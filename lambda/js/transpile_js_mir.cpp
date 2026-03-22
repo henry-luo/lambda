@@ -4800,6 +4800,22 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 }
+                // v12b: obj.style.setProperty(...) / obj.style.removeProperty(...)
+                if (mid->name && mid->name->len == 5 && strncmp(mid->name->chars, "style", 5) == 0) {
+                    const char* mn = prop->name->chars;
+                    int ml = (int)prop->name->len;
+                    if ((ml == 11 && strncmp(mn, "setProperty", 11) == 0) ||
+                        (ml == 14 && strncmp(mn, "removeProperty", 14) == 0)) {
+                        MIR_reg_t obj = jm_transpile_box_item(mt, inner->object);
+                        MIR_reg_t method_str = jm_box_string_literal(mt, mn, ml);
+                        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                        return jm_call_4(mt, "js_dom_style_method", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
+                            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                    }
+                }
             }
             if (!inner->computed &&
                 inner->object && inner->object->node_type == JS_AST_NODE_IDENTIFIER &&

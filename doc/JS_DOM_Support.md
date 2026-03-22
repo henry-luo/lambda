@@ -27,7 +27,7 @@ LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). 
 | Default parameters                                 |   ✅    |                                                          |
 | Destructuring — arrays                             |   ✅    | `const [a, b] = arr`                                     |
 | Destructuring — objects                            |   ✅    | `const {x, y} = obj`, rename `{x: px}`, for-of           |
-| Destructuring — rest (`...rest`)                   |   ⚠️   | Parsed but not transpiled                                |
+| Destructuring — rest (`...rest`)                   |   ✅    | Object rest `{a, ...rest}` and array rest `[a, ...rest]` |
 | ES6 classes                                        |   ✅    | `class`, `extends`, `super()`, `static`, getters/setters |
 | Prototype-based OOP                                |   ✅    | `Foo.prototype.method = fn`, `new Foo()`                 |
 | Closures                                           |   ✅    | Multi-level transitive capture, shared scope env         |
@@ -54,12 +54,12 @@ LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). 
 | `async` / `await` / `Promise`                      |   ❌    |                                                          |
 | `import` / `export` (ES modules)                   |   ❌    |                                                          |
 | `WeakMap` / `WeakSet`                              |   ❌    |                                                          |
-| `Symbol` API                                       |   ❌    | `Symbol.iterator`, `Symbol.toPrimitive`                  |
+| `Symbol` API                                       |   ✅    | `Symbol()`, `Symbol.for()`, `Symbol.keyFor()`, well-known symbols |
 | `Proxy` / `Reflect`                                |   ❌    |                                                          |
 | `setTimeout` / `setInterval`                       |   ❌    |                                                          |
-| `encodeURIComponent` / `decodeURIComponent`        |   ❌    |                                                          |
+| `encodeURIComponent` / `decodeURIComponent`        |   ✅    | RFC 3986 percent-encoding via `lib/url.c`                |
 | `structuredClone`                                  |   ❌    |                                                          |
-| `globalThis`                                       |   ❌    |                                                          |
+| `globalThis`                                       |   ✅    | Singleton global object with `undefined`, `NaN`, `Infinity` |
 | `Intl`                                             |   ❌    |                                                          |
 
 ### Operators
@@ -79,22 +79,22 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 
 #### Document Methods
 
-| Method                     | Status | Notes                              |
-| -------------------------- | :----: | ---------------------------------- |
-| `getElementById`           |   ✅    |                                    |
-| `getElementsByClassName`   |   ✅    |                                    |
-| `getElementsByTagName`     |   ✅    |                                    |
-| `querySelector`            |   ✅    |                                    |
-| `querySelectorAll`         |   ✅    |                                    |
-| `createElement`            |   ✅    |                                    |
-| `createTextNode`           |   ✅    |                                    |
-| `createElementNS`          |   ✅    | Namespace ignored, delegates to `createElement` |
-| `write` / `writeln`        |   ✅    | Simplified; appends text to body   |
-| `normalize`                |   ✅    | Merges adjacent text nodes at root |
-| `createDocumentFragment`   |   ❌    |                                    |
-| `createComment`            |   ❌    |                                    |
-| `importNode`               |   ❌    |                                    |
-| `adoptNode`                |   ❌    |                                    |
+| Method                   | Status | Notes                                           |
+| ------------------------ | :----: | ----------------------------------------------- |
+| `getElementById`         |   ✅    |                                                 |
+| `getElementsByClassName` |   ✅    |                                                 |
+| `getElementsByTagName`   |   ✅    |                                                 |
+| `querySelector`          |   ✅    |                                                 |
+| `querySelectorAll`       |   ✅    |                                                 |
+| `createElement`          |   ✅    |                                                 |
+| `createTextNode`         |   ✅    |                                                 |
+| `createElementNS`        |   ✅    | Namespace ignored, delegates to `createElement` |
+| `write` / `writeln`      |   ✅    | Simplified; appends text to body                |
+| `normalize`              |   ✅    | Merges adjacent text nodes at root              |
+| `createDocumentFragment` |   ✅    | Lightweight container; children transfer on append |
+| `createComment`          |   ✅    | Creates comment DOM node                          |
+| `importNode`             |   ✅    | Deep clone from external tree                     |
+| `adoptNode`              |   ✅    | Detaches node from current parent                 |
 
 #### Document Properties
 
@@ -106,42 +106,42 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 | `title`            |   ✅    |       |
 | `cookie`           |   ❌    |       |
 | `readyState`       |   ❌    |       |
-| `URL` / `location` |   ❌    |       |
+| `URL` / `location` |   ✅    | `URL` returns href string; `location` object with `.href`, `.hostname`, `.pathname`, etc. |
 
 #### Element Properties
 
-| Property                   | Status | Notes                                 |
-| -------------------------- | :----: | ------------------------------------- |
-| `tagName`                  |   ✅    |                                       |
-| `id`                       |   ✅    |                                       |
-| `className`                |   ✅    |                                       |
-| `textContent`              |   ✅    |                                       |
-| `children`                 |   ✅    |                                       |
-| `parentElement`            |   ✅    |                                       |
-| `parentNode`               |   ✅    |                                       |
-| `firstChild`               |   ✅    |                                       |
-| `lastChild`                |   ✅    |                                       |
-| `nextSibling`              |   ✅    |                                       |
-| `previousSibling`          |   ✅    |                                       |
-| `childNodes`               |   ✅    |                                       |
-| `childElementCount`        |   ✅    |                                       |
-| `nodeType`                 |   ✅    |                                       |
-| `nodeName`                 |   ✅    | Tag name or `"#text"`                 |
-| `nodeValue`                |   ✅    | Alias for text node `.data`           |
-| `firstElementChild`        |   ✅    | Skips text nodes                      |
-| `lastElementChild`         |   ✅    | Skips text nodes                      |
-| `nextElementSibling`       |   ✅    | Skips text nodes                      |
-| `previousElementSibling`   |   ✅    | Skips text nodes                      |
-| `innerHTML`                |   ⚠️   | Getter only; setter not implemented   |
-| `offsetWidth`              |   ✅    | Returns 0 (JS runs before layout)     |
-| `offsetHeight`             |   ✅    | Returns 0 (JS runs before layout)     |
-| `clientWidth`              |   ✅    | Returns 0 (JS runs before layout)     |
-| `clientHeight`             |   ✅    | Returns 0 (JS runs before layout)     |
-| `outerHTML`                |   ❌    |                                       |
-| `classList`                |   ❌    | `add`, `remove`, `toggle`, `contains` |
-| `dataset`                  |   ❌    | `data-*` attribute access             |
-| `scrollTop` / `scrollLeft` |   ❌    |                                       |
-| `getBoundingClientRect`    |   ❌    |                                       |
+| Property                   | Status | Notes                                                                       |
+| -------------------------- | :----: | --------------------------------------------------------------------------- |
+| `tagName`                  |   ✅    |                                                                             |
+| `id`                       |   ✅    |                                                                             |
+| `className`                |   ✅    |                                                                             |
+| `textContent`              |   ✅    |                                                                             |
+| `children`                 |   ✅    |                                                                             |
+| `parentElement`            |   ✅    |                                                                             |
+| `parentNode`               |   ✅    |                                                                             |
+| `firstChild`               |   ✅    |                                                                             |
+| `lastChild`                |   ✅    |                                                                             |
+| `nextSibling`              |   ✅    |                                                                             |
+| `previousSibling`          |   ✅    |                                                                             |
+| `childNodes`               |   ✅    |                                                                             |
+| `childElementCount`        |   ✅    |                                                                             |
+| `nodeType`                 |   ✅    |                                                                             |
+| `nodeName`                 |   ✅    | Tag name or `"#text"`                                                       |
+| `nodeValue`                |   ✅    | Alias for text node `.data`                                                 |
+| `firstElementChild`        |   ✅    | Skips text nodes                                                            |
+| `lastElementChild`         |   ✅    | Skips text nodes                                                            |
+| `nextElementSibling`       |   ✅    | Skips text nodes                                                            |
+| `previousElementSibling`   |   ✅    | Skips text nodes                                                            |
+| `innerHTML`                |   ✅    | Getter and setter; setter parses HTML fragment                              |
+| `offsetWidth`              |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `offsetHeight`             |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `clientWidth`              |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `clientHeight`             |   ✅    | Returns 0 (JS runs before layout)                                           |
+| `outerHTML`                |   ✅    | Getter only                                                                 |
+| `classList`                |   ✅    | `add`, `remove`, `toggle`, `contains`, `item`, `replace`, `length`, `value` |
+| `dataset`                  |   ✅    | `data-*` attribute proxy with camelCase ↔ kebab-case conversion             |
+| `scrollTop` / `scrollLeft` |   ❌    |                                                                             |
+| `getBoundingClientRect`    |   ❌    |                                                                             |
 
 #### Element Methods
 
@@ -161,12 +161,12 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 | `hasChildNodes`         |   ✅    |                            |
 | `cloneNode`             |   ✅    |                            |
 | `normalize`             |   ✅    | Merges adjacent text nodes |
-| `replaceChild`          |   ❌    |                            |
-| `insertAdjacentHTML`    |   ❌    |                            |
-| `insertAdjacentElement` |   ❌    |                            |
-| `remove`                |   ❌    | Self-removal from parent   |
-| `contains`              |   ❌    |                            |
-| `toggleAttribute`       |   ❌    |                            |
+| `replaceChild`          |   ✅    |                            |
+| `insertAdjacentHTML`    |   ✅    | Parses HTML fragment at position |
+| `insertAdjacentElement` |   ✅    | Inserts element at position |
+| `remove`                |   ✅    | Self-removal from parent   |
+| `contains`              |   ✅    | Subtree containment check  |
+| `toggleAttribute`       |   ✅    | Optional force parameter   |
 
 #### Style
 
@@ -174,9 +174,9 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 | -------------------------------- | :----: | -------------------------- |
 | `element.style.prop` get/set     |   ✅    | camelCase ↔ CSS conversion |
 | `getComputedStyle()`             |   ✅    | Full cascade matching      |
-| `element.style.cssText`          |   ❌    |                            |
-| `element.style.setProperty()`    |   ❌    |                            |
-| `element.style.removeProperty()` |   ❌    |                            |
+| `element.style.cssText`          |   ✅    | Getter only                |
+| `element.style.setProperty()`    |   ✅    | Sets inline style property  |
+| `element.style.removeProperty()` |   ✅    | Removes inline style property |
 
 ### Built-in Objects & Methods
 
@@ -264,7 +264,7 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 #### Global Functions
 
-`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `console.log`, `performance.now()`, `alert`
+`parseInt`, `parseFloat`, `isNaN`, `isFinite`, `console.log`, `performance.now()`, `alert`, `encodeURIComponent`, `decodeURIComponent`, `globalThis`
 
 ---
 

@@ -1523,6 +1523,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
 
     printf("\n=== Batch Processing Layout Data Files ===\n");
     int total = 0;
+    int skipped = 0;
     int parsed = 0;
     int converted = 0;
     int has_css = 0;
@@ -1533,6 +1534,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
 
         if (html_content.empty()) {
             printf("  ⚠️  Skipped: %s (not found)\n", layout_files[i]);
+            skipped++;
             continue;
         }
 
@@ -1568,12 +1570,13 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
     }
 
     printf("\n=== Batch Processing Summary ===\n");
-    printf("  Total files: %d\n", total);
-    printf("  Successfully parsed: %d (%.1f%%)\n", parsed, 100.0 * parsed / total);
-    printf("  Converted to DOM: %d (%.1f%%)\n", converted, 100.0 * converted / total);
+    printf("  Total files: %d (%d skipped/not found)\n", total, skipped);
+    int findable = total - skipped;
+    printf("  Successfully parsed: %d (%.1f%%)\n", parsed, findable > 0 ? 100.0 * parsed / findable : 0);
+    printf("  Converted to DOM: %d (%.1f%%)\n", converted, findable > 0 ? 100.0 * converted / findable : 0);
     printf("  Files with CSS: %d (%.1f%%)\n", has_css, converted > 0 ? 100.0 * has_css / converted : 0);
 
-    EXPECT_GE(parsed, total * 0.8) << "At least 80% should parse successfully";
+    EXPECT_GE(parsed, findable * 0.8) << "At least 80% of found files should parse successfully";
     EXPECT_GE(converted, parsed * 0.8) << "At least 80% of parsed should convert";
 }
 

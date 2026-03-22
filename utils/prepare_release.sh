@@ -39,29 +39,21 @@ if ls ./lambda/input/latex/css/*.css >/dev/null 2>&1; then
     echo "    Copied LaTeX CSS files"
 fi
 
-# Step 2b2: Copy LaTeX fonts (Computer Modern)
-echo "==> Copying LaTeX fonts..."
-mkdir -p ./release/lambda/input/latex/fonts
+# Step 2b2: Copy LaTeX fonts (Computer Modern + KaTeX)
+# Fonts used by latex package: Computer Modern Serif, Typewriter, Sans (CMU woff files in subdirs)
+# Fonts used by math package: KaTeX_* woff2 files (KaTeX_AMS, Caligraphic, Fraktur, Main, Math,
+#   SansSerif, Script, Size1-4, Typewriter)
+# Copy the entire fonts directory to ensure all referenced assets are present.
+echo "==> Copying LaTeX fonts (Computer Modern + KaTeX)..."
+rm -rf ./release/lambda/input/latex/fonts
+cp -r ./lambda/input/latex/fonts ./release/lambda/input/latex/fonts
+echo "    Copied lambda/input/latex/fonts/ (KaTeX woff2 + CMU woff subdirectories)"
 
-# Copy main font CSS files
-if [ -f "./lambda/input/latex/fonts/cmu.css" ]; then
-    cp ./lambda/input/latex/fonts/cmu.css ./release/lambda/input/latex/fonts/
-    echo "    Copied fonts/cmu.css"
-fi
-
-if [ -f "./lambda/input/latex/fonts/cmu-combined.css" ]; then
-    cp ./lambda/input/latex/fonts/cmu-combined.css ./release/lambda/input/latex/fonts/
-    echo "    Copied fonts/cmu-combined.css"
-fi
-
-# Copy font directories (Serif, Sans, Typewriter, etc.)
-for fontdir in "Serif" "Serif Slanted" "Sans" "Typewriter" "Typewriter Slanted"; do
-    if [ -d "./lambda/input/latex/fonts/$fontdir" ]; then
-        mkdir -p "./release/lambda/input/latex/fonts/$fontdir"
-        cp "./lambda/input/latex/fonts/$fontdir/"* "./release/lambda/input/latex/fonts/$fontdir/" 2>/dev/null
-        echo "    Copied fonts/$fontdir"
-    fi
-done
+# Step 2d: Copy Lambda packages
+echo "==> Copying Lambda packages..."
+rm -rf ./release/lambda/package
+cp -r ./lambda/package ./release/lambda/package
+echo "    Copied lambda/package/ (chart, latex, math)"
 
 # Step 2c: Copy live-demo.html and referenced files
 echo "==> Copying live-demo.html and referenced files..."
@@ -115,19 +107,23 @@ if [ -f "./test/lambda/complex_iot_report_html.ls" ]; then
     echo "    Copied test/lambda/complex_iot_report_html.ls"
 fi
 
-# Step 3: Copy doc files (excluding files starting with '_')
+# Step 3: Copy doc files (*.md, *.pdf, *.svg, excluding paths starting with '_')
 echo "==> Creating release/doc directory..."
 mkdir -p ./release/doc
 
-echo "==> Copying documentation files..."
-for file in ./doc/*; do
-    filename=$(basename "$file")
-    # Skip files starting with '_'
-    if [[ ! "$filename" =~ ^_ ]]; then
-        cp "$file" ./release/doc/
-        echo "    Copied $filename"
+echo "==> Copying documentation files (*.md, *.pdf, *.svg)..."
+while IFS= read -r -d '' file; do
+    # Get path relative to ./doc
+    relpath="${file#./doc/}"
+    # Skip any path component starting with '_'
+    if echo "$relpath" | grep -qE '(^|/)_'; then
+        continue
     fi
-done
+    destdir="./release/doc/$(dirname "$relpath")"
+    mkdir -p "$destdir"
+    cp "$file" "$destdir/"
+    echo "    Copied doc/$relpath"
+done < <(find ./doc -type f \( -name "*.md" -o -name "*.pdf" -o -name "*.svg" \) -print0)
 
 # Step 4: Build release binary
 echo "==> Building release binary..."
