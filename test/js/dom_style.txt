@@ -1,0 +1,14 @@
+5px
+green
+24px
+10px
+200px
+block
+object
+true
+true
+true
+test-class
+test-class
+dynamic-el
+"DOM style tests complete"

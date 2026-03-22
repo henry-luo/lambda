@@ -422,7 +422,7 @@ bool dom_element_remove_attribute(DomElement* element, const char* name) {
             lower_name
         );
 
-        if (result.element) {
+        if (get_type_id(result) == LMD_TYPE_ELEMENT && result.element) {
             // In INLINE mode, element pointer remains the same
             // This assignment is a no-op but kept for consistency
             element->native_element = result.element;
