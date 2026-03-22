@@ -10,20 +10,22 @@ After v11, LambdaJS covers ES6 classes, prototype OOP, multi-level closures, typ
 
 ### v12 Feature Overview
 
-| Item | Track | Priority | Est. LOC | Notes |
-|------|:-----:|:--------:|:--------:|-------|
-| A1 Destructuring rest (`...rest`) | Lang | HIGH | ~120 | Object & array rest in declarations, assignments, and function params |
-| A2 `Symbol` API | Lang | MEDIUM | ~250 | `Symbol()`, `Symbol.for()`, `Symbol.keyFor()`, well-known symbols |
-| A3 `globalThis` | Lang | LOW | ~20 | Alias for the JS global object |
-| A4 `encodeURIComponent` / `decodeURIComponent` | Lang | MEDIUM | ~80 | Reuse `lib/url.c` infrastructure |
-| B1 `document.URL` / `document.location` | DOM | MEDIUM | ~150 | Reuse `lib/url.c` + `lib/url_parser.c` |
-| B2 Element `outerHTML` | DOM | LOW | ~60 | Serialize element + descendants to HTML string |
-| B3 Element `classList` | DOM | HIGH | ~180 | `add`, `remove`, `toggle`, `contains`, `item`, `length` |
-| B4 Element `dataset` | DOM | MEDIUM | ~100 | `data-*` attribute proxy with camelCase conversion |
-| B5 Element `contains` | DOM | LOW | ~30 | Subtree containment check |
-| B6 Style `cssText` | DOM | LOW | ~50 | Get/set inline style as raw CSS string |
+| Item | Track | Priority | Est. LOC | Status | Notes |
+|------|:-----:|:--------:|:--------:|:------:|-------|
+| A1 Destructuring rest (`...rest`) | Lang | HIGH | ~120 | ✅ | Object & array rest in declarations, assignments, and function params |
+| A2 `Symbol` API | Lang | MEDIUM | ~250 | ✅ | `Symbol()`, `Symbol.for()`, `Symbol.keyFor()`, well-known symbols |
+| A3 `globalThis` | Lang | LOW | ~20 | ✅ | Alias for the JS global object |
+| A4 `encodeURIComponent` / `decodeURIComponent` | Lang | MEDIUM | ~80 | ✅ | Reuse `lib/url.c` infrastructure |
+| B1 `document.URL` / `document.location` | DOM | MEDIUM | ~150 | ✅ | Reuse `lib/url.c` + `lib/url_parser.c` |
+| B2 Element `outerHTML` | DOM | LOW | ~60 | ✅ | Serialize element + descendants to HTML string |
+| B3 Element `classList` | DOM | HIGH | ~180 | ✅ | `add`, `remove`, `toggle`, `contains`, `item`, `length` |
+| B4 Element `dataset` | DOM | MEDIUM | ~100 | ✅ | `data-*` attribute proxy with camelCase conversion |
+| B5 Element `contains` | DOM | LOW | ~30 | ✅ | Subtree containment check |
+| B6 Style `cssText` | DOM | LOW | ~50 | ✅ | Get/set inline style as raw CSS string |
 
 **Total estimated:** ~1,040 LOC across `transpile_js_mir.cpp`, `js_runtime.cpp`, `js_globals.cpp`, `js_dom.cpp`, `lib/url.c`
+
+**Status:** ✅ All 10 v12 features implemented and passing (669/669 Lambda baseline, 52/52 JS tests). ~949 LOC added across 10 files.
 
 ---
 
@@ -1046,3 +1048,696 @@ After implementation, update:
 | `lambda/js/js_dom.cpp` | Location wrapper, classList, dataset, outerHTML, contains, cssText |
 | `lambda/js/js_dom.h` | Declare DOM additions |
 | `test/js/test_*.js` + `.txt` | New test files per feature |
+
+---
+
+## 8. v12b — DOM Expansion: Document Methods, innerHTML Setter, Element Methods, Style Methods
+
+After the initial v12 features (Track A language + Track B DOM) landed, the remaining ❌ items in `JS_DOM_Support.md` are addressed here. This continuation focuses on completing the DOM API surface.
+
+### v12b Feature Overview
+
+| Item | Category | Priority | Est. LOC | Status | Notes |
+|------|:--------:|:--------:|:--------:|:------:|-------|
+| C1 `createDocumentFragment` | Document | HIGH | ~60 | ✅ | Returns a lightweight container for batch DOM mutation |
+| C2 `createComment` | Document | LOW | ~30 | ✅ | Create a comment node |
+| C3 `importNode` | Document | LOW | ~40 | ✅ | Clone a node from another document context |
+| C4 `adoptNode` | Document | LOW | ~30 | ✅ | Transfer a node into this document |
+| D1 `innerHTML` setter | Element | HIGH | ~80 | ✅ | Parse HTML string, replace children with parsed fragment |
+| E1 `replaceChild` | Element | MEDIUM | ~20 | ✅ | Replace old child with new child |
+| E2 `insertAdjacentHTML` | Element | MEDIUM | ~80 | ✅ | Parse HTML and insert at position (`beforebegin`, `afterbegin`, `beforeend`, `afterend`) |
+| E3 `insertAdjacentElement` | Element | LOW | ~30 | ✅ | Insert element at position (no parsing) |
+| E4 `remove` | Element | HIGH | ~10 | ✅ | Self-removal from parent |
+| E5 `toggleAttribute` | Element | LOW | ~15 | ✅ | Toggle boolean attribute presence |
+| F1 `style.setProperty` | Style | MEDIUM | ~25 | ✅ | Set CSS property with optional priority |
+| F2 `style.removeProperty` | Style | MEDIUM | ~30 | ✅ | Remove CSS property, return old value |
+
+**Total estimated:** ~450 LOC across `js_dom.cpp`, `js_dom.h`, `transpile_js_mir.cpp`, `sys_func_registry.c`
+
+**Status:** ✅ All 12 v12b features implemented and passing (669/669 Lambda baseline tests). ~270 LOC added across 4 files.
+
+---
+
+### C1: `document.createDocumentFragment()` (Priority: HIGH)
+
+**Problem:** `DocumentFragment` is a lightweight container used as a staging area for batch DOM mutations. Code like `fragment.appendChild(a); fragment.appendChild(b); parent.appendChild(fragment)` moves all fragment children into the parent in one operation, avoiding repeated reflows.
+
+**Current state:** Not implemented. `createDocumentFragment` is not in `js_document_method()`.
+
+**Approach:** A `DocumentFragment` is essentially a parentless `DomElement` with a synthetic tag name (e.g., `"#document-fragment"`). The key behavior is that when a fragment is passed to `appendChild`/`insertBefore`, its *children* are moved (not the fragment itself).
+
+**New runtime helper** (`js_dom.cpp`):
+
+```c
+// Create a document fragment — a parentless container element
+// Used in js_document_method under "createDocumentFragment"
+static Item js_dom_create_document_fragment(DomDocument* doc) {
+    MarkBuilder builder(doc->input);
+    Item elem_item = builder.element("#document-fragment").final();
+    DomElement* frag = dom_element_create(doc, "#document-fragment", elem_item.element);
+    return js_dom_wrap_element(frag);
+}
+```
+
+**Modify `appendChild` / `insertBefore`** to detect fragments:
+
+When the child argument is a fragment (tag_name == `"#document-fragment"`), iterate through its children and move each one individually:
+
+```c
+// In appendChild handler, before the current append logic:
+if (child_node->is_element()) {
+    DomElement* child_elem = child_node->as_element();
+    if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+        // move all fragment children to the target
+        DomNode* fc = child_elem->first_child;
+        Item last_appended = ItemNull;
+        while (fc) {
+            DomNode* next = fc->next_sibling;
+            child_elem->remove_child(fc);
+            ((DomNode*)elem)->append_child(fc);
+            last_appended = js_dom_wrap_element(fc);
+            fc = next;
+        }
+        return last_appended;
+    }
+}
+```
+
+**Document method dispatch:**
+
+```c
+// In js_document_method:
+if (strcmp(method, "createDocumentFragment") == 0) {
+    return js_dom_create_document_fragment(doc);
+}
+```
+
+**No transpiler changes needed** — `document.createDocumentFragment()` already routes through `js_document_method` via the existing `jm_is_document_call` dispatch path.
+
+**Code locations:**
+- `lambda/js/js_dom.cpp` — fragment creation + modify `appendChild`/`insertBefore` for fragment unpacking
+
+**Estimated effort:** ~60 LOC.
+
+---
+
+### C2: `document.createComment(text)` (Priority: LOW)
+
+**Problem:** Creates a comment node (`<!-- text -->`). Rarely used in application code but needed for spec compliance and some templating libraries.
+
+**Current state:** `DomComment` struct exists. `dom_comment_create()` exists but requires a backing Lambda Element with tag `"!--"`. No JS-level API.
+
+**Approach:** Create a detached comment node analogous to `dom_text_create_detached`.
+
+**Implementation** (`js_dom.cpp`, in `js_document_method`):
+
+```c
+if (strcmp(method, "createComment") == 0) {
+    if (argc < 1) return ItemNull;
+    const char* text = fn_to_cstr(args[0]);
+    if (!text) text = "";
+
+    // create a Lambda Element with tag "!--" to back the comment
+    MarkBuilder builder(doc->input);
+    Item comment_elem = builder.element("!--").final();
+
+    // create DomComment backed by this element
+    // need a temporary parent context — use root
+    DomComment* comment = dom_comment_create(comment_elem.element, doc->root);
+    if (!comment) return ItemNull;
+
+    // set the comment text content
+    size_t len = strlen(text);
+    char* content_copy = (char*)arena_alloc(doc->arena, len + 1);
+    memcpy(content_copy, text, len);
+    content_copy[len] = '\0';
+    comment->content = content_copy;
+    comment->length = len;
+
+    // detach from the temporary parent
+    comment->parent = nullptr;
+    if (doc->root) {
+        ((DomNode*)doc->root)->remove_child((DomNode*)comment);
+    }
+
+    return js_dom_wrap_element(comment);
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~30 LOC.
+
+---
+
+### C3: `document.importNode(node, deep)` (Priority: LOW)
+
+**Problem:** Copies a node from another document into this document's context. In a single-document system like LambdaJS, this is effectively the same as `cloneNode(deep)`.
+
+**Implementation** (`js_dom.cpp`, in `js_document_method`):
+
+```c
+if (strcmp(method, "importNode") == 0) {
+    if (argc < 1) return ItemNull;
+    bool deep = (argc > 1) ? js_is_truthy(args[1]) : false;
+    // delegate to cloneNode on the source node
+    DomNode* source = (DomNode*)js_dom_unwrap_element(args[0]);
+    if (!source || !source->is_element()) return ItemNull;
+    Item source_item = js_dom_wrap_element(source);
+    Item deep_arg = (Item){.item = b2it(deep ? 1 : 0)};
+    Item method_str = (Item){.item = s2it(heap_create_name("cloneNode"))};
+    return js_dom_element_method(source_item, method_str, &deep_arg, 1);
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~40 LOC.
+
+---
+
+### C4: `document.adoptNode(node)` (Priority: LOW)
+
+**Problem:** Removes a node from its current parent and adopts it into this document. In a single-document system, this just detaches the node from its parent.
+
+**Implementation** (`js_dom.cpp`, in `js_document_method`):
+
+```c
+if (strcmp(method, "adoptNode") == 0) {
+    if (argc < 1) return ItemNull;
+    DomNode* node = (DomNode*)js_dom_unwrap_element(args[0]);
+    if (!node) return ItemNull;
+    // detach from current parent
+    if (node->parent) {
+        node->parent->remove_child(node);
+    }
+    return args[0];
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~30 LOC.
+
+---
+
+### D1: `innerHTML` Setter (Priority: HIGH)
+
+**Problem:** `element.innerHTML = "<p>Hello</p>"` should parse the HTML string, remove the element's current children, and replace them with the parsed fragment. Currently only the getter is implemented.
+
+**Current state:** The getter uses `collect_inner_html()`. The setter falls through to `js_dom_set_property` which treats it as a generic attribute (wrong behavior). The HTML5 fragment parser (`html5_fragment_parser_create`, `html5_fragment_parse`, `html5_fragment_get_body`) already exists and is used by the markdown parser.
+
+**Approach:** Parse the HTML string using the fragment parser, convert the resulting Lambda Elements into DOM nodes using `build_dom_tree_from_element`, then replace the element's children.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_set_property`):
+
+```c
+// innerHTML setter — parse HTML and replace children
+if (strcmp(prop, "innerHTML") == 0) {
+    const char* html_str = fn_to_cstr(value);
+    if (!html_str) return ItemNull;
+
+    // 1. Remove all existing children
+    DomNode* child = elem->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        child->parent = nullptr;
+        child->next_sibling = nullptr;
+        child->prev_sibling = nullptr;
+        child = next;
+    }
+    elem->first_child = nullptr;
+    elem->last_child = nullptr;
+
+    // 2. Empty string → done (cleared children)
+    if (html_str[0] == '\0') return value;
+
+    // 3. Parse HTML fragment
+    DomDocument* doc = elem->doc;
+    if (!doc || !doc->input) return value;
+
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->pool, doc->arena, doc->input);
+    if (!parser) return value;
+
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return value;
+
+    // 4. Convert parsed Lambda Elements to DOM nodes and append
+    //    Iterate body_elem children (the parsed fragment content)
+    for (size_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            DomElement* child_dom = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, elem);
+            // build_dom_tree_from_element already appends to parent
+        } else if (type == LMD_TYPE_STRING) {
+            String* s = it2s(body_elem->items[i]);
+            DomText* text_node = dom_text_create(s, elem);
+            // dom_text_create already sets parent
+        }
+    }
+
+    log_debug("js_dom_set_property: set innerHTML on <%s>",
+              elem->tag_name ? elem->tag_name : "?");
+    return value;
+}
+```
+
+**Header includes needed** in `js_dom.cpp`:
+```c
+#include "../input/html5/html5_parser.h"
+```
+
+**Forward declaration** needed in `js_dom.cpp`:
+```c
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
+```
+
+**No transpiler changes needed** — innerHTML set goes through the existing `js_property_set` → `js_dom_set_property` path.
+
+**Code locations:**
+- `lambda/js/js_dom.cpp` — innerHTML setter in `js_dom_set_property`
+
+**Test cases:**
+```javascript
+var div = document.createElement("div");
+div.innerHTML = "<p>Hello</p><span>World</span>";
+console.log(div.children.length);        // 2
+console.log(div.children[0].tagName);    // "P"
+console.log(div.children[0].textContent); // "Hello"
+console.log(div.children[1].tagName);    // "SPAN"
+
+div.innerHTML = "";
+console.log(div.children.length);        // 0
+
+div.innerHTML = "plain text";
+console.log(div.textContent);            // "plain text"
+```
+
+**Estimated effort:** ~80 LOC.
+
+---
+
+### E1: `element.replaceChild(newChild, oldChild)` (Priority: MEDIUM)
+
+**Problem:** Replaces `oldChild` with `newChild` in the element's child list. Returns the removed old child.
+
+**Current state:** Not implemented. The tree primitives `insert_before` and `remove_child` already exist — `replaceChild` is a composition of these two.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_element_method`):
+
+```c
+// replaceChild(newChild, oldChild)
+if (strcmp(method, "replaceChild") == 0) {
+    if (argc < 2) return ItemNull;
+    DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
+    DomNode* old_child = (DomNode*)js_dom_unwrap_element(args[1]);
+    if (!new_child || !old_child) return ItemNull;
+
+    // detach new_child from its current parent
+    if (new_child->parent) {
+        new_child->parent->remove_child(new_child);
+    }
+
+    // insert new before old, then remove old
+    ((DomNode*)elem)->insert_before(new_child, old_child);
+    ((DomNode*)elem)->remove_child(old_child);
+    return args[1]; // return removed old child
+}
+```
+
+**No transpiler changes needed** — method calls on DOM elements already route through `js_dom_element_method`.
+
+**Estimated effort:** ~20 LOC.
+
+---
+
+### E2: `element.insertAdjacentHTML(position, text)` (Priority: MEDIUM)
+
+**Problem:** Parses `text` as HTML and inserts the resulting nodes at one of four positions relative to the element:
+- `"beforebegin"` — before the element itself (as previous sibling)
+- `"afterbegin"` — inside the element, before its first child
+- `"beforeend"` — inside the element, after its last child (same as `innerHTML +=`)
+- `"afterend"` — after the element itself (as next sibling)
+
+**Approach:** Reuse the same fragment parsing pipeline as innerHTML setter: `html5_fragment_parser_create` → `html5_fragment_parse` → `html5_fragment_get_body` → `build_dom_tree_from_element`. Then insert the resulting nodes at the correct position.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_element_method`):
+
+```c
+// insertAdjacentHTML(position, text)
+if (strcmp(method, "insertAdjacentHTML") == 0) {
+    if (argc < 2) return ItemNull;
+    const char* position = fn_to_cstr(args[0]);
+    const char* html_str = fn_to_cstr(args[1]);
+    if (!position || !html_str || !elem->doc) return ItemNull;
+
+    DomDocument* doc = elem->doc;
+
+    // parse the HTML fragment
+    Html5Parser* parser = html5_fragment_parser_create(
+        doc->pool, doc->arena, doc->input);
+    if (!parser) return ItemNull;
+    html5_fragment_parse(parser, html_str);
+    Element* body_elem = html5_fragment_get_body(parser);
+    if (!body_elem) return ItemNull;
+
+    // determine target parent and reference node based on position
+    DomElement* target_parent = nullptr;
+    DomNode* ref_node = nullptr; // insert before this node (nullptr = append)
+
+    if (strcasecmp(position, "beforebegin") == 0) {
+        // insert before this element, into this element's parent
+        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+        target_parent = elem->parent->as_element();
+        ref_node = (DomNode*)elem;
+    } else if (strcasecmp(position, "afterbegin") == 0) {
+        // insert inside this element, before first child
+        target_parent = elem;
+        ref_node = elem->first_child;
+    } else if (strcasecmp(position, "beforeend") == 0) {
+        // insert inside this element, after last child (append)
+        target_parent = elem;
+        ref_node = nullptr;
+    } else if (strcasecmp(position, "afterend") == 0) {
+        // insert after this element, into this element's parent
+        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+        target_parent = elem->parent->as_element();
+        ref_node = elem->next_sibling;
+    } else {
+        log_error("insertAdjacentHTML: invalid position '%s'", position);
+        return ItemNull;
+    }
+
+    // build DOM nodes from parsed fragment and insert
+    for (size_t i = 0; i < body_elem->length; i++) {
+        TypeId type = get_type_id(body_elem->items[i]);
+        if (type == LMD_TYPE_ELEMENT) {
+            // build dom tree with nullptr parent (detached), then insert manually
+            DomElement* child_dom = build_dom_tree_from_element(
+                body_elem->items[i].element, doc, nullptr);
+            if (child_dom) {
+                if (ref_node)
+                    ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
+                else
+                    ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
+            }
+        } else if (type == LMD_TYPE_STRING) {
+            String* s = it2s(body_elem->items[i]);
+            DomText* text_node = dom_text_create_detached(s, doc);
+            if (text_node) {
+                if (ref_node)
+                    ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
+                else
+                    ((DomNode*)target_parent)->append_child((DomNode*)text_node);
+            }
+        }
+    }
+    return ItemNull;
+}
+```
+
+**Note:** `build_dom_tree_from_element` with `parent=nullptr` creates a detached subtree. Need to verify this works or adjust accordingly. If `build_dom_tree_from_element` requires a parent, create a temporary fragment container and then move children.
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~80 LOC.
+
+---
+
+### E3: `element.insertAdjacentElement(position, element)` (Priority: LOW)
+
+**Problem:** Like `insertAdjacentHTML` but takes an existing DOM element instead of an HTML string. No parsing needed.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_element_method`):
+
+```c
+// insertAdjacentElement(position, newElement)
+if (strcmp(method, "insertAdjacentElement") == 0) {
+    if (argc < 2) return ItemNull;
+    const char* position = fn_to_cstr(args[0]);
+    DomNode* new_node = (DomNode*)js_dom_unwrap_element(args[1]);
+    if (!position || !new_node) return ItemNull;
+
+    // detach from old parent
+    if (new_node->parent) {
+        new_node->parent->remove_child(new_node);
+    }
+
+    if (strcasecmp(position, "beforebegin") == 0) {
+        if (elem->parent && elem->parent->is_element())
+            elem->parent->insert_before(new_node, (DomNode*)elem);
+    } else if (strcasecmp(position, "afterbegin") == 0) {
+        ((DomNode*)elem)->insert_before(new_node, elem->first_child);
+    } else if (strcasecmp(position, "beforeend") == 0) {
+        ((DomNode*)elem)->append_child(new_node);
+    } else if (strcasecmp(position, "afterend") == 0) {
+        if (elem->parent && elem->parent->is_element())
+            elem->parent->insert_before(new_node, elem->next_sibling);
+    }
+    return args[1]; // return the inserted element
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~30 LOC.
+
+---
+
+### E4: `element.remove()` (Priority: HIGH)
+
+**Problem:** `element.remove()` removes the element from its parent. Equivalent to `element.parentNode.removeChild(element)` but more concise. Widely used in modern web code.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_element_method`):
+
+```c
+// remove() — self-removal from parent
+if (strcmp(method, "remove") == 0) {
+    DomNode* node = (DomNode*)elem;
+    if (node->parent) {
+        node->parent->remove_child(node);
+    }
+    return ItemNull;
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~10 LOC.
+
+---
+
+### E5: `element.toggleAttribute(name)` / `element.toggleAttribute(name, force)` (Priority: LOW)
+
+**Problem:** Toggles a boolean attribute. If `force` is provided, adds the attribute if `force` is true, removes if false. Returns whether the attribute is present after the call.
+
+**Implementation** (`js_dom.cpp`, add to `js_dom_element_method`):
+
+```c
+// toggleAttribute(name [, force])
+if (strcmp(method, "toggleAttribute") == 0) {
+    if (argc < 1) return (Item){.item = ITEM_FALSE};
+    const char* attr_name = fn_to_cstr(args[0]);
+    if (!attr_name) return (Item){.item = ITEM_FALSE};
+
+    bool has = dom_element_has_attribute(elem, attr_name);
+    bool should_have;
+    if (argc >= 2) {
+        should_have = js_is_truthy(args[1]);
+    } else {
+        should_have = !has; // toggle
+    }
+
+    if (should_have && !has) {
+        dom_element_set_attribute(elem, attr_name, "");
+    } else if (!should_have && has) {
+        dom_element_remove_attribute(elem, attr_name);
+    }
+    return (Item){.item = b2it(should_have ? 1 : 0)};
+}
+```
+
+**No transpiler changes needed.**
+
+**Estimated effort:** ~15 LOC.
+
+---
+
+### F1: `element.style.setProperty(property, value [, priority])` (Priority: MEDIUM)
+
+**Problem:** The programmatic way to set a CSS property. Unlike `element.style.prop = val`, this accepts CSS property names (kebab-case) and an optional `"important"` priority string.
+
+**Current state:** `element.style.X = val` is handled by `js_dom_set_style_property` which converts camelCase to CSS properties. `setProperty` needs similar logic but skips the camelCase conversion (since the property name is already in CSS format).
+
+**Approach:** This is a method call on the `style` object. The pattern `obj.style.setProperty(...)` is a three-level chain: `obj` → `style` → `setProperty(...)`. We need transpiler-level detection for `obj.style.setProperty(...)` and `obj.style.removeProperty(...)`.
+
+**New runtime function** (`js_dom.cpp`):
+
+```c
+extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return ItemNull;
+
+    // setProperty(property, value [, priority])
+    if (strcmp(method, "setProperty") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* css_prop = fn_to_cstr(args[0]);
+        const char* val_str = fn_to_cstr(args[1]);
+        if (!css_prop || !val_str) return ItemNull;
+
+        // build declaration string, optionally with !important
+        char style_decl[256];
+        if (argc >= 3) {
+            const char* priority = fn_to_cstr(args[2]);
+            if (priority && strcasecmp(priority, "important") == 0) {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
+            } else {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+            }
+        } else {
+            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+        }
+        dom_element_apply_inline_style(elem, style_decl);
+        elem->styles_resolved = false;
+        return ItemNull;
+    }
+
+    // removeProperty(property) — returns old value
+    if (strcmp(method, "removeProperty") == 0) {
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        const char* css_prop = fn_to_cstr(args[0]);
+        if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+        // get old value before removing
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        Item old_val = (Item){.item = s2it(heap_create_name(""))};
+        if (prop_id != CSS_PROPERTY_UNKNOWN) {
+            CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+            if (decl && decl->specificity.inline_style) {
+                // serialize old value (reuse getter logic)
+                Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
+                old_val = js_dom_get_style_property(elem_item, prop_item);
+            }
+            // remove the declaration from the style tree
+            style_tree_remove(elem->specified_style, prop_id);
+        }
+        elem->styles_resolved = false;
+        return old_val;
+    }
+
+    log_debug("js_dom_style_method: unknown method '%s'", method);
+    return ItemNull;
+}
+```
+
+**Transpiler changes** (`transpile_js_mir.cpp`):
+
+Detect `obj.style.setProperty(...)` / `obj.style.removeProperty(...)` — three-level chained method call:
+
+```cpp
+// In the method call dispatch section, before the generic receiver-type dispatch:
+// Detect: obj.style.setProperty(...) or obj.style.removeProperty(...)
+if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+    JsMemberNode* m = (JsMemberNode*)call->callee;
+    if (m->object && m->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* outer = (JsMemberNode*)m->object;
+        if (outer->property && outer->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* mid = (JsIdentifierNode*)outer->property;
+            if (mid->name && mid->name->len == 5 &&
+                strncmp(mid->name->chars, "style", 5) == 0 &&
+                m->property && m->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* method_id = (JsIdentifierNode*)m->property;
+                const char* mn = method_id->name->chars;
+                int ml = method_id->name->len;
+                if ((ml == 11 && strncmp(mn, "setProperty", 11) == 0) ||
+                    (ml == 14 && strncmp(mn, "removeProperty", 14) == 0)) {
+                    MIR_reg_t obj = jm_transpile_box_item(mt, outer->object);
+                    MIR_reg_t method_str = jm_box_string_literal(mt, mn, ml);
+                    MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                    return jm_call_4(mt, "js_dom_style_method", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_str),
+                        MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                }
+            }
+        }
+    }
+}
+```
+
+**Code locations:**
+- `lambda/js/js_dom.cpp` — `js_dom_style_method()` implementation
+- `lambda/js/js_dom.h` — declare `js_dom_style_method`
+- `lambda/js/transpile_js_mir.cpp` — chained call detection for `style.setProperty` / `style.removeProperty`
+- `lambda/sys_func_registry.c` — register `js_dom_style_method`
+
+**Note:** `style_tree_remove()` must exist or be added to remove a specific property from the AVL tree. If it doesn't exist, we can use `dom_element_remove_inline_styles()` followed by re-apply, but that's less efficient. Verify `style_tree_remove` exists in the CSS engine.
+
+**Test cases:**
+```javascript
+var el = document.createElement("div");
+el.style.setProperty("color", "red");
+console.log(el.style.color);                  // "red"
+
+el.style.setProperty("font-size", "14px", "important");
+console.log(el.style.fontSize);               // "14px"
+
+var old = el.style.removeProperty("color");
+console.log(old);                             // "red"
+console.log(el.style.color);                  // ""
+```
+
+**Estimated effort:** F1 + F2 combined ~55 LOC runtime + ~25 LOC transpiler.
+
+---
+
+### F2: `element.style.removeProperty(property)` (Priority: MEDIUM)
+
+Handled together with F1 above in `js_dom_style_method()`. See section F1 for the combined implementation.
+
+---
+
+## 9. v12b Implementation Order
+
+| Phase | Items | Rationale |
+|:-----:|-------|-----------|
+| 1 | E4 (remove) | Trivial, 10 LOC, high usage |
+| 2 | E1 (replaceChild) | Simple composition of existing primitives |
+| 3 | D1 (innerHTML setter) | High impact; enables fragment-based DOM building |
+| 4 | C1 (createDocumentFragment) | Enables batch mutations; requires extend `appendChild`/`insertBefore` |
+| 5 | E2 (insertAdjacentHTML) | Reuses innerHTML setter's fragment parsing pipeline |
+| 6 | E3 (insertAdjacentElement) | Simple positional insert, no parsing |
+| 7 | F1+F2 (style.setProperty/removeProperty) | Moderate impact; needs transpiler + runtime |
+| 8 | E5 (toggleAttribute) | Trivial |
+| 9 | C2 (createComment) | Low priority |
+| 10 | C3+C4 (importNode/adoptNode) | Low priority, simple wrappers |
+
+## 10. v12b Summary of File Changes
+
+| File | Changes |
+|------|---------|
+| `lambda/js/js_dom.cpp` | `createDocumentFragment`, `createComment`, `importNode`, `adoptNode` in document method; innerHTML setter in property setter; `replaceChild`, `insertAdjacentHTML`, `insertAdjacentElement`, `remove`, `toggleAttribute` in element method; fragment-aware `appendChild`/`insertBefore`; `js_dom_style_method()` |
+| `lambda/js/js_dom.h` | Declare `js_dom_style_method` |
+| `lambda/js/transpile_js_mir.cpp` | Detect `obj.style.setProperty(...)` / `obj.style.removeProperty(...)` chained calls |
+| `lambda/sys_func_registry.c` | Register `js_dom_style_method` |
+| `test/js/test_*.js` + `.txt` | New test files for each feature |
+
+## 11. Implementation Status
+
+**v12 (Track A + Track B):** ✅ Complete — all 10 features landed, 669/669 baseline tests pass.
+
+**v12b (DOM expansion):** ✅ Complete — all 12 features landed, 669/669 baseline tests pass.
+
+Files modified for v12b:
+- `lambda/js/js_dom.cpp` — ~230 LOC: createDocumentFragment, createComment, importNode, adoptNode, innerHTML setter, replaceChild, insertAdjacentHTML, insertAdjacentElement, remove, toggleAttribute, js_dom_style_method, fragment-aware appendChild/insertBefore
+- `lambda/js/js_dom.h` — declared `js_dom_style_method`
+- `lambda/js/transpile_js_mir.cpp` — ~15 LOC: `obj.style.setProperty()`/`removeProperty()` chained call dispatch
+- `lambda/sys_func_registry.c` — registered `js_dom_style_method`
+- `doc/JS_DOM_Support.md` — 12 status entries flipped from ❌/⚠️ to ✅

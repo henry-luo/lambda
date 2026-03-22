@@ -24,6 +24,7 @@
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style_node.hpp"
 #include "../input/css/selector_matcher.hpp"
+#include "../input/html5/html5_parser.h"
 
 #include <cstring>
 #include <cctype>
@@ -31,6 +32,7 @@
 // Forward declarations
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
+DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // ============================================================================
 // Unique type marker for DOM-wrapped Maps
@@ -785,6 +787,54 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         return ItemNull;
     }
 
+    // v12b: createDocumentFragment()
+    if (strcmp(method, "createDocumentFragment") == 0) {
+        // create a lightweight container element with a special tag
+        MarkBuilder builder(doc->input);
+        Item frag_item = builder.element("#document-fragment").final();
+        Element* frag_elem = frag_item.element;
+        DomElement* dom_frag = dom_element_create(doc, "#document-fragment", frag_elem);
+        return js_dom_wrap_element(dom_frag);
+    }
+
+    // v12b: createComment(data)
+    if (strcmp(method, "createComment") == 0) {
+        const char* text = (argc >= 1) ? fn_to_cstr(args[0]) : "";
+        if (!text) text = "";
+
+        // create a Lambda Element with comment tag for backing
+        MarkBuilder builder(doc->input);
+        Item comment_item = builder.element("!--").text(text).final();
+        Element* comment_elem = comment_item.element;
+
+        DomComment* comment_node = dom_comment_create(comment_elem, nullptr);
+        if (!comment_node) return ItemNull;
+        return js_dom_wrap_element(comment_node);
+    }
+
+    // v12b: importNode(node [, deep]) — deep clone a node
+    if (strcmp(method, "importNode") == 0) {
+        if (argc < 1) return ItemNull;
+        DomNode* source = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!source || !source->is_element()) return ItemNull;
+        bool deep = (argc >= 2) ? js_is_truthy(args[1]) : false;
+        Item source_item = js_dom_wrap_element(source);
+        Item deep_arg = (Item){.item = b2it(deep ? 1 : 0)};
+        Item method_str = (Item){.item = s2it(heap_create_name("cloneNode"))};
+        return js_dom_element_method(source_item, method_str, &deep_arg, 1);
+    }
+
+    // v12b: adoptNode(node) — detach from current parent
+    if (strcmp(method, "adoptNode") == 0) {
+        if (argc < 1) return ItemNull;
+        DomNode* node = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!node) return ItemNull;
+        if (node->parent) {
+            node->parent->remove_child(node);
+        }
+        return args[0];
+    }
+
     log_debug("js_document_method: unknown method '%s'", method);
     return ItemNull;
 }
@@ -1376,6 +1426,57 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
         return value;
     }
 
+    // v12b: innerHTML setter — parse HTML and replace children
+    if (strcmp(prop, "innerHTML") == 0) {
+        const char* html_str = fn_to_cstr(value);
+        if (!html_str) return ItemNull;
+
+        // 1. Remove all existing children
+        DomNode* child = elem->first_child;
+        while (child) {
+            DomNode* next = child->next_sibling;
+            child->parent = nullptr;
+            child->next_sibling = nullptr;
+            child->prev_sibling = nullptr;
+            child = next;
+        }
+        elem->first_child = nullptr;
+        elem->last_child = nullptr;
+
+        // 2. Empty string → done (cleared children)
+        if (html_str[0] == '\0') return value;
+
+        // 3. Parse HTML fragment
+        DomDocument* doc = elem->doc;
+        if (!doc || !doc->input) return value;
+
+        Html5Parser* parser = html5_fragment_parser_create(
+            doc->pool, doc->arena, doc->input);
+        if (!parser) return value;
+
+        html5_fragment_parse(parser, html_str);
+        Element* body_elem = html5_fragment_get_body(parser);
+        if (!body_elem) return value;
+
+        // 4. Convert parsed Lambda Elements to DOM nodes and append
+        for (size_t i = 0; i < body_elem->length; i++) {
+            TypeId type = get_type_id(body_elem->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                build_dom_tree_from_element(
+                    body_elem->items[i].element, doc, elem);
+                // build_dom_tree_from_element already appends to parent
+            } else if (type == LMD_TYPE_STRING) {
+                String* s = it2s(body_elem->items[i]);
+                dom_text_create(s, elem);
+                // dom_text_create already sets parent
+            }
+        }
+
+        log_debug("js_dom_set_property: set innerHTML on <%s>",
+                  elem->tag_name ? elem->tag_name : "?");
+        return value;
+    }
+
     // generic property set via setAttribute
     const char* val_str = fn_to_cstr(value);
     if (val_str) {
@@ -1678,6 +1779,20 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             log_error("js_dom_element_method appendChild: argument is not a DOM node");
             return ItemNull;
         }
+        // v12b: DocumentFragment support — move children instead of the fragment itself
+        if (child_node->is_element()) {
+            DomElement* child_elem = child_node->as_element();
+            if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+                DomNode* frag_child = child_elem->first_child;
+                while (frag_child) {
+                    DomNode* next = frag_child->next_sibling;
+                    child_elem->remove_child(frag_child);
+                    ((DomNode*)elem)->append_child(frag_child);
+                    frag_child = next;
+                }
+                return args[0];
+            }
+        }
         // detach child from current parent if any
         if (child_node->parent) {
             DomNode* old_parent = child_node->parent;
@@ -1708,6 +1823,20 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
         DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
         DomNode* ref_child = (DomNode*)js_dom_unwrap_element(args[1]);
         if (!new_child) return ItemNull;
+        // v12b: DocumentFragment support — move children instead of the fragment itself
+        if (new_child->is_element()) {
+            DomElement* new_elem = new_child->as_element();
+            if (new_elem->tag_name && strcmp(new_elem->tag_name, "#document-fragment") == 0) {
+                DomNode* frag_child = new_elem->first_child;
+                while (frag_child) {
+                    DomNode* next = frag_child->next_sibling;
+                    new_elem->remove_child(frag_child);
+                    ((DomNode*)elem)->insert_before(frag_child, ref_child);
+                    frag_child = next;
+                }
+                return args[0];
+            }
+        }
         // detach from old parent
         if (new_child->parent) {
             new_child->parent->remove_child(new_child);
@@ -1797,6 +1926,146 @@ extern "C" Item js_dom_element_method(Item elem_item, Item method_name, Item* ar
             }
         }
         return js_dom_wrap_element(clone);
+    }
+
+    // v12b: remove() — self-removal from parent
+    if (strcmp(method, "remove") == 0) {
+        DomNode* node = (DomNode*)elem;
+        if (node->parent) {
+            node->parent->remove_child(node);
+        }
+        return ItemNull;
+    }
+
+    // v12b: replaceChild(newChild, oldChild)
+    if (strcmp(method, "replaceChild") == 0) {
+        if (argc < 2) return ItemNull;
+        DomNode* new_child = (DomNode*)js_dom_unwrap_element(args[0]);
+        DomNode* old_child = (DomNode*)js_dom_unwrap_element(args[1]);
+        if (!new_child || !old_child) return ItemNull;
+        // detach new_child from its current parent
+        if (new_child->parent) {
+            new_child->parent->remove_child(new_child);
+        }
+        // insert new before old, then remove old
+        ((DomNode*)elem)->insert_before(new_child, old_child);
+        ((DomNode*)elem)->remove_child(old_child);
+        return args[1]; // return removed old child
+    }
+
+    // v12b: toggleAttribute(name [, force])
+    if (strcmp(method, "toggleAttribute") == 0) {
+        if (argc < 1) return (Item){.item = ITEM_FALSE};
+        const char* attr_name = fn_to_cstr(args[0]);
+        if (!attr_name) return (Item){.item = ITEM_FALSE};
+
+        bool has = dom_element_has_attribute(elem, attr_name);
+        bool should_have;
+        if (argc >= 2) {
+            should_have = js_is_truthy(args[1]);
+        } else {
+            should_have = !has; // toggle
+        }
+
+        if (should_have && !has) {
+            dom_element_set_attribute(elem, attr_name, "");
+        } else if (!should_have && has) {
+            dom_element_remove_attribute(elem, attr_name);
+        }
+        return (Item){.item = b2it(should_have ? 1 : 0)};
+    }
+
+    // v12b: insertAdjacentElement(position, newElement)
+    if (strcmp(method, "insertAdjacentElement") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* position = fn_to_cstr(args[0]);
+        DomNode* new_node = (DomNode*)js_dom_unwrap_element(args[1]);
+        if (!position || !new_node) return ItemNull;
+
+        // detach from old parent
+        if (new_node->parent) {
+            new_node->parent->remove_child(new_node);
+        }
+
+        if (strcasecmp(position, "beforebegin") == 0) {
+            if (elem->parent && elem->parent->is_element())
+                elem->parent->insert_before(new_node, (DomNode*)elem);
+        } else if (strcasecmp(position, "afterbegin") == 0) {
+            ((DomNode*)elem)->insert_before(new_node, elem->first_child);
+        } else if (strcasecmp(position, "beforeend") == 0) {
+            ((DomNode*)elem)->append_child(new_node);
+        } else if (strcasecmp(position, "afterend") == 0) {
+            if (elem->parent && elem->parent->is_element())
+                elem->parent->insert_before(new_node, elem->next_sibling);
+        }
+        return args[1]; // return the inserted element
+    }
+
+    // v12b: insertAdjacentHTML(position, text)
+    if (strcmp(method, "insertAdjacentHTML") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* position = fn_to_cstr(args[0]);
+        const char* html_str = fn_to_cstr(args[1]);
+        if (!position || !html_str || !elem->doc) return ItemNull;
+
+        DomDocument* doc = elem->doc;
+        if (!doc->input) return ItemNull;
+
+        // parse the HTML fragment
+        Html5Parser* parser = html5_fragment_parser_create(
+            doc->pool, doc->arena, doc->input);
+        if (!parser) return ItemNull;
+        html5_fragment_parse(parser, html_str);
+        Element* body_elem = html5_fragment_get_body(parser);
+        if (!body_elem) return ItemNull;
+
+        // determine target parent and reference node based on position
+        DomElement* target_parent = nullptr;
+        DomNode* ref_node = nullptr;
+
+        if (strcasecmp(position, "beforebegin") == 0) {
+            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+            target_parent = elem->parent->as_element();
+            ref_node = (DomNode*)elem;
+        } else if (strcasecmp(position, "afterbegin") == 0) {
+            target_parent = elem;
+            ref_node = elem->first_child;
+        } else if (strcasecmp(position, "beforeend") == 0) {
+            target_parent = elem;
+            ref_node = nullptr;
+        } else if (strcasecmp(position, "afterend") == 0) {
+            if (!elem->parent || !elem->parent->is_element()) return ItemNull;
+            target_parent = elem->parent->as_element();
+            ref_node = elem->next_sibling;
+        } else {
+            log_error("insertAdjacentHTML: invalid position '%s'", position);
+            return ItemNull;
+        }
+
+        // build DOM nodes from parsed fragment and insert
+        for (size_t i = 0; i < body_elem->length; i++) {
+            TypeId type = get_type_id(body_elem->items[i]);
+            if (type == LMD_TYPE_ELEMENT) {
+                DomElement* child_dom = build_dom_tree_from_element(
+                    body_elem->items[i].element, doc, nullptr);
+                if (child_dom) {
+                    if (ref_node)
+                        ((DomNode*)target_parent)->insert_before((DomNode*)child_dom, ref_node);
+                    else
+                        ((DomNode*)target_parent)->append_child((DomNode*)child_dom);
+                }
+            } else if (type == LMD_TYPE_STRING) {
+                String* s = it2s(body_elem->items[i]);
+                DomText* text_node = dom_text_create_detached(s, doc);
+                if (text_node) {
+                    if (ref_node)
+                        ((DomNode*)target_parent)->insert_before((DomNode*)text_node, ref_node);
+                    else
+                        ((DomNode*)target_parent)->append_child((DomNode*)text_node);
+                }
+            }
+        }
+        return ItemNull;
     }
 
     log_debug("js_dom_element_method: unknown method '%s'", method);
@@ -2095,4 +2364,69 @@ extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
         current = current->parent;
     }
     return (Item){.item = ITEM_FALSE};
+}
+
+// ============================================================================
+// style.setProperty() / style.removeProperty() (v12b)
+// ============================================================================
+
+extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
+    DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
+    if (!elem) return ItemNull;
+
+    const char* method = fn_to_cstr(method_name);
+    if (!method) return ItemNull;
+
+    // setProperty(property, value [, priority])
+    if (strcmp(method, "setProperty") == 0) {
+        if (argc < 2) return ItemNull;
+        const char* css_prop = fn_to_cstr(args[0]);
+        const char* val_str = fn_to_cstr(args[1]);
+        if (!css_prop || !val_str) return ItemNull;
+
+        char style_decl[256];
+        if (argc >= 3) {
+            const char* priority = fn_to_cstr(args[2]);
+            if (priority && strcasecmp(priority, "important") == 0) {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s !important", css_prop, val_str);
+            } else {
+                snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+            }
+        } else {
+            snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
+        }
+        dom_element_apply_inline_style(elem, style_decl);
+        elem->styles_resolved = false;
+        log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
+                  css_prop, val_str, elem->tag_name ? elem->tag_name : "?");
+        return ItemNull;
+    }
+
+    // removeProperty(property) — returns old value
+    if (strcmp(method, "removeProperty") == 0) {
+        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        const char* css_prop = fn_to_cstr(args[0]);
+        if (!css_prop) return (Item){.item = s2it(heap_create_name(""))};
+
+        // get old value before removing
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        Item old_val = (Item){.item = s2it(heap_create_name(""))};
+        if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
+            CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+            if (decl && decl->specificity.inline_style) {
+                // serialize old value via the getter
+                Item prop_item = (Item){.item = s2it(heap_create_name(css_prop))};
+                old_val = js_dom_get_style_property(elem_item, prop_item);
+            }
+            // remove the declaration from the style tree
+            style_tree_remove_property(elem->specified_style, prop_id);
+        }
+        elem->styles_resolved = false;
+        log_debug("js_dom_style_method: removeProperty '%s' on <%s>",
+                  css_prop, elem->tag_name ? elem->tag_name : "?");
+        return old_val;
+    }
+
+    log_debug("js_dom_style_method: unknown method '%s'", method);
+    return ItemNull;
 }

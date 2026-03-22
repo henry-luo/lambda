@@ -1114,6 +1114,8 @@ JitImport jit_runtime_imports[] = {
     {"js_dataset_set_property", FPTR(js_dataset_set_property)},
     {"js_location_get_property", FPTR(js_location_get_property)},
     {"js_dom_contains", FPTR(js_dom_contains)},
+    // v12b: DOM extensions
+    {"js_dom_style_method", FPTR(js_dom_style_method)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions
