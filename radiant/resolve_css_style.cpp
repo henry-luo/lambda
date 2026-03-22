@@ -1185,8 +1185,14 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         } else if (effective_property == CSS_PROPERTY_HEIGHT || effective_property == CSS_PROPERTY_MIN_HEIGHT ||
                    effective_property == CSS_PROPERTY_MAX_HEIGHT || effective_property == CSS_PROPERTY_TOP ||
                    effective_property == CSS_PROPERTY_BOTTOM) {
-            // height-related properties: percentage relative to parent HEIGHT
-            if (lycon->block.parent && lycon->block.parent->content_height > 0) {
+            // CSS Position 3 §3.4: For top/bottom position insets, if the containing
+            // block height is indefinite (auto), any percentage makes the entire
+            // value auto. Return NAN so calc() expressions also evaluate to NAN.
+            bool is_position_inset = (effective_property == CSS_PROPERTY_TOP || effective_property == CSS_PROPERTY_BOTTOM);
+            if (is_position_inset && lycon->block.parent && lycon->block.parent->given_height < 0) {
+                log_debug("percentage top/bottom %.2f%% resolves to auto (parent height is indefinite)", percentage);
+                result = NAN;
+            } else if (lycon->block.parent && lycon->block.parent->content_height > 0) {
                 log_debug("percentage height calculation: %.2f%% of parent height %.1f = %.2f",
                        percentage, lycon->block.parent->content_height,
                        percentage * lycon->block.parent->content_height / 100.0);
@@ -6553,10 +6559,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->position->has_top = false;
             } else {
                 block->position->top = resolve_length_value(lycon, CSS_PROPERTY_TOP, value);
-                block->position->has_top = true;
-                // store raw percentage for re-resolution during absolute positioning
+                // store raw percentage for re-resolution during layout
                 if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     block->position->top_percent = value->data.percentage.value;
+                    block->position->has_top = true;
+                    if (isnan(block->position->top)) block->position->top = 0;
+                } else if (isnan(block->position->top)) {
+                    // calc() with percentage on indefinite containing block → auto
+                    block->position->has_top = false;
+                    block->position->top = 0;
+                } else {
+                    block->position->has_top = true;
                 }
             }
             break;
@@ -6643,10 +6656,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 block->position->has_bottom = false;
             } else {
                 block->position->bottom = resolve_length_value(lycon, CSS_PROPERTY_BOTTOM, value);
-                block->position->has_bottom = true;
-                // store raw percentage for re-resolution during absolute positioning
+                // store raw percentage for re-resolution during layout
                 if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                     block->position->bottom_percent = value->data.percentage.value;
+                    block->position->has_bottom = true;
+                    if (isnan(block->position->bottom)) block->position->bottom = 0;
+                } else if (isnan(block->position->bottom)) {
+                    // calc() with percentage on indefinite containing block → auto
+                    block->position->has_bottom = false;
+                    block->position->bottom = 0;
+                } else {
+                    block->position->has_bottom = true;
                 }
             }
             break;
