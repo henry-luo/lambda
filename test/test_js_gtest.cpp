@@ -361,6 +361,14 @@ TEST(JavaScriptTests, test_dom_basic) {
     test_js_dom_script_against_file("test/js/dom_basic.js", "test/js/dom_basic.html", "test/js/dom_basic.txt");
 }
 
+TEST(JavaScriptTests, test_dom_mutation) {
+    test_js_dom_script_against_file("test/js/dom_mutation.js", "test/js/dom_mutation.html", "test/js/dom_mutation.txt");
+}
+
+TEST(JavaScriptTests, test_dom_style) {
+    test_js_dom_script_against_file("test/js/dom_style.js", "test/js/dom_style.html", "test/js/dom_style.txt");
+}
+
 // v5 coverage tests: implemented but previously untested features
 TEST(JavaScriptTests, test_switch_statement) {
     test_js_script_against_file("test/js/switch_statement.js", "test/js/switch_statement.txt");

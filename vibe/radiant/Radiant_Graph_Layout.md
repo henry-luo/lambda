@@ -853,5 +853,5 @@ write_file("diagram.svg", svg);
 
 - `lambda/input/input-graph-mermaid.cpp` - Mermaid parser
 - `lambda/input/input-graph-d2.cpp` - D2 parser
-- `doc/Radiant_Layout_Design.md` - Radiant architecture
+- `doc/dev/Radiant_Layout_Design.md` - Radiant architecture
 - `radiant/layout_*.cpp` - Existing layout algorithms

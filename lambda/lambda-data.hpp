@@ -191,6 +191,11 @@ typedef struct ShapeEntry {
     struct AstNode* default_value;  // default value expression (NULL if none)
 } ShapeEntry;
 
+// A1: Property hash table — inline open-addressing table for O(1) property lookup.
+// For objects with ≤32 properties (covers >99% of JS objects), uses a small fixed
+// table indexed by FNV-1a hash. Each slot stores a ShapeEntry pointer.
+#define TYPEMAP_HASH_CAPACITY 32
+
 typedef struct TypeMap : Type {
     int64_t length;  // no. of items in the map
     int64_t byte_size;  // byte size of the struct that the map is transpiled to
@@ -199,7 +204,65 @@ typedef struct TypeMap : Type {
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
     const char* struct_name;  // C struct name for direct access (NULL if anonymous)
+    // A1: Inline property hash table for O(1) lookup
+    ShapeEntry* field_index[TYPEMAP_HASH_CAPACITY];  // hash table slots (NULL = empty)
+    uint8_t field_count;  // number of fields in hash table (0 = not populated)
 } TypeMap;
+
+// A1: FNV-1a hash for property name lookup
+static inline uint32_t typemap_fnv1a(const char* key, int len) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < len; i++) {
+        h ^= (uint8_t)key[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+// A1: Insert a ShapeEntry into the TypeMap hash table (open addressing, linear probe).
+// Uses last-writer-wins: if a name already exists, the slot is overwritten.
+static inline void typemap_hash_insert(TypeMap* tm, ShapeEntry* entry) {
+    if (!entry || !entry->name || tm->field_count >= TYPEMAP_HASH_CAPACITY) return;
+    uint32_t h = typemap_fnv1a(entry->name->str, (int)entry->name->length);
+    uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
+    for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
+        uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
+        if (!tm->field_index[slot]) {
+            tm->field_index[slot] = entry;
+            tm->field_count++;
+            return;
+        }
+        // last-writer-wins: replace existing entry with same name
+        if (tm->field_index[slot]->name &&
+            tm->field_index[slot]->name->length == entry->name->length &&
+            memcmp(tm->field_index[slot]->name->str, entry->name->str, entry->name->length) == 0) {
+            tm->field_index[slot] = entry;
+            return;
+        }
+    }
+    // table full — field_count stays below TYPEMAP_HASH_CAPACITY
+}
+
+// A1: Lookup a ShapeEntry by name through the hash table.
+// Returns the ShapeEntry or NULL if not found.
+// A6: Uses pointer comparison first (interned strings via name pool share
+// the same char* pointer), falling back to memcmp only on pointer mismatch.
+static inline ShapeEntry* typemap_hash_lookup(TypeMap* tm, const char* key, int key_len) {
+    if (tm->field_count == 0) return NULL;
+    uint32_t h = typemap_fnv1a(key, key_len);
+    uint32_t idx = h & (TYPEMAP_HASH_CAPACITY - 1);
+    for (int probe = 0; probe < TYPEMAP_HASH_CAPACITY; probe++) {
+        uint32_t slot = (idx + probe) & (TYPEMAP_HASH_CAPACITY - 1);
+        ShapeEntry* e = tm->field_index[slot];
+        if (!e) return NULL;  // empty slot → not found
+        if (e->name && (e->name->str == key ||  // A6: interned pointer match (fast)
+            (e->name->length == (size_t)key_len &&
+             memcmp(e->name->str, key, key_len) == 0))) {
+            return e;
+        }
+    }
+    return NULL;
+}
 
 typedef struct TypeElmt : TypeMap {
     StrView name;  // local name of the element

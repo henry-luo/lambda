@@ -384,7 +384,7 @@ TEST_F(MarkEditorTest, ArrayDelete) {
     MarkEditor editor(input, EDIT_MODE_INLINE);
 
     // Delete element
-    Item updated = editor.array_delete(arr, 1);
+    Item updated = editor.array_delete(arr, (int64_t)1);
 
     ASSERT_NE(updated.array, nullptr);
     ASSERT_EQ(updated.array->type_id, LMD_TYPE_ARRAY);
@@ -732,7 +732,7 @@ TEST_F(MarkEditorTest, ArrayDeleteOutOfBounds) {
     MarkEditor editor(input, EDIT_MODE_INLINE);
 
     // Delete beyond bounds
-    Item result = editor.array_delete(arr, 5);
+    Item result = editor.array_delete(arr, (int64_t)5);
 
     // Should return error
     ASSERT_EQ(result._type_id, LMD_TYPE_ERROR);

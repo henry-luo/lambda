@@ -15,6 +15,7 @@
 #include "../transpiler.hpp"
 #include "../format/format.h"
 #include "../../lib/log.h"
+#include "../../lib/url.h"
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
@@ -915,4 +916,181 @@ extern "C" Item js_delete_property(Item obj, Item key) {
     // set property to null (real deletion would require map_remove)
     js_property_set(obj, key, ItemNull);
     return (Item){.item = b2it(true)};
+}
+
+// =============================================================================
+// v12: encodeURIComponent / decodeURIComponent
+// =============================================================================
+
+extern "C" Item js_encodeURIComponent(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    char* encoded = url_encode_component(s->chars, s->len);
+    if (!encoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    String* result = heap_create_name(encoded, strlen(encoded));
+    free(encoded);
+    return (Item){.item = s2it(result)};
+}
+
+extern "C" Item js_decodeURIComponent(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    size_t decoded_len = 0;
+    char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
+    if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    String* result = heap_create_name(decoded, decoded_len);
+    free(decoded);
+    return (Item){.item = s2it(result)};
+}
+
+// =============================================================================
+// v12: globalThis
+// =============================================================================
+
+static Item js_global_this_obj = {0};
+
+extern "C" Item js_get_global_this() {
+    if (js_global_this_obj.item == 0) {
+        js_global_this_obj = js_new_object();
+        // populate standard globals
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, ItemNull);
+        double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *nan_p = NAN;
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, (Item){.item = d2it(nan_p)});
+        double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *inf_p = INFINITY;
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, (Item){.item = d2it(inf_p)});
+    }
+    return js_global_this_obj;
+}
+
+// =============================================================================
+// v12: Symbol API
+// =============================================================================
+
+#include "../../lib/hashmap.h"
+
+// symbol registry entry for Symbol.for() / Symbol.keyFor()
+struct JsSymbolEntry {
+    char key[128];
+    uint64_t symbol_id;
+};
+
+static uint64_t js_symbol_next_id = 100;  // IDs 1-99 reserved for well-known symbols
+static HashMap* js_symbol_registry = nullptr;  // string key -> JsSymbolEntry
+
+// well-known symbol IDs (pre-allocated)
+#define JS_SYMBOL_ID_ITERATOR       1
+#define JS_SYMBOL_ID_TO_PRIMITIVE   2
+#define JS_SYMBOL_ID_HAS_INSTANCE   3
+#define JS_SYMBOL_ID_TO_STRING_TAG  4
+
+static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    return strcmp(((const JsSymbolEntry*)a)->key, ((const JsSymbolEntry*)b)->key);
+}
+
+static uint64_t js_symbol_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsSymbolEntry* e = (const JsSymbolEntry*)item;
+    return hashmap_sip(e->key, strlen(e->key), seed0, seed1);
+}
+
+static void js_symbol_init_registry() {
+    if (!js_symbol_registry) {
+        js_symbol_registry = hashmap_new(sizeof(JsSymbolEntry), 16, 0, 0,
+            js_symbol_entry_hash, js_symbol_entry_compare, NULL, NULL);
+    }
+}
+
+// create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
+// symbol items are encoded as negative ints that won't collide with normal ints
+static Item js_make_symbol_item(uint64_t id) {
+    // encode as an int with a special range: -(id + 1000000)
+    return (Item){.item = i2it(-(int64_t)(id + 1000000))};
+}
+
+static bool js_is_symbol_item(Item item) {
+    if (get_type_id(item) != LMD_TYPE_INT) return false;
+    int64_t v = it2i(item);
+    return v <= -1000000;
+}
+
+static uint64_t js_symbol_item_id(Item item) {
+    return (uint64_t)(-(it2i(item) + 1000000));
+}
+
+extern "C" Item js_symbol_create(Item description) {
+    uint64_t id = js_symbol_next_id++;
+    // store description on a map wrapper so toString can access it
+    Item sym = js_make_symbol_item(id);
+    (void)description;  // description is only for debugging
+    return sym;
+}
+
+extern "C" Item js_symbol_for(Item key) {
+    js_symbol_init_registry();
+    String* s = it2s(js_to_string(key));
+    if (!s) return js_symbol_create(key);
+
+    JsSymbolEntry lookup;
+    int klen = s->len < 127 ? (int)s->len : 127;
+    memcpy(lookup.key, s->chars, klen);
+    lookup.key[klen] = '\0';
+
+    JsSymbolEntry* found = (JsSymbolEntry*)hashmap_get(js_symbol_registry, &lookup);
+    if (found) return js_make_symbol_item(found->symbol_id);
+
+    // create new entry
+    lookup.symbol_id = js_symbol_next_id++;
+    hashmap_set(js_symbol_registry, &lookup);
+    return js_make_symbol_item(lookup.symbol_id);
+}
+
+extern "C" Item js_symbol_key_for(Item sym) {
+    if (!js_is_symbol_item(sym)) return ItemNull;
+    js_symbol_init_registry();
+    uint64_t id = js_symbol_item_id(sym);
+
+    // linear scan — symbol registry is small
+    size_t iter = 0;
+    void* entry;
+    while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
+        JsSymbolEntry* e = (JsSymbolEntry*)entry;
+        if (e->symbol_id == id) {
+            return (Item){.item = s2it(heap_create_name(e->key, strlen(e->key)))};
+        }
+    }
+    return ItemNull;  // not in global registry
+}
+
+extern "C" Item js_symbol_to_string(Item sym) {
+    if (!js_is_symbol_item(sym)) {
+        return (Item){.item = s2it(heap_create_name("Symbol()", 8))};
+    }
+    // check global registry for description
+    uint64_t id = js_symbol_item_id(sym);
+
+    // well-known symbols
+    if (id == JS_SYMBOL_ID_ITERATOR)      return (Item){.item = s2it(heap_create_name("Symbol(Symbol.iterator)", 23))};
+    if (id == JS_SYMBOL_ID_TO_PRIMITIVE)   return (Item){.item = s2it(heap_create_name("Symbol(Symbol.toPrimitive)", 26))};
+    if (id == JS_SYMBOL_ID_HAS_INSTANCE)   return (Item){.item = s2it(heap_create_name("Symbol(Symbol.hasInstance)", 26))};
+    if (id == JS_SYMBOL_ID_TO_STRING_TAG)  return (Item){.item = s2it(heap_create_name("Symbol(Symbol.toStringTag)", 26))};
+
+    // check registry
+    if (js_symbol_registry) {
+        size_t iter = 0;
+        void* entry;
+        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
+            JsSymbolEntry* e = (JsSymbolEntry*)entry;
+            if (e->symbol_id == id) {
+                char buf[160];
+                snprintf(buf, sizeof(buf), "Symbol(%s)", e->key);
+                return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+            }
+        }
+    }
+
+    return (Item){.item = s2it(heap_create_name("Symbol()", 8))};
 }

@@ -1,0 +1,40 @@
+3
+4
+added
+hello world
+true
+3
+#text
+hello world
+DIV
+false
+3
+B
+2
+A
+C
+3
+A
+X
+C
+END
+4
+First paragraph
+Replaced text
+2
+DIV
+false
+DIV
+2
+EM
+STRONG
+42
+true
+false
+true
+false
+string
+2
+1
+hello world
+"DOM mutation tests complete"

@@ -822,5 +822,5 @@ One of Redex's strongest features is `redex-check` — random testing against pr
 - [CSS Flexible Box Layout Module Level 1](https://www.w3.org/TR/css-flexbox-1/)
 - [CSS Grid Layout Module Level 2](https://www.w3.org/TR/css-grid-2/)
 - [CSS Intrinsic & Extrinsic Sizing Module Level 3](https://www.w3.org/TR/css-sizing-3/)
-- Radiant Layout Design Document: `doc/Radiant_Layout_Design.md`
+- Radiant Layout Design Document: `doc/dev/Radiant_Layout_Design.md`
 - Radiant Graph Layout Proposal: `vibe/Radiant_Graph_Layout.md`

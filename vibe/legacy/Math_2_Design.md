@@ -1087,4 +1087,4 @@ void render_glyph(FT_Face face, int codepoint, PaintContext& ctx) {
 - [MathLive Architecture Analysis](./Mathlive.md) - Detailed analysis of MathLive's design
 - [TeXBook](https://www.amazon.com/TeXbook-Donald-Knuth/dp/0201134489) - Appendix G for typesetting algorithms
 - [OpenType Math Table](https://docs.microsoft.com/en-us/typography/opentype/spec/math) - Font metrics specification
-- [Radiant Layout Design](../doc/Radiant_Layout_Design.md) - Existing Radiant architecture
+- [Radiant Layout Design](../doc/dev/Radiant_Layout_Design.md) - Existing Radiant architecture
