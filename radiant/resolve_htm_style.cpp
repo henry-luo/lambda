@@ -599,6 +599,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_LI:
         // list item: display list-item handled elsewhere
         break;
+    case HTM_TAG_SUMMARY:
+        // UA default: list-style: inside disclosure-closed
+        // summary elements use inside marker position (disclosure triangle before text)
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->list_style_position = (CssEnum)1;  // 1 = inside
+        block->blk->list_style_type = CSS_VALUE_DISC;   // disc as proxy for disclosure triangle
+        break;
     // ========== Table elements ==========
     case HTM_TAG_TABLE: {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
@@ -1150,7 +1157,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_ARTICLE:  case HTM_TAG_SECTION:  case HTM_TAG_NAV:
     case HTM_TAG_ASIDE:  case HTM_TAG_HEADER:  case HTM_TAG_FOOTER:
     case HTM_TAG_MAIN:  case HTM_TAG_HGROUP:  case HTM_TAG_DETAILS:
-    case HTM_TAG_SUMMARY:
         // these are block-level but have no special default styling
         break;
     }

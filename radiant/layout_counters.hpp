@@ -67,8 +67,12 @@ void counter_pop_scope(CounterContext* ctx);
  * Pop the current counter scope and propagate counter values to parent.
  * Use for inline elements so counter values persist for following siblings.
  * Propagated counters are marked so that sibling counter-reset can replace them.
+ * @param propagate_resets If true, counter-reset counters also propagate to parent
+ *        (needed for regular elements so siblings can see them). If false, only
+ *        counters created by counter-increment/counter-set propagate (default,
+ *        used for pseudo-elements whose counter-reset should stay scoped).
  */
-void counter_pop_scope_propagate(CounterContext* ctx);
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false);
 
 // ============================================================================
 // Counter Operations
