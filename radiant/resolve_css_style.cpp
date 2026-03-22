@@ -9323,6 +9323,25 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
                         if (sb->length > 0) stringbuf_append_char(sb, ' ');
                         stringbuf_append_int(sb, (int)item->data.number.value);
+                    } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
+                        // CSS Lists 3: reversed(counter-name) in counter-reset
+                        CssFunction* func = item->data.function;
+                        if (func->name && strcmp(func->name, "reversed") == 0 &&
+                            func->arg_count >= 1 && func->args[0]) {
+                            const char* counter_name = nullptr;
+                            if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
+                                func->args[0]->data.custom_property.name) {
+                                counter_name = func->args[0]->data.custom_property.name;
+                            } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                                const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+                                if (info) counter_name = info->name;
+                            }
+                            if (counter_name) {
+                                if (sb->length > 0) stringbuf_append_char(sb, ' ');
+                                stringbuf_append_str(sb, counter_name);
+                                log_debug("[CSS] counter-reset: reversed(%s)", counter_name);
+                            }
+                        }
                     }
                 }
 
@@ -9332,6 +9351,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] counter-reset: %s", sb->str->chars);
                 }
                 stringbuf_free(sb);
+            } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function) {
+                // CSS Lists 3: standalone reversed(counter-name) in counter-reset
+                CssFunction* func = value->data.function;
+                if (func->name && strcmp(func->name, "reversed") == 0 &&
+                    func->arg_count >= 1 && func->args[0]) {
+                    const char* counter_name = nullptr;
+                    if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
+                        func->args[0]->data.custom_property.name) {
+                        counter_name = func->args[0]->data.custom_property.name;
+                    } else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+                        if (info) counter_name = info->name;
+                    }
+                    if (counter_name) {
+                        size_t len = strlen(counter_name);
+                        block->blk->counter_reset = (char*)alloc_prop(lycon, len + 1);
+                        str_copy(block->blk->counter_reset, len + 1, counter_name, len);
+                        log_debug("[CSS] counter-reset: reversed(%s) → %s", counter_name, counter_name);
+                    }
+                }
             }
             break;
         }

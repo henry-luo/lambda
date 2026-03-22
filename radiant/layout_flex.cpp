@@ -1802,6 +1802,9 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         View* item = items[i];
         ViewBlock* item_block = (ViewBlock*)item->as_element();
         if (item_block && item_block->position &&
+            item_block->position->position == CSS_VALUE_STICKY) {
+            layout_sticky_positioned(lycon, item_block);
+        } else if (item_block && item_block->position &&
             item_block->position->position == CSS_VALUE_RELATIVE) {
             float offset_x = 0, offset_y = 0;
             // horizontal offset — re-resolve percentage against actual parent width

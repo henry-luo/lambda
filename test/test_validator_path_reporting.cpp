@@ -22,7 +22,7 @@ class ValidatorTestHelper {
 public:
     static std::string runValidator(const char* args) {
         char command[1024];
-        snprintf(command, sizeof(command), "./lambda.exe validate %s 2>&1", args);
+        snprintf(command, sizeof(command), "./lambda.exe validate --no-log %s 2>&1", args);
 
         FILE* pipe = popen(command, "r");
         if (!pipe) return "";

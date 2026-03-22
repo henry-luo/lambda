@@ -328,7 +328,8 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     DomElement* elem = (DomElement*)block;
 
     // Check if pseudo-elements already exist (reflow case)
-    if (block->pseudo) {
+    // But if the pseudo was created by marker code, ::before/::after may still need creation
+    if (block->pseudo && block->pseudo->before_generated && block->pseudo->after_generated) {
         log_debug("[PSEUDO] Reusing existing pseudo-elements for <%s>",
                   elem->tag_name ? elem->tag_name : "unknown");
         return block->pseudo;
@@ -341,18 +342,19 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     log_debug("[PSEUDO] Checking <%s>: has_before=%d, has_after=%d, before_styles=%p",
               elem->tag_name ? elem->tag_name : "?", has_before, has_after, (void*)elem->before_styles);
 
-    if (!has_before && !has_after) return nullptr;
+    if (!has_before && !has_after) return block->pseudo;  // Return existing (may have marker) or nullptr
 
-    // Allocate PseudoContentProp
-    PseudoContentProp* pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
-    if (!pseudo) return nullptr;
+    // Reuse existing PseudoContentProp if already allocated (e.g., by marker creation code)
+    PseudoContentProp* pseudo = block->pseudo;
+    if (!pseudo) {
+        pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+        if (!pseudo) return nullptr;
+        memset(pseudo, 0, sizeof(PseudoContentProp));
+    }
 
-    // Initialize
-    memset(pseudo, 0, sizeof(PseudoContentProp));
-
-    // Create ::before pseudo-element if needed
+    // Create ::before pseudo-element if needed and not already created
     // Note: Even empty content "" creates a pseudo-element for layout purposes (e.g., clearfix)
-    if (has_before) {
+    if (has_before && !pseudo->before_generated) {
         log_info("[PSEUDO] Getting before content for <%s>", elem->tag_name ? elem->tag_name : "?");
         const char* before_content = nullptr;
         if (lycon->counter_context) {
@@ -390,9 +392,9 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
                   elem->tag_name ? elem->tag_name : "?", before_content ? before_content : "(empty)");
     }
 
-    // Create ::after pseudo-element if needed
+    // Create ::after pseudo-element if needed and not already created
     // Note: Even empty content "" creates a pseudo-element for layout purposes
-    if (has_after) {
+    if (has_after && !pseudo->after_generated) {
         const char* after_content = nullptr;
         if (lycon->counter_context) {
             after_content = dom_element_get_pseudo_element_content_with_counters(
@@ -882,6 +884,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             bool has_marker = true;
             if (block->blk && block->blk->list_style_type == CSS_VALUE_NONE) {
                 has_marker = false;
+            }
+            // Also check ::marker { content: none } CSS override
+            if (has_marker && block->marker_styles) {
+                CssDeclaration* content_decl = style_tree_get_declaration(
+                    block->marker_styles, CSS_PROPERTY_CONTENT);
+                if (content_decl && content_decl->value) {
+                    CssValue* cv = content_decl->value;
+                    if (cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NONE) {
+                        has_marker = false;
+                    }
+                }
             }
             if (has_marker) {
                 float min_line_height = lycon->block.line_height;
@@ -1862,6 +1875,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
         // Insert pseudo-elements into DOM tree for proper view tree linking
         if (block->pseudo) {
+            // Insert ::marker first (before ::before), as it's the first box in list items
+            if (block->pseudo->marker) {
+                insert_pseudo_into_dom((DomElement*)block, block->pseudo->marker, true);
+            }
             if (block->pseudo->before) {
                 insert_pseudo_into_dom((DomElement*)block, block->pseudo->before, true);
             }
@@ -2446,8 +2463,13 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
                 // Text view that survived whitespace collapsing — has actual content
                 is_substantial = true;
             } else {
-                // BR, inline-block, marker, image, etc. — always substantial
-                is_substantial = true;
+                // BR, inline-block, image, etc. — always substantial
+                // Outside markers don't count (they're outside the principal box)
+                if (child->view_type == RDT_VIEW_MARKER) {
+                    is_substantial = false;
+                } else {
+                    is_substantial = true;
+                }
             }
             if (is_substantial) return false;
         }
@@ -4085,6 +4107,184 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Restore parent BFC if we created a new one - handled by block.parent in calling code
 }
 
+// Helper: extract counter-increment value for a specific counter from element's CSS
+static bool get_element_counter_inc(DomElement* elem, const char* counter_name, int* out_value) {
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
+    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_INCREMENT);
+    if (!node) return false;
+    StyleNode* sn = (StyleNode*)node->declaration;
+    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
+    CssValue* val = sn->winning_decl->value;
+    if (!val) return false;
+
+    // helper to match a name from a CSS value item
+    auto match_name = [&](CssValue* item) -> const char* {
+        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name)
+            return item->data.custom_property.name;
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            return info ? info->name : nullptr;
+        }
+        return nullptr;
+    };
+
+    if (val->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < val->data.list.count; i++) {
+            const char* name = match_name(val->data.list.values[i]);
+            if (name && strcmp(name, counter_name) == 0) {
+                if (i + 1 < val->data.list.count &&
+                    val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
+                    *out_value = (int)val->data.list.values[i + 1]->data.number.value;
+                } else {
+                    *out_value = 1;
+                }
+                return true;
+            }
+        }
+    } else {
+        const char* name = match_name(val);
+        if (name && strcmp(name, counter_name) == 0) {
+            *out_value = 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper: check if element's CSS counter-reset contains a specific counter name
+static bool element_resets_counter(DomElement* elem, const char* counter_name) {
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
+    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_RESET);
+    if (!node) return false;
+    StyleNode* sn = (StyleNode*)node->declaration;
+    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
+    CssValue* val = sn->winning_decl->value;
+
+    auto check_name = [&](CssValue* item) -> bool {
+        const char* name = nullptr;
+        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name) {
+            name = item->data.custom_property.name;
+        } else if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            if (info) name = info->name;
+        } else if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function) {
+            CssFunction* func = item->data.function;
+            if (func->name && strcmp(func->name, "reversed") == 0 &&
+                func->arg_count >= 1 && func->args[0]) {
+                if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
+                    func->args[0]->data.custom_property.name)
+                    name = func->args[0]->data.custom_property.name;
+                else if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+                    const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+                    if (info) name = info->name;
+                }
+            }
+        }
+        return name && strcmp(name, counter_name) == 0;
+    };
+
+    if (val->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < val->data.list.count; i++) {
+            if (check_name(val->data.list.values[i])) return true;
+        }
+    } else {
+        return check_name(val);
+    }
+    return false;
+}
+
+// Helper: get the counter-set integer value for a specific counter name on an element.
+static bool get_element_counter_set_value(DomElement* elem, const char* counter_name, int* out_value) {
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
+    AvlNode* node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_COUNTER_SET);
+    if (!node) return false;
+    StyleNode* sn = (StyleNode*)node->declaration;
+    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
+    CssValue* val = sn->winning_decl->value;
+    if (!val) return false;
+
+    auto match_name = [&](CssValue* item) -> const char* {
+        if (item->type == CSS_VALUE_TYPE_CUSTOM && item->data.custom_property.name)
+            return item->data.custom_property.name;
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            const CssEnumInfo* info = css_enum_info(item->data.keyword);
+            return info ? info->name : nullptr;
+        }
+        return nullptr;
+    };
+
+    if (val->type == CSS_VALUE_TYPE_LIST) {
+        for (int i = 0; i < val->data.list.count; i++) {
+            const char* name = match_name(val->data.list.values[i]);
+            if (name && strcmp(name, counter_name) == 0) {
+                if (i + 1 < val->data.list.count &&
+                    val->data.list.values[i + 1]->type == CSS_VALUE_TYPE_NUMBER) {
+                    *out_value = (int)val->data.list.values[i + 1]->data.number.value;
+                } else {
+                    *out_value = 0;
+                }
+                return true;
+            }
+        }
+    } else {
+        const char* name = match_name(val);
+        if (name && strcmp(name, counter_name) == 0) {
+            *out_value = 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+// DFS walk: sum non-zero counter-increments for a reversed counter in scope.
+// Skips subtrees that create a new scope (counter-reset) for the same counter.
+// Per CSS Lists 3 §4.4.2: at the first counter-set, adds its value to total and breaks.
+// Returns true if a counter-set was encountered (caller should stop walking).
+static bool sum_reversed_counter_incs(DomElement* parent, const char* counter_name,
+                                      int* total, int* last_nonzero, int* set_value) {
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* elem = (DomElement*)child;
+
+        // skip subtree if this element resets the same counter (new scope)
+        if (element_resets_counter(elem, counter_name)) continue;
+
+        // check counter-increment (processed before counter-set per spec §12.4)
+        int inc = 0;
+        if (get_element_counter_inc(elem, counter_name, &inc) && inc != 0) {
+            *total += inc;
+            *last_nonzero = inc;
+        }
+
+        // stop if this element has counter-set for the same counter
+        // (counter-increment on this element is already counted above)
+        // Per spec §4.4.2: add the counter-set value to total and break
+        int sv = 0;
+        if (get_element_counter_set_value(elem, counter_name, &sv)) {
+            *set_value = sv;
+            return true;
+        }
+
+        // recurse into children; stop if counter-set found in subtree
+        if (sum_reversed_counter_incs(elem, counter_name, total, last_nonzero, set_value)) return true;
+    }
+    return false;
+}
+
+// Extract counter name from a reversed() CSS function value
+static const char* get_reversed_counter_name(CssFunction* func) {
+    if (!func || !func->name || strcmp(func->name, "reversed") != 0) return nullptr;
+    if (func->arg_count < 1 || !func->args[0]) return nullptr;
+    if (func->args[0]->type == CSS_VALUE_TYPE_CUSTOM &&
+        func->args[0]->data.custom_property.name)
+        return func->args[0]->data.custom_property.name;
+    if (func->args[0]->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(func->args[0]->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
+}
+
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     uintptr_t tag = elmt->tag();
     if (tag == HTM_TAG_IMG) {
@@ -4257,23 +4457,47 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §12.5: OL, UL, MENU, DIR have implicit counter-reset: list-item
         // This creates a new list-item counter instance for each list container,
         // enabling counters(list-item, ".") to show nested numbering (e.g., "1.2.3").
-        if (dom_elem && !(block->blk && block->blk->counter_reset)) {
+        // Only skip if explicit counter-reset already includes "list-item".
+        if (dom_elem) {
             uintptr_t tag = dom_elem->tag_id;
             if (tag == HTM_TAG_OL || tag == HTM_TAG_UL ||
                 tag == HTM_TAG_MENU || tag == HTM_TAG_DIR) {
-                // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
-                int start_value = 0;  // default: counter-reset: list-item 0
-                if (tag == HTM_TAG_OL) {
-                    const char* start_attr = dom_element_get_attribute(dom_elem, "start");
-                    if (start_attr) {
-                        start_value = atoi(start_attr) - 1;
-                        log_debug("    [List] OL start=%s → counter-reset: list-item %d", start_attr, start_value);
-                    }
+                // Check if explicit counter-reset already handles list-item
+                bool explicit_has_list_item = false;
+                if (block->blk && block->blk->counter_reset) {
+                    explicit_has_list_item = strstr(block->blk->counter_reset, "list-item") != nullptr;
                 }
-                char reset_spec[64];
-                snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
-                counter_reset(lycon->counter_context, reset_spec);
-                log_debug("    [List] Implicit counter-reset: %s for <%s>", reset_spec, dom_elem->tag_name);
+                if (!explicit_has_list_item) {
+                    // Check <ol start="N"> attribute: resets to N-1 so first li increments to N
+                    int start_value = 0;  // default: counter-reset: list-item 0
+                    if (tag == HTM_TAG_OL) {
+                        // Check <ol reversed> attribute
+                        bool is_reversed = dom_element_get_attribute(dom_elem, "reversed") != nullptr;
+                        const char* start_attr = dom_element_get_attribute(dom_elem, "start");
+                        if (is_reversed) {
+                            if (start_attr) {
+                                start_value = atoi(start_attr) + 1;
+                            } else {
+                                int li_count = 0;
+                                for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
+                                    if (child->is_element()) {
+                                        DomElement* child_elem = (DomElement*)child;
+                                        if (child_elem->tag_id == HTM_TAG_LI) li_count++;
+                                    }
+                                }
+                                start_value = li_count + 1;
+                            }
+                            log_debug("    [List] OL reversed → counter-reset: list-item %d", start_value);
+                        } else if (start_attr) {
+                            start_value = atoi(start_attr) - 1;
+                            log_debug("    [List] OL start=%s → counter-reset: list-item %d", start_attr, start_value);
+                        }
+                    }
+                    char reset_spec[64];
+                    snprintf(reset_spec, sizeof(reset_spec), "list-item %d", start_value);
+                    counter_reset(lycon->counter_context, reset_spec);
+                    log_debug("    [List] Implicit counter-reset: %s for <%s>", reset_spec, dom_elem->tag_name);
+                }
             }
         }
 
@@ -4281,6 +4505,53 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (block->blk && block->blk->counter_reset) {
             log_debug("    [Block] Applying counter-reset: %s", block->blk->counter_reset);
             counter_reset(lycon->counter_context, block->blk->counter_reset);
+
+            // CSS Lists 3: For reversed() counters without explicit values,
+            // compute initial value = -(total_non_zero_increments + last_non_zero_increment)
+            // by DFS-walking the subtree, skipping nested scopes for the same counter.
+            if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
+                AvlNode* cr_node = avl_tree_search(dom_elem->specified_style->tree,
+                                                    CSS_PROPERTY_COUNTER_RESET);
+                if (cr_node) {
+                    StyleNode* style_node = (StyleNode*)cr_node->declaration;
+                    CssValue* cr_value = (style_node && style_node->winning_decl) ?
+                                         style_node->winning_decl->value : nullptr;
+
+                    // Process reversed() functions — handle both LIST and standalone FUNCTION
+                    auto compute_reversed = [&](CssFunction* func) {
+                        const char* rev_name = get_reversed_counter_name(func);
+                        if (!rev_name) return;
+                        int total = 0, last_nz = 0, set_val = 0;
+                        bool has_set = sum_reversed_counter_incs(dom_elem, rev_name, &total, &last_nz, &set_val);
+                        if (last_nz == 0 && !has_set) return; // no non-zero increments and no counter-set found
+                        // CSS Lists 3 §4.4.2: initial = sum_of(-inc_i) + set_val + (-last_nz_inc)
+                        // = -(total + last_nz) + set_val
+                        int initial = -(total + last_nz) + set_val;
+                        char set_spec[128];
+                        snprintf(set_spec, sizeof(set_spec), "%s %d", rev_name, initial);
+                        counter_set(lycon->counter_context, set_spec);
+                        log_debug("    [Block] Reversed counter '%s': total=%d, last_nz=%d, set_val=%d, initial=%d",
+                                  rev_name, total, last_nz, set_val, initial);
+                    };
+
+                    if (cr_value && cr_value->type == CSS_VALUE_TYPE_LIST) {
+                        int count = cr_value->data.list.count;
+                        CssValue** items = cr_value->data.list.values;
+                        for (int iv = 0; iv < count; iv++) {
+                            CssValue* item = items[iv];
+                            if (item->type != CSS_VALUE_TYPE_FUNCTION || !item->data.function)
+                                continue;
+                            // Skip if followed by explicit integer value
+                            if (iv + 1 < count && items[iv + 1]->type == CSS_VALUE_TYPE_NUMBER)
+                                continue;
+                            compute_reversed(item->data.function);
+                        }
+                    } else if (cr_value && cr_value->type == CSS_VALUE_TYPE_FUNCTION &&
+                               cr_value->data.function) {
+                        compute_reversed(cr_value->data.function);
+                    }
+                }
+            }
         }
 
         // Apply counter-increment if specified
@@ -4299,24 +4570,33 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
         // For display:list-item, auto-increment list-item counter
         if (display.outer == CSS_VALUE_LIST_ITEM || display.list_item) {
+            // Detect if parent is <ol reversed>
+            bool parent_reversed = false;
+            if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
+                DomElement* parent_elem = dom_element_get_parent(dom_elem);
+                if (parent_elem && parent_elem->tag_id == HTM_TAG_OL &&
+                    dom_element_get_attribute(parent_elem, "reversed") != nullptr) {
+                    parent_reversed = true;
+                }
+            }
+
             // Handle <li value="N"> attribute: sets counter to N before increment
             if (dom_elem && dom_elem->tag_id == HTM_TAG_LI) {
                 const char* value_attr = dom_element_get_attribute(dom_elem, "value");
                 if (value_attr) {
                     int li_value = atoi(value_attr);
                     // CSS Lists 3: li[value] acts as counter-set: list-item <value>
-                    // counter-set is processed after counter-increment, but we need
-                    // the value to be set BEFORE increment. So set to value-1 and let
-                    // the auto-increment bring it to value.
+                    // Set to value±1 so auto-increment brings it to value
+                    int set_value = parent_reversed ? li_value + 1 : li_value - 1;
                     char set_spec[64];
-                    snprintf(set_spec, sizeof(set_spec), "list-item %d", li_value - 1);
+                    snprintf(set_spec, sizeof(set_spec), "list-item %d", set_value);
                     counter_set(lycon->counter_context, set_spec);
-                    log_debug("    [List] LI value=%s → counter-set: list-item %d", value_attr, li_value - 1);
+                    log_debug("    [List] LI value=%s → counter-set: list-item %d", value_attr, set_value);
                 }
             }
 
-            log_debug("    [List] Auto-incrementing list-item counter");
-            counter_increment(lycon->counter_context, "list-item 1");
+            log_debug("    [List] Auto-%s list-item counter", parent_reversed ? "decrementing" : "incrementing");
+            counter_increment(lycon->counter_context, parent_reversed ? "list-item -1" : "list-item 1");
 
             // For inline list-item (outer != LIST_ITEM), force inside position
             // since there's no block margin area for outside markers
@@ -4353,6 +4633,29 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             const char* string_marker = (block->blk) ? block->blk->list_style_type_string : nullptr;
             bool has_marker = (effective_list_style != CSS_VALUE_NONE) || (string_marker != nullptr);
 
+            // Check for ::marker { content: ... } CSS override
+            const char* marker_css_content = nullptr;
+            DomElement* list_elem = (DomElement*)elmt;
+            if (list_elem->marker_styles) {
+                CssDeclaration* content_decl = style_tree_get_declaration(
+                    list_elem->marker_styles, CSS_PROPERTY_CONTENT);
+                if (content_decl && content_decl->value) {
+                    CssValue* cv = content_decl->value;
+                    if (cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NONE) {
+                        has_marker = false;  // content: none suppresses marker
+                        log_debug("    [List] ::marker { content: none } - suppressing marker");
+                    } else if (!(cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NORMAL)) {
+                        // explicit content (not 'normal') - resolve using counter context
+                        marker_css_content = dom_element_get_pseudo_element_content_with_counters(
+                            list_elem, 6, lycon->counter_context, list_elem->doc->arena);
+                        if (marker_css_content) {
+                            has_marker = true;
+                            log_debug("    [List] ::marker { content: '%s' } - using CSS content", marker_css_content);
+                        }
+                    }
+                }
+            }
+
             if (has_marker) {
                 CssEnum marker_style = effective_list_style;
                 bool is_string_marker = (string_marker != nullptr);
@@ -4379,7 +4682,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         memset(block->pseudo, 0, sizeof(PseudoContentProp));
                     }
 
-                    if (!block->pseudo->before_generated) {
+                    if (!block->pseudo->marker_generated) {
                         // Create ViewMarker element for the ::marker pseudo-element
                         // Use fixed width of ~1.4em (22px at 16px font) to match browser behavior
                         // Get font size from block->font (already resolved by dom_node_resolve_style)
@@ -4404,7 +4707,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             marker_prop->bullet_size = bullet_size;
 
                             // For text markers (decimal, roman, alpha) or string markers, set text content
-                            if (is_string_marker) {
+                            if (marker_css_content) {
+                                // ::marker { content: ... } overrides list-style-type
+                                size_t slen = strlen(marker_css_content);
+                                char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
+                                if (text_copy) {
+                                    memcpy(text_copy, marker_css_content, slen + 1);
+                                    marker_prop->text_content = text_copy;
+                                }
+                                marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
+                            } else if (is_string_marker) {
                                 // CSS Lists 3 §4.1: use the string directly as marker content
                                 size_t slen = strlen(string_marker);
                                 char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
@@ -4441,14 +4753,75 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             log_debug("    [List] Created ::marker with fixed width=%.1f, bullet_size=%.1f, type=%s",
                                      fixed_marker_width, bullet_size, is_bullet_marker ? "bullet" : "text");
 
-                            block->pseudo->before = marker_elem;
-                            block->pseudo->before_generated = true;
+                            block->pseudo->marker = marker_elem;
+                            block->pseudo->marker_generated = true;
                         }
                     }
                 } else {
-                    // Outside markers are not added to DOM tree
-                    // They should be rendered directly in the margin area during paint
-                    log_debug("    [List] Skipping 'outside' marker creation (should render in margin area)");
+                    // Outside markers: create ::marker element positioned in margin area
+                    // CSS 2.1 §12.5.1: marker box is outside the principal block box
+                    DomElement* parent_elem = (DomElement*)elmt;
+
+                    if (!block->pseudo) {
+                        block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+                        memset(block->pseudo, 0, sizeof(PseudoContentProp));
+                    }
+
+                    if (!block->pseudo->marker_generated) {
+                        float font_size = 16.0f;
+                        if (block->font && block->font->font_size > 0) {
+                            font_size = block->font->font_size;
+                        }
+                        float fixed_marker_width = font_size * 1.375f;
+                        float bullet_size = font_size * 0.35f;
+
+                        DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
+                        if (marker_elem) {
+                            marker_elem->parent = parent_elem;
+
+                            MarkerProp* marker_prop = (MarkerProp*)alloc_prop(lycon, sizeof(MarkerProp));
+                            memset(marker_prop, 0, sizeof(MarkerProp));
+                            marker_prop->marker_type = marker_style;
+                            marker_prop->width = fixed_marker_width;
+                            marker_prop->bullet_size = bullet_size;
+                            marker_prop->is_outside = true;
+
+                            if (marker_css_content) {
+                                // ::marker { content: ... } overrides list-style-type
+                                size_t slen = strlen(marker_css_content);
+                                char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, slen + 1);
+                                if (text_copy) {
+                                    memcpy(text_copy, marker_css_content, slen + 1);
+                                    marker_prop->text_content = text_copy;
+                                }
+                                marker_prop->marker_type = CSS_VALUE_DECIMAL;  // force text rendering
+                            } else if (!is_bullet_marker) {
+                                char marker_text[64];
+                                int marker_len = counter_format(lycon->counter_context, "list-item", marker_style, marker_text, sizeof(marker_text));
+                                if (marker_len > 0 && marker_len + 2 < (int)sizeof(marker_text)) {
+                                    marker_text[marker_len] = '.';
+                                    marker_text[marker_len + 1] = ' ';
+                                    marker_text[marker_len + 2] = '\0';
+                                    marker_len += 2;
+
+                                    char* text_copy = (char*)arena_alloc(parent_elem->doc->arena, marker_len + 1);
+                                    if (text_copy) {
+                                        memcpy(text_copy, marker_text, marker_len + 1);
+                                        marker_prop->text_content = text_copy;
+                                    }
+                                }
+                            }
+
+                            marker_elem->view_type = RDT_VIEW_MARKER;
+                            marker_elem->blk = (BlockProp*)marker_prop;
+
+                            log_debug("    [List] Created outside ::marker width=%.1f, bullet_size=%.1f, type=%s",
+                                     fixed_marker_width, bullet_size, is_bullet_marker ? "bullet" : "text");
+
+                            block->pseudo->marker = marker_elem;
+                            block->pseudo->marker_generated = true;
+                        }
+                    }
                 }
             }
         }
@@ -4805,6 +5178,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // - It has no borders, padding, or line boxes
                 View* first_in_flow_child = block->parent_view()->first_placed_child();
                 while (first_in_flow_child) {
+                    // Skip outside markers: they sit outside the principal box and
+                    // don't participate in margin collapsing (CSS Lists 3 §4)
+                    if (first_in_flow_child->view_type == RDT_VIEW_MARKER) {
+                        View* next = (View*)first_in_flow_child->next_sibling;
+                        while (next && !next->view_type) {
+                            next = (View*)next->next_sibling;
+                        }
+                        first_in_flow_child = next;
+                        continue;
+                    }
                     if (!first_in_flow_child->is_block()) break;
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
                     // Skip floats
@@ -5257,10 +5640,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->block.max_width, lycon->block.advance_y, block->height);
         }
 
-        // apply CSS relative positioning after normal layout
+        // apply CSS relative/sticky positioning after normal layout
         if (block->position && block->position->position == CSS_VALUE_RELATIVE) {
             log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
+        } else if (block->position && block->position->position == CSS_VALUE_STICKY) {
+            layout_sticky_positioned(lycon, block);
         }
     }
 

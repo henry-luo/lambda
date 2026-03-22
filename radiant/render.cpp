@@ -837,16 +837,63 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         }
 
         case CSS_VALUE_DECIMAL:
+        case CSS_VALUE_DECIMAL_LEADING_ZERO:
         case CSS_VALUE_LOWER_ROMAN:
         case CSS_VALUE_UPPER_ROMAN:
         case CSS_VALUE_LOWER_ALPHA:
-        case CSS_VALUE_UPPER_ALPHA: {
+        case CSS_VALUE_UPPER_ALPHA:
+        case CSS_VALUE_LOWER_LATIN:
+        case CSS_VALUE_UPPER_LATIN:
+        case CSS_VALUE_LOWER_GREEK:
+        case CSS_VALUE_ARMENIAN:
+        case CSS_VALUE_GEORGIAN: {
             // Text markers - render the text_content right-aligned within marker width
-            if (marker_prop->text_content && *marker_prop->text_content) {
-                // TODO: Implement text rendering for numbered markers
-                // For now, log that we need to render text
-                log_debug("[MARKER RENDER] Text marker: '%s' (type=%d)",
-                         marker_prop->text_content, marker_type);
+            if (marker_prop->text_content && *marker_prop->text_content && rdcon->font.font_handle) {
+                float s = rdcon->scale;
+                const FontMetrics* _mk = font_get_metrics(rdcon->font.font_handle);
+                float ascend = _mk ? (_mk->hhea_ascender * s) : 12.0f;
+
+                // First pass: measure total text width
+                float total_text_width = 0.0f;
+                const char* p = marker_prop->text_content;
+                while (*p) {
+                    uint32_t cp;
+                    int bytes = str_utf8_decode(p, strlen(p), &cp);
+                    if (bytes <= 0) { p++; continue; }
+                    p += bytes;
+                    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
+                    LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, cp, false);
+                    total_text_width += glyph ? glyph->advance_x : (rdcon->font.style->space_width * s);
+                }
+
+                // Right-align text within marker box: start at (x + width - total_text_width)
+                float tx = x + (width * s) - total_text_width;
+
+                // Second pass: render glyphs
+                p = marker_prop->text_content;
+                while (*p) {
+                    uint32_t cp;
+                    int bytes = str_utf8_decode(p, strlen(p), &cp);
+                    if (bytes <= 0) { p++; continue; }
+                    p += bytes;
+
+                    if (cp == ' ') {
+                        tx += rdcon->font.style->space_width * s;
+                        continue;
+                    }
+
+                    FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
+                    LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, cp, true);
+                    if (glyph) {
+                        draw_glyph(rdcon, &glyph->bitmap, tx + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
+                        tx += glyph->advance_x;
+                    } else {
+                        tx += rdcon->font.style->space_width * s;
+                    }
+                }
+
+                log_debug("[MARKER RENDER] Text marker: '%s' at x=%.1f y=%.1f w=%.1f",
+                         marker_prop->text_content, x, y, width);
             }
             break;
         }

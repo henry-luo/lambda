@@ -31,9 +31,9 @@
 char* execute_js_script(const char* script_path) {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\"", script_path);
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log", script_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\"", script_path);
+    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --no-log", script_path);
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -150,9 +150,9 @@ void test_js_script_against_file(const char* script_path, const char* expected_f
 char* execute_js_builtin_tests() {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js 2>&1");
+    snprintf(command, sizeof(command), "lambda.exe js --no-log 2>&1");
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js 2>&1");
+    snprintf(command, sizeof(command), "./lambda.exe js --no-log 2>&1");
 #endif
 
     FILE* pipe = popen(command, "r");
@@ -198,9 +198,9 @@ char* execute_js_builtin_tests() {
 char* execute_js_script_with_doc(const char* script_path, const char* html_path) {
     char command[512];
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\"", script_path, html_path);
+    snprintf(command, sizeof(command), "./lambda.exe js \"%s\" --document \"%s\" --no-log", script_path, html_path);
 #endif
 
     FILE* pipe = popen(command, "r");

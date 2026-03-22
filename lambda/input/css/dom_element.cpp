@@ -889,6 +889,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
         target_style = &element->first_letter_styles;
         pseudo_name = "::first-letter";
+    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
+        target_style = &element->marker_styles;
+        pseudo_name = "::marker";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -945,6 +948,8 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->before_styles;
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->after_styles;
+    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
+        style = element->marker_styles;
     }
 
     if (!style) {
@@ -1096,6 +1101,9 @@ const char* dom_element_get_pseudo_element_content(DomElement* element, int pseu
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->after_styles;
         log_info("[PSEUDO CONTENT GET] after_styles=%p", (void*)style);
+    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
+        style = element->marker_styles;
+        log_info("[PSEUDO CONTENT GET] marker_styles=%p", (void*)style);
     }    if (!style) {
         log_info("[PSEUDO CONTENT GET] No style tree found");
         return NULL;
@@ -1206,6 +1214,9 @@ const char* dom_element_get_pseudo_element_content_with_counters(
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->after_styles;
         log_info("[PSEUDO CONTENT WITH COUNTERS] after_styles=%p", (void*)style);
+    } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
+        style = element->marker_styles;
+        log_info("[PSEUDO CONTENT WITH COUNTERS] marker_styles=%p", (void*)style);
     }
 
     if (!style) {

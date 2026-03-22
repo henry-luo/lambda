@@ -796,10 +796,15 @@ int main(int argc, char *argv[]) {
     log_init("");  // Initialize with parsed config or defaults
 
     // Check for --no-log flag early (before any logging)
+    // Strip it from argv so subcommand handlers don't see it
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--no-log") == 0) {
             log_disable_all();
-            break;
+            for (int j = i; j < argc - 1; j++) {
+                argv[j] = argv[j + 1];
+            }
+            argc--;
+            i--;
         }
     }
 
@@ -1943,6 +1948,76 @@ int main(int argc, char *argv[]) {
             log_finish();
             return 1;
         }
+    }
+
+    // Handle test-batch command: run multiple scripts in one process for test performance
+    if (argc >= 2 && strcmp(argv[1], "test-batch") == 0) {
+        log_debug("Entering test-batch command handler");
+
+        bool use_mir = true;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--c2mir") == 0) {
+                use_mir = false;
+            } else if (strcmp(argv[i], "--no-log") == 0) {
+                // already handled early in main()
+            }
+        }
+
+        char line[1024];
+        while (fgets(line, sizeof(line), stdin)) {
+            // trim trailing whitespace
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
+                line[--len] = '\0';
+            if (len == 0) continue;
+
+            // parse optional "run " prefix for procedural scripts
+            bool run_main = false;
+            char* script_path = line;
+            if (strncmp(line, "run ", 4) == 0) {
+                run_main = true;
+                script_path += 4;
+                while (*script_path == ' ') script_path++;
+            }
+            if (*script_path == '\0') continue;
+
+            printf("\x01" "BATCH_START %s\n", script_path);
+            fflush(stdout);
+
+            if (access(script_path, F_OK) != 0) {
+                fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
+                fflush(stdout);
+                printf("\x01" "BATCH_END 1\n");
+                fflush(stdout);
+                continue;
+            }
+
+            int result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+            fflush(stdout);
+
+            printf("\x01" "BATCH_END %d\n", result);
+            fflush(stdout);
+
+            // Clean up accumulated scripts to prevent state corruption across runs.
+            // Keep the parser (expensive to recreate) but free all script data.
+            if (runtime.scripts) {
+                for (int i = 0; i < runtime.scripts->length; i++) {
+                    Script *script = (Script*)runtime.scripts->data[i];
+                    if (script->source) free((void*)script->source);
+                    if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
+                    if (script->pool) pool_destroy(script->pool);
+                    if (script->type_list) arraylist_free(script->type_list);
+                    if (script->jit_context) jit_cleanup(script->jit_context);
+                    script->decimal_ctx = NULL;
+                    free(script);
+                }
+                runtime.scripts->length = 0;
+            }
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
     }
 
     // Handle run command

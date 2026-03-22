@@ -1136,37 +1136,51 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     // FreeType metrics are in physical pixels, divide by pixel_ratio for CSS pixels
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                     marker_span->width = marker_prop->width;
-                    marker_span->height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 16.0f;
+                    // Use CSS computed line-height for marker height (not raw font metrics)
+                    marker_span->height = lycon->block.line_height;
 
-                    // Set marker position
-                    marker_span->x = lycon->line.advance_x;
-                    marker_span->y = lycon->block.advance_y;
-
-                    // Advance inline position by fixed marker width
-                    lycon->line.advance_x += marker_prop->width;
-
-                    // Update line metrics (marker contributes to line height)
-                    float ascender = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_ascender : 12.0f;
-                    float descender = lycon->font.font_handle ? -(font_get_metrics(lycon->font.font_handle)->hhea_descender) : 4.0f;
-                    if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
-                    if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
-
-                    // CSS 2.1 §12.5.1: The marker box is the first inline box in the
-                    // principal box when list-style-position is 'inside'. It participates
-                    // in the line box, so we must mark the line as non-empty. Without this,
-                    // a subsequent block-level child won't trigger line_break() and the
-                    // marker's line height is lost (advance_y never advances).
-                    if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
-                    lycon->line.is_line_start = false;
-
-                    // Track normal line-height so line_break() uses platform metrics
-                    // (which include lineGap/platform hacks) instead of raw hhea sum
-                    if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
-                        float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
-                        lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
+                    if (marker_prop->is_outside) {
+                        // Outside marker: position to the left of content area
+                        // CSS Lists 3 §4: formatted as a zero-width inline box on the first line
+                        // Contributes to line height but does NOT advance inline position
+                        marker_span->x = lycon->line.advance_x - marker_prop->width;
+                        marker_span->y = lycon->block.advance_y;
+                    } else {
+                        // Inside marker: position at current inline position and advance
+                        marker_span->x = lycon->line.advance_x;
+                        marker_span->y = lycon->block.advance_y;
+                        lycon->line.advance_x += marker_prop->width;
                     }
 
-                    log_debug("[MARKER] Laid out marker with fixed width=%.1f, height=%.1f at (%.1f, %.1f)",
+                    if (!marker_prop->is_outside) {
+                        // Inside markers contribute to line height and mark the line as non-empty
+                        // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
+                        float ascender = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_ascender : 12.0f;
+                        float descender = lycon->font.font_handle ? -(font_get_metrics(lycon->font.font_handle)->hhea_descender) : 4.0f;
+                        if (!lycon->block.line_height_is_normal) {
+                            float content_height = ascender + descender;
+                            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+                            ascender += half_leading;
+                            descender += half_leading;
+                        }
+                        if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
+                        if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
+
+                        // Mark line as non-empty so line_break() accounts for marker height
+                        if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                        lycon->line.is_line_start = false;
+
+                        // Track normal line-height for platform metrics
+                        if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
+                            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+                            lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
+                        }
+                    }
+                    // Outside markers: positioned outside content area, don't create a line box
+                    // They are placed at advance_y and will align with the first content line
+
+                    log_debug("[MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)",
+                             marker_prop->is_outside ? "outside" : "inside",
                              marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }
             }
@@ -1492,7 +1506,8 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     // or non-static positioning, and apply accordingly.
     bool root_is_abspos = html->position &&
         (html->position->position == CSS_VALUE_ABSOLUTE || html->position->position == CSS_VALUE_FIXED);
-    bool root_is_relative = html->position && html->position->position == CSS_VALUE_RELATIVE;
+    bool root_is_relative = html->position && (html->position->position == CSS_VALUE_RELATIVE ||
+                                                    html->position->position == CSS_VALUE_STICKY);
 
     // Compute border+padding dimensions for the root element
     float root_bp_left = 0, root_bp_right = 0, root_bp_top = 0, root_bp_bottom = 0;
@@ -1710,14 +1725,17 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     // CSS 2.1 §9.4.3: Apply position:relative offsets to root element after layout
     if (root_is_relative && html->position) {
-        if (html->position->has_left) {
-            html->x += html->position->left;
-            log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->position->left, html->x);
+        if (html->position->position == CSS_VALUE_RELATIVE) {
+            if (html->position->has_left) {
+                html->x += html->position->left;
+                log_debug("[CSS] Root relative offset: x += %.1f = %.1f", html->position->left, html->x);
+            }
+            if (html->position->has_top) {
+                html->y += html->position->top;
+                log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->position->top, html->y);
+            }
         }
-        if (html->position->has_top) {
-            html->y += html->position->top;
-            log_debug("[CSS] Root relative offset: y += %.1f = %.1f", html->position->top, html->y);
-        }
+        // sticky on root element: no scroll container above root, so no clamping applies
     }
 
     // Set up viewport-level scrolling when document content exceeds the viewport height.
