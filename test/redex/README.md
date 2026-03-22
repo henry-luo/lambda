@@ -136,4 +136,4 @@ The core `CSS-Layout` language defines:
 - [CSS Flexible Box Layout](https://www.w3.org/TR/css-flexbox-1/)
 - [CSS Grid Layout](https://www.w3.org/TR/css-grid-1/)
 - [CSS Sizing Level 3](https://www.w3.org/TR/css-sizing-3/)
-- [Radiant Layout Design](../../doc/Radiant_Layout_Design.md)
+- [Radiant Layout Design](../../doc/dev/Radiant_Layout_Design.md)
