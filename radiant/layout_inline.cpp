@@ -703,6 +703,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Compute vertical union from children, horizontal from the parent block.
         compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
 
+        // CSS 2.1 §9.2.1.1: For relatively-positioned block-in-inline spans,
+        // override y with the flow position. compute_span_bounding_box uses
+        // children's visual positions (after their own relative positioning),
+        // which would contaminate the span's base position for its own offset.
+        if (span->position && span->position->position == CSS_VALUE_RELATIVE) {
+            span->y = (int)pre_split_advance_y;
+        }
+
         // CSS 2.1 §9.2.1.1: Extend span bounding box upward to cover the leading
         // anonymous block's strut. When the span has inline-start border/padding,
         // the leading strut creates a line box before the first block child.

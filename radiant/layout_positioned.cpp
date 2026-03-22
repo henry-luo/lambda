@@ -98,8 +98,14 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // (during child layout), they are still 0. Instead, derive from the parent's
     // border-box width/height minus padding and border.
     float cb_width = 0, cb_height = 0;
-    if (parent && parent->is_block()) {
-        ViewBlock* parent_block = (ViewBlock*)parent;
+    ViewElement* cb_parent = parent;
+    // CSS 2.1 §9.2.1.1: For block children inside inline spans (block-in-inline),
+    // the containing block is the nearest block-level ancestor, not the inline span.
+    while (cb_parent && !cb_parent->is_block()) {
+        cb_parent = cb_parent->parent_view();
+    }
+    if (cb_parent && cb_parent->is_block()) {
+        ViewBlock* parent_block = (ViewBlock*)cb_parent;
         // Compute content-box width from border-box width
         float pad_border_h = 0;
         if (parent_block->bound) {
