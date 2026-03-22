@@ -98,85 +98,85 @@ LambdaJS includes a DOM bridge for use with the Radiant layout engine:
 
 #### Document Properties
 
-| Property            | Status | Notes |
-| ------------------- | :----: | ----- |
-| `body`              |   ✅    |       |
-| `documentElement`   |   ✅    |       |
-| `head`              |   ✅    |       |
-| `title`             |   ✅    |       |
-| `cookie`            |   ❌    |       |
-| `readyState`        |   ❌    |       |
-| `URL` / `location`  |   ❌    |       |
+| Property           | Status | Notes |
+| ------------------ | :----: | ----- |
+| `body`             |   ✅    |       |
+| `documentElement`  |   ✅    |       |
+| `head`             |   ✅    |       |
+| `title`            |   ✅    |       |
+| `cookie`           |   ❌    |       |
+| `readyState`       |   ❌    |       |
+| `URL` / `location` |   ❌    |       |
 
 #### Element Properties
 
-| Property                | Status | Notes                                  |
-| ----------------------- | :----: | -------------------------------------- |
-| `tagName`               |   ✅    |                                        |
-| `id`                    |   ✅    |                                        |
-| `className`             |   ✅    |                                        |
-| `textContent`           |   ✅    |                                        |
-| `children`              |   ✅    |                                        |
-| `parentElement`         |   ✅    |                                        |
-| `parentNode`            |   ✅    |                                        |
-| `firstChild`            |   ✅    |                                        |
-| `lastChild`             |   ✅    |                                        |
-| `nextSibling`           |   ✅    |                                        |
-| `previousSibling`       |   ✅    |                                        |
-| `childNodes`            |   ✅    |                                        |
-| `childElementCount`     |   ✅    |                                        |
-| `nodeType`              |   ✅    |                                        |
-| `nodeName`              |   ✅    | Tag name or `"#text"`                  |
-| `nodeValue`             |   ✅    | Alias for text node `.data`            |
-| `firstElementChild`     |   ✅    | Skips text nodes                       |
-| `lastElementChild`      |   ✅    | Skips text nodes                       |
-| `nextElementSibling`    |   ✅    | Skips text nodes                       |
-| `previousElementSibling`|   ✅    | Skips text nodes                       |
-| `innerHTML`             |   ⚠️   | Getter only; setter not implemented    |
-| `offsetWidth`           |   ✅    | Returns 0 (JS runs before layout)      |
-| `offsetHeight`          |   ✅    | Returns 0 (JS runs before layout)      |
-| `clientWidth`           |   ✅    | Returns 0 (JS runs before layout)      |
-| `clientHeight`          |   ✅    | Returns 0 (JS runs before layout)      |
-| `outerHTML`             |   ❌    |                                        |
-| `classList`             |   ❌    | `add`, `remove`, `toggle`, `contains`  |
-| `dataset`               |   ❌    | `data-*` attribute access              |
-| `scrollTop` / `scrollLeft` |  ❌  |                                        |
-| `getBoundingClientRect` |   ❌    |                                        |
+| Property                   | Status | Notes                                 |
+| -------------------------- | :----: | ------------------------------------- |
+| `tagName`                  |   ✅    |                                       |
+| `id`                       |   ✅    |                                       |
+| `className`                |   ✅    |                                       |
+| `textContent`              |   ✅    |                                       |
+| `children`                 |   ✅    |                                       |
+| `parentElement`            |   ✅    |                                       |
+| `parentNode`               |   ✅    |                                       |
+| `firstChild`               |   ✅    |                                       |
+| `lastChild`                |   ✅    |                                       |
+| `nextSibling`              |   ✅    |                                       |
+| `previousSibling`          |   ✅    |                                       |
+| `childNodes`               |   ✅    |                                       |
+| `childElementCount`        |   ✅    |                                       |
+| `nodeType`                 |   ✅    |                                       |
+| `nodeName`                 |   ✅    | Tag name or `"#text"`                 |
+| `nodeValue`                |   ✅    | Alias for text node `.data`           |
+| `firstElementChild`        |   ✅    | Skips text nodes                      |
+| `lastElementChild`         |   ✅    | Skips text nodes                      |
+| `nextElementSibling`       |   ✅    | Skips text nodes                      |
+| `previousElementSibling`   |   ✅    | Skips text nodes                      |
+| `innerHTML`                |   ⚠️   | Getter only; setter not implemented   |
+| `offsetWidth`              |   ✅    | Returns 0 (JS runs before layout)     |
+| `offsetHeight`             |   ✅    | Returns 0 (JS runs before layout)     |
+| `clientWidth`              |   ✅    | Returns 0 (JS runs before layout)     |
+| `clientHeight`             |   ✅    | Returns 0 (JS runs before layout)     |
+| `outerHTML`                |   ❌    |                                       |
+| `classList`                |   ❌    | `add`, `remove`, `toggle`, `contains` |
+| `dataset`                  |   ❌    | `data-*` attribute access             |
+| `scrollTop` / `scrollLeft` |   ❌    |                                       |
+| `getBoundingClientRect`    |   ❌    |                                       |
 
 #### Element Methods
 
-| Method              | Status | Notes                        |
-| ------------------- | :----: | ---------------------------- |
-| `getAttribute`      |   ✅    |                              |
-| `setAttribute`      |   ✅    |                              |
-| `hasAttribute`      |   ✅    |                              |
-| `removeAttribute`   |   ✅    |                              |
-| `querySelector`     |   ✅    |                              |
-| `querySelectorAll`  |   ✅    |                              |
-| `matches`           |   ✅    |                              |
-| `closest`           |   ✅    |                              |
-| `appendChild`       |   ✅    |                              |
-| `removeChild`       |   ✅    |                              |
-| `insertBefore`      |   ✅    |                              |
-| `hasChildNodes`     |   ✅    |                              |
-| `cloneNode`         |   ✅    |                              |
-| `normalize`         |   ✅    | Merges adjacent text nodes   |
-| `replaceChild`      |   ❌    |                              |
-| `insertAdjacentHTML`|   ❌    |                              |
-| `insertAdjacentElement` | ❌ |                              |
-| `remove`            |   ❌    | Self-removal from parent     |
-| `contains`          |   ❌    |                              |
-| `toggleAttribute`   |   ❌    |                              |
+| Method                  | Status | Notes                      |
+| ----------------------- | :----: | -------------------------- |
+| `getAttribute`          |   ✅    |                            |
+| `setAttribute`          |   ✅    |                            |
+| `hasAttribute`          |   ✅    |                            |
+| `removeAttribute`       |   ✅    |                            |
+| `querySelector`         |   ✅    |                            |
+| `querySelectorAll`      |   ✅    |                            |
+| `matches`               |   ✅    |                            |
+| `closest`               |   ✅    |                            |
+| `appendChild`           |   ✅    |                            |
+| `removeChild`           |   ✅    |                            |
+| `insertBefore`          |   ✅    |                            |
+| `hasChildNodes`         |   ✅    |                            |
+| `cloneNode`             |   ✅    |                            |
+| `normalize`             |   ✅    | Merges adjacent text nodes |
+| `replaceChild`          |   ❌    |                            |
+| `insertAdjacentHTML`    |   ❌    |                            |
+| `insertAdjacentElement` |   ❌    |                            |
+| `remove`                |   ❌    | Self-removal from parent   |
+| `contains`              |   ❌    |                            |
+| `toggleAttribute`       |   ❌    |                            |
 
 #### Style
 
-| Feature                          | Status | Notes                        |
-| -------------------------------- | :----: | ---------------------------- |
-| `element.style.prop` get/set     |   ✅    | camelCase ↔ CSS conversion   |
-| `getComputedStyle()`             |   ✅    | Full cascade matching        |
-| `element.style.cssText`          |   ❌    |                              |
-| `element.style.setProperty()`    |   ❌    |                              |
-| `element.style.removeProperty()` |   ❌    |                              |
+| Feature                          | Status | Notes                      |
+| -------------------------------- | :----: | -------------------------- |
+| `element.style.prop` get/set     |   ✅    | camelCase ↔ CSS conversion |
+| `getComputedStyle()`             |   ✅    | Full cascade matching      |
+| `element.style.cssText`          |   ❌    |                            |
+| `element.style.setProperty()`    |   ❌    |                            |
+| `element.style.removeProperty()` |   ❌    |                            |
 
 ### Built-in Objects & Methods
 

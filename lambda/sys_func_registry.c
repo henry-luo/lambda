@@ -1098,6 +1098,22 @@ JitImport jit_runtime_imports[] = {
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
+    // v12: Language features
+    {"js_object_rest", FPTR(js_object_rest)},
+    {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
+    {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
+    {"js_get_global_this", FPTR(js_get_global_this)},
+    {"js_symbol_create", FPTR(js_symbol_create)},
+    {"js_symbol_for", FPTR(js_symbol_for)},
+    {"js_symbol_key_for", FPTR(js_symbol_key_for)},
+    {"js_symbol_to_string", FPTR(js_symbol_to_string)},
+    // v12: DOM extensions
+    {"js_classlist_method", FPTR(js_classlist_method)},
+    {"js_classlist_get_property", FPTR(js_classlist_get_property)},
+    {"js_dataset_get_property", FPTR(js_dataset_get_property)},
+    {"js_dataset_set_property", FPTR(js_dataset_set_property)},
+    {"js_location_get_property", FPTR(js_location_get_property)},
+    {"js_dom_contains", FPTR(js_dom_contains)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

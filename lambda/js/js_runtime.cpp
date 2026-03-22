@@ -2824,3 +2824,35 @@ extern "C" Item js_prototype_lookup(Item object, Item property) {
     }
     return ItemNull;
 }
+
+// =============================================================================
+// v12: Object rest destructuring
+// =============================================================================
+
+extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) {
+    if (get_type_id(src) != LMD_TYPE_MAP) return js_new_object();
+    Map* m = it2map(src);
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm) return js_new_object();
+    ShapeEntry* e = tm->shape;
+    Item rest = js_new_object();
+    while (e) {
+        if (e->name) {
+            bool excluded = false;
+            for (int i = 0; i < exclude_count; i++) {
+                String* ek = it2s(exclude_keys[i]);
+                if (ek && e->name->length == ek->len && memcmp(e->name->str, ek->chars, ek->len) == 0) {
+                    excluded = true;
+                    break;
+                }
+            }
+            if (!excluded) {
+                Item val = _map_read_field(e, m->data);
+                String* key_str = heap_create_name(e->name->str, e->name->length);
+                js_property_set(rest, (Item){.item = s2it(key_str)}, val);
+            }
+        }
+        e = e->next;
+    }
+    return rest;
+}

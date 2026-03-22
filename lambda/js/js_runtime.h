@@ -320,6 +320,26 @@ Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int
 // Same as above but also sets __proto__ from callee.prototype
 Item js_constructor_create_object_shaped(Item callee, const char** prop_names, const int* prop_lens, int count);
 
+// =============================================================================
+// v12: Language extensions
+// =============================================================================
+
+// Object rest destructuring: create object with all props except excluded keys
+Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
+
+// URI encoding/decoding
+Item js_encodeURIComponent(Item str_item);
+Item js_decodeURIComponent(Item str_item);
+
+// globalThis
+Item js_get_global_this(void);
+
+// Symbol API
+Item js_symbol_create(Item description);
+Item js_symbol_for(Item key);
+Item js_symbol_key_for(Item sym);
+Item js_symbol_to_string(Item sym);
+
 #ifdef __cplusplus
 }
 #endif
