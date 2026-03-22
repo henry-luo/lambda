@@ -995,6 +995,10 @@ JitImport jit_runtime_imports[] = {
     {"js_alloc_env", FPTR(js_alloc_env)},
     {"js_call_function", FPTR(js_call_function)},
     {"js_apply_function", FPTR(js_apply_function)},
+    {"js_bind_function", FPTR(js_bind_function)},
+    {"js_create_regex", FPTR(js_create_regex)},
+    {"js_regex_test", FPTR(js_regex_test)},
+    {"js_regex_exec", FPTR(js_regex_exec)},
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
@@ -1073,6 +1077,11 @@ JitImport jit_runtime_imports[] = {
     {"js_performance_now", FPTR(js_performance_now)},
     {"js_date_now", FPTR(js_date_now)},
     {"js_date_new", FPTR(js_date_new)},
+    {"js_date_method", FPTR(js_date_method)},
+    {"js_map_collection_new", FPTR(js_map_collection_new)},
+    {"js_set_collection_new", FPTR(js_set_collection_new)},
+    {"js_collection_method", FPTR(js_collection_method)},
+    {"js_map_method", FPTR(js_map_method)},
     // shims
     {"js_alert", FPTR(js_alert)},
     // typed arrays

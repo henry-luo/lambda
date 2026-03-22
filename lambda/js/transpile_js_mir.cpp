@@ -69,6 +69,8 @@ struct JsMirVarEntry {
 struct JsLoopLabels {
     MIR_label_t continue_label;
     MIR_label_t break_label;
+    const char* label_name;       // v11: named label (NULL if anonymous)
+    int label_name_len;           // v11: length of label name
 };
 
 // Capture entry for closure analysis
@@ -160,6 +162,10 @@ struct JsMirTranspiler {
     // Loop label stack
     JsLoopLabels loop_stack[32];
     int loop_depth;
+
+    // v11: pending label for next loop push
+    const char* pending_label_name;
+    int pending_label_len;
 
     int reg_counter;
     int label_counter;
@@ -313,6 +319,19 @@ static void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
 
 static void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
+}
+
+// v11: push loop labels, consuming any pending label from a labeled statement
+static void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label) {
+    if (mt->loop_depth < 32) {
+        mt->loop_stack[mt->loop_depth].continue_label = continue_label;
+        mt->loop_stack[mt->loop_depth].break_label = break_label;
+        mt->loop_stack[mt->loop_depth].label_name = mt->pending_label_name;
+        mt->loop_stack[mt->loop_depth].label_name_len = mt->pending_label_len;
+        mt->loop_depth++;
+    }
+    mt->pending_label_name = NULL;
+    mt->pending_label_len = 0;
 }
 
 // Zero-extend uint8_t return value to full i64 (needed on Windows x64 ABI
@@ -4980,6 +4999,22 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_array));
             }
 
+            // v11: Function.prototype.bind(thisArg, ...args)
+            if (prop->name->len == 4 && strncmp(prop->name->chars, "bind", 4) == 0) {
+                MIR_reg_t fn = jm_transpile_box_item(mt, m->object);
+                MIR_reg_t this_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                // remaining args after thisArg are partial application args
+                int bound_count = arg_count > 1 ? arg_count - 1 : 0;
+                JsAstNode* bound_args = (call->arguments && call->arguments->next) ? call->arguments->next : NULL;
+                MIR_reg_t args_ptr = jm_build_args_array(mt, bound_args, bound_count);
+                MIR_op_t args_op = args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0);
+                return jm_call_4(mt, "js_bind_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, this_arg),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bound_count));
+            }
+
             // obj.hasOwnProperty(key) -> js_has_own_property(obj, key)
             if (prop->name->len == 14 && strncmp(prop->name->chars, "hasOwnProperty", 14) == 0) {
                 MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
@@ -4987,6 +5022,47 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_2(mt, "js_has_own_property", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_arg));
+            }
+
+            // v11: regex.test(str)
+            if (prop->name->len == 4 && strncmp(prop->name->chars, "test", 4) == 0) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
+                MIR_reg_t str_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_2(mt, "js_regex_test", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_arg));
+            }
+
+            // v11: regex.exec(str)
+            if (prop->name->len == 4 && strncmp(prop->name->chars, "exec", 4) == 0) {
+                MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
+                MIR_reg_t str_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_2(mt, "js_regex_exec", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_arg));
+            }
+
+            // v11: Date instance methods → js_date_method(obj, method_id)
+            {
+                int date_method_id = -1;
+                int plen = prop->name->len;
+                const char* pname = prop->name->chars;
+                if (plen == 7 && strncmp(pname, "getTime", 7) == 0) date_method_id = 0;
+                else if (plen == 11 && strncmp(pname, "getFullYear", 11) == 0) date_method_id = 1;
+                else if (plen == 8 && strncmp(pname, "getMonth", 8) == 0) date_method_id = 2;
+                else if (plen == 7 && strncmp(pname, "getDate", 7) == 0) date_method_id = 3;
+                else if (plen == 8 && strncmp(pname, "getHours", 8) == 0) date_method_id = 4;
+                else if (plen == 10 && strncmp(pname, "getMinutes", 10) == 0) date_method_id = 5;
+                else if (plen == 10 && strncmp(pname, "getSeconds", 10) == 0) date_method_id = 6;
+                else if (plen == 15 && strncmp(pname, "getMilliseconds", 15) == 0) date_method_id = 7;
+                else if (plen == 11 && strncmp(pname, "toISOString", 11) == 0) date_method_id = 8;
+                else if (plen == 17 && strncmp(pname, "toLocaleDateString", 17) == 0) date_method_id = 9;
+                if (date_method_id >= 0) {
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
+                    return jm_call_2(mt, "js_date_method", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, date_method_id));
+                }
             }
 
             // Reset closure env tracking before evaluating arguments
@@ -5033,15 +5109,15 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
             }
             if (recv_type == LMD_TYPE_MAP) {
-                // Known map receiver (e.g., 'this' in class methods) — skip type dispatch
-                MIR_reg_t fn = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                // Known map receiver — dispatch through js_map_method which handles
+                // collections (Map/Set) and falls back to property access + call
+                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
-                return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
                     MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_readback_closure_env(mt);
+                return r;
             }
 
             // Runtime type dispatch cascade (when receiver type unknown)
@@ -5052,6 +5128,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_label_t l_string = jm_new_label(mt);
             MIR_label_t l_array = jm_new_label(mt);
             MIR_label_t l_dom = jm_new_label(mt);
+            MIR_label_t l_map = jm_new_label(mt);
             MIR_label_t l_fallback = jm_new_label(mt);
             MIR_label_t l_end = jm_new_label(mt);
 
@@ -5097,7 +5174,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_dom),
                 MIR_new_reg_op(mt->ctx, is_dom)));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_fallback)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_map)));
 
             // STRING path
             jm_emit_label(mt, l_string);
@@ -5129,6 +5206,19 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             jm_emit_label(mt, l_dom);
             {
                 MIR_reg_t r = jm_call_4(mt, "js_dom_element_method", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
+                    MIR_T_I64, args_op,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, r)));
+            }
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // MAP path: dispatch through js_map_method (handles collections + fallback)
+            jm_emit_label(mt, l_map);
+            {
+                MIR_reg_t r = jm_call_4(mt, "js_map_method", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
                     MIR_T_I64, args_op,
@@ -6797,6 +6887,21 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         }
         return result;
     }
+    case JS_AST_NODE_REGEX: {
+        // v11: regex literal /pattern/flags → js_create_regex(pattern, len, flags, len)
+        JsRegexNode* re = (JsRegexNode*)expr;
+        MIR_reg_t pat_ptr = jm_new_reg(mt, "re_pat", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pat_ptr),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->pattern)));
+        MIR_reg_t flags_ptr = jm_new_reg(mt, "re_flags", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_ptr),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)re->flags)));
+        return jm_call_4(mt, "js_create_regex", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pat_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, re->pattern_len),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, flags_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, re->flags_len));
+    }
     default:
         log_error("js-mir: unsupported expression type %d", expr->node_type);
         return jm_emit_null(mt);
@@ -7154,11 +7259,7 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
     MIR_label_t l_end = jm_new_label(mt);
 
     // Push loop labels
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_test;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_depth++;
-    }
+    jm_push_loop_labels(mt, l_test, l_end);
 
     jm_emit_label(mt, l_test);
 
@@ -7339,11 +7440,7 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     MIR_label_t l_end = jm_new_label(mt);
 
     // Push loop labels
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_update;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_depth++;
-    }
+    jm_push_loop_labels(mt, l_update, l_end);
 
     jm_emit_label(mt, l_test);
 
@@ -7560,6 +7657,9 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 10 && strncmp(ctor_name, "RangeError", 10) == 0) is_builtin = true;
     else if (ctor_len == 11 && strncmp(ctor_name, "SyntaxError", 11) == 0) is_builtin = true;
     else if (ctor_len == 14 && strncmp(ctor_name, "ReferenceError", 14) == 0) is_builtin = true;
+    // v11: Map/Set
+    else if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) is_builtin = true;
+    else if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) is_builtin = true;
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -7637,6 +7737,14 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // Used by raytrace3d: var startDate = new Date().getTime();
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) {
         return jm_call_0(mt, "js_date_new", MIR_T_I64);
+    }
+
+    // v11: new Map() / new Set()
+    if (ctor_len == 3 && strncmp(ctor_name, "Map", 3) == 0) {
+        return jm_call_0(mt, "js_map_collection_new", MIR_T_I64);
+    }
+    if (ctor_len == 3 && strncmp(ctor_name, "Set", 3) == 0) {
+        return jm_call_0(mt, "js_set_collection_new", MIR_T_I64);
     }
 
     // User-defined class instantiation: new ClassName(args)
@@ -7785,11 +7893,7 @@ static void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
     MIR_label_t l_end = jm_new_label(mt);
 
     // Push break label for the switch (break exits the switch)
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = 0; // no continue in switch
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_depth++;
-    }
+    jm_push_loop_labels(mt, 0, l_end);
 
     // Collect case labels and default
     int case_count = 0;
@@ -7853,11 +7957,7 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_test;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_depth++;
-    }
+    jm_push_loop_labels(mt, l_test, l_end);
 
     // Body first
     jm_emit_label(mt, l_body);
@@ -8022,11 +8122,7 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     MIR_label_t l_update = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
-    if (mt->loop_depth < 32) {
-        mt->loop_stack[mt->loop_depth].continue_label = l_update;
-        mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_depth++;
-    }
+    jm_push_loop_labels(mt, l_update, l_end);
 
     // Test: idx < len
     jm_emit_label(mt, l_test);
@@ -8260,18 +8356,76 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     case JS_AST_NODE_RETURN_STATEMENT:
         jm_transpile_return(mt, (JsReturnNode*)stmt);
         break;
-    case JS_AST_NODE_BREAK_STATEMENT:
-        if (mt->loop_depth > 0) {
+    case JS_AST_NODE_BREAK_STATEMENT: {
+        JsBreakContinueNode* brk = (JsBreakContinueNode*)stmt;
+        if (brk->label && brk->label_len > 0) {
+            // labeled break: search loop_stack for matching label
+            for (int i = mt->loop_depth - 1; i >= 0; i--) {
+                if (mt->loop_stack[i].label_name &&
+                    mt->loop_stack[i].label_name_len == brk->label_len &&
+                    memcmp(mt->loop_stack[i].label_name, brk->label, brk->label_len) == 0) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, mt->loop_stack[i].break_label)));
+                    break;
+                }
+            }
+        } else if (mt->loop_depth > 0) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                 MIR_new_label_op(mt->ctx, mt->loop_stack[mt->loop_depth - 1].break_label)));
         }
         break;
-    case JS_AST_NODE_CONTINUE_STATEMENT:
-        if (mt->loop_depth > 0) {
+    }
+    case JS_AST_NODE_CONTINUE_STATEMENT: {
+        JsBreakContinueNode* cont = (JsBreakContinueNode*)stmt;
+        if (cont->label && cont->label_len > 0) {
+            // labeled continue: search loop_stack for matching label
+            for (int i = mt->loop_depth - 1; i >= 0; i--) {
+                if (mt->loop_stack[i].label_name &&
+                    mt->loop_stack[i].label_name_len == cont->label_len &&
+                    memcmp(mt->loop_stack[i].label_name, cont->label, cont->label_len) == 0) {
+                    if (mt->loop_stack[i].continue_label) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, mt->loop_stack[i].continue_label)));
+                    }
+                    break;
+                }
+            }
+        } else if (mt->loop_depth > 0) {
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                 MIR_new_label_op(mt->ctx, mt->loop_stack[mt->loop_depth - 1].continue_label)));
         }
         break;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)stmt;
+        if (labeled->body) {
+            // check if body is a loop/switch — if so, the loop itself will push to loop_stack
+            // and we just need to annotate the label on that entry
+            JsAstNodeType body_type = labeled->body->node_type;
+            bool is_loop_or_switch = (body_type == JS_AST_NODE_FOR_STATEMENT ||
+                                      body_type == JS_AST_NODE_WHILE_STATEMENT ||
+                                      body_type == JS_AST_NODE_DO_WHILE_STATEMENT ||
+                                      body_type == JS_AST_NODE_FOR_OF_STATEMENT ||
+                                      body_type == JS_AST_NODE_FOR_IN_STATEMENT ||
+                                      body_type == JS_AST_NODE_SWITCH_STATEMENT);
+            if (is_loop_or_switch) {
+                // set pending label so the loop's jm_push_loop_labels picks it up
+                mt->pending_label_name = labeled->label;
+                mt->pending_label_len = labeled->label_len;
+                jm_transpile_statement(mt, labeled->body);
+            } else {
+                // non-loop labeled block: push a label entry with break_label for "break label;"
+                MIR_label_t l_end = jm_new_label(mt);
+                mt->pending_label_name = labeled->label;
+                mt->pending_label_len = labeled->label_len;
+                jm_push_loop_labels(mt, 0, l_end);
+                jm_transpile_statement(mt, labeled->body);
+                if (mt->loop_depth > 0) mt->loop_depth--;
+                jm_emit_label(mt, l_end);
+            }
+        }
+        break;
+    }
     case JS_AST_NODE_BLOCK_STATEMENT: {
         jm_push_scope(mt);
         JsBlockNode* blk = (JsBlockNode*)stmt;
@@ -8546,6 +8700,8 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         mt->current_func_item = native_item;
         mt->current_func = native_func;
         mt->loop_depth = 0;
+        mt->pending_label_name = NULL;
+        mt->pending_label_len = 0;
         mt->in_native_func = true;
         mt->current_fc = fc;
         mt->tco_func = NULL;
@@ -8773,6 +8929,8 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->current_func_item = func_item;
     mt->current_func = func;
     mt->loop_depth = 0;
+    mt->pending_label_name = NULL;
+    mt->pending_label_len = 0;
     mt->in_native_func = false;
     mt->current_fc = fc;
 

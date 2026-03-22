@@ -188,6 +188,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
         for (int i = 0; i < gl->item_count; i++) {
             ViewBlock* item = gl->grid_items[i];
             if (!item || !item->position) continue;
+            if (item->position->position == CSS_VALUE_STICKY) {
+                layout_sticky_positioned(lycon, item);
+                continue;
+            }
             if (item->position->position != CSS_VALUE_RELATIVE) continue;
             float ox = 0, oy = 0;
             if (item->position->has_left) {

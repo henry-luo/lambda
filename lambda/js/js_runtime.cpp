@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <re2/re2.h>
 
 // Global Input context for JS runtime map_put operations.
 // Initialized in transpile_js_to_mir() before JIT execution.
@@ -638,6 +639,9 @@ struct JsFunction {
     Item* env;       // Closure environment (NULL for non-closures)
     int env_size;    // Number of captured variables in env
     Item prototype;  // Constructor prototype (Foo.prototype = {...})
+    Item bound_this; // v11: bound 'this' (0 if not a bound function)
+    Item* bound_args; // v11: pre-applied arguments (NULL if none)
+    int bound_argc;  // v11: number of bound arguments
 };
 
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
@@ -1252,6 +1256,24 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
         return ItemNull;
     }
 
+    // v11: handle bound functions — use bound this and prepend bound args
+    if (fn->bound_args || fn->bound_this.item) {
+        Item effective_this = fn->bound_this.item ? fn->bound_this : this_val;
+        int total_argc = fn->bound_argc + arg_count;
+        Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+        for (int i = 0; i < fn->bound_argc; i++) {
+            merged_args[i] = fn->bound_args[i];
+        }
+        for (int i = 0; i < arg_count; i++) {
+            merged_args[fn->bound_argc + i] = args ? args[i] : ItemNull;
+        }
+        Item prev_this = js_current_this;
+        js_current_this = effective_this;
+        Item result = js_invoke_fn(fn, merged_args, total_argc);
+        js_current_this = prev_this;
+        return result;
+    }
+
     // Bind 'this' for the duration of this call
     Item prev_this = js_current_this;
     js_current_this = this_val;
@@ -1280,6 +1302,404 @@ extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array
         }
     }
     return js_call_function(func_item, this_val, args, argc);
+}
+
+// v11: Function.prototype.bind(thisArg, ...args)
+extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc) {
+    if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        log_error("js_bind_function: not a function (type=%d)", get_type_id(func_item));
+        return ItemNull;
+    }
+    JsFunction* orig = (JsFunction*)func_item.function;
+    JsFunction* bound = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    bound->type_id = LMD_TYPE_FUNC;
+    bound->func_ptr = orig->func_ptr;
+    bound->param_count = orig->param_count;
+    bound->env = orig->env;
+    bound->env_size = orig->env_size;
+    bound->prototype = ItemNull;
+    bound->bound_this = bound_this;
+    if (bound_argc > 0 && bound_args) {
+        bound->bound_args = (Item*)pool_calloc(js_input->pool, bound_argc * sizeof(Item));
+        for (int i = 0; i < bound_argc; i++) {
+            bound->bound_args[i] = bound_args[i];
+        }
+        bound->bound_argc = bound_argc;
+    }
+    return (Item){.function = (Function*)bound};
+}
+
+// =============================================================================
+// v11: Regex support — /pattern/flags as Map objects with compiled RE2
+// =============================================================================
+
+// hidden property key for storing regex data pointer
+static const char* JS_REGEX_DATA_KEY = "__rd";
+
+struct JsRegexData {
+    re2::RE2* re2;            // compiled regex
+    bool global;              // 'g' flag
+    bool ignore_case;         // 'i' flag
+    bool multiline;           // 'm' flag
+};
+
+extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // build RE2 options from flags
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    bool global = false;
+    for (int i = 0; i < flags_len; i++) {
+        if (flags[i] == 'i') opts.set_case_sensitive(false);
+        else if (flags[i] == 'm') opts.set_one_line(false);
+        else if (flags[i] == 'g') global = true;
+        else if (flags[i] == 's') opts.set_dot_nl(true);
+    }
+    // compile RE2 pattern
+    re2::RE2* re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+    if (!re2->ok()) {
+        log_error("js regex compile error: /%.*s/%.*s: %s",
+            pattern_len, pattern, flags_len, flags, re2->error().c_str());
+        delete re2;
+        return ItemNull;
+    }
+    // store regex data in a pool-allocated struct
+    JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
+    rd->re2 = re2;
+    rd->global = global;
+    rd->ignore_case = !opts.case_sensitive();
+    rd->multiline = !opts.one_line();
+    // create a Map object and set properties
+    Item regex_obj = js_new_object();
+    // store regex data pointer as int in hidden property
+    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
+    Item rd_val = (Item){.item = i2it((int64_t)(uintptr_t)rd)};
+    js_property_set(regex_obj, rd_key, rd_val);
+    // create null-terminated copies for heap_create_name
+    char* src_buf = (char*)pool_calloc(js_input->pool, pattern_len + 1);
+    memcpy(src_buf, pattern, pattern_len);
+    src_buf[pattern_len] = '\0';
+    char* flg_buf = (char*)pool_calloc(js_input->pool, flags_len + 1);
+    memcpy(flg_buf, flags, flags_len);
+    flg_buf[flags_len] = '\0';
+    // set visible properties
+    Item source_key = (Item){.item = s2it(heap_create_name("source"))};
+    Item source_val = (Item){.item = s2it(heap_create_name(src_buf))};
+    js_property_set(regex_obj, source_key, source_val);
+    Item flags_key = (Item){.item = s2it(heap_create_name("flags"))};
+    Item flags_val = (Item){.item = s2it(heap_create_name(flg_buf))};
+    js_property_set(regex_obj, flags_key, flags_val);
+    Item global_key = (Item){.item = s2it(heap_create_name("global"))};
+    Item global_val = (Item){.item = b2it(global ? BOOL_TRUE : BOOL_FALSE)};
+    js_property_set(regex_obj, global_key, global_val);
+    return regex_obj;
+}
+
+static JsRegexData* js_get_regex_data(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
+    Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
+    Item rd_item = js_property_get(obj, rd_key);
+    TypeId tid = get_type_id(rd_item);
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return NULL;
+    int64_t ptr_val = it2i(rd_item);
+    if (ptr_val == 0) return NULL;
+    return (JsRegexData*)(uintptr_t)ptr_val;
+}
+
+extern "C" Item js_regex_test(Item regex, Item str) {
+    JsRegexData* rd = js_get_regex_data(regex);
+    if (!rd) return (Item){.item = b2it(BOOL_FALSE)};
+    TypeId tid = get_type_id(str);
+    if (tid != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
+    const char* chars = str.get_chars();
+    int len = str.get_len();
+    bool matched = re2::RE2::PartialMatch(re2::StringPiece(chars, len), *rd->re2);
+    return (Item){.item = b2it(matched ? BOOL_TRUE : BOOL_FALSE)};
+}
+
+extern "C" Item js_regex_exec(Item regex, Item str) {
+    JsRegexData* rd = js_get_regex_data(regex);
+    if (!rd) return ItemNull;
+    TypeId tid = get_type_id(str);
+    if (tid != LMD_TYPE_STRING) return ItemNull;
+    const char* chars = str.get_chars();
+    int len = str.get_len();
+    // perform match with captures
+    int num_groups = rd->re2->NumberOfCapturingGroups() + 1; // +1 for full match
+    if (num_groups > 16) num_groups = 16;
+    re2::StringPiece matches[16];
+    bool matched = rd->re2->Match(re2::StringPiece(chars, len), 0, len,
+        re2::RE2::UNANCHORED, matches, num_groups);
+    if (!matched) return ItemNull;
+    // build result array: [fullMatch, group1, group2, ..., matchIndex]
+    // Note: matchIndex appended as last element since Lambda arrays don't support named properties
+    Item result_arr = js_array_new(num_groups + 1);
+    for (int i = 0; i < num_groups; i++) {
+        if (matches[i].data()) {
+            int mlen = (int)matches[i].size();
+            char* mbuf = (char*)alloca(mlen + 1);
+            memcpy(mbuf, matches[i].data(), mlen);
+            mbuf[mlen] = '\0';
+            Item s = (Item){.item = s2it(heap_create_name(mbuf))};
+            Item idx = (Item){.item = i2it(i)};
+            js_array_set(result_arr, idx, s);
+        }
+    }
+    // store match index as last element
+    int match_index = (int)(matches[0].data() - chars);
+    Item idx_item = (Item){.item = i2it(num_groups)};
+    Item idx_val = (Item){.item = i2it(match_index)};
+    js_array_set(result_arr, idx_item, idx_val);
+    return result_arr;
+}
+
+// =============================================================================
+// v11: Map/Set collections — backed by HashMap from lib/hashmap.h
+// =============================================================================
+
+static const char* JS_COLLECTION_DATA_KEY = "__cd";
+
+struct JsCollectionEntry {
+    Item key;
+    Item value;
+};
+
+// 0 = Map, 1 = Set
+#define JS_COLLECTION_MAP 0
+#define JS_COLLECTION_SET 1
+
+struct JsCollectionData {
+    HashMap* hmap;
+    int type; // JS_COLLECTION_MAP or JS_COLLECTION_SET
+};
+
+static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const JsCollectionEntry* e = (const JsCollectionEntry*)item;
+    Item k = e->key;
+    TypeId tid = get_type_id(k);
+    if (tid == LMD_TYPE_STRING) {
+        String* s = it2s(k);
+        return hashmap_sip(s->chars, s->len, seed0, seed1);
+    }
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) {
+        int64_t v = it2i(k);
+        return hashmap_sip(&v, sizeof(v), seed0, seed1);
+    }
+    // fallback: hash the raw item bits
+    uint64_t bits = k.item;
+    return hashmap_sip(&bits, sizeof(bits), seed0, seed1);
+}
+
+static int js_collection_compare(const void *a, const void *b, void *udata) {
+    const JsCollectionEntry* ea = (const JsCollectionEntry*)a;
+    const JsCollectionEntry* eb = (const JsCollectionEntry*)b;
+    Item ka = ea->key, kb = eb->key;
+    TypeId ta = get_type_id(ka), tb = get_type_id(kb);
+    if (ta != tb) return 1;
+    if (ta == LMD_TYPE_STRING) {
+        String* sa = it2s(ka);
+        String* sb = it2s(kb);
+        if (sa->len != sb->len) return 1;
+        return memcmp(sa->chars, sb->chars, sa->len);
+    }
+    if (ta == LMD_TYPE_INT || ta == LMD_TYPE_INT64) {
+        int64_t va = it2i(ka), vb = it2i(kb);
+        return (va == vb) ? 0 : 1;
+    }
+    if (ta == LMD_TYPE_FLOAT) {
+        double da = ka.get_double(), db = kb.get_double();
+        return (da == db) ? 0 : 1;
+    }
+    // reference equality for objects
+    return (ka.item == kb.item) ? 0 : 1;
+}
+
+static JsCollectionData* js_get_collection_data(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
+    Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
+    Item cd_item = js_property_get(obj, cd_key);
+    TypeId tid = get_type_id(cd_item);
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return NULL;
+    int64_t ptr_val = it2i(cd_item);
+    if (ptr_val == 0) return NULL;
+    return (JsCollectionData*)(uintptr_t)ptr_val;
+}
+
+static Item js_collection_create(int type) {
+    HashMap* hm = hashmap_new(sizeof(JsCollectionEntry), 16, 0, 0,
+        js_collection_hash, js_collection_compare, NULL, NULL);
+    JsCollectionData* cd = (JsCollectionData*)pool_calloc(js_input->pool, sizeof(JsCollectionData));
+    cd->hmap = hm;
+    cd->type = type;
+    Item obj = js_new_object();
+    Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
+    Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
+    js_property_set(obj, cd_key, cd_val);
+    // set initial size property
+    Item size_key = (Item){.item = s2it(heap_create_name("size"))};
+    Item size_val = (Item){.item = i2it(0)};
+    js_property_set(obj, size_key, size_val);
+    return obj;
+}
+
+static void js_collection_update_size(Item obj, JsCollectionData* cd) {
+    Item size_key = (Item){.item = s2it(heap_create_name("size"))};
+    Item size_val = (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
+    js_property_set(obj, size_key, size_val);
+}
+
+extern "C" Item js_map_collection_new(void) {
+    return js_collection_create(JS_COLLECTION_MAP);
+}
+
+extern "C" Item js_set_collection_new(void) {
+    return js_collection_create(JS_COLLECTION_SET);
+}
+
+// Map/Set method dispatch
+// method_id: 0=set/add, 1=get, 2=has, 3=delete, 4=clear,
+//   5=forEach, 6=keys, 7=values, 8=entries, 9=size(getter)
+extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2) {
+    JsCollectionData* cd = js_get_collection_data(obj);
+    if (!cd) return ItemNull;
+
+    switch (method_id) {
+        case 0: { // set(key, value) for Map, add(value) for Set
+            JsCollectionEntry entry;
+            if (cd->type == JS_COLLECTION_SET) {
+                entry.key = arg1;
+                entry.value = (Item){.item = b2it(BOOL_TRUE)};
+            } else {
+                entry.key = arg1;
+                entry.value = arg2;
+            }
+            hashmap_set(cd->hmap, &entry);
+            js_collection_update_size(obj, cd);
+            return obj; // return collection for chaining
+        }
+        case 1: { // get(key) — Map only
+            JsCollectionEntry probe = {.key = arg1};
+            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
+            if (found) return found->value;
+            return make_js_undefined();
+        }
+        case 2: { // has(key)
+            JsCollectionEntry probe = {.key = arg1};
+            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_get(cd->hmap, &probe);
+            return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+        }
+        case 3: { // delete(key)
+            JsCollectionEntry probe = {.key = arg1};
+            const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_delete(cd->hmap, &probe);
+            js_collection_update_size(obj, cd);
+            return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+        }
+        case 4: { // clear()
+            hashmap_clear(cd->hmap, false);
+            js_collection_update_size(obj, cd);
+            return make_js_undefined();
+        }
+        case 5: { // forEach(callback)
+            size_t iter = 0;
+            void* item;
+            while (hashmap_iter(cd->hmap, &iter, &item)) {
+                JsCollectionEntry* e = (JsCollectionEntry*)item;
+                if (cd->type == JS_COLLECTION_SET) {
+                    // callback(value, value, set)
+                    js_call_function(arg1, make_js_undefined(), &e->key, 1);
+                } else {
+                    // callback(value, key, map)
+                    Item args[2] = {e->value, e->key};
+                    js_call_function(arg1, make_js_undefined(), args, 2);
+                }
+            }
+            return make_js_undefined();
+        }
+        case 6: { // keys() — returns array
+            size_t count = hashmap_count(cd->hmap);
+            Item arr = js_array_new((int)count);
+            size_t iter = 0;
+            void* item;
+            int idx = 0;
+            while (hashmap_iter(cd->hmap, &iter, &item)) {
+                JsCollectionEntry* e = (JsCollectionEntry*)item;
+                js_array_set_int(arr, idx, e->key);
+                idx++;
+            }
+            return arr;
+        }
+        case 7: { // values()
+            size_t count = hashmap_count(cd->hmap);
+            Item arr = js_array_new((int)count);
+            size_t iter = 0;
+            void* item;
+            int idx = 0;
+            while (hashmap_iter(cd->hmap, &iter, &item)) {
+                JsCollectionEntry* e = (JsCollectionEntry*)item;
+                if (cd->type == JS_COLLECTION_SET)
+                    js_array_set_int(arr, idx, e->key);
+                else
+                    js_array_set_int(arr, idx, e->value);
+                idx++;
+            }
+            return arr;
+        }
+        case 8: { // entries() — returns array of [key, value] pairs
+            size_t count = hashmap_count(cd->hmap);
+            Item arr = js_array_new((int)count);
+            size_t iter = 0;
+            void* item;
+            int idx = 0;
+            while (hashmap_iter(cd->hmap, &iter, &item)) {
+                JsCollectionEntry* e = (JsCollectionEntry*)item;
+                Item pair = js_array_new(2);
+                js_array_set_int(pair, 0, e->key);
+                js_array_set_int(pair, 1, e->value);
+                js_array_set_int(arr, idx, pair);
+                idx++;
+            }
+            return arr;
+        }
+        default: return ItemNull;
+    }
+}
+
+// Map method dispatcher: handles collection methods, falls back to property access
+extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // Check if this is a Map/Set collection
+    JsCollectionData* cd = js_get_collection_data(obj);
+    if (cd) {
+        String* method = it2s(method_name);
+        if (method) {
+            int method_id = -1;
+            if (cd->type == JS_COLLECTION_MAP) {
+                if (method->len == 3 && strncmp(method->chars, "set", 3) == 0) method_id = 0;
+                else if (method->len == 3 && strncmp(method->chars, "get", 3) == 0) method_id = 1;
+                else if (method->len == 3 && strncmp(method->chars, "has", 3) == 0) method_id = 2;
+                else if (method->len == 6 && strncmp(method->chars, "delete", 6) == 0) method_id = 3;
+                else if (method->len == 5 && strncmp(method->chars, "clear", 5) == 0) method_id = 4;
+                else if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) method_id = 5;
+                else if (method->len == 4 && strncmp(method->chars, "keys", 4) == 0) method_id = 6;
+                else if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) method_id = 7;
+                else if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) method_id = 8;
+            } else {
+                if (method->len == 3 && strncmp(method->chars, "add", 3) == 0) method_id = 0;
+                else if (method->len == 3 && strncmp(method->chars, "has", 3) == 0) method_id = 2;
+                else if (method->len == 6 && strncmp(method->chars, "delete", 6) == 0) method_id = 3;
+                else if (method->len == 5 && strncmp(method->chars, "clear", 5) == 0) method_id = 4;
+                else if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) method_id = 5;
+                else if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) method_id = 7;
+                else if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) method_id = 8;
+            }
+            if (method_id >= 0) {
+                Item arg1 = argc > 0 ? args[0] : ItemNull;
+                Item arg2 = argc > 1 ? args[1] : ItemNull;
+                return js_collection_method(obj, method_id, arg1, arg2);
+            }
+        }
+    }
+    // Fallback: property access + call
+    Item fn = js_property_access(obj, method_name);
+    return js_call_function(fn, obj, args, argc);
 }
 
 // =============================================================================

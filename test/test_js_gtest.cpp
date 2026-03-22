@@ -361,6 +361,14 @@ TEST(JavaScriptTests, test_dom_basic) {
     test_js_dom_script_against_file("test/js/dom_basic.js", "test/js/dom_basic.html", "test/js/dom_basic.txt");
 }
 
+TEST(JavaScriptTests, test_dom_mutation) {
+    test_js_dom_script_against_file("test/js/dom_mutation.js", "test/js/dom_mutation.html", "test/js/dom_mutation.txt");
+}
+
+TEST(JavaScriptTests, test_dom_style) {
+    test_js_dom_script_against_file("test/js/dom_style.js", "test/js/dom_style.html", "test/js/dom_style.txt");
+}
+
 // v5 coverage tests: implemented but previously untested features
 TEST(JavaScriptTests, test_switch_statement) {
     test_js_script_against_file("test/js/switch_statement.js", "test/js/switch_statement.txt");
@@ -470,6 +478,26 @@ TEST(JavaScriptTests, test_v11_nullish_assign) {
 
 TEST(JavaScriptTests, test_v11_object_methods) {
     test_js_script_against_file("test/js/v11_object_methods.js", "test/js/v11_object_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v11_labeled_statements) {
+    test_js_script_against_file("test/js/v11_labeled_statements.js", "test/js/v11_labeled_statements.txt");
+}
+
+TEST(JavaScriptTests, test_v11_function_bind) {
+    test_js_script_against_file("test/js/v11_function_bind.js", "test/js/v11_function_bind.txt");
+}
+
+TEST(JavaScriptTests, test_v11_regex_methods) {
+    test_js_script_against_file("test/js/v11_regex_methods.js", "test/js/v11_regex_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v11_date_methods) {
+    test_js_script_against_file("test/js/v11_date_methods.js", "test/js/v11_date_methods.txt");
+}
+
+TEST(JavaScriptTests, test_v11_map_set) {
+    test_js_script_against_file("test/js/v11_map_set.js", "test/js/v11_map_set.txt");
 }
 
 int main(int argc, char **argv) {

@@ -2187,9 +2187,9 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             continue;  // skip the view
         }
 
-        // Skip pseudo-elements (::before, ::after) - these are rendering artifacts not part of DOM
+        // Skip pseudo-elements (::before, ::after, ::marker) - these are rendering artifacts not part of DOM
         const char* tag = child->node_name();
-        if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0)) {
+        if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {
             log_debug("JSON: Skipping pseudo-element %s from inline children", tag);
             child = child->next();
             continue;

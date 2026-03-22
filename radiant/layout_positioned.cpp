@@ -195,7 +195,178 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     // todo: add to chain of positioned elements for z-index stacking
     // find containing block; add to its positioned children list;
-}/**
+}
+
+/**
+ * Apply sticky positioning to an element (CSS Position 3 §3.5)
+ *
+ * At scroll position 0, sticky elements remain at their normal flow position
+ * unless their inset constraints (top/bottom/left/right) would pull them into
+ * the visible area of their nearest scroll container. The element is also
+ * constrained to stay within its containing block (parent box).
+ *
+ * The inset values define constraints, NOT offsets:
+ *   top: T → element's top edge must be >= scrollport_top + T
+ *   bottom: B → element's bottom edge must be <= scrollport_bottom - B
+ *   left: L → element's left edge must be >= scrollport_left + L
+ *   right: R → element's right edge must be <= scrollport_right - R
+ */
+void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
+    if (!block->position) return;
+
+    // find the nearest scroll container ancestor (overflow != visible)
+    ViewElement* scroll_ancestor = NULL;
+    for (ViewElement* p = block->parent_view(); p; p = p->parent_view()) {
+        if (!p->is_block()) continue;
+        ViewBlock* pb = (ViewBlock*)p;
+        if (pb->scroller &&
+            (pb->scroller->overflow_x != CSS_VALUE_VISIBLE ||
+             pb->scroller->overflow_y != CSS_VALUE_VISIBLE)) {
+            scroll_ancestor = p;
+            break;
+        }
+    }
+
+    if (!scroll_ancestor) {
+        // no scroll container found — sticky acts exactly like relative at scroll=0
+        // with no constraints, the insets have no effect
+        log_debug("sticky: no scroll container found, no offset applied");
+        return;
+    }
+
+    ViewBlock* scroller = (ViewBlock*)scroll_ancestor;
+
+    // compute scrollport rectangle in absolute coordinates
+    // the scrollport is the content box of the scroll container
+    float sp_top = (float)scroller->y;
+    float sp_left = (float)scroller->x;
+    if (scroller->bound) {
+        sp_top += scroller->bound->padding.top;
+        sp_left += scroller->bound->padding.left;
+        if (scroller->bound->border) {
+            sp_top += scroller->bound->border->width.top;
+            sp_left += scroller->bound->border->width.left;
+        }
+    }
+    float sp_bottom = sp_top + (float)scroller->height;
+    float sp_right = sp_left + (float)scroller->width;
+    if (scroller->bound) {
+        // subtract padding from bottom/right to get content box
+        sp_bottom -= scroller->bound->padding.top + scroller->bound->padding.bottom;
+        sp_right -= scroller->bound->padding.left + scroller->bound->padding.right;
+        if (scroller->bound->border) {
+            sp_bottom -= scroller->bound->border->width.top + scroller->bound->border->width.bottom;
+            sp_right -= scroller->bound->border->width.left + scroller->bound->border->width.right;
+        }
+    }
+
+    log_debug("sticky: scrollport [%.1f, %.1f, %.1f, %.1f], element at (%d, %d) size %dx%d",
+              sp_left, sp_top, sp_right, sp_bottom, block->x, block->y, block->width, block->height);
+
+    // current element position (static/normal flow position)
+    float elem_top = (float)block->y;
+    float elem_left = (float)block->x;
+    float elem_bottom = elem_top + (float)block->height;
+    float elem_right = elem_left + (float)block->width;
+
+    float offset_x = 0, offset_y = 0;
+
+    // vertical sticky constraints
+    if (block->position->has_top && block->position->has_bottom) {
+        // both top and bottom: top wins (CSS Position 3 §3.5.2)
+        float inset = block->position->top;
+        float min_top = sp_top + inset;
+        if (elem_top < min_top) {
+            offset_y = min_top - elem_top;
+        }
+    } else if (block->position->has_top) {
+        float inset = block->position->top;
+        float min_top = sp_top + inset;
+        if (elem_top < min_top) {
+            offset_y = min_top - elem_top;
+        }
+    } else if (block->position->has_bottom) {
+        float inset = block->position->bottom;
+        float max_bottom = sp_bottom - inset;
+        if (elem_bottom > max_bottom) {
+            offset_y = max_bottom - elem_bottom;
+        }
+    }
+
+    // horizontal sticky constraints
+    if (block->position->has_left && block->position->has_right) {
+        // both left and right: left wins in LTR
+        float inset = block->position->left;
+        float min_left = sp_left + inset;
+        if (elem_left < min_left) {
+            offset_x = min_left - elem_left;
+        }
+    } else if (block->position->has_left) {
+        float inset = block->position->left;
+        float min_left = sp_left + inset;
+        if (elem_left < min_left) {
+            offset_x = min_left - elem_left;
+        }
+    } else if (block->position->has_right) {
+        float inset = block->position->right;
+        float max_right = sp_right - inset;
+        if (elem_right > max_right) {
+            offset_x = max_right - elem_right;
+        }
+    }
+
+    // constrain: element must stay within its containing block
+    // The containing block for a sticky element is its parent box
+    ViewElement* parent = block->parent_view();
+    if (parent && parent->is_block() && (offset_x != 0 || offset_y != 0)) {
+        ViewBlock* cb = (ViewBlock*)parent;
+        float cb_top = (float)cb->y;
+        float cb_left = (float)cb->x;
+        float cb_bottom = cb_top + (float)cb->height;
+        float cb_right = cb_left + (float)cb->width;
+        if (cb->bound) {
+            cb_top += cb->bound->padding.top;
+            cb_left += cb->bound->padding.left;
+            cb_bottom -= cb->bound->padding.bottom;
+            cb_right -= cb->bound->padding.right;
+            if (cb->bound->border) {
+                cb_top += cb->bound->border->width.top;
+                cb_left += cb->bound->border->width.left;
+                cb_bottom -= cb->bound->border->width.bottom;
+                cb_right -= cb->bound->border->width.right;
+            }
+        }
+
+        // clamp offset so element stays in containing block
+        if (offset_y > 0 && (elem_bottom + offset_y) > cb_bottom) {
+            offset_y = max(0.0f, cb_bottom - elem_bottom);
+        }
+        if (offset_y < 0 && (elem_top + offset_y) < cb_top) {
+            offset_y = min(0.0f, cb_top - elem_top);
+        }
+        if (offset_x > 0 && (elem_right + offset_x) > cb_right) {
+            offset_x = max(0.0f, cb_right - elem_right);
+        }
+        if (offset_x < 0 && (elem_left + offset_x) < cb_left) {
+            offset_x = min(0.0f, cb_left - elem_left);
+        }
+    }
+
+    if (offset_x != 0 || offset_y != 0) {
+        block->x += (int)offset_x;
+        block->y += (int)offset_y;
+        log_debug("sticky: applied offset (%.1f, %.1f), new position (%d, %d)", offset_x, offset_y, block->x, block->y);
+
+        // for inline elements, offset children too
+        if (block->view_type == RDT_VIEW_INLINE) {
+            offset_children_recursive((ViewElement*)block, (int)offset_x, (int)offset_y);
+        }
+    } else {
+        log_debug("sticky: no offset needed, element at static position");
+    }
+}
+
+/**
  * Find the containing block for a positioned element
  * For relative/static: nearest block container ancestor
  * For absolute: nearest positioned ancestor or initial containing block
@@ -1305,6 +1476,7 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 bool element_has_positioning(ViewBlock* block) {
     return block->position &&
            (block->position->position == CSS_VALUE_RELATIVE ||
+            block->position->position == CSS_VALUE_STICKY ||
             block->position->position == CSS_VALUE_ABSOLUTE ||
             block->position->position == CSS_VALUE_FIXED);
 }

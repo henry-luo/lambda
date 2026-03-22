@@ -946,12 +946,14 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
     log_debug("elmt_rebuild_with_new_shape: field_count=%zu, new_attr=%s",
               builder->field_count, new_attr_name ? new_attr_name->chars : "NULL");
 
-    // Get new deduplicated shape
-    ShapeEntry* new_shape = shape_builder_finalize(builder);
-
-    if (!new_shape) {
-        log_error("elmt_rebuild_with_new_shape: shape_builder_finalize failed");
-        return ItemError;
+    // Get new deduplicated shape (NULL is valid when all fields removed)
+    ShapeEntry* new_shape = nullptr;
+    if (builder->field_count > 0) {
+        new_shape = shape_builder_finalize(builder);
+        if (!new_shape) {
+            log_error("elmt_rebuild_with_new_shape: shape_builder_finalize failed");
+            return ItemError;
+        }
     }
 
     // Calculate new byte size

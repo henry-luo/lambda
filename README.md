@@ -15,7 +15,7 @@ Lambda is designed for two things at once:
 1) an expressive functional language for transforming data and documents, and
 2) an end-to-end document pipeline (parse → validate/transform → layout → render/view).
 
-Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) are parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG layout engine.
+Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) are parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG/JS layout engine.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
 > A stable subset of the literal data model is separately formalised and released as
@@ -61,7 +61,7 @@ lambda view
 **Radiant HTML/CSS/SVG/JS layout, rendering & viewer**
 - **Browser-compatible layout engine** supporting block, inline, flex, grid, and tables.
 - **Unified interactive viewer** via `lambda view`:
-   - static HTML/CSS/SVG with some basic JS support
+   - static HTML/CSS/SVG with some basic JS and DOM support
    - XML (treated as HTML with CSS styling)
    - Markdown / Wiki (rendered with styling)
    - LaTeX (`.tex`) via conversion to HTML
@@ -293,13 +293,13 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 
 ### Developer Documentation
 
-| Document                                              | Description                                                            |
-| ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
-| [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                |
-| [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                     |
-| [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                       |
-| [LambdaJS Support](doc/JS_Support.md)                 | Experimental JavaScript JIT engine — supported features and benchmarks |
+| Document                                              | Description                                                                            |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT                 |
+| [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
+| [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
+| [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                                       |
+| [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 
 ## Platform Support
 

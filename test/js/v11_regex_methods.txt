@@ -1,0 +1,11 @@
+true
+false
+true
+2024-01
+2024
+01
+6
+null
+abc
+gi
+null
