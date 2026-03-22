@@ -5182,8 +5182,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 table_width += ml + mr;
             }
 
-            // Position caption (caption's box width, not the larger table wrapper)
-            caption->x = 0;
+            // Position caption: margin-left determines x offset within table wrapper
+            float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                               ? caption->bound->margin.left : 0;
+            caption->x = caption_ml;
             caption->y = 0;
             caption->width = caption_box_width;
 
@@ -6018,9 +6020,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // the table expands if the caption's margin-box exceeds the table content width.
         if (caption->bound) {
             float ml = (caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                       ? caption->bound->margin.left : 0;
+                           ? caption->bound->margin.left : 0;
             float mr = (caption->bound->margin.right_type != CSS_VALUE_AUTO && caption->bound->margin.right > 0)
-                       ? caption->bound->margin.right : 0;
+                           ? caption->bound->margin.right : 0;
             if (ml + mr > 0) {
                 caption_width_contribution += (int)(ml + mr);
                 log_debug("Caption margin-box: added margins (left=%.0f, right=%.0f) -> contribution=%dpx",
@@ -6638,7 +6640,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position caption at top if caption-side is top (default)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        caption->x = 0;
+        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
+        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                           ? caption->bound->margin.left : 0;
+        caption->x = caption_ml;
         // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
         // The caption's margin-top pushes it down from the table wrapper's content edge.
         float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
@@ -7997,7 +8002,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position caption at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
-        caption->x = 0;
+        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
+        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                           ? caption->bound->margin.left : 0;
+        caption->x = caption_ml;
         // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
         // The caption's margin-top pushes it down from the table box's bottom edge.
         float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
