@@ -1363,7 +1363,7 @@ radiant/
 - [Taffy GitHub Repository](https://github.com/DioxusLabs/taffy)
 - [CSS Flexbox Level 1 Spec](https://www.w3.org/TR/css-flexbox-1/)
 - [CSS Grid Level 1 Spec](https://www.w3.org/TR/css-grid-1/)
-- [Radiant Layout Design Doc](../doc/Radiant_Layout_Design.md)
+- [Radiant Layout Design Doc](../doc/dev/Radiant_Layout_Design.md)
 
 ---
 
