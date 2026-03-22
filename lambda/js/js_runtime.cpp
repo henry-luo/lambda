@@ -664,6 +664,75 @@ extern "C" Item js_constructor_create_object(Item callee) {
     return obj;
 }
 
+// A5: Create a new object with pre-built shape for constructor optimization.
+// All property slots are pre-allocated as LMD_TYPE_NULL (8-byte pointer-sized)
+// and initialized to null. When the constructor body sets this.prop = val,
+// js_property_set will find the existing key via hash table and do a fast
+// in-place update instead of extending the shape.
+extern "C" Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count) {
+    if (!js_input || count <= 0) return js_new_object();
+
+    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+
+    // Allocate TypeMap
+    TypeMap* tm = (TypeMap*)alloc_type(js_input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!tm) { m->type = &EmptyMap; return (Item){.map = m}; }
+
+    // Build ShapeEntry chain — each slot is LMD_TYPE_NULL (sizeof(void*) = 8 bytes).
+    // This gives correct 8-byte spacing so INT, FLOAT, STRING, MAP, FUNC etc.
+    // all fit in-place via the NULL→same-byte-size fast path in fn_map_set.
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    for (int i = 0; i < count; i++) {
+        ShapeEntry* se = (ShapeEntry*)pool_calloc(js_input->pool, sizeof(ShapeEntry) + sizeof(StrView));
+        StrView* nv = (StrView*)((char*)se + sizeof(ShapeEntry));
+        String* key_str = heap_create_name(prop_names[i], (size_t)prop_lens[i]);
+        nv->str = key_str->chars;
+        nv->length = key_str->len;
+        se->name = nv;
+        se->type = type_info[LMD_TYPE_NULL].type;
+        se->byte_offset = i * (int)sizeof(void*);  // 8-byte slots
+        se->next = NULL;
+        if (prev) prev->next = se;
+        else first = se;
+        prev = se;
+    }
+    tm->shape = first;
+    tm->last = prev;
+    tm->length = count;
+    tm->byte_size = count * (int)sizeof(void*);
+
+    // Populate hash table
+    ShapeEntry* se = first;
+    while (se) {
+        typemap_hash_insert(tm, se);
+        se = se->next;
+    }
+
+    // Allocate data buffer (pre-sized, zero-initialized = null pointers)
+    int data_size = count * (int)sizeof(void*);
+    int data_cap = data_size < 64 ? 64 : data_size;
+    m->data = pool_calloc(js_input->pool, data_cap);
+    m->data_cap = data_cap;
+    m->type = tm;
+
+    return (Item){.map = m};
+}
+
+// A5: Create pre-shaped object and set __proto__ from constructor's prototype
+extern "C" Item js_constructor_create_object_shaped(Item callee,
+    const char** prop_names, const int* prop_lens, int count) {
+    Item obj = js_new_object_with_shape(prop_names, prop_lens, count);
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)callee.function;
+        if (fn->prototype.item != ItemNull.item && get_type_id(fn->prototype) == LMD_TYPE_MAP) {
+            js_set_prototype(obj, fn->prototype);
+        }
+    }
+    return obj;
+}
+
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup(Item object, Item property);
 
@@ -674,27 +743,48 @@ extern "C" Item js_prototype_lookup(Item object, Item property);
 static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
     TypeMap* map_type = (TypeMap*)m->type;
     if (!map_type || !map_type->shape) return ItemNull;
+
+    // A1: Try hash table first for O(1) lookup (covers >99% of JS objects).
+    // The hash table uses last-writer-wins via typemap_hash_insert, so the
+    // entry in the table always points to the latest ShapeEntry for that name.
+    if (map_type->field_count > 0) {
+        ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
+        if (entry) {
+            return _map_read_field(entry, m->data);
+        }
+        // Not found in hash table — check for spread/nested maps (rare)
+        ShapeEntry* field = map_type->shape;
+        while (field) {
+            if (!field->name) {
+                Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
+                if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
+                    bool nested_found;
+                    Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
+                    if (nested_found) return nested_result;
+                }
+            }
+            field = field->next;
+        }
+        return ItemNull;
+    }
+
+    // Fallback: linear scan for objects without hash table
     ShapeEntry* field = map_type->shape;
     Item result = ItemNull;
-    bool found = false;
     while (field) {
         if (!field->name) {
-            // spread/nested map — search recursively
             Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
             if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
-                // Use standard map_get for nested — rare case
                 bool nested_found;
                 Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
                 if (nested_found) {
-                    found = true;
                     result = nested_result;
                 }
             }
-        } else if (field->name->length == (size_t)key_len &&
-                   memcmp(field->name->str, key_str, key_len) == 0) {
-            found = true;
+        } else if (field->name->str == key_str ||  // A6: interned pointer match
+                   (field->name->length == (size_t)key_len &&
+                    memcmp(field->name->str, key_str, key_len) == 0)) {
             result = _map_read_field(field, m->data);
-            // don't return — later entries may override (type change duplicates)
         }
         field = field->next;
     }
@@ -890,15 +980,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             if (key_type == LMD_TYPE_STRING) str_key = it2s(key);
             else if (key_type == LMD_TYPE_SYMBOL) str_key = it2s(key);
             if (str_key) {
-                ShapeEntry* entry = map_type->shape;
-                while (entry) {
-                    if (entry->name && entry->name->length == (size_t)str_key->len
-                        && strncmp(entry->name->str, str_key->chars, str_key->len) == 0) {
-                        // existing key — use fn_map_set for in-place update
+                // A1: Use hash table for O(1) existing-key check
+                if (map_type->field_count > 0) {
+                    ShapeEntry* found = typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len);
+                    if (found) {
                         fn_map_set(object, key, value);
                         return value;
                     }
-                    entry = entry->next;
+                } else {
+                    ShapeEntry* entry = map_type->shape;
+                    while (entry) {
+                        if (entry->name && (entry->name->str == str_key->chars ||  // A6: interned pointer
+                            (entry->name->length == (size_t)str_key->len
+                             && strncmp(entry->name->str, str_key->chars, str_key->len) == 0))) {
+                            fn_map_set(object, key, value);
+                            return value;
+                        }
+                        entry = entry->next;
+                    }
                 }
             }
         }
@@ -1016,15 +1115,22 @@ extern "C" Item js_array_get(Item array, Item index) {
 
 // P10e: Fast array access with native int index (no js_get_number overhead)
 extern "C" Item js_array_get_int(Item array, int64_t index) {
-    Array* arr = array.array;
-    if (index >= 0 && index < arr->length) {
-        return arr->items[index];
+    if (get_type_id(array) == LMD_TYPE_ARRAY) {
+        Array* arr = array.array;
+        if (index >= 0 && index < arr->length) {
+            return arr->items[index];
+        }
+        return ItemNull;
     }
-    return ItemNull;
+    // fall back to general property access for strings, maps, etc.
+    return js_property_access(array, (Item){.item = i2it((int)index)});
 }
 
 // P10e: Fast array set with native int index
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
+    if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        return js_property_set(array, (Item){.item = i2it((int)index)}, value);
+    }
     Array* arr = array.array;
     if (index >= 0 && index < arr->length) {
         arr->items[index] = value;

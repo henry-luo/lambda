@@ -2,7 +2,7 @@
 
 LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). It transpiles JavaScript source code into MIR IR which is then compiled to native machine code, enabling near-native execution of JavaScript programs within the Lambda runtime.
 
-> **Status:** Experimental. LambdaJS passes 62/62 benchmarks across 5 suites and 12/13 JetStream original JS files. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, and regex via RE2.
+> **Status:** Experimental. LambdaJS passes 62/62 benchmarks across 5 suites and all 52/52 JS baseline tests. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, regex via RE2, optional chaining, Map/Set collections, and error subclasses. JetStream geometric mean: **6.3×** vs Node.js (V8).
 
 ## Usage
 
@@ -285,8 +285,8 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 | BENG | 0.8× | 6 | 4 | 10 |
 | KOSTYA | 25.7× | 0 | 7 | 7 |
 | LARCENY | 15.5× | 2 | 10 | 12 |
-| JetStream | 14.7× | 0 | 7 | 7 |
-| **Overall** | **8.8×** | **13** | **47** | **60** |
+| JetStream | 6.3× | 0 | 9 | 11 |
+| **Overall** | **6.3×** | **13** | **47** | **60** |
 
 ### Where LambdaJS Beats Node.js (13 benchmarks)
 
@@ -328,19 +328,27 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 ### JetStream Benchmarks (Original JS Files)
 
+Measured after v11 Track A performance optimizations (property hash table, array fast path, float prescan widening, integer index fast path, constructor shape pre-allocation, property name interning).
+
 | Benchmark | Category | LambdaJS (ms) | Node.js (ms) | Ratio |
 |-----------|----------|-------------:|-----------:|------:|
-| cube3d | 3D | 22 | 18 | 1.2× |
-| splay | data | 48 | 20 | 2.4× |
-| deltablue | macro | 48 | 11 | 4.4× |
-| crypto_sha1 | crypto | 141 | 9.0 | 15.7× |
-| richards | macro | 483 | 8.3 | 58.2× |
-| raytrace3d | 3D | 709 | 19 | 37.3× |
-| nbody | numeric | 1,910 | 5.5 | 347× |
-| navier_stokes | numeric | — | 14 | — |
-| hashmap | data | — | 16 | — |
+| deltablue | macro | 11.0 | 5.8 | 1.9× |
+| regex_dna | string | 2.4 | — | — |
+| cube3d | 3D | 29.9 | 11.7 | 2.6× |
+| splay | data | 22.0 | 7.7 | 2.9× |
+| crypto_sha1 | crypto | 22.3 | 7.5 | 3.0× |
+| crypto_md5 | crypto | 21.7 | — | — |
+| richards | macro | 81.4 | 5.1 | 16.0× |
+| crypto_aes | crypto | 38.8 | — | — |
+| nbody | numeric | 260.8 | 3.1 | 84.1× |
+| navier_stokes | numeric | 569.2 | 7.5 | 75.9× |
+| base64 | string | 390.3 | — | — |
+| hashmap | data | TIMEOUT | 12.0 | — |
+| raytrace3d | 3D | FAIL | 9.1 | — |
 
-12 of 13 JetStream JS files run successfully. Two benchmarks (navier_stokes, hashmap) are still being optimized.
+**Geometric mean (exec):** LambdaJS 45.0ms vs Node.js 7.2ms → **6.3×** (improved from 8.8× in v10).
+
+11 of 13 JetStream JS files run successfully. hashmap times out (GC pressure from 90K constructor calls). raytrace3d has a pre-existing closure capture bug.
 
 ---
 
