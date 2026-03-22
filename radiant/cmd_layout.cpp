@@ -4052,6 +4052,7 @@ int cmd_layout(int argc, char** argv) {
     ui_context_cleanup(&ui_context);
     log_debug("[Cleanup] Complete");
 
+    printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
     log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);
     return failure_count > 0 ? 1 : 0;
 }
