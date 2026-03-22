@@ -2846,6 +2846,37 @@ static bool is_abspos_or_fixed(DomElement* elem) {
     return false;
 }
 
+// CSS 2.1 §9.7: Check if an element has float:left or float:right
+// Floated elements are out-of-flow and should not be wrapped in anonymous table boxes
+static bool is_floated_element(DomElement* elem) {
+    if (!elem) return false;
+
+    // Check resolved position prop first (if styles already resolved)
+    if (elem->position) {
+        if (elem->position->float_prop == CSS_VALUE_LEFT ||
+            elem->position->float_prop == CSS_VALUE_RIGHT) {
+            return true;
+        }
+    }
+
+    // Check specified_style (CSS cascade result before full resolution)
+    if (elem->specified_style && elem->specified_style->tree) {
+        AvlNode* float_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+        if (float_node) {
+            StyleNode* style_node = (StyleNode*)float_node->declaration;
+            if (style_node && style_node->winning_decl && style_node->winning_decl->value) {
+                CssValue* val = style_node->winning_decl->value;
+                if (val->type == CSS_VALUE_TYPE_KEYWORD &&
+                    (val->data.keyword == CSS_VALUE_LEFT || val->data.keyword == CSS_VALUE_RIGHT)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 /**
  * Helper function to wrap a node in an anonymous table-cell if needed.
  * If the node is already a cell, just reparent it.
@@ -2976,10 +3007,10 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             continue;
         }
 
-        // CSS 2.1 §9.7: Absolutely positioned and fixed elements are completely
+        // CSS 2.1 §9.7: Absolutely positioned, fixed, and floated elements are
         // out of flow and should NOT be wrapped in anonymous table boxes.
         // Their display is blockified per §9.7, so they are regular blocks.
-        if (is_abspos_or_fixed(child->as_element())) {
+        if (is_abspos_or_fixed(child->as_element()) || is_floated_element(child->as_element())) {
             // Flush any accumulated runs before skipping
             if (current_cell_run->length > 0) {
                 DomElement* anon_tbody = create_anonymous_table_element(lycon, table,
@@ -3214,8 +3245,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                 continue;
             }
 
-            // CSS 2.1 §9.7: Skip absolutely positioned/fixed elements
-            if (is_abspos_or_fixed(gchild->as_element())) {
+            // CSS 2.1 §9.7: Skip absolutely positioned/fixed/floated elements
+            if (is_abspos_or_fixed(gchild->as_element()) || is_floated_element(gchild->as_element())) {
                 // Flush any accumulated cells before skipping
                 if (cell_run->length > 0) {
                     DomElement* anon_tr = create_anonymous_table_element(lycon, row_group,
@@ -3352,8 +3383,8 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
                     continue;
                 }
 
-                // CSS 2.1 §9.7: Skip absolutely positioned/fixed elements
-                if (is_abspos_or_fixed(rchild->as_element())) {
+                // CSS 2.1 §9.7: Skip absolutely positioned/fixed/floated elements
+                if (is_abspos_or_fixed(rchild->as_element()) || is_floated_element(rchild->as_element())) {
                     // Flush any accumulated non-cell content before skipping
                     if (non_cell_run->length > 0) {
                         DomElement* anon_td = create_anonymous_table_element(lycon, row,
@@ -8659,6 +8690,8 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
     // (table cells, rows, row groups, captions) after all table layout is finalized.
     // Table-internal elements can be relatively positioned per CSS 2.1 §17.5.1.
     for (ViewBlock* child = (ViewBlock*)table->first_child; child; child = (ViewBlock*)child->next_sibling) {
+        // Skip non-block views (text nodes, br, inline, etc.) — they don't have position properties
+        if (!child->is_block()) continue;
         if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
             if (child->position && child->position->position == CSS_VALUE_RELATIVE)
                 layout_relative_positioned(lycon, child);

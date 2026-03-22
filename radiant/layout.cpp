@@ -1327,7 +1327,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // CSS Display Level 3: display: contents
             // Element does not generate a box, but its children are laid out
             // as if they were children of the element's parent.
-            // Counter properties still apply per CSS Lists 3 §5.3.
+            // Counter properties do NOT apply (no box generated).
             log_debug("display:contents for <%s> - no box, layout children directly", node->node_name());
 
             // Mark element in the view tree with zero dimensions (no box generated)
@@ -1350,31 +1350,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // Restore view context
             lycon->view = saved_view;
 
-            // Apply counter properties if present
-            if (lycon->counter_context) {
-                counter_push_scope(lycon->counter_context);
-                if (elem->blk && elem->blk->counter_reset) {
-                    log_debug("    [Contents] Applying counter-reset: %s", elem->blk->counter_reset);
-                    counter_reset(lycon->counter_context, elem->blk->counter_reset);
-                }
-                if (elem->blk && elem->blk->counter_increment) {
-                    log_debug("    [Contents] Applying counter-increment: %s", elem->blk->counter_increment);
-                    counter_increment(lycon->counter_context, elem->blk->counter_increment);
-                }
-                if (elem->blk && elem->blk->counter_set) {
-                    log_debug("    [Contents] Applying counter-set: %s", elem->blk->counter_set);
-                    counter_set(lycon->counter_context, elem->blk->counter_set);
-                }
-            }
+            // CSS Lists 3: "An element that does not generate a box... also does not
+            // increment, set, or reset any counters." display:contents does not
+            // generate a box, so skip all counter operations.
 
             // Layout children directly in parent's formatting context
             for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
                 layout_flow_node(lycon, child);
-            }
-
-            // Pop counter scope
-            if (lycon->counter_context) {
-                counter_pop_scope(lycon->counter_context);
             }
             break;
         }

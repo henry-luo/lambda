@@ -113,7 +113,7 @@ void counter_pop_scope(CounterContext* ctx) {
     }
 }
 
-void counter_pop_scope_propagate(CounterContext* ctx) {
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets) {
     if (!ctx || !ctx->scope_stack) return;
 
     int size = ctx->scope_stack->length;
@@ -122,29 +122,73 @@ void counter_pop_scope_propagate(CounterContext* ctx) {
     CounterScope* scope = (CounterScope*)ctx->scope_stack->data[size - 1];
     CounterScope* parent = (size > 1) ? (CounterScope*)ctx->scope_stack->data[size - 2] : nullptr;
 
-    // Propagate counters from popped scope to parent
-    // Only propagate counters created by counter-set/counter-increment (implicit creation).
-    // Counters from counter-reset have proper scoping and should NOT propagate.
+    // Propagate counters from popped scope to parent.
+    // CSS 2.1 §12.4.1: "The scope of a counter starts at the first element in the
+    // document that has a 'counter-reset' for that counter, and includes the element's
+    // descendants and its subsequent siblings and their descendants."
+    //
+    // When propagate_resets=true (regular elements): counter-reset counters propagate
+    // so subsequent siblings can see them. But we must NOT overwrite the parent's own
+    // (non-propagated) counter of the same name — that would break nesting.
+    //
+    // When propagate_resets=false (pseudo-elements): counter-reset counters do NOT
+    // propagate, keeping them scoped to the pseudo-element per CSS spec.
     if (scope && scope->counters && parent && parent->counters) {
         size_t iter = 0;
         void* item;
         while (hashmap_iter(scope->counters, &iter, &item)) {
             CounterValue* cv = (CounterValue*)item;
-            if (cv->created_by_reset) continue;  // Don't propagate counter-reset counters
+
+            if (cv->created_by_reset && !propagate_resets) {
+                // Pseudo-element scope: don't propagate counter-reset counters
+                continue;
+            }
 
             CounterValue search_key = {cv->name, 0, false, false};
             CounterValue* parent_cv = (CounterValue*)hashmap_get(parent->counters, &search_key);
             if (parent_cv) {
-                // Update existing parent counter value
+                if (cv->created_by_reset && parent_cv->created_by_reset) {
+                    // Parent has a counter with same name from a reset — child's
+                    // counter-reset creates a nested scope, don't overwrite
+                    log_debug("[Counters] Skip propagating reset '%s' = %d (parent has reset counter)", cv->name, cv->value);
+                    continue;
+                }
+                if (cv->created_by_reset && parent_cv->propagated) {
+                    // Parent inherited this counter from ancestor — child's
+                    // counter-reset creates a nested scope, don't propagate
+                    log_debug("[Counters] Skip propagating reset '%s' = %d (parent has inherited counter)", cv->name, cv->value);
+                    continue;
+                }
+                // Update existing parent counter value (propagated or increment-created)
                 parent_cv->value = cv->value;
                 parent_cv->propagated = true;
             } else {
-                // Add new counter to parent scope, marked as propagated
+                // Parent scope doesn't have this counter. For counter-reset counters,
+                // check if ANY ancestor scope has this counter name — if so, the child
+                // created a nested scope and shouldn't propagate upward.
+                if (cv->created_by_reset) {
+                    bool ancestor_has_counter = false;
+                    for (int si = size - 3; si >= 0; si--) {
+                        CounterScope* ancestor = (CounterScope*)ctx->scope_stack->data[si];
+                        if (ancestor && ancestor->counters) {
+                            CounterValue* anc_cv = (CounterValue*)hashmap_get(ancestor->counters, &search_key);
+                            if (anc_cv) {
+                                ancestor_has_counter = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (ancestor_has_counter) {
+                        log_debug("[Counters] Skip propagating reset '%s' = %d (ancestor has counter)", cv->name, cv->value);
+                        continue;
+                    }
+                }
+                // No ancestor has this counter — propagate so siblings see it
                 CounterValue new_cv;
                 new_cv.name = cv->name;
                 new_cv.value = cv->value;
                 new_cv.propagated = true;
-                new_cv.created_by_reset = false;
+                new_cv.created_by_reset = cv->created_by_reset;
                 hashmap_set(parent->counters, &new_cv);
             }
             log_debug("[Counters] Propagated '%s' = %d to parent scope", cv->name, cv->value);
