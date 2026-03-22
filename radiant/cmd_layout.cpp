@@ -3885,6 +3885,11 @@ static bool layout_single_file(
     // Note: free_document is handled by pool_destroy since doc is allocated from pool
     pool_destroy(pool);
 
+    // Reset per-document font state to avoid cross-document cache pollution in batch mode.
+    // Clears @font-face descriptors, face cache, and codepoint fallback cache.
+    font_context_reset_document_fonts(ui_context->font_ctx);
+    ui_context->font_face_count = 0;
+
     // Reset ui_context document pointer to avoid dangling pointer in batch mode
     ui_context->document = nullptr;
 
