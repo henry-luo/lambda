@@ -30,6 +30,7 @@
 #include "../radiant/graph_to_svg.hpp"
 #include "../radiant/graph_theme.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
+#include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/input-graph.h"
 
 // Network module includes
@@ -987,6 +988,9 @@ int main(int argc, char *argv[]) {
                     if (html_root) {
                         DomDocument* dom_doc = dom_document_create(input);
                         if (dom_doc) {
+                            // init CSS property system before building DOM tree
+                            // so inline style parsing resolves property IDs correctly
+                            css_property_system_init(dom_doc->pool);
                             DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, NULL);
                             if (dom_root) {
                                 dom_doc->root = dom_root;

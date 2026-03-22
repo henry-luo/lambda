@@ -58,6 +58,12 @@ static __thread DomDocument* _js_current_document = nullptr;
 
 extern "C" void js_dom_set_document(void* dom_doc) {
     _js_current_document = (DomDocument*)dom_doc;
+    if (dom_doc) {
+        DomDocument* doc = (DomDocument*)dom_doc;
+        if (doc->pool) {
+            css_property_system_init(doc->pool);
+        }
+    }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
 }
 
@@ -807,7 +813,7 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
         Item comment_item = builder.element("!--").text(text).final();
         Element* comment_elem = comment_item.element;
 
-        DomComment* comment_node = dom_comment_create(comment_elem, nullptr);
+        DomComment* comment_node = dom_comment_create_detached(comment_elem, doc);
         if (!comment_node) return ItemNull;
         return js_dom_wrap_element(comment_node);
     }
@@ -982,6 +988,33 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return js_dom_wrap_element((void*)sib);
         }
         log_debug("js_dom_get_property: unknown text node property '%s'", prop);
+        return ItemNull;
+    }
+
+    // Comment node properties
+    if (node->is_comment()) {
+        DomComment* comment_node = node->as_comment();
+        if (strcmp(prop, "data") == 0 || strcmp(prop, "nodeValue") == 0 || strcmp(prop, "textContent") == 0) {
+            return comment_node->content ? (Item){.item = s2it(heap_create_name(comment_node->content))}
+                                         : (Item){.item = s2it(heap_create_name(""))};
+        }
+        if (strcmp(prop, "nodeType") == 0) {
+            return (Item){.item = i2it(8)}; // COMMENT_NODE
+        }
+        if (strcmp(prop, "nodeName") == 0) {
+            return (Item){.item = s2it(heap_create_name("#comment"))};
+        }
+        if (strcmp(prop, "length") == 0) {
+            return (Item){.item = i2it((int64_t)comment_node->length)};
+        }
+        if (strcmp(prop, "parentNode") == 0 || strcmp(prop, "parentElement") == 0) {
+            DomNode* parent = comment_node->parent;
+            if (parent && parent->is_element()) {
+                return js_dom_wrap_element(parent->as_element());
+            }
+            return ItemNull;
+        }
+        log_debug("js_dom_get_property: unknown comment node property '%s'", prop);
         return ItemNull;
     }
 
@@ -1467,8 +1500,20 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
                 // build_dom_tree_from_element already appends to parent
             } else if (type == LMD_TYPE_STRING) {
                 String* s = it2s(body_elem->items[i]);
-                dom_text_create(s, elem);
-                // dom_text_create already sets parent
+                DomText* text_node = dom_text_create(s, elem);
+                if (text_node) {
+                    // link text node into parent's sibling chain
+                    text_node->parent = elem;
+                    if (!elem->first_child) {
+                        elem->first_child = text_node;
+                        elem->last_child = text_node;
+                    } else {
+                        DomNode* last = elem->last_child;
+                        last->next_sibling = text_node;
+                        text_node->prev_sibling = last;
+                        elem->last_child = text_node;
+                    }
+                }
             }
         }
 
@@ -1558,7 +1603,19 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     // get the specified value for this property
     CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
     if (!decl || !decl->value) {
-        return (Item){.item = s2it(heap_create_name(""))};
+        // shorthand fallback: if the property is a shorthand (e.g. padding, margin),
+        // try the first longhand (e.g. padding-top) since shorthands are expanded
+        if (css_property_is_shorthand(prop_id)) {
+            char longhand[128];
+            snprintf(longhand, sizeof(longhand), "%s-top", css_prop);
+            CssPropertyId lh_id = css_property_id_from_name(longhand);
+            if (lh_id != CSS_PROPERTY_UNKNOWN) {
+                decl = dom_element_get_specified_value(elem, lh_id);
+            }
+        }
+        if (!decl || !decl->value) {
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
     }
 
     // only return values that came from inline styles (element.style.X should

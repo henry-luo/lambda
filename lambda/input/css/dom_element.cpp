@@ -2299,6 +2299,65 @@ DomComment* dom_comment_create(Element* native_element, DomElement* parent_eleme
     return comment_node;
 }
 
+DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc) {
+    if (!native_element) {
+        log_error("dom_comment_create_detached: native_element required");
+        return nullptr;
+    }
+    if (!doc || !doc->arena) {
+        log_error("dom_comment_create_detached: doc with arena required");
+        return nullptr;
+    }
+
+    TypeElmt* type = (TypeElmt*)native_element->type;
+    const char* tag_name = type ? type->name.str : nullptr;
+    if (!tag_name) {
+        log_error("dom_comment_create_detached: no tag name");
+        return nullptr;
+    }
+
+    DomNodeType node_type;
+    if (str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
+        node_type = DOM_NODE_DOCTYPE;
+    } else if (strcmp(tag_name, "!--") == 0) {
+        node_type = DOM_NODE_COMMENT;
+    } else {
+        log_error("dom_comment_create_detached: not a comment or DOCTYPE: %s", tag_name);
+        return nullptr;
+    }
+
+    DomComment* comment_node = (DomComment*)arena_calloc(doc->arena, sizeof(DomComment));
+    if (!comment_node) {
+        log_error("dom_comment_create_detached: arena_calloc failed");
+        return nullptr;
+    }
+
+    comment_node->node_type = node_type;
+    comment_node->parent = nullptr;
+    comment_node->next_sibling = nullptr;
+    comment_node->prev_sibling = nullptr;
+    comment_node->native_element = native_element;
+    comment_node->tag_name = tag_name;
+
+    if (native_element->length > 0) {
+        Item first_item = native_element->items[0];
+        if (get_type_id(first_item) == LMD_TYPE_STRING) {
+            String* content_str = first_item.get_string();
+            comment_node->content = content_str->chars;
+            comment_node->length = content_str->len;
+        }
+    }
+
+    if (!comment_node->content) {
+        comment_node->content = "";
+        comment_node->length = 0;
+    }
+
+    log_debug("dom_comment_create_detached: created comment (tag=%s, content='%s')",
+              tag_name, comment_node->content);
+    return comment_node;
+}
+
 void dom_comment_destroy(DomComment* comment_node) {
     if (!comment_node) {
         return;
