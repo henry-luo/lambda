@@ -327,6 +327,7 @@ struct DomComment : public DomNode {
  * @return New backed DomComment or NULL on failure
  */
 DomComment* dom_comment_create(Element* native_element, DomElement* parent_element);
+DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc);
 
 /**
  * Destroy a DomComment node

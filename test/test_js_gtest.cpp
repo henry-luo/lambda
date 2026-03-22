@@ -369,6 +369,10 @@ TEST(JavaScriptTests, test_dom_style) {
     test_js_dom_script_against_file("test/js/dom_style.js", "test/js/dom_style.html", "test/js/dom_style.txt");
 }
 
+TEST(JavaScriptTests, test_dom_v12b) {
+    test_js_dom_script_against_file("test/js/dom_v12b.js", "test/js/dom_v12b.html", "test/js/dom_v12b.txt");
+}
+
 // v5 coverage tests: implemented but previously untested features
 TEST(JavaScriptTests, test_switch_statement) {
     test_js_script_against_file("test/js/switch_statement.js", "test/js/switch_statement.txt");
