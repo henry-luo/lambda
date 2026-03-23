@@ -526,6 +526,9 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 #   5. LTO enabled (-flto)
 release: build-release
 
+prepare-release:
+	@bash utils/prepare_release.sh
+
 build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
