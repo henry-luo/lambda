@@ -1436,8 +1436,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         g_render_setup_font_count++;
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
+    // Skip legacy render_list_bullet when a ::marker pseudo-element exists,
+    // since render_marker_view will handle it during child traversal.
     if (block->view_type == RDT_VIEW_LIST_ITEM) {
-        render_list_bullet(rdcon, block);
+        DomElement* li_elem = (DomElement*)block;
+        if (!li_elem->pseudo || !li_elem->pseudo->marker) {
+            render_list_bullet(rdcon, block);
+        }
     }
     if (block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
