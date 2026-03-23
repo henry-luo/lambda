@@ -114,31 +114,69 @@ static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
 }
 
 // draw a color glyph bitmap (BGRA format, used for color emoji) into the doc surface
+// supports bitmap_scale for fixed-size bitmap fonts (e.g. emoji at 109ppem → 16px)
 void draw_color_glyph(RenderContext* rdcon, GlyphBitmap *bitmap, int x, int y) {
+    float bscale = bitmap->bitmap_scale;
+    if (bscale <= 0.0f) bscale = 1.0f;
+
+    // target dimensions after scaling
+    int target_w = (int)(bitmap->width  * bscale + 0.5f);
+    int target_h = (int)(bitmap->height * bscale + 0.5f);
+    if (target_w <= 0 || target_h <= 0) return;
+
     int left = max(rdcon->block.clip.left, x);
-    int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
+    int right = min(rdcon->block.clip.right, x + target_w);
     int top = max(rdcon->block.clip.top, y);
-    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->height);
+    int bottom = min(rdcon->block.clip.bottom, y + target_h);
     if (left >= right || top >= bottom) return; // glyph outside the surface
+
     ImageSurface* surface = rdcon->ui_context->surface;
-    for (int i = top - y; i < bottom - y; i++) {
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
-        uint8_t* glyph_row = bitmap->buffer + i * bitmap->pitch;
-        for (int j = left - x; j < right - x; j++) {
-            if (x + j < 0 || x + j >= surface->width) continue;
-            // BGRA format: Blue, Green, Red, Alpha (4 bytes per pixel)
-            uint8_t* src = glyph_row + j * 4;
-            uint8_t src_b = src[0], src_g = src[1], src_r = src[2], src_a = src[3];
+    float inv_scale = 1.0f / bscale; // map target pixels back to source pixels
+
+    for (int dy = top - y; dy < bottom - y; dy++) {
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + dy) * surface->pitch;
+        // map target row to source row with bilinear interpolation
+        float src_y = dy * inv_scale;
+        int sy0 = (int)src_y;
+        int sy1 = sy0 + 1;
+        float fy = src_y - sy0;
+        if (sy0 >= (int)bitmap->height) sy0 = bitmap->height - 1;
+        if (sy1 >= (int)bitmap->height) sy1 = bitmap->height - 1;
+
+        for (int dx = left - x; dx < right - x; dx++) {
+            if (x + dx < 0 || x + dx >= surface->width) continue;
+
+            float src_x = dx * inv_scale;
+            int sx0 = (int)src_x;
+            int sx1 = sx0 + 1;
+            float fx = src_x - sx0;
+            if (sx0 >= (int)bitmap->width) sx0 = bitmap->width - 1;
+            if (sx1 >= (int)bitmap->width) sx1 = bitmap->width - 1;
+
+            // bilinear sample from BGRA source
+            uint8_t* s00 = bitmap->buffer + sy0 * bitmap->pitch + sx0 * 4;
+            uint8_t* s10 = bitmap->buffer + sy0 * bitmap->pitch + sx1 * 4;
+            uint8_t* s01 = bitmap->buffer + sy1 * bitmap->pitch + sx0 * 4;
+            uint8_t* s11 = bitmap->buffer + sy1 * bitmap->pitch + sx1 * 4;
+
+            float w00 = (1 - fx) * (1 - fy);
+            float w10 = fx * (1 - fy);
+            float w01 = (1 - fx) * fy;
+            float w11 = fx * fy;
+
+            uint8_t src_b = (uint8_t)(s00[0]*w00 + s10[0]*w10 + s01[0]*w01 + s11[0]*w11 + 0.5f);
+            uint8_t src_g = (uint8_t)(s00[1]*w00 + s10[1]*w10 + s01[1]*w01 + s11[1]*w11 + 0.5f);
+            uint8_t src_r = (uint8_t)(s00[2]*w00 + s10[2]*w10 + s01[2]*w01 + s11[2]*w11 + 0.5f);
+            uint8_t src_a = (uint8_t)(s00[3]*w00 + s10[3]*w10 + s01[3]*w01 + s11[3]*w11 + 0.5f);
+
             if (src_a > 0) {
-                uint8_t* dst = (uint8_t*)(row_pixels + (x + j) * 4);
+                uint8_t* dst = (uint8_t*)(row_pixels + (x + dx) * 4);
                 if (src_a == 255) {
-                    // fully opaque - just copy
                     dst[0] = src_r;  // our surface is RGBA
                     dst[1] = src_g;
                     dst[2] = src_b;
                     dst[3] = 255;
                 } else {
-                    // alpha blend
                     uint32_t inv_alpha = 255 - src_a;
                     dst[0] = (dst[0] * inv_alpha + src_r * src_a) / 255;
                     dst[1] = (dst[1] * inv_alpha + src_g * src_a) / 255;

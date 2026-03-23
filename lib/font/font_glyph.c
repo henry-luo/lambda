@@ -117,13 +117,14 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     }
 
     FT_GlyphSlot slot = face->glyph;
+    float bscale = handle->bitmap_scale;  // 1.0 for scalable fonts, <1 for fixed-size bitmap fonts
     info.id        = char_index;
-    info.advance_x = (slot->advance.x / 64.0f) / pixel_ratio;
-    info.advance_y = (slot->advance.y / 64.0f) / pixel_ratio;
-    info.bearing_x = (slot->metrics.horiBearingX / 64.0f) / pixel_ratio;
-    info.bearing_y = (slot->metrics.horiBearingY / 64.0f) / pixel_ratio;
-    info.width     = (int)(slot->metrics.width  / 64.0f);
-    info.height    = (int)(slot->metrics.height / 64.0f);
+    info.advance_x = (slot->advance.x / 64.0f) * bscale / pixel_ratio;
+    info.advance_y = (slot->advance.y / 64.0f) * bscale / pixel_ratio;
+    info.bearing_x = (slot->metrics.horiBearingX / 64.0f) * bscale / pixel_ratio;
+    info.bearing_y = (slot->metrics.horiBearingY / 64.0f) * bscale / pixel_ratio;
+    info.width     = (int)(slot->metrics.width  / 64.0f * bscale);
+    info.height    = (int)(slot->metrics.height / 64.0f * bscale);
     info.is_color  = (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
 
     // cache the advance (with size limit)
@@ -248,8 +249,9 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     bmp->width     = slot->bitmap.width;
     bmp->height    = slot->bitmap.rows;
     bmp->pitch     = slot->bitmap.pitch;
-    bmp->bearing_x = slot->bitmap_left;
-    bmp->bearing_y = slot->bitmap_top;
+    bmp->bearing_x = (int)(slot->bitmap_left * handle->bitmap_scale);
+    bmp->bearing_y = (int)(slot->bitmap_top  * handle->bitmap_scale);
+    bmp->bitmap_scale = handle->bitmap_scale;
     bmp->mode      = mode;
 
     // map FreeType pixel_mode to our GlyphPixelMode enum
@@ -297,13 +299,15 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 static LoadedGlyph s_loaded_glyph;
 
 // fill the static LoadedGlyph from an FT_GlyphSlot
-static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot) {
+// bitmap_scale: for fixed-size bitmap fonts (e.g. emoji at 109ppem scaled to 16px), <1.0
+static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot, float bitmap_scale) {
     s_loaded_glyph.bitmap.buffer    = slot->bitmap.buffer;
     s_loaded_glyph.bitmap.width     = slot->bitmap.width;
     s_loaded_glyph.bitmap.height    = slot->bitmap.rows;
     s_loaded_glyph.bitmap.pitch     = slot->bitmap.pitch;
-    s_loaded_glyph.bitmap.bearing_x = slot->bitmap_left;
-    s_loaded_glyph.bitmap.bearing_y = slot->bitmap_top;
+    s_loaded_glyph.bitmap.bearing_x = (int)(slot->bitmap_left * bitmap_scale);
+    s_loaded_glyph.bitmap.bearing_y = (int)(slot->bitmap_top  * bitmap_scale);
+    s_loaded_glyph.bitmap.bitmap_scale = bitmap_scale;
     s_loaded_glyph.bitmap.mode      = GLYPH_RENDER_NORMAL;
     switch (slot->bitmap.pixel_mode) {
         case FT_PIXEL_MODE_MONO: s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_MONO; break;
@@ -311,8 +315,8 @@ static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot) {
         case FT_PIXEL_MODE_LCD:  s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_LCD;  break;
         default:                 s_loaded_glyph.bitmap.pixel_mode = GLYPH_PIXEL_GRAY;  break;
     }
-    s_loaded_glyph.advance_x = slot->advance.x / 64.0f;
-    s_loaded_glyph.advance_y = slot->advance.y / 64.0f;
+    s_loaded_glyph.advance_x = slot->advance.x / 64.0f * bitmap_scale;
+    s_loaded_glyph.advance_y = slot->advance.y / 64.0f * bitmap_scale;
     return &s_loaded_glyph;
 }
 
@@ -325,7 +329,7 @@ static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_I
     if (idx == 0) return NULL;
     FT_Error err = FT_Load_Glyph(face, idx, load_flags);
     if (err) return NULL;
-    return fill_loaded_glyph_from_slot(face->glyph);
+    return fill_loaded_glyph_from_slot(face->glyph, h->bitmap_scale);
 }
 
 // fill font metrics fields on the loaded glyph from the given handle

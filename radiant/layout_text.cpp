@@ -741,11 +741,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
             if (ginfo.id == 0) {
-                fprintf(stderr, "Could not load character (codepoint: %u)\n", codepoint);
-                return RDT_LINE_NOT_FILLED;
+                // glyph not in primary font — estimate width as 1em for lookahead
+                // (actual layout uses font_load_glyph which does fallback)
+                text_width += lycon->font.current_font_size;
+            } else {
+                // CSS Fonts 3: small-caps lowercase chars use ~0.7x font size
+                text_width += ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f);
             }
-            // CSS Fonts 3: small-caps lowercase chars use ~0.7x font size
-            text_width += ginfo.advance_x * (is_small_caps_lower ? 0.7f : 1.0f);
         }
         // CSS 2.1 §16.4: letter-spacing is added after every character
         // Browsers include trailing letter-spacing in text width (getBoundingClientRect)

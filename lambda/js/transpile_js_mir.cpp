@@ -10670,28 +10670,34 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Set up MIR transpiler
-    JsMirTranspiler mt;
-    memset(&mt, 0, sizeof(mt));
-    mt.tp = tp;
-    mt.ctx = ctx;
-    mt.import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
+    // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
+    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    if (!mt) {
+        log_error("js-mir: failed to allocate JsMirTranspiler");
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
         js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
-    mt.local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
-    mt.var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
         js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
-    mt.scope_depth = 0;
-    mt.collect_parent_func_index = -1;
-    mt.scope_env_reg = 0;
-    mt.scope_env_slot_count = 0;
-    mt.current_func_index = -1;
+    mt->scope_depth = 0;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
 
     // Create module
-    mt.module = MIR_new_module(ctx, "js_script");
+    mt->module = MIR_new_module(ctx, "js_script");
 
     // Transpile AST to MIR
-    transpile_js_mir_ast(&mt, js_ast);
+    transpile_js_mir_ast(mt, js_ast);
 
 #ifndef NDEBUG
     // Dump MIR for debugging
@@ -10713,12 +10719,13 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 
     if (!js_main) {
         log_error("js-mir: failed to find js_main");
-        hashmap_free(mt.import_cache);
-        hashmap_free(mt.local_funcs);
-        if (mt.widen_to_float) hashmap_free(mt.widen_to_float);
-        for (int i = 0; i <= mt.scope_depth; i++) {
-            if (mt.var_scopes[i]) hashmap_free(mt.var_scopes[i]);
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
         }
+        free(mt);
         MIR_finish(ctx);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -10788,13 +10795,14 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     context = old_context;
 
     // Cleanup
-    hashmap_free(mt.import_cache);
-    hashmap_free(mt.local_funcs);
-    if (mt.widen_to_float) hashmap_free(mt.widen_to_float);
-    if (mt.module_consts) hashmap_free(mt.module_consts);
-    for (int i = 0; i <= mt.scope_depth; i++) {
-        if (mt.var_scopes[i]) hashmap_free(mt.var_scopes[i]);
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->local_funcs);
+    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+    if (mt->module_consts) hashmap_free(mt->module_consts);
+    for (int i = 0; i <= mt->scope_depth; i++) {
+        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
+    free(mt);
     MIR_finish(ctx);
     js_transpiler_destroy(tp);
 

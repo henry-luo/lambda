@@ -62,6 +62,10 @@ static void face_cache_free(void* item) {
 // ============================================================================
 
 static const char* default_fallback_fonts[] = {
+    "Noto Color Emoji",     // Emoji — Linux / cross-platform (before text fonts
+                            // so emoji codepoints get color glyphs, not mono outlines)
+    "Apple Color Emoji",    // Emoji — macOS
+    "Segoe UI Emoji",       // Emoji — Windows
     "Liberation Sans",
     "DejaVu Sans",
     "Helvetica",

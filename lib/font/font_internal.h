@@ -89,6 +89,7 @@ struct FontHandle {
     // font info
     float       size_px;                // requested size in CSS pixels
     float       physical_size_px;       // size * pixel_ratio (actual FreeType size)
+    float       bitmap_scale;           // scale factor for fixed-size bitmap fonts (target/actual ppem), 1.0 for scalable fonts
     FontWeight  weight;
     FontSlant   slant;
     char*       family_name;            // arena-allocated

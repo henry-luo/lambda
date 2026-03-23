@@ -19,7 +19,10 @@ char* load_font_path(FontContext *font_ctx, const char* font_name);
 void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
-    "Apple Color Emoji", // Emoji - macOS native (must be first for color emoji support)
+    "Noto Color Emoji",  // Emoji — Linux / cross-platform (before text fonts
+                         // so emoji codepoints get color glyphs, not mono outlines)
+    "Apple Color Emoji", // Emoji — macOS native
+    "Segoe UI Emoji",    // Emoji — Windows
     "PingFang SC", // Chinese (Simplified), partial Japanese and Korean - macOS native
     "Heiti SC", // Chinese (Simplified) additional fallback
     "Hiragino Sans", // Japanese font with good Unicode coverage

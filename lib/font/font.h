@@ -179,6 +179,7 @@ typedef struct GlyphBitmap {
     int      pitch;             // bytes per row
     int      bearing_x;        // left offset from pen position
     int      bearing_y;         // top offset from baseline
+    float    bitmap_scale;      // scale factor for fixed-size bitmap fonts (e.g. emoji), 1.0 for scalable
     GlyphRenderMode mode;
     GlyphPixelMode  pixel_mode; // actual pixel format of buffer data
 } GlyphBitmap;

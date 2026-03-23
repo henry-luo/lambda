@@ -622,11 +622,15 @@ class PremakeGenerator:
                 ])
         elif self.use_windows_config:
             self.premake_content.extend([
-                '        -- Windows: strip dead code with LTO',
+                '        -- Windows: strip dead code with LTO + platform flags',
                 '        linkoptions {',
                 '            "-flto",',
                 '            "-Wl,--gc-sections",',
                 '            "-s",  -- Strip symbols',
+                '            "-Wl,--stack,8388608",  -- 8 MB stack (match debug config)',
+                '            "-Wl,--subsystem,console",',
+                '            "-static-libgcc",',
+                '            "-static-libstdc++",',
                 '        }',
             ])
 

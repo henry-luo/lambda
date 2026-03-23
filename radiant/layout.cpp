@@ -705,9 +705,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
                 line_height, lycon->line.max_ascender, item_baseline, lycon->line.vertical_align_offset);
+            const unsigned char* td = text_view->text_data();
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
-                rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
-                rect->length, text_view->text_data() + rect->start_index);
+                (int)rect->y, (int)lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
+                rect->length, td ? td + rect->start_index : (const unsigned char*)"(null)");
             // CSS 2.1 §10.8.1: Content area may overflow the line box when
             // line-height < content-height (negative half-leading). Allow negative
             // offsets so the content area extends above the line box top.
@@ -1383,7 +1384,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("layout unknown node type: %d", node->node_type);
         // skip the node
     }
-    log_debug("end flow node, block advance_y: %d", lycon->block.advance_y);
+    log_debug("end flow node, block advance_y: %.0f", lycon->block.advance_y);
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {

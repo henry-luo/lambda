@@ -1651,13 +1651,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     int detected_version = HTML4_01_TRANSITIONAL;  // Default to quirks mode
     if (input) {
         detected_version = detect_html_version_from_lambda_element(nullptr, input);
-        log_debug("[Lambda CSS] Detected HTML version: %d", detected_version);
     }
     log_debug("Parsed HTML root element");
     log_root_item((Item){.element = html_root});
 
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
-    log_debug("Building DomElement tree with Lambda backing (input=%p)!!!", (void*)input);
     DomDocument* dom_doc = dom_document_create(input);
     if (!dom_doc) {
         log_error("Failed to create DomDocument");
@@ -1684,28 +1682,14 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         }
     }
 
-    log_debug("[DOM] About to call build_dom_tree_from_element, html_root=%p, length=%lld",
-             (void*)html_root, (long long)html_root->length);
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
         log_error("Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
         return nullptr;
     }
-    log_debug("[DOM] dom_root=%p, first_child=%p, tag=%s",
-             (void*)dom_root, (void*)dom_root->first_child, dom_root->tag_name);
 
     auto t_dom = high_resolution_clock::now();
-    log_info("[TIMING] load: build DOM tree: %.1fms", duration<double, std::milli>(t_dom - t_debug).count());
-
-    log_debug("Built DomElement tree: root=%p, backed=%s",
-              (void*)dom_root,
-              (dom_root->native_element && dom_root->doc) ? "YES" : "NO");
-
-    // Step 2b: Parse CSS before scripts (so getComputedStyle can query styles)
-    // CSS parsing is moved before script execution. The cascade (applying rules
-    // to elements) still happens AFTER scripts, so JS DOM mutations (className
-    // changes, appendChild, etc.) are reflected in the final styles.
 
     // Initialize CSS engine
     CssEngine* css_engine = css_engine_create(pool);
@@ -1747,10 +1731,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     }
 
     // Extract and parse <style> elements
-    log_debug("[Lambda CSS] Extracting inline <style> elements...");
     int inline_stylesheet_count = 0;
     const char* css_base_path = url_get_href(html_url);
-    log_debug("[Lambda CSS] Using base path for CSS: %s", css_base_path);
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
         html_root, css_engine, css_base_path, pool, &inline_stylesheet_count);
 
@@ -1792,7 +1774,6 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // via dom_element_apply_inline_style with a later source_order, so they
     // correctly override the original HTML inline styles in the cascade.
     // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
-    log_debug("[Lambda CSS] Applying inline style attributes (before scripts)...");
     apply_inline_styles_to_tree(dom_root, html_root, pool);
 
     // Step 2d: Execute inline <script> elements and body onload handlers
@@ -1804,13 +1785,8 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     execute_document_scripts(html_root, dom_doc, pool);
 
     auto t_scripts = high_resolution_clock::now();
-    log_info("[TIMING] load: execute scripts: %.1fms", duration<double, std::milli>(t_scripts - t_dom).count());
 
     // Step 6: Apply CSS cascade (external + <style> elements)
-    log_debug("[Lambda CSS] Applying CSS cascade...");
-    log_debug("[Lambda CSS] inline_stylesheet_count = %d", inline_stylesheet_count);
-    log_debug("[Lambda CSS] external_stylesheet = %p, rule_count = %d",
-              external_stylesheet, external_stylesheet ? external_stylesheet->rule_count : -1);
     SelectorMatcher* matcher = selector_matcher_create(pool);
 
     auto t_cascade_start = high_resolution_clock::now();
@@ -3105,12 +3081,19 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 1: Use the Lambda LaTeX package to convert LaTeX → HTML
     // Build a Lambda script that imports the LaTeX package and renders to HTML
+    // Normalize backslashes to forward slashes so the path is safe inside a Lambda string literal
+    char safe_path[1024];
+    snprintf(safe_path, sizeof(safe_path), "%s", latex_filepath);
+    for (char* p = safe_path; *p; p++) {
+        if (*p == '\\') *p = '/';
+    }
+
     char script_buf[4096];
     snprintf(script_buf, sizeof(script_buf),
         "import latex: lambda.package.latex.latex\n"
         "let ast^err = input(\"%s\", {type: \"latex\"})\n"
         "latex.render(ast, {standalone: true})\n",
-        latex_filepath);
+        safe_path);
 
     // Run the script in-memory (no temp file needed)
     Runtime latex_runtime;
