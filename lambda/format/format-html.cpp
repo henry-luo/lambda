@@ -5,6 +5,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
+#include "../../radiant/symbol_resolver.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
@@ -381,11 +382,18 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
         }
     }
     else if (item.isSymbol()) {
-        // Symbol items represent HTML entities like &copy;, &mdash;, etc.
-        // Format them back as entity references for proper roundtrip
+        // Symbol items represent HTML entities or emoji shortcodes.
+        // Resolve to determine type: emojis get UTF-8 output, HTML entities get &name; references.
         Symbol* sym = item.asSymbol();
         if (sym && sym->chars) {
-            stringbuf_append_format(ctx.output(), "&%.*s;", (int)sym->len, sym->chars);
+            SymbolResolution resolved = resolve_symbol(sym->chars, sym->len);
+            if (resolved.type == SYMBOL_EMOJI && resolved.utf8) {
+                // emit actual UTF-8 emoji character
+                stringbuf_append_str(ctx.output(), resolved.utf8);
+            } else {
+                // HTML entity reference for proper roundtrip
+                stringbuf_append_format(ctx.output(), "&%.*s;", (int)sym->len, sym->chars);
+            }
         }
     }
     else if (item.isArray()) {

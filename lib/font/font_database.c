@@ -1004,7 +1004,25 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
     FontEntry* best_font = NULL;
 
     if (family && family->fonts) {
+        // lazy-parse any remaining placeholders in this family so we get
+        // accurate weight/style from the OS/2 table before scoring
+        bool reorganize_needed = false;
         for (int i = 0; i < family->fonts->length; i++) {
+            FontEntry* e = (FontEntry*)family->fonts->data[i];
+            if (!e || !e->is_placeholder) continue;
+            if (e->format == FONT_FORMAT_TTC) {
+                parse_ttc_font_metadata(e->file_path, db, db->arena);
+            } else {
+                parse_placeholder_font(e, db->arena);
+            }
+            reorganize_needed = true;
+        }
+        if (reorganize_needed) {
+            organize_fonts_into_families(db);
+            // re-fetch family after re-organization (pointers may have changed)
+            family = (FontFamily*)hashmap_get(db->families, &search_fam);
+        }
+        for (int i = 0; family && i < family->fonts->length; i++) {
             FontEntry* e = (FontEntry*)family->fonts->data[i];
             if (!e) continue;
             float score = calculate_match_score(e, criteria);

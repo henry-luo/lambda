@@ -493,10 +493,11 @@ cleanup_intermediate_files() {
     # Clean object files but keep static libraries
     find . -name "*.o" -type f -delete 2>/dev/null || true
 
-    # Clean dependency build files but keep the built libraries
-    if [ -d "build_temp" ]; then
-        rm -rf build_temp/
-    fi
+    # Clean dependency build files but keep source and built libraries
+    # Note: build_temp/re2-noabsl is needed at build time (Makefile references it)
+    # Only clean cmake/meson build caches, not source trees
+    rm -rf build_temp/mbedtls-*/build 2>/dev/null || true
+    rm -f  build_temp/mbedtls-*.tar.bz2 2>/dev/null || true
 
     echo "Cleanup completed."
 }
@@ -517,8 +518,13 @@ build_thorvg_v1_0_pre34_for_linux() {
     # Use mac-deps/thorvg source (already at v1.0-pre34, same as Mac)
     local THORVG_SRC="$SCRIPT_DIR/mac-deps/thorvg"
     if [ ! -d "$THORVG_SRC" ]; then
-        echo "❌ mac-deps/thorvg source not found - run setup-mac-deps.sh first or clone manually"
-        return 1
+        echo "mac-deps/thorvg source not found - cloning ThorVG v1.0-pre34..."
+        mkdir -p "$SCRIPT_DIR/mac-deps"
+        if ! git clone --depth 1 --branch v1.0-pre34 https://github.com/thorvg/thorvg.git "$THORVG_SRC"; then
+            echo "❌ Failed to clone ThorVG v1.0-pre34"
+            return 1
+        fi
+        echo "✅ ThorVG v1.0-pre34 cloned to mac-deps/thorvg"
     fi
 
     # Verify the source is at the right tag
@@ -914,8 +920,13 @@ build_re2_for_linux() {
     fi
 
     if [ ! -d "$RE2_SRC" ]; then
-        echo "❌ RE2 source not found at $RE2_SRC"
-        return 1
+        echo "RE2 source not found - cloning RE2 (no-abseil version)..."
+        mkdir -p build_temp
+        if ! git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git "$RE2_SRC"; then
+            echo "❌ Failed to clone RE2"
+            return 1
+        fi
+        echo "✅ RE2 (2023-03-01, no-abseil) cloned to $RE2_SRC"
     fi
 
     echo "Building RE2 from $RE2_SRC..."
@@ -1003,7 +1014,7 @@ if ! is_elf_archive "lambda/tree-sitter/libtree-sitter.a"; then
         cd lambda/tree-sitter
         rm -f libtree-sitter.a tree_sitter.o
         cc -c lib/src/lib.c \
-            -Ilib/include \
+            -Ilib/include -Ilib/src \
             -O3 -Wall -Wextra -std=c11 -fPIC \
             -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
             -o tree_sitter.o
@@ -1024,7 +1035,7 @@ if ! is_elf_archive "lambda/tree-sitter-lambda/libtree-sitter-lambda.a"; then
         echo "Building tree-sitter-lambda for Linux..."
         cd lambda/tree-sitter-lambda
         make clean || true
-        make libtree-sitter-lambda.a
+        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-lambda.a
         cd - > /dev/null
         echo "Tree-sitter-lambda built successfully"
     else
@@ -1051,7 +1062,7 @@ if ! is_elf_archive "lambda/tree-sitter-javascript/libtree-sitter-javascript.a";
             fi
         fi
 
-        make libtree-sitter-javascript.a
+        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-javascript.a
         cd - > /dev/null
         echo "Tree-sitter-javascript built successfully"
     else
@@ -1078,7 +1089,7 @@ if ! is_elf_archive "lambda/tree-sitter-latex/libtree-sitter-latex.a"; then
             fi
         fi
 
-        make libtree-sitter-latex.a
+        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-latex.a
         cd - > /dev/null
         echo "Tree-sitter-latex built successfully"
     else
@@ -1095,7 +1106,7 @@ if ! is_elf_archive "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a";
         cd lambda/tree-sitter-latex-math
         make clean || true
 
-        make libtree-sitter-latex-math.a
+        make TS="npx tree-sitter-cli@0.24.7" libtree-sitter-latex-math.a
         cd - > /dev/null
         echo "Tree-sitter-latex-math built successfully"
     else

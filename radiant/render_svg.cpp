@@ -213,11 +213,18 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         color_str);
 
     // Add font style attributes
-    if (ctx->font.style->font_weight != CSS_VALUE_NORMAL && ctx->font.style->font_weight != 400) {
-        if (ctx->font.style->font_weight >= 700) {
-            strbuf_append_str(ctx->svg_content, " font-weight=\"bold\"");
-        } else {
-            strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", ctx->font.style->font_weight);
+    // Use font_weight_numeric (100-900) when available, otherwise map CssEnum keyword
+    {
+        int weight = 0;
+        if (ctx->font.style->font_weight_numeric > 0) {
+            weight = ctx->font.style->font_weight_numeric;
+        } else if (ctx->font.style->font_weight == CSS_VALUE_BOLD || ctx->font.style->font_weight == CSS_VALUE_BOLDER) {
+            weight = 700;
+        } else if (ctx->font.style->font_weight == CSS_VALUE_LIGHTER) {
+            weight = 300;
+        }
+        if (weight > 0 && weight != 400) {
+            strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", weight);
         }
     }
 
