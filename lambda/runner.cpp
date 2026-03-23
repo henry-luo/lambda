@@ -14,14 +14,14 @@
 // (package/, input/).
 //
 //   Dev default  : "./lambda"   (assets live next to source)
-//   Release      : "./lmd"      (set via LAMBDA_HOME_DEFAULT compile flag,
+//   Release      : "./lmd"      (set via -DLAMBDA_HOME_RELEASE compile flag,
 //                                or override at runtime with LAMBDA_HOME env var)
 //
 // The name "lmd" avoids a name clash between the lambda executable and a
 // directory of the same name on macOS/Linux.
 
-#ifdef LAMBDA_HOME_DEFAULT
-const char* g_lambda_home = LAMBDA_HOME_DEFAULT;
+#ifdef LAMBDA_HOME_RELEASE
+const char* g_lambda_home = "./lmd";
 #else
 const char* g_lambda_home = "./lambda";
 #endif

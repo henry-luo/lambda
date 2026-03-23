@@ -13,6 +13,12 @@ cd "$PROJECT_ROOT"
 
 echo "==> Preparing Lambda release..."
 
+# Clear the release directory before copying fresh files
+echo "==> Clearing ./release/ directory..."
+rm -rf ./release
+mkdir -p ./release
+echo "    Cleared ./release/"
+
 # Runtime assets are copied to ./release/lmd/ (not ./release/lambda/) to avoid a name clash
 # between the lambda executable and a directory of the same name on macOS/Linux.
 

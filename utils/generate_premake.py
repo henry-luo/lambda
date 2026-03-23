@@ -576,7 +576,8 @@ class PremakeGenerator:
         lto_flag = '"-flto=thin"' if (self.use_macos_config or linux_uses_clang) else '"-flto"'
         self.premake_content.extend([
             '    filter "configurations:release"',
-            '        defines { "NDEBUG" }',
+            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE" }',
+            '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
             '        optimize "On"',
             f'        -- Dead code elimination and LTO',
