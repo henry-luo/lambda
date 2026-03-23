@@ -2802,8 +2802,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Step 4: Load markdown.css stylesheet
-    // Determine the path to markdown.css (relative to executable)
-    const char* css_filename = "lambda/input/markdown.css";
+    // Determine the path to markdown.css (relative to lambda home)
+    char* css_filename = lambda_home_path("input/markdown.css");
     log_debug("[Lambda Markdown] Loading default markdown stylesheet: %s", css_filename);
 
     CssStylesheet* markdown_stylesheet = nullptr;
@@ -2828,6 +2828,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
         log_warn("Failed to load markdown.css file: %s", css_filename);
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
+    free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -3021,8 +3022,8 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
 
     // Step 4: Load wiki.css stylesheet
-    // Determine the path to wiki.css (relative to executable)
-    const char* css_filename = "lambda/input/wiki.css";
+    // Determine the path to wiki.css (relative to lambda home)
+    char* css_filename = lambda_home_path("input/wiki.css");
     log_debug("[Lambda Wiki] Loading default wiki stylesheet: %s", css_filename);
 
     CssStylesheet* wiki_stylesheet = nullptr;
@@ -3047,6 +3048,7 @@ DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_heigh
         log_warn("Failed to load wiki.css file: %s", css_filename);
         log_warn("Continuing without stylesheet - wiki will use browser defaults");
     }
+    free(css_filename);
 
     auto step3_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
@@ -3187,7 +3189,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     // Step 5: Load LaTeX.css stylesheet (if it exists)
     // LaTeX to HTML conversion may embed styles, but we can provide default styling
-    const char* css_filename = "lambda/input/latex/css/article.css";
+    char* css_filename = lambda_home_path("input/latex/css/article.css");
     log_debug("[Lambda LaTeX] Loading default LaTeX stylesheet: %s", css_filename);
 
     CssStylesheet* latex_stylesheet = nullptr;
@@ -3211,9 +3213,10 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     } else {
         log_debug("No latex.css file found, LaTeX HTML will use embedded and inline styles");
     }
+    free(css_filename);
 
     // Load KaTeX font stylesheet for math rendering (@font-face declarations for KaTeX_Size1-4 etc.)
-    const char* katex_css_filename = "lambda/input/latex/css/katex.css";
+    char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
     CssStylesheet* katex_stylesheet = nullptr;
     char* katex_css_content = read_text_file(katex_css_filename);
     if (katex_css_content) {
@@ -3231,6 +3234,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
             free(katex_css_content);
         }
     }
+    free(katex_css_filename);
 
     // Step 6: Extract and parse any inline <style> elements from HTML
     log_debug("[Lambda LaTeX] Extracting inline <style> elements from LaTeX-generated HTML...");

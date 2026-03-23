@@ -437,7 +437,8 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
     }
 
     const char* data_file = nullptr;
-    const char* schema_file = nullptr;  // Will be determined based on format
+    char* schema_file = nullptr;  // Will be determined based on format
+    bool schema_file_allocated = false;  // true when schema_file was malloc'd via lambda_home_path()
     const char* input_format = nullptr;  // Auto-detect by default
     bool schema_explicitly_set = false;
 
@@ -547,16 +548,20 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
             schema_file = nullptr;
             printf("Using AST-based validation for Lambda file\n");
         } else if (input_format && strcmp(input_format, "html") == 0) {
-            schema_file = "lambda/input/html5_schema.ls";
+            schema_file = lambda_home_path("input/html5_schema.ls");
+            schema_file_allocated = true;
             printf("Using HTML5 schema for HTML input\n");
         } else if (input_format && strcmp(input_format, "eml") == 0) {
-            schema_file = "lambda/input/eml_schema.ls";
+            schema_file = lambda_home_path("input/eml_schema.ls");
+            schema_file_allocated = true;
             printf("Using EML schema for email input\n");
         } else if (input_format && strcmp(input_format, "ics") == 0) {
-            schema_file = "lambda/input/ics_schema.ls";
+            schema_file = lambda_home_path("input/ics_schema.ls");
+            schema_file_allocated = true;
             printf("Using ICS schema for calendar input\n");
         } else if (input_format && strcmp(input_format, "vcf") == 0) {
-            schema_file = "lambda/input/vcf_schema.ls";
+            schema_file = lambda_home_path("input/vcf_schema.ls");
+            schema_file_allocated = true;
             printf("Using VCF schema for vCard input\n");
         } else if (input_format && (strcmp(input_format, "asciidoc") == 0 ||
                                  strcmp(input_format, "man") == 0 ||
@@ -564,7 +569,8 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
                                  strcmp(input_format, "rst") == 0 ||
                                  strcmp(input_format, "textile") == 0 ||
                                  strcmp(input_format, "wiki") == 0)) {
-            schema_file = "lambda/input/doc_schema.ls";
+            schema_file = lambda_home_path("input/doc_schema.ls");
+            schema_file_allocated = true;
             printf("Using document schema for %s input\n", input_format);
         } else if (!input_format || strcmp(input_format, "lambda") == 0) {
             // Default to AST validation for Lambda format
@@ -598,6 +604,8 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
     opts.disabled_rules = nullptr;
 
     ValidationResult* result = run_ast_validation(data_file, schema_file, input_format, &opts);
+
+    if (schema_file_allocated) { free(schema_file); schema_file = nullptr; }
 
     // Return the ValidationResult directly to the caller
     return result;

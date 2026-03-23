@@ -1,10 +1,50 @@
 #include <time.h>
 #include <stdlib.h>
+#include <string.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "../lib/file_utils.h"
+
+// ============================================================================
+// Lambda Home Path
+// ============================================================================
+// g_lambda_home is the directory containing Lambda's runtime assets
+// (package/, input/).
+//
+//   Dev default  : "./lambda"   (assets live next to source)
+//   Release      : "./lmd"      (set via LAMBDA_HOME_DEFAULT compile flag,
+//                                or override at runtime with LAMBDA_HOME env var)
+//
+// The name "lmd" avoids a name clash between the lambda executable and a
+// directory of the same name on macOS/Linux.
+
+#ifdef LAMBDA_HOME_DEFAULT
+const char* g_lambda_home = LAMBDA_HOME_DEFAULT;
+#else
+const char* g_lambda_home = "./lambda";
+#endif
+
+void lambda_home_init(void) {
+    const char* env = getenv("LAMBDA_HOME");
+    if (env && env[0]) {
+        g_lambda_home = env;
+    }
+}
+
+// Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().
+char* lambda_home_path(const char* rel) {
+    size_t home_len = strlen(g_lambda_home);
+    size_t rel_len  = strlen(rel);
+    char* out = (char*)malloc(home_len + 1 + rel_len + 1);
+    if (!out) return NULL;
+    memcpy(out, g_lambda_home, home_len);
+    out[home_len] = '/';
+    memcpy(out + home_len + 1, rel, rel_len + 1);
+    return out;
+}
+
 
 #if _WIN32
 #include <windows.h>

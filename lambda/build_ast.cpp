@@ -7222,14 +7222,40 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             strbuf_free(buf);
         }
         else {
-            // absolute import: resolve from CWD (project root)
+            // absolute import: resolve from lambda home (g_lambda_home).
+            // e.g. "lambda.package.chart.chart" →
+            //   dots → slashes: "lambda/package/chart/chart"
+            //   strip the first segment ("lambda") and replace with g_lambda_home:
+            //   "./lmd/package/chart/chart.ls"  (release)
+            //   "./lambda/package/chart/chart.ls"  (dev)
+            //
+            // The first segment of the module path is always "lambda" by convention
+            // (scripts write `import lambda.package.*`).  We strip it and prepend
+            // g_lambda_home so the same source works in both dev and release layouts.
             log_debug("absolute import: %.*s", (int)ast_node->module.length, ast_node->module.str);
             StrBuf* buf = strbuf_new();
+
+            // Convert dot-separated module name to a slash-separated path
             strbuf_append_format(buf, "./%.*s",
                 (int)ast_node->module.length, ast_node->module.str);
             char* ch = buf->str + 2;  // skip "./"
             while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
+
+            // Replace the first path segment ("lambda") with g_lambda_home.
+            // buf->str is "./lambda/…" — find the end of that first segment.
+            char* segment_end = strchr(buf->str + 2, '/');
+            if (segment_end) {
+                StrBuf* fixed = strbuf_new();
+                // skip leading "./" in g_lambda_home if present
+                const char* home = g_lambda_home;
+                if (home[0] == '.' && home[1] == '/') home += 2;
+                strbuf_append_str(fixed, "./");
+                strbuf_append_str(fixed, home);
+                strbuf_append_str(fixed, segment_end);  // "/package/…" remainder
+                strbuf_free(buf);
+                buf = fixed;
+            }
             ast_node->is_relative = false;
 
             #ifdef SIMPLE_SCHEMA_PARSER

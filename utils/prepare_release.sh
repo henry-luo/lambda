@@ -13,29 +13,32 @@ cd "$PROJECT_ROOT"
 
 echo "==> Preparing Lambda release..."
 
-# Step 1: Create release/lambda/input directory recursively
-echo "==> Creating release/lambda/input directory..."
-mkdir -p ./release/lambda/input
+# Runtime assets are copied to ./release/lmd/ (not ./release/lambda/) to avoid a name clash
+# between the lambda executable and a directory of the same name on macOS/Linux.
+
+# Step 1: Create release/lmd/input directory recursively
+echo "==> Creating release/lmd/input directory..."
+mkdir -p ./release/lmd/input
 
 # Step 2: Copy Lambda input files (*.ls and *.css)
 echo "==> Copying Lambda input files..."
 if ls ./lambda/input/*.ls >/dev/null 2>&1; then
-    cp ./lambda/input/*.ls ./release/lambda/input/
+    cp ./lambda/input/*.ls ./release/lmd/input/
     echo "    Copied *.ls files"
 fi
 
 if ls ./lambda/input/*.css >/dev/null 2>&1; then
-    cp ./lambda/input/*.css ./release/lambda/input/
+    cp ./lambda/input/*.css ./release/lmd/input/
     echo "    Copied *.css files"
 fi
 
 # Step 2b: Copy LaTeX CSS files
-echo "==> Creating release/lambda/input/latex/css directory..."
-mkdir -p ./release/lambda/input/latex/css
+echo "==> Creating release/lmd/input/latex/css directory..."
+mkdir -p ./release/lmd/input/latex/css
 
 echo "==> Copying LaTeX CSS files..."
 if ls ./lambda/input/latex/css/*.css >/dev/null 2>&1; then
-    cp ./lambda/input/latex/css/*.css ./release/lambda/input/latex/css/
+    cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
     echo "    Copied LaTeX CSS files"
 fi
 
@@ -45,14 +48,14 @@ fi
 #   SansSerif, Script, Size1-4, Typewriter)
 # Copy the entire fonts directory to ensure all referenced assets are present.
 echo "==> Copying LaTeX fonts (Computer Modern + KaTeX)..."
-rm -rf ./release/lambda/input/latex/fonts
-cp -r ./lambda/input/latex/fonts ./release/lambda/input/latex/fonts
+rm -rf ./release/lmd/input/latex/fonts
+cp -r ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
 echo "    Copied lambda/input/latex/fonts/ (KaTeX woff2 + CMU woff subdirectories)"
 
 # Step 2d: Copy Lambda packages
 echo "==> Copying Lambda packages..."
-rm -rf ./release/lambda/package
-cp -r ./lambda/package ./release/lambda/package
+rm -rf ./release/lmd/package
+cp -r ./lambda/package ./release/lmd/package
 echo "    Copied lambda/package/ (chart, latex, math)"
 
 # Step 2c: Copy live-demo.html and referenced files
@@ -130,8 +133,16 @@ echo "==> Building release binary..."
 make build-release
 
 # Step 5: Copy lambda.exe to release directory
+# On macOS and Linux rename to 'lambda' (no .exe) to follow POSIX convention and
+# avoid a name clash between the executable and the lmd/ asset directory.
 echo "==> Copying lambda.exe to release directory..."
-cp ./lambda.exe ./release/
+if [[ "$OSTYPE" == "darwin"* ]] || [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    cp ./lambda.exe ./release/lambda
+    echo "    Copied lambda.exe as release/lambda"
+else
+    cp ./lambda.exe ./release/lambda.exe
+    echo "    Copied lambda.exe to release/"
+fi
 
 echo "==> Release preparation complete!"
 echo "    Release location: ./release/"

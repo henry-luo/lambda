@@ -59,6 +59,12 @@ struct Runtime {
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 extern bool g_dry_run;
 
+// Lambda home: directory containing runtime assets (package/, input/).
+// Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.
+extern const char* g_lambda_home;
+void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
+char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
+
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
