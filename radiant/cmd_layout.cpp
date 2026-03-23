@@ -2838,7 +2838,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     CssStylesheet* math_stylesheet = nullptr;
     CssStylesheet* katex_stylesheet = nullptr;
     {
-        const char* math_css_filename = "lambda/input/math.css";
+        char* math_css_filename = lambda_home_path("input/math.css");
         char* math_css_content = read_text_file(math_css_filename);
         if (math_css_content) {
             size_t math_css_len = strlen(math_css_content);
@@ -2855,8 +2855,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 free(math_css_content);
             }
         }
+        free(math_css_filename);
 
-        const char* katex_css_filename = "lambda/input/latex/css/katex.css";
+        char* katex_css_filename = lambda_home_path("input/latex/css/katex.css");
         char* katex_css_content = read_text_file(katex_css_filename);
         if (katex_css_content) {
             size_t katex_css_len = strlen(katex_css_content);
@@ -2873,6 +2874,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 free(katex_css_content);
             }
         }
+        free(katex_css_filename);
     }
 
     // Step 5: Apply CSS cascade to DOM tree
@@ -3752,7 +3754,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     if (!is_html_document) {
         // For non-HTML elements, load the default script.css
-        const char* css_filename = "lambda/input/script.css";
+        char* css_filename = lambda_home_path("input/script.css");
         log_debug("[Lambda Script] Loading default script stylesheet: %s", css_filename);
 
         char* css_content = read_text_file(css_filename);
@@ -3775,6 +3777,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         } else {
             log_debug("[Lambda Script] No script.css file found, using browser defaults");
         }
+        free(css_filename);
     } else {
         // For complete HTML documents, extract inline <style> elements
         log_debug("[Lambda Script] Skipping script.css for complete HTML document");
