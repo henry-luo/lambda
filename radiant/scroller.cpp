@@ -53,7 +53,8 @@ void ScrollPane::reset() {
 }
 
 void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
-    float content_width, float content_height, Bound* clip, float scale) {
+    float content_width, float content_height, Bound* clip, float scale,
+    bool show_hz_scroll, bool show_vt_scroll) {
     log_info("SCROLLPANE: content size: %.1f x %.1f, view bounds: %.1f x %.1f",
         content_width, content_height, block_bound->width, block_bound->height);
     log_debug("render scroller content size: %f x %f, blk bounds: %f x %f",
@@ -68,71 +69,75 @@ void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
     tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
     tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
 
-    // vertical scrollbar
+    // vertical scrollbar — only render if vertical overflow exists
     Tvg_Paint v_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(v_scrollbar, view_x + view_width - sc.SCROLLBAR_SIZE,
-        view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0, true);
-    log_debug("v_scrollbar rect: x %f, y %f, wd %f, hg %f",
-        view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
-    tvg_shape_set_fill_color(v_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
-    tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
-
     Tvg_Paint v_scroll_handle = tvg_shape_new();
-    if (content_height > 0) {
-        tvg_shape_set_fill_color(v_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
-        // NOTE: Do NOT recalculate v_max_scroll here!
-        // v_max_scroll is set by update_scroller() in CSS pixels, and is used by scroll event handlers
-        // which compare against scroll_position (also in CSS pixels).
-        // content_height and view_height here are in physical pixels (for rendering).
-        float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
-        log_debug("bar height: %f", bar_height);
-        float v_ratio = min(view_height * 100 / content_height, 100.0f);
-        float v_handle_height_phys = (v_ratio * bar_height) / 100;
-        v_handle_height_phys = max(sc.MIN_HANDLE_SIZE, v_handle_height_phys);
-        // v_scroll_position and v_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
-        float scroll_ratio = (sp->v_max_scroll > 0) ? (sp->v_scroll_position / sp->v_max_scroll) : 0;
-        float v_handle_y_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - v_handle_height_phys);
-        // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
-        sp->v_handle_height = v_handle_height_phys / scale;
-        sp->v_handle_y = v_handle_y_phys / scale;
-        float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + v_handle_y_phys,
-            sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
-        log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
-            v_scroll_x, view_y + v_handle_y_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys);
-        tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
+    if (show_vt_scroll) {
+        tvg_shape_append_rect(v_scrollbar, view_x + view_width - sc.SCROLLBAR_SIZE,
+            view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0, true);
+        log_debug("v_scrollbar rect: x %f, y %f, wd %f, hg %f",
+            view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
+        tvg_shape_set_fill_color(v_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
+        tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+        if (content_height > 0) {
+            tvg_shape_set_fill_color(v_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
+            // NOTE: Do NOT recalculate v_max_scroll here!
+            // v_max_scroll is set by update_scroller() in CSS pixels, and is used by scroll event handlers
+            // which compare against scroll_position (also in CSS pixels).
+            // content_height and view_height here are in physical pixels (for rendering).
+            float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
+            log_debug("bar height: %f", bar_height);
+            float v_ratio = min(view_height * 100 / content_height, 100.0f);
+            float v_handle_height_phys = (v_ratio * bar_height) / 100;
+            v_handle_height_phys = max(sc.MIN_HANDLE_SIZE, v_handle_height_phys);
+            // v_scroll_position and v_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
+            float scroll_ratio = (sp->v_max_scroll > 0) ? (sp->v_scroll_position / sp->v_max_scroll) : 0;
+            float v_handle_y_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_height - v_handle_height_phys);
+            // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
+            sp->v_handle_height = v_handle_height_phys / scale;
+            sp->v_handle_y = v_handle_y_phys / scale;
+            float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
+            tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + v_handle_y_phys,
+                sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
+            log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
+                v_scroll_x, view_y + v_handle_y_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, v_handle_height_phys);
+            tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
+        }
     }
 
-    // horizontal scrollbar
+    // horizontal scrollbar — only render if horizontal overflow exists
     Tvg_Paint h_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(h_scrollbar, view_x,
-        view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, 0, 0, true);
-    log_debug("h_scrollbar rect: %f, %f, %f, %f",
-        view_x, view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE);
-    tvg_shape_set_fill_color(h_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
-    tvg_paint_set_mask_method(h_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
-
     Tvg_Paint h_scroll_handle = tvg_shape_new();
-    if (content_width > 0) {
-        tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
-        // NOTE: Do NOT recalculate h_max_scroll here! Same reason as v_max_scroll above.
-        // h_max_scroll is set by update_scroller() in CSS pixels.
-        log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", sp->h_max_scroll, content_width, view_width);
-        float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
-        log_debug("bar width: %f", bar_width);
-        float h_ratio = min(view_width * 100 / content_width, 100.0f);
-        float h_handle_width_phys = (h_ratio * bar_width) / 100;
-        h_handle_width_phys = max(sc.MIN_HANDLE_SIZE, h_handle_width_phys);
-        // h_scroll_position and h_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
-        float scroll_ratio = (sp->h_max_scroll > 0) ? (sp->h_scroll_position / sp->h_max_scroll) : 0;
-        float h_handle_x_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - h_handle_width_phys);
-        // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
-        sp->h_handle_width = h_handle_width_phys / scale;
-        sp->h_handle_x = h_handle_x_phys / scale;
-        int h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(h_scroll_handle, view_x + h_handle_x_phys, h_scroll_y,
-            h_handle_width_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
-        tvg_paint_set_mask_method(h_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
+    if (show_hz_scroll) {
+        tvg_shape_append_rect(h_scrollbar, view_x,
+            view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, 0, 0, true);
+        log_debug("h_scrollbar rect: %f, %f, %f, %f",
+            view_x, view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE);
+        tvg_shape_set_fill_color(h_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
+        tvg_paint_set_mask_method(h_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+        if (content_width > 0) {
+            tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
+            // NOTE: Do NOT recalculate h_max_scroll here! Same reason as v_max_scroll above.
+            // h_max_scroll is set by update_scroller() in CSS pixels.
+            log_debug("h_max_scroll: %f (content_width=%.1f, view_width=%.1f)", sp->h_max_scroll, content_width, view_width);
+            float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
+            log_debug("bar width: %f", bar_width);
+            float h_ratio = min(view_width * 100 / content_width, 100.0f);
+            float h_handle_width_phys = (h_ratio * bar_width) / 100;
+            h_handle_width_phys = max(sc.MIN_HANDLE_SIZE, h_handle_width_phys);
+            // h_scroll_position and h_max_scroll are in CSS pixels, calculate scroll ratio (0..1)
+            float scroll_ratio = (sp->h_max_scroll > 0) ? (sp->h_scroll_position / sp->h_max_scroll) : 0;
+            float h_handle_x_phys = sc.SCROLL_BORDER_MAIN + scroll_ratio * (bar_width - h_handle_width_phys);
+            // Store handle position/size in CSS pixels (divide by scale) for hit-testing in event handlers
+            sp->h_handle_width = h_handle_width_phys / scale;
+            sp->h_handle_x = h_handle_x_phys / scale;
+            int h_scroll_y = view_y + view_height - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
+            tvg_shape_append_rect(h_scroll_handle, view_x + h_handle_x_phys, h_scroll_y,
+                h_handle_width_phys, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS, true);
+            tvg_paint_set_mask_method(h_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
+        }
     }
 
     // as clip_rect is shared, can only push the shapes after they are all setup
@@ -299,7 +304,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     // handle horizontal overflow
     log_debug("update scroller for block:%s, content_width:%.1f, content_height:%.1f, block_width:%.1f, block_height:%.1f",
         block->node_name(), content_width, content_height, block->width, block->height);
-    
+
     // Update scroll pane max values if pane exists
     if (block->scroller->pane) {
         block->scroller->pane->h_max_scroll = content_width > block->width ? content_width - block->width : 0;
@@ -311,10 +316,10 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         if (block->scroller->pane->v_scroll_position > block->scroller->pane->v_max_scroll) {
             block->scroller->pane->v_scroll_position = block->scroller->pane->v_max_scroll;
         }
-        log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f", 
+        log_debug("update_scroller: h_max_scroll=%.1f, v_max_scroll=%.1f",
             block->scroller->pane->h_max_scroll, block->scroller->pane->v_max_scroll);
     }
-    
+
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == CSS_VALUE_VISIBLE) {}

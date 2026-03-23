@@ -1857,6 +1857,11 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
         track_size = create_grid_track_size(GRID_TRACK_SIZE_PERCENTAGE, percent);
         track_size->is_percentage = true;
         log_debug("[CSS]   parsed track: %d%%", percent);
+    } else if (val->type == CSS_VALUE_TYPE_NUMBER) {
+        // CSS spec: unitless 0 is valid as a <length> value
+        int px_value = (int)val->data.number.value;
+        track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, px_value);
+        log_debug("[CSS]   parsed track: %dpx (from number)", px_value);
     } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
         if (val->data.keyword == CSS_VALUE_AUTO) {
             track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
