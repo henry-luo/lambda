@@ -602,15 +602,28 @@ class PremakeGenerator:
             ])
         elif self.use_linux_config:
             if base_compiler == 'clang':
-                self.premake_content.extend([
-                    '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
-                    '        linkoptions {',
-                    '            "-flto=thin",',
-                    '            "-fuse-ld=lld",',
-                    '            "-Wl,--gc-sections",',
-                    '            "-Wl,--strip-all",',
-                    '        }',
-                ])
+                # check if lld is available for ThinLTO
+                import shutil
+                has_lld = shutil.which('lld') is not None or shutil.which('ld.lld') is not None
+                if has_lld:
+                    self.premake_content.extend([
+                        '        -- Linux/Clang: strip dead code and symbols with ThinLTO + LLD',
+                        '        linkoptions {',
+                        '            "-flto=thin",',
+                        '            "-fuse-ld=lld",',
+                        '            "-Wl,--gc-sections",',
+                        '            "-Wl,--strip-all",',
+                        '        }',
+                    ])
+                else:
+                    self.premake_content.extend([
+                        '        -- Linux/Clang: strip dead code and symbols (lld not available, using default linker)',
+                        '        linkoptions {',
+                        '            "-flto",',
+                        '            "-Wl,--gc-sections",',
+                        '            "-Wl,--strip-all",',
+                        '        }',
+                    ])
             else:
                 self.premake_content.extend([
                     '        -- Linux/GCC: strip dead code and symbols with LTO',

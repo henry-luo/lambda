@@ -158,6 +158,7 @@ $(TREE_SITTER_LIB):
 	rm -f libtree-sitter.a tree_sitter.o && \
 	$(CC) -c lib/src/lib.c \
 		-Ilib/include \
+		-Ilib/src \
 		-O3 -Wall -Wextra -std=c11 -fPIC \
 		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
 		-o tree_sitter.o && \
@@ -524,7 +525,7 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
 #   3. Symbol visibility control (-fvisibility=hidden)
 #   4. Debug symbols stripped (-s linker flag + post-build strip)
 #   5. LTO enabled (-flto)
-release: build-release
+release: build-release prepare-release
 
 prepare-release:
 	@bash utils/prepare_release.sh
