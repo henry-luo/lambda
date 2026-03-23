@@ -3104,7 +3104,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     // Build a Lambda script that imports the LaTeX package and renders to HTML
     char script_buf[4096];
     snprintf(script_buf, sizeof(script_buf),
-        "import latex: .lambda.package.latex.latex\n"
+        "import latex: lambda.package.latex.latex\n"
         "let ast^err = input(\"%s\", {type: \"latex\"})\n"
         "latex.render(ast, {standalone: true})\n",
         latex_filepath);

@@ -2026,8 +2026,8 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     Tvg_Paint shape = tvg_shape_new();
     if (shape) {
         tvg_shape_append_rect(shape, x, y, caret_width, height, 0, 0, true);
-        // Red caret color
-        tvg_shape_set_fill_color(shape, 0xFF, 0x00, 0x00, 0xFF);
+        // Gray caret
+        tvg_shape_set_fill_color(shape, 0x66, 0x66, 0x66, 0xCC);
         tvg_canvas_push(rdcon->canvas, shape);
         tvg_canvas_reset_and_draw(rdcon, false);
         tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
