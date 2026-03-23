@@ -115,6 +115,12 @@ static void init_stack_bounds(void) {
  * a null-pointer dereference or other memory fault.
  */
 static bool is_stack_overflow_fault(uintptr_t fault_addr) {
+    // Reject addresses in the first 64KB — these are NULL pointer dereferences
+    // (accessing a field at some offset from a NULL struct pointer), not stack overflows.
+    if (fault_addr < 0x10000) {
+        return false;
+    }
+
     if (_lambda_stack_base == 0) {
         // stack bounds not initialized — can't tell, assume stack overflow
         return true;

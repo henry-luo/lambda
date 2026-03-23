@@ -1126,6 +1126,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             static_cast<DomElement*>(elmt)->tag_name[0] == ':';
         counter_pop_scope_propagate(lycon->counter_context, !is_pseudo);
     }
-    log_debug("inline span view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->view_type,
+    log_debug("inline span view: %d, child %p, x:%.0f, y:%.0f, wd:%.0f, hg:%.0f", span->view_type,
         span->first_child, span->x, span->y, span->width, span->height);
 }

@@ -145,6 +145,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         float heading_font_size = lycon->font.style->font_size * em_size;
         block->font->font_size = heading_font_size;
         block->font->font_weight = CSS_VALUE_BOLD;
+        block->font->font_weight_numeric = 700;
         // Default margins for headings (browser UA stylesheet)
         // margin: 0.67em 0 for h1, varying for other levels
         // The margin is relative to the heading's computed font-size
@@ -374,6 +375,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_weight = CSS_VALUE_BOLD;
+        span->font->font_weight_numeric = 700;
         break;
     case HTM_TAG_I:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -468,6 +470,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_STRONG:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_weight = CSS_VALUE_BOLD;
+        span->font->font_weight_numeric = 700;
         break;
     case HTM_TAG_EM:  case HTM_TAG_CITE:  case HTM_TAG_DFN:  case HTM_TAG_VAR:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -595,6 +598,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // definition term: bold (common style, not strictly default)
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_weight = CSS_VALUE_BOLD;
+        block->font->font_weight_numeric = 700;
         break;
     case HTM_TAG_LI:
         // list item: display list-item handled elsewhere
@@ -719,6 +723,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         log_debug("apply default TH styles");
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_weight = CSS_VALUE_BOLD;
+        block->font->font_weight_numeric = 700;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
         if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
