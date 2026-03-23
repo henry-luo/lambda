@@ -1,6 +1,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
@@ -26,11 +27,30 @@ const char* g_lambda_home = "./lmd";
 const char* g_lambda_home = "./lambda";
 #endif
 
+// check if a directory exists
+static bool dir_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 void lambda_home_init(void) {
+    // 1. environment variable always wins
     const char* env = getenv("LAMBDA_HOME");
     if (env && env[0]) {
         g_lambda_home = env;
+        return;
     }
+
+    // 2. auto-detect: try the compiled-in default first, then the other
+    if (dir_exists(g_lambda_home)) return;
+
+#ifdef LAMBDA_HOME_RELEASE
+    // release binary but ./lmd/ missing — fall back to ./lambda/ (dev tree)
+    if (dir_exists("./lambda")) { g_lambda_home = "./lambda"; }
+#else
+    // dev binary but ./lambda/ missing — try ./lmd/ (release layout)
+    if (dir_exists("./lmd"))    { g_lambda_home = "./lmd"; }
+#endif
 }
 
 // Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().

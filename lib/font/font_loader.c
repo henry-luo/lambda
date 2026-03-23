@@ -82,6 +82,21 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     handle->slant = slant;
     handle->metrics_ready = false;
 
+    // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
+    // these fonts have a fixed ppem (e.g. 109) that may differ from target size
+    handle->bitmap_scale = 1.0f;
+    if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
+        (face->face_flags & FT_FACE_FLAG_COLOR) &&
+        face->num_fixed_sizes > 0 &&
+        face->size && face->size->metrics.y_ppem > 0) {
+        float actual_ppem = (float)face->size->metrics.y_ppem;
+        if (actual_ppem > 0 && physical_size > 0 && actual_ppem != physical_size) {
+            handle->bitmap_scale = physical_size / actual_ppem;
+            log_debug("font_loader: bitmap_scale=%.4f (target=%.0f, actual_ppem=%.0f)",
+                      handle->bitmap_scale, physical_size, actual_ppem);
+        }
+    }
+
     // copy family name from FreeType face
     if (face->family_name) {
         handle->family_name = arena_strdup(ctx->arena, face->family_name);
