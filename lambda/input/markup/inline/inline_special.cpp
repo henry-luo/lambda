@@ -193,16 +193,15 @@ Item parse_strikethrough(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
 
-    // Create content string (simple text, no nested parsing for safety)
+    // Parse inner content (may contain bold, italic, etc.)
     char* content = (char*)malloc(content_len + 1);
     if (content) {
-        strncpy(content, content_start, content_len);
+        memcpy(content, content_start, content_len);
         content[content_len] = '\0';
 
-        String* content_str = create_string(parser, content);
-        if (content_str) {
-            Item content_item = {.item = s2it(content_str)};
-            list_push((List*)del_elem, content_item);
+        Item inner = parse_inline_spans(parser, content);
+        if (inner.item != ITEM_ERROR && inner.item != ITEM_UNDEFINED) {
+            list_push((List*)del_elem, inner);
             increment_element_content_length(del_elem);
         }
         free(content);
