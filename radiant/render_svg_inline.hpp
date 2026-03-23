@@ -14,6 +14,8 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lib/hashmap.h"
 
+struct FontContext;  // forward declaration from lib/font/font.h
+
 // ============================================================================
 // SVG ViewBox Structure
 // ============================================================================
@@ -43,6 +45,7 @@ struct SvgIntrinsicSize {
 struct SvgRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
+    FontContext* font_ctx;       // font context for font resolution (may be nullptr)
     
     // pixel ratio for text sizing - text font sizes need to be divided by this
     // because the entire SVG scene is scaled by pixel_ratio after building
@@ -101,7 +104,7 @@ SvgIntrinsicSize calculate_svg_intrinsic_size(Element* svg_element);
  * @param pixel_ratio Device pixel ratio (for text size adjustment)
  * @return ThorVG scene containing all SVG content (caller must manage lifecycle)
  */
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio = 1.0f, FontContext* font_ctx = nullptr);
 
 /**
  * Render inline SVG element in document context
