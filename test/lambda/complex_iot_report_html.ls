@@ -7,34 +7,33 @@ fn float_val(val) { val }
 
 // Environmental sensor data processing and analysis
 pub fn process_environmental_data(sensor_readings) {
-    
+
     // Data quality assessment and cleaning
     let quality_assessment = for (reading in sensor_readings) (
         let measurements = reading.measurements,
         let quality_flags = [],
-        
+
         // Check for out-of-range values
         let temp_flag = if (measurements.temperature < -40.0 or measurements.temperature > 60.0) "temperature_anomaly" else null,
         let humidity_flag = if (measurements.humidity < 0.0 or measurements.humidity > 100.0) "humidity_anomaly" else null,
         let pm25_flag = if (measurements.air_quality_pm25 < 0.0 or measurements.air_quality_pm25 > 500.0) "pm25_anomaly" else null,
         let noise_flag = if (measurements.noise_level < 0.0 or measurements.noise_level > 120.0) "noise_anomaly" else null,
-        
+
         let all_flags = [temp_flag, humidity_flag, pm25_flag, noise_flag],
-        let valid_flags = for (flag in all_flags) if (flag != null) flag else null,
-        
+        let valid_flags = for (flag in all_flags where flag != null) flag,
+
         {
             sensor_id: reading.sensor_id,
             timestamp: reading.timestamp,
-            quality_score: if (len(valid_flags) == 0) 1.0 
+            quality_score: if (len(valid_flags) == 0) 1.0
                           else 1.0 - (float_val(len(valid_flags)) / 4.0),
             anomalies: valid_flags,
             is_valid: len(valid_flags) <= 1
         }
     );
-    
-    let valid_readings = for (i in 0 to len(sensor_readings)-1) 
-        if (quality_assessment[i].is_valid) sensor_readings[i] else null;
-    
+
+    let valid_readings = for (i in 0 to len(sensor_readings)-1 where quality_assessment[i].is_valid) sensor_readings[i];
+
     // Temporal analysis and trending
     let temporal_analysis = {
         time_range: {
@@ -42,7 +41,7 @@ pub fn process_environmental_data(sensor_readings) {
             end: if (len(valid_readings) > 0) valid_readings[len(valid_readings)-1].timestamp else null,
             duration_hours: float_val(len(valid_readings))
         },
-        
+
         air_quality_trends: {
             avg_pm25: avg(for (reading in valid_readings) reading.measurements.air_quality_pm25),
             avg_pm10: avg(for (reading in valid_readings) reading.measurements.air_quality_pm10),
@@ -56,8 +55,7 @@ pub fn process_environmental_data(sensor_readings) {
                 else if (second_avg < first_avg - 5.0) "improving"
                 else "stable"
             ),
-            air_quality_alerts: for (reading in valid_readings) 
-                if (reading.measurements.air_quality_pm25 > 35.0 or reading.measurements.air_quality_pm10 > 50.0) {
+            air_quality_alerts: for (reading in valid_readings where reading.measurements.air_quality_pm25 > 35.0 or reading.measurements.air_quality_pm10 > 50.0) {
                     sensor_id: reading.sensor_id,
                     timestamp: reading.timestamp,
                     location: reading.location,
@@ -66,13 +64,12 @@ pub fn process_environmental_data(sensor_readings) {
                                 else if (reading.measurements.air_quality_pm25 > 55.0) "unhealthy"
                                 else "moderate"
                 }
-                else null
         },
-        
+
         climate_analysis: {
             avg_temperature: avg(for (reading in valid_readings) reading.measurements.temperature),
             avg_humidity: avg(for (reading in valid_readings) reading.measurements.humidity),
-            heat_index_alerts: for (reading in valid_readings) (
+            heat_index_alerts: (for (reading in valid_readings) (
                 let temp_f = (reading.measurements.temperature * 9.0 / 5.0) + 32.0,
                 let humidity = reading.measurements.humidity,
                 let heat_index = temp_f + (humidity / 10.0),
@@ -83,50 +80,44 @@ pub fn process_environmental_data(sensor_readings) {
                     risk_level: if (heat_index > 105.0) "extreme" else "caution"
                 }
                 else null
-            ),
+            )) that (~ != null),
             comfort_score: (
                 let ideal_temp = 22.0,
                 let ideal_humidity = 50.0,
-                let temp_scores = for (reading in valid_readings) 
+                let temp_scores = for (reading in valid_readings)
                     1.0 - (abs(reading.measurements.temperature - ideal_temp) / 20.0),
-                let humidity_scores = for (reading in valid_readings) 
+                let humidity_scores = for (reading in valid_readings)
                     1.0 - (abs(reading.measurements.humidity - ideal_humidity) / 50.0),
                 (avg(temp_scores) + avg(humidity_scores)) / 2.0
             )
         },
-        
+
         noise_analysis: {
             avg_noise_level: avg(for (reading in valid_readings) reading.measurements.noise_level),
-            noise_violations: for (reading in valid_readings) 
-                if (reading.measurements.noise_level > 70.0){
+            noise_violations: for (reading in valid_readings where reading.measurements.noise_level > 70.0) {
                     sensor_id: reading.sensor_id,
                     timestamp: reading.timestamp,
                     noise_level: reading.measurements.noise_level,
                     violation_severity: if (reading.measurements.noise_level > 85.0) "severe"
                                         else "moderate"
-                }
-                else null,
+                },
             quiet_hours_compliance: (
                 let total_readings = len(valid_readings),
-                let quiet_violations = len(for (reading in valid_readings) 
-                    if (reading.measurements.noise_level > 55.0) reading else null),
+                let quiet_violations = len(for (reading in valid_readings where reading.measurements.noise_level > 55.0) reading),
                 if (total_readings > 0) ((float_val(total_readings - quiet_violations)) / float_val(total_readings)) * 100.0 else 100.0
             )
         }
     };
-    
+
     {
         data_quality: {
             total_readings: len(sensor_readings),
             valid_readings: len(valid_readings),
             data_quality_score: avg(for (qa in quality_assessment) qa.quality_score),
             anomaly_summary: {
-                temperature_anomalies: len(for (qa in quality_assessment) 
-                    if (len(for (anomaly in qa.anomalies) if (anomaly == "temperature_anomaly") anomaly else null) > 0) qa else null),
-                humidity_anomalies: len(for (qa in quality_assessment) 
-                    if (len(for (anomaly in qa.anomalies) if (anomaly == "humidity_anomaly") anomaly else null) > 0) qa else null),
-                air_quality_anomalies: len(for (qa in quality_assessment) 
-                    if (len(for (anomaly in qa.anomalies) if (anomaly == "pm25_anomaly") anomaly else null) > 0) qa else null)
+                temperature_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "temperature_anomaly") anomaly) > 0) qa),
+                humidity_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "humidity_anomaly") anomaly) > 0) qa),
+                air_quality_anomalies: len(for (qa in quality_assessment where len(for (anomaly in qa.anomalies where anomaly == "pm25_anomaly") anomaly) > 0) qa)
             }
         },
         environmental_analysis: temporal_analysis,
@@ -136,38 +127,37 @@ pub fn process_environmental_data(sensor_readings) {
 
 // Urban traffic flow analysis and optimization
 pub fn analyze_traffic_patterns(traffic_data) {
-    
+
     let flow_analysis = {
         total_intersections: len(set_data(for (data in traffic_data) data.intersection_id)),
         total_vehicle_count: sum(for (data in traffic_data) data.vehicle_count),
         avg_speed_citywide: avg(for (data in traffic_data) data.avg_speed),
-        
+
         congestion_distribution: {
-            low_congestion: len(for (data in traffic_data) if (data.congestion_level <= 2) data else null),
-            moderate_congestion: len(for (data in traffic_data) if (data.congestion_level >= 3 and data.congestion_level <= 6) data else null),
-            high_congestion: len(for (data in traffic_data) if (data.congestion_level >= 7) data else null)
+            low_congestion: len(for (data in traffic_data where data.congestion_level <= 2) data),
+            moderate_congestion: len(for (data in traffic_data where data.congestion_level >= 3 and data.congestion_level <= 6) data),
+            high_congestion: len(for (data in traffic_data where data.congestion_level >= 7) data)
         },
-        
+
         speed_by_zone: {
             downtown_avg: (
-                let downtown_readings = for (data in traffic_data) if (data.location.zone == "downtown") data else null,
+                let downtown_readings = for (data in traffic_data where data.location.zone == "downtown") data,
                 if (len(downtown_readings) > 0) avg(for (reading in downtown_readings) reading.avg_speed) else 0.0
             ),
             residential_avg: (
-                let residential_readings = for (data in traffic_data) if (data.location.zone == "residential") data else null,
+                let residential_readings = for (data in traffic_data where data.location.zone == "residential") data,
                 if (len(residential_readings) > 0) avg(for (reading in residential_readings) reading.avg_speed) else 0.0
             ),
             industrial_avg: (
-                let industrial_readings = for (data in traffic_data) if (data.location.zone == "industrial") data else null,
+                let industrial_readings = for (data in traffic_data where data.location.zone == "industrial") data,
                 if (len(industrial_readings) > 0) avg(for (reading in industrial_readings) reading.avg_speed) else 0.0
             )
         }
     };
-    
+
     let safety_analysis = {
         total_incidents: sum(for (data in traffic_data) len(data.incident_reports)),
-        incident_hotspots: for (data in traffic_data) 
-            if (len(data.incident_reports) >= 2) {
+        incident_hotspots: for (data in traffic_data where len(data.incident_reports) >= 2) {
                 intersection_id: data.intersection_id,
                 location: data.location,
                 incident_count: len(data.incident_reports),
@@ -175,13 +165,12 @@ pub fn analyze_traffic_patterns(traffic_data) {
                 risk_level: if (len(data.incident_reports) >= 5) "high"
                             else if (len(data.incident_reports) >= 3) "medium"
                             else "low"
-            }
-            else null,
-        
+            },
+
         safety_score_by_zone: (
             let zones = ["downtown", "residential", "industrial"],
             for (zone in zones) (
-                let zone_data = for (data in traffic_data) if (data.location.zone == zone) data else null,
+                let zone_data = for (data in traffic_data where data.location.zone == zone) data,
                 let zone_incidents = sum(for (data in zone_data) len(data.incident_reports)),
                 let zone_readings = len(zone_data),
                 {
@@ -192,46 +181,40 @@ pub fn analyze_traffic_patterns(traffic_data) {
             )
         )
     };
-    
+
     let optimization_recommendations = {
-        signal_timing_adjustments: for (data in traffic_data) 
-            if (data.congestion_level >= 7 and data.avg_speed < 15.0) {
+        signal_timing_adjustments: for (data in traffic_data where data.congestion_level >= 7 and data.avg_speed < 15.0)
                 {
                     intersection_id: data.intersection_id,
                     current_congestion: data.congestion_level,
                     avg_speed: data.avg_speed,
                     recommendation: "Increase green light duration for main arterial",
                     priority: "high"
-                }
-            } else null,
-        
-        route_diversions: for (data in traffic_data) 
-            if (data.congestion_level >= 8) {
+                },
+
+        route_diversions: for (data in traffic_data where data.congestion_level >= 8)
                 {
                     intersection_id: data.intersection_id,
                     location: data.location,
                     recommendation: "Activate dynamic message signs for route diversion",
                     estimated_relief: "15-25% volume reduction"
-                }
-            } else null,
-        
-        infrastructure_improvements: for (data in safety_analysis.incident_hotspots) 
-            if (data.risk_level == "high") {
+                },
+
+        infrastructure_improvements: for (data in safety_analysis.incident_hotspots where data.risk_level == "high")
                 {
                     location: data.intersection_id,
                     issue: "High incident rate: " ++ string(data.incident_count) ++ " incidents",
                     recommendation: "Install additional safety infrastructure (cameras, improved signage)",
                     estimated_cost_category: "medium"
                 }
-            } else null
     };
-    
+
     {
         traffic_summary: {
             monitoring_coverage: flow_analysis.total_intersections,
             overall_flow_rate: flow_analysis.total_vehicle_count,
             citywide_avg_speed: flow_analysis.avg_speed_citywide,
-            congestion_status: if (flow_analysis.congestion_distribution.high_congestion > flow_analysis.congestion_distribution.low_congestion) 
+            congestion_status: if (flow_analysis.congestion_distribution.high_congestion > flow_analysis.congestion_distribution.low_congestion)
                               "high_congestion_citywide" else "manageable_congestion"
         },
         performance_metrics: {
@@ -244,7 +227,7 @@ pub fn analyze_traffic_patterns(traffic_data) {
 
 // Energy consumption and smart grid analytics
 pub fn analyze_energy_consumption(energy_data) {
-    
+
     let consumption_analysis = {
         total_consumption: sum(for (data in energy_data) data.consumption_kwh),
         avg_consumption_per_hour: avg(for (data in energy_data) data.consumption_kwh),
@@ -257,41 +240,38 @@ pub fn analyze_energy_consumption(energy_data) {
                 variance ** 0.5
             )
         },
-        
+
         consumption_by_type: {
-            residential_total: sum(for (data in energy_data) 
+            residential_total: sum(for (data in energy_data)
                 if (data.location.building_type == "residential") data.consumption_kwh else 0.0),
-            commercial_total: sum(for (data in energy_data) 
+            commercial_total: sum(for (data in energy_data)
                 if (data.location.building_type == "commercial") data.consumption_kwh else 0.0),
-            industrial_total: sum(for (data in energy_data) 
+            industrial_total: sum(for (data in energy_data)
                 if (data.location.building_type == "industrial") data.consumption_kwh else 0.0),
-            public_total: sum(for (data in energy_data) 
+            public_total: sum(for (data in energy_data)
                 if (data.location.building_type == "public") data.consumption_kwh else 0.0)
         },
-        
+
         renewable_analysis: {
             avg_renewable_percentage: avg(for (data in energy_data) data.renewable_percentage),
-            renewable_leaders: for (data in energy_data) 
-                if (data.renewable_percentage >= 75.0) {
+            renewable_leaders: for (data in energy_data where data.renewable_percentage >= 75.0)
                     {
                         meter_id: data.meter_id,
                         location: data.location,
                         renewable_percentage: data.renewable_percentage,
                         category: "high_renewable"
-                    }
-                } else null,
+                    },
             grid_dependency: {
-                high_dependency: len(for (data in energy_data) if (data.renewable_percentage < 25.0) data else null),
-                medium_dependency: len(for (data in energy_data) if (data.renewable_percentage >= 25.0 and data.renewable_percentage < 50.0) data else null),
-                low_dependency: len(for (data in energy_data) if (data.renewable_percentage >= 50.0) data else null)
+                high_dependency: len(for (data in energy_data where data.renewable_percentage < 25.0) data),
+                medium_dependency: len(for (data in energy_data where data.renewable_percentage >= 25.0 and data.renewable_percentage < 50.0) data),
+                low_dependency: len(for (data in energy_data where data.renewable_percentage >= 50.0) data)
             }
         }
     };
-    
+
     let grid_analysis = {
         avg_stability_score: avg(for (data in energy_data) data.grid_stability_score),
-        stability_issues: for (data in energy_data) 
-            if (data.grid_stability_score < 0.8) {
+        stability_issues: for (data in energy_data where data.grid_stability_score < 0.8)
                 {
                     meter_id: data.meter_id,
                     location: data.location,
@@ -299,55 +279,46 @@ pub fn analyze_energy_consumption(energy_data) {
                     issue_severity: if (data.grid_stability_score < 0.6) "critical"
                                    else if (data.grid_stability_score < 0.7) "major"
                                    else "minor"
-                }
-            } else null,
-        
-        load_balancing_opportunities: for (data in energy_data) 
-            if (data.peak_demand_kw > avg(for (d in energy_data) d.peak_demand_kw) * 1.5) {
+                },
+
+        load_balancing_opportunities: for (data in energy_data where data.peak_demand_kw > avg(for (d in energy_data) d.peak_demand_kw) * 1.5)
                 {
                     meter_id: data.meter_id,
                     peak_demand: data.peak_demand_kw,
                     load_shift_potential: (data.peak_demand_kw - avg(for (d in energy_data) d.peak_demand_kw)) * 0.3,
                     recommendation: "Implement demand response programs"
                 }
-            } else null
     };
-    
+
     let efficiency_recommendations = {
         consumption_optimization: {
-            high_consumers: for (data in energy_data) 
-                if (data.consumption_kwh > avg(for (d in energy_data) d.consumption_kwh) * 1.8) {
+            high_consumers: for (data in energy_data where data.consumption_kwh > avg(for (d in energy_data) d.consumption_kwh) * 1.8)
                     {
                         meter_id: data.meter_id,
                         building_type: data.location.building_type,
                         consumption: data.consumption_kwh,
                         savings_potential: data.consumption_kwh * 0.15,
                         priority: "high"
-                    }
-                } else null,
-            
-            renewable_expansion: for (data in energy_data) 
-                if (data.renewable_percentage < 30.0 and data.location.building_type != "residential") {
+                    },
+
+            renewable_expansion: for (data in energy_data where data.renewable_percentage < 30.0 and data.location.building_type != "residential")
                     {
                         meter_id: data.meter_id,
                         current_renewable: data.renewable_percentage,
                         expansion_potential: "Solar installation feasible",
                         estimated_renewable_increase: 40.0
                     }
-                } else null
         },
-        
+
         grid_improvements: {
-            stability_enhancements: for (issue in grid_analysis.stability_issues) 
-                if (issue.issue_severity == "critical" or issue.issue_severity == "major") {
+            stability_enhancements: for (issue in grid_analysis.stability_issues where issue.issue_severity == "critical" or issue.issue_severity == "major")
                     {
                         location: issue.location,
                         issue: issue.issue_severity ++ " stability issue",
                         recommendation: "Upgrade grid infrastructure and install battery storage",
                         priority: if (issue.issue_severity == "critical") "immediate" else "high"
-                    }
-                } else null,
-            
+                    },
+
             smart_grid_initiatives: [
                 "Deploy advanced metering infrastructure (AMI) for real-time monitoring",
                 "Implement predictive maintenance for grid components",
@@ -355,7 +326,7 @@ pub fn analyze_energy_consumption(energy_data) {
             ]
         }
     };
-    
+
     {
         energy_overview: {
             total_consumption_kwh: consumption_analysis.total_consumption,
@@ -376,7 +347,7 @@ fn format_number(num, decimals) {
 }
 
 fn status_badge(status) {
-    let badge_class = if (status == "deteriorating" or status == "high_congestion_citywide" or status == "concerning") 
+    let badge_class = if (status == "deteriorating" or status == "high_congestion_citywide" or status == "concerning")
         "badge badge-danger"
     else if (status == "improving" or status == "good" or status == "flowing")
         "badge badge-success"
@@ -417,7 +388,7 @@ fn alert_box(alert_class, content) {
 // Sample IoT sensor data
 let sample_environmental_sensors = [
     {
-        sensor_id: "ENV_001", 
+        sensor_id: "ENV_001",
         location: {lat: 40.7589, lon: -73.9851, zone: "downtown"},
         timestamp: t'2024-09-05 08:00:00',
         measurements: {air_quality_pm25: 28.5, air_quality_pm10: 42.3, temperature: 24.2, humidity: 65.0, noise_level: 68.5, light_intensity: 850.0}
@@ -508,8 +479,8 @@ let traffic_analysis = analyze_traffic_patterns(sample_traffic_data);
 let energy_analysis = analyze_energy_consumption(sample_energy_data);
 
 // Calculate overall metrics
-let overall_livability_score = (environmental_analysis.environmental_analysis.climate_analysis.comfort_score + 
-                               (traffic_analysis.traffic_summary.citywide_avg_speed / 30.0) + 
+let overall_livability_score = (environmental_analysis.environmental_analysis.climate_analysis.comfort_score +
+                               (traffic_analysis.traffic_summary.citywide_avg_speed / 30.0) +
                                (energy_analysis.energy_overview.avg_renewable_integration / 100.0)) / 3.0;
 
 
@@ -770,14 +741,14 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
         <div class:"header"
             <h1 "🌆 Smart City IoT Analytics Dashboard">
             <p "Real-time Urban Intelligence & Environmental Monitoring">
-            <p style:"margin-top: 10px; font-size: 0.9em;" 
+            <p style:"margin-top: 10px; font-size: 0.9em;"
                 ("Generated: September 5, 2024 | Data Quality: " ++ format_number(environmental_analysis.data_quality.data_quality_score * 100.0, 1) ++ "%")
             >
         >
         <div class:"content"
             // Key Metrics Overview
             <div class:"overview-grid"
-                metric_card("Overall Livability Score", 
+                metric_card("Overall Livability Score",
                     format_number(overall_livability_score * 100.0, 1) ++ "%",
                     "City health composite index")
                 metric_card("Environmental Sensors",
@@ -794,7 +765,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             // Environmental Intelligence
             <div class:"section"
                 <h2 class:"section-title"; "🌿 Environmental Intelligence">
-                
+
                 <div class:"card"
                     <h3 class:"card-title"; "Air Quality Status">
                     <div class:"info-grid"
@@ -835,7 +806,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
             // Traffic & Mobility Intelligence
             <div class:"section"
                 <h2 class:"section-title"; "🚗 Traffic & Mobility Intelligence">
-                
+
                 <div class:"card"
                     <h3 class:"card-title"; "Traffic Flow Performance">
                     <div class:"info-grid"
@@ -843,22 +814,22 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         info_item("Total Vehicle Count", string(traffic_analysis.traffic_summary.overall_flow_rate))
                         info_item("Congestion Status", status_badge(traffic_analysis.traffic_summary.congestion_status))
                     >
-                    
+
                     <h4 style:"margin-top: 20px; margin-bottom: 10px; color: #4299e1;"; "Congestion Distribution">
                     <div style:"margin: 10px 0;"
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "Low Congestion:">
-                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.low_congestion), 
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.low_congestion),
                                         float_val(len(sample_traffic_data)), "success")
                         >
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "Moderate:">
-                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.moderate_congestion), 
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.moderate_congestion),
                                         float_val(len(sample_traffic_data)), "warning")
                         >
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "High Congestion:">
-                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.high_congestion), 
+                            progress_bar(float_val(traffic_analysis.performance_metrics.flow_analysis.congestion_distribution.high_congestion),
                                         float_val(len(sample_traffic_data)), "danger")
                         >
                     >
@@ -875,7 +846,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         <tr
                             <td "Downtown">
                             <td (format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg, 1) ++ " km/h")>
-                            <td 
+                            <td
                                 if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.downtown_avg < 15.0) {
                                     <span class:"badge badge-danger"; "Congested">
                                 } else {
@@ -891,7 +862,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         <tr
                             <td "Industrial">
                             <td (format_number(traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg, 1) ++ " km/h")>
-                            <td 
+                            <td
                                 if (traffic_analysis.performance_metrics.flow_analysis.speed_by_zone.industrial_avg < 20.0) {
                                     <span class:"badge badge-warning"; "Moderate">
                                 } else {
@@ -919,7 +890,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         info_item("Renewable Integration", format_number(energy_analysis.energy_overview.avg_renewable_integration, 1) ++ "%")
                         info_item("Grid Stability", format_number(energy_analysis.energy_overview.grid_reliability_score * 100.0, 1) ++ "%")
                     >
-                    
+
                     <h4 style:"margin-top: 20px; margin-bottom: 10px; color: #4299e1;"; "Renewable Energy Progress">
                     progress_bar(energy_analysis.energy_overview.avg_renewable_integration, 100.0, "info")
                 >
@@ -935,19 +906,19 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         <tr
                             <td "Residential">
                             <td format_number(energy_analysis.consumption_insights.consumption_by_type.residential_total, 1)>
-                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.residential_total / 
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.residential_total /
                                                energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
                         >
                         <tr
                             <td "Commercial">
                             <td format_number(energy_analysis.consumption_insights.consumption_by_type.commercial_total, 1)>
-                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.commercial_total / 
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.commercial_total /
                                                energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
                         >
                         <tr
                             <td "Industrial">
                             <td format_number(energy_analysis.consumption_insights.consumption_by_type.industrial_total, 1)>
-                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.industrial_total / 
+                            <td (format_number((energy_analysis.consumption_insights.consumption_by_type.industrial_total /
                                                energy_analysis.energy_overview.total_consumption_kwh) * 100.0, 1) ++ "%")>
                         >
                     >
@@ -958,17 +929,17 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                     <div style:"margin: 15px 0;"
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "High Dependency:">
-                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.high_dependency), 
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.high_dependency),
                                         float_val(len(sample_energy_data)), "danger")
                         >
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "Medium:">
-                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.medium_dependency), 
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.medium_dependency),
                                         float_val(len(sample_energy_data)), "warning")
                         >
                         <div style:"margin-bottom: 10px;"
                             <span style:"display: inline-block; width: 150px;"; "Low Dependency:">
-                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.low_dependency), 
+                            progress_bar(float_val(energy_analysis.consumption_insights.renewable_analysis.grid_dependency.low_dependency),
                                         float_val(len(sample_energy_data)), "success")
                         >
                     >
@@ -996,7 +967,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         >
                     }
                 >
-                
+
                 <h4 style:"margin-top: 25px; margin-bottom: 10px;"; "Strategic Initiatives">
                 <ul
                     <li "📡 Expand environmental sensor network in industrial zones for better coverage"
@@ -1015,7 +986,7 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                         <span class:"priority-badge priority-strategic"; "Strategic">
                     >
                 >
-                
+
                 <h4 style:"margin-top: 25px; margin-bottom: 10px;"; "Investment Priorities">
                 <div style:"background: #f7fafc; padding: 20px; border-radius: 8px; margin-top: 15px;"
                     <table style:"margin: 0;"
@@ -1052,12 +1023,12 @@ let overall_livability_score = (environmental_analysis.environmental_analysis.cl
                 >
             >
         >
-        
+
         <div class:"footer"
             <p <strong "Smart City IoT Analytics Platform">>
             <p "Powered by Lambda Script Engine | Real-time Data Processing & Urban Intelligence">
             <p style:"margin-top: 10px; font-size: 0.85em;"
-                ("Data sources: " ++ string(environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++ 
+                ("Data sources: " ++ string(environmental_analysis.data_quality.total_readings or 0) ++ " environmental sensors, " ++
                 string(traffic_analysis.traffic_summary.monitoring_coverage or 0) ++ " traffic intersections, " ++
                 string(energy_analysis.energy_overview.monitored_meters or 0) ++ " energy meters")
             >
