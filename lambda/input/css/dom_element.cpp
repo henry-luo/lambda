@@ -1983,9 +1983,9 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc) {
     return text_node;
 }
 
-DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_element) {
-    if (!symbol_string || !parent_element) {
-        log_error("dom_text_create_symbol: symbol_string and parent_element required");
+DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent_element) {
+    if (!name || len == 0 || !parent_element) {
+        log_error("dom_text_create_symbol: name and parent_element required");
         return nullptr;
     }
 
@@ -2007,14 +2007,14 @@ DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_elemen
     text_node->next_sibling = nullptr;
     text_node->prev_sibling = nullptr;
 
-    // Set Lambda backing - symbol name is stored in native_string
-    text_node->native_string = symbol_string;
-    text_node->text = symbol_string->chars;  // Symbol name
-    text_node->length = symbol_string->len;
-    text_node->content_type = DOM_TEXT_SYMBOL;  // Symbol (entity or emoji)
+    // Set symbol name directly (Symbol and String have different layouts)
+    text_node->native_string = nullptr;
+    text_node->text = name;
+    text_node->length = len;
+    text_node->content_type = DOM_TEXT_SYMBOL;
     text_node->parent = parent_element;
 
-    log_debug("dom_text_create_symbol: created symbol node, name='%s'", symbol_string->chars);
+    log_debug("dom_text_create_symbol: created symbol node, name='%.*s'", (int)len, name);
     return text_node;
 }
 
@@ -2773,16 +2773,16 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             }
         } else if (child_type == LMD_TYPE_SYMBOL) {
             // Symbol node (HTML entity or emoji) - create DomText with symbol type
-            String* symbol_str = child_item.get_string();
-            if (symbol_str && symbol_str->len > 0) {
+            Symbol* sym = child_item.get_symbol();
+            if (sym && sym->len > 0) {
                 // Create symbol text node (will be resolved at render time)
-                DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);
+                DomText* text_node = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
                 if (text_node) {
                     // Add symbol node to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, text_node);
 
-                    log_debug("  Created symbol node at index %lld: '%s' (len=%zu)",
-                              i, symbol_str->chars, symbol_str->len);
+                    log_debug("  Created symbol node at index %lld: '%.*s' (len=%u)",
+                              i, (int)sym->len, sym->chars, sym->len);
                 }
             }
         } else if (child_type == LMD_TYPE_ARRAY) {
@@ -2805,9 +2805,9 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                             }
                         }
                     } else if (arr_item_type == LMD_TYPE_SYMBOL) {
-                        String* symbol_str = arr_item.get_string();
-                        if (symbol_str && symbol_str->len > 0) {
-                            DomText* text_node = dom_text_create_symbol(symbol_str, dom_elem);
+                        Symbol* sym = arr_item.get_symbol();
+                        if (sym && sym->len > 0) {
+                            DomText* text_node = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
                             }
@@ -2828,9 +2828,9 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 } else if (nested_type == LMD_TYPE_SYMBOL) {
-                                    String* s = nested_item.get_string();
-                                    if (s && s->len > 0) {
-                                        DomText* tn = dom_text_create_symbol(s, dom_elem);
+                                    Symbol* sym = nested_item.get_symbol();
+                                    if (sym && sym->len > 0) {
+                                        DomText* tn = dom_text_create_symbol(sym->chars, sym->len, dom_elem);
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 }

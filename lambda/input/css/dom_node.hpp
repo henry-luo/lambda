@@ -241,11 +241,12 @@ DomText* dom_text_create_detached(String* native_string, DomDocument* doc);
 
 /**
  * Create a new DomText node for a symbol (entity or emoji)
- * @param symbol_string Pointer to Lambda String containing symbol name
+ * @param name Symbol name (e.g., "smile" for emoji, "copy" for entity)
+ * @param len Length of the symbol name
  * @param parent_element Parent DomElement (provides document context)
  * @return New DomText or NULL on failure
  */
-DomText* dom_text_create_symbol(String* symbol_string, DomElement* parent_element);
+DomText* dom_text_create_symbol(const char* name, size_t len, DomElement* parent_element);
 
 /**
  * Destroy a DomText node
