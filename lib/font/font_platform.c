@@ -265,6 +265,73 @@ void scan_windows_registry_fonts(FontDatabase* db) {
     RegCloseKey(hkey);
     log_info("scan_windows_registry_fonts: added %d fonts from registry", added);
 }
+
+/**
+ * find_font_path_windows - Find a font file path by family name using Windows registry
+ *
+ * Registry value names are like "Arial (TrueType)", "Segoe UI (TrueType)".
+ * We match if the value name starts with the requested family name (case-insensitive).
+ * Prefers .ttf over .ttc since ThorVG TTF loader doesn't support TTC.
+ */
+static char* find_font_path_windows(const char* font_name) {
+    HKEY hkey;
+    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
+        0, KEY_READ, &hkey);
+
+    if (result != ERROR_SUCCESS) return NULL;
+
+    char fonts_dir[260];
+    if (SHGetFolderPathA(NULL, CSIDL_FONTS, NULL, SHGFP_TYPE_CURRENT, fonts_dir) != S_OK) {
+        RegCloseKey(hkey);
+        return NULL;
+    }
+
+    size_t name_len = strlen(font_name);
+    DWORD index = 0;
+    char reg_name[256];
+    char reg_file[260];
+    char* best_path = NULL;
+
+    while (1) {
+        DWORD name_size = sizeof(reg_name);
+        DWORD file_size = sizeof(reg_file);
+
+        result = RegEnumValueA(hkey, index++, reg_name, &name_size,
+            NULL, NULL, (LPBYTE)reg_file, &file_size);
+        if (result != ERROR_SUCCESS) break;
+
+        // check if registry name starts with the requested font name (case-insensitive)
+        if (_strnicmp(reg_name, font_name, name_len) != 0) continue;
+
+        // after the font name, expect end, " (" for style suffix like "(TrueType)",
+        // but NOT another word (to avoid "Arial" matching "Arial Narrow")
+        char after = reg_name[name_len];
+        if (after != '\0' && !(after == ' ' && reg_name[name_len + 1] == '(')) continue;
+
+        // skip TTC files
+        if (strstr(reg_file, ".ttc") || strstr(reg_file, ".TTC")) continue;
+
+        // build absolute path
+        char full_path[520];
+        if (reg_file[0] != '\\' && (reg_file[1] != ':')) {
+            snprintf(full_path, sizeof(full_path), "%s\\%s", fonts_dir, reg_file);
+        } else {
+            strncpy(full_path, reg_file, sizeof(full_path) - 1);
+            full_path[sizeof(full_path) - 1] = '\0';
+        }
+
+        // verify file exists
+        struct stat s;
+        if (stat(full_path, &s) != 0) continue;
+
+        best_path = mem_strdup(full_path, MEM_CAT_FONT);
+        break;
+    }
+
+    RegCloseKey(hkey);
+    return best_path;
+}
 #endif
 
 // ============================================================================
@@ -291,9 +358,10 @@ char* font_platform_find_fallback(const char* font_name) {
 
 #ifdef __APPLE__
     return find_font_path_macos(font_name);
+#elif defined(_WIN32)
+    return find_font_path_windows(font_name);
 #else
-    // Linux/Windows: scan database directories for a matching file
-    // (handled by font_database_find_best_match_internal instead)
+    // Linux: handled by font_database_find_best_match_internal instead
     (void)font_name;
     return NULL;
 #endif

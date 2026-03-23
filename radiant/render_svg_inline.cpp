@@ -1206,7 +1206,10 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     // try common fallbacks - prefer simple TTF files that ThorVG can load
     // avoid fonts that are typically in TTC format
     static const char* fallbacks[] = {
-        "Arial",             // /System/Library/Fonts/Supplemental/Arial.ttf
+        "Arial",             // Windows + macOS (Supplemental)
+        "Segoe UI",          // Windows default UI font
+        "Calibri",           // Windows
+        "Verdana",           // Windows + macOS
         "SFNS",              // /System/Library/Fonts/SFNS.ttf (macOS) - font name is "SF NS"
         "Geneva",            // /System/Library/Fonts/Geneva.ttf (macOS)
         "Arial Unicode MS",  // /System/Library/Fonts/Supplemental/Arial Unicode.ttf
@@ -1291,7 +1294,7 @@ static const char* get_direct_text_content(Element* elem) {
         TypeId type = get_type_id(child);
 
         if (type == LMD_TYPE_STRING) {
-            String* str = (String*)child.item;
+            String* str = child.get_string();
             if (str && str->chars && str->len > 0) {
                 // skip whitespace-only nodes
                 if (is_whitespace_only(str->chars, str->len)) continue;
@@ -1510,7 +1513,7 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
 
         if (type == LMD_TYPE_STRING) {
             // direct text node - skip whitespace-only
-            String* str = (String*)child.item;
+            String* str = child.get_string();
             if (str && str->chars && str->len > 0) {
                 if (is_whitespace_only(str->chars, str->len)) continue;
                 char* text_copy = trim_whitespace(str->chars, str->len);
