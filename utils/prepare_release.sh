@@ -169,5 +169,15 @@ else
     echo "    Copied lambda.exe to release/"
 fi
 
+# Create temp/ directory required for runtime-generated scripts (math, latex, script view)
+echo "==> Creating release/temp directory..."
+mkdir -p ./release/temp
+echo "    Created ./release/temp/"
+
+# Create temp/ directory required for runtime-generated scripts (math, latex, script view)
+echo "==> Creating release/temp directory..."
+mkdir -p ./release/temp
+echo "    Created ./release/temp/"
+
 echo "==> Release preparation complete!"
 echo "    Release location: ./release/"

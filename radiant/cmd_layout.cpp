@@ -1568,7 +1568,7 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool) {
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -1581,9 +1581,13 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     log_debug("[Lambda CSS] Loading HTML document: %s", html_filepath);
 
     // Step 1: Parse HTML with Lambda parser
-    // Check if URL is HTTP/HTTPS and download, otherwise read local file
+    // If html_source is provided, use it directly; otherwise read from file or download
     char* html_content = nullptr;
-    if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
+    bool html_content_owned = false;
+    if (html_source) {
+        html_content = const_cast<char*>(html_source);
+        log_debug("[Lambda CSS] Using in-memory HTML source (%zu bytes)", strlen(html_source));
+    } else if (html_url->scheme == URL_SCHEME_HTTP || html_url->scheme == URL_SCHEME_HTTPS) {
         const char* url_str = url_get_href(html_url);
         log_debug("[Lambda CSS] Downloading HTML from URL: %s", url_str);
         size_t content_size = 0;
@@ -1592,12 +1596,14 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             log_error("Failed to download HTML from URL: %s", url_str);
             return nullptr;
         }
+        html_content_owned = true;
     } else {
         html_content = read_text_file(html_filepath);
         if (!html_content) {
             log_error("Failed to read HTML file: %s", html_filepath);
             return nullptr;
         }
+        html_content_owned = true;
     }
 
     auto t_read = high_resolution_clock::now();
@@ -1609,7 +1615,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
     Input* input = input_from_source(html_content, html_url, type_str, nullptr);
-    free(html_content);  // from read_text_file, uses stdlib
+    if (html_content_owned) free(html_content);  // only free what we allocated
 
     auto t_parse = high_resolution_clock::now();
     log_info("[TIMING] load: parse HTML: %.1fms", duration<double, std::milli>(t_parse - t_read).count());
@@ -2730,16 +2736,13 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 
             strbuf_append_str(script, "]\n");
 
-            // Write script to temp file and run
-            const char* tmp_script = "temp/_md_math_render.ls";
-            write_text_file(tmp_script, script->str);
-
+            // Run the script in-memory (no temp file needed)
             Runtime math_runtime;
             runtime_init(&math_runtime);
             math_runtime.current_dir = const_cast<char*>("./");
             math_runtime.import_base_dir = "./";
 
-            Input* math_result = run_script_mir(&math_runtime, nullptr, (char*)tmp_script, false);
+            Input* math_result = run_script_mir(&math_runtime, script->str, (char*)"<math_render>", false);
 
             if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
                 Array* rendered_arr = math_result->root.array;
@@ -3109,15 +3112,12 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         "latex.render(ast, {standalone: true})\n",
         latex_filepath);
 
-    // Run the script using the Lambda runtime (MIR JIT for performance)
+    // Run the script in-memory (no temp file needed)
     Runtime latex_runtime;
     runtime_init(&latex_runtime);
     latex_runtime.current_dir = const_cast<char*>("./");
-
-    const char* tmp_script_path = "temp/_view_latex_tmp.ls";
-    write_text_file(tmp_script_path, script_buf);
-    latex_runtime.import_base_dir = "./";  // resolve imports from project root, not temp/
-    Input* script_result = run_script_mir(&latex_runtime, nullptr, (char*)tmp_script_path, false);
+    latex_runtime.import_base_dir = "./";  // resolve imports from project root
+    Input* script_result = run_script_mir(&latex_runtime, script_buf, (char*)"<latex_render>", false);
 
     if (!script_result || get_type_id(script_result->root) == LMD_TYPE_NULL
         || get_type_id(script_result->root) == LMD_TYPE_ERROR) {
@@ -3528,6 +3528,23 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 }
 
 /**
+ * Load HTML document from an in-memory string, using the Lambda CSS pipeline.
+ * Avoids writing to a temp file. Creates its own pool (owned by the returned DomDocument).
+ *
+ * @param html_source  NUL-terminated HTML string (caller owns; not freed here)
+ * @param viewport_width  Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @return DomDocument ready for layout, or nullptr on failure
+ */
+static DomDocument* load_html_string_doc(const char* html_source, int viewport_width, int viewport_height) {
+    Pool* pool = pool_create();
+    if (!pool) { log_error("load_html_string_doc: pool_create failed"); return nullptr; }
+    Url* base_url = get_current_dir();
+    if (!base_url) { log_error("load_html_string_doc: get_current_dir failed"); pool_destroy(pool); return nullptr; }
+    return load_lambda_html_doc(base_url, nullptr, viewport_width, viewport_height, pool, html_source);
+}
+
+/**
  * Load Lambda script document with Lambda CSS system
  * Evaluates a Lambda script, wraps the result in HTML structure, applies CSS, builds DOM tree
  *
@@ -3593,13 +3610,11 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
-        const char* temp_html_path = "./temp/lambda_script_view.html";
-        write_text_file(temp_html_path, html_buf->str);
-        strbuf_free(html_buf);
         runtime_cleanup(&runtime);
-        Url* cwd = get_current_dir();
-        log_info("[Lambda Script] Loading SVG-in-HTML wrapper: %s", temp_html_path);
-        return load_html_doc(cwd, (char*)temp_html_path, viewport_width, viewport_height);
+        log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
+        DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
+        strbuf_free(html_buf);
+        return doc;
     };
 
     if (result_type == LMD_TYPE_ELEMENT) {
@@ -3626,12 +3641,9 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         if (result_str && result_str->len >= 5 &&
                 (strncmp(result_str->chars, "<html", 5) == 0 ||
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
-            log_info("[Lambda Script] Script returned HTML string, loading as HTML document");
-            const char* temp_html_path = "./temp/lambda_script_view.html";
-            write_text_file(temp_html_path, result_str->chars);
+            log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
             runtime_cleanup(&runtime);
-            Url* cwd = get_current_dir();
-            return load_html_doc(cwd, (char*)temp_html_path, viewport_width, viewport_height);
+            return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
 

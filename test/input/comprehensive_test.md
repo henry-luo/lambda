@@ -1,6 +1,6 @@
 # Main Document Title
 
-This is a comprehensive test document covering all features implemented in the markup parser with **bold**, *italic*, and `inline code`.
+A comprehensive test document covering all features including **bold**, *italic*, and `inline code`.
 
 ## Headers Testing
 
