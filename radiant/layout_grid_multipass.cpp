@@ -175,6 +175,37 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_info("=== GRID PASS 3: Final content layout ===");
     layout_final_grid_content(lycon, lycon->grid_container);
 
+    // Update row heights based on actual content heights from Pass 3.
+    // The intrinsic height measurement in Pass 2 may underestimate because it doesn't
+    // fully handle complex layouts (flex, margins, etc.). After content layout, items
+    // have accurate content_height values.
+    {
+        GridContainerLayout* gl = lycon->grid_container;
+        bool rows_changed = false;
+        for (int r = 0; r < gl->computed_row_count; r++) {
+            float max_content_h = 0;
+            for (int i = 0; i < gl->item_count; i++) {
+                ViewBlock* item = gl->grid_items[i];
+                if (!item || !item->gi) continue;
+                int rs = item->gi->computed_grid_row_start - 1;
+                int re = item->gi->computed_grid_row_end - 1;
+                if (rs != r || re != r + 1) continue; // only single-row-span items
+                float h = item->content_height;
+                if (h > max_content_h) max_content_h = h;
+            }
+            if (max_content_h > gl->computed_rows[r].computed_size) {
+                log_debug("GRID row[%d] height updated: %d -> %.0f (from content)",
+                          r, gl->computed_rows[r].computed_size, max_content_h);
+                gl->computed_rows[r].computed_size = (int)(max_content_h + 0.5f);
+                gl->computed_rows[r].base_size = max_content_h;
+                rows_changed = true;
+            }
+        }
+        if (rows_changed) {
+            position_grid_items(gl, grid_container);
+        }
+    }
+
     // Re-align items after content is laid out (now items have final heights)
     // This is needed for align-items: center/end to work correctly
     align_grid_items(lycon->grid_container);
