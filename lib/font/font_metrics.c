@@ -149,12 +149,14 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
                             ? ctx->config.pixel_ratio : 1.0f;
 
     FontMetrics* m = &handle->metrics;
+    float bscale = handle->bitmap_scale; // 1.0 for scalable fonts, <1 for fixed-size bitmap fonts
 
     // ---- HHEA / basic metrics (from FreeType size metrics) ----
     // These are in 26.6 fixed-point physical pixels; convert to CSS pixels
-    m->hhea_ascender  =  (face->size->metrics.ascender  / 64.0f) / pixel_ratio;
-    m->hhea_descender =  (face->size->metrics.descender / 64.0f) / pixel_ratio;
-    float hhea_height =  (face->size->metrics.height     / 64.0f) / pixel_ratio;
+    // For fixed-size bitmap fonts (e.g. emoji at 109ppem), apply bitmap_scale
+    m->hhea_ascender  =  (face->size->metrics.ascender  / 64.0f) * bscale / pixel_ratio;
+    m->hhea_descender =  (face->size->metrics.descender / 64.0f) * bscale / pixel_ratio;
+    float hhea_height =  (face->size->metrics.height     / 64.0f) * bscale / pixel_ratio;
     m->hhea_line_gap  = hhea_height - (m->hhea_ascender - m->hhea_descender);
     m->hhea_line_height = hhea_height;
 
@@ -163,7 +165,7 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->descender =  m->hhea_descender;   // negative value
 
     // ---- OS/2 table metrics ----
-    float scale = units_to_css_px(face, pixel_ratio);
+    float scale = units_to_css_px(face, pixel_ratio) * bscale;
 
     TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
     if (os2) {
@@ -195,14 +197,14 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->line_height = m->ascender - m->descender + m->line_gap;
 
     // ---- underline metrics ----
-    m->underline_position  = (face->underline_position  / 64.0f);
-    m->underline_thickness = (face->underline_thickness / 64.0f);
+    m->underline_position  = (face->underline_position  / 64.0f) * bscale;
+    m->underline_thickness = (face->underline_thickness / 64.0f) * bscale;
     if (m->underline_thickness < 1.0f) m->underline_thickness = 1.0f;
 
     // ---- typographic measures ----
     m->x_height    = measure_x_height(face, scale, m->ascender);
     m->cap_height  = measure_cap_height(face, scale, m->ascender);
-    m->space_width = measure_space_width(face, pixel_ratio);
+    m->space_width = measure_space_width(face, pixel_ratio) * bscale;
     m->em_size     = (float)face->units_per_EM;
     m->has_kerning = FT_HAS_KERNING(face);
 
@@ -248,9 +250,10 @@ float font_calc_normal_line_height(FontHandle* handle) {
     const char* family = face->family_name;
 
     // derive CSS font size from ppem (or fallback)
+    // for fixed-size bitmap fonts (emoji), apply bitmap_scale to get target size
     float font_size;
     if (face->size && face->size->metrics.y_ppem != 0) {
-        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+        font_size = (float)face->size->metrics.y_ppem * handle->bitmap_scale / pixel_ratio;
     } else {
         // y_ppem=0 (common with WOFF), use stored CSS size
         font_size = handle->size_px;
@@ -287,16 +290,21 @@ float font_calc_normal_line_height(FontHandle* handle) {
         line_height = ra + rd + rl;
     } else {
         // 3. HHEA fallback — use font-unit values for Chrome-accurate rounding
-        float scale = font_size / m->em_size;
-        float raw_ascent  = (float)face->ascender * scale;
-        float raw_descent = -(float)face->descender * scale;
-        int hhea_line_gap = face->height - face->ascender + face->descender;
-        float raw_leading = (float)hhea_line_gap * scale;
+        if (m->em_size <= 0) {
+            // bitmap-only fonts may have no units_per_EM; use pre-scaled hhea metrics
+            line_height = m->hhea_line_height;
+        } else {
+            float scale = font_size / m->em_size;
+            float raw_ascent  = (float)face->ascender * scale;
+            float raw_descent = -(float)face->descender * scale;
+            int hhea_line_gap = face->height - face->ascender + face->descender;
+            float raw_leading = (float)hhea_line_gap * scale;
 
-        float ra = roundf(raw_ascent);
-        float rd = roundf(raw_descent);
-        float rl = roundf(raw_leading);
-        line_height = ra + rd + rl;
+            float ra = roundf(raw_ascent);
+            float rd = roundf(raw_descent);
+            float rl = roundf(raw_leading);
+            line_height = ra + rd + rl;
+        }
     }
 
     log_debug("font_calc_normal_line_height: %.2f for %s@%.1f (use_typo=%d)",
@@ -327,7 +335,7 @@ float font_get_cell_height(FontHandle* handle) {
     // derive CSS font size
     float font_size;
     if (face->size && face->size->metrics.y_ppem != 0) {
-        font_size = (float)face->size->metrics.y_ppem / pixel_ratio;
+        font_size = (float)face->size->metrics.y_ppem * handle->bitmap_scale / pixel_ratio;
     } else {
         font_size = handle->size_px;
         if (font_size <= 0) {
@@ -351,5 +359,5 @@ float font_get_cell_height(FontHandle* handle) {
     }
 
     // all other fonts: FreeType metrics.height (ascent + descent)
-    return face->size->metrics.height / 64.0f / pixel_ratio;
+    return face->size->metrics.height / 64.0f * handle->bitmap_scale / pixel_ratio;
 }
