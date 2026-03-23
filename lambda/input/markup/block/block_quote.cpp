@@ -13,7 +13,7 @@
  * Content inside blockquotes is recursively parsed for block elements.
  */
 #include "block_common.hpp"
-#include <vector>
+#include "lib/arraylist.h"
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
@@ -331,7 +331,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
     log_debug("parse_rst_blockquote: base_indent=%d", base_indent);
 
     // Collect all lines with at least base_indent spaces
-    std::vector<char*> content_lines;
+    ArrayList* content_lines = arraylist_new(16);
 
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
@@ -350,7 +350,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
                 while (*np == ' ') { next_indent++; np++; }
                 if (next_indent >= base_indent) {
                     // Empty line is part of the blockquote
-                    content_lines.push_back(strdup(""));
+                    arraylist_append(content_lines, strdup(""));
                     parser->current_line++;
                     continue;
                 }
@@ -374,18 +374,18 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
 
         // Strip exactly base_indent spaces
         char* stripped = strdup(current + base_indent);
-        content_lines.push_back(stripped);
+        arraylist_append(content_lines, stripped);
         parser->current_line++;
     }
 
-    log_debug("parse_rst_blockquote: collected %zu lines", content_lines.size());
+    log_debug("parse_rst_blockquote: collected %d lines", content_lines->length);
 
     // Parse the collected content as block elements
-    if (!content_lines.empty()) {
-        size_t num_lines = content_lines.size();
+    if (content_lines->length > 0) {
+        size_t num_lines = content_lines->length;
         char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
         for (size_t i = 0; i < num_lines; i++) {
-            lines_array[i] = content_lines[i];
+            lines_array[i] = (char*)content_lines->data[i];
         }
 
         // Save current parser state
@@ -427,6 +427,7 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
         }
         free(lines_array);
     }
+    arraylist_free(content_lines);
 
     return Item{.item = (uint64_t)quote};
 }
@@ -472,8 +473,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
     const int base_depth = 1;
 
     // Collect all content lines for this blockquote
-    std::vector<char*> content_lines;
-    std::vector<bool> is_lazy_line;  // Track which lines were lazy continuations
+    ArrayList* content_lines = arraylist_new(16);
+    ArrayList* is_lazy_line = arraylist_new(16);  // Track which lines were lazy continuations
     bool last_was_empty_quote = false;  // Tracks if previous line was just ">"
 
     // Track if we're in a fenced code block - lazy continuation not allowed for code blocks
@@ -526,10 +527,10 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
                 }
             }
 
-            log_debug("blockquote: lazy check = %d, content_lines.size = %zu", lazy, content_lines.size());
-            if (!content_lines.empty() && lazy) {
-                content_lines.push_back(strdup(current));
-                is_lazy_line.push_back(true);  // Mark as lazy continuation
+            log_debug("blockquote: lazy check = %d, content_lines.size = %d", lazy, content_lines->length);
+            if (content_lines->length > 0 && lazy) {
+                arraylist_append(content_lines, strdup(current));
+                arraylist_append(is_lazy_line, (ArrayListValue)(intptr_t)1);  // Mark as lazy continuation
                 parser->current_line++;
                 continue;
             }
@@ -581,20 +582,20 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         }
 
         // content is already allocated by strip_quote_markers_with_tabs
-        content_lines.push_back(content);
-        is_lazy_line.push_back(false);  // Not a lazy continuation
+        arraylist_append(content_lines, content);
+        arraylist_append(is_lazy_line, (ArrayListValue)(intptr_t)0);  // Not a lazy continuation
         parser->current_line++;
     }
 
     // Now parse the collected content lines as block elements
-    if (!content_lines.empty()) {
+    if (content_lines->length > 0) {
         // Create a temporary array of line pointers
-        size_t num_lines = content_lines.size();
+        size_t num_lines = content_lines->length;
         char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
         bool* lazy_array = (bool*)malloc(sizeof(bool) * num_lines);
         for (size_t i = 0; i < num_lines; i++) {
-            lines_array[i] = content_lines[i];
-            lazy_array[i] = is_lazy_line[i];
+            lines_array[i] = (char*)content_lines->data[i];
+            lazy_array[i] = (bool)(intptr_t)is_lazy_line->data[i];
         }
 
         // Save current parser state
@@ -692,6 +693,8 @@ Item parse_blockquote(MarkupParser* parser, const char* line) {
         free(lines_array);
         free(lazy_array);
     }
+    arraylist_free(content_lines);
+    arraylist_free(is_lazy_line);
 
     return Item{.item = (uint64_t)quote};
 }

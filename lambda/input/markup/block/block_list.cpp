@@ -15,7 +15,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
-#include <vector>
+#include "lib/arraylist.h"
 
 namespace lambda {
 namespace markup {
@@ -621,7 +621,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
     if (!parser) return Item{.item = ITEM_ERROR};
 
     // Collect all lines belonging to this list item
-    std::vector<char*> content_lines;
+    ArrayList* content_lines = arraylist_new(16);
     bool had_blank_line = false;
     bool ends_with_blank = false;
 
@@ -661,7 +661,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             }
 
             // Continue with empty line as part of content
-            content_lines.push_back(strdup(""));
+            arraylist_append(content_lines, strdup(""));
             had_blank_line = true;
             parser->current_line++;
             continue;
@@ -679,7 +679,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
             // Check for lazy continuation (paragraph continuation)
             if (!had_blank_line && is_lazy_continuation(line)) {
                 // Lazy continuation is allowed for paragraphs
-                content_lines.push_back(strdup(line));
+                arraylist_append(content_lines, strdup(line));
                 parser->current_line++;
                 continue;
             }
@@ -690,20 +690,21 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         // Use strip_indentation_with_tabs to handle tabs that straddle the boundary
         char* stripped = strip_indentation_with_tabs(line, content_column);
         log_debug("list content: collected stripped line: '%s'", stripped);
-        content_lines.push_back(stripped);  // Already allocated by strip_indentation_with_tabs
+        arraylist_append(content_lines, stripped);  // Already allocated by strip_indentation_with_tabs
         parser->current_line++;
     }
 
     // If no content lines, return empty
-    if (content_lines.empty()) {
+    if (content_lines->length == 0) {
+        arraylist_free(content_lines);
         return Item{.item = ITEM_UNDEFINED};
     }
 
     // Now parse the collected content lines as block elements
-    size_t num_lines = content_lines.size();
+    size_t num_lines = content_lines->length;
     char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
     for (size_t i = 0; i < num_lines; i++) {
-        lines_array[i] = content_lines[i];
+        lines_array[i] = (char*)content_lines->data[i];
     }
 
     // Save current parser state
@@ -801,6 +802,7 @@ Item parse_nested_list_content(MarkupParser* parser, int content_column) {
         free(lines_array[i]);
     }
     free(lines_array);
+    arraylist_free(content_lines);
 
     return Item{.item = (uint64_t)content_container};
 }
@@ -1005,13 +1007,13 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                 // then parse as block content.
                 // This ensures "A paragraph\nwith two lines." becomes one paragraph.
 
-                std::vector<char*> content_lines;
+                ArrayList* content_lines = arraylist_new(16);
 
                 // Add first line content (properly stripped to preserve code block indentation)
                 // first_line_stripped is already allocated by strip_to_column_with_tabs or strdup
                 bool first_line_empty = !first_line_stripped || !*first_line_stripped;
                 if (!first_line_empty) {
-                    content_lines.push_back(first_line_stripped);
+                    arraylist_append(content_lines, first_line_stripped);
                 } else {
                     free(first_line_stripped);
                 }
@@ -1028,6 +1030,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         list_push((List*)list, Item{.item = (uint64_t)item});
                         increment_element_content_length(list);
                         had_blank_before_item = true;
+                        arraylist_free(content_lines);
                         continue;  // Don't collect any content, process next line
                     }
                 }
@@ -1068,7 +1071,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         if (next_indent >= content_column) {
                             // Add all the blank lines we skipped
                             for (int b = 0; b < blank_count; b++) {
-                                content_lines.push_back(strdup(""));
+                                arraylist_append(content_lines, strdup(""));
                             }
                             had_blank = true;
                             parser->current_line = next_idx;
@@ -1105,7 +1108,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             // Since cont_indent < content_column, we need to treat the whole
                             // line (from its indent) as literal text
                             char* literal_stripped = strip_indentation_with_tabs(cont_line, cont_indent);
-                            content_lines.push_back(literal_stripped);
+                            arraylist_append(content_lines, literal_stripped);
                             parser->current_line++;
                             continue;
                         }
@@ -1114,7 +1117,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                             // For lazy continuation, strip whatever indentation exists
                             // (it's paragraph text, not indented code)
                             char* lazy_stripped = strip_indentation_with_tabs(cont_line, cont_indent);
-                            content_lines.push_back(lazy_stripped);
+                            arraylist_append(content_lines, lazy_stripped);
                             parser->current_line++;
                             continue;
                         }
@@ -1123,16 +1126,16 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
 
                     // Properly indented - strip and add with proper tab expansion
                     char* stripped = strip_indentation_with_tabs(cont_line, content_column);
-                    content_lines.push_back(stripped);
+                    arraylist_append(content_lines, stripped);
                     parser->current_line++;
                 }
 
                 // Now parse collected content as blocks
-                if (!content_lines.empty()) {
-                    size_t num_lines = content_lines.size();
+                if (content_lines->length > 0) {
+                    size_t num_lines = content_lines->length;
                     char** lines_array = (char**)malloc(sizeof(char*) * num_lines);
                     for (size_t i = 0; i < num_lines; i++) {
-                        lines_array[i] = content_lines[i];
+                        lines_array[i] = (char*)content_lines->data[i];
                     }
 
                     // Save and replace parser state
@@ -1277,6 +1280,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         free(lines_array[i]);
                     }
                     free(lines_array);
+                    arraylist_free(content_lines);
 
                     // Check for loose list: If we found a blank line between two
                     // direct top-level blocks, OR if we had a blank followed by
@@ -1289,6 +1293,8 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                     if (had_blank_before_block && direct_block_count > 0) {
                         is_loose = true;
                     }
+                } else {
+                    arraylist_free(content_lines);
                 }
             }
 
@@ -1414,7 +1420,7 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
             if (item_children->length < 1) continue;
 
             // Collect all children, unwrapping any paragraphs
-            std::vector<Item> new_children;
+            ArrayList* new_children = arraylist_new(8);
             for (long ci = 0; ci < item_children->length; ci++) {
                 Item child = item_children->items[ci];
                 TypeId child_type = get_type_id(child);
@@ -1429,22 +1435,23 @@ Item parse_list_structure(MarkupParser* parser, int base_indent) {
                         if (tag && strcmp(tag, "p") == 0) {
                             List* p_children = (List*)child_elem;
                             for (long pi = 0; pi < p_children->length; pi++) {
-                                new_children.push_back(p_children->items[pi]);
+                                arraylist_append(new_children, (ArrayListValue)p_children->items[pi].item);
                             }
                             continue;  // Don't add the paragraph itself
                         }
                     }
                 }
                 // Not a paragraph - keep as is
-                new_children.push_back(child);
+                arraylist_append(new_children, (ArrayListValue)child.item);
             }
 
             // Replace item's children with unwrapped version
             item_children->length = 0;
-            for (size_t ni = 0; ni < new_children.size(); ni++) {
-                list_push((List*)item, new_children[ni]);
+            for (int ni = 0; ni < new_children->length; ni++) {
+                list_push((List*)item, Item{.item = (uint64_t)new_children->data[ni]});
                 increment_element_content_length(item);
             }
+            arraylist_free(new_children);
         }
     } else {
         // Loose list - mark it and ensure paragraphs are wrapped

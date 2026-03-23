@@ -1533,6 +1533,7 @@ TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
 
         if (html_content.empty()) {
             printf("  ⚠️  Skipped: %s (not found)\n", layout_files[i]);
+            total--;  // Don't count missing files toward total
             continue;
         }
 

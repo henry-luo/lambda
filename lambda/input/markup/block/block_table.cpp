@@ -10,7 +10,7 @@
  */
 #include "block_common.hpp"
 #include <cstdlib>
-#include <vector>
+#include "lib/arraylist.h"
 
 namespace lambda {
 namespace markup {
@@ -57,10 +57,11 @@ static bool is_separator_row(const char* line) {
 
 /**
  * parse_separator_alignments - Parse alignment info from separator row
- * Returns a vector of alignments, one per column
+ * Returns an ArrayList of alignments (TableAlign cast to ArrayListValue), one per column.
+ * Caller must free the returned ArrayList.
  */
-static std::vector<TableAlign> parse_separator_alignments(const char* line) {
-    std::vector<TableAlign> alignments;
+static ArrayList* parse_separator_alignments(const char* line) {
+    ArrayList* alignments = arraylist_new(8);
     if (!line) return alignments;
 
     const char* pos = line;
@@ -105,7 +106,7 @@ static std::vector<TableAlign> parse_separator_alignments(const char* line) {
         } else if (right_colon) {
             align = TableAlign::RIGHT;
         }
-        alignments.push_back(align);
+        arraylist_append(alignments, (ArrayListValue)(intptr_t)align);
         
         // Skip to next cell
         if (*pos == '|') pos++;
@@ -174,7 +175,7 @@ Item parse_table_cell_content(MarkupParser* parser, const char* text) {
  */
 static Item parse_table_row_with_type(MarkupParser* parser, const char* line, 
                                        const char* cell_tag,
-                                       const std::vector<TableAlign>& alignments) {
+                                       ArrayList* alignments) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
     }
@@ -255,10 +256,10 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
         Element* cell = create_element(parser, cell_tag);
         if (cell) {
             // Add alignment attribute if specified
-            if (col_index < (int)alignments.size() && alignments[col_index] != TableAlign::NONE) {
+            if (col_index < alignments->length && (TableAlign)(intptr_t)alignments->data[col_index] != TableAlign::NONE) {
                 String* align_key = parser->builder.createName("align");
                 const char* align_val_str = nullptr;
-                switch (alignments[col_index]) {
+                switch ((TableAlign)(intptr_t)alignments->data[col_index]) {
                     case TableAlign::LEFT: align_val_str = "left"; break;
                     case TableAlign::CENTER: align_val_str = "center"; break;
                     case TableAlign::RIGHT: align_val_str = "right"; break;
@@ -293,15 +294,15 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
     }
 
     // Pad row with empty cells if it has fewer cells than expected
-    size_t expected_cols = alignments.size();
-    while (col_index < (int)expected_cols) {
+    int expected_cols = alignments->length;
+    while (col_index < expected_cols) {
         Element* empty_cell = create_element(parser, cell_tag);
         if (empty_cell) {
             // Add alignment attribute if specified
-            if (col_index < (int)alignments.size() && alignments[col_index] != TableAlign::NONE) {
+            if (col_index < alignments->length && (TableAlign)(intptr_t)alignments->data[col_index] != TableAlign::NONE) {
                 String* align_key = parser->builder.createName("align");
                 const char* align_val_str = nullptr;
-                switch (alignments[col_index]) {
+                switch ((TableAlign)(intptr_t)alignments->data[col_index]) {
                     case TableAlign::LEFT: align_val_str = "left"; break;
                     case TableAlign::CENTER: align_val_str = "center"; break;
                     case TableAlign::RIGHT: align_val_str = "right"; break;
@@ -326,8 +327,10 @@ static Item parse_table_row_with_type(MarkupParser* parser, const char* line,
  * parse_table_row - Parse a single table row (backward compatible wrapper)
  */
 Item parse_table_row(MarkupParser* parser, const char* line) {
-    std::vector<TableAlign> empty_alignments;
-    return parse_table_row_with_type(parser, line, "td", empty_alignments);
+    ArrayList* empty_alignments = arraylist_new(0);
+    Item result = parse_table_row_with_type(parser, line, "td", empty_alignments);
+    arraylist_free(empty_alignments);
+    return result;
 }
 
 /**
@@ -355,8 +358,8 @@ static Item parse_rst_simple_table_row(MarkupParser* parser, const char* line,
     if (!row) return Item{.item = ITEM_ERROR};
 
     // Find column boundaries from border line
-    std::vector<int> col_starts;
-    std::vector<int> col_ends;
+    ArrayList* col_starts = arraylist_new(8);
+    ArrayList* col_ends = arraylist_new(8);
 
     const char* bp = border;
     int pos = 0;
@@ -367,19 +370,19 @@ static Item parse_rst_simple_table_row(MarkupParser* parser, const char* line,
         if (*bp != '=') break;
 
         // Start of column
-        col_starts.push_back(pos);
+        arraylist_append(col_starts, (ArrayListValue)(intptr_t)pos);
         while (*bp == '=') { bp++; pos++; }
-        col_ends.push_back(pos);
+        arraylist_append(col_ends, (ArrayListValue)(intptr_t)pos);
     }
 
     // Extract content from each column
     size_t line_len = strlen(line);
-    for (size_t i = 0; i < col_starts.size(); i++) {
-        int start = col_starts[i];
-        int end = col_ends[i];
-        if (i + 1 < col_starts.size()) {
+    for (int i = 0; i < col_starts->length; i++) {
+        int start = (int)(intptr_t)col_starts->data[i];
+        int end = (int)(intptr_t)col_ends->data[i];
+        if (i + 1 < col_starts->length) {
             // Use space between columns
-            end = col_starts[i + 1];
+            end = (int)(intptr_t)col_starts->data[i + 1];
         }
 
         // Extract cell content
@@ -411,6 +414,8 @@ static Item parse_rst_simple_table_row(MarkupParser* parser, const char* line,
             increment_element_content_length(row);
         }
     }
+    arraylist_free(col_starts);
+    arraylist_free(col_ends);
 
     return Item{.item = (uint64_t)row};
 }
@@ -493,7 +498,7 @@ Item parse_table(MarkupParser* parser, const char* line) {
 
     // For GFM tables: we need to look ahead to detect the header
     // Pattern: header_row -> separator_row -> body_rows
-    std::vector<TableAlign> column_alignments;
+    ArrayList* column_alignments = arraylist_new(8);
     bool has_gfm_header = false;
     
     // Check if this is a GFM table with header
@@ -501,6 +506,7 @@ Item parse_table(MarkupParser* parser, const char* line) {
         const char* next_line = parser->lines[parser->current_line + 1];
         if (is_separator_row(next_line)) {
             has_gfm_header = true;
+            arraylist_free(column_alignments);
             column_alignments = parse_separator_alignments(next_line);
         }
     }
@@ -613,6 +619,7 @@ Item parse_table(MarkupParser* parser, const char* line) {
     if (table_type->content_length == 0) {
         parser->warnInvalidSyntax("table", "at least one row with | delimiters");
     }
+    arraylist_free(column_alignments);
 
     return Item{.item = (uint64_t)table};
 }

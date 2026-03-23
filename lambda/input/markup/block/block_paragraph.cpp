@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <cstring>
-#include <vector>
+#include "lib/arraylist.h"
 
 namespace lambda {
 namespace markup {
@@ -45,7 +45,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     }
 
     // Collect indented lines
-    std::vector<const char*> code_lines;
+    ArrayList* code_lines = arraylist_new(16);
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
 
@@ -62,7 +62,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
                 while (next[next_indent] == ' ') next_indent++;
                 if (next_indent >= base_indent) {
                     // Include empty line
-                    code_lines.push_back("");
+                    arraylist_append(code_lines, (ArrayListValue)"");
                     parser->current_line++;
                     continue;
                 }
@@ -78,11 +78,12 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
         }
 
         // Strip base indentation
-        code_lines.push_back(line + base_indent);
+        arraylist_append(code_lines, (ArrayListValue)(line + base_indent));
         parser->current_line++;
     }
 
-    if (code_lines.empty()) {
+    if (code_lines->length == 0) {
+        arraylist_free(code_lines);
         return Item{.item = ITEM_UNDEFINED};
     }
 
@@ -100,10 +101,11 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     // Build code content
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
-    for (size_t i = 0; i < code_lines.size(); i++) {
+    for (int i = 0; i < code_lines->length; i++) {
         if (i > 0) stringbuf_append_char(sb, '\n');
-        stringbuf_append_str(sb, code_lines[i]);
+        stringbuf_append_str(sb, (const char*)code_lines->data[i]);
     }
+    arraylist_free(code_lines);
 
     // Add text node to code element
     String* text = parser->builder.createString(sb->str->chars, sb->length);
