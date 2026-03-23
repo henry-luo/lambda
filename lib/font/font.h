@@ -329,6 +329,11 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
 // remove all registered descriptors (e.g., on document unload)
 void font_face_clear(FontContext* ctx);
 
+// reset per-document font state: clears @font-face descriptors, face cache,
+// and codepoint fallback cache. Keeps system font database intact.
+// Call between documents in batch mode.
+void font_context_reset_document_fonts(FontContext* ctx);
+
 // ============================================================================
 // Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)
 // ============================================================================

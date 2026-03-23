@@ -254,6 +254,27 @@ void font_context_destroy(FontContext* ctx) {
     if (owns_pool  && pool)  pool_destroy(pool);
 }
 
+void font_context_reset_document_fonts(FontContext* ctx) {
+    if (!ctx) return;
+
+    // clear @font-face descriptors from the previous document
+    font_face_clear(ctx);
+
+    // clear codepoint fallback cache — entries may reference handles
+    // loaded at a different size for a previous document's @font-face
+    if (ctx->codepoint_fallback_cache) {
+        hashmap_clear(ctx->codepoint_fallback_cache, false);
+    }
+
+    // clear face cache — entries may reference @font-face loaded fonts
+    // that are no longer valid for the next document
+    if (ctx->face_cache) {
+        hashmap_clear(ctx->face_cache, false);
+    }
+
+    log_info("font_context_reset_document_fonts: cleared per-document font state");
+}
+
 bool font_context_scan(FontContext* ctx) {
     if (!ctx || !ctx->database) return false;
     if (ctx->database->scanned) return true;

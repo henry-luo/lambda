@@ -1609,11 +1609,10 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 }
             }
 
-            // Check cache for height
-            if (!item_is_grid_container && cached && cached->measured_height > 0) {
-                min_height = max_height = cached->measured_height;
-                log_debug("calculate_item_intrinsic_sizes: using cached height: %.1f", min_height);
-            } else {
+            // Always use calculate_max_content_height for accurate height measurement.
+            // The cached heights from measure_flex_child_content use inaccurate
+            // hardcoded tag-based estimates (e.g. p=36px, h1=32px + artificial margins).
+            {
                 float available_width = 10000.0f;
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
                 log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f (is_grid=%d)", min_height, item_is_grid_container);

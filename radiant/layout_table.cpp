@@ -5182,8 +5182,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 table_width += ml + mr;
             }
 
-            // Position caption (caption's box width, not the larger table wrapper)
-            caption->x = 0;
+            // Position caption: margin-left determines x offset within table wrapper
+            float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                               ? caption->bound->margin.left : 0;
+            caption->x = caption_ml;
             caption->y = 0;
             caption->width = caption_box_width;
 
@@ -5235,6 +5237,70 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             ((ViewBlock*)table)->height = table->height;
             log_debug("Empty table: width=%.0f, height=%.0f (bp: t=%.0f b=%.0f l=%.0f r=%.0f)",
                       table->width, table->height, bp_top, bp_bottom, bp_left, bp_right);
+
+            // CSS 2.1 §9.7: When table-internal elements have float applied, they are
+            // blockified and removed from the table layout. But row groups and rows that
+            // contained them still need sizing. Expand rows/row-groups to contain floated
+            // children, inheriting the table's width.
+            for (View* tch = table->first_child; tch; tch = tch->next_sibling) {
+                if (!tch->view_type) continue;  // skip nil-views (text nodes)
+                ViewBlock* tblk = (ViewBlock*)tch;
+                bool is_row_group = (tblk->view_type == RDT_VIEW_TABLE_ROW_GROUP);
+                bool is_row = (tblk->view_type == RDT_VIEW_TABLE_ROW);
+                if (!is_row_group && !is_row) continue;
+
+                float group_height = 0;
+
+                if (is_row) {
+                    // Direct row child of table: scan for floated children
+                    float max_float_bottom = 0;
+                    for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
+                        if (!rch->view_type || !rch->is_block()) continue;
+                        ViewBlock* rvb = (ViewBlock*)rch;
+                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
+                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
+                            float bottom = rvb->y + rvb->height;
+                            if (bottom > max_float_bottom) max_float_bottom = bottom;
+                        }
+                    }
+                    if (max_float_bottom > 0) {
+                        tblk->width = table->width;
+                        tblk->height = max_float_bottom;
+                        log_debug("Float-containing row sized: width=%.0f, height=%.0f",
+                                  tblk->width, tblk->height);
+                    }
+                } else {
+                    // Row group: process each child row
+                    for (View* rch = tblk->first_child; rch; rch = rch->next_sibling) {
+                        if (!rch->view_type) continue;
+                        ViewBlock* row = (ViewBlock*)rch;
+                        if (row->view_type != RDT_VIEW_TABLE_ROW) continue;
+                        float max_float_bottom = 0;
+                        for (View* cch = row->first_child; cch; cch = cch->next_sibling) {
+                            if (!cch->view_type || !cch->is_block()) continue;
+                            ViewBlock* cvb = (ViewBlock*)cch;
+                            if (cvb->position && (cvb->position->float_prop == CSS_VALUE_LEFT ||
+                                                  cvb->position->float_prop == CSS_VALUE_RIGHT)) {
+                                float bottom = cvb->y + cvb->height;
+                                if (bottom > max_float_bottom) max_float_bottom = bottom;
+                            }
+                        }
+                        if (max_float_bottom > 0) {
+                            row->width = table->width;
+                            row->height = max_float_bottom;
+                            log_debug("Float-containing row sized: width=%.0f, height=%.0f",
+                                      row->width, row->height);
+                        }
+                        if (row->height > group_height) group_height = row->height;
+                    }
+                    if (group_height > 0) {
+                        tblk->width = table->width;
+                        tblk->height = group_height;
+                        log_debug("Float-containing row group sized: width=%.0f, height=%.0f",
+                                  tblk->width, tblk->height);
+                    }
+                }
+            }
         }
         return;
     }
@@ -5954,9 +6020,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // the table expands if the caption's margin-box exceeds the table content width.
         if (caption->bound) {
             float ml = (caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
-                       ? caption->bound->margin.left : 0;
+                           ? caption->bound->margin.left : 0;
             float mr = (caption->bound->margin.right_type != CSS_VALUE_AUTO && caption->bound->margin.right > 0)
-                       ? caption->bound->margin.right : 0;
+                           ? caption->bound->margin.right : 0;
             if (ml + mr > 0) {
                 caption_width_contribution += (int)(ml + mr);
                 log_debug("Caption margin-box: added margins (left=%.0f, right=%.0f) -> contribution=%dpx",
@@ -6574,7 +6640,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position caption at top if caption-side is top (default)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_TOP) {
-        caption->x = 0;
+        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
+        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                           ? caption->bound->margin.left : 0;
+        caption->x = caption_ml;
         // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
         // The caption's margin-top pushes it down from the table wrapper's content edge.
         float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;
@@ -6829,6 +6898,28 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Global row index for tracking row positions across all row groups
     int global_row_index = 0;
 
+    // CSS 2.1 §9.4.1: Tables establish a BFC. Floated children (blockified per
+    // §9.7) are out of flow but occupy space in the BFC. Table row groups must
+    // be positioned below any floated siblings so they don't overlap.
+    {
+        float max_float_bottom = 0;
+        for (View* child = table->first_child; child; child = child->next_sibling) {
+            if (!child->is_block()) continue;
+            ViewBlock* vb = (ViewBlock*)child;
+            if (vb->position && (vb->position->float_prop == CSS_VALUE_LEFT ||
+                                 vb->position->float_prop == CSS_VALUE_RIGHT)) {
+                float bottom = vb->y + vb->height;
+                if (bottom > max_float_bottom)
+                    max_float_bottom = bottom;
+            }
+        }
+        if (max_float_bottom > current_y) {
+            log_debug("Table float offset: current_y %d -> %d for floated children",
+                      current_y, (int)max_float_bottom);
+            current_y = (int)max_float_bottom;
+        }
+    }
+
     // =========================================================================
     // CSS 2.1 Section 17.2: Visual ordering of row groups
     // Row groups must be rendered in order: THEAD → TBODY → TFOOT
@@ -6904,6 +6995,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (table->tb->border_spacing_h > 0 && columns > 1) {
                     tbody_content_width += (columns - 1) * table->tb->border_spacing_h;
                 }
+            }
+
+            // CSS 2.1 §9.4.1: When a table has no columns (all children were
+            // floated/blockified), the row groups should still use the table's
+            // content width so they span the full table area.
+            if (tbody_content_width <= 0 && table->width > 0 && columns == 0) {
+                tbody_content_width = (int)table->width;
+                log_debug("No columns: using table->width %.1f for tbody_content_width", table->width);
             }
 
             // Position tbody based on border-collapse mode
@@ -7016,6 +7115,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         float height_for_row = process_table_cell(lycon, tcell, table, col_widths, col_x_positions, columns, meta->col_edge_max_border, meta->col_collapsed, meta->col_original_widths);
                         if (height_for_row > row_height) {
                             row_height = height_for_row;
+                        }
+                    }
+
+                    // CSS 2.1 §9.4.1: Tables establish a BFC. When a row contains
+                    // floated children (blockified table-internal elements per §9.7),
+                    // the row expands to contain them.
+                    for (DomNode* rchild = row->first_child; rchild; rchild = rchild->next_sibling) {
+                        if (!rchild->is_element()) continue;
+                        ViewBlock* rvb = (ViewBlock*)rchild;
+                        if (rvb->position && (rvb->position->float_prop == CSS_VALUE_LEFT ||
+                                              rvb->position->float_prop == CSS_VALUE_RIGHT)) {
+                            float float_bottom = rvb->height;
+                            if (float_bottom > row_height) {
+                                log_debug("Row float containment: expanding height %.1f -> %.1f for floated child",
+                                          row_height, float_bottom);
+                                row_height = float_bottom;
+                            }
                         }
                     }
 
@@ -7886,7 +8002,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Position caption at bottom if caption-side is bottom (CSS 2.1 Section 17.4.1)
     if (caption && table->tb->caption_side == TableProp::CAPTION_SIDE_BOTTOM) {
-        caption->x = 0;
+        // CSS 2.1 §17.4: Caption margin-left positions the caption's border-box within the wrapper
+        float caption_ml = (caption->bound && caption->bound->margin.left_type != CSS_VALUE_AUTO && caption->bound->margin.left > 0)
+                           ? caption->bound->margin.left : 0;
+        caption->x = caption_ml;
         // CSS 2.1 §17.4: Caption margins are not collapsed with the table margins.
         // The caption's margin-top pushes it down from the table box's bottom edge.
         float caption_mt = (caption->bound && caption->bound->margin.top > 0) ? caption->bound->margin.top : 0;

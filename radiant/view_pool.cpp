@@ -1853,7 +1853,11 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_str(buf, "\"style\": \"normal\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
-    if (block->font && block->font->font_weight) {
+    if (block->font && block->font->font_weight_numeric > 0) {
+        char weight_buf[8];
+        snprintf(weight_buf, sizeof(weight_buf), "%d", block->font->font_weight_numeric);
+        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_buf);
+    } else if (block->font && block->font->font_weight) {
         const char* weight_str = "normal";
         auto weight_val = css_enum_info(block->font->font_weight);
         if (weight_val) weight_str = (const char*)weight_val->name;
@@ -2158,10 +2162,16 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         if (style_val) style_str = (const char*)style_val->name;
         strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* weight_str = "normal";
-        auto weight_val = css_enum_info(span->font->font_weight);
-        if (weight_val) weight_str = (const char*)weight_val->name;
-        strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_str);
+        if (span->font->font_weight_numeric > 0) {
+            char weight_buf[8];
+            snprintf(weight_buf, sizeof(weight_buf), "%d", span->font->font_weight_numeric);
+            strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_buf);
+        } else {
+            const char* weight_str = "normal";
+            auto weight_val = css_enum_info(span->font->font_weight);
+            if (weight_val) weight_str = (const char*)weight_val->name;
+            strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_str);
+        }
         strbuf_append_char_n(buf, ' ', indent + 6);
         const char* deco_str = "none";
         auto deco_val = css_enum_info(span->font->text_deco);

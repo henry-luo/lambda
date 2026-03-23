@@ -98,8 +98,14 @@ void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block) {
     // (during child layout), they are still 0. Instead, derive from the parent's
     // border-box width/height minus padding and border.
     float cb_width = 0, cb_height = 0;
-    if (parent && parent->is_block()) {
-        ViewBlock* parent_block = (ViewBlock*)parent;
+    ViewElement* cb_parent = parent;
+    // CSS 2.1 §9.2.1.1: For block children inside inline spans (block-in-inline),
+    // the containing block is the nearest block-level ancestor, not the inline span.
+    while (cb_parent && !cb_parent->is_block()) {
+        cb_parent = cb_parent->parent_view();
+    }
+    if (cb_parent && cb_parent->is_block()) {
+        ViewBlock* parent_block = (ViewBlock*)cb_parent;
         // Compute content-box width from border-box width
         float pad_border_h = 0;
         if (parent_block->bound) {
@@ -228,52 +234,62 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
     }
 
     if (!scroll_ancestor) {
-        // no scroll container found — sticky acts exactly like relative at scroll=0
-        // with no constraints, the insets have no effect
         log_debug("sticky: no scroll container found, no offset applied");
         return;
     }
 
     ViewBlock* scroller = (ViewBlock*)scroll_ancestor;
 
-    // compute scrollport rectangle in absolute coordinates
-    // the scrollport is the content box of the scroll container
-    float sp_top = (float)scroller->y;
-    float sp_left = (float)scroller->x;
+    // Scrollport: scroller's content box at (0, 0) in scroller content coordinates.
+    // At scroll position 0, the visible area starts at the content box origin.
+    float sp_content_h = (float)scroller->height;
+    float sp_content_w = (float)scroller->width;
     if (scroller->bound) {
-        sp_top += scroller->bound->padding.top;
-        sp_left += scroller->bound->padding.left;
+        sp_content_h -= scroller->bound->padding.top + scroller->bound->padding.bottom;
+        sp_content_w -= scroller->bound->padding.left + scroller->bound->padding.right;
         if (scroller->bound->border) {
-            sp_top += scroller->bound->border->width.top;
-            sp_left += scroller->bound->border->width.left;
+            sp_content_h -= scroller->bound->border->width.top + scroller->bound->border->width.bottom;
+            sp_content_w -= scroller->bound->border->width.left + scroller->bound->border->width.right;
         }
     }
-    float sp_bottom = sp_top + (float)scroller->height;
-    float sp_right = sp_left + (float)scroller->width;
-    if (scroller->bound) {
-        // subtract padding from bottom/right to get content box
-        sp_bottom -= scroller->bound->padding.top + scroller->bound->padding.bottom;
-        sp_right -= scroller->bound->padding.left + scroller->bound->padding.right;
-        if (scroller->bound->border) {
-            sp_bottom -= scroller->bound->border->width.top + scroller->bound->border->width.bottom;
-            sp_right -= scroller->bound->border->width.left + scroller->bound->border->width.right;
+    float sp_top = 0, sp_left = 0;
+    float sp_bottom = sp_content_h;
+    float sp_right = sp_content_w;
+
+    // Convert element position from parent-relative to scroller content coordinates.
+    // Walk from element's parent up to (not including) the scroller, accumulating
+    // each ancestor's border-box offset plus its padding/border to reach its content area.
+    float offset_to_scroller_y = 0;
+    float offset_to_scroller_x = 0;
+    for (ViewElement* p = block->parent_view(); p && p != scroll_ancestor; p = p->parent_view()) {
+        if (p->is_block()) {
+            ViewBlock* pb = (ViewBlock*)p;
+            offset_to_scroller_y += (float)pb->y;
+            offset_to_scroller_x += (float)pb->x;
+            if (pb->bound) {
+                offset_to_scroller_y += pb->bound->padding.top;
+                offset_to_scroller_x += pb->bound->padding.left;
+                if (pb->bound->border) {
+                    offset_to_scroller_y += pb->bound->border->width.top;
+                    offset_to_scroller_x += pb->bound->border->width.left;
+                }
+            }
         }
     }
 
-    log_debug("sticky: scrollport [%.1f, %.1f, %.1f, %.1f], element at (%d, %d) size %dx%d",
-              sp_left, sp_top, sp_right, sp_bottom, block->x, block->y, block->width, block->height);
-
-    // current element position (static/normal flow position)
-    float elem_top = (float)block->y;
-    float elem_left = (float)block->x;
+    // element position in scroller content coordinates
+    float elem_top = (float)block->y + offset_to_scroller_y;
+    float elem_left = (float)block->x + offset_to_scroller_x;
     float elem_bottom = elem_top + (float)block->height;
     float elem_right = elem_left + (float)block->width;
+
+    log_debug("sticky: scrollport [%.1f, %.1f, %.1f, %.1f], element in scroller coords (%.1f, %.1f) size %dx%d",
+              sp_left, sp_top, sp_right, sp_bottom, elem_left, elem_top, block->width, block->height);
 
     float offset_x = 0, offset_y = 0;
 
     // vertical sticky constraints
     if (block->position->has_top && block->position->has_bottom) {
-        // both top and bottom: top wins (CSS Position 3 §3.5.2)
         float inset = block->position->top;
         float min_top = sp_top + inset;
         if (elem_top < min_top) {
@@ -295,7 +311,6 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
 
     // horizontal sticky constraints
     if (block->position->has_left && block->position->has_right) {
-        // both left and right: left wins in LTR
         float inset = block->position->left;
         float min_left = sp_left + inset;
         if (elem_left < min_left) {
@@ -315,40 +330,42 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         }
     }
 
-    // constrain: element must stay within its containing block
-    // The containing block for a sticky element is its parent box
+    // Constrain: element must stay within its containing block (parent).
+    // Use parent content coordinates (element's y=0 is parent content top).
     ViewElement* parent = block->parent_view();
     if (parent && parent->is_block() && (offset_x != 0 || offset_y != 0)) {
         ViewBlock* cb = (ViewBlock*)parent;
-        float cb_top = (float)cb->y;
-        float cb_left = (float)cb->x;
-        float cb_bottom = cb_top + (float)cb->height;
-        float cb_right = cb_left + (float)cb->width;
+        // containing block content area in parent-relative coordinates: [0, content_height]
+        float cb_content_top = 0;
+        float cb_content_left = 0;
+        float cb_content_bottom = (float)cb->height;
+        float cb_content_right = (float)cb->width;
         if (cb->bound) {
-            cb_top += cb->bound->padding.top;
-            cb_left += cb->bound->padding.left;
-            cb_bottom -= cb->bound->padding.bottom;
-            cb_right -= cb->bound->padding.right;
+            cb_content_bottom -= cb->bound->padding.top + cb->bound->padding.bottom;
+            cb_content_right -= cb->bound->padding.left + cb->bound->padding.right;
             if (cb->bound->border) {
-                cb_top += cb->bound->border->width.top;
-                cb_left += cb->bound->border->width.left;
-                cb_bottom -= cb->bound->border->width.bottom;
-                cb_right -= cb->bound->border->width.right;
+                cb_content_bottom -= cb->bound->border->width.top + cb->bound->border->width.bottom;
+                cb_content_right -= cb->bound->border->width.left + cb->bound->border->width.right;
             }
         }
 
-        // clamp offset so element stays in containing block
-        if (offset_y > 0 && (elem_bottom + offset_y) > cb_bottom) {
-            offset_y = max(0.0f, cb_bottom - elem_bottom);
+        // clamp offset so element stays in containing block (in parent coords)
+        float local_top = (float)block->y;
+        float local_bottom = local_top + (float)block->height;
+        float local_left = (float)block->x;
+        float local_right = local_left + (float)block->width;
+
+        if (offset_y > 0 && (local_bottom + offset_y) > cb_content_bottom) {
+            offset_y = max(0.0f, cb_content_bottom - local_bottom);
         }
-        if (offset_y < 0 && (elem_top + offset_y) < cb_top) {
-            offset_y = min(0.0f, cb_top - elem_top);
+        if (offset_y < 0 && (local_top + offset_y) < cb_content_top) {
+            offset_y = min(0.0f, cb_content_top - local_top);
         }
-        if (offset_x > 0 && (elem_right + offset_x) > cb_right) {
-            offset_x = max(0.0f, cb_right - elem_right);
+        if (offset_x > 0 && (local_right + offset_x) > cb_content_right) {
+            offset_x = max(0.0f, cb_content_right - local_right);
         }
-        if (offset_x < 0 && (elem_left + offset_x) < cb_left) {
-            offset_x = min(0.0f, cb_left - elem_left);
+        if (offset_x < 0 && (local_left + offset_x) < cb_content_left) {
+            offset_x = min(0.0f, cb_content_left - local_left);
         }
     }
 
@@ -357,7 +374,6 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
         block->y += (int)offset_y;
         log_debug("sticky: applied offset (%.1f, %.1f), new position (%d, %d)", offset_x, offset_y, block->x, block->y);
 
-        // for inline elements, offset children too
         if (block->view_type == RDT_VIEW_INLINE) {
             offset_children_recursive((ViewElement*)block, (int)offset_x, (int)offset_y);
         }

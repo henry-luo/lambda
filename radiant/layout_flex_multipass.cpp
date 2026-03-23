@@ -1510,8 +1510,44 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         tt_node = tt_node->parent;
                     }
 
+                    // CSS white-space property determines whether to collapse whitespace
+                    CssEnum ws = CSS_VALUE_NORMAL;
+                    if (flex_container->blk && flex_container->blk->white_space != 0) {
+                        ws = flex_container->blk->white_space;
+                    }
+                    bool collapse_ws = (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_NOWRAP ||
+                                        ws == CSS_VALUE_PRE_LINE || ws == 0);
+                    bool nowrap = (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
+
+                    // Normalize whitespace before measuring: collapse runs of
+                    // spaces/tabs/newlines to a single space, trim leading/trailing.
+                    const char* measure_text = text;
+                    size_t measure_len = strlen(text);
+                    char normalized_buf[4096];
+                    if (collapse_ws && measure_len > 0) {
+                        size_t j = 0;
+                        bool in_space = true; // true to trim leading whitespace
+                        for (size_t i = 0; i < measure_len && j < sizeof(normalized_buf) - 1; i++) {
+                            char c = text[i];
+                            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                                if (!in_space) {
+                                    normalized_buf[j++] = ' ';
+                                    in_space = true;
+                                }
+                            } else {
+                                normalized_buf[j++] = c;
+                                in_space = false;
+                            }
+                        }
+                        // trim trailing space
+                        if (j > 0 && normalized_buf[j - 1] == ' ') j--;
+                        normalized_buf[j] = '\0';
+                        measure_text = normalized_buf;
+                        measure_len = j;
+                    }
+
                     // Measure this text node
-                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, text, strlen(text), text_transform);
+                    TextIntrinsicWidths widths = measure_text_intrinsic_widths(lycon, measure_text, measure_len, text_transform);
                     float text_width = widths.max_content;
                     float text_height = lycon->font.style ? lycon->font.style->font_size : 16.0f;
 
@@ -1531,9 +1567,10 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     // CSS Flexbox: anonymous text items shrink (flex-shrink: 1 default).
                     // When text is wider than container, it wraps to container width.
                     // Use effective (wrapped) dimensions for positioning.
+                    // Skip wrapping estimation when white-space: nowrap or pre.
                     float effective_text_width = text_width;
                     float effective_text_height = text_height;
-                    if (text_width > container_content_width && container_content_width > 0) {
+                    if (!nowrap && text_width > container_content_width && container_content_width > 0) {
                         effective_text_width = container_content_width;
                         // estimate wrapped height using word-boundary groups
                         float min_word = widths.min_content;
@@ -1848,12 +1885,14 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
                 scan = scan->next_sibling;
             }
-            // Also compute padding+border to add to content height
+            // Also compute bottom padding+border to add to content height.
+            // Note: text y-positions already include the top padding offset
+            // (positioned at container_content_y), so only bottom is needed.
             float pad_border_h = 0;
             if (flex_container->bound) {
-                pad_border_h += flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                pad_border_h += flex_container->bound->padding.bottom;
                 if (flex_container->bound->border) {
-                    pad_border_h += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                    pad_border_h += flex_container->bound->border->width.bottom;
                 }
             }
             float text_total_height = max_text_bottom + pad_border_h;
