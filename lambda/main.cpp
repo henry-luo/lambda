@@ -787,6 +787,9 @@ int main(int argc, char *argv[]) {
     // Store command line args for sys.proc.self.args access
     sysinfo_set_args(argc, argv);
 
+    // Initialize lambda home path (reads LAMBDA_HOME env var if set)
+    lambda_home_init();
+
     // Initialize logging system with config file if available
     if (access("log.conf", F_OK) == 0) {
         // log.conf exists, load it
