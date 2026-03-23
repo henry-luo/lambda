@@ -279,8 +279,9 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, control flow, and comprehensions  |
 | [Functions](doc/Lambda_Func.md)                     | Function declarations, closures, and procedures     |
 | [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O)  |
-| [Validator Guide](doc/Lambda_Validator_Guide.md)    | Schema-based validation for data structures         |
-| [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
+| [Validator Guide](doc/Lambda_Validator_Guide.md)          | Schema-based validation for data structures                   |
+| [Doc Schema](doc/Doc_Schema.md)                           | Schema for lightweight markup (Markdown, Wiki, RST)           |
+| [Markup & Data Format Support](doc/Markup_Formats_Support.md) | Supported input formats and how they map to Lambda/Mark   |
 
 ### Developer Documentation
 
