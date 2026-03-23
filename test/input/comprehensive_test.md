@@ -5,7 +5,7 @@ This is a comprehensive test document covering all features implemented in the m
 ## Headers Testing
 
 ### Level 3 Header
-#### Level 4 Header  
+#### Level 4 Header
 ##### Level 5 Header
 ###### Level 6 Header
 
@@ -82,7 +82,7 @@ without syntax highlighting
 > with multiple lines
 
 > **Nested formatting** works in blockquotes
-> 
+>
 > Including `inline code` and *emphasis*
 
 ## Links and Images
@@ -93,9 +93,7 @@ without syntax highlighting
 - [Relative link](../other-page.html)
 
 ### Images
-- ![Alt text](https://example.com/image.png)
-- ![Alt text with title](https://example.com/image.png "Image title")
-- ![Local image](./assets/test-image.jpg)
+- ![Local image](../layout/data/res/sample1.png)
 
 ## Advanced Inline Formatting
 
@@ -105,7 +103,7 @@ You can combine ~~**bold strikethrough**~~ and ~~*italic strikethrough*~~.
 
 ### Superscript and Subscript
 - Water molecule: H^2^O (superscript)
-- Chemical formula: CO~2~ (subscript)  
+- Chemical formula: CO~2~ (subscript)
 - Complex: E = mc^2^ and H~2~SO~4~
 
 ### Mathematical Content
@@ -277,7 +275,7 @@ Text between dividers (three hyphens)
 
 ***
 
-Text between dividers (three asterisks)  
+Text between dividers (three asterisks)
 
 ___
 
@@ -312,32 +310,32 @@ Mixed ordered and unordered nesting:
 
 Lists containing code:
 - First item
-  
+
   ```python
   def example():
       return "code in list"
   ```
 
 - Second item with inline `code` and block code:
-  
+
   ```javascript
   console.log("nested code block");
   ```
 
 ### Basic Nested Lists
 1. **First item** with bold text
-   
+
    - Simple nested unordered item
    - Another nested item with *italic*
-   
+
 2. **Second item** with different nesting
-   
+
    1. Nested ordered item
    2. Another nested ordered item
 
 ### Simple Blockquotes with Basic Content
 > This blockquote contains **bold** and *italic* text.
-> 
+>
 > It also has `inline code` but no complex nesting.
 
 ## Final Testing Section
@@ -346,7 +344,7 @@ This comprehensive test covers implemented features that are stable:
 
 **Block Elements:**
 - Headers (levels 1-6) ✓
-- Paragraphs ✓  
+- Paragraphs ✓
 - Lists (ordered, unordered, basic nesting) ✓
 - Code blocks (fenced with ``` syntax) ✓
 - Tables ✓
@@ -356,7 +354,7 @@ This comprehensive test covers implemented features that are stable:
 
 **Inline Elements:**
 - Bold (**text**) and italic (*text*) ✓
-- Inline code (`text`) ✓  
+- Inline code (`text`) ✓
 - Links [text](url) ✓
 - Images ![alt](url) ✓
 - Strikethrough (~~text~~) ✓
@@ -369,7 +367,7 @@ This comprehensive test covers implemented features that are stable:
 - Multi-paragraph list items ✓
 - Basic nested lists ✓
 - Code blocks inside list items ✓
-- Tables with inline formatting ✓  
+- Tables with inline formatting ✓
 - Blockquotes with inline formatting ✓
 - Mixed inline formatting combinations ✓
 
@@ -409,7 +407,7 @@ According to [@darwin1859, p. 42], natural selection is the key mechanism.
 [^2]: This footnote contains multiple paragraphs.
 
     It can span several lines and include formatting like **bold** and *italic*.
-    
+
     Even `code` and [links](https://example.com) work in footnotes.
 
 [^note1]: Academic footnotes often contain detailed references and additional context that would disrupt the flow of the main text.

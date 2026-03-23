@@ -617,8 +617,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
                         else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
                         else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
+                    } else if (list_values[0]->type == CSS_VALUE_TYPE_CUSTOM) {
+                        // Custom identifier (e.g., "Menlo" as unquoted font name)
+                        css_family = list_values[0]->data.custom_property.name;
                     }
                 }
+            } else if (font_family_decl->value->type == CSS_VALUE_TYPE_CUSTOM) {
+                // Single unquoted font name
+                css_family = font_family_decl->value->data.custom_property.name;
             }
 
             if (css_family && css_family != lycon->font.style->family) {
@@ -633,10 +639,16 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // font-size even when font-family is inherited unchanged.
         CssDeclaration* font_size_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_SIZE);
-        if (font_size_decl && font_size_decl->value &&
-            font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            float resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
-                                                       font_size_decl->value);
+        if (font_size_decl && font_size_decl->value) {
+            float resolved_size = 0;
+            if (font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
+                                                         font_size_decl->value);
+            } else if (font_size_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // e.g., font-size: 85% → percentage of parent font size
+                float parent_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                resolved_size = (float)(font_size_decl->value->data.percentage.value / 100.0 * parent_size);
+            }
             if (resolved_size > 0 && fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 temp_font_prop->font_size = resolved_size;
                 need_font_setup = true;
@@ -1872,7 +1884,6 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             border_right = view->bound->border->width.right;
         }
     } else if (element->specified_style) {
-        log_debug("measure_element_intrinsic: %s NO bound, using CSS fallback", element->node_name());
         // Fallback: read padding from CSS styles if bound hasn't been allocated yet
         CssDeclaration* pad_decl = style_tree_get_declaration(element->specified_style, CSS_PROPERTY_PADDING);
         if (pad_decl && pad_decl->value) {
@@ -1882,12 +1893,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 pad_right = resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[1]);
                 pad_left = (pad_decl->value->data.list.count >= 4) ?
                     resolve_length_value(lycon, CSS_PROPERTY_PADDING, values[3]) : pad_right;
-                log_debug("  -> multi-value padding: left=%.1f, right=%.1f", pad_left, pad_right);
             } else if (pad_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Single padding value (shorthand)
                 float pad = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_decl->value);
                 pad_left = pad_right = pad;
-                log_debug("  -> single padding value: %.1f", pad);
             }
         }
 

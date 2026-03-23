@@ -59,6 +59,15 @@ Item parse_math_block(MarkupParser* parser, const char* line) {
     StringBuf* sb = parser->sb;
     stringbuf_reset(sb);
 
+    // Capture any content after $$ on the opening line
+    if (*pos != '\0') {
+        // skip leading whitespace after $$
+        while (*pos == ' ' || *pos == '\t') pos++;
+        if (*pos != '\0') {
+            stringbuf_append_str(sb, pos);
+        }
+    }
+
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
