@@ -2550,6 +2550,14 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     }
 
     char* markdown_filepath = url_to_local_path(markdown_url);
+    if (!markdown_filepath) {
+        // url_to_local_path failed - try using the URL's pathname directly as fallback
+        const char* pathname = url_get_pathname(markdown_url);
+        log_debug("load_markdown_doc: url_to_local_path returned NULL, scheme=%d, pathname=%s, href=%s",
+                  markdown_url->scheme,
+                  pathname ? pathname : "(null)",
+                  markdown_url->href ? markdown_url->href->chars : "(null)");
+    }
     log_info("[TIMING] Loading markdown document: %s", markdown_filepath);
 
     // Step 1: Parse markdown with Lambda parser

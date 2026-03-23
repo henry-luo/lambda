@@ -5,7 +5,7 @@
 #include "../mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/str.h"
-#include "../input/html_entities.h"
+#include "../../radiant/symbol_resolver.h"
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
@@ -383,19 +383,16 @@ static void format_item_reader(HtmlContext& ctx, const ItemReader& item, int dep
     }
     else if (item.isSymbol()) {
         // Symbol items represent HTML entities or emoji shortcodes.
-        // If it's a known HTML entity, output &name; reference.
-        // Otherwise it's an emoji shortcode — output the symbol name as text
-        // (the rendering engine resolves emoji to glyphs via font fallback).
+        // Use resolve_symbol() which checks emoji first (higher priority),
+        // then HTML entities — avoids conflicts like "smile" (emoji vs math entity).
         Symbol* sym = item.asSymbol();
         if (sym && sym->chars) {
-            const char* entity_utf8 = html_entity_lookup(sym->chars, sym->len);
-            if (entity_utf8) {
-                // known HTML entity — output as entity reference
+            SymbolResolution res = resolve_symbol(sym->chars, sym->len);
+            if (res.type == SYMBOL_EMOJI && res.utf8) {
+                stringbuf_append_str(ctx.output(), res.utf8);
+            } else if (res.type == SYMBOL_HTML_ENTITY) {
                 stringbuf_append_format(ctx.output(), "&%.*s;", (int)sym->len, sym->chars);
             } else {
-                // emoji shortcode — output the UTF-8 emoji character
-                // The emoji was already looked up during parsing; the symbol name
-                // is the shortcode. Look up from the emoji table.
                 stringbuf_append_format(ctx.output(), ":%.*s:", (int)sym->len, sym->chars);
             }
         }
