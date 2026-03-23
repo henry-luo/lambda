@@ -39,7 +39,7 @@ lambda view
 ## Features
 
 **Lambda script (pure functional runtime)**
-- **Pure-functional core** with immutable data structures (lists, arrays, maps, elements) and first-class functions and types.
+- **Pure-functional core** with immutable data structures (arrays, maps, elements) and first-class functions and types.
 - **Expressive pipe operator** (`|`) for fluent set-oriented data transformation pipelines with inline mapping and filtering.
 - **Vector arithmetic** with automatic broadcasting — apply scalar operations to entire collections.
 - **Powerful for-expressions** with `where`, `order by`, `limit`, `offset` clauses for SQL-like data querying.
@@ -49,17 +49,16 @@ lambda view
 - **Multi-format parsing**: JSON, XML, HTML, Markdown, Wiki, YAML/TOML/INI, CSV, LaTeX, PDF, and more.
 - **One universal representation**: parse disparate syntaxes into a common Lambda/Mark node tree.
 - **Conversion pipeline**: convert between formats using `lambda convert` (auto-detect input formats when possible).
-- **Document-centric tooling**: designed to treat "documents as data", not just as text.
+- **DOM-centric tooling**: designed to treat "documents as data/objects", not just as text.
 
 **Type system & schema validation**
-- **Rich type system** with type inference and explicit type annotations, similar to that of TypeScript.
+- **Rich type system** with type inference and explicit type annotations, similar to and beyond that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
-- **Format-aware validation** helpers that unwrap/normalize documents before validation.
 
 ![Type Hierarchy](doc/type_hierarchy.svg)
 
 **Radiant HTML/CSS/SVG/JS layout, rendering & viewer**
-- **Browser-compatible layout engine** supporting block, inline, flex, grid, and tables.
+- **Browser-compatible layout engine** supporting html block, inline, flex, grid, and tables.
 - **Unified interactive viewer** via `lambda view`:
    - static HTML/CSS/SVG with some basic JS and DOM support
    - XML (treated as HTML with CSS styling)
@@ -104,11 +103,11 @@ The pipe operator `|` enables fluent data transformations. Use `~` to reference 
 // Extract fields
 users | ~.name                       // ["Alice", "Bob", "Carol"]
 
-// Filter with 'where'
-[1, 2, 3, 4, 5] where ~ > 3          // [4, 5]
+// Filter with 'that'
+[1, 2, 3, 4, 5] that ~ > 3          // [4, 5]
 
 // Chain operations: filter → map → aggregate
-users where ~.age >= 18 | ~.name | len   // count adult names
+users that ~.age >= 18 | ~.name | len   // count adult names
 ```
 
 #### For-Expressions with SQL-like Clauses
@@ -147,7 +146,7 @@ fn add(a: int, b: int) int => a + b
 
 #### Pattern-based Matching & Query
 
-Match expressions support value, range, type, and constrained patterns:
+Match expressions support `value`, `range`, `type`, and constrained patterns:
 
 ```lambda
 fn describe(x) => match x {
@@ -182,20 +181,12 @@ html[body][div]?<a>           // direct path then recursive search
 
 2. **Install dependencies:**
    ```bash
-   # macOS
-   ./setup-mac-deps.sh
-
-   # Linux
-   ./setup-linux-deps.sh
-
-   # Windows (under MSYS2)
-   ./setup-windows-deps.sh
+   ./setup-mac-deps.sh       # macOS
+   ./setup-linux-deps.sh     # Linux
+   ./setup-windows-deps.sh   # Windows (under MSYS2)
    ```
 
 3. **Build:**
-   ```bash
-   make build
-   ```
 
 Lambda uses a Premake5-based build system generated from `build_lambda_config.json`.
 
@@ -238,7 +229,7 @@ for (row in csv) {
 }
 ```
 
-### Interactive/CLI Analysis
+### Interactive CLI/REPL
 ```lambda
 λ> let data = input("sample.json", 'json')
 λ> data.users.length
@@ -260,7 +251,7 @@ Lambda's MIR JIT compiler is benchmarked across 6 standard benchmark suites (R7R
 > Ratio < 1.0 = Lambda is faster.
 
 **Highlights:**
-- Competitive with Node.js V8 overall. Excels on tight numeric loops and recursive workloads (R7RS: 0.44×, AWFY micro: 0.05–0.30×).
+- Competitive with Node.js V8 overall. Excels on micro-benchmarks, tight numeric loops and recursive workloads (R7RS: 0.44×, AWFY micro: 0.05–0.30×).
 - **13× faster than CPython** across the board (wins 47/55 benchmarks).
 
 See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
