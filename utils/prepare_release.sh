@@ -110,6 +110,25 @@ if [ -f "./test/lambda/complex_iot_report_html.ls" ]; then
     echo "    Copied test/lambda/complex_iot_report_html.ls"
 fi
 
+# Copy test/lambda/chart/ files referenced by live-demo.html
+echo "==> Copying chart demo Lambda scripts..."
+mkdir -p ./release/test/lambda/chart
+for file in chart_dashboard_demo.ls dashboard_demo.json \
+            test_bar_chart.ls bar_chart.json \
+            test_line_chart.ls line_chart.json \
+            test_area_chart.ls area_chart.json \
+            test_scatter_chart.ls scatter_chart.json \
+            test_stacked_bar_chart.ls \
+            test_grouped_bar_chart.ls \
+            test_donut_chart.ls donut_chart.json \
+            test_heatmap.ls \
+            test_layered_chart.ls layered_chart.json; do
+    if [ -f "./test/lambda/chart/$file" ]; then
+        cp "./test/lambda/chart/$file" ./release/test/lambda/chart/
+        echo "    Copied test/lambda/chart/$file"
+    fi
+done
+
 # Step 3: Copy doc files (*.md, *.pdf, *.svg, excluding paths starting with '_')
 echo "==> Creating release/doc directory..."
 mkdir -p ./release/doc
