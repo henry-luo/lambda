@@ -103,6 +103,7 @@ static const EmojiEntry emoji_map[] = {
     {":calendar:", "📅"},
     {":clock:", "🕐"},
     {":hourglass:", "⏳"},
+    {":100:", "💯"},
     {nullptr, nullptr}  // Sentinel
 };
 
