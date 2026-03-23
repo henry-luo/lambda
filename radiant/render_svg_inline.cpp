@@ -11,6 +11,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/font/font.h"
+#include "../lib/font/font_internal.h"
 #include "../lib/memtrack.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
@@ -1178,7 +1179,36 @@ static Tvg_Paint render_svg_path(SvgRenderContext* ctx, Element* elem) {
  * Uses platform-specific font lookup
  * out_font_name: returns the actual font name used (may be different due to fallback)
  */
-static char* resolve_svg_font_path(const char* font_family, const char** out_font_name) {
+// helper: try font database lookup for a given family name
+// returns malloc'd path string (caller frees), or nullptr
+static char* resolve_font_via_database(FontContext* font_ctx, const char* family,
+                                       const char** out_font_name) {
+    if (!font_ctx || !font_ctx->database || !family) return nullptr;
+
+    FontDatabaseCriteria criteria = {};
+    strncpy(criteria.family_name, family, sizeof(criteria.family_name) - 1);
+    criteria.weight = 400;  // normal weight
+    criteria.style = FONT_SLANT_NORMAL;
+
+    FontDatabaseResult result = font_database_find_best_match_internal(font_ctx->database, &criteria);
+    if (result.font && result.font->file_path) {
+        // skip TTC files — ThorVG TTF loader doesn't handle TrueType Collections
+        if (strstr(result.font->file_path, ".ttc")) {
+            log_debug("[SVG] skipping TTC from database: %s", result.font->file_path);
+            return nullptr;
+        }
+        if (out_font_name) *out_font_name = result.font->family_name;
+        // return a malloc'd copy so caller can free() uniformly
+        size_t len = strlen(result.font->file_path);
+        char* path = (char*)malloc(len + 1);
+        if (path) memcpy(path, result.font->file_path, len + 1);
+        return path;
+    }
+    return nullptr;
+}
+
+static char* resolve_svg_font_path(const char* font_family, const char** out_font_name,
+                                    FontContext* font_ctx = nullptr) {
     // default font name
     const char* used_font_name = font_family;
 
@@ -1188,7 +1218,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
         used_font_name = "Arial";
     }
 
-    // try platform font lookup
+    // try platform font lookup first (works on macOS/Windows)
     char* path = font_platform_find_fallback(font_family);
 
     // check if path is a TTC file - ThorVG TTF loader doesn't support TTC (TrueType Collection)
@@ -1201,6 +1231,15 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
     if (path) {
         if (out_font_name) *out_font_name = used_font_name;
         return path;
+    }
+
+    // try font database lookup (works on Linux where platform lookup returns NULL)
+    if (font_ctx) {
+        path = resolve_font_via_database(font_ctx, font_family, out_font_name);
+        if (path) {
+            log_debug("[SVG] font resolved via database: %s -> %s", font_family, path);
+            return path;
+        }
     }
 
     // try common fallbacks - prefer simple TTF files that ThorVG can load
@@ -1221,6 +1260,7 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
 
     for (int i = 0; fallbacks[i]; i++) {
         if (strcmp(fallbacks[i], font_family) != 0) {
+            // try platform first
             path = font_platform_find_fallback(fallbacks[i]);
 
             // skip TTC files
@@ -1236,6 +1276,15 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
                 used_font_name = fallbacks[i];
                 if (out_font_name) *out_font_name = used_font_name;
                 return path;
+            }
+
+            // try database fallback
+            if (font_ctx) {
+                path = resolve_font_via_database(font_ctx, fallbacks[i], out_font_name);
+                if (path) {
+                    log_debug("[SVG] font fallback via database: %s -> %s", font_family, fallbacks[i]);
+                    return path;
+                }
             }
         }
     }
@@ -1430,7 +1479,7 @@ static Tvg_Paint render_svg_text(SvgRenderContext* ctx, Element* elem) {
 
     // resolve font path and name
     const char* font_name = nullptr;
-    char* font_path = resolve_svg_font_path(font_family, &font_name);
+    char* font_path = resolve_svg_font_path(font_family, &font_name, ctx->font_ctx);
     if (!font_path) {
         log_debug("[SVG] <text> no font available for: %s", font_family ? font_family : "default");
         return nullptr;
@@ -1796,15 +1845,16 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
 // Build SVG Scene
 // ============================================================================
 
-Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio) {
+Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float viewport_height, Pool* pool, float pixel_ratio, FontContext* font_ctx) {
     if (!svg_element) return nullptr;
 
-    log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f pixel_ratio=%.2f", viewport_width, viewport_height, pixel_ratio);
+    log_debug("[SVG] build_svg_scene: viewport %.0fx%.0f pixel_ratio=%.2f font_ctx=%p", viewport_width, viewport_height, pixel_ratio, (void*)font_ctx);
 
     // initialize render context
     SvgRenderContext ctx = {};
     ctx.svg_root = svg_element;
     ctx.pool = pool;
+    ctx.font_ctx = font_ctx;
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;  // ensure valid pixel ratio
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
@@ -1885,8 +1935,9 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     // build ThorVG scene from SVG element tree
     // pass pixel_ratio so text sizes can be adjusted (divided by pixel_ratio)
     // since the entire scene will be scaled by pixel_ratio after building
+    FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
     Tvg_Paint svg_scene = build_svg_scene(svg_elem, view->width, view->height,
-                                            rdcon->ui_context->document->pool, scale);
+                                            rdcon->ui_context->document->pool, scale, font_ctx);
     if (!svg_scene) {
         log_debug("[SVG] render_inline_svg: failed to build scene");
         return;

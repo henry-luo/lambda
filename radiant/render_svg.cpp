@@ -4,6 +4,7 @@
 #include "font_face.h"
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/mark_reader.hpp"
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/memtrack.h"
@@ -439,6 +440,132 @@ void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 }
 
+// ============================================================================
+// Inline SVG Passthrough — serialize Lambda Element tree as SVG markup
+// ============================================================================
+
+// escape text content for SVG/XML output
+static void svg_escape_text(StrBuf* buf, const char* s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        switch (s[i]) {
+            case '<':  strbuf_append_str(buf, "&lt;");   break;
+            case '>':  strbuf_append_str(buf, "&gt;");   break;
+            case '&':  strbuf_append_str(buf, "&amp;");  break;
+            default:   strbuf_append_char(buf, s[i]);    break;
+        }
+    }
+}
+
+// escape attribute value for SVG/XML output
+static void svg_escape_attr(StrBuf* buf, const char* s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        switch (s[i]) {
+            case '<':  strbuf_append_str(buf, "&lt;");   break;
+            case '>':  strbuf_append_str(buf, "&gt;");   break;
+            case '&':  strbuf_append_str(buf, "&amp;");  break;
+            case '"':  strbuf_append_str(buf, "&quot;");  break;
+            default:   strbuf_append_char(buf, s[i]);    break;
+        }
+    }
+}
+
+// recursively serialize a Lambda Element as SVG/XML markup
+static void serialize_svg_element(StrBuf* buf, const ElementReader& elem) {
+    const char* tag = elem.tagName();
+    if (!tag) return;
+
+    // open tag
+    strbuf_append_char(buf, '<');
+    strbuf_append_str(buf, tag);
+
+    // serialize attributes by walking the ShapeEntry linked list
+    const Element* e = elem.element();
+    if (e && e->type && e->data) {
+        TypeMap* map_type = (TypeMap*)e->type;
+        ShapeEntry* field = map_type->shape;
+        while (field) {
+            if (field->name && field->name->str && field->type) {
+                void* field_ptr = ((char*)e->data) + field->byte_offset;
+                TypeId ftype = field->type->type_id;
+
+                if (ftype == LMD_TYPE_STRING) {
+                    String* str = *(String**)field_ptr;
+                    if (str && str->chars) {
+                        strbuf_append_char(buf, ' ');
+                        strbuf_append_str_n(buf, field->name->str, field->name->length);
+                        strbuf_append_str(buf, "=\"");
+                        svg_escape_attr(buf, str->chars, str->len);
+                        strbuf_append_char(buf, '"');
+                    }
+                } else if (ftype == LMD_TYPE_INT) {
+                    int64_t val = *(int64_t*)field_ptr;
+                    strbuf_append_char(buf, ' ');
+                    strbuf_append_str_n(buf, field->name->str, field->name->length);
+                    strbuf_append_format(buf, "=\"%" PRId64 "\"", val);
+                } else if (ftype == LMD_TYPE_FLOAT) {
+                    double val = *(double*)field_ptr;
+                    strbuf_append_char(buf, ' ');
+                    strbuf_append_str_n(buf, field->name->str, field->name->length);
+                    strbuf_append_format(buf, "=\"%g\"", val);
+                }
+            }
+            field = field->next;
+        }
+    }
+
+    // check for children
+    int64_t count = elem.childCount();
+    if (count == 0) {
+        strbuf_append_str(buf, "/>");
+        return;
+    }
+
+    strbuf_append_char(buf, '>');
+
+    // serialize children
+    auto children = elem.children();
+    ItemReader child;
+    while (children.next(&child)) {
+        if (child.isString()) {
+            String* str = child.asString();
+            if (str && str->chars) {
+                svg_escape_text(buf, str->chars, str->len);
+            }
+        } else if (child.isElement()) {
+            ElementReader child_elem(child.item());
+            serialize_svg_element(buf, child_elem);
+        }
+    }
+
+    // close tag
+    strbuf_append_str(buf, "</");
+    strbuf_append_str(buf, tag);
+    strbuf_append_char(buf, '>');
+}
+
+// serialize inline SVG block with position transform
+static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* block) {
+    DomElement* dom_elem = static_cast<DomElement*>(block);
+    if (!dom_elem->native_element) return;
+
+    float svg_x = ctx->block.x + block->x;
+    float svg_y = ctx->block.y + block->y;
+
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content,
+        "<g transform=\"translate(%.2f,%.2f)\">\n", svg_x, svg_y);
+
+    ElementReader reader(dom_elem->native_element);
+    serialize_svg_element(ctx->svg_content, reader);
+
+    strbuf_append_char(ctx->svg_content, '\n');
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+
+    log_debug("[SVG] inline SVG passthrough at (%.1f, %.1f) size=(%.0f x %.0f)",
+              svg_x, svg_y, block->width, block->height);
+}
+
 void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     // Save parent context
     BlockBlot pa_block = ctx->block;
@@ -462,6 +589,16 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     // Update color context
     if (block->in_line && block->in_line->color.c) {
         ctx->color = block->in_line->color;
+    }
+
+    // Inline SVG — serialize original SVG markup directly instead of
+    // traversing the HTML view tree (SVG children are not HTML views)
+    if (block->tag_id == HTM_TAG_SVG) {
+        render_inline_svg_passthrough(ctx, block);
+        ctx->block = pa_block;
+        ctx->font = pa_font;
+        ctx->color = pa_color;
+        return;
     }
 
     // Render embedded image if present
