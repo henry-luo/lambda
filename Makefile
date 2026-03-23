@@ -243,7 +243,7 @@ $(RE2_LIB):
 	@echo "Building re2 library from source..."
 	@mkdir -p build_temp/re2-noabsl/build
 	@cd build_temp/re2-noabsl/build && \
-		cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
+		cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
 
