@@ -2618,6 +2618,161 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     log_info("[TIMING] Step 1 - Parse markdown: %.1fms",
         std::chrono::duration<double, std::milli>(step1_end - step1_start).count());
 
+    // Step 1.5: Process <math> elements using Lambda math package
+    // Walk the Element tree, find <math> elements, render them to HTML via the math package,
+    // and replace them in the tree with the rendered HTML elements.
+    {
+        auto math_start = std::chrono::high_resolution_clock::now();
+
+        // Collect all <math> elements: {parent, index_in_parent, source, is_display}
+        struct MathInfo {
+            Element* parent;
+            int64_t index;
+            const char* source;
+            size_t source_len;
+            bool is_display;
+        };
+        ArrayList* math_list = arraylist_new(16);
+
+        // Recursive lambda to walk the tree (use a stack to avoid recursion depth issues)
+        struct WalkFrame { Element* elem; };
+        ArrayList* stack = arraylist_new(64);
+        arraylist_append(stack, (ArrayListValue)markdown_root);
+
+        while (stack->length > 0) {
+            Element* elem = (Element*)stack->data[stack->length - 1];
+            stack->length--;
+
+            for (int64_t i = 0; i < elem->length; i++) {
+                Item child = elem->items[i];
+                if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+
+                Element* child_elem = child.element;
+                TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                if (!child_type) continue;
+
+                const char* tag = child_type->name.str;
+                if (tag && strcmp(tag, "math") == 0) {
+                    // Found a <math> element - extract source and type
+                    ConstItem type_attr = child_elem->get_attr("type");
+                    String* type_str_val = type_attr.string();
+                    bool is_display = type_str_val && strcmp(type_str_val->chars, "block") == 0;
+
+                    // Get LaTeX source from first string child
+                    const char* math_src = nullptr;
+                    size_t math_src_len = 0;
+                    for (int64_t j = 0; j < child_elem->length; j++) {
+                        if (get_type_id(child_elem->items[j]) == LMD_TYPE_STRING) {
+                            String* s = child_elem->items[j].get_string();
+                            if (s && s->len > 0) {
+                                math_src = s->chars;
+                                math_src_len = s->len;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (math_src && math_src_len > 0) {
+                        MathInfo* mi = (MathInfo*)malloc(sizeof(MathInfo));
+                        mi->parent = elem;
+                        mi->index = i;
+                        mi->source = math_src;
+                        mi->source_len = math_src_len;
+                        mi->is_display = is_display;
+                        arraylist_append(math_list, (ArrayListValue)mi);
+                    }
+                } else {
+                    // Not a <math> element - recurse into it
+                    arraylist_append(stack, (ArrayListValue)child_elem);
+                }
+            }
+        }
+        arraylist_free(stack);
+
+        if (math_list->length > 0) {
+            log_info("[Lambda Markdown] Found %d math elements, rendering via math package",
+                     math_list->length);
+
+            // Build a Lambda script that renders all math at once
+            // Use parse() instead of input() to parse raw strings (not files)
+            StrBuf* script = strbuf_new_cap(4096);
+            strbuf_append_str(script, "import math: lambda.package.math.math\n[\n");
+
+            for (int i = 0; i < math_list->length; i++) {
+                MathInfo* mi = (MathInfo*)math_list->data[i];
+
+                // Escape the LaTeX source for use in a Lambda string literal
+                strbuf_append_str(script, "  ");
+                if (mi->is_display) {
+                    strbuf_append_str(script, "<div class: \"math-display-container\"; math.render_display(parse(\"");
+                } else {
+                    strbuf_append_str(script, "math.render_inline(parse(\"");
+                }
+
+                // Escape: \ -> \\, " -> \", newline -> \n, tab -> \t
+                for (size_t k = 0; k < mi->source_len; k++) {
+                    char c = mi->source[k];
+                    if (c == '\\') strbuf_append_str(script, "\\\\");
+                    else if (c == '"') strbuf_append_str(script, "\\\"");
+                    else if (c == '\n') strbuf_append_str(script, "\\n");
+                    else if (c == '\t') strbuf_append_str(script, "\\t");
+                    else if (c == '\r') { /* skip */ }
+                    else strbuf_append_char(script, c);
+                }
+
+                strbuf_append_str(script, "\", {type: \"math\"}))");
+                if (mi->is_display) {
+                    strbuf_append_str(script, ">");
+                }
+                if (i < math_list->length - 1) strbuf_append_str(script, ",");
+                strbuf_append_str(script, "\n");
+            }
+
+            strbuf_append_str(script, "]\n");
+
+            // Write script to temp file and run
+            const char* tmp_script = "temp/_md_math_render.ls";
+            write_text_file(tmp_script, script->str);
+
+            Runtime math_runtime;
+            runtime_init(&math_runtime);
+            math_runtime.current_dir = const_cast<char*>("./");
+            math_runtime.import_base_dir = "./";
+
+            Input* math_result = run_script_mir(&math_runtime, nullptr, (char*)tmp_script, false);
+
+            if (math_result && get_type_id(math_result->root) == LMD_TYPE_ARRAY) {
+                Array* rendered_arr = math_result->root.array;
+                int replace_count = 0;
+                for (int i = 0; i < math_list->length && i < (int)rendered_arr->length; i++) {
+                    Item rendered_item = rendered_arr->items[i];
+                    if (get_type_id(rendered_item) == LMD_TYPE_ELEMENT) {
+                        MathInfo* mi = (MathInfo*)math_list->data[i];
+                        mi->parent->items[mi->index] = rendered_item;
+                        replace_count++;
+                    }
+                }
+                log_info("[Lambda Markdown] Replaced %d/%d math elements with rendered HTML",
+                         replace_count, math_list->length);
+            } else {
+                log_error("[Lambda Markdown] Math rendering script failed or returned unexpected type");
+            }
+
+            runtime_cleanup(&math_runtime);
+            strbuf_free(script);
+        }
+
+        // Free math_list entries
+        for (int i = 0; i < math_list->length; i++) {
+            free(math_list->data[i]);
+        }
+        arraylist_free(math_list);
+
+        auto math_end = std::chrono::high_resolution_clock::now();
+        log_info("[TIMING] Step 1.5 - Math rendering: %.1fms",
+            std::chrono::duration<double, std::milli>(math_end - math_start).count());
+    }
+
     // Step 2: Create DomDocument and build DomElement tree from Lambda Element tree
     auto step2_start = std::chrono::high_resolution_clock::now();
     DomDocument* dom_doc = dom_document_create(input);
@@ -2678,15 +2833,67 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     log_info("[TIMING] Step 3 - CSS parse: %.1fms",
         std::chrono::duration<double, std::milli>(step3_end - step3_start).count());
 
+    // Step 4.5: Load math CSS and KaTeX font CSS for math rendering
+    CssStylesheet* math_stylesheet = nullptr;
+    CssStylesheet* katex_stylesheet = nullptr;
+    {
+        const char* math_css_filename = "lambda/input/math.css";
+        char* math_css_content = read_text_file(math_css_filename);
+        if (math_css_content) {
+            size_t math_css_len = strlen(math_css_content);
+            char* math_css_pool = (char*)pool_alloc(pool, math_css_len + 1);
+            if (math_css_pool) {
+                str_copy(math_css_pool, math_css_len + 1, math_css_content, math_css_len);
+                free(math_css_content);
+                math_stylesheet = css_parse_stylesheet(css_engine, math_css_pool, math_css_filename);
+                if (math_stylesheet) {
+                    log_debug("[Lambda Markdown] Loaded math stylesheet with %zu rules",
+                              math_stylesheet->rule_count);
+                }
+            } else {
+                free(math_css_content);
+            }
+        }
+
+        const char* katex_css_filename = "lambda/input/latex/css/katex.css";
+        char* katex_css_content = read_text_file(katex_css_filename);
+        if (katex_css_content) {
+            size_t katex_css_len = strlen(katex_css_content);
+            char* katex_css_pool = (char*)pool_alloc(pool, katex_css_len + 1);
+            if (katex_css_pool) {
+                str_copy(katex_css_pool, katex_css_len + 1, katex_css_content, katex_css_len);
+                free(katex_css_content);
+                katex_stylesheet = css_parse_stylesheet(css_engine, katex_css_pool, katex_css_filename);
+                if (katex_stylesheet) {
+                    log_debug("[Lambda Markdown] Loaded KaTeX font stylesheet with %zu rules",
+                              katex_stylesheet->rule_count);
+                }
+            } else {
+                free(katex_css_content);
+            }
+        }
+    }
+
     // Step 5: Apply CSS cascade to DOM tree
     auto step4_start = std::chrono::high_resolution_clock::now();
-    if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
+    {
         SelectorMatcher* matcher = selector_matcher_create(pool);
-        apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
+        if (markdown_stylesheet && markdown_stylesheet->rule_count > 0) {
+            apply_stylesheet_to_dom_tree_fast(dom_root, markdown_stylesheet, matcher, pool, css_engine);
+        }
+        if (math_stylesheet && math_stylesheet->rule_count > 0) {
+            apply_stylesheet_to_dom_tree_fast(dom_root, math_stylesheet, matcher, pool, css_engine);
+        }
+        if (katex_stylesheet && katex_stylesheet->rule_count > 0) {
+            apply_stylesheet_to_dom_tree_fast(dom_root, katex_stylesheet, matcher, pool, css_engine);
+        }
     }
     auto step4_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] Step 4 - CSS cascade: %.1fms",
         std::chrono::duration<double, std::milli>(step4_end - step4_start).count());
+
+    // Step 5.5: Apply inline style="" attributes (highest priority, after stylesheet cascade)
+    apply_inline_styles_to_tree(dom_root, markdown_root, pool);
 
     // Step 6: Populate DomDocument structure
     dom_doc->root = dom_root;
@@ -2695,6 +2902,19 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     dom_doc->url = markdown_url;
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
+
+    // Store stylesheets in DomDocument for @font-face processing
+    int total_stylesheets = (markdown_stylesheet ? 1 : 0) + (math_stylesheet ? 1 : 0) + (katex_stylesheet ? 1 : 0);
+    if (total_stylesheets > 0) {
+        dom_doc->stylesheet_capacity = total_stylesheets;
+        dom_doc->stylesheets = (CssStylesheet**)pool_alloc(pool, total_stylesheets * sizeof(CssStylesheet*));
+        dom_doc->stylesheet_count = 0;
+        if (markdown_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = markdown_stylesheet;
+        if (math_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = math_stylesheet;
+        if (katex_stylesheet) dom_doc->stylesheets[dom_doc->stylesheet_count++] = katex_stylesheet;
+        log_debug("[Lambda Markdown] Stored %d stylesheets in DomDocument for @font-face processing",
+                  dom_doc->stylesheet_count);
+    }
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_markdown_doc total: %.1fms",

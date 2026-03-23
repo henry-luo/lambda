@@ -8,7 +8,10 @@ import css: lambda.package.math.css
 // ============================================================
 
 pub fn render(node, context, render_fn) {
-    let cmd = if (node.cmd != null) string(node.cmd) else ""
+    // space_command nodes use 'value' field; hspace/kern use 'cmd'
+    let cmd = if (node.cmd != null) string(node.cmd)
+              else if (node.value != null) string(node.value)
+              else ""
 
     // named spacing commands → CSS class
     match cmd {
