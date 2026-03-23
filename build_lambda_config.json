@@ -341,7 +341,8 @@
                 "lib/file.c",
                 "lib/log.c",
                 "lib/memtrack.c",
-                "lib/str.c"
+                "lib/str.c",
+                "radiant/symbol_resolver.cpp"
             ],
             "libraries": [
                 "lambda-lib",
