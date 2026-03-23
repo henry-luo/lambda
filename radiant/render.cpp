@@ -96,7 +96,8 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void render_image_content(RenderContext* rdcon, ViewBlock* view);
 void scrollpane_render(Tvg_Canvas canvas, ScrollPane* sp, Rect* block_bound,
-    float content_width, float content_height, Bound* clip, float scale);
+    float content_width, float content_height, Bound* clip, float scale,
+    bool show_hz_scroll = true, bool show_vt_scroll = true);
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
@@ -1366,7 +1367,8 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
         }
         if (block->scroller->pane) {
             scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-                block->content_width * s, block->content_height * s, &rdcon->block.clip, s);
+                block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
+                block->scroller->has_hz_scroll, block->scroller->has_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
         }
