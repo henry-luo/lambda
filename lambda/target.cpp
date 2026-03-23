@@ -211,6 +211,16 @@ Target* item_to_target(uint64_t item, Url* cwd) {
 
         // Parse URL with optional base (cwd)
         Url* url;
+#ifdef _WIN32
+        // Detect Windows absolute path with drive letter (e.g., C:/... or D:\...)
+        // Convert to file:// URL to prevent the drive letter being parsed as a URL scheme
+        char file_url_buf[2048];
+        if (isalpha((unsigned char)url_str[0]) && url_str[1] == ':' &&
+            (url_str[2] == '/' || url_str[2] == '\\')) {
+            snprintf(file_url_buf, sizeof(file_url_buf), "file:///%s", url_str);
+            url = url_parse(file_url_buf);
+        } else
+#endif
         if (cwd) {
             url = url_parse_with_base(url_str, cwd);
         } else {
