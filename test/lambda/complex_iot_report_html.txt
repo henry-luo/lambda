@@ -256,14 +256,14 @@
         <p
           "Real-time Urban Intelligence & Environmental Monitoring">
         <p style: "margin-top: 10px; font-size: 0.9em;"
-          "Generated: September 5, 2024 | Data Quality: 0%">>
+          "Generated: September 5, 2024 | Data Quality: 100%">>
       <div class: "content"
         <div class: "overview-grid"
           <div class: "metric-card"
             <div class: "label"
               "Overall Livability Score">
             <div class: "value"
-              "<error>%">
+              "60%">
             <div class: "description"
               "City health composite index">>
           <div class: "metric-card"
@@ -298,12 +298,12 @@
                 <div class: "label"
                   "PM2.5 Average">
                 <div class: "value"
-                  "<error> µg/m³">>
+                  "30.4 µg/m³">>
               <div class: "info-item"
                 <div class: "label"
                   "PM10 Average">
                 <div class: "value"
-                  "<error> µg/m³">>
+                  "48.8 µg/m³">>
               <div class: "info-item"
                 <div class: "label"
                   "Trend">
@@ -314,10 +314,10 @@
                 <div class: "label"
                   "Active Alerts">
                 <div class: "value"
-                  "4">>>
+                  "1">>>
             <div class: "alert-box alert-warning", style: "margin-top: 15px;"
               [<strong
-                  "⚠️ Air Quality Alerts Active">, <br>, "4 location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities."]>>
+                  "⚠️ Air Quality Alerts Active">, <br>, "1 location(s) exceeding safe PM2.5 levels. Recommend limiting outdoor activities."]>>
           <div class: "card"
             <h3 class: "card-title"
               "Climate Comfort Analysis">
@@ -326,25 +326,25 @@
                 <div class: "label"
                   "Average Temperature">
                 <div class: "value"
-                  "<error>°C">>
+                  "24.9°C">>
               <div class: "info-item"
                 <div class: "label"
                   "Average Humidity">
                 <div class: "value"
-                  "<error>%">>
+                  "64.5%">>
               <div class: "info-item"
                 <div class: "label"
                   "Comfort Score">
                 <div class: "value"
-                  "<error>%">>
+                  "78.3%">>
               <div class: "info-item"
                 <div class: "label"
                   "Heat Warnings">
                 <div class: "value"
-                  "4">>>
+                  "0">>>
             <div class: "progress"
-              <div class: "progress-bar bg-success", style: "width: <error>%"
-                "<error>%">>>
+              <div class: "progress-bar bg-success", style: "width: 78.3%"
+                "78.3%">>>
           <div class: "card"
             <h3 class: "card-title"
               "Noise Pollution Monitoring">
@@ -353,17 +353,17 @@
                 <div class: "label"
                   "Citywide Average">
                 <div class: "value"
-                  "<error> dB">>
+                  "67.8 dB">>
               <div class: "info-item"
                 <div class: "label"
                   "Violations">
                 <div class: "value"
-                  "4">>
+                  "2">>
               <div class: "info-item"
                 <div class: "label"
                   "Quiet Hours Compliance">
                 <div class: "value"
-                  "0%">>>>>
+                  "25%">>>>>
         <div class: "section"
           <h2 class: "section-title"
             "🚗 Traffic & Mobility Intelligence">
@@ -385,8 +385,8 @@
                 <div class: "label"
                   "Congestion Status">
                 <div class: "value"
-                  <span class: "badge badge-warning"
-                    "manageable_congestion">>>>
+                  <span class: "badge badge-danger"
+                    "high_congestion_citywide">>>>
             <h4 style: "margin-top: 20px; margin-bottom: 10px; color: #4299e1;"
               "Congestion Distribution">
             <div style: "margin: 10px 0;"
@@ -394,20 +394,20 @@
                 <span style: "display: inline-block; width: 150px;"
                   "Low Congestion:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-success", style: "width: 100%"
-                    "100%">>>
+                  <div class: "progress-bar bg-success", style: "width: 0%"
+                    "0%">>>
               <div style: "margin-bottom: 10px;"
                 <span style: "display: inline-block; width: 150px;"
                   "Moderate:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-warning", style: "width: 100%"
-                    "100%">>>
+                  <div class: "progress-bar bg-warning", style: "width: 66.7%"
+                    "66.7%">>>
               <div style: "margin-bottom: 10px;"
                 <span style: "display: inline-block; width: 150px;"
                   "High Congestion:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-danger", style: "width: 100%"
-                    "100%">>>>>
+                  <div class: "progress-bar bg-danger", style: "width: 33.3%"
+                    "33.3%">>>>>
           <div class: "card"
             <h3 class: "card-title"
               "Speed Analysis by Zone">
@@ -423,7 +423,7 @@
                 <td
                   "Downtown">
                 <td
-                  "<error> km/h">
+                  "12.5 km/h">
                 <td
                   <span class: "badge badge-danger"
                     "Congested">>>
@@ -431,7 +431,7 @@
                 <td
                   "Residential">
                 <td
-                  "<error> km/h">
+                  "25 km/h">
                 <td
                   <span class: "badge badge-success"
                     "Normal">>>
@@ -439,13 +439,13 @@
                 <td
                   "Industrial">
                 <td
-                  "<error> km/h">
+                  "18.2 km/h">
                 <td
                   <span class: "badge badge-warning"
                     "Moderate">>>>>
           <div class: "alert-box alert-info", style: "margin-top: 15px;"
             [<strong
-                "🚦 Optimization Opportunity">, <br>, "3 intersection(s) identified for signal timing optimization to reduce congestion."]>>
+                "🚦 Optimization Opportunity">, <br>, "1 intersection(s) identified for signal timing optimization to reduce congestion."]>>
         <div class: "section"
           <h2 class: "section-title"
             "⚡ Energy & Grid Intelligence">
@@ -513,20 +513,20 @@
                 <span style: "display: inline-block; width: 150px;"
                   "High Dependency:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-danger", style: "width: 100%"
-                    "100%">>>
+                  <div class: "progress-bar bg-danger", style: "width: 33.3%"
+                    "33.3%">>>
               <div style: "margin-bottom: 10px;"
                 <span style: "display: inline-block; width: 150px;"
                   "Medium:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-warning", style: "width: 100%"
-                    "100%">>>
+                  <div class: "progress-bar bg-warning", style: "width: 33.3%"
+                    "33.3%">>>
               <div style: "margin-bottom: 10px;"
                 <span style: "display: inline-block; width: 150px;"
                   "Low Dependency:">
                 <div class: "progress"
-                  <div class: "progress-bar bg-success", style: "width: 100%"
-                    "100%">>>>>>
+                  <div class: "progress-bar bg-success", style: "width: 33.3%"
+                    "33.3%">>>>>>
         <div class: "recommendations"
           <h3
             "🎯 Strategic Recommendations">
@@ -535,6 +535,10 @@
           <ul
             <li
               "⚠️ Air quality alerts active - implement traffic restrictions in affected zones"
+              <span class: "priority-badge priority-high"
+                "High Priority">>
+            <li
+              "🚦 Activate dynamic traffic management protocols citywide"
               <span class: "priority-badge priority-high"
                 "High Priority">>
             <li
