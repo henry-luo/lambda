@@ -418,12 +418,12 @@ list, traversing a tree), this removes the dynamic dispatch overhead per call.
 | Proposal | Complexity | Impact | Prerequisite | Status |
 |----------|------------|--------|-------------|--------|
 | **P1** Return type → var type propagation | Low | Medium | None | ✅ Done |
-| **P2** Bump-pointer nursery inline alloc | Medium | High (allocation-heavy code) | Runtime nursery already in place | ⬜ Todo |
+| **P2** Bump-pointer nursery inline alloc | Medium | High (allocation-heavy code) | Runtime nursery already in place | ✅ Done |
 | **P3** Direct property stores in constructor | Medium | High (class-heavy code) | A5 scan (already done) | ✅ Done |
 | **P4** Direct property access for typed instances | Medium | High (tree/graph code) | P3, A5 scan | ✅ Done |
 | **P5** Module variable arithmetic without boxing | Low | Medium (top-level loops) | None | ✅ Done |
 | **P6** Single-expression function inlining | Medium-High | High (compute benchmarks) | None | ✅ Done |
-| **P7** Native method call resolution | Low once P4 done | Medium | P4 | ⬜ Todo |
+| **P7** Native method call resolution | Low once P4 done | Medium | P4 | ✅ Done |
 
 ### Implementation Progress
 
@@ -432,8 +432,8 @@ list, traversing a tree), this removes the dynamic dispatch overhead per call.
 - ✅ **P6** — Single-expression function inlining via `jm_transpile_inline_native()`. Eligible when `has_native_version`, no captures, ≤4 params, single return statement. Validated: 670/670 tests pass.
 - ✅ **P3** — `js_set_shaped_slot()` runtime helper + A5-style pre-shaping for class `new` path + `is_constructor` flag on `JsFuncCollected`. Eliminates `js_property_set` calls for `this.prop = val` in constructors. Validated: 670/670 tests pass.
 - ✅ **P4** — `js_get_shaped_slot()` runtime helper + `class_entry` field on `JsMirVarEntry` + detection at `var = new ClassName()` declaration sites. Direct slot-indexed reads for typed class instance property access. Both helpers registered in `jit_runtime_imports[]`. Validated: 670/670 tests pass.
-- ⬜ **P7** — Native method call resolution via `jm_resolve_native_call` extension for `MEMBER_EXPRESSION` callees (essentially free now that P4 is done)
-- ⬜ **P2** — Bump-pointer nursery JIT-inline (runtime nursery already present)
+- ✅ **P7** — Extended `jm_resolve_native_call` to handle `MEMBER_EXPRESSION` callees. Checks `JsMirVarEntry.class_entry` for local vars and `JsModuleConstEntry.class_entry` (new field) for module-level vars (top-level `var x = new Foo()`). When receiver type + method native version are both known, emits a direct MIR `CALL` to the `_n` native function, bypassing generic boxing + runtime dispatch. P7 path also delegates to P6 inlining when the method body is a single return expression. Validated: 677/677 tests pass.
+- ✅ **P2** — `js_new_object()` and `js_new_object_with_shape()` in `js_runtime.cpp` now call `heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS)` instead of `heap_calloc()`. Pre-computed size class index (JS_MAP_SIZE_CLASS=1, since sizeof(Map)=32 maps to SIZE_CLASSES[1]) skips the O(7) class-index lookup and uses the bump-pointer fast path directly. Validated: 677/677 tests pass.
 
 ---
 

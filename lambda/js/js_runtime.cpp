@@ -644,9 +644,13 @@ struct JsFunction {
     int bound_argc;  // v11: number of bound arguments
 };
 
+// P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.
+// Skips the class-index lookup in gc_heap_alloc and uses the bump-pointer fast path.
+#define JS_MAP_SIZE_CLASS 1
+
 // Create a new JS object as a Lambda Map (empty, using map_put for dynamic keys)
 extern "C" Item js_new_object() {
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
     m->type = &EmptyMap;
     return (Item){.map = m};
@@ -672,7 +676,7 @@ extern "C" Item js_constructor_create_object(Item callee) {
 extern "C" Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int count) {
     if (!js_input || count <= 0) return js_new_object();
 
-    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    Map* m = (Map*)heap_calloc_class(sizeof(Map), LMD_TYPE_MAP, JS_MAP_SIZE_CLASS);
     m->type_id = LMD_TYPE_MAP;
 
     // Allocate TypeMap

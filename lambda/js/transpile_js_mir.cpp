@@ -295,6 +295,7 @@ struct JsModuleConstEntry {
     bool is_int;        // legacy compat: true for int, false for float
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
                         //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
+    JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -1771,6 +1772,63 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 // Check if a call expression should use the native version of a function.
 // Returns the JsFuncCollected* if native call is possible, NULL otherwise.
 static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
+    // P7: obj.method(args) — typed class instance with known native method
+    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* mem = (JsMemberNode*)call->callee;
+        if (!mem->computed && mem->object && mem->property &&
+            mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id  = (JsIdentifierNode*)mem->object;
+            JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+            JsMirVarEntry* obj_var = jm_find_var(mt, vname);
+            // P7: also check module_consts for top-level vars (is_modvar path has no local entry)
+            JsClassEntry* p7_ce = obj_var ? obj_var->class_entry : NULL;
+            if (!p7_ce && mt->module_consts) {
+                JsModuleConstEntry p7_mclookup;
+                memset(&p7_mclookup, 0, sizeof(p7_mclookup));
+                snprintf(p7_mclookup.name, sizeof(p7_mclookup.name), "%s", vname);
+                JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_mclookup);
+                if (p7_mc) p7_ce = p7_mc->class_entry;
+            }
+            if (p7_ce) {
+                JsClassEntry* ce = p7_ce;
+                for (int i = 0; i < ce->method_count; i++) {
+                    JsClassMethodEntry* me = &ce->methods[i];
+                    if (me->is_constructor || me->is_static) continue;
+                    if (!me->fc || !me->fc->has_native_version || !me->fc->native_func_item) continue;
+                    if (!me->name) continue;
+                    if (me->name->len != (size_t)prop_id->name->len ||
+                        strncmp(me->name->chars, prop_id->name->chars, me->name->len) != 0) continue;
+                    // found matching method — validate arg types
+                    JsAstNode* arg = call->arguments;
+                    bool ok = true;
+                    for (int p = 0; p < me->fc->param_count && ok; p++) {
+                        TypeId expected = me->fc->param_types[p];
+                        TypeId actual   = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
+                        if (expected == LMD_TYPE_INT) {
+                            if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) ok = false;
+                        } else if (expected == LMD_TYPE_FLOAT) {
+                            if (actual != LMD_TYPE_FLOAT && actual != LMD_TYPE_INT) ok = false;
+                        } else {
+                            ok = false; // ANY param — cannot optimize
+                        }
+                        if (arg) arg = arg->next;
+                    }
+                    if (ok) {
+                        log_debug("P7: resolved native method %.*s.%.*s → %s",
+                            (int)obj_id->name->len, obj_id->name->chars,
+                            (int)prop_id->name->len, prop_id->name->chars,
+                            me->fc->name);
+                        return me->fc;
+                    }
+                }
+            }
+        }
+        return NULL; // MEMBER_EXPRESSION but not P7-eligible
+    }
+
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
 
@@ -5448,6 +5506,51 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
+            // P7: Native method call for typed class instance — avoids generic
+            // boxing + runtime dispatch when receiver type and method are known.
+            if (!m->computed && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsFuncCollected* p7_fc = jm_resolve_native_call(mt, (JsCallNode*)call);
+                if (p7_fc) {
+                    // P6: also try inlining the native method
+                    if (jm_should_inline(p7_fc)) {
+                        return jm_transpile_inline_native(mt, (JsCallNode*)call, p7_fc);
+                    }
+                    // emit native direct call (same pattern as identifier native call)
+                    char p7_name[160];
+                    snprintf(p7_name, sizeof(p7_name), "%s_n_p7%d", p7_fc->name, mt->label_counter++);
+                    MIR_var_t* p7_pargs = (MIR_var_t*)alloca(p7_fc->param_count * sizeof(MIR_var_t));
+                    for (int i = 0; i < p7_fc->param_count; i++) {
+                        MIR_type_t mtype = (p7_fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                        p7_pargs[i] = {mtype, "a", 0};
+                    }
+                    MIR_type_t p7_ret = (p7_fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                    MIR_item_t p7_proto = MIR_new_proto_arr(mt->ctx, p7_name, 1, &p7_ret, p7_fc->param_count, p7_pargs);
+                    int p7_nops = 3 + p7_fc->param_count;
+                    MIR_op_t* p7_ops = (MIR_op_t*)alloca(p7_nops * sizeof(MIR_op_t));
+                    int p7_oi = 0;
+                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_proto);
+                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_fc->native_func_item);
+                    MIR_reg_t p7_result = jm_new_reg(mt, "p7call", p7_ret);
+                    p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, p7_result);
+                    JsAstNode* p7_arg = ((JsCallNode*)call)->arguments;
+                    for (int i = 0; i < p7_fc->param_count; i++) {
+                        if (p7_arg) {
+                            MIR_reg_t val = jm_transpile_as_native(mt, p7_arg,
+                                jm_get_effective_type(mt, p7_arg), p7_fc->param_types[i]);
+                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, val);
+                            p7_arg = p7_arg->next;
+                        } else {
+                            MIR_reg_t zero = jm_new_reg(mt, "p7z", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, zero), MIR_new_int_op(mt->ctx, 0)));
+                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, zero);
+                        }
+                    }
+                    jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p7_nops, p7_ops));
+                    return p7_result; // returns native value
+                }
+            }
+
             // Reset closure env tracking before evaluating arguments
             mt->last_closure_has_env = false;
 
@@ -7513,6 +7616,26 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                     log_debug("modvar: init js_set_module_var(%d) for '%s' (no local)", modvar_index, vname);
+                    // P7: detect new ClassName(...) and record class_entry in module_consts
+                    if (d->init && d->init->node_type == JS_AST_NODE_NEW_EXPRESSION && mt->module_consts) {
+                        JsCallNode* p7_nc = (JsCallNode*)d->init;
+                        if (p7_nc->callee && p7_nc->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* p7_ctor = (JsIdentifierNode*)p7_nc->callee;
+                            JsClassEntry* p7_ce = jm_find_class(mt, p7_ctor->name->chars, (int)p7_ctor->name->len);
+                            if (p7_ce && p7_ce->constructor && p7_ce->constructor->fc &&
+                                p7_ce->constructor->fc->ctor_prop_count > 0) {
+                                JsModuleConstEntry p7_lookup;
+                                memset(&p7_lookup, 0, sizeof(p7_lookup));
+                                snprintf(p7_lookup.name, sizeof(p7_lookup.name), "%s", vname);
+                                JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_lookup);
+                                if (p7_mc) {
+                                    p7_mc->class_entry = p7_ce;
+                                    log_debug("P7: modvar '%s' is instance of '%.*s' — class_entry recorded",
+                                              vname, (int)p7_ctor->name->len, p7_ctor->name->chars);
+                                }
+                            }
+                        }
+                    }
                 } else if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);

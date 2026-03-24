@@ -525,6 +525,14 @@ TEST(JavaScriptTests, test_opt_p6_func_inline) {
     test_js_script_against_file("test/js/opt_p6_func_inline.js", "test/js/opt_p6_func_inline.txt");
 }
 
+TEST(JavaScriptTests, test_opt_p2_obj_alloc) {
+    test_js_script_against_file("test/js/opt_p2_obj_alloc.js", "test/js/opt_p2_obj_alloc.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p7_method_native) {
+    test_js_script_against_file("test/js/opt_p7_method_native.js", "test/js/opt_p7_method_native.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
