@@ -95,7 +95,7 @@ type User {
 
 **Self reference `~`:**
 ```lambda
-type Vec { 
+type Vec {
   x: float, y: float;
   fn len() => math.sqrt(x**2 + y**2)
   fn scale(f) => <Vec ~, x:~.x*f, y:~.y*f>  // ~ = self
@@ -503,11 +503,11 @@ replace("abc", "b", "")            // "ac"
 split("a1b2c3", digit)           // ["a", "b", "c", ""]
 split("hello   world", ws)       // ["hello", "world"]
 split("a,b,c", ",")              // ["a", "b", "c"]
-split("a1b2c3", digit, true)         
+split("a1b2c3", digit, true)
 // ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
 
 // find(str, pattern_or_string) → [{value, index}, ...]
-find("a1b22c333", digits)            
+find("a1b22c333", digits)
 // [{value:"1", index:1}, {value:"22", index:3}, ...]
 find("hello world", "lo")  // [{value: "lo", index: 3}]
 ```
@@ -553,22 +553,22 @@ import alias: .module       // Import with alias
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159               // Export variable
-pub fn square(x) => x * x      // Export function
-pub pn log(msg) { print(msg) } // Export procedure
-pub type Score = int           // Export type alias
-pub type Counter {             // Export object type
+pub PI = 3.14159                  // Export variable
+pub fn square(x) => x * x         // Export function
+pub pn log(msg) { print(msg) }    // Export procedure
+pub type Score = int              // Export type alias
+pub type Counter {                // Export object type
     value: int = 0;
     fn double() => value * 2
 }
-pub data^err = input(\"f\")    // Exp. data and err
+pub data^err = input(\"f\")       // Exp. data and err
 ```
 
 **Module Usage:**
 ```lambda
 // In math_utils.ls:
 pub PI = 3.14159
-pub type Vec2 { x: float, y: float; fn len() => 
+pub type Vec2 { x: float, y: float; fn len() =>
     math.sqrt(x**2 + y**2) }
 
 // In main.ls:

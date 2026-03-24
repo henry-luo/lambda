@@ -515,6 +515,7 @@ float calc_normal_line_height(struct FontHandle* handle);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block);
 void setup_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation

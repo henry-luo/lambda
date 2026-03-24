@@ -409,7 +409,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
         br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
-        br_view->width = 0;  br_view->height = lycon->block.line_height;
+        br_view->width = 0;
+        // The <br> element's bounding box height is the font content area (cell height),
+        // not the CSS line-height. The line-height is used by line_break() to advance
+        // the block cursor, but the element's own reported height matches the font metrics.
+        struct FontHandle* br_fh = lycon->font.font_handle;
+        br_view->height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
         line_break(lycon);
 
         // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
@@ -566,15 +571,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CSS 2.1 §10.8.1: Each inline box uses its own 'line-height' property for
     // the half-leading model, not the parent block's line-height. Save the block's
     // line-height and resolve the inline element's own line-height if specified.
-    // Only re-resolve when the element has its own explicit line-height declaration
-    // (via CSS line-height property or font shorthand). For inherited line-heights,
-    // the parent block's already-resolved value is correct (CSS 2.1 specifies that
-    // <length>/<percentage> line-heights inherit the computed value).
     float pa_line_height = lycon->block.line_height;
     bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
     // Check the element's specified_style for an explicit line-height or font shorthand
     // declaration. If neither is present, line-height is inherited and the parent's
-    // resolved value is already correct in lycon->block.line_height.
+    // resolved value is already correct in lycon->block.line_height — UNLESS the
+    // inherited line-height is a <number> value and the font-size changed.
+    // CSS 2.1: <number> line-heights inherit the number, not the computed length,
+    // so each element must recompute: number × own font-size.
     bool has_own_line_height = false;
     if (elmt->is_element()) {
         DomElement* dom_elmt = static_cast<DomElement*>(elmt);
@@ -584,8 +588,25 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 style_tree_get_declaration(dom_elmt->specified_style, CSS_PROPERTY_FONT) != nullptr;
         }
     }
-    if (has_own_line_height) {
-        setup_line_height(lycon, (ViewBlock*)span);
+    // Also re-resolve when font-size changed AND inherited line-height is a
+    // <number> or 'normal'. CSS 2.1: number line-heights inherit the number (not
+    // the computed length), so each element recomputes: number × own font-size.
+    // Length/percentage line-heights inherit the computed absolute value and must
+    // NOT be re-resolved against the child's font-size.
+    bool font_size_changed = lycon->font.style && pa_font.style &&
+        lycon->font.style->font_size != pa_font.style->font_size;
+    if (has_own_line_height || font_size_changed) {
+        if (has_own_line_height) {
+            setup_line_height(lycon, (ViewBlock*)span);
+        } else {
+            // font-size changed: only re-resolve for number/normal line-height
+            CssValue inherited_lh = inherit_line_height(lycon, (ViewBlock*)span);
+            if (inherited_lh.type == CSS_VALUE_TYPE_NUMBER ||
+                (inherited_lh.type == CSS_VALUE_TYPE_KEYWORD &&
+                 inherited_lh.data.keyword == CSS_VALUE_NORMAL)) {
+                setup_line_height(lycon, (ViewBlock*)span);
+            }
+        }
         // Track if this inline's line-height exceeds the parent block's,
         // so line_break() knows to respect the expanded line box height.
         if (lycon->block.line_height > pa_line_height) {
@@ -904,10 +925,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
 
     // CSS 2.1 §8.5.1: Detect multi-line by checking if children are on different lines.
-    // We can't just check advance_y — if the entire span wraps to a new line,
-    // advance_y changes but the span has content on only one line (single fragment).
     // Multi-line means the span's content itself spans multiple lines, requiring
-    // left border+padding only on the first fragment and right on the last.
+    // left border+padding only on the first line fragment and right on the last.
     bool span_is_multi_line = false;
     {
         View* first_content = span->first_child;
@@ -927,11 +946,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
                 c = c->next();
             }
-            // Check 2: a single text child may wrap across lines without creating
-            // multiple DOM children. Detect by checking if advance_y has moved at
-            // least one full line past the first child's y (text wrapped internally).
-            if (!span_is_multi_line && lycon->block.line_height > 0) {
-                if (lycon->block.advance_y >= first_y + lycon->block.line_height) {
+            // Check 2: advance_y moved during children layout, meaning a line
+            // break occurred while laying out this span's content (text wrapped).
+            // start_advance_y was captured before children layout, so if advance_y
+            // increased, a line_break() was called inside this span.
+            if (!span_is_multi_line) {
+                if (lycon->block.advance_y > start_advance_y) {
                     span_is_multi_line = true;
                 }
             }

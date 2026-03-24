@@ -13,6 +13,7 @@ typedef struct {
     int measured_height;
     int content_width;
     int content_height;
+    uint32_t generation;  // layout generation when this entry was stored
 } MeasurementCacheEntry;
 
 // Main measurement functions
@@ -42,6 +43,8 @@ void store_in_measurement_cache(DomNode* node, int width, int height, int conten
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
 void invalidate_measurement_cache_for_node(DomNode* node);
+void advance_measurement_cache_generation();  // call at start of each top-level layout
+uint32_t get_measurement_cache_generation();
 
 // Enhanced layout functions that use measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node);

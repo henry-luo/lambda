@@ -740,7 +740,16 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                 log_debug("AUTO-HEIGHT: NOT shrinking container from %.0f to %d (keeping parent-set height)",
                           existing_height, final_height);
             } else {
-                flex_layout->main_axis_size = (float)total_height;  // Content height
+                // For column flex with wrap and indefinite height (auto), set wrapping
+                // boundary to infinite per CSS Flexbox §9.3 (items don't wrap when the
+                // main axis can grow indefinitely). Phase 7 computes final height.
+                bool has_max_height = flex_container->blk && flex_container->blk->given_max_height > 0;
+                if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
+                    flex_layout->main_axis_size = 1e9f;
+                    log_debug("AUTO-HEIGHT: column flex with wrap, using infinite main_axis_size for wrapping");
+                } else {
+                    flex_layout->main_axis_size = (float)total_height;  // Content height
+                }
                 flex_container->height = (float)final_height;  // Total height including padding
                 log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
                           final_height, total_height, padding_top, padding_bottom);
@@ -1924,19 +1933,33 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     // Layout content within each flex item with their final sizes
-    View* child = flex_container->first_child;
-    while (child) {
-        // Include block, inline-block, list-item, and table flex items
-        // CSS treats list-item as block-level for flex layout purposes
-        if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
-            child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
-            ViewBlock* flex_item = (ViewBlock*)child;
-            log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
-
-            // Final layout of flex item contents with determined sizes
-            layout_flex_item_content(lycon, flex_item);
+    // Use flex_items[] (CSS order-sorted) when available, so content layout respects
+    // the visual order set by the CSS `order` property. This is critical for correct
+    // baseline calculation and scroll position in reordered layouts.
+    if (flex && flex->flex_items && flex->item_count > 0) {
+        for (int i = 0; i < flex->item_count; i++) {
+            View* fchild = flex->flex_items[i];
+            if (!fchild) continue;
+            if (fchild->view_type == RDT_VIEW_BLOCK || fchild->view_type == RDT_VIEW_INLINE_BLOCK ||
+                fchild->view_type == RDT_VIEW_LIST_ITEM || fchild->view_type == RDT_VIEW_TABLE) {
+                ViewBlock* flex_item = (ViewBlock*)fchild;
+                log_debug("Final layout for flex item %p (order-sorted %d): %.1fx%.1f",
+                          flex_item, i, flex_item->width, flex_item->height);
+                layout_flex_item_content(lycon, flex_item);
+            }
         }
-        child = child->next();
+    } else {
+        // Fallback: DOM order traversal when flex_items[] is unavailable
+        View* child = flex_container->first_child;
+        while (child) {
+            if (child->view_type == RDT_VIEW_BLOCK || child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                child->view_type == RDT_VIEW_LIST_ITEM || child->view_type == RDT_VIEW_TABLE) {
+                ViewBlock* flex_item = (ViewBlock*)child;
+                log_debug("Final layout for flex item %p: %.1fx%.1f", flex_item, flex_item->width, flex_item->height);
+                layout_flex_item_content(lycon, flex_item);
+            }
+            child = child->next();
+        }
     }
 
     // CRITICAL: Adjust positions of items after content layout for column flex

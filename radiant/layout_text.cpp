@@ -295,6 +295,18 @@ CssEnum get_white_space_value(DomNode* node) {
                 return ws;
             }
         }
+        // Fallback: check specified_style when blk is not yet resolved
+        // (e.g. during intrinsic sizing measurement before full layout)
+        if (elem->specified_style) {
+            CssDeclaration* ws_decl = style_tree_get_declaration(
+                elem->specified_style, CSS_PROPERTY_WHITE_SPACE);
+            if (ws_decl && ws_decl->value && ws_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum ws = ws_decl->value->data.keyword;
+                if (is_concrete_white_space_value(ws)) {
+                    return ws;
+                }
+            }
+        }
         current = current->parent;
     }
     return CSS_VALUE_NORMAL;  // default

@@ -815,6 +815,30 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 
+// CSS 2.1 §16.2: Shift current-line text rects inside a span that was laid out
+// on a previous line but has continuation content on the current line.
+static void shift_span_current_line_rects(float offset, float line_y, ViewSpan* span) {
+    View* child = (View*)span->first_child;
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            TextRect* rect = text->rect;
+            while (rect) {
+                if (rect->y >= line_y - 1.0f) {
+                    rect->x += offset;
+                }
+                rect = rect->next;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE) {
+            shift_span_current_line_rects(offset, line_y, (ViewSpan*)child);
+        }
+        child = child->next();
+    }
+    if (span->y >= line_y - 1.0f) {
+        span->x += offset;
+    }
+}
+
 void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
         log_debug("view line align: %d", view->view_type);
@@ -832,10 +856,6 @@ void view_line_align(LayoutContext* lycon, float offset, View* view) {
             ViewSpan* sp = (ViewSpan*)view;
             if (sp->first_child) view_line_align(lycon, offset, sp->first_child);
         }
-        // else if (view->is_block()) {
-        //     view->x += offset;
-        // }
-        // else {} // br
         view = view->next();
     }
 }
@@ -980,14 +1000,24 @@ void line_align(LayoutContext* lycon) {
         View* view = lycon->line.start_view;
 
         // Special handling for wrapped text continuation lines:
-        // When text wraps within the same text node, start_view is NULL but we need to align
-        // Check if we have a text view with multiple TextRects (= wrapped text)
+        // When text wraps within the same text node, start_view may point to a text view
+        // whose first rects belong to previous lines. Detect this by checking if the first
+        // rect's y is well below the current advance_y.
         bool is_wrapped_continuation = false;
-        if (!view && lycon->view && lycon->view->view_type == RDT_VIEW_TEXT) {
+        if (view && view->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)view;
+            TextRect* first_rect = text->rect;
+            if (first_rect && first_rect->y < lycon->block.advance_y - 1.0f) {
+                is_wrapped_continuation = true;
+            }
+        }
+        // Fallback: start_view is NULL but current view has wrapped text
+        if (!is_wrapped_continuation && !view && lycon->view &&
+            lycon->view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)lycon->view;
             TextRect* rect = text->rect;
             int rect_count = 0;
-            while (rect && rect_count < 2) {  // Only need to count up to 2
+            while (rect && rect_count < 2) {
                 rect_count++;
                 rect = rect->next;
             }
@@ -1024,21 +1054,44 @@ void line_align(LayoutContext* lycon) {
         // For LTR: start = left, so negative offset is clamped to 0 (text stays at left edge).
         if ((text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) &&
             (offset > 0 || (is_rtl && offset < 0))) {
-            // For wrapped text continuation lines, only align the current line's TextRect
+            // For wrapped text continuation lines, only align current-line rects
             if (is_wrapped_continuation) {
                 ViewText* text = (ViewText*)view;
+                float line_y = lycon->block.advance_y;
                 TextRect* rect = text->rect;
-                TextRect* last_rect = rect;
                 while (rect) {
-                    last_rect = rect;
+                    if (rect->y >= line_y - 1.0f) {
+                        rect->x += offset;
+                    }
                     rect = rect->next;
                 }
-
-                if (last_rect) {
-                    // Shift only this rect
-                    last_rect->x += offset;
+                // Also shift any sibling views that follow on the current line
+                View* next = view->next();
+                if (next) {
+                    view_line_align(lycon, offset, next);
                 }
             } else {
+                // CSS 2.1 §16.2: Before aligning from start_view, check preceding siblings
+                // for text continuation rects on the current line. This happens when a text
+                // node wraps and a sibling inline element (e.g., <span>) follows on the same
+                // line — start_view points to the span, but the wrapped text rect precedes it.
+                float line_y = lycon->block.advance_y;
+                View* prev = (View*)((DomNode*)view)->prev_sibling;
+                while (prev) {
+                    if (prev->view_type == RDT_VIEW_TEXT) {
+                        ViewText* text = (ViewText*)prev;
+                        TextRect* rect = text->rect;
+                        while (rect) {
+                            if (rect->y >= line_y - 1.0f) {
+                                rect->x += offset;
+                            }
+                            rect = rect->next;
+                        }
+                    } else if (prev->view_type == RDT_VIEW_INLINE) {
+                        shift_span_current_line_rects(offset, line_y, (ViewSpan*)prev);
+                    }
+                    prev = (View*)((DomNode*)prev)->prev_sibling;
+                }
                 // Normal case: align all views in the line
                 view_line_align(lycon, offset, view);
             }
@@ -1803,6 +1856,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     // Clear measurement cache at the start of each layout pass
     // This ensures fresh intrinsic size calculations for each layout
     clear_measurement_cache();
+    advance_measurement_cache_generation();
 
     // Reset styles_resolved flags for all elements before layout
     // This ensures CSS style resolution happens exactly once per element per layout pass
