@@ -2,7 +2,7 @@
 
 LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). It transpiles JavaScript source code into MIR IR which is then compiled to native machine code, enabling near-native execution of JavaScript programs within the Lambda runtime.
 
-> **Status:** Experimental. LambdaJS passes 62/62 benchmarks across 5 suites and all 52/52 JS baseline tests. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, regex via RE2, optional chaining, Map/Set collections, and error subclasses. JetStream geometric mean: **6.3×** vs Node.js (V8).
+> **Status:** Experimental. LambdaJS passes 60/60 JS baseline tests (677/677 total) and runs all 53/53 benchmarks across 5 suites. It covers ES6 classes, prototype-based OOP, closures, typed arrays, template literals, try/catch/finally, destructuring, regex via RE2, optional chaining, Map/Set collections, and error subclasses. 5-suite geometric mean: **2.2×** vs Node.js (V8) (JetStream standalone: **6.3×**).
 
 ## Usage
 
@@ -272,7 +272,8 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 **Platform:** Apple Silicon MacBook Air (M4), macOS  
 **Node.js:** v22.13.0 (V8 JIT with TurboFan optimizing compiler)  
-**Methodology:** 3 runs per benchmark, median of self-reported execution time
+**Methodology:** 3 runs per benchmark, median of self-reported execution time  
+**Optimizations applied:** P1 (return type propagation), P2 (bump-pointer alloc), P3 (direct ctor stores), P4 (typed instance property reads), P5 (module var arithmetic), P6 (function inlining), P7 (native method dispatch)
 
 > Ratio = LambdaJS / Node.js. Values < 1.0× mean LambdaJS is faster.
 
@@ -280,45 +281,48 @@ Operations: `new`, `get`, `set`, `length`, `fill`, `subarray`
 
 | Suite | Geo. Mean | LJS Wins | Node Wins | Total |
 |-------|----------:|:--------:|:---------:|:-----:|
-| R7RS | 2.3× | 5 | 5 | 10 |
-| AWFY | 34.9× | 0 | 14 | 14 |
-| BENG | 0.8× | 6 | 4 | 10 |
-| KOSTYA | 25.7× | 0 | 7 | 7 |
-| LARCENY | 15.5× | 2 | 10 | 12 |
+| R7RS | 1.3× | 5 | 5 | 10 |
+| AWFY | 4.7× | 2 | 12 | 14 |
+| BENG | 0.3× | 6 | 4 | 10 |
+| KOSTYA | 6.3× | 0 | 7 | 7 |
+| LARCENY | 3.8× | 2 | 10 | 12 |
 | JetStream | 6.3× | 0 | 9 | 11 |
-| **Overall** | **6.3×** | **13** | **47** | **60** |
+| **Overall (5 suites)** | **2.2×** | **15** | **38** | **53** |
 
-### Where LambdaJS Beats Node.js (13 benchmarks)
+### Where LambdaJS Beats Node.js (15 benchmarks)
 
 | Benchmark | Suite | LambdaJS | Node.js | Ratio |
 |-----------|-------|----------:|--------:|------:|
-| revcomp | BENG | 0.002ms | 3.4ms | **0.001×** |
-| knucleotide | BENG | 0.088ms | 5.0ms | **0.02×** |
-| regexredux | BENG | 0.095ms | 2.5ms | **0.04×** |
-| pidigits | BENG | 0.083ms | 2.0ms | **0.04×** |
-| divrec | LARCENY | 0.82ms | 7.9ms | **0.10×** |
-| tak | R7RS | 0.10ms | 0.80ms | **0.12×** |
-| cpstak | R7RS | 0.22ms | 1.00ms | **0.22×** |
-| array1 | LARCENY | 0.56ms | 1.8ms | **0.31×** |
-| fannkuch | BENG | 1.6ms | 4.1ms | **0.39×** |
-| fib | R7RS | 0.99ms | 2.0ms | **0.50×** |
-| fibfp | R7RS | 1.0ms | 1.8ms | **0.56×** |
-| ack | R7RS | 8.1ms | 14ms | **0.58×** |
-| fasta | BENG | 3.9ms | 6.2ms | **0.63×** |
+| revcomp | BENG | 0.001ms | 3.4ms | **0.0003×** |
+| knucleotide | BENG | 0.016ms | 5.0ms | **0.003×** |
+| pidigits | BENG | 0.015ms | 2.0ms | **0.008×** |
+| json | AWFY | 0.167ms | 2.8ms | **0.06×** |
+| divrec | LARCENY | 0.823ms | 7.9ms | **0.10×** |
+| regexredux | BENG | 0.305ms | 2.5ms | **0.12×** |
+| fannkuch | BENG | 0.529ms | 4.1ms | **0.13×** |
+| tak | R7RS | 0.117ms | 0.80ms | **0.15×** |
+| fasta | BENG | 1.21ms | 6.2ms | **0.20×** |
+| cpstak | R7RS | 0.233ms | 1.00ms | **0.23×** |
+| array1 | LARCENY | 0.580ms | 1.8ms | **0.31×** |
+| sieve | AWFY | 0.136ms | 0.376ms | **0.36×** |
+| fib | R7RS | 1.20ms | 2.0ms | **0.60×** |
+| ack | R7RS | 9.33ms | 13.7ms | **0.68×** |
+| fibfp | R7RS | 1.25ms | 1.77ms | **0.70×** |
 
 **Strengths:**
 - Delegating to Lambda's native engines (revcomp, knucleotide, regexredux, pidigits) bypasses JS-level overhead entirely.
 - Simple recursive functions (tak, cpstak, fib, ack): MIR JIT generates efficient code for monomorphic call sites.
-- Small array/permutation code (divrec, array1, fannkuch): tight-loop compilation.
+- Small array/permutation code (divrec, array1, fannkuch, sieve): tight-loop compilation with P5/P6 inlining.
+- AWFY json and sieve added as wins after P3/P4/P5 property-access and module-var optimizations.
 
 ### Where Node.js is Faster
 
 | Tier | Count | Key Bottleneck |
 |------|------:|----------------|
-| Comparable (1–5×) | 5 | Close — cube3d, sieve, splay, nqueens, deltablue |
-| Node 5–50× faster | 23 | Numeric loops, OOP dispatch, GC pressure |
-| Node 50–200× faster | 13 | String ops, heavy allocation, interpreter-like patterns |
-| Node >200× faster | 6 | nbody variants, deriv, cd, havlak — deep OOP + GC |
+| Comparable (1–2×) | 8 | nqueens (1.0×), fft (1.6×), primes/larceny (1.7×), primes/kostya (1.8×), paraffins (1.2×), fasta/fib/fibfp |
+| Node 2–5× faster | 10 | json_gen (2.5×), storage (2.8×), bounce (3.2×), ray (3.2×), list (3.3×), levenshtein (3.5×), queens (3.6×), permute (3.6×), collatz (4.4×), towers (4.9×) |
+| Node 5–20× faster | 12 | sumfp (5.3×), base64 (6.2×), binarytrees (7.2×), spectralnorm (7.5×), brainfuck (11×), deltablue (12×), deriv (13×), triangl (15×), richards (16×), havlak (18×), diviter (23×), quicksort (5.8×) |
+| Node >20× faster | 8 | sum (18×), mbrot (10×), puzzle (4.6×), pnpoly (12×), gcbench (29×), nbody/beng (38×), mandelbrot/beng (54×), cd (54×), nbody/awfy (67×), matmul (83×) |
 
 **Where V8 dominates and why:**
 - **Numeric-heavy loops** (sum, nbody, mandelbrot): V8's TurboFan performs type specialization and SIMD optimizations.
