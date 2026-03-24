@@ -95,9 +95,10 @@ type User {
 
 **Self reference `~`:**
 ```lambda
-type Vec { x: float, y: float;
+type Vec { 
+  x: float, y: float;
   fn len() => math.sqrt(x**2 + y**2)
-  fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
+  fn scale(f) => <Vec ~, x:~.x*f, y:~.y*f>  // ~ = self
 }
 ```
 
@@ -178,7 +179,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 elem.svg.width              // Chained sub-map access
 elem.svg                    // {width: 100} sub-map
 svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Dynamic namespaced symbol
+symbol("href", 'xlink_url') // Namespaced symbol
 ```
 
 ## Variables & Declarations
@@ -194,7 +195,7 @@ symbol("href", 'xlink_url') // Dynamic namespaced symbol
 let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
 let a = 1, b = 2;         // Multiple bindings
-x = 10       // ERROR E211: cannot reassign let binding
+x = 10     // ERROR E211: cannot reassign let binding
 ```
 
 **Var Statements (mutable, `pn` only):**
@@ -228,10 +229,10 @@ let a = [1, 2, 3]
 
 `==` performs **structural deep equality** on all types:
 ```lambda
-[1, 2] == [1, 2]             // true  (array)
-{a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
-[1] == [1.0]                  // true  (numeric promotion)
-(1 to 3) == [1, 2, 3]         // true  (cross-type sequence)
+[1, 2] == [1, 2]          // true  (array)
+{a:1, b:2} == {b:2, a:1}  // true  (map, order-independent)
+[1] == [1.0]              // true  (numeric promotion)
+(1 to 3) == [1, 2, 3]     // true  (cross-type sequence)
 ```
 
 **Logical:** logical and, or, not
@@ -274,9 +275,9 @@ users that (age >= 18) | ~.name  // filter then map
 
 **Spreading in Array Literals:** pipe and filter results flatten
 ```lambda
-[1, [2,3] | ~, 4, 5]              // [1, 2, 3, 4, 5]
-[0, [1,2,3] | ~ * 10, 99]         // [0, 10, 20, 30, 99]
-[1, [3,5,7] that (~ > 4), 9]      // [1, 5, 7, 9]
+[1, [2,3] | ~, 4, 5]           // [1, 2, 3, 4, 5]
+[0, [1,2,3] | ~ * 10, 99]      // [0, 10, 20, 30, 99]
+[1, [3,5,7] that (~ > 4), 9]   // [1, 5, 7, 9]
 ```
 
 ## Query Expressions
@@ -329,7 +330,7 @@ Data type determines output format:
 if (x > 0) "positive" else "non-positive"
 if (score >= 90) "A"
 else if (score >= 80) "B" else "C"
-if (x > 0) "pos" else { log("neg"); "neg" } // block else
+if (x > 0) "pos" else { "neg" } // block else
 ```
 
 **If Statements (block body, else optional):**
@@ -494,19 +495,21 @@ string digits = \d+
 string ws = \s+
 
 // replace(str, pattern_or_string, replacement)
-replace("a1b2c3", digit, "X")        // "aXbXcX"
-replace("hello   world", ws, " ")    // "hello world"
-replace("abc", "b", "")              // "ac"
+replace("a1b2c3", digit, "X")      // "aXbXcX"
+replace("hello   world", ws, " ")  // "hello world"
+replace("abc", "b", "")            // "ac"
 
 // split(str, pattern_or_string)
-split("a1b2c3", digit)               // ["a", "b", "c", ""]
-split("hello   world", ws)           // ["hello", "world"]
-split("a,b,c", ",")                  // ["a", "b", "c"]
-split("a1b2c3", digit, true)         // ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
+split("a1b2c3", digit)           // ["a", "b", "c", ""]
+split("hello   world", ws)       // ["hello", "world"]
+split("a,b,c", ",")              // ["a", "b", "c"]
+split("a1b2c3", digit, true)         
+// ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
 
 // find(str, pattern_or_string) → [{value, index}, ...]
-find("a1b22c333", digits)            // [{value: "1", index: 1}, {value: "22", index: 3}, ...]
-find("hello world", "lo")            // [{value: "lo", index: 3}]
+find("a1b22c333", digits)            
+// [{value:"1", index:1}, {value:"22", index:3}, ...]
+find("hello world", "lo")  // [{value: "lo", index: 3}]
 ```
 
 **Collection:**
@@ -542,30 +545,31 @@ format(data, 'yaml')                // Format as YAML
 
 **Import Syntax:**
 ```lambda
-import .relative_module          // Relative to script's directory
-import .path.to.module           // Nested relative import
-import module_name               // Relative to CWD/project root
-import alias: .module            // Import with alias
+import module_name          // Built-in module
+import .relative_module     // Relative to script's dir
+import .path.to.module      // Nested relative import
+import alias: .module       // Import with alias
 ```
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159                 // Export variable
-pub fn square(x) => x * x       // Export function
-pub pn log(msg) { print(msg) }  // Export procedure
-pub type Score = int             // Export type alias
-pub type Counter {               // Export object type
+pub PI = 3.14159               // Export variable
+pub fn square(x) => x * x      // Export function
+pub pn log(msg) { print(msg) } // Export procedure
+pub type Score = int           // Export type alias
+pub type Counter {             // Export object type
     value: int = 0;
     fn double() => value * 2
 }
-pub data^err = input(\"f\", 'json') // Export with error var
+pub data^err = input(\"f\")    // Exp. data and err
 ```
 
 **Module Usage:**
 ```lambda
 // In math_utils.ls:
 pub PI = 3.14159
-pub type Vec2 { x: float, y: float; fn len() => math.sqrt(x**2 + y**2) }
+pub type Vec2 { x: float, y: float; fn len() => 
+    math.sqrt(x**2 + y**2) }
 
 // In main.ls:
 import .math_utils
@@ -584,9 +588,9 @@ error({code: 304, message: "div by zero"})
 
 **Error Return Types (`T^E`):**
 ```lambda
-fn parse(s: string) int^ {...}   // Return int or any error
-fn divide(a, b) int ^ DivErr {...}     // Specific error
-fn load(p) Config ^ ParseErr | IOErr {...} // Multiple errors
+fn parse(s: string) int^ {...}   // int or any error
+fn divide(a, b) int ^ DivErr {...}    // specific error
+fn load(p) Config ^ ParseErr|IOErr {...} // multi errors
 ```
 
 **`raise` error , or propagate error with `^`**
