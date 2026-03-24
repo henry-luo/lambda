@@ -1965,6 +1965,23 @@ TypePattern* const_pattern(int64_t pattern_index) {
     return (TypePattern*)type;
 }
 
+// MIR Direct module-type-list-aware wrappers: save/restore context->type_list so that
+// cross-module calls use this module's own type_list.
+Type* const_type_with_tl(int64_t type_index, void* type_list_ptr) {
+    void* saved = context->type_list;
+    context->type_list = type_list_ptr;
+    Type* r = const_type(type_index);
+    context->type_list = saved;
+    return r;
+}
+TypePattern* const_pattern_with_tl(int64_t pattern_index, void* type_list_ptr) {
+    void* saved = context->type_list;
+    context->type_list = type_list_ptr;
+    TypePattern* r = const_pattern(pattern_index);
+    context->type_list = saved;
+    return r;
+}
+
 Type* fn_type(Item item) {
     TypeType *type = (TypeType *)heap_calloc(sizeof(TypeType) + sizeof(Type), LMD_TYPE_TYPE);
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));

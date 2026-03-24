@@ -880,9 +880,12 @@ typedef struct Context {
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
+    Map* map_with_tl(int64_t type_index, void* type_list_ptr);
     Element* elmt(int64_t type_index);
+    Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object(int64_t type_index);
     Object* object_with_data(int64_t type_index);
+    Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object_fill(Object* obj, ...);
 
     // these getters use runtime num_stack
@@ -1158,7 +1161,9 @@ typedef struct Context {
     Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
     Type* const_type(int64_t type_index);
+    Type* const_type_with_tl(int64_t type_index, void* type_list_ptr);
     TypePattern* const_pattern(int64_t pattern_index);  // retrieve compiled pattern by index
+    TypePattern* const_pattern_with_tl(int64_t pattern_index, void* type_list_ptr);
 
     // returns the type of the item
     Type* fn_type(Item item);

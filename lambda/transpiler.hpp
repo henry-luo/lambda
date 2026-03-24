@@ -54,6 +54,7 @@ struct Runtime {
     bool dry_run;        // dry-run mode: IO functions return fabricated results instead of real IO
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
+    bool use_mir_direct; // if true, all modules (main + imports) compiled via MIR Direct instead of C2MIR
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
@@ -114,6 +115,7 @@ void clear_dynamic_imports(void);
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
+void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);

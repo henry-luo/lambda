@@ -2064,6 +2064,7 @@ int main(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "--transpile-dir") == 0) {
                 if (i + 1 < argc) {
                     runtime.transpile_dir = argv[++i];
+                    use_mir = false;  // --transpile-dir is for C code inspection: force C2MIR
                 } else {
                     printf("Error: --transpile-dir requires a directory argument\n");
                     log_finish();
@@ -2133,6 +2134,7 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--transpile-dir") == 0) {
             if (i + 1 < argc) {
                 runtime.transpile_dir = argv[++i];
+                use_mir = false;  // --transpile-dir is for C code inspection: force C2MIR
             } else {
                 printf("Error: --transpile-dir requires a directory argument\n");
                 help_only = true;
