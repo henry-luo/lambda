@@ -80,6 +80,7 @@ echo -e "${BLUE}Generating landscape PDF...${NC}"
 if pandoc ../Lambda_Cheatsheet.md \
     -o ../Lambda_Cheatsheet.pdf \
     --template=template_landscape.tex \
+    --listings \
     --pdf-engine=xelatex \
     -V geometry:a4paper,landscape,margin=0.5in; then
 
@@ -105,7 +106,7 @@ echo
 #     --template=template_portrait.tex \
 #     --pdf-engine=xelatex \
 #     -V geometry:a4paper,portrait,margin=0.5in; then
-# 
+#
 #     if [[ -f "Lambda_Cheatsheet_Portrait.pdf" ]]; then
 #         PDF_SIZE=$(stat -f%z "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || stat -c%s "Lambda_Cheatsheet_Portrait.pdf" 2>/dev/null || echo "unknown")
 #         echo -e "${GREEN}✓ Portrait PDF generated successfully${NC}"

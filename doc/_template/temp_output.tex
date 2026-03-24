@@ -1,0 +1,1074 @@
+\documentclass[8pt,landscape,a4paper,oneside]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{multicol}
+\usepackage[landscape,margin=0.3in]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{fancyvrb}
+\usepackage{framed}
+\usepackage{alltt}
+\usepackage{fancyhdr}
+
+% Configure page numbering and footer
+\pagestyle{fancy}
+\fancyhf{} % Clear all header and footer fields
+\fancyfoot[C]{\thepage} % Center page number in footer
+\renewcommand{\headrulewidth}{0pt} % Remove header rule
+\renewcommand{\footrulewidth}{0pt} % Remove footer rule
+
+% Prevent blank pages
+\raggedbottom
+\let\cleardoublepage\clearpage
+
+% Better page breaking and orphan/widow control
+\setlength{\columnsep}{15pt}
+\raggedcolumns
+\widowpenalty=10000
+\clubpenalty=10000
+
+% Prevent premature column/page breaks in multicol
+\setlength{\multicolsep}{0pt}
+\setlength{\premulticols}{1pt}
+\setlength{\postmulticols}{1pt}
+\setlength{\multicolbaselineskip}{0pt}
+
+% Define colors for shaded environments
+\definecolor{shadecolor}{rgb}{0.97,0.97,0.97}
+
+% Define custom verbatim environment for better line break handling
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+  frame=none,
+  framesep=1pt,
+  commandchars=\\\{\}
+}
+
+% Simple environment definitions that preserve pandoc's defaults with light background
+\newenvironment{Shaded}{%
+  \begin{snugshade}%
+  \vspace{0.4\baselineskip}%
+  \fontsize{9}{10}\selectfont%
+  \setlength{\parskip}{0pt}%
+  \setlength{\topsep}{0pt}%
+  \setlength{\partopsep}{0pt}%
+}{%
+  \vspace{0.01\baselineskip}%
+  \end{snugshade}%
+}
+
+% Define tightlist for pandoc
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Pandoc highlighting commands
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\ImportTok}[1]{#1}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\BuiltInTok}[1]{#1}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.77,0.63,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.94,0.16,0.16}{#1}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.64,0.00,0.00}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+
+% Configure page with tighter spacing
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1pt}
+\setlength{\topsep}{0pt}
+\setlength{\partopsep}{0pt}
+
+% Configure multicol
+\setlength{\columnsep}{15pt}
+\setlength{\columnseprule}{0.2pt}
+
+% Configure sections - make them slightly bigger and more compact
+\titleformat{\section}[block]{\normalfont\Large\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{3pt plus 1pt minus 1pt}{1pt plus 1pt minus 1pt}
+
+\titleformat{\subsection}[block]{\normalfont\large\bfseries}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{2pt plus 1pt minus 1pt}{0pt plus 1pt minus 1pt}
+
+% Don't print section numbers
+\setcounter{secnumdepth}{0}
+
+% Custom commands for compact lists
+\newenvironment{compactlist}{
+    \begin{list}{\textbullet}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}\setlength{\parsep}{0pt}}
+}{\end{list}}
+
+\begin{document}
+
+% Title
+\begin{center}
+{\Large \textbf{Lambda Script Cheatsheet}}
+\end{center}
+\vspace{-8pt}
+\begin{flushright}
+{\small Jan 2026 - v0.2}
+\end{flushright}
+
+\vspace{3pt}
+
+% Start 3-column layout
+\begin{multicols*}{3}
+\raggedright
+\subsection{CLI Commands}\label{cli-commands}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{lambda}                    \CommentTok{\# Start REPL}
+\ExtensionTok{//}\NormalTok{ REPL Commands: quit, help, clear}
+\ExtensionTok{lambda}\NormalTok{ script.ls          }\CommentTok{\# Eval functional script}
+\ExtensionTok{lambda}\NormalTok{ run script.ls      }\CommentTok{\# Run procedual script}
+\ExtensionTok{lambda} \AttributeTok{{-}{-}help}             \CommentTok{\# Show help}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Validation:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\ExtensionTok{lambda}\NormalTok{ validate file.json }\AttributeTok{{-}s}\NormalTok{ schema.ls  }\CommentTok{\# With schema}
+\ExtensionTok{lambda}\NormalTok{ validate file.json            }\CommentTok{\# Default schema}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Type System}\label{type-system}
+
+\textbf{Scalar Types:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{null  bool  int  float  decimal}
+\NormalTok{string  symbol  binary  datetime  path}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Container Types:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{range, 1 to 10          // Range (inclusive both ends)}
+\NormalTok{array, [123, true]      // Array of values}
+\NormalTok{map, \{key: \textquotesingle{}symbol\textquotesingle{}\}    // Map}
+\NormalTok{element, \textless{}div class: bold; "text" \textless{}br\textgreater{}\textgreater{}  // Element}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Type Operators:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{int | string     // Union type}
+\NormalTok{int \& number     // Intersection}
+\NormalTok{int?             // Optional (int | null)}
+\NormalTok{int*             // Zero or more}
+\NormalTok{int+             // One or more}
+\NormalTok{int[]            // Array of ints (same as int*)}
+\NormalTok{int[5]           // Array of exactly 5 ints}
+\NormalTok{[int*]           // Bracket form: array of 0+ ints}
+\NormalTok{[int+]           // Bracket form: array of 1+ ints}
+\NormalTok{fn (a: int, b: string) bool   // Function type}
+\NormalTok{fn int                        // Same as fn () int}
+\NormalTok{\{a: int, b: bool\}             // Map type}
+\NormalTok{\textless{}div id:symbol; \textless{}br\textgreater{}\textgreater{}         // Element type}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Type Declarations:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{type User = \{name: string, age: int\};   // Map type alias}
+\NormalTok{type Point = (float, float);            // Tuple type}
+\NormalTok{type Result = int | error;              // Union type}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Object Types}\label{object-types}
+
+\textbf{Definition:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{type Point \{ x: float, y: float \}     // Fields only}
+\NormalTok{type Counter \{}
+\NormalTok{    value: int = 0;                   // Default value}
+\NormalTok{    fn double() =\textgreater{} value * 2          // Functional}
+\NormalTok{    fn add(n: int) =\textgreater{} value + n}
+\NormalTok{    pn inc() \{ value = value + 1 \}    // Procedural}
+\NormalTok{\}}
+\NormalTok{type Circle : Shape \{ radius: float; \}  // Inheritance}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Literals \& Access:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let p = \{Point x: 1.0, y: 2.0\}   // Object literal}
+\NormalTok{let c = \{Counter\}                // All defaults}
+\NormalTok{p.x                              // Field access}
+\NormalTok{c.double()                       // Method call}
+\NormalTok{\{p, x: 5.0\}                      // Wrap and override}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Type Checking (nominal only):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{p is Point     // true}
+\NormalTok{p is object    // true}
+\NormalTok{p is map       // true (objects are map{-}compatible)}
+\NormalTok{\{x: 1\} is Point  // false (plain maps don\textquotesingle{}t match)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Constraints:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{type User \{}
+\NormalTok{  name: string that (len(\textasciitilde{}) \textgreater{} 1),  // Field constraint}
+\NormalTok{  age: int that (0 \textless{}= \textasciitilde{} \textless{}= 150);}
+\NormalTok{  that (\textasciitilde{}.name != "admin")         // Object constraint}
+\NormalTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Self reference \texttt{\textasciitilde{}}:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{type Vec \{ }
+\NormalTok{  x: float, y: float;}
+\NormalTok{  fn len() =\textgreater{} math.sqrt(x**2 + y**2)}
+\NormalTok{  fn scale(f) =\textgreater{} \textless{}Vec \textasciitilde{}, x:\textasciitilde{}.x*f, y:\textasciitilde{}.y*f\textgreater{}  // \textasciitilde{} = self}
+\NormalTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Literals}\label{literals}
+
+\textbf{Numbers:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{42        // Integer}
+\NormalTok{3.14      // Float}
+\NormalTok{1.5e{-}10   // Scientific notation}
+\NormalTok{123.45n   // Decimal128 (\textasciitilde{}34 digits)}
+\NormalTok{123.45N   // Decimal (ultra precision, 200 digits)}
+\NormalTok{inf  nan  // Special values}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Strings \& Symbols:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{"hello"           // String}
+\NormalTok{"multi{-}line       // Multi{-}line string}
+\NormalTok{string"}
+\NormalTok{\textquotesingle{}symbol\textquotesingle{}          // Symbol}
+\NormalTok{symbol            // Unquoted symbol}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Binary:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{b\textquotesingle{}\textbackslash{}xDEADBEEF\textquotesingle{}     // Hex binary}
+\NormalTok{b\textquotesingle{}\textbackslash{}64QUVGRw==\textquotesingle{}    // Base64 binary}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{DateTime:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{t\textquotesingle{}2025{-}01{-}01T14:30:00Z\textquotesingle{}  // DateTime}
+\NormalTok{t\textquotesingle{}2025{-}04{-}26\textquotesingle{} is date       // Sub{-}types: date}
+\NormalTok{t\textquotesingle{}10:30:00\textquotesingle{} is time         // Sub{-}types: time}
+
+\NormalTok{// Member properties}
+\NormalTok{dt.date  dt.year  dt.month  dt.day}
+\NormalTok{dt.time  dt.hour  dt.minute dt.second  dt.millisecond}
+\NormalTok{dt.weekday  dt.yearday  dt.week  dt.quarter}
+\NormalTok{dt.unix  dt.timezone  dt.utc\_offset  dt.utc  dt.local}
+
+\NormalTok{// Formatting}
+\NormalTok{dt.format("YYYY{-}MM{-}DD")  dt.format(\textquotesingle{}iso\textquotesingle{})}
+
+\NormalTok{// Constructors}
+\NormalTok{datetime()  today()  justnow()   // current date/time}
+\NormalTok{datetime(2025, 4, 26, 10, 30)}
+\NormalTok{date(2025, 4, 26)  time(10, 30, 45)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Collections:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1, 2, 3]         // Array}
+\NormalTok{\{a: 1, b: 2\}      // Map}
+\NormalTok{\textless{}div id: "main"\textgreater{}  // Element}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Indexing \& Slicing:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{arr[0]            // First element}
+\NormalTok{arr.0             // Alt. syntax for const index}
+\NormalTok{arr[1 to 3]       // Slice (indices 1, 2, 3)}
+\NormalTok{map.key           // Map field access}
+\NormalTok{map["key"]        // Map field by string}
+\NormalTok{"hello"[1 to 3]   // "ell" — string slicing}
+\NormalTok{\textquotesingle{}hello\textquotesingle{}[1 to 3]   // \textquotesingle{}ell\textquotesingle{} — symbol slicing}
+\NormalTok{"café"[2 to 3]    // "fé" — UTF{-}8 aware}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Namespaces (via \texttt{import} with bare URI):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{import svg: \textquotesingle{}http://www.w3.org/2000/svg\textquotesingle{}}
+\NormalTok{import xlink: \textquotesingle{}http://www.w3.org/1999/xlink\textquotesingle{}}
+
+\NormalTok{\textless{}svg.rect svg.width: 100\textgreater{}   // Namespaced tag \& attr}
+\NormalTok{// desugars to: \textless{}svg.rect svg: \{width: 100\}\textgreater{}}
+\NormalTok{elem.svg.width              // Chained sub{-}map access}
+\NormalTok{elem.svg                    // \{width: 100\} sub{-}map}
+\NormalTok{svg.rect                    // Qualified symbol}
+\NormalTok{symbol("href", \textquotesingle{}xlink\_url\textquotesingle{}) // Namespaced symbol}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Variables \& Declarations}\label{variables-declarations}
+
+\textbf{Let Expressions:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{(let x = 5, x + 1, x * 2)      // Single binding}
+\NormalTok{(let a = 1, b = 2, a + b)      // Multiple bindings}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Let Statements (immutable):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let x = 42;               // Immutable binding}
+\NormalTok{let y : int = 100;        // With type annotation}
+\NormalTok{let a = 1, b = 2;         // Multiple bindings}
+\NormalTok{x = 10     // ERROR E211: cannot reassign let binding}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Var Statements (mutable, \texttt{pn} only):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{var x = 0;         // Mutable variable}
+\NormalTok{var y: int = 42;   // With type annotation}
+\NormalTok{var a: int[] = [1, 2, 3];  // Array of ints}
+\NormalTok{var b: float[] = [0.1, 0.2]; // Array of floats}
+\NormalTok{x = x + 1          // OK: reassignment}
+\NormalTok{x = "hello"        // OK: type widening (int → string)}
+\NormalTok{y = "oops"      // ERROR E201: annotated type enforced}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Operators}\label{operators}
+
+\textbf{Arithmetic:} addition, subtraction, multiplication, division,
+integer division, modulo, exponentiation
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{+  {-}  *  /  div  \%  **}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Spread:} *
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let a = [1, 2, 3]}
+\NormalTok{(*a, *[10, 20])    // (1, 2, 3, 10, 20)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Comparison:} equal, not equal, less than, less equal, greater
+than, greater equal
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{==  !=  \textless{}  \textless{}=  \textgreater{}  \textgreater{}=}
+\end{Highlighting}
+\end{Shaded}
+
+\texttt{==} performs \textbf{structural deep equality} on all types:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1, 2] == [1, 2]          // true  (array)}
+\NormalTok{\{a:1, b:2\} == \{b:2, a:1\}  // true  (map, order{-}independent)}
+\NormalTok{[1] == [1.0]              // true  (numeric promotion)}
+\NormalTok{(1 to 3) == [1, 2, 3]     // true  (cross{-}type sequence)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Logical:} logical and, or, not
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{and  or  not}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Type \& Set:} type check, membership, range, union,
+intersection, exclusion
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{is  in  to  |  \&  !}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Query:} type-based search
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{?   .?           // recursive descendant search}
+\NormalTok{expr[T]          // child{-}level query (direct only)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Vector Arithmetic:} scalar broadcast, element-wise ops
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Pipe Expressions}\label{pipe-expressions}
+
+\textbf{Pipe \texttt{\textbar{}} with current item
+\texttt{\textasciitilde{}}:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1,2,3] | \textasciitilde{} * 2          // [2,4,6] {-} map over items}
+\NormalTok{[1,2,3] | sum            // 6 {-} aggregate (no \textasciitilde{})}
+\NormalTok{users | \textasciitilde{}.age            // [12,20,62] {-} extract field}
+\NormalTok{[\textquotesingle{}a\textquotesingle{},\textquotesingle{}b\textquotesingle{}] | \{i:\textasciitilde{}\#, v:\textasciitilde{}\}  // \textasciitilde{}\# = index/key}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Filter with \texttt{that}:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1,2,3,4,5] that (\textasciitilde{} \textgreater{} 3)         // [4,5]}
+\NormalTok{users that (age \textgreater{}= 18) | \textasciitilde{}.name  // filter then map}
+\NormalTok{[1,2,3] | \textasciitilde{} ** 2 that (\textasciitilde{} \textgreater{} 5) | sum // 13 (4+9)}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Spreading in Array Literals:} pipe and filter results flatten
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1, [2,3] | \textasciitilde{}, 4, 5]           // [1, 2, 3, 4, 5]}
+\NormalTok{[0, [1,2,3] | \textasciitilde{} * 10, 99]      // [0, 10, 20, 30, 99]}
+\NormalTok{[1, [3,5,7] that (\textasciitilde{} \textgreater{} 4), 9]   // [1, 5, 7, 9]}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Query Expressions}\label{query-expressions}
+
+\textbf{Results in document order} (depth-first, pre-order).
+
+\textbf{Query \texttt{?} --- attributes + all descendants:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{html?\textless{}img\textgreater{}                // all \textless{}img\textgreater{} at any depth}
+\NormalTok{html?\textless{}div class: string\textgreater{}  // \textless{}div\textgreater{} with class attr}
+\NormalTok{data?int                  // all int values in tree}
+\NormalTok{data?(int | string)       // all int or string values}
+\NormalTok{data?\{name: string\}       // maps with string \textquotesingle{}name\textquotesingle{}}
+\NormalTok{data?\{status: "ok"\}       // maps where status == "ok"}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Self-inclusive query \texttt{.?} --- self + attributes + all
+descendants:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{div.?\textless{}div\textgreater{}     // includes div itself if it matches}
+\NormalTok{el.?int        // self + all int values in subtree}
+\NormalTok{42.?int        // [42] — trivial self{-}match}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Child-level query \texttt{{[}T{]}} --- direct attributes +
+children only (no recursion):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{[1, "a", 3, true][int]   // [1, 3] — int items}
+\NormalTok{\{name: "Alice", age: 30\}[string]  // ["Alice"]}
+\NormalTok{el[element]     // direct child elements only}
+\NormalTok{el[string]      // attr values + text children}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Pipe to File (procedural
+only)}\label{pipe-to-file-procedural-only}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{// Target can be string, symbol, or path}
+\NormalTok{data |\textgreater{} \textquotesingle{}output.txt\textquotesingle{}        // file under CWD}
+\NormalTok{data |\textgreater{} /tmp.\textquotesingle{}output.txt\textquotesingle{}   // output at full path}
+\NormalTok{data |\textgreater{}\textgreater{} "output.txt"       // append to file}
+\NormalTok{data | format(\textquotesingle{}json\textquotesingle{}) |\textgreater{} "output.json"}
+\end{Highlighting}
+\end{Shaded}
+
+Data type determines output format:
+
+\begin{itemize}
+\tightlist
+\item
+  String: raw text (no formatting)
+\item
+  Binary: raw binary data
+\item
+  Other types: Lambda/Mark format
+\end{itemize}
+
+\subsection{Control Flow}\label{control-flow}
+
+\textbf{If Expressions (parenthesized condition, else required):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{if (x \textgreater{} 0) "positive" else "non{-}positive"}
+\NormalTok{if (score \textgreater{}= 90) "A"}
+\NormalTok{else if (score \textgreater{}= 80) "B" else "C"}
+\NormalTok{if (x \textgreater{} 0) "pos" else \{ "neg" \} // block else}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{If Statements (block body, else optional):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{if x \textgreater{} 0 \{ "positive" \}}
+\NormalTok{if condition \{ something() \} else \{ otherThing() \}}
+\NormalTok{if x \textgreater{} 0 \{ compute() \} else "default"   // expr else}
+\end{Highlighting}
+\end{Shaded}
+
+Both forms share the same \texttt{else} syntax: \texttt{else\ expr},
+\texttt{else\ \{\ stam\ \}}, or \texttt{else\ if\ ...}.
+
+\textbf{Match Expressions:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{// Type patterns or Literal}
+\NormalTok{match value \{}
+\NormalTok{    case 200: "OK"              // case literal}
+\NormalTok{    case string: "text"         // case type}
+\NormalTok{    case int | float: "number"  // case type union}
+\NormalTok{    case Circle:                // case object type}
+\NormalTok{        3.14 * \textasciitilde{}.r ** 2}
+\NormalTok{    default: "other"}
+\NormalTok{\}}
+
+\NormalTok{// String pattern arms (full{-}match semantics)}
+\NormalTok{string digits = \textbackslash{}d+}
+\NormalTok{string alpha = \textbackslash{}a+}
+\NormalTok{match input \{}
+\NormalTok{    case digits: "number"     // case named pattern}
+\NormalTok{    case alpha: "word"}
+\NormalTok{    default: "other"}
+\NormalTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{For Expressions:} (produce spreadable arrays --- pipe/filter
+also spread, see above)
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{for (x in [1, 2, 3]) x * 2     // [2, 4, 6]}
+\NormalTok{for (i in 1 to 5) i * i        // [1, 4, 9, 16, 25]}
+\NormalTok{for (x in data) if (x \textgreater{} 0) x else 0  // Conditional}
+\NormalTok{// Nested for{-}expressions flatten}
+\NormalTok{[for (i in 1 to 2) for (j in 1 to 2) i*j]  // [1,2,2,4]}
+\NormalTok{// Empty for produces spreadable null (skipped)}
+\NormalTok{[for (x in [] ) x]             // []}
+
+\NormalTok{// for loop over map by keys}
+\NormalTok{for (k at \{a: 1, b: 2\}) k      // \textquotesingle{}a\textquotesingle{}, \textquotesingle{}b\textquotesingle{}}
+\NormalTok{for (k, v at \{a: 1, b: 2\}) k ++ v  // [\textquotesingle{}a1\textquotesingle{}, \textquotesingle{}b2\textquotesingle{}]}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{For Expression Clauses:} \texttt{let}, \texttt{where},
+\texttt{order\ by}, \texttt{limit}, \texttt{offset}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{for (x in data where x \textgreater{} 0) x           // filter}
+\NormalTok{for (x in data, let sq = x*x) sq        // let binding}
+\NormalTok{for (x in [3,1,2] order by x) x         // (1,2,3)}
+\NormalTok{for (x in [3,1,2] order by x desc) x    // (3,2,1)}
+\NormalTok{for (x in data limit 5 offset 10) x     // pagination}
+\NormalTok{for (x in data, let y=x*2}
+\NormalTok{    where y\textgreater{}5 order by y desc limit 3) y}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{For Statements:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{for item in collection \{ transform(item) \}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Procedural Control (in \texttt{pn}):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{var x=0;   // Mutable variable}
+\NormalTok{while(c) \{ break;  continue;  return x; \}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Assignment Targets (in \texttt{pn}):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{x = 10              // Variable reassignment (var only)}
+\NormalTok{arr[i] = val        // Array element reassignment}
+\NormalTok{obj.field = val     // Map field reassignment}
+\NormalTok{elem.attr = val     // Element attribute reassignment}
+\NormalTok{elem[i] = val       // Element child reassignment}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Functions}\label{functions}
+
+\textbf{Function Declaration:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{// Function with statement body}
+\NormalTok{fn add(a: int, b: int) int \{ a + b \}}
+\NormalTok{// Function  with expression body}
+\NormalTok{fn multiply(x: int, y: int) =\textgreater{} x * y}
+\NormalTok{// Anonymous function}
+\NormalTok{let square = (x) =\textgreater{} x * x;}
+\NormalTok{// Procedural function}
+\NormalTok{pn f(n) \{ var x=0; while(x\textless{}n) \{x=x+1\}; x \}}
+\NormalTok{// Array parameters}
+\NormalTok{pn advance(pos: float[], vel: float[], n: int) \{ ... \}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Advanced Features:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fn f(x?:int)    // optional param}
+\NormalTok{fn f(x=10)      // default param value}
+\NormalTok{fn f(...)       // variadic args}
+\NormalTok{f(b:2, a:1)     // named param call}
+\NormalTok{fn outer(n) \{ fn inner(x)=\textgreater{}x+n; inner \} // closure}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{String Patterns}\label{string-patterns}
+
+Define named patterns for string validation and matching. Uses
+regex-like syntax integrated into the type system.
+
+\textbf{Definition:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{string digits = \textbackslash{}d+                    // one or more digits}
+\NormalTok{string email = \textbackslash{}w+ "@" \textbackslash{}w+ "." \textbackslash{}a[2,6] // email{-}like}
+\NormalTok{string ws = \textbackslash{}s+                        // whitespace}
+\NormalTok{symbol keyword = \textquotesingle{}if\textquotesingle{} | \textquotesingle{}else\textquotesingle{} | \textquotesingle{}for\textquotesingle{} // symbol pattern}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Type check (\texttt{is}) --- full-match semantics:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{"hello@world.com" is email    // true}
+\NormalTok{"abc" is email                // false}
+\NormalTok{"123" is digits               // true}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Character classes:} \texttt{\textbackslash{}d} digit,
+\texttt{\textbackslash{}w} word, \texttt{\textbackslash{}s} whitespace,
+\texttt{\textbackslash{}a} alpha, \texttt{\textbackslash{}.} any char,
+\texttt{...} any string
+
+\textbf{Quantifiers:} \texttt{?} optional, \texttt{+} one or more,
+\texttt{*} zero or more, \texttt{{[}n{]}} exactly n, \texttt{{[}n,m{]}}
+range
+
+\subsection{System Functions}\label{system-functions}
+
+\textbf{Type:}
+
+\texttt{int(v)} \texttt{int64(v)} \texttt{float(v)} \texttt{decimal(v)}
+\texttt{string(v)} \texttt{symbol(v)} \texttt{binary(v)}
+\texttt{number(v)} \texttt{type(v)} \texttt{len(v)}
+
+\textbf{Math:}
+
+\texttt{math.pi} \texttt{math.e} \texttt{abs(x)} \texttt{sign(x)}
+\texttt{min(a,b)} \texttt{max(a,b)} \texttt{round(x)} \texttt{floor(x)}
+\texttt{ceil(x)} \texttt{math.trunc(x)} \texttt{math.sqrt(x)}
+\texttt{math.cbrt(x)} \texttt{math.hypot(x,y)} \texttt{math.pow(b,e)}
+\texttt{math.log(x)} \texttt{math.log2(x)} \texttt{math.log10(x)}
+\texttt{math.log1p(x)} \texttt{math.exp(x)} \texttt{math.exp2(x)}
+\texttt{math.expm1(x)} \texttt{math.sin(x)} \texttt{math.cos(x)}
+\texttt{math.tan(x)} \texttt{math.asin(x)} \texttt{math.acos(x)}
+\texttt{math.atan(x)} \texttt{math.atan2(y,x)} \texttt{math.sinh(x)}
+\texttt{math.cosh(x)} \texttt{math.tanh(x)} \texttt{math.asinh(x)}
+\texttt{math.acosh(x)} \texttt{math.atanh(x)} \texttt{math.random(seed)}
+→ \texttt{{[}value,\ new\_seed{]}}
+
+\textbf{Stats:}
+
+\texttt{sum(v)} \texttt{avg(v)} \texttt{math.mean(v)}
+\texttt{math.median(v)} \texttt{math.variance(v)}
+\texttt{math.deviation(v)} \texttt{math.quantile(v,p)}
+\texttt{math.prod(v)}
+
+\textbf{Date/Time:}
+
+\texttt{datetime()} \texttt{today()} \texttt{now()} \texttt{justnow()}
+\texttt{date(dt)} \texttt{time(dt)}
+
+\textbf{Range:}
+
+\texttt{s\ to\ e} creates a range from \texttt{s} to \texttt{e}
+(inclusive both ends). \texttt{range(s,e,step)} creates a range with
+custom step (exclusive end).
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{1 to 5                 // [1, 2, 3, 4, 5]}
+\NormalTok{range(0, 10, 2)        // [0, 2, 4, 6, 8]}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{String:}
+
+\texttt{replace(str,old,new)} \texttt{split(str,sep)}
+\texttt{join(strs,sep)} \texttt{find(str,pattern)}
+\texttt{normalize(str)} \texttt{ord(str)} \texttt{chr(int)}
+
+All three accept both plain strings and named patterns as the second
+argument:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{string digit = \textbackslash{}d}
+\NormalTok{string digits = \textbackslash{}d+}
+\NormalTok{string ws = \textbackslash{}s+}
+
+\NormalTok{// replace(str, pattern\_or\_string, replacement)}
+\NormalTok{replace("a1b2c3", digit, "X")      // "aXbXcX"}
+\NormalTok{replace("hello   world", ws, " ")  // "hello world"}
+\NormalTok{replace("abc", "b", "")            // "ac"}
+
+\NormalTok{// split(str, pattern\_or\_string)}
+\NormalTok{split("a1b2c3", digit)           // ["a", "b", "c", ""]}
+\NormalTok{split("hello   world", ws)       // ["hello", "world"]}
+\NormalTok{split("a,b,c", ",")              // ["a", "b", "c"]}
+\NormalTok{split("a1b2c3", digit, true)         }
+\NormalTok{// ["a", "1", "b", "2", "c", "3", ""] — keep delimiters}
+
+\NormalTok{// find(str, pattern\_or\_string) → [\{value, index\}, ...]}
+\NormalTok{find("a1b22c333", digits)            }
+\NormalTok{// [\{value:"1", index:1\}, \{value:"22", index:3\}, ...]}
+\NormalTok{find("hello world", "lo")  // [\{value: "lo", index: 3\}]}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Collection:}
+
+\texttt{slice(v,i,j)} \texttt{set(v)} \texttt{all(v)} \texttt{any(v)}
+\texttt{reverse(v)} \texttt{sort(v)} \texttt{unique(v)}
+\texttt{take(v,n)} \texttt{drop(v,n)} \texttt{zip(a,b)}
+\texttt{fill(n,x)} \texttt{range(s,e,step)} \texttt{map(f,v)}
+\texttt{filter(f,v)} \texttt{reduce(f,v,init)}
+
+\textbf{Vector:}
+
+\texttt{math.dot(a,b)} \texttt{math.norm(v)} \texttt{math.cumsum(v)}
+\texttt{math.cumprod(v)} \texttt{argmin(v)} \texttt{argmax(v)}
+\texttt{diff(v)}
+
+\textbf{I/O:}
+
+\texttt{input(file,fmt)} \texttt{format(data,fmt)} \texttt{print(v)}
+\texttt{output(data,file)} \texttt{fetch(url,opts)} \texttt{cmd(c,args)}
+\texttt{error(msg)} \texttt{varg()}
+
+\subsection{Input/Output Formats}\label{inputoutput-formats}
+
+\textbf{Supported Input Types:} \texttt{json}, \texttt{xml},
+\texttt{yaml}, \texttt{markdown}, \texttt{csv}, \texttt{html},
+\texttt{latex}, \texttt{toml}, \texttt{rtf}, \texttt{css}, \texttt{ini},
+\texttt{math}, \texttt{pdf}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{input("path/file.md", \textquotesingle{}markdown\textquotesingle{})   // Input Markdown}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Input with Flavors:} e.g.~math flavors: \texttt{latex},
+\texttt{typst}, \texttt{ascii}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{input("math.txt", \{\textquotesingle{}type\textquotesingle{}:\textquotesingle{}math\textquotesingle{}, \textquotesingle{}flavor\textquotesingle{}:\textquotesingle{}ascii\textquotesingle{}\})}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Output Formatting:} \texttt{json}, \texttt{yaml}, \texttt{xml},
+\texttt{html}, \texttt{markdown}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{format(data, \textquotesingle{}yaml\textquotesingle{})                // Format as YAML}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Modules, Imports \& Exports}\label{modules-imports-exports}
+
+\textbf{Import Syntax:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{import module\_name          // Built{-}in module}
+\NormalTok{import .relative\_module     // Relative to script\textquotesingle{}s dir}
+\NormalTok{import .path.to.module      // Nested relative import}
+\NormalTok{import alias: .module       // Import with alias}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Export Declarations:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{pub PI = 3.14159               // Export variable}
+\NormalTok{pub fn square(x) =\textgreater{} x * x      // Export function}
+\NormalTok{pub pn log(msg) \{ print(msg) \} // Export procedure}
+\NormalTok{pub type Score = int           // Export type alias}
+\NormalTok{pub type Counter \{             // Export object type}
+\NormalTok{    value: int = 0;}
+\NormalTok{    fn double() =\textgreater{} value * 2}
+\NormalTok{\}}
+\NormalTok{pub data\^{}err = input(\textbackslash{}"f\textbackslash{}")    // Exp. data and err}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Module Usage:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{// In math\_utils.ls:}
+\NormalTok{pub PI = 3.14159}
+\NormalTok{pub type Vec2 \{ x: float, y: float; fn len() =\textgreater{} }
+\NormalTok{    math.sqrt(x**2 + y**2) \}}
+
+\NormalTok{// In main.ls:}
+\NormalTok{import .math\_utils}
+\NormalTok{let area = PI * r ** 2}
+\NormalTok{let v = \{Vec2 x: 3.0, y: 4.0\}}
+\NormalTok{v.len()        // 5.0}
+\NormalTok{v is Vec2      // true}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Error Handling}\label{error-handling}
+
+\textbf{Creating Errors:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{error("Message")    error("load failed", inner\_err)}
+\NormalTok{error(\{code: 304, message: "div by zero"\})}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Error Return Types (\texttt{T\^{}E}):}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fn parse(s: string) int\^{} \{...\}   // int or any error}
+\NormalTok{fn divide(a, b) int \^{} DivErr \{...\}    // specific error}
+\NormalTok{fn load(p) Config \^{} ParseErr|IOErr \{...\} // multi errors}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{\texttt{raise} error , or propagate error with \texttt{\^{}}}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fn compute(x: int) int\^{} \{}
+\NormalTok{  if (b == 0) raise error("div by zero")  // raise error}
+\NormalTok{  let a = parse(input)\^{}    // return immediately on error}
+\NormalTok{  let b = divide(a, x)\^{}    // return immediately on error}
+\NormalTok{  a + b}
+\NormalTok{\}}
+\NormalTok{fun()\^{}               // propagate error, discard value}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{\texttt{let\ a\^{}err} --- destructure value and error:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let result\^{}err = divide(10, x)}
+\NormalTok{if (\^{}err) print(err.message)  // \^{}err to check error}
+\NormalTok{else result * 2}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{Operator Precedence (High to
+Low)}\label{operator-precedence-high-to-low}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  \texttt{()} \texttt{{[}{]}} \texttt{.} \texttt{?} \texttt{.?} -
+  Primary, query
+\item
+  \texttt{-} \texttt{+} \texttt{not} \texttt{!} - Unary (\texttt{not}:
+  logical NOT, \texttt{!}: type negation)
+\item
+  \texttt{**} - Exponentiation
+\item
+  \texttt{*} \texttt{/} \texttt{div} \texttt{\%} - Multiplicative
+\item
+  \texttt{+} \texttt{-} - Additive
+\item
+  \texttt{\textless{}} \texttt{\textless{}=} \texttt{\textgreater{}}
+  \texttt{\textgreater{}=} - Relational
+\item
+  \texttt{==} \texttt{!=} - Equality
+\item
+  \texttt{and} - Logical AND
+\item
+  \texttt{or} - Logical OR
+\item
+  \texttt{to} - Range
+\item
+  \texttt{is} \texttt{in} - Type operations (\texttt{is\ nan} for NaN
+  detection)
+\item
+  \texttt{\textbar{}} \texttt{where} - Pipe and Filter
+\end{enumerate}
+
+\subsection{Quick Examples}\label{quick-examples}
+
+\textbf{Data Processing:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let data = input("sales.json", \textquotesingle{}json\textquotesingle{})}
+\NormalTok{let total = sum(}
+\NormalTok{  (for (sale in data.sales) sale.amount))}
+\NormalTok{let report = \{total: total,}
+\NormalTok{  count: len(data.sales)\}}
+\NormalTok{format(report, \textquotesingle{}json\textquotesingle{})}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Function Definition:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{fn factorial(n: int) int \{}
+\NormalTok{    if (n \textless{}= 1) 1 else n * factorial(n {-} 1)}
+\NormalTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Element Creation:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{let article = \textless{}article title:"My Article"}
+\NormalTok{    \textless{}h1 "Introduction"\textgreater{}}
+\NormalTok{    \textless{}p "Content goes here."\textgreater{}}
+\NormalTok{\textgreater{}}
+\NormalTok{format(article, \textquotesingle{}html\textquotesingle{})}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Comprehensions - Complex data processing:}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\NormalTok{(let data = [1, 2, 3, 4, 5],}
+\NormalTok{ let filtered = (for (x in data)}
+\NormalTok{   if (x \% 2 == 0) x else 0),}
+\NormalTok{ let doubled = (for (x in filtered) x * 2), doubled)}
+\end{Highlighting}
+\end{Shaded}
+
+\end{multicols*}
+
+\end{document}
