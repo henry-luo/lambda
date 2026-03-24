@@ -1,6 +1,6 @@
 # Radiant Flex Layout — Unified Design Document
 
-**Status:** Current as of December 2025  
+**Status:** Current as of December 2025
 **Replaces:** `Radiant_Flexbox0.md` through `Radiant_Flexbox10.md`, `Radiant_Flex_Layout_Design.md`, `Radiant_Flex_Layout_Nested.md`
 
 ---
@@ -332,7 +332,7 @@ After all items receive their resolved sizes, absolutely-positioned containers w
 
 When `free_space < 0`, `fallback_alignment_for_overflow()` returns `FLEX_START` for space-based modes.
 
-Gaps (`column_gap` for row flex, `row_gap` for column flex) are interleaved between items.  
+Gaps (`column_gap` for row flex, `row_gap` for column flex) are interleaved between items.
 `margin: auto` on the main axis is handled *after* this step by `apply_auto_margin_centering()`.
 
 ### Phase 7 — Finalize Container Cross Size
@@ -395,10 +395,10 @@ The ordering is:
 
 `layout_flex_container_with_nested_content()` handles this by:
 
-1. **Pre-seeding width from parent cross axis** (for column parent + `stretch` child):  
+1. **Pre-seeding width from parent cross axis** (for column parent + `stretch` child):
    If `pa_flex` is a column container and this item should stretch, `flex_container->width = pa_flex->cross_axis_size` is set before `init_flex_container` runs.
 
-2. **Auto-height after `collect_and_prepare_flex_items`**:  
+2. **Auto-height after `collect_and_prepare_flex_items`**:
    - Row flex with auto height: `max(item heights)` → update `cross_axis_size` and `flex_container->height`.
    - Column flex with auto height: `Σ(item heights + margins) + gaps` → update `main_axis_size` and `flex_container->height`.
    - Column flex with auto width: `max(item widths)` → update `cross_axis_size` and `flex_container->width`.
@@ -516,33 +516,27 @@ float apply_stretch_constraint(ViewElement* item, float container_cross,
 
 | Suite | Location | Description |
 |-------|----------|-------------|
-| `baseline` | `test/layout/data/baseline/` | 1330 core regression tests (100% passing) |
+| `baseline` | `test/layout/data/baseline/` | 1299 HTML tests (~3673 element checks), 97.5% passing (3581/3673) |
 | `flex-nest` | `test/layout/data/flex-nest/` | 8 HTML tests for nested flex layouts |
-| Taffy/Yoga flex | `test/layout/data/advanced/` | ~270 flex tests (uses `test_base_style.css`; all `<div>` are flex containers) |
+| `advanced` | `test/layout/data/advanced/` | 72 HTM tests (CSS WG test suite subset: block-in-inline, floats, run-in) |
 
 Running tests:
 
 ```bash
 make layout suite=flex-nest                    # nested flex suite
 make layout suite=baseline                     # core regression
+make layout suite=advanced                     # advanced CSS tests
 make layout test=flex_019_nested_flex.html     # single test
 node test/layout/test_radiant_layout.js -c flex-nest -t flex_014_nested_flex.html -v
 ```
 
-Approximate pass rates at time of writing (Taffy flex suite):
+Approximate pass rates (March 2026):
 
-| Category | Pass rate | Notes |
-|----------|-----------|-------|
-| Baseline regression | 100% | Protected; must not regress |
-| justify-content | ~71% | Mostly working |
-| align-self | ~80% | Mostly working |
-| align-content (stretch) | ~90% | Improved in Phase 9 |
-| flex-wrap / wrap-reverse | ~83% | Improved; some edge cases remain |
-| align-content wrapping | ~56% | Work in progress |
-| flex grow/shrink/basis | ~20%–47% | Core sizing gaps |
-| align-items (baseline) | ~47% | Simple cases pass; recursive cases fail |
-| absolute pos in flex | ~70% | Phase 5 improvements |
-| Nested flex | ~60%+ elements | Height, cross-axis gaps remain |
+| Suite | Pass / Total | Rate | Notes |
+|-------|-------------|------|-------|
+| Baseline | 3581 / 3673 | 97.5% | Core regression; protected, must not regress |
+| Advanced | 63 / 73 | 86.3% | CSS WG block-in-inline, floats, run-in tests |
+| Flex-nest | 0 / 8 (partial) | — | All 8 tests partially match (33–97% element accuracy) |
 
 ---
 
@@ -584,97 +578,135 @@ grep "Phase 7" log.txt
 
 ## 16. Known Gaps and Improvement Areas
 
-### 16.1 Flex Distribution Precision
+### 16.1 Flex Distribution Precision — ✅ RESOLVED
 
 **Issue**: Two-pass constraint resolution (CSS §9.7) is implemented, but the iterative loop does not always produce exact browser-matching values. Grow/shrink amounts use `float` rounding that can accumulate 1–2px errors.
 
-**Spec reference**: §9.7 step 4: "Sum the outside sizes of all the flex items to find their combined outer hypothetical main size."
-
-**Suggested fix**: Use `double` accumulation for intermediate free-space sums; apply last-item correction to absorb rounding remainder (as Taffy does).
+**Resolution**: `double` accumulation is used for intermediate free-space sums (`sum_unfrozen_flex`, `total_flex_factor`, `total_scaled_shrink`, `grow_ratio`, `shrink_ratio`). A last-item rounding correction absorbs any remaining float precision remainder (up to 4px) into the last flexible item, ensuring `Σ(item sizes) + margins + gaps == container_main_size`.
 
 ---
 
-### 16.2 Hypothetical Cross Size (§9.4) Accuracy
+### 16.2 Hypothetical Cross Size (§9.4) Accuracy — PARTIAL
 
 **Issue**: `determine_hypothetical_cross_sizes()` uses a simplified intrinsic height measurement. For elements with complex inner layout (nested flex, tables, multi-column text), the returned height can differ significantly from browser values.
+
+**Current state**: Uses `measure_flex_content_height()` with text wrapping heuristics and intrinsic height cache. Does not run a full `ComputeSize`-mode layout pass.
 
 **Suggested fix**: Run a full `ComputeSize`-mode layout pass (using `run_mode = LayoutMode::ComputeSize`) similar to how Taffy calls `measure_child_size`. This would use the full block/flex/table layout engine with a `width = resolved_main_axis_size` constraint to get the real height.
 
 ---
 
-### 16.3 Recursive Baseline Calculation
+### 16.3 Recursive Baseline Calculation — ✅ RESOLVED
 
-**Issue**: `calculate_item_baseline()` handles one level of nesting. Items whose baseline is inside a nested flex container (whose children have not yet been laid out at baseline-query time) fall back to the synthesized bottom-of-margin-box baseline.
+**Issue**: `calculate_item_baseline()` handles one level of nesting.
 
-**Suggested fix**: Two-pass approach:
-1. Layout all content first.
-2. Walk up the baseline chain recursively (`calculate_baseline_recursive()`), adding relative `y` offsets from each parent.
-
-This requires restructuring `reposition_baseline_items` to run after all nested content is fully finalized, not after a single level.
+**Resolution**: `calculate_item_baseline()` now recursively calls itself on children, accumulating `y` offsets through multiple levels. Called after `layout_final_flex_content()` so nested content is fully laid out before baseline queries.
 
 ---
 
-### 16.4 Auto min-size for Flex Items (CSS §9.7 step 4)
+### 16.4 Auto min-size for Flex Items (CSS §9.7 step 4) — ✅ RESOLVED
 
-**Issue**: The CSS spec says: *"the automatic minimum size of a flex item is its min-content size in the main axis, unless the item is a scroll container."* Radiant resolves `resolved_min_width` using intrinsic measurement, but this is not always triggered correctly when `min-width: auto` is the unset default (i.e., the property was never written in CSS).
+**Issue**: The CSS spec says: *"the automatic minimum size of a flex item is its min-content size in the main axis, unless the item is a scroll container."*
 
-**Suggested fix**: Ensure `resolve_flex_item_constraints()` is called unconditionally for every flex item, and that it treats a missing `given_min_width` as `auto` (not zero). Currently `given_min_width == 0` is treated as zero rather than auto for some code paths.
-
----
-
-### 16.5 `align-content: stretch` with Re-layout
-
-**Issue**: When `align-content: stretch` distributes extra space to lines, items with `height: auto` should be re-measured at the new line cross size. The current implementation sets item size directly but does not re-run inner layout, so inner content may overflow the new size.
-
-**Suggested fix**: After Phase 8 assigns stretched line cross sizes, for each affected item: re-run `layout_block_content()` (or the equivalent flex layout for nested containers) with the new cross-size constraint.
+**Resolution**: `resolve_flex_item_constraints()` is called unconditionally for every flex item in Phase 2.5. Missing `given_min_width` is treated as `auto` via `min_width_is_auto = !item->blk || item->blk->given_min_width < 0`, resolving to min-content width. Overflow containers correctly get `auto min = 0`.
 
 ---
 
-### 16.6 Measurement Cache Invalidation
+### 16.5 `align-content: stretch` with Re-layout — ✅ RESOLVED
 
-**Issue**: The measurement cache is populated in the first pass and shared across all nested containers. There is no mechanism to invalidate entries when a reflow occurs (e.g., the viewport resizes). Stale cache entries can cause items to be sized with old intrinsic measurements.
+**Issue**: When `align-content: stretch` distributes extra space to lines, items with `height: auto` should be re-measured at the new line cross size.
 
-**Suggested fix**: Tie cache lifetime to a layout-generation counter (`uint32_t generation`). Increment the counter on each top-level `layout_html_doc()` call; skip cache entries with a different generation. This mirrors how Yoga handles `generation_count`.
-
----
-
-### 16.7 `flex-wrap: wrap` + Multi-Line Auto-Height
-
-**Issue**: Auto-height calculation in `layout_flex_container_with_nested_content()` assumes single-line layout when summing item heights. For a multi-line wrapping container, the height should be `Σ(line.cross_size) + row_gap × (line_count - 1)`.
-
-**Suggested fix**: Use `flex_layout->lines[]` (computed by `create_flex_lines()`) as the source of truth for auto-height, not a direct child traversal. This is the same logic that Phase 7 uses; move or share it with the multipass auto-height step.
+**Resolution**: Phase 8b now re-runs `layout_flex_item_content()` for stretch items whose cross size increased after `align_content()` distributes extra space to lines. Only triggers for items that pass `item_will_stretch()` and whose new cross size exceeds the current by >0.5px.
 
 ---
 
-### 16.8 Percentage Heights in Nested Flex
+### 16.6 Measurement Cache Invalidation — ✅ RESOLVED
 
-**Issue**: A nested flex item with `height: 50%` should resolve relative to the parent flex container's cross-axis size. However, percentage heights are resolved once at CSS parse time against the initial containing block, and the re-resolution in `collect_and_prepare_flex_items` only handles direct percentage width.
+**Issue**: The measurement cache is populated in the first pass and shared across all nested containers. There is no mechanism to invalidate entries when a reflow occurs.
 
-**Suggested fix**: Extend the percentage re-resolution in `collect_and_prepare_flex_items` to also handle `height` percentages when the container's `has_definite_cross_size` is true.
-
----
-
-### 16.9 `order` Property and DOM Traversal
-
-**Issue**: Items are sorted by `order` in Phase 2, so `flex_layout->flex_items[]` may be reordered. However, `layout_final_flex_content()` re-traverses `container->first_child → next_sibling` (DOM order), applying content layout in DOM order rather than visual flex order. For `order`-reordered layouts this produces wrong baseline/scroll results.
-
-**Suggested fix**: `layout_final_flex_content()` should iterate `flex_layout->flex_items[]` (already sorted order) rather than the DOM child list.
+**Resolution**: Each `MeasurementCacheEntry` now carries a `uint32_t generation` field. `advance_measurement_cache_generation()` is called at the start of each `layout_html_doc()`. `get_from_measurement_cache()` skips stale entries whose generation doesn't match the current one.
 
 ---
 
-### 16.10 `gap` with `flex-wrap` Across Lines
+### 16.7 `flex-wrap: wrap` + Multi-Line Auto-Height — ✅ RESOLVED
 
-**Issue**: `row_gap` (between flex lines in a row container) is not consistently applied during cross-axis positioning. `align_content()` uses it for multi-line spacing, but `align_items_cross_axis()` accounts for it only partially.
+**Issue**: Auto-height calculation assumes single-line layout when summing item heights.
 
-**Suggested fix**: `FlexLineInfo.cross_position` (set by `align_content()`) should be the single source of truth for each line's cross position. `align_items_cross_axis()` should use `line->cross_position` as the base rather than recomputing from `cross_axis_size`.
+**Resolution**: Phase 7 in `layout_flex_container()` already uses `flex_layout->lines[]` as the source of truth, computing `total_line_cross = Σ(line.cross_size) + row_gap × (lines - 1)`. The multipass pre-estimate in `layout_flex_container_with_nested_content()` is an intentional seed value that Phase 7 corrects using the actual line structure.
 
 ---
 
-### 16.11 Writing Mode Support
+### 16.8 Percentage Heights in Nested Flex — ✅ RESOLVED
 
-**Issue**: `FlexProp` stores `writing_mode` and `text_direction`, but the axis helpers (`is_main_axis_horizontal`, `set_main_axis_position`, etc.) do not currently respect them. All flex layout assumes horizontal writing mode.
+**Issue**: Percentage heights resolved once at CSS parse time, not re-resolved against the flex container.
 
-**Suggested fix**: Extend axis helpers to consider `writing_mode`. For `vertical-rl` and `vertical-lr`, the main axis should be vertical for `flex-direction: row`-equivalent layouts. This is a significant future work item but aligns with CSS Writing Modes Level 4.
+**Resolution**: `collect_and_prepare_flex_items()` re-resolves both width AND height percentages against the flex container's content dimensions. Height percentages use `given_height_percent` resolved against `container_cross` (for row flex) or `container_main` (for column flex). Also handles min/max width/height percentages.
+
+---
+
+### 16.9 `order` Property and DOM Traversal — ✅ RESOLVED
+
+**Issue**: `layout_final_flex_content()` traverses DOM child list instead of the order-sorted `flex_items[]`.
+
+**Resolution**: `layout_final_flex_content()` now iterates `flex->flex_items[]` (CSS `order`-sorted) when available, falling back to DOM order traversal only when `flex_items` is not populated.
+
+---
+
+### 16.10 `gap` with `flex-wrap` Across Lines — ✅ RESOLVED
+
+**Issue**: `row_gap` not consistently applied during cross-axis positioning.
+
+**Resolution**: `FlexLineInfo.cross_position` (set by `align_content()`) is the single source of truth for each line's cross position. `align_items_cross_axis()` uses `line->cross_position` as the base, with proper gap accounting in `align_content()`.
+
+---
+
+### 16.11 Writing Mode Support — ✅ RESOLVED
+
+**Issue**: Axis helpers did not respect `writing_mode`.
+
+**Resolution**: `is_main_axis_horizontal()` checks `writing_mode` — for `vertical-rl` and `vertical-lr`, it correctly inverts axis interpretation. Used throughout flex layout (26+ call sites) and intrinsic sizing.
+
+---
+
+### 16.12 `BlockProp` Unavailable During Intrinsic Sizing — ✅ RESOLVED
+
+**Architectural insight**: `blk` (`BlockProp`) is **not allocated** during intrinsic sizing measurement. Functions like `measure_element_intrinsic_widths()` and `calculate_item_intrinsic_sizes()` run before the CSS cascade has fully populated `blk` on child elements (all `elem->blk` are null at that stage).
+
+**Consequence**: Any code path in intrinsic measurement that needs CSS property values (e.g. `white-space`, `overflow`, `text-overflow`) **must** fall back to reading from `elem->specified_style` via `style_tree_get_declaration()` when `blk` is null.
+
+**Example — `get_white_space_value()` (`layout_text.cpp`)**: Originally only checked `elem->blk->white_space`. During intrinsic sizing, `blk` was null, so `white-space: nowrap` was never detected → min-content was not forced to max-content → flex items with nowrap text were sized incorrectly. Fixed by adding a `specified_style` fallback using `style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_WHITE_SPACE)`.
+
+**Rule of thumb**: When writing measurement/intrinsic code, always use the pattern:
+
+```cpp
+CssEnum value = CSS_VALUE_NORMAL;  // default
+if (elem->blk && elem->blk->some_field != 0) {
+    value = elem->blk->some_field;
+} else if (elem->specified_style) {
+    CssDeclaration* decl = style_tree_get_declaration(
+        elem->specified_style, CSS_PROPERTY_SOME_PROP);
+    if (decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD)
+        value = decl->value->data.keyword;
+}
+```
+
+---
+
+### 16.13 Intrinsic Width Box-Model Consistency — ✅ RESOLVED
+
+**Issue**: `measure_element_intrinsic_widths()` returns **border-box** values (adds the element's own padding + border to content widths at the end of the function). However, the stored intrinsic sizes in `fi->intrinsic_width` were consumed by `resolve_flex_item_constraints()` as if they were **content-box**, and padding + border were added again for `box-sizing: border-box` items — a double-counting bug.
+
+**Impact**: All flex items with `box-sizing: border-box` (common due to `* { box-sizing: border-box }` resets) had inflated `min-width: auto` values, causing incorrect flex distribution.
+
+**Resolution**: `calculate_item_intrinsic_sizes()` now subtracts the item's own padding + border from the `measure_element_intrinsic_widths()` result before storing the values in `fi->intrinsic_width`, ensuring all stored intrinsic sizes are **content-box**. This is consistent with the image/replaced-element path and with `resolve_flex_item_constraints()` which converts content-box to border-box when needed.
+
+---
+
+### 16.14 Column Flex Intrinsic Height — Available Width — ✅ RESOLVED
+
+**Issue**: `calculate_item_intrinsic_sizes()` used `available_width = 10000.0f` when calling `calculate_max_content_height()` for non-flex-container items. In column flex, this caused text to never wrap during height measurement, producing underestimated heights (min-height:auto too small).
+
+**Resolution**: For column flex containers (`!is_main_axis_horizontal(flex_layout)`), the available width is now resolved from `flex_layout->cross_axis_size` minus the item's own margin, padding, and border. This produces realistic text wrapping during height measurement, matching browser behavior.
 
 ---
 

@@ -22,6 +22,8 @@ float get_main_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_main_axis_outer_size(ViewElement* item, FlexContainerLayout* flex_layout);
 static bool should_skip_flex_item(ViewElement* item);
 float calculate_item_baseline(ViewElement* item);
+void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item);
+static bool item_will_stretch(ViewElement* item, FlexContainerLayout* flex_layout);
 
 // ============================================================================
 // Flex Item Property Helpers (support both flex items and form controls)
@@ -1631,6 +1633,29 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         log_debug("Phase 8: About to align content for %d lines", line_count);
         align_content(flex_layout);
         log_debug("Phase 8: Completed align content");
+
+        // Phase 8b: Re-layout items after align-content: stretch
+        // When align-content: stretch distributes extra cross space to lines, items with
+        // auto cross-axis size need re-layout so inner content fills the new cross size.
+        if (flex_layout->align_content == ALIGN_STRETCH && flex_layout->lycon) {
+            for (int li = 0; li < line_count; li++) {
+                FlexLineInfo* sline = &flex_layout->lines[li];
+                for (int si = 0; si < sline->item_count; si++) {
+                    ViewElement* sitem = (ViewElement*)sline->items[si]->as_element();
+                    if (!sitem) continue;
+                    // Only re-layout items that will be stretched (auto cross size, not constrained)
+                    if (!item_will_stretch(sitem, flex_layout)) continue;
+                    float new_cross = (float)sline->cross_size;
+                    float current_cross = get_cross_axis_size(sitem, flex_layout);
+                    if (new_cross > current_cross + 0.5f) {
+                        set_cross_axis_size(sitem, new_cross, flex_layout);
+                        layout_flex_item_content(flex_layout->lycon, (ViewBlock*)sitem);
+                        log_debug("Phase 8b: Re-laid out item after stretch, cross %.1f -> %.1f",
+                                  current_cross, new_cross);
+                    }
+                }
+            }
+        }
     }
 
     // Phase 9: Align items on cross axis
@@ -4206,6 +4231,36 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         if (!item) continue;
         set_main_axis_size(item, item_hypothetical[i], flex_layout);
         log_debug("ITERATIVE_FLEX - item %d: UNFROZEN finalized at hypothetical=%.1f", i, item_hypothetical[i]);
+    }
+
+    // Last-item rounding correction: absorb float rounding remainder into the last
+    // flexible item so that Σ(item sizes) + margins + gaps == container_main_size exactly.
+    // Without this, accumulated float precision errors (1-2px) cause visible gaps or overflow.
+    {
+        double total_outer = 0.0;
+        int last_flex_idx = -1;
+        for (int i = 0; i < line->item_count; i++) {
+            ViewElement* item = (ViewElement*)line->items[i]->as_element();
+            if (!item) continue;
+            total_outer += (double)get_main_axis_outer_size(item, flex_layout);
+            float fg = get_item_flex_grow(item);
+            float fs = get_item_flex_shrink(item);
+            if (fg > 0 || fs > 0) last_flex_idx = i;
+        }
+        if (last_flex_idx >= 0) {
+            double expected = (double)container_main_size - (double)gap_space;
+            double remainder = expected - total_outer;
+            if (fabs(remainder) > 0.01 && fabs(remainder) < 4.0) {
+                ViewElement* last = (ViewElement*)line->items[last_flex_idx]->as_element();
+                if (last) {
+                    float old_size = get_main_axis_size(last, flex_layout);
+                    float new_size = old_size + (float)remainder;
+                    set_main_axis_size(last, new_size, flex_layout);
+                    log_debug("ITERATIVE_FLEX - rounding correction: item %d size %.1f -> %.1f (remainder=%.2f)",
+                              last_flex_idx, old_size, new_size, remainder);
+                }
+            }
+        }
     }
 
     // Mark items whose main-axis size was actually changed by flex grow/shrink

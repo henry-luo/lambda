@@ -270,6 +270,16 @@ static float measure_content_height_recursive(DomNode* node, LayoutContext* lyco
 // Global measurement cache (simplified implementation)
 static MeasurementCacheEntry measurement_cache[1000]; // Fixed size for simplicity
 static int cache_count = 0;
+static uint32_t cache_generation = 0;  // incremented on each top-level layout
+
+void advance_measurement_cache_generation() {
+    cache_generation++;
+    log_debug("Measurement cache generation advanced to %u", cache_generation);
+}
+
+uint32_t get_measurement_cache_generation() {
+    return cache_generation;
+}
 
 void store_in_measurement_cache(DomNode* node, int width, int height,
                                int content_width, int content_height) {
@@ -283,15 +293,22 @@ void store_in_measurement_cache(DomNode* node, int width, int height,
     measurement_cache[cache_count].measured_height = height;
     measurement_cache[cache_count].content_width = content_width;
     measurement_cache[cache_count].content_height = content_height;
+    measurement_cache[cache_count].generation = cache_generation;
     cache_count++;
 
-    log_debug("Cached measurement for node %p: %dx%d (content: %dx%d)",
-              node, width, height, content_width, content_height);
+    log_debug("Cached measurement for node %p: %dx%d (content: %dx%d) gen=%u",
+              node, width, height, content_width, content_height, cache_generation);
 }
 
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node) {
     for (int i = 0; i < cache_count; i++) {
         if (measurement_cache[i].node == node) {
+            // skip stale entries from a previous layout generation
+            if (measurement_cache[i].generation != cache_generation) {
+                log_debug("Skipping stale measurement cache entry for node %p (gen %u, current %u)",
+                          node, measurement_cache[i].generation, cache_generation);
+                return nullptr;
+            }
             return &measurement_cache[i];
         }
     }
@@ -1594,6 +1611,20 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                                                          /*content_only=*/true);
             min_width = item_sizes.min_content;
             max_width = item_sizes.max_content;
+            // measure_element_intrinsic_widths returns border-box values (includes
+            // the element's own padding+border). Convert back to content-box so all
+            // stored intrinsic sizes are content-box — resolve_flex_item_constraints
+            // adds padding+border when converting to border-box for comparison.
+            if (item->bound) {
+                float hp = item->bound->padding.left + item->bound->padding.right;
+                float hb = 0;
+                if (item->bound->border)
+                    hb = item->bound->border->width.left + item->bound->border->width.right;
+                min_width -= (hp + hb);
+                max_width -= (hp + hb);
+                if (min_width < 0) min_width = 0;
+                if (max_width < 0) max_width = 0;
+            }
             log_debug("calculate_item_intrinsic_sizes: non-flex container, using measure_element_intrinsic_widths (content_only): min=%.1f, max=%.1f",
                       min_width, max_width);
 
@@ -1614,8 +1645,25 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             // hardcoded tag-based estimates (e.g. p=36px, h1=32px + artificial margins).
             {
                 float available_width = 10000.0f;
+                // In column flex, text wraps at the container's cross-axis width
+                // (which is the horizontal axis). Use that instead of 10000px so
+                // calculate_max_content_height produces realistic wrapped heights.
+                if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
+                    flex_layout->cross_axis_size > 0) {
+                    available_width = flex_layout->cross_axis_size;
+                    // Subtract item's own margin from container cross-axis
+                    if (item->bound)
+                        available_width -= item->bound->margin.left + item->bound->margin.right;
+                    // Subtract item's padding+border to get content width
+                    if (item->bound) {
+                        available_width -= item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            available_width -= item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                    if (available_width <= 0) available_width = 10000.0f;
+                }
                 min_height = max_height = calculate_max_content_height(lycon, (DomNode*)item, available_width);
-                log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f (is_grid=%d)", min_height, item_is_grid_container);
+                log_debug("calculate_item_intrinsic_sizes: calculated height: %.1f avail_w=%.1f (is_grid=%d)", min_height, available_width, item_is_grid_container);
             }
 
             // Skip the manual child iteration since we've already calculated sizes
@@ -1934,12 +1982,36 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                                               avail_w, child_height, (void*)child_view->bound);
                                 }
                             } else if (child_display.outer == CSS_VALUE_BLOCK && lycon) {
-                                // For regular block elements (like h2), measure content height
-                                // using intrinsic sizing module
-                                // Use a large available width for max-content calculation
-                                float available_width = 10000.0f;  // Large enough for single-line
+                                // For regular block elements, measure content height.
+                                // In column flex, use the item's resolved cross-axis width
+                                // so text wraps correctly during measurement.
+                                float available_width = 10000.0f;
+                                if (!is_row_flex_container) {
+                                    float parent_cw = -1;
+                                    if (item->blk && item->blk->given_width >= 0) {
+                                        parent_cw = item->blk->given_width;
+                                        if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                                            parent_cw -= item->bound->padding.left + item->bound->padding.right;
+                                            if (item->bound->border)
+                                                parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                        }
+                                    } else if (flex_layout && flex_layout->cross_axis_size > 0) {
+                                        parent_cw = flex_layout->cross_axis_size;
+                                        if (item->bound)
+                                            parent_cw -= item->bound->margin.left + item->bound->margin.right;
+                                        if (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX && item->bound) {
+                                            parent_cw -= item->bound->padding.left + item->bound->padding.right;
+                                            if (item->bound->border)
+                                                parent_cw -= item->bound->border->width.left + item->bound->border->width.right;
+                                        }
+                                    }
+                                    if (parent_cw > 0) {
+                                        float chm = get_child_horizontal_margins(lycon, child_view);
+                                        available_width = fmax(parent_cw - chm, 0.0f);
+                                    }
+                                }
                                 child_height = calculate_max_content_height(lycon, c, available_width);
-                                log_debug("Block child height from calculate_max_content_height: %.1f", child_height);
+                                log_debug("Block child height from calculate_max_content_height: avail_w=%.1f, h=%.1f", available_width, child_height);
                             }
                         }
 

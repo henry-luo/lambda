@@ -144,6 +144,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         float heading_font_size = lycon->font.style->font_size * em_size;
         block->font->font_size = heading_font_size;
+        block->font->font_size_from_medium = false;
         block->font->font_weight = CSS_VALUE_BOLD;
         block->font->font_weight_numeric = 700;
         // Default margins for headings (browser UA stylesheet)
@@ -481,11 +482,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->family = (char*)"monospace";
         // Browser quirk: monospace generic family uses 13px as default "medium" size
-        // instead of 16px. Apply ratio when transitioning from non-monospace parent.
+        // instead of 16px. Only apply when the inherited font-size originates from
+        // the CSS 'medium' keyword. When an ancestor explicitly set a pixel/em/%
+        // font-size, the quirk does not apply.
         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
             str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-        if (!parent_is_mono && span->font->font_size > 0) {
+        if (!parent_is_mono && span->font->font_size > 0 &&
+            span->font->font_size_from_medium) {
             span->font->font_size = span->font->font_size * 13.0f / 16.0f;
+            span->font->font_size_from_medium = false;
         }
         break;
     }
@@ -497,16 +502,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // font-size: smaller (0.83em)
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
+        span->font->font_size_from_medium = false;
         break;
     case HTM_TAG_BIG:
         // font-size: larger (1.17em) - deprecated but still supported
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 1.17;
+        span->font->font_size_from_medium = false;
         break;
     case HTM_TAG_SUB:
         // subscript: smaller font, lowered baseline
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
+        span->font->font_size_from_medium = false;
         if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         span->in_line->vertical_align = CSS_VALUE_SUB;
         break;
@@ -514,6 +522,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // superscript: smaller font, raised baseline
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
+        span->font->font_size_from_medium = false;
         if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         span->in_line->vertical_align = CSS_VALUE_SUPER;
         break;
@@ -543,11 +552,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->family = (char*)"monospace";
-        // Browser quirk: monospace generic family uses 13px as default "medium" size
-        bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-        if (!parent_is_mono && block->font->font_size > 0) {
-            block->font->font_size = block->font->font_size * 13.0f / 16.0f;
+        // Browser quirk: monospace generic family uses 13px as default "medium" size.
+        // Only apply when the inherited font-size originates from the CSS 'medium' keyword.
+        {
+            bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+                str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+            if (!parent_is_mono && block->font->font_size > 0 &&
+                block->font->font_size_from_medium) {
+                block->font->font_size = block->font->font_size * 13.0f / 16.0f;
+                block->font->font_size_from_medium = false;
+            }
         }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->white_space = CSS_VALUE_PRE;

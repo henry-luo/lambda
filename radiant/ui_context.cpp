@@ -145,8 +145,10 @@ int ui_context_init(UiContext* uicon, bool headless) {
     // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
     uicon->default_font = (FontProp){"Times New Roman", 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
+    uicon->default_font.font_size_from_medium = true;
     uicon->legacy_default_font = (FontProp){"Times", 16.0f, // 16px (CSS logical pixels)
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
+    uicon->legacy_default_font.font_size_from_medium = true;
     uicon->fallback_fonts = fallback_fonts;
 
     // init ThorVG engine (v1.0-pre34: no engine type param, just thread count)
