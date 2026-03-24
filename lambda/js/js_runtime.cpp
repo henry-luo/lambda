@@ -733,6 +733,75 @@ extern "C" Item js_constructor_create_object_shaped(Item callee,
     return obj;
 }
 
+// P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
+// These bypass the hash-table lookup in js_property_get/set by walking the
+// ShapeEntry linked list to the N-th slot (O(slot) ≈ O(2-4) for typical classes).
+//
+// js_get_shaped_slot: read property at slot index → returns correctly boxed Item
+// js_set_shaped_slot: write property at slot index, updates ShapeEntry type
+
+extern "C" Item js_get_shaped_slot(Item object, int64_t slot) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    Map* m = (Map*)object.map;
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || !tm->shape) return ItemNull;
+    ShapeEntry* entry = tm->shape;
+    for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
+    if (!entry) return ItemNull;
+    return _map_read_field(entry, m->data);
+}
+
+extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return;
+    Map* m = (Map*)object.map;
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm || !tm->shape) return;
+    ShapeEntry* entry = tm->shape;
+    for (int i = 0; i < (int)slot && entry; i++) entry = entry->next;
+    if (!entry) return;
+    void* field_ptr = (char*)m->data + entry->byte_offset;
+    TypeId value_type = get_type_id(value);
+    TypeId field_type = entry->type->type_id;
+    // Store with correct type-aware unboxing (all shaped slots are 8 bytes).
+    switch (value_type) {
+    case LMD_TYPE_INT:
+        *(int64_t*)field_ptr = value.get_int56();
+        break;
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = value.get_double();
+        break;
+    case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
+        *(Container**)field_ptr = value.container;
+        break;
+    case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
+        String* s = value.get_string();
+        *(String**)field_ptr = s;
+        break;
+    }
+    case LMD_TYPE_FUNC: case LMD_TYPE_DECIMAL: case LMD_TYPE_TYPE:
+    case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
+        *(void**)field_ptr = (void*)(uintptr_t)(value.item & 0x00FFFFFFFFFFFFFFULL);
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;
+        break;
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    default:
+        // Unexpected type: skip to prevent slot corruption
+        log_debug("js_set_shaped_slot: unhandled type %d at slot %d", (int)value_type, (int)slot);
+        return;
+    }
+    // Update ShapeEntry type in-place (NULL→type is the common constructor init path).
+    // All shaped slots are 8 bytes so no reshape is needed.
+    if (field_type != value_type && value_type != LMD_TYPE_NULL) {
+        entry->type = type_info[value_type].type;
+    }
+}
+
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup(Item object, Item property);
 

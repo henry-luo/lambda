@@ -320,6 +320,13 @@ Item js_new_object_with_shape(const char** prop_names, const int* prop_lens, int
 // Same as above but also sets __proto__ from callee.prototype
 Item js_constructor_create_object_shaped(Item callee, const char** prop_names, const int* prop_lens, int count);
 
+// P3/P4: Slot-indexed property access for shaped (constructor-created) objects.
+// Avoids hash-table lookup by walking ShapeEntry chain to the N-th slot index.
+// js_get_shaped_slot: reads and correctly boxes the typed field value.
+// js_set_shaped_slot: writes with correct unboxing, updates ShapeEntry type.
+Item js_get_shaped_slot(Item object, int64_t slot);
+void js_set_shaped_slot(Item object, int64_t slot, Item value);
+
 // =============================================================================
 // v12: Language extensions
 // =============================================================================

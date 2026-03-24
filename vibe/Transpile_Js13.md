@@ -419,21 +419,21 @@ list, traversing a tree), this removes the dynamic dispatch overhead per call.
 |----------|------------|--------|-------------|--------|
 | **P1** Return type → var type propagation | Low | Medium | None | ✅ Done |
 | **P2** Bump-pointer nursery inline alloc | Medium | High (allocation-heavy code) | Runtime nursery already in place | ⬜ Todo |
-| **P3** Direct property stores in constructor | Medium | High (class-heavy code) | A5 scan (already done) | ⬜ Todo |
-| **P4** Direct property access for typed instances | Medium | High (tree/graph code) | P3, A5 scan | ⬜ Todo |
+| **P3** Direct property stores in constructor | Medium | High (class-heavy code) | A5 scan (already done) | ✅ Done |
+| **P4** Direct property access for typed instances | Medium | High (tree/graph code) | P3, A5 scan | ✅ Done |
 | **P5** Module variable arithmetic without boxing | Low | Medium (top-level loops) | None | ✅ Done |
-| **P6** Single-expression function inlining | Medium-High | High (compute benchmarks) | None | ⬜ Todo |
+| **P6** Single-expression function inlining | Medium-High | High (compute benchmarks) | None | ✅ Done |
 | **P7** Native method call resolution | Low once P4 done | Medium | P4 | ⬜ Todo |
 
 ### Implementation Progress
 
 - ✅ **P1** — Early native eligibility flag (Phase 1.75) + forward native func declarations (Phase 1.9). Validated: 670/670 tests pass.
 - ✅ **P5** — `modvar_type` field on `JsModuleConstEntry`; inline arithmetic for INT module-variable compound assigns. Validated: 670/670 tests pass.
-- ⬜ **P3** — Next: direct byte-offset MIR stores in constructors (builds on existing A5 `ctor_prop_ptrs` scan)
-- ⬜ **P4** — After P3: direct property reads for typed class instances; enables P7
+- ✅ **P6** — Single-expression function inlining via `jm_transpile_inline_native()`. Eligible when `has_native_version`, no captures, ≤4 params, single return statement. Validated: 670/670 tests pass.
+- ✅ **P3** — `js_set_shaped_slot()` runtime helper + A5-style pre-shaping for class `new` path + `is_constructor` flag on `JsFuncCollected`. Eliminates `js_property_set` calls for `this.prop = val` in constructors. Validated: 670/670 tests pass.
+- ✅ **P4** — `js_get_shaped_slot()` runtime helper + `class_entry` field on `JsMirVarEntry` + detection at `var = new ClassName()` declaration sites. Direct slot-indexed reads for typed class instance property access. Both helpers registered in `jit_runtime_imports[]`. Validated: 670/670 tests pass.
+- ⬜ **P7** — Native method call resolution via `jm_resolve_native_call` extension for `MEMBER_EXPRESSION` callees (essentially free now that P4 is done)
 - ⬜ **P2** — Bump-pointer nursery JIT-inline (runtime nursery already present)
-- ⬜ **P6** — Single-expression function inlining (independent of P3/P4)
-- ⬜ **P7** — Native method call resolution (essentially free once P4 is done)
 
 ---
 
