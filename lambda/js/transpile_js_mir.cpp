@@ -289,6 +289,8 @@ struct JsModuleConstEntry {
     int64_t int_val;    // for MCONST_INT and MCONST_BOOL (0/1)
     double float_val;   // for MCONST_FLOAT
     bool is_int;        // legacy compat: true for int, false for float
+    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
+                        //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -1295,6 +1297,17 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->type_id;
+        // P5: Check module-level variable type for arithmetic type inference.
+        // When a MODVAR was initialized with a numeric literal, modvar_type is set
+        // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
+        if (mt->module_consts) {
+            JsModuleConstEntry mv_lookup;
+            snprintf(mv_lookup.name, sizeof(mv_lookup.name), "%s", vname);
+            JsModuleConstEntry* mv_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mv_lookup);
+            if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
+                (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
+                return mv_mc->modvar_type;
+        }
         return LMD_TYPE_ANY;
     }
 
@@ -3727,6 +3740,47 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 if (mc && mc->const_type == MCONST_MODVAR) {
+                    // P5: For typed INT module variables, use inline native arithmetic
+                    // for compound assignments instead of calling js_add/js_subtract/etc.
+                    // This eliminates one function call per iteration in tight loops.
+                    if (mc->modvar_type == LMD_TYPE_INT && asgn->op != JS_OP_ASSIGN) {
+                        MIR_insn_code_t p5_mir_op = MIR_ADD;
+                        bool p5_handled = true;
+                        switch (asgn->op) {
+                        case JS_OP_ADD_ASSIGN:    p5_mir_op = MIR_ADD;  break;
+                        case JS_OP_SUB_ASSIGN:    p5_mir_op = MIR_SUB;  break;
+                        case JS_OP_MUL_ASSIGN:    p5_mir_op = MIR_MUL;  break;
+                        case JS_OP_BIT_AND_ASSIGN: p5_mir_op = MIR_AND; break;
+                        case JS_OP_BIT_OR_ASSIGN:  p5_mir_op = MIR_OR;  break;
+                        case JS_OP_BIT_XOR_ASSIGN: p5_mir_op = MIR_XOR; break;
+                        case JS_OP_LSHIFT_ASSIGN:  p5_mir_op = MIR_LSH; break;
+                        case JS_OP_RSHIFT_ASSIGN:  p5_mir_op = MIR_RSH; break;
+                        case JS_OP_URSHIFT_ASSIGN: p5_mir_op = MIR_URSH; break;
+                        default: p5_handled = false; break;
+                        }
+                        if (p5_handled) {
+                            // load: old = js_get_module_var(idx)  → boxed Item
+                            MIR_reg_t old_boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                            // inline unbox: native_old = old << 8 >> 8
+                            MIR_reg_t old_nat = jm_emit_unbox_int(mt, old_boxed);
+                            // native rhs
+                            TypeId p5_rtype = jm_get_effective_type(mt, asgn->right);
+                            MIR_reg_t rhs_nat = jm_transpile_as_native(mt, asgn->right, p5_rtype, LMD_TYPE_INT);
+                            // inline arithmetic
+                            MIR_reg_t new_nat = jm_new_reg(mt, "mvn", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, p5_mir_op,
+                                MIR_new_reg_op(mt->ctx, new_nat),
+                                MIR_new_reg_op(mt->ctx, old_nat),
+                                MIR_new_reg_op(mt->ctx, rhs_nat)));
+                            // inline re-box
+                            MIR_reg_t boxed_new = jm_box_int_reg(mt, new_nat);
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_new));
+                            return boxed_new;
+                        }
+                    }
                     MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                     if (asgn->op != JS_OP_ASSIGN) {
                         // Compound assignment: read current value, apply op, store result
@@ -9863,8 +9917,25 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 snprintf(mce.name, sizeof(mce.name), "%s", vname);
                                 mce.const_type = MCONST_MODVAR;
                                 mce.int_val = mt->module_var_count++;
+                                // P5: Track initial type for arithmetic optimization.
+                                // Only set for numeric literal initializers — safe because
+                                // the JIT will use inline unbox/arithmetic for these variables.
+                                mce.modvar_type = 0;  // default: unknown (0 = LMD_TYPE_RAW_POINTER = not tracked)
+                                if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
+                                    JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
+                                    if (mlit->literal_type == JS_LITERAL_NUMBER) {
+                                        double mdv = mlit->value.number_value;
+                                        if (!mlit->has_decimal && mdv == (double)(int64_t)mdv &&
+                                            mdv >= -36028797018963968.0 && mdv <= 36028797018963967.0) {
+                                            mce.modvar_type = LMD_TYPE_INT;
+                                        } else {
+                                            mce.modvar_type = LMD_TYPE_FLOAT;
+                                        }
+                                    }
+                                }
                                 hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: module var '%s' index=%d", mce.name, (int)mce.int_val);
+                                log_debug("js-mir: module var '%s' index=%d modvar_type=%d",
+                                    mce.name, (int)mce.int_val, mce.modvar_type);
                             }
                         }
                     }
@@ -10394,7 +10465,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         JsFuncCollected* fc = &mt->func_entries[i];
         jm_infer_param_types(fc);
         jm_infer_return_type(fc);
-        // Check native eligibility (preview only — actual flag set in jm_define_function)
+        // P1: Compute native eligibility here (Phase 1.75) rather than lazily in jm_define_function.
+        // This allows jm_resolve_native_call() (which checks has_native_version) to see the flag
+        // when transpiling earlier functions that call later-defined native functions, enabling
+        // `let x = f(...)` to propagate f's return type into x's variable type.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
                          fc->param_count <= 16 &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
@@ -10406,8 +10480,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        fc->has_native_version = eligible;
         if (eligible) {
-            log_debug("js-mir P4: %s eligible for native version (params: %d, ret: %s)",
+            log_debug("js-mir P1/P4: %s eligible for native version (params: %d, ret: %s)",
                 fc->name, fc->param_count,
                 fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
         }
@@ -10430,6 +10505,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, fc->name);
             fc->func_item = fwd;
             jm_register_local_func(mt, fc->name, fwd);
+        }
+        // P1: Also pre-declare native function version so call sites emitted before
+        // a function is defined can use fc->native_func_item.  The actual native
+        // function replaces this forward reference when jm_define_function runs.
+        if (fc->has_native_version && !fc->native_func_item) {
+            char native_fwd_name[140];
+            snprintf(native_fwd_name, sizeof(native_fwd_name), "%s_n", fc->name);
+            MIR_item_t fwd_native = MIR_new_forward(mt->ctx, native_fwd_name);
+            fc->native_func_item = fwd_native;
+            jm_register_local_func(mt, native_fwd_name, fwd_native);
         }
     }
 

@@ -4,7 +4,6 @@ lambda                    # Start REPL
 // REPL Commands: quit, help, clear
 lambda script.ls          # Eval functional script
 lambda run script.ls      # Run procedual script
-lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help
 ```
 
@@ -19,7 +18,7 @@ lambda validate file.json            # Default schema
 **Scalar Types:**
 ```lambda
 null  bool  int  float  decimal
-string  symbol  binary  datetime
+string  symbol  binary  datetime  path
 ```
 
 **Container Types:**
@@ -27,7 +26,6 @@ string  symbol  binary  datetime
 range, 1 to 10          // Range (inclusive both ends)
 array, [123, true]      // Array of values
 map, {key: 'symbol'}    // Map
-object, {point x: 1, y: 2}  // Object (nominally-typed)
 element, <div class: bold; "text" <br>>  // Element
 ```
 
@@ -42,7 +40,6 @@ int[]            // Array of ints (same as int*)
 int[5]           // Array of exactly 5 ints
 [int*]           // Bracket form: array of 0+ ints
 [int+]           // Bracket form: array of 1+ ints
-float[]          // Array of floats
 fn (a: int, b: string) bool   // Function type
 fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
@@ -76,7 +73,7 @@ let p = {Point x: 1.0, y: 2.0}   // Object literal
 let c = {Counter}                // All defaults
 p.x                              // Field access
 c.double()                       // Method call
-{Point p, x: 5.0}                // Wrap and override
+{p, x: 5.0}                      // Wrap and override
 ```
 
 **Type Checking (nominal only):**
@@ -167,8 +164,8 @@ arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
 "hello"[1 to 3]   // "ell" — string slicing
-'hello'[1 to 3]   // 'ell'  — symbol slicing
-"café"[2 to 3]    // "fé"  — UTF-8 aware
+'hello'[1 to 3]   // 'ell' — symbol slicing
+"café"[2 to 3]    // "fé" — UTF-8 aware
 ```
 
 **Namespaces (via `import` with bare URI):**
@@ -348,10 +345,10 @@ Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else 
 ```lambda
 // Type patterns or Literal
 match value {
-    case 200: "OK"                // case literal
-    case string: "text"           // case type
-    case int | float: "number"    // case type union
-    case Circle:                   // case object type
+    case 200: "OK"              // case literal
+    case string: "text"         // case type
+    case int | float: "number"  // case type union
+    case Circle:                // case object type
         3.14 * ~.r ** 2
     default: "other"
 }
@@ -360,7 +357,7 @@ match value {
 string digits = \d+
 string alpha = \a+
 match input {
-    case digits: "number"         // case named pattern
+    case digits: "number"     // case named pattern
     case alpha: "word"
     default: "other"
 }
@@ -403,7 +400,7 @@ var x=0;   // Mutable variable
 while(c) { break;  continue;  return x; }
 ```
 
-**Assignment Targets:**
+**Assignment Targets (in `pn`):**
 ```lambda
 x = 10              // Variable reassignment (var only)
 arr[i] = val        // Array element reassignment
@@ -589,7 +586,7 @@ error({code: 304, message: "div by zero"})
 ```lambda
 fn parse(s: string) int^ {...}   // Return int or any error
 fn divide(a, b) int ^ DivErr {...}     // Specific error
-fn load(p) Config ^ ParseErr|IOErr {...} // Multiple errors
+fn load(p) Config ^ ParseErr | IOErr {...} // Multiple errors
 ```
 
 **`raise` error , or propagate error with `^`**
