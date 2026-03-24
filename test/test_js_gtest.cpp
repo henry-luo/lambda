@@ -504,6 +504,35 @@ TEST(JavaScriptTests, test_v11_map_set) {
     test_js_script_against_file("test/js/v11_map_set.js", "test/js/v11_map_set.txt");
 }
 
+// Transpiler optimization tests (Transpile_Js13 P1/P3/P4/P5/P6)
+TEST(JavaScriptTests, test_opt_p1_return_type) {
+    test_js_script_against_file("test/js/opt_p1_return_type.js", "test/js/opt_p1_return_type.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p3_ctor_stores) {
+    test_js_script_against_file("test/js/opt_p3_ctor_stores.js", "test/js/opt_p3_ctor_stores.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p4_typed_reads) {
+    test_js_script_against_file("test/js/opt_p4_typed_reads.js", "test/js/opt_p4_typed_reads.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p5_modvar) {
+    test_js_script_against_file("test/js/opt_p5_modvar.js", "test/js/opt_p5_modvar.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p6_func_inline) {
+    test_js_script_against_file("test/js/opt_p6_func_inline.js", "test/js/opt_p6_func_inline.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p2_obj_alloc) {
+    test_js_script_against_file("test/js/opt_p2_obj_alloc.js", "test/js/opt_p2_obj_alloc.txt");
+}
+
+TEST(JavaScriptTests, test_opt_p7_method_native) {
+    test_js_script_against_file("test/js/opt_p7_method_native.js", "test/js/opt_p7_method_native.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

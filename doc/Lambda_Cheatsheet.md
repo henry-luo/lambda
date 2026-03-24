@@ -4,7 +4,6 @@ lambda                    # Start REPL
 // REPL Commands: quit, help, clear
 lambda script.ls          # Eval functional script
 lambda run script.ls      # Run procedual script
-lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help
 ```
 
@@ -19,7 +18,7 @@ lambda validate file.json            # Default schema
 **Scalar Types:**
 ```lambda
 null  bool  int  float  decimal
-string  symbol  binary  datetime
+string  symbol  binary  datetime  path
 ```
 
 **Container Types:**
@@ -27,7 +26,6 @@ string  symbol  binary  datetime
 range, 1 to 10          // Range (inclusive both ends)
 array, [123, true]      // Array of values
 map, {key: 'symbol'}    // Map
-object, {point x: 1, y: 2}  // Object (nominally-typed)
 element, <div class: bold; "text" <br>>  // Element
 ```
 
@@ -42,7 +40,6 @@ int[]            // Array of ints (same as int*)
 int[5]           // Array of exactly 5 ints
 [int*]           // Bracket form: array of 0+ ints
 [int+]           // Bracket form: array of 1+ ints
-float[]          // Array of floats
 fn (a: int, b: string) bool   // Function type
 fn int                        // Same as fn () int
 {a: int, b: bool}             // Map type
@@ -76,7 +73,7 @@ let p = {Point x: 1.0, y: 2.0}   // Object literal
 let c = {Counter}                // All defaults
 p.x                              // Field access
 c.double()                       // Method call
-{Point p, x: 5.0}                // Wrap and override
+{p, x: 5.0}                      // Wrap and override
 ```
 
 **Type Checking (nominal only):**
@@ -98,9 +95,10 @@ type User {
 
 **Self reference `~`:**
 ```lambda
-type Vec { x: float, y: float;
+type Vec { 
+  x: float, y: float;
   fn len() => math.sqrt(x**2 + y**2)
-  fn scale(f) => {Vec ~, x: ~.x*f, y: ~.y*f}  // ~ = self
+  fn scale(f) => <Vec ~, x:~.x*f, y:~.y*f>  // ~ = self
 }
 ```
 
@@ -167,8 +165,8 @@ arr[1 to 3]       // Slice (indices 1, 2, 3)
 map.key           // Map field access
 map["key"]        // Map field by string
 "hello"[1 to 3]   // "ell" — string slicing
-'hello'[1 to 3]   // 'ell'  — symbol slicing
-"café"[2 to 3]    // "fé"  — UTF-8 aware
+'hello'[1 to 3]   // 'ell' — symbol slicing
+"café"[2 to 3]    // "fé" — UTF-8 aware
 ```
 
 **Namespaces (via `import` with bare URI):**
@@ -181,7 +179,7 @@ import xlink: 'http://www.w3.org/1999/xlink'
 elem.svg.width              // Chained sub-map access
 elem.svg                    // {width: 100} sub-map
 svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Dynamic namespaced symbol
+symbol("href", 'xlink_url') // Namespaced symbol
 ```
 
 ## Variables & Declarations
@@ -197,7 +195,7 @@ symbol("href", 'xlink_url') // Dynamic namespaced symbol
 let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
 let a = 1, b = 2;         // Multiple bindings
-x = 10       // ERROR E211: cannot reassign let binding
+x = 10     // ERROR E211: cannot reassign let binding
 ```
 
 **Var Statements (mutable, `pn` only):**
@@ -231,10 +229,10 @@ let a = [1, 2, 3]
 
 `==` performs **structural deep equality** on all types:
 ```lambda
-[1, 2] == [1, 2]             // true  (array)
-{a: 1, b: 2} == {b: 2, a: 1} // true  (map, order-independent)
-[1] == [1.0]                  // true  (numeric promotion)
-(1 to 3) == [1, 2, 3]         // true  (cross-type sequence)
+[1, 2] == [1, 2]          // true  (array)
+{a:1, b:2} == {b:2, a:1}  // true  (map, order-independent)
+[1] == [1.0]              // true  (numeric promotion)
+(1 to 3) == [1, 2, 3]     // true  (cross-type sequence)
 ```
 
 **Logical:** logical and, or, not
@@ -277,9 +275,9 @@ users that (age >= 18) | ~.name  // filter then map
 
 **Spreading in Array Literals:** pipe and filter results flatten
 ```lambda
-[1, [2,3] | ~, 4, 5]              // [1, 2, 3, 4, 5]
-[0, [1,2,3] | ~ * 10, 99]         // [0, 10, 20, 30, 99]
-[1, [3,5,7] that (~ > 4), 9]      // [1, 5, 7, 9]
+[1, [2,3] | ~, 4, 5]           // [1, 2, 3, 4, 5]
+[0, [1,2,3] | ~ * 10, 99]      // [0, 10, 20, 30, 99]
+[1, [3,5,7] that (~ > 4), 9]   // [1, 5, 7, 9]
 ```
 
 ## Query Expressions
@@ -332,7 +330,7 @@ Data type determines output format:
 if (x > 0) "positive" else "non-positive"
 if (score >= 90) "A"
 else if (score >= 80) "B" else "C"
-if (x > 0) "pos" else { log("neg"); "neg" } // block else
+if (x > 0) "pos" else { "neg" } // block else
 ```
 
 **If Statements (block body, else optional):**
@@ -348,10 +346,10 @@ Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else 
 ```lambda
 // Type patterns or Literal
 match value {
-    case 200: "OK"                // case literal
-    case string: "text"           // case type
-    case int | float: "number"    // case type union
-    case Circle:                   // case object type
+    case 200: "OK"              // case literal
+    case string: "text"         // case type
+    case int | float: "number"  // case type union
+    case Circle:                // case object type
         3.14 * ~.r ** 2
     default: "other"
 }
@@ -360,7 +358,7 @@ match value {
 string digits = \d+
 string alpha = \a+
 match input {
-    case digits: "number"         // case named pattern
+    case digits: "number"     // case named pattern
     case alpha: "word"
     default: "other"
 }
@@ -403,7 +401,7 @@ var x=0;   // Mutable variable
 while(c) { break;  continue;  return x; }
 ```
 
-**Assignment Targets:**
+**Assignment Targets (in `pn`):**
 ```lambda
 x = 10              // Variable reassignment (var only)
 arr[i] = val        // Array element reassignment
@@ -497,19 +495,21 @@ string digits = \d+
 string ws = \s+
 
 // replace(str, pattern_or_string, replacement)
-replace("a1b2c3", digit, "X")        // "aXbXcX"
-replace("hello   world", ws, " ")    // "hello world"
-replace("abc", "b", "")              // "ac"
+replace("a1b2c3", digit, "X")      // "aXbXcX"
+replace("hello   world", ws, " ")  // "hello world"
+replace("abc", "b", "")            // "ac"
 
 // split(str, pattern_or_string)
-split("a1b2c3", digit)               // ["a", "b", "c", ""]
-split("hello   world", ws)           // ["hello", "world"]
-split("a,b,c", ",")                  // ["a", "b", "c"]
-split("a1b2c3", digit, true)         // ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
+split("a1b2c3", digit)           // ["a", "b", "c", ""]
+split("hello   world", ws)       // ["hello", "world"]
+split("a,b,c", ",")              // ["a", "b", "c"]
+split("a1b2c3", digit, true)         
+// ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
 
 // find(str, pattern_or_string) → [{value, index}, ...]
-find("a1b22c333", digits)            // [{value: "1", index: 1}, {value: "22", index: 3}, ...]
-find("hello world", "lo")            // [{value: "lo", index: 3}]
+find("a1b22c333", digits)            
+// [{value:"1", index:1}, {value:"22", index:3}, ...]
+find("hello world", "lo")  // [{value: "lo", index: 3}]
 ```
 
 **Collection:**
@@ -545,30 +545,31 @@ format(data, 'yaml')                // Format as YAML
 
 **Import Syntax:**
 ```lambda
-import .relative_module          // Relative to script's directory
-import .path.to.module           // Nested relative import
-import module_name               // Relative to CWD/project root
-import alias: .module            // Import with alias
+import module_name          // Built-in module
+import .relative_module     // Relative to script's dir
+import .path.to.module      // Nested relative import
+import alias: .module       // Import with alias
 ```
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159                 // Export variable
-pub fn square(x) => x * x       // Export function
-pub pn log(msg) { print(msg) }  // Export procedure
-pub type Score = int             // Export type alias
-pub type Counter {               // Export object type
+pub PI = 3.14159               // Export variable
+pub fn square(x) => x * x      // Export function
+pub pn log(msg) { print(msg) } // Export procedure
+pub type Score = int           // Export type alias
+pub type Counter {             // Export object type
     value: int = 0;
     fn double() => value * 2
 }
-pub data^err = input(\"f\", 'json') // Export with error var
+pub data^err = input(\"f\")    // Exp. data and err
 ```
 
 **Module Usage:**
 ```lambda
 // In math_utils.ls:
 pub PI = 3.14159
-pub type Vec2 { x: float, y: float; fn len() => math.sqrt(x**2 + y**2) }
+pub type Vec2 { x: float, y: float; fn len() => 
+    math.sqrt(x**2 + y**2) }
 
 // In main.ls:
 import .math_utils
@@ -587,9 +588,9 @@ error({code: 304, message: "div by zero"})
 
 **Error Return Types (`T^E`):**
 ```lambda
-fn parse(s: string) int^ {...}   // Return int or any error
-fn divide(a, b) int ^ DivErr {...}     // Specific error
-fn load(p) Config ^ ParseErr|IOErr {...} // Multiple errors
+fn parse(s: string) int^ {...}   // int or any error
+fn divide(a, b) int ^ DivErr {...}    // specific error
+fn load(p) Config ^ ParseErr|IOErr {...} // multi errors
 ```
 
 **`raise` error , or propagate error with `^`**

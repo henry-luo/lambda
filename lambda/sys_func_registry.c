@@ -1002,6 +1002,8 @@ JitImport jit_runtime_imports[] = {
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},
     {"js_new_object_with_shape", FPTR(js_new_object_with_shape)},
     {"js_constructor_create_object_shaped", FPTR(js_constructor_create_object_shaped)},
+    {"js_get_shaped_slot", FPTR(js_get_shaped_slot)},
+    {"js_set_shaped_slot", FPTR(js_set_shaped_slot)},
     {"js_array_get_int", FPTR(js_array_get_int)},
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},

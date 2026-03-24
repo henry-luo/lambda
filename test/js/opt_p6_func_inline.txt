@@ -1,0 +1,15 @@
+{
+  "s5": 25,
+  "c3": 27,
+  "cl1": 10,
+  "cl2": 0,
+  "cl3": 7,
+  "fm": 17,
+  "expr": 25,
+  "nested": 32,
+  "sum_sq": 385,
+  "combined": 59,
+  "pos1": true,
+  "pos2": false,
+  "pos3": false
+}

@@ -45,6 +45,7 @@ extern "C" void js_reset_module_vars();
 
 // ============================================================================
 // JsMirTranspiler Context
+struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
 // ============================================================================
 
 struct JsMirImportEntry {
@@ -64,6 +65,7 @@ struct JsMirVarEntry {
     MIR_reg_t scope_env_reg; // register holding scope env pointer
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
     bool is_js_array;        // A2: true if variable is known to hold a regular JS array
+    JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
 };
 
 // Loop label pair for break/continue
@@ -101,6 +103,8 @@ struct JsFuncCollected {
     bool has_native_version;        // whether native version was generated
     // TCO:
     bool is_tco_eligible;           // has tail-recursive calls → loop transform
+    // P3: Constructor flag (set for class constructor methods only)
+    bool is_constructor;            // true if this function is a class constructor
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -289,6 +293,9 @@ struct JsModuleConstEntry {
     int64_t int_val;    // for MCONST_INT and MCONST_BOOL (0/1)
     double float_val;   // for MCONST_FLOAT
     bool is_int;        // legacy compat: true for int, false for float
+    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
+                        //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
+    JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
 };
 
 static int js_module_const_cmp(const void *a, const void *b, void *udata) {
@@ -1295,6 +1302,17 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
         JsMirVarEntry* var = jm_find_var(mt, vname);
         if (var) return var->type_id;
+        // P5: Check module-level variable type for arithmetic type inference.
+        // When a MODVAR was initialized with a numeric literal, modvar_type is set
+        // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
+        if (mt->module_consts) {
+            JsModuleConstEntry mv_lookup;
+            snprintf(mv_lookup.name, sizeof(mv_lookup.name), "%s", vname);
+            JsModuleConstEntry* mv_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mv_lookup);
+            if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
+                (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
+                return mv_mc->modvar_type;
+        }
         return LMD_TYPE_ANY;
     }
 
@@ -1754,6 +1772,63 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 // Check if a call expression should use the native version of a function.
 // Returns the JsFuncCollected* if native call is possible, NULL otherwise.
 static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
+    // P7: obj.method(args) — typed class instance with known native method
+    if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* mem = (JsMemberNode*)call->callee;
+        if (!mem->computed && mem->object && mem->property &&
+            mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id  = (JsIdentifierNode*)mem->object;
+            JsIdentifierNode* prop_id = (JsIdentifierNode*)mem->property;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s", (int)obj_id->name->len, obj_id->name->chars);
+            JsMirVarEntry* obj_var = jm_find_var(mt, vname);
+            // P7: also check module_consts for top-level vars (is_modvar path has no local entry)
+            JsClassEntry* p7_ce = obj_var ? obj_var->class_entry : NULL;
+            if (!p7_ce && mt->module_consts) {
+                JsModuleConstEntry p7_mclookup;
+                memset(&p7_mclookup, 0, sizeof(p7_mclookup));
+                snprintf(p7_mclookup.name, sizeof(p7_mclookup.name), "%s", vname);
+                JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_mclookup);
+                if (p7_mc) p7_ce = p7_mc->class_entry;
+            }
+            if (p7_ce) {
+                JsClassEntry* ce = p7_ce;
+                for (int i = 0; i < ce->method_count; i++) {
+                    JsClassMethodEntry* me = &ce->methods[i];
+                    if (me->is_constructor || me->is_static) continue;
+                    if (!me->fc || !me->fc->has_native_version || !me->fc->native_func_item) continue;
+                    if (!me->name) continue;
+                    if (me->name->len != (size_t)prop_id->name->len ||
+                        strncmp(me->name->chars, prop_id->name->chars, me->name->len) != 0) continue;
+                    // found matching method — validate arg types
+                    JsAstNode* arg = call->arguments;
+                    bool ok = true;
+                    for (int p = 0; p < me->fc->param_count && ok; p++) {
+                        TypeId expected = me->fc->param_types[p];
+                        TypeId actual   = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
+                        if (expected == LMD_TYPE_INT) {
+                            if (actual != LMD_TYPE_INT && actual != LMD_TYPE_BOOL) ok = false;
+                        } else if (expected == LMD_TYPE_FLOAT) {
+                            if (actual != LMD_TYPE_FLOAT && actual != LMD_TYPE_INT) ok = false;
+                        } else {
+                            ok = false; // ANY param — cannot optimize
+                        }
+                        if (arg) arg = arg->next;
+                    }
+                    if (ok) {
+                        log_debug("P7: resolved native method %.*s.%.*s → %s",
+                            (int)obj_id->name->len, obj_id->name->chars,
+                            (int)prop_id->name->len, prop_id->name->chars,
+                            me->fc->name);
+                        return me->fc;
+                    }
+                }
+            }
+        }
+        return NULL; // MEMBER_EXPRESSION but not P7-eligible
+    }
+
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
 
@@ -2169,6 +2244,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                     strncmp(method_name->chars, "constructor", 11) == 0);
                                 if (me->is_constructor) {
                                     ce->constructor = me;
+                                    fc->is_constructor = true;  // P3: mark fc for direct slot stores
                                     // A5: Scan constructor for this.prop = expr
                                     if (fn->body) jm_scan_ctor_props(fc, fn->body);
                                 }
@@ -2197,6 +2273,16 @@ static JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNo
         if (mt->func_entries[i].node == fn) return &mt->func_entries[i];
     }
     return NULL;
+}
+
+// P3: Find property slot index in constructor's ctor_prop_ptrs[]. Returns -1 if not found.
+static int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int prop_len) {
+    for (int i = 0; i < fc->ctor_prop_count; i++) {
+        if (fc->ctor_prop_lens[i] == prop_len &&
+            strncmp(fc->ctor_prop_ptrs[i], prop_name, prop_len) == 0)
+            return i;
+    }
+    return -1;
 }
 
 // A5: Scan constructor body for this.property = expr assignment patterns.
@@ -3727,6 +3813,47 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                 snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
                 if (mc && mc->const_type == MCONST_MODVAR) {
+                    // P5: For typed INT module variables, use inline native arithmetic
+                    // for compound assignments instead of calling js_add/js_subtract/etc.
+                    // This eliminates one function call per iteration in tight loops.
+                    if (mc->modvar_type == LMD_TYPE_INT && asgn->op != JS_OP_ASSIGN) {
+                        MIR_insn_code_t p5_mir_op = MIR_ADD;
+                        bool p5_handled = true;
+                        switch (asgn->op) {
+                        case JS_OP_ADD_ASSIGN:    p5_mir_op = MIR_ADD;  break;
+                        case JS_OP_SUB_ASSIGN:    p5_mir_op = MIR_SUB;  break;
+                        case JS_OP_MUL_ASSIGN:    p5_mir_op = MIR_MUL;  break;
+                        case JS_OP_BIT_AND_ASSIGN: p5_mir_op = MIR_AND; break;
+                        case JS_OP_BIT_OR_ASSIGN:  p5_mir_op = MIR_OR;  break;
+                        case JS_OP_BIT_XOR_ASSIGN: p5_mir_op = MIR_XOR; break;
+                        case JS_OP_LSHIFT_ASSIGN:  p5_mir_op = MIR_LSH; break;
+                        case JS_OP_RSHIFT_ASSIGN:  p5_mir_op = MIR_RSH; break;
+                        case JS_OP_URSHIFT_ASSIGN: p5_mir_op = MIR_URSH; break;
+                        default: p5_handled = false; break;
+                        }
+                        if (p5_handled) {
+                            // load: old = js_get_module_var(idx)  → boxed Item
+                            MIR_reg_t old_boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                            // inline unbox: native_old = old << 8 >> 8
+                            MIR_reg_t old_nat = jm_emit_unbox_int(mt, old_boxed);
+                            // native rhs
+                            TypeId p5_rtype = jm_get_effective_type(mt, asgn->right);
+                            MIR_reg_t rhs_nat = jm_transpile_as_native(mt, asgn->right, p5_rtype, LMD_TYPE_INT);
+                            // inline arithmetic
+                            MIR_reg_t new_nat = jm_new_reg(mt, "mvn", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, p5_mir_op,
+                                MIR_new_reg_op(mt->ctx, new_nat),
+                                MIR_new_reg_op(mt->ctx, old_nat),
+                                MIR_new_reg_op(mt->ctx, rhs_nat)));
+                            // inline re-box
+                            MIR_reg_t boxed_new = jm_box_int_reg(mt, new_nat);
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_new));
+                            return boxed_new;
+                        }
+                    }
                     MIR_reg_t rhs = jm_transpile_box_item(mt, asgn->right);
                     if (asgn->op != JS_OP_ASSIGN) {
                         // Compound assignment: read current value, apply op, store result
@@ -4032,6 +4159,32 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                         }
                     }
                     search = search->superclass;
+                }
+            }
+        }
+
+        // P3: In class constructors, use slot-indexed property set for this.prop = val.
+        // Avoids hash-table lookup+comparison: replaces js_property_set with js_set_shaped_slot.
+        // Safe because js_constructor_create_object_shaped (A5) pre-allocates all slots.
+        if (!member->computed && asgn->op == JS_OP_ASSIGN &&
+            mt->current_fc && mt->current_fc->is_constructor &&
+            member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
+            JsIdentifierNode* prop_id = (JsIdentifierNode*)member->property;
+            if (obj_id->name && obj_id->name->len == 4 &&
+                strncmp(obj_id->name->chars, "this", 4) == 0) {
+                int p3_slot = jm_ctor_prop_slot(mt->current_fc, prop_id->name->chars, (int)prop_id->name->len);
+                if (p3_slot >= 0) {
+                    MIR_reg_t this_reg = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    MIR_reg_t new_val = jm_transpile_box_item(mt, asgn->right);
+                    jm_call_void_3(mt, "js_set_shaped_slot",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p3_slot),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, new_val));
+                    log_debug("P3: constructor this.%.*s → slot %d",
+                              (int)prop_id->name->len, prop_id->name->chars, p3_slot);
+                    return new_val;
                 }
             }
         }
@@ -4673,6 +4826,90 @@ static void jm_readback_closure_env(JsMirTranspiler* mt) {
     mt->last_closure_has_env = false;
 }
 
+// P6: Check if a function is eligible for call-site inlining.
+// Requires: native version, no captures, ≤4 params, single return statement body.
+static bool jm_should_inline(JsFuncCollected* fc) {
+    if (!fc->has_native_version || !fc->native_func_item) return false;
+    if (fc->capture_count > 0) return false;
+    if (fc->param_count > 4) return false;
+    if (!fc->node || !fc->node->body) return false;
+    if (fc->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return false;
+    JsBlockNode* blk = (JsBlockNode*)fc->node->body;
+    // require exactly one statement and it must be a return
+    if (!blk->statements || blk->statements->next) return false;
+    return blk->statements->node_type == JS_AST_NODE_RETURN_STATEMENT;
+}
+
+// P6: Inline a single-return-statement function at the call site.
+// Pushes a temporary scope, binds params to evaluated arguments, transpiles the
+// return expression inline, and pops the scope. Returns a register holding the result:
+// native (INT/FLOAT) when fc->return_type is typed, boxed Item otherwise.
+static MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc) {
+    JsFunctionNode* fn = fc->node;
+    JsReturnNode* ret_stmt = (JsReturnNode*)((JsBlockNode*)fn->body)->statements;
+
+    jm_push_scope(mt);
+
+    // Bind each parameter to its argument's evaluated value
+    JsAstNode* param_node = fn->params;
+    JsAstNode* arg_node = call->arguments;
+    for (int i = 0; i < fc->param_count && param_node; i++) {
+        if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
+            char pname[140];
+            snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+            TypeId ptype = fc->param_types[i];
+            MIR_reg_t arg_reg;
+            MIR_type_t arg_mir_type;
+            if (arg_node) {
+                TypeId actual = jm_get_effective_type(mt, arg_node);
+                if (ptype == LMD_TYPE_FLOAT) {
+                    arg_reg = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_FLOAT);
+                    arg_mir_type = MIR_T_D;
+                } else if (ptype == LMD_TYPE_INT) {
+                    arg_reg = jm_transpile_as_native(mt, arg_node, actual, LMD_TYPE_INT);
+                    arg_mir_type = MIR_T_I64;
+                } else {
+                    arg_reg = jm_transpile_box_item(mt, arg_node);
+                    arg_mir_type = MIR_T_I64;
+                }
+                arg_node = arg_node->next;
+            } else {
+                // Missing argument: default to zero
+                arg_mir_type = (ptype == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                arg_reg = jm_new_reg(mt, "ia0", arg_mir_type);
+                if (ptype == LMD_TYPE_FLOAT) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                        MIR_new_reg_op(mt->ctx, arg_reg), MIR_new_double_op(mt->ctx, 0.0)));
+                } else {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, arg_reg), MIR_new_int_op(mt->ctx, 0)));
+                }
+            }
+            jm_set_var(mt, pname, arg_reg, arg_mir_type, ptype);
+        }
+        param_node = param_node->next;
+    }
+
+    // Transpile the single return expression inline
+    MIR_reg_t result;
+    if (ret_stmt->argument) {
+        TypeId ret_type = fc->return_type;
+        TypeId expr_type = jm_get_effective_type(mt, ret_stmt->argument);
+        if (jm_is_native_type(ret_type)) {
+            result = jm_transpile_as_native(mt, ret_stmt->argument, expr_type, ret_type);
+        } else {
+            result = jm_transpile_box_item(mt, ret_stmt->argument);
+        }
+    } else {
+        result = jm_emit_null(mt);
+    }
+
+    jm_pop_scope(mt);
+    log_debug("P6: inlined call to '%s'", fc->name);
+    return result;
+}
+
 // Call expression
 static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
     int arg_count = jm_count_args(call->arguments);
@@ -5269,6 +5506,51 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
+            // P7: Native method call for typed class instance — avoids generic
+            // boxing + runtime dispatch when receiver type and method are known.
+            if (!m->computed && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsFuncCollected* p7_fc = jm_resolve_native_call(mt, (JsCallNode*)call);
+                if (p7_fc) {
+                    // P6: also try inlining the native method
+                    if (jm_should_inline(p7_fc)) {
+                        return jm_transpile_inline_native(mt, (JsCallNode*)call, p7_fc);
+                    }
+                    // emit native direct call (same pattern as identifier native call)
+                    char p7_name[160];
+                    snprintf(p7_name, sizeof(p7_name), "%s_n_p7%d", p7_fc->name, mt->label_counter++);
+                    MIR_var_t* p7_pargs = (MIR_var_t*)alloca(p7_fc->param_count * sizeof(MIR_var_t));
+                    for (int i = 0; i < p7_fc->param_count; i++) {
+                        MIR_type_t mtype = (p7_fc->param_types[i] == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                        p7_pargs[i] = {mtype, "a", 0};
+                    }
+                    MIR_type_t p7_ret = (p7_fc->return_type == LMD_TYPE_FLOAT) ? MIR_T_D : MIR_T_I64;
+                    MIR_item_t p7_proto = MIR_new_proto_arr(mt->ctx, p7_name, 1, &p7_ret, p7_fc->param_count, p7_pargs);
+                    int p7_nops = 3 + p7_fc->param_count;
+                    MIR_op_t* p7_ops = (MIR_op_t*)alloca(p7_nops * sizeof(MIR_op_t));
+                    int p7_oi = 0;
+                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_proto);
+                    p7_ops[p7_oi++] = MIR_new_ref_op(mt->ctx, p7_fc->native_func_item);
+                    MIR_reg_t p7_result = jm_new_reg(mt, "p7call", p7_ret);
+                    p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, p7_result);
+                    JsAstNode* p7_arg = ((JsCallNode*)call)->arguments;
+                    for (int i = 0; i < p7_fc->param_count; i++) {
+                        if (p7_arg) {
+                            MIR_reg_t val = jm_transpile_as_native(mt, p7_arg,
+                                jm_get_effective_type(mt, p7_arg), p7_fc->param_types[i]);
+                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, val);
+                            p7_arg = p7_arg->next;
+                        } else {
+                            MIR_reg_t zero = jm_new_reg(mt, "p7z", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, zero), MIR_new_int_op(mt->ctx, 0)));
+                            p7_ops[p7_oi++] = MIR_new_reg_op(mt->ctx, zero);
+                        }
+                    }
+                    jm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, p7_nops, p7_ops));
+                    return p7_result; // returns native value
+                }
+            }
+
             // Reset closure env tracking before evaluating arguments
             mt->last_closure_has_env = false;
 
@@ -5700,6 +5982,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                                     MIR_new_int_op(mt->ctx, 0)));
                             }
                             return dummy;
+                        }
+
+                        // P6: Inline single-expression functions at the call site —
+                        // skip MIR call overhead entirely for eligible functions.
+                        if (jm_should_inline(fc)) {
+                            return jm_transpile_inline_native(mt, call, fc);
                         }
 
                         // Native direct call
@@ -6447,6 +6735,35 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             return jm_call_2(mt, "js_array_get_int", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_native));
+        }
+    }
+
+    // P4: Direct property access for known class instances — avoids hash lookup.
+    // For `let node = new Node(...)`, `node.val` emits js_get_shaped_slot(node, slot)
+    // instead of js_property_access(node, "val").
+    if (!mem->computed && !mem->optional &&
+        mem->object && mem->object->node_type == JS_AST_NODE_IDENTIFIER &&
+        mem->property && mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* p4_obj = (JsIdentifierNode*)mem->object;
+        JsIdentifierNode* p4_prop = (JsIdentifierNode*)mem->property;
+        char p4_vname[132];
+        snprintf(p4_vname, sizeof(p4_vname), "_js_%.*s", (int)p4_obj->name->len, p4_obj->name->chars);
+        JsMirVarEntry* p4_var = jm_find_var(mt, p4_vname);
+        if (p4_var && p4_var->class_entry) {
+            JsClassEntry* p4_ce = p4_var->class_entry;
+            if (p4_ce->constructor && p4_ce->constructor->fc) {
+                int p4_slot = jm_ctor_prop_slot(p4_ce->constructor->fc,
+                    p4_prop->name->chars, (int)p4_prop->name->len);
+                if (p4_slot >= 0) {
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, mem->object);
+                    log_debug("P4: shaped load %.*s.%.*s → slot %d",
+                              (int)p4_obj->name->len, p4_obj->name->chars,
+                              (int)p4_prop->name->len, p4_prop->name->chars, p4_slot);
+                    return jm_call_2(mt, "js_get_shaped_slot", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)p4_slot));
+                }
+            }
         }
     }
 
@@ -7299,6 +7616,26 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
                     log_debug("modvar: init js_set_module_var(%d) for '%s' (no local)", modvar_index, vname);
+                    // P7: detect new ClassName(...) and record class_entry in module_consts
+                    if (d->init && d->init->node_type == JS_AST_NODE_NEW_EXPRESSION && mt->module_consts) {
+                        JsCallNode* p7_nc = (JsCallNode*)d->init;
+                        if (p7_nc->callee && p7_nc->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* p7_ctor = (JsIdentifierNode*)p7_nc->callee;
+                            JsClassEntry* p7_ce = jm_find_class(mt, p7_ctor->name->chars, (int)p7_ctor->name->len);
+                            if (p7_ce && p7_ce->constructor && p7_ce->constructor->fc &&
+                                p7_ce->constructor->fc->ctor_prop_count > 0) {
+                                JsModuleConstEntry p7_lookup;
+                                memset(&p7_lookup, 0, sizeof(p7_lookup));
+                                snprintf(p7_lookup.name, sizeof(p7_lookup.name), "%s", vname);
+                                JsModuleConstEntry* p7_mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &p7_lookup);
+                                if (p7_mc) {
+                                    p7_mc->class_entry = p7_ce;
+                                    log_debug("P7: modvar '%s' is instance of '%.*s' — class_entry recorded",
+                                              vname, (int)p7_ctor->name->len, p7_ctor->name->chars);
+                                }
+                            }
+                        }
+                    }
                 } else if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);
@@ -7367,6 +7704,21 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                     if (var_entry) {
                                         var_entry->is_js_array = true;
                                         log_debug("A2: var '%s' is regular JS array (new Array)", vname);
+                                    }
+                                }
+                                // P4: Detect known class instance for direct shaped property reads.
+                                // Only for classes with pre-shaped constructors (ctor_prop_count > 0).
+                                if (ta_type < 0) {
+                                    JsClassEntry* p4_ce = jm_find_class(mt, ctor->name->chars, (int)ctor->name->len);
+                                    if (p4_ce && p4_ce->constructor && p4_ce->constructor->fc &&
+                                        p4_ce->constructor->fc->ctor_prop_count > 0) {
+                                        JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                        if (var_entry) {
+                                            var_entry->class_entry = p4_ce;
+                                            log_debug("P4: var '%s' is instance of '%.*s' (%d slots)",
+                                                      vname, (int)ctor->name->len, ctor->name->chars,
+                                                      p4_ce->constructor->fc->ctor_prop_count);
+                                        }
                                     }
                                 }
                             }
@@ -8197,8 +8549,40 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // User-defined class instantiation: new ClassName(args)
     JsClassEntry* ce = jm_find_class(mt, ctor_name, ctor_len);
     if (ce) {
-        // Create new empty object
-        MIR_reg_t obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        // Create new object — use pre-shaped allocation when constructor has this.prop assigns
+        // so that P3 (js_set_shaped_slot) and P4 (js_get_shaped_slot) can use slot-indexed access.
+        MIR_reg_t obj;
+        if (ce->constructor && ce->constructor->fc &&
+            ce->constructor->fc->ctor_prop_count > 0) {
+            JsFuncCollected* ctor_fc = ce->constructor->fc;
+            MIR_reg_t names_arr = jm_new_reg(mt, "ctor_names", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                MIR_new_reg_op(mt->ctx, names_arr),
+                MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(void*))));
+            MIR_reg_t lens_arr = jm_new_reg(mt, "ctor_lens", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count * (int64_t)sizeof(int))));
+            for (int i = 0; i < ctor_fc->ctor_prop_count; i++) {
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(void*), names_arr, 0, 1),
+                    MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)ctor_fc->ctor_prop_ptrs[i])));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I32, i * (int)sizeof(int), lens_arr, 0, 1),
+                    MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_lens[i])));
+            }
+            // Pass ItemNull as callee — class path doesn't need prototype from callee
+            MIR_reg_t null_callee = jm_emit_null(mt);
+            obj = jm_call_4(mt, "js_constructor_create_object_shaped", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_callee),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, names_arr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lens_arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, ctor_fc->ctor_prop_count));
+            log_debug("A5-class: new %.*s using pre-shaped object with %d props",
+                      ctor_len, ctor_name, ctor_fc->ctor_prop_count);
+        } else {
+            obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+        }
 
         // Set __class_name__ for instanceof support
         {
@@ -9863,8 +10247,25 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 snprintf(mce.name, sizeof(mce.name), "%s", vname);
                                 mce.const_type = MCONST_MODVAR;
                                 mce.int_val = mt->module_var_count++;
+                                // P5: Track initial type for arithmetic optimization.
+                                // Only set for numeric literal initializers — safe because
+                                // the JIT will use inline unbox/arithmetic for these variables.
+                                mce.modvar_type = 0;  // default: unknown (0 = LMD_TYPE_RAW_POINTER = not tracked)
+                                if (vd->init && vd->init->node_type == JS_AST_NODE_LITERAL) {
+                                    JsLiteralNode* mlit = (JsLiteralNode*)vd->init;
+                                    if (mlit->literal_type == JS_LITERAL_NUMBER) {
+                                        double mdv = mlit->value.number_value;
+                                        if (!mlit->has_decimal && mdv == (double)(int64_t)mdv &&
+                                            mdv >= -36028797018963968.0 && mdv <= 36028797018963967.0) {
+                                            mce.modvar_type = LMD_TYPE_INT;
+                                        } else {
+                                            mce.modvar_type = LMD_TYPE_FLOAT;
+                                        }
+                                    }
+                                }
                                 hashmap_set(mt->module_consts, &mce);
-                                log_debug("js-mir: module var '%s' index=%d", mce.name, (int)mce.int_val);
+                                log_debug("js-mir: module var '%s' index=%d modvar_type=%d",
+                                    mce.name, (int)mce.int_val, mce.modvar_type);
                             }
                         }
                     }
@@ -10394,7 +10795,10 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         JsFuncCollected* fc = &mt->func_entries[i];
         jm_infer_param_types(fc);
         jm_infer_return_type(fc);
-        // Check native eligibility (preview only — actual flag set in jm_define_function)
+        // P1: Compute native eligibility here (Phase 1.75) rather than lazily in jm_define_function.
+        // This allows jm_resolve_native_call() (which checks has_native_version) to see the flag
+        // when transpiling earlier functions that call later-defined native functions, enabling
+        // `let x = f(...)` to propagate f's return type into x's variable type.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
                          fc->param_count <= 16 &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
@@ -10406,8 +10810,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        fc->has_native_version = eligible;
         if (eligible) {
-            log_debug("js-mir P4: %s eligible for native version (params: %d, ret: %s)",
+            log_debug("js-mir P1/P4: %s eligible for native version (params: %d, ret: %s)",
                 fc->name, fc->param_count,
                 fc->return_type == LMD_TYPE_INT ? "INT" : "FLOAT");
         }
@@ -10430,6 +10835,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, fc->name);
             fc->func_item = fwd;
             jm_register_local_func(mt, fc->name, fwd);
+        }
+        // P1: Also pre-declare native function version so call sites emitted before
+        // a function is defined can use fc->native_func_item.  The actual native
+        // function replaces this forward reference when jm_define_function runs.
+        if (fc->has_native_version && !fc->native_func_item) {
+            char native_fwd_name[140];
+            snprintf(native_fwd_name, sizeof(native_fwd_name), "%s_n", fc->name);
+            MIR_item_t fwd_native = MIR_new_forward(mt->ctx, native_fwd_name);
+            fc->native_func_item = fwd_native;
+            jm_register_local_func(mt, native_fwd_name, fwd_native);
         }
     }
 
