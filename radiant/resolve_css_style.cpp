@@ -2187,27 +2187,30 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     log_debug("[Lambda CSS] First pass - processed %d font properties", font_processed);
 
     // Browser quirk: monospace generic family uses 13px default "medium" size (not 16px).
-    // The quirk only applies when the inherited font-size originates from the CSS 'medium'
-    // keyword (the initial value). When an ancestor explicitly declares a pixel/em/% font-size,
-    // the inherited value is NOT re-evaluated for monospace.
-    // Example: body { font-size: 16px } → <code> stays at 16px (explicit).
-    //          body (default medium=16px) → <code> gets 13px (from medium).
+    // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family transitions to
+    // generic 'monospace' and the element has no explicit font-size, scale inherited size by
+    // defaultFixedFontSize/defaultFontSize (13/16). Applies regardless of how the inherited
+    // size was established (keyword, em, px, %, etc.).
+    // Only apply when font-family was set via CSS (not by the HTM handler for <code>/<pre>/etc.,
+    // which already applies the quirk in resolve_htm_style.cpp).
     {
         ViewSpan* span = (ViewSpan*)lycon->view;
         if (span && span->font && span->font->family) {
-            bool is_mono = str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
-            if (is_mono) {
-                bool has_explicit_size = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
-                                         avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr;
-                if (!has_explicit_size) {
-                    bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
-                        str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-                    if (!parent_is_mono && span->font->font_size > 0 &&
-                        span->font->font_size_from_medium) {
-                        float parent_size = span->font->font_size;
-                        span->font->font_size = span->font->font_size * 13.0f / 16.0f;
-                        span->font->font_size_from_medium = false;
-                        log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);
+            bool has_css_font_family = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_FAMILY) != nullptr ||
+                                       avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr;
+            if (has_css_font_family) {
+                bool is_mono = str_ieq_const(span->font->family, strlen(span->font->family), "monospace");
+                if (is_mono) {
+                    bool has_explicit_size = avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT_SIZE) != nullptr ||
+                                             avl_tree_search(style_tree->tree, CSS_PROPERTY_FONT) != nullptr;
+                    if (!has_explicit_size) {
+                        bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
+                            str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
+                        if (!parent_is_mono && span->font->font_size > 0) {
+                            float parent_size = span->font->font_size;
+                            span->font->font_size = span->font->font_size * 13.0f / 16.0f;
+                            log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);
+                        }
                     }
                 }
             }

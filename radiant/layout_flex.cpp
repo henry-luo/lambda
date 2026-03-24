@@ -767,7 +767,17 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         total_item_height += flex_layout->row_gap * (child_count - 1);
                     }
                     if (total_item_height >= 0) {
-                        flex_layout->main_axis_size = (float)total_item_height;
+                        // For wrapping: if the column flex container has indefinite main size
+                        // (auto height), per CSS Flexbox §9.3 items should not wrap since the
+                        // main axis can grow indefinitely. Set main_axis_size to a very large
+                        // value for wrapping purposes. Phase 7 will compute the final height.
+                        bool has_max_height = container->blk && container->blk->given_max_height > 0;
+                        if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
+                            flex_layout->main_axis_size = 1e9f;
+                            log_debug("COLUMN FLEX: auto-height with wrap, using infinite main_axis_size for wrapping");
+                        } else {
+                            flex_layout->main_axis_size = (float)total_item_height;
+                        }
                         // Update container height to include padding + border (border-box)
                         float padding_border_height = 0.0f;
                         if (container->bound) {

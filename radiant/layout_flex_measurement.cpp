@@ -1567,8 +1567,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK) {
                 ViewBlock* block_view = (ViewBlock*)item;
                 if (block_view->embed && block_view->embed->flex) {
-                    int dir = block_view->embed->flex->direction;
-                    is_row_flex_container = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+                    is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
                 } else {
                     // embed->flex not yet allocated - resolve direction from CSS
                     // Default is row per CSS spec
@@ -1589,10 +1588,9 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             ViewBlock* block_view = (ViewBlock*)item;
             if (block_view->embed && block_view->embed->flex) {
                 is_flex_container = true;
-                int dir = block_view->embed->flex->direction;
-                is_row_flex_container = (dir == CSS_VALUE_ROW || dir == CSS_VALUE_ROW_REVERSE);
+                is_row_flex_container = is_main_axis_horizontal(block_view->embed->flex);
                 log_debug("calculate_item_intrinsic_sizes: is_row_flex_container=%d (direction=%d)",
-                          is_row_flex_container, dir);
+                          is_row_flex_container, block_view->embed->flex->direction);
             }
         }
 
@@ -2133,6 +2131,22 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     }
 
 store_results:
+    // For vertical writing modes, swap intrinsic width/height because text measurement
+    // always produces horizontal metrics, but in vertical-lr/rl the inline axis is vertical
+    {
+        ViewBlock* block_view = (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK)
+                                ? (ViewBlock*)item : nullptr;
+        if (block_view && block_view->embed && block_view->embed->flex &&
+            (block_view->embed->flex->writing_mode == WM_VERTICAL_LR ||
+             block_view->embed->flex->writing_mode == WM_VERTICAL_RL)) {
+            float tmp;
+            tmp = min_width;  min_width = min_height;  min_height = tmp;
+            tmp = max_width;  max_width = max_height;  max_height = tmp;
+            log_debug("Intrinsic sizes swapped for vertical writing-mode: width=[%.1f, %.1f], height=[%.1f, %.1f]",
+                      min_width, max_width, min_height, max_height);
+        }
+    }
+
     // Store results
     item->fi->intrinsic_width.min_content = min_width;
     item->fi->intrinsic_width.max_content = max_width;

@@ -481,16 +481,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // monospace font family
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->family = (char*)"monospace";
-        // Browser quirk: monospace generic family uses 13px as default "medium" size
-        // instead of 16px. Only apply when the inherited font-size originates from
-        // the CSS 'medium' keyword. When an ancestor explicitly set a pixel/em/%
-        // font-size, the quirk does not apply.
+        // Browser quirk: when font-family transitions to monospace and no explicit
+        // font-size on this element, scale inherited size by 13/16.
         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
             str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-        if (!parent_is_mono && span->font->font_size > 0 &&
-            span->font->font_size_from_medium) {
+        if (!parent_is_mono && span->font->font_size > 0) {
             span->font->font_size = span->font->font_size * 13.0f / 16.0f;
-            span->font->font_size_from_medium = false;
         }
         break;
     }
@@ -552,15 +548,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->family = (char*)"monospace";
-        // Browser quirk: monospace generic family uses 13px as default "medium" size.
-        // Only apply when the inherited font-size originates from the CSS 'medium' keyword.
+        // Browser quirk: when font-family transitions to monospace and no explicit
+        // font-size on this element, scale inherited size by 13/16.
         {
             bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
                 str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-            if (!parent_is_mono && block->font->font_size > 0 &&
-                block->font->font_size_from_medium) {
+            if (!parent_is_mono && block->font->font_size > 0) {
                 block->font->font_size = block->font->font_size * 13.0f / 16.0f;
-                block->font->font_size_from_medium = false;
             }
         }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }

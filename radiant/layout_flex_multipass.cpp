@@ -740,7 +740,16 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
                 log_debug("AUTO-HEIGHT: NOT shrinking container from %.0f to %d (keeping parent-set height)",
                           existing_height, final_height);
             } else {
-                flex_layout->main_axis_size = (float)total_height;  // Content height
+                // For column flex with wrap and indefinite height (auto), set wrapping
+                // boundary to infinite per CSS Flexbox §9.3 (items don't wrap when the
+                // main axis can grow indefinitely). Phase 7 computes final height.
+                bool has_max_height = flex_container->blk && flex_container->blk->given_max_height > 0;
+                if (flex_layout->wrap != WRAP_NOWRAP && !has_max_height) {
+                    flex_layout->main_axis_size = 1e9f;
+                    log_debug("AUTO-HEIGHT: column flex with wrap, using infinite main_axis_size for wrapping");
+                } else {
+                    flex_layout->main_axis_size = (float)total_height;  // Content height
+                }
                 flex_container->height = (float)final_height;  // Total height including padding
                 log_debug("AUTO-HEIGHT: column flex container height updated to %d (content=%d + padding=%d+%d)",
                           final_height, total_height, padding_top, padding_bottom);
