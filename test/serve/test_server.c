@@ -155,10 +155,10 @@ void test_http_handler(void) {
     TEST_START("http_handler");
     
     // test method string conversion
-    const char *method = http_method_string(EVHTTP_REQ_GET);
+    const char *method = http_method_string(HTTP_METHOD_GET);
     TEST_ASSERT(strcmp(method, "GET") == 0, "get method string should be correct");
     
-    method = http_method_string(EVHTTP_REQ_POST);
+    method = http_method_string(HTTP_METHOD_POST);
     TEST_ASSERT(strcmp(method, "POST") == 0, "post method string should be correct");
     
     // test status string conversion
@@ -170,9 +170,9 @@ void test_http_handler(void) {
     
     // test method allowed checking
     int allowed = HTTP_METHOD_GET | HTTP_METHOD_POST;
-    TEST_ASSERT(http_method_allowed(EVHTTP_REQ_GET, allowed), "get should be allowed");
-    TEST_ASSERT(http_method_allowed(EVHTTP_REQ_POST, allowed), "post should be allowed");
-    TEST_ASSERT(!http_method_allowed(EVHTTP_REQ_PUT, allowed), "put should not be allowed");
+    TEST_ASSERT(http_method_allowed(HTTP_METHOD_GET, allowed), "get should be allowed");
+    TEST_ASSERT(http_method_allowed(HTTP_METHOD_POST, allowed), "post should be allowed");
+    TEST_ASSERT(!http_method_allowed(HTTP_METHOD_PUT, allowed), "put should not be allowed");
     
     TEST_PASS();
 }
@@ -213,14 +213,15 @@ void test_server_lifecycle(void) {
 /**
  * simple request handler for testing
  */
-void test_request_handler(struct evhttp_request *req, void *user_data) {
+void test_request_handler(http_request_t *req, http_response_t *resp, void *user_data) {
     const char *message = (const char *)user_data;
     
     if (!message) {
         message = "hello from test server";
     }
     
-    http_send_simple_response(req, 200, "text/plain", message);
+    http_response_set_header(resp, "Content-Type", "text/plain");
+    http_response_add_string(resp, message);
 }
 
 /**

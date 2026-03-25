@@ -4,13 +4,14 @@
  *
  * this file defines functions for handling HTTP requests, generating responses,
  * and managing HTTP-specific functionality like headers and status codes.
+ * v15: libuv-based, no libevent dependency.
  */
 
 #ifndef SERVE_HTTP_HANDLER_H
 #define SERVE_HTTP_HANDLER_H
 
-#include <event2/http.h>
-#include <event2/buffer.h>
+#include <uv.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,37 +41,50 @@ typedef enum {
  * http methods
  */
 typedef enum {
-    HTTP_METHOD_GET = 1 << 0,
-    HTTP_METHOD_POST = 1 << 1,
-    HTTP_METHOD_PUT = 1 << 2,
-    HTTP_METHOD_DELETE = 1 << 3,
-    HTTP_METHOD_HEAD = 1 << 4,
+    HTTP_METHOD_GET     = 1 << 0,
+    HTTP_METHOD_POST    = 1 << 1,
+    HTTP_METHOD_PUT     = 1 << 2,
+    HTTP_METHOD_DELETE  = 1 << 3,
+    HTTP_METHOD_HEAD    = 1 << 4,
     HTTP_METHOD_OPTIONS = 1 << 5,
-    HTTP_METHOD_PATCH = 1 << 6
+    HTTP_METHOD_PATCH   = 1 << 6,
+    HTTP_METHOD_UNKNOWN = 0
 } http_method_t;
+
+/**
+ * key-value pair for headers and query params
+ */
+typedef struct http_header {
+    char *name;
+    char *value;
+    struct http_header *next;
+} http_header_t;
 
 /**
  * request context structure
  */
-typedef struct {
-    struct evhttp_request *req;
+typedef struct http_request_s {
+    uv_tcp_t *client;          // back-pointer to client connection
     const char *uri;
-    const char *path;
-    const char *query;
-    enum evhttp_cmd_type method;
-    struct evkeyvalq *headers;
-    struct evkeyvalq *query_params;
-    struct evbuffer *input_buffer;
+    char *path;
+    char *query;
+    http_method_t method;
+    http_header_t *headers;
+    http_header_t *query_params;
+    char *body;
+    size_t body_len;
     void *user_data;
 } http_request_t;
 
 /**
  * response helper structure
  */
-typedef struct {
-    struct evhttp_request *req;
-    struct evbuffer *output_buffer;
-    struct evkeyvalq *headers;
+typedef struct http_response_s {
+    uv_tcp_t *client;          // client to write response to
+    http_header_t *headers;
+    char *body;
+    size_t body_len;
+    size_t body_cap;
     int status_code;
     int headers_sent;
 } http_response_t;
@@ -80,11 +94,12 @@ typedef struct {
  */
 
 /**
- * create request context from evhttp request
- * @param req libevent http request
+ * parse raw HTTP data into request structure
+ * @param data raw HTTP request data
+ * @param len data length
  * @return request context or NULL on error
  */
-http_request_t* http_request_create(struct evhttp_request *req);
+http_request_t* http_request_parse(const char *data, size_t len);
 
 /**
  * destroy request context
@@ -94,31 +109,22 @@ void http_request_destroy(http_request_t *request);
 
 /**
  * get query parameter value
- * @param request request context
- * @param name parameter name
- * @return parameter value or NULL if not found
  */
 const char* http_request_get_param(http_request_t *request, const char *name);
 
 /**
- * get request header value
- * @param request request context
- * @param name header name (case-insensitive)
- * @return header value or NULL if not found
+ * get request header value (case-insensitive)
  */
 const char* http_request_get_header(http_request_t *request, const char *name);
 
 /**
  * get request body as string
- * @param request request context
- * @return body content or NULL if empty (must be freed)
+ * @return body content or NULL if empty (do NOT free — owned by request)
  */
-char* http_request_get_body(http_request_t *request);
+const char* http_request_get_body(http_request_t *request);
 
 /**
  * get request body size
- * @param request request context
- * @return body size in bytes
  */
 size_t http_request_get_body_size(http_request_t *request);
 
@@ -127,62 +133,30 @@ size_t http_request_get_body_size(http_request_t *request);
  */
 
 /**
- * create response context
- * @param req libevent http request
- * @return response context or NULL on error
+ * create response context for a client connection
  */
-http_response_t* http_response_create(struct evhttp_request *req);
+http_response_t* http_response_create(uv_tcp_t *client);
 
 /**
- * destroy response context (automatically sends response if not sent)
- * @param response response context
+ * destroy response context (automatically sends if not sent)
  */
 void http_response_destroy(http_response_t *response);
 
-/**
- * set response status code
- * @param response response context
- * @param status_code http status code
- */
 void http_response_set_status(http_response_t *response, int status_code);
 
-/**
- * set response header
- * @param response response context
- * @param name header name
- * @param value header value
- */
-void http_response_set_header(http_response_t *response, 
+void http_response_set_header(http_response_t *response,
                              const char *name, const char *value);
 
-/**
- * add content to response body
- * @param response response context
- * @param data content data
- * @param size content size
- */
-void http_response_add_content(http_response_t *response, 
+void http_response_add_content(http_response_t *response,
                               const void *data, size_t size);
 
-/**
- * add string content to response body
- * @param response response context
- * @param content string content
- */
 void http_response_add_string(http_response_t *response, const char *content);
 
-/**
- * add formatted content to response body
- * @param response response context
- * @param format printf-style format string
- * @param ... format arguments
- */
-void http_response_add_printf(http_response_t *response, 
+void http_response_add_printf(http_response_t *response,
                              const char *format, ...);
 
 /**
  * send the response to client
- * @param response response context
  */
 void http_response_send(http_response_t *response);
 
@@ -190,82 +164,37 @@ void http_response_send(http_response_t *response);
  * convenience functions
  */
 
-/**
- * send simple text response
- * @param req libevent http request
- * @param status_code http status code
- * @param content_type content type header
- * @param content response content
- */
-void http_send_simple_response(struct evhttp_request *req, int status_code,
+void http_send_simple_response(uv_tcp_t *client, int status_code,
                               const char *content_type, const char *content);
 
-/**
- * send error response
- * @param req libevent http request
- * @param status_code http status code
- * @param message error message
- */
-void http_send_error(struct evhttp_request *req, int status_code, 
+void http_send_error(uv_tcp_t *client, int status_code,
                     const char *message);
 
-/**
- * send file response
- * @param req libevent http request
- * @param filepath path to file
- * @return 0 on success, -1 on error
- */
-int http_send_file(struct evhttp_request *req, const char *filepath);
+int http_send_file(uv_tcp_t *client, const char *filepath);
 
-/**
- * send redirect response
- * @param req libevent http request
- * @param location redirect location
- * @param permanent whether redirect is permanent (301 vs 302)
- */
-void http_send_redirect(struct evhttp_request *req, const char *location, 
+void http_send_redirect(uv_tcp_t *client, const char *location,
                        int permanent);
 
 /**
  * utility functions
  */
 
-/**
- * get http method string
- * @param method libevent method enum
- * @return method string
- */
-const char* http_method_string(enum evhttp_cmd_type method);
+const char* http_method_string(http_method_t method);
 
-/**
- * get http status string
- * @param status_code status code
- * @return status string
- */
+http_method_t http_method_from_string(const char *method_str);
+
 const char* http_status_string(int status_code);
 
-/**
- * parse query string into key-value pairs
- * @param query query string
- * @param params output key-value structure
- * @return 0 on success, -1 on error
- */
-int http_parse_query(const char *query, struct evkeyvalq *params);
-
-/**
- * url decode string in place
- * @param str string to decode
- * @return decoded length
- */
 size_t http_url_decode(char *str);
 
+int http_method_allowed(http_method_t method, int allowed_methods);
+
 /**
- * check if method is allowed
- * @param method actual method
- * @param allowed_methods bitmask of allowed methods
- * @return 1 if allowed, 0 if not
+ * header list helpers
  */
-int http_method_allowed(enum evhttp_cmd_type method, int allowed_methods);
+http_header_t* http_header_add(http_header_t *list, const char *name, const char *value);
+const char* http_header_find(http_header_t *list, const char *name);
+void http_header_free(http_header_t *list);
 
 #ifdef __cplusplus
 }

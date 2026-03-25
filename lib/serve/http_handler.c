@@ -1,409 +1,531 @@
 /**
  * @file http_handler.c
- * @brief HTTP request handling and response generation implementation
+ * @brief HTTP request handling and response generation (libuv-based)
  */
 
 #include "http_handler.h"
 #include "utils.h"
 #include <stdarg.h>
-#ifndef _WIN32
-#include <sys/queue.h>
-#else
-// provide TAILQ_INIT for Windows (not available in MinGW headers)
-#ifndef TAILQ_INIT
-#define TAILQ_INIT(head) do { \
-    (head)->tqh_first = NULL; \
-    (head)->tqh_last = &(head)->tqh_first; \
-} while (0)
-#endif
-#ifndef TAILQ_FOREACH
-#define TAILQ_FOREACH(var, head, field) \
-    for ((var) = ((head)->tqh_first); (var); (var) = ((var)->field.tqe_next))
-#endif
-#endif
-#include <event2/keyvalq_struct.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
 
-/**
- * request parsing implementation
- */
+// =============================================================================
+// Header List Helpers
+// =============================================================================
 
-http_request_t* http_request_create(struct evhttp_request *req) {
-    if (!req) {
-        serve_set_error("null request");
-        return NULL;
-    }
-    
-    http_request_t *request = serve_malloc(sizeof(http_request_t));
-    if (!request) {
-        serve_set_error("failed to allocate request context");
-        return NULL;
-    }
-    
-    request->req = req;
-    request->uri = evhttp_request_get_uri(req);
-    request->method = evhttp_request_get_command(req);
-    request->headers = evhttp_request_get_input_headers(req);
-    request->input_buffer = evhttp_request_get_input_buffer(req);
-    
-    // parse uri to extract path and query
-    if (request->uri) {
-        struct evhttp_uri *uri_struct = evhttp_uri_parse(request->uri);
-        if (uri_struct) {
-            request->path = evhttp_uri_get_path(uri_struct);
-            request->query = evhttp_uri_get_query(uri_struct);
-            
-            // note: we don't free uri_struct here as it's tied to the request
-            // it will be cleaned up when the request is destroyed
+http_header_t* http_header_add(http_header_t *list, const char *name, const char *value) {
+    http_header_t *h = (http_header_t *)serve_malloc(sizeof(http_header_t));
+    if (!h) return list;
+    h->name = serve_strdup(name);
+    h->value = serve_strdup(value);
+    h->next = list;
+    return h;
+}
+
+const char* http_header_find(http_header_t *list, const char *name) {
+    for (http_header_t *h = list; h; h = h->next) {
+        if (h->name && name) {
+            // case-insensitive comparison
+            const char *a = h->name, *b = name;
+            while (*a && *b && (tolower((unsigned char)*a) == tolower((unsigned char)*b))) {
+                a++; b++;
+            }
+            if (*a == '\0' && *b == '\0') return h->value;
         }
     }
-    
-    // parse query parameters
-    request->query_params = serve_malloc(sizeof(struct evkeyvalq));
-    if (request->query_params) {
-        TAILQ_INIT(request->query_params);
-        if (request->query) {
-            http_parse_query(request->query, request->query_params);
+    return NULL;
+}
+
+void http_header_free(http_header_t *list) {
+    while (list) {
+        http_header_t *next = list->next;
+        serve_free(list->name);
+        serve_free(list->value);
+        serve_free(list);
+        list = next;
+    }
+}
+
+// =============================================================================
+// HTTP Method Helpers
+// =============================================================================
+
+http_method_t http_method_from_string(const char *method_str) {
+    if (!method_str) return HTTP_METHOD_UNKNOWN;
+    if (strcmp(method_str, "GET") == 0) return HTTP_METHOD_GET;
+    if (strcmp(method_str, "POST") == 0) return HTTP_METHOD_POST;
+    if (strcmp(method_str, "PUT") == 0) return HTTP_METHOD_PUT;
+    if (strcmp(method_str, "DELETE") == 0) return HTTP_METHOD_DELETE;
+    if (strcmp(method_str, "HEAD") == 0) return HTTP_METHOD_HEAD;
+    if (strcmp(method_str, "OPTIONS") == 0) return HTTP_METHOD_OPTIONS;
+    if (strcmp(method_str, "PATCH") == 0) return HTTP_METHOD_PATCH;
+    return HTTP_METHOD_UNKNOWN;
+}
+
+const char* http_method_string(http_method_t method) {
+    switch (method) {
+        case HTTP_METHOD_GET: return "GET";
+        case HTTP_METHOD_POST: return "POST";
+        case HTTP_METHOD_PUT: return "PUT";
+        case HTTP_METHOD_DELETE: return "DELETE";
+        case HTTP_METHOD_HEAD: return "HEAD";
+        case HTTP_METHOD_OPTIONS: return "OPTIONS";
+        case HTTP_METHOD_PATCH: return "PATCH";
+        default: return "UNKNOWN";
+    }
+}
+
+int http_method_allowed(http_method_t method, int allowed_methods) {
+    return (method & allowed_methods) != 0;
+}
+
+// =============================================================================
+// URL Decode
+// =============================================================================
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+size_t http_url_decode(char *str) {
+    if (!str) return 0;
+    char *src = str, *dst = str;
+    while (*src) {
+        if (*src == '%' && src[1] && src[2]) {
+            int hi = hex_digit(src[1]);
+            int lo = hex_digit(src[2]);
+            if (hi >= 0 && lo >= 0) {
+                *dst++ = (char)((hi << 4) | lo);
+                src += 3;
+                continue;
+            }
+        }
+        if (*src == '+') {
+            *dst++ = ' ';
+            src++;
+        } else {
+            *dst++ = *src++;
         }
     }
-    
+    *dst = '\0';
+    return (size_t)(dst - str);
+}
+
+// =============================================================================
+// Request Parsing
+// =============================================================================
+
+http_request_t* http_request_parse(const char *data, size_t len) {
+    if (!data || len == 0) return NULL;
+
+    http_request_t *request = (http_request_t *)serve_malloc(sizeof(http_request_t));
+    if (!request) return NULL;
+    memset(request, 0, sizeof(http_request_t));
+
+    // find the request line end
+    const char *line_end = (const char *)memchr(data, '\r', len);
+    if (!line_end || (size_t)(line_end - data + 1) >= len || line_end[1] != '\n') {
+        // try just \n
+        line_end = (const char *)memchr(data, '\n', len);
+        if (!line_end) {
+            serve_free(request);
+            return NULL;
+        }
+    }
+
+    // parse request line: METHOD SP URI SP HTTP/x.x
+    size_t rline_len = (size_t)(line_end - data);
+    char *rline = (char *)serve_malloc(rline_len + 1);
+    if (!rline) { serve_free(request); return NULL; }
+    memcpy(rline, data, rline_len);
+    rline[rline_len] = '\0';
+
+    // extract method
+    char *sp = strchr(rline, ' ');
+    if (!sp) { serve_free(rline); serve_free(request); return NULL; }
+    *sp = '\0';
+    request->method = http_method_from_string(rline);
+
+    // extract URI
+    char *uri_start = sp + 1;
+    char *sp2 = strchr(uri_start, ' ');
+    if (sp2) *sp2 = '\0';
+
+    // split URI into path and query
+    char *qmark = strchr(uri_start, '?');
+    if (qmark) {
+        *qmark = '\0';
+        request->query = serve_strdup(qmark + 1);
+        // parse query params
+        char *query_copy = serve_strdup(qmark + 1);
+        if (query_copy) {
+            char *pair = strtok(query_copy, "&");
+            while (pair) {
+                char *eq = strchr(pair, '=');
+                if (eq) {
+                    *eq = '\0';
+                    char *key = pair;
+                    char *val = eq + 1;
+                    http_url_decode(key);
+                    http_url_decode(val);
+                    request->query_params = http_header_add(request->query_params, key, val);
+                }
+                pair = strtok(NULL, "&");
+            }
+            serve_free(query_copy);
+        }
+    }
+
+    // url-decode path
+    request->path = serve_strdup(uri_start);
+    if (request->path) http_url_decode(request->path);
+    request->uri = request->path;
+
+    serve_free(rline);
+
+    // parse headers
+    const char *hdr_start = line_end;
+    // skip \r\n or \n
+    if (*hdr_start == '\r') hdr_start++;
+    if (*hdr_start == '\n') hdr_start++;
+
+    const char *end_ptr = data + len;
+    while (hdr_start < end_ptr) {
+        // check for empty line (end of headers)
+        if (*hdr_start == '\r' || *hdr_start == '\n') {
+            if (*hdr_start == '\r') hdr_start++;
+            if (hdr_start < end_ptr && *hdr_start == '\n') hdr_start++;
+            break;
+        }
+
+        // find end of this header line
+        const char *hdr_end = hdr_start;
+        while (hdr_end < end_ptr && *hdr_end != '\r' && *hdr_end != '\n') hdr_end++;
+
+        // parse "Name: Value"
+        const char *colon = (const char *)memchr(hdr_start, ':', (size_t)(hdr_end - hdr_start));
+        if (colon) {
+            size_t name_len = (size_t)(colon - hdr_start);
+            char *name = (char *)serve_malloc(name_len + 1);
+            if (name) {
+                memcpy(name, hdr_start, name_len);
+                name[name_len] = '\0';
+
+                const char *val_start = colon + 1;
+                while (val_start < hdr_end && *val_start == ' ') val_start++;
+                size_t val_len = (size_t)(hdr_end - val_start);
+                char *value = (char *)serve_malloc(val_len + 1);
+                if (value) {
+                    memcpy(value, val_start, val_len);
+                    value[val_len] = '\0';
+                    request->headers = http_header_add(request->headers, name, value);
+                    serve_free(value);
+                }
+                serve_free(name);
+            }
+        }
+
+        hdr_start = hdr_end;
+        if (hdr_start < end_ptr && *hdr_start == '\r') hdr_start++;
+        if (hdr_start < end_ptr && *hdr_start == '\n') hdr_start++;
+    }
+
+    // body is everything after the blank line
+    if (hdr_start < end_ptr) {
+        size_t body_len = (size_t)(end_ptr - hdr_start);
+        if (body_len > 0) {
+            request->body = (char *)serve_malloc(body_len + 1);
+            if (request->body) {
+                memcpy(request->body, hdr_start, body_len);
+                request->body[body_len] = '\0';
+                request->body_len = body_len;
+            }
+        }
+    }
+
     return request;
 }
 
 void http_request_destroy(http_request_t *request) {
-    if (!request) {
-        return;
-    }
-    
-    if (request->query_params) {
-        evhttp_clear_headers(request->query_params);
-        serve_free(request->query_params);
-    }
-    
+    if (!request) return;
+    serve_free(request->path);
+    serve_free(request->query);
+    serve_free(request->body);
+    http_header_free(request->headers);
+    http_header_free(request->query_params);
     serve_free(request);
 }
 
 const char* http_request_get_param(http_request_t *request, const char *name) {
-    if (!request || !name || !request->query_params) {
-        return NULL;
-    }
-    
-    return evhttp_find_header(request->query_params, name);
+    if (!request || !name) return NULL;
+    return http_header_find(request->query_params, name);
 }
 
 const char* http_request_get_header(http_request_t *request, const char *name) {
-    if (!request || !name || !request->headers) {
-        return NULL;
-    }
-    
-    return evhttp_find_header(request->headers, name);
+    if (!request || !name) return NULL;
+    return http_header_find(request->headers, name);
 }
 
-char* http_request_get_body(http_request_t *request) {
-    if (!request || !request->input_buffer) {
-        return NULL;
-    }
-    
-    size_t len = evbuffer_get_length(request->input_buffer);
-    if (len == 0) {
-        return NULL;
-    }
-    
-    char *body = serve_malloc(len + 1);
-    if (!body) {
-        return NULL;
-    }
-    
-    evbuffer_copyout(request->input_buffer, body, len);
-    body[len] = '\0';
-    
-    return body;
+const char* http_request_get_body(http_request_t *request) {
+    if (!request) return NULL;
+    return request->body;
 }
 
 size_t http_request_get_body_size(http_request_t *request) {
-    if (!request || !request->input_buffer) {
-        return 0;
-    }
-    
-    return evbuffer_get_length(request->input_buffer);
+    if (!request) return 0;
+    return request->body_len;
 }
 
-/**
- * response generation implementation
- */
+// =============================================================================
+// Response Generation
+// =============================================================================
 
-http_response_t* http_response_create(struct evhttp_request *req) {
-    if (!req) {
-        serve_set_error("null request");
-        return NULL;
-    }
-    
-    http_response_t *response = serve_malloc(sizeof(http_response_t));
-    if (!response) {
-        serve_set_error("failed to allocate response context");
-        return NULL;
-    }
-    
-    response->req = req;
-    response->output_buffer = evbuffer_new();
-    response->headers = evhttp_request_get_output_headers(req);
+http_response_t* http_response_create(uv_tcp_t *client) {
+    if (!client) return NULL;
+
+    http_response_t *response = (http_response_t *)serve_malloc(sizeof(http_response_t));
+    if (!response) return NULL;
+    memset(response, 0, sizeof(http_response_t));
+
+    response->client = client;
     response->status_code = HTTP_STATUS_OK;
-    response->headers_sent = 0;
-    
-    if (!response->output_buffer) {
+    response->body_cap = 4096;
+    response->body = (char *)serve_malloc(response->body_cap);
+    if (!response->body) {
         serve_free(response);
-        serve_set_error("failed to create output buffer");
         return NULL;
     }
-    
+    response->body_len = 0;
+
     return response;
 }
 
 void http_response_destroy(http_response_t *response) {
-    if (!response) {
-        return;
-    }
-    
-    // send response if not already sent
+    if (!response) return;
     if (!response->headers_sent) {
         http_response_send(response);
     }
-    
-    if (response->output_buffer) {
-        evbuffer_free(response->output_buffer);
-    }
-    
+    http_header_free(response->headers);
+    serve_free(response->body);
     serve_free(response);
 }
 
 void http_response_set_status(http_response_t *response, int status_code) {
-    if (!response || response->headers_sent) {
-        return;
-    }
-    
+    if (!response || response->headers_sent) return;
     response->status_code = status_code;
 }
 
-void http_response_set_header(http_response_t *response, 
+void http_response_set_header(http_response_t *response,
                              const char *name, const char *value) {
-    if (!response || !name || !value || response->headers_sent) {
-        return;
-    }
-    
-    evhttp_add_header(response->headers, name, value);
+    if (!response || !name || !value || response->headers_sent) return;
+    response->headers = http_header_add(response->headers, name, value);
 }
 
-void http_response_add_content(http_response_t *response, 
-                              const void *data, size_t size) {
-    if (!response || !data || size == 0 || response->headers_sent) {
-        return;
+static void ensure_body_capacity(http_response_t *response, size_t additional) {
+    if (response->body_len + additional >= response->body_cap) {
+        size_t new_cap = (response->body_len + additional) * 2;
+        char *new_body = (char *)serve_malloc(new_cap);
+        if (!new_body) return;
+        if (response->body_len > 0)
+            memcpy(new_body, response->body, response->body_len);
+        serve_free(response->body);
+        response->body = new_body;
+        response->body_cap = new_cap;
     }
-    
-    evbuffer_add(response->output_buffer, data, size);
+}
+
+void http_response_add_content(http_response_t *response,
+                              const void *data, size_t size) {
+    if (!response || !data || size == 0 || response->headers_sent) return;
+    ensure_body_capacity(response, size);
+    memcpy(response->body + response->body_len, data, size);
+    response->body_len += size;
 }
 
 void http_response_add_string(http_response_t *response, const char *content) {
-    if (!response || !content || response->headers_sent) {
-        return;
-    }
-    
-    evbuffer_add_printf(response->output_buffer, "%s", content);
+    if (!response || !content || response->headers_sent) return;
+    http_response_add_content(response, content, strlen(content));
 }
 
-void http_response_add_printf(http_response_t *response, 
+void http_response_add_printf(http_response_t *response,
                              const char *format, ...) {
-    if (!response || !format || response->headers_sent) {
-        return;
-    }
-    
+    if (!response || !format || response->headers_sent) return;
+    char buf[4096];
     va_list args;
     va_start(args, format);
-    evbuffer_add_vprintf(response->output_buffer, format, args);
+    int n = vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
+    if (n > 0) {
+        http_response_add_content(response, buf, (size_t)n);
+    }
+}
+
+static void on_write_done(uv_write_t *req, int status) {
+    free(req->data); // free the buffer
+    free(req);
 }
 
 void http_response_send(http_response_t *response) {
-    if (!response || response->headers_sent) {
-        return;
+    if (!response || response->headers_sent || !response->client) return;
+
+    // build the HTTP response
+    // estimate header size
+    size_t hdr_size = 256;
+    for (http_header_t *h = response->headers; h; h = h->next) {
+        hdr_size += strlen(h->name) + strlen(h->value) + 4;
     }
-    
-    // set content length if not already set
-    if (!evhttp_find_header(response->headers, "Content-Length")) {
-        size_t content_length = evbuffer_get_length(response->output_buffer);
-        char length_str[32];
-        snprintf(length_str, sizeof(length_str), "%zu", content_length);
-        evhttp_add_header(response->headers, "Content-Length", length_str);
+    hdr_size += 64; // content-length, server, date
+
+    size_t total_size = hdr_size + response->body_len;
+    char *buf = (char *)malloc(total_size);
+    if (!buf) return;
+
+    // status line
+    int offset = snprintf(buf, total_size, "HTTP/1.1 %d %s\r\n",
+                          response->status_code,
+                          http_status_string(response->status_code));
+
+    // content-length
+    offset += snprintf(buf + offset, total_size - (size_t)offset,
+                      "Content-Length: %zu\r\n", response->body_len);
+
+    // server header
+    int has_server = 0;
+    for (http_header_t *h = response->headers; h; h = h->next) {
+        if (h->name && tolower((unsigned char)h->name[0]) == 's' &&
+            strcasecmp(h->name, "Server") == 0) {
+            has_server = 1;
+            break;
+        }
     }
-    
-    // add server header if not present
-    if (!evhttp_find_header(response->headers, "Server")) {
-        evhttp_add_header(response->headers, "Server", "Jubily/1.0");
+    if (!has_server) {
+        offset += snprintf(buf + offset, total_size - (size_t)offset,
+                          "Server: Lambda/1.0\r\n");
     }
-    
-    // add date header if not present
-    if (!evhttp_find_header(response->headers, "Date")) {
-        char date_buffer[32];
-        serve_get_timestamp(date_buffer);
-        evhttp_add_header(response->headers, "Date", date_buffer);
+
+    // custom headers
+    for (http_header_t *h = response->headers; h; h = h->next) {
+        offset += snprintf(buf + offset, total_size - (size_t)offset,
+                          "%s: %s\r\n", h->name, h->value);
     }
-    
-    evhttp_send_reply(response->req, response->status_code,
-                     http_status_string(response->status_code),
-                     response->output_buffer);
-    
+
+    // end of headers
+    offset += snprintf(buf + offset, total_size - (size_t)offset, "\r\n");
+
+    // body
+    if (response->body_len > 0) {
+        memcpy(buf + offset, response->body, response->body_len);
+        offset += (int)response->body_len;
+    }
+
+    // send via libuv
+    uv_write_t *write_req = (uv_write_t *)malloc(sizeof(uv_write_t));
+    if (!write_req) { free(buf); return; }
+    write_req->data = buf;
+
+    uv_buf_t uv_buf = uv_buf_init(buf, (unsigned int)offset);
+    uv_write(write_req, (uv_stream_t *)response->client, &uv_buf, 1, on_write_done);
+
     response->headers_sent = 1;
 }
 
-/**
- * convenience functions implementation
- */
+// =============================================================================
+// Convenience Functions
+// =============================================================================
 
-void http_send_simple_response(struct evhttp_request *req, int status_code,
+void http_send_simple_response(uv_tcp_t *client, int status_code,
                               const char *content_type, const char *content) {
-    if (!req) {
-        return;
-    }
-    
-    http_response_t *response = http_response_create(req);
-    if (!response) {
-        return;
-    }
-    
+    if (!client) return;
+    http_response_t *response = http_response_create(client);
+    if (!response) return;
+
     http_response_set_status(response, status_code);
-    
     if (content_type) {
         http_response_set_header(response, "Content-Type", content_type);
     }
-    
     if (content) {
         http_response_add_string(response, content);
     }
-    
     http_response_destroy(response);
 }
 
-void http_send_error(struct evhttp_request *req, int status_code, 
-                    const char *message) {
-    if (!req) {
-        return;
-    }
-    
+void http_send_error(uv_tcp_t *client, int status_code, const char *message) {
+    if (!client) return;
+
     const char *status_text = http_status_string(status_code);
-    char *html_content = NULL;
-    
+    char html[512];
     if (message) {
-        size_t content_size = strlen(message) + strlen(status_text) + 200;
-        html_content = serve_malloc(content_size);
-        if (html_content) {
-            snprintf(html_content, content_size,
-                    "<!DOCTYPE html>\n"
-                    "<html><head><title>%d %s</title></head>\n"
-                    "<body><h1>%d %s</h1><p>%s</p></body></html>\n",
-                    status_code, status_text, status_code, status_text, message);
-        }
+        snprintf(html, sizeof(html),
+                "<!DOCTYPE html>\n"
+                "<html><head><title>%d %s</title></head>\n"
+                "<body><h1>%d %s</h1><p>%s</p></body></html>\n",
+                status_code, status_text, status_code, status_text, message);
     } else {
-        size_t content_size = strlen(status_text) + 150;
-        html_content = serve_malloc(content_size);
-        if (html_content) {
-            snprintf(html_content, content_size,
-                    "<!DOCTYPE html>\n"
-                    "<html><head><title>%d %s</title></head>\n"
-                    "<body><h1>%d %s</h1></body></html>\n",
-                    status_code, status_text, status_code, status_text);
-        }
+        snprintf(html, sizeof(html),
+                "<!DOCTYPE html>\n"
+                "<html><head><title>%d %s</title></head>\n"
+                "<body><h1>%d %s</h1></body></html>\n",
+                status_code, status_text, status_code, status_text);
     }
-    
-    http_send_simple_response(req, status_code, "text/html", 
-                             html_content ? html_content : status_text);
-    
-    serve_free(html_content);
+
+    http_send_simple_response(client, status_code, "text/html", html);
 }
 
-int http_send_file(struct evhttp_request *req, const char *filepath) {
-    if (!req || !filepath) {
-        http_send_error(req, 400, "invalid request");
+int http_send_file(uv_tcp_t *client, const char *filepath) {
+    if (!client || !filepath) {
+        http_send_error(client, 400, "invalid request");
         return -1;
     }
-    
-    // check if file exists
+
     if (!serve_file_exists(filepath)) {
-        http_send_error(req, HTTP_STATUS_NOT_FOUND, "file not found");
+        http_send_error(client, HTTP_STATUS_NOT_FOUND, "file not found");
         return -1;
     }
-    
-    // read file content
+
     size_t file_size;
     char *content = serve_read_file(filepath, &file_size);
     if (!content) {
-        http_send_error(req, HTTP_STATUS_INTERNAL_ERROR, "failed to read file");
+        http_send_error(client, HTTP_STATUS_INTERNAL_ERROR, "failed to read file");
         return -1;
     }
-    
-    // determine content type from file extension
+
     const char *extension = serve_get_file_extension(filepath);
     const char *content_type = serve_get_mime_type(extension);
-    
-    // create response
-    http_response_t *response = http_response_create(req);
+
+    http_response_t *response = http_response_create(client);
     if (!response) {
         serve_free(content);
-        http_send_error(req, HTTP_STATUS_INTERNAL_ERROR, "failed to create response");
         return -1;
     }
-    
-    // set headers
+
     http_response_set_header(response, "Content-Type", content_type);
-    
-    // add last-modified header
-    char time_buffer[32];
-    if (serve_get_file_time(filepath, time_buffer)) {
-        http_response_set_header(response, "Last-Modified", time_buffer);
-    }
-    
-    // add content
     http_response_add_content(response, content, file_size);
-    
-    // send response
     http_response_destroy(response);
+
     serve_free(content);
-    
     return 0;
 }
 
-void http_send_redirect(struct evhttp_request *req, const char *location, 
-                       int permanent) {
-    if (!req || !location) {
-        return;
-    }
-    
-    int status_code = permanent ? HTTP_STATUS_MOVED_PERMANENTLY : HTTP_STATUS_FOUND;
-    http_response_t *response = http_response_create(req);
-    if (!response) {
-        return;
-    }
-    
-    http_response_set_status(response, status_code);
+void http_send_redirect(uv_tcp_t *client, const char *location, int permanent) {
+    if (!client || !location) return;
+
+    http_response_t *response = http_response_create(client);
+    if (!response) return;
+
+    http_response_set_status(response, permanent ? HTTP_STATUS_MOVED_PERMANENTLY : HTTP_STATUS_FOUND);
     http_response_set_header(response, "Location", location);
+    http_response_add_string(response, "Redirecting...");
     http_response_destroy(response);
 }
 
-/**
- * utility functions implementation
- */
-
-const char* http_method_string(enum evhttp_cmd_type method) {
-    switch (method) {
-        case EVHTTP_REQ_GET: return "GET";
-        case EVHTTP_REQ_POST: return "POST";
-        case EVHTTP_REQ_HEAD: return "HEAD";
-        case EVHTTP_REQ_PUT: return "PUT";
-        case EVHTTP_REQ_DELETE: return "DELETE";
-        case EVHTTP_REQ_OPTIONS: return "OPTIONS";
-        case EVHTTP_REQ_TRACE: return "TRACE";
-        case EVHTTP_REQ_CONNECT: return "CONNECT";
-        case EVHTTP_REQ_PATCH: return "PATCH";
-        default: return "UNKNOWN";
-    }
-}
+// =============================================================================
+// Status String
+// =============================================================================
 
 const char* http_status_string(int status_code) {
     switch (status_code) {
@@ -421,67 +543,6 @@ const char* http_status_string(int status_code) {
         case 500: return "Internal Server Error";
         case 501: return "Not Implemented";
         case 503: return "Service Unavailable";
-        default: return "Unknown";
-    }
-}
-
-int http_parse_query(const char *query, struct evkeyvalq *params) {
-    if (!query || !params) {
-        return -1;
-    }
-    
-    char *query_copy = serve_strdup(query);
-    if (!query_copy) {
-        return -1;
-    }
-    
-    char *token = strtok(query_copy, "&");
-    while (token) {
-        char *equals = strchr(token, '=');
-        if (equals) {
-            *equals = '\0';
-            char *key = token;
-            char *value = equals + 1;
-            
-            // url decode key and value
-            serve_url_decode(key);
-            serve_url_decode(value);
-            
-            evhttp_add_header(params, key, value);
-        } else {
-            // parameter without value
-            serve_url_decode(token);
-            evhttp_add_header(params, token, "");
-        }
-        
-        token = strtok(NULL, "&");
-    }
-    
-    serve_free(query_copy);
-    return 0;
-}
-
-size_t http_url_decode(char *str) {
-    return serve_url_decode(str);
-}
-
-int http_method_allowed(enum evhttp_cmd_type method, int allowed_methods) {
-    switch (method) {
-        case EVHTTP_REQ_GET:
-            return (allowed_methods & HTTP_METHOD_GET) != 0;
-        case EVHTTP_REQ_POST:
-            return (allowed_methods & HTTP_METHOD_POST) != 0;
-        case EVHTTP_REQ_PUT:
-            return (allowed_methods & HTTP_METHOD_PUT) != 0;
-        case EVHTTP_REQ_DELETE:
-            return (allowed_methods & HTTP_METHOD_DELETE) != 0;
-        case EVHTTP_REQ_HEAD:
-            return (allowed_methods & HTTP_METHOD_HEAD) != 0;
-        case EVHTTP_REQ_OPTIONS:
-            return (allowed_methods & HTTP_METHOD_OPTIONS) != 0;
-        case EVHTTP_REQ_PATCH:
-            return (allowed_methods & HTTP_METHOD_PATCH) != 0;
-        default:
-            return 0;
+        default:  return "Unknown";
     }
 }
