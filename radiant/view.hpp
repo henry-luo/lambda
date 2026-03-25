@@ -298,6 +298,10 @@ typedef enum { TD_LTR, TD_RTL } TextDirection;
 #define MARGIN_TRIM_INLINE_START  0x04
 #define MARGIN_TRIM_INLINE_END    0x08
 
+// text-box-trim bitmask flags (CSS Inline Level 3)
+#define TEXT_BOX_TRIM_START       0x01   // trim over-side half-leading
+#define TEXT_BOX_TRIM_END         0x02   // trim under-side half-leading
+
 typedef enum AlignType {
     ALIGN_AUTO = CSS_VALUE_AUTO,
     ALIGN_START = CSS_VALUE_FLEX_START,
@@ -910,6 +914,9 @@ typedef struct BlockProp {
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     int tab_size;           // CSS tab-size (number of spaces, default 8)
     uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
+    uint8_t text_box_trim;   // bitmask: TEXT_BOX_TRIM_START|END (CSS Inline Level 3)
+    CssEnum text_box_over_edge;  // CSS Inline 3 text-box-edge over metric (CSS_VALUE_TEXT, CSS_VALUE_CAP, CSS_VALUE_EX, etc.)
+    CssEnum text_box_under_edge; // CSS Inline 3 text-box-edge under metric (CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, etc.)
     float given_width, given_height;  // CSS specified width/height values
     CssEnum given_width_type;
     CssEnum given_height_type;
@@ -919,6 +926,12 @@ typedef struct BlockProp {
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
     float given_min_height_percent;  // Raw percentage if min-height: X% (NaN if not percentage)
     float given_max_height_percent;  // Raw percentage if max-height: X% (NaN if not percentage)
+    // CSS Inline 3 §5: line box metrics for text-box-trim.
+    // Stored during line_break() to capture inline descendants' contributions.
+    float first_line_max_ascender;
+    float first_line_max_descender;
+    float last_line_max_ascender;
+    float last_line_max_descender;
 } BlockProp;
 
 typedef struct FontBox {

@@ -1,0 +1,12 @@
+a equals b
+a not equals c
+5
+Hello, World!
+Line one
+Line two
+Line three
+string is empty
+string is not empty
+50
+  hello  world  
+[  hello  world  ]

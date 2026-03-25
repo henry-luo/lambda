@@ -702,6 +702,16 @@ void line_break(LayoutContext* lycon) {
     // The baseline of an inline-block with in-flow content is the baseline of its last line box
     lycon->block.last_line_ascender = lycon->line.max_ascender;
 
+    // CSS Inline 3 §5: Track first/last line box metrics for text-box-trim.
+    // max_ascender/max_descender capture the full line box extent including
+    // contributions from tall inline descendants (e.g., font-size: 200% spans).
+    if (lycon->block.first_line_max_ascender == 0 && lycon->block.first_line_max_descender == 0) {
+        lycon->block.first_line_max_ascender = lycon->line.max_ascender;
+        lycon->block.first_line_max_descender = lycon->line.max_descender;
+    }
+    lycon->block.last_line_max_ascender = lycon->line.max_ascender;
+    lycon->block.last_line_max_descender = lycon->line.max_descender;
+
     // reset the new line
     line_reset(lycon);
 }

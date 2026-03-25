@@ -653,32 +653,24 @@ static PyAstNode* build_py_subscript(PyTranspiler* tp, TSNode sub_node) {
 PyAstNode* build_py_slice(PyTranspiler* tp, TSNode slice_node) {
     PySliceNode* slice = (PySliceNode*)alloc_py_ast_node(tp, PY_AST_NODE_SLICE, slice_node, sizeof(PySliceNode));
 
-    // slice children are unnamed: up to 3 expressions separated by colons
-    // walk children to find expressions
+    // slice children: up to 3 expressions separated by colons
+    // track colon count to determine which slot (start/stop/step) each expression fills
     uint32_t child_count = ts_node_child_count(slice_node);
-    int expr_index = 0;
+    int colon_count = 0;
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_child(slice_node, i);
         if (ts_node_is_named(child)) {
             PyAstNode* expr = build_py_expression(tp, child);
-            switch (expr_index) {
+            switch (colon_count) {
                 case 0: slice->start = expr; break;
                 case 1: slice->stop = expr; break;
                 case 2: slice->step = expr; break;
             }
-            expr_index++;
         } else {
-            // colon separator - if consecutive colons, skip slot
             StrView src = py_node_source(tp, child);
             if (src.length == 1 && src.str[0] == ':') {
-                // if next child is also a colon or unnamed non-expression, ensure we advance
-                if (expr_index == 0) {
-                    // nothing before first colon → start is None
-                    expr_index = 1;
-                } else if (expr_index == 1) {
-                    expr_index = 2;
-                }
+                colon_count++;
             }
         }
     }

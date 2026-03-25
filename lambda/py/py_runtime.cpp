@@ -9,6 +9,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/strbuf.h"
 #include <cstring>
 #include <cmath>
 #include <cstdlib>
@@ -16,6 +17,9 @@
 
 // Global Input context for Python runtime (for map_put, pool allocations)
 Input* py_input = NULL;
+
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
+extern "C" Item py_builtin_repr(Item obj);
 
 // Forward declarations from lambda-data-runtime.cpp
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
@@ -137,11 +141,52 @@ extern "C" Item py_to_str(Item value) {
     }
     case LMD_TYPE_STRING:
         return value;
-    case LMD_TYPE_ARRAY:
-        return (Item){.item = s2it(heap_create_name("[...]"))};
-    case LMD_TYPE_MAP:
-        return (Item){.item = s2it(heap_create_name("{...}"))};
-    case LMD_TYPE_FUNC:
+    case LMD_TYPE_ARRAY: {
+        Array* arr = it2arr(value);
+        if (!arr) return (Item){.item = s2it(heap_create_name("[]"))};
+        StrBuf* sb = strbuf_new();
+        strbuf_append_char(sb, '[');
+        for (int i = 0; i < arr->length; i++) {
+            if (i > 0) strbuf_append_str(sb, ", ");
+            Item elem_str = py_builtin_repr(arr->items[i]);
+            if (get_type_id(elem_str) == LMD_TYPE_STRING) {
+                String* s = it2s(elem_str);
+                strbuf_append_str_n(sb, s->chars, s->len);
+            }
+        }
+        strbuf_append_char(sb, ']');
+        Item arr_result = (Item){.item = s2it(heap_create_name(sb->str))};
+        strbuf_free(sb);
+        return arr_result;
+    }
+    case LMD_TYPE_MAP: {
+        Map* m = it2map(value);
+        if (!m || !m->type) return (Item){.item = s2it(heap_create_name("{}"))};
+        TypeMap* tm = (TypeMap*)m->type;
+        StrBuf* sb = strbuf_new();
+        strbuf_append_char(sb, '{');
+        int idx = 0;
+        ShapeEntry* field = tm->shape;
+        while (field) {
+            if (idx > 0) strbuf_append_str(sb, ", ");
+            if (field->name) {
+                strbuf_append_str_n(sb, field->name->str, field->name->length);
+            }
+            strbuf_append_str(sb, ": ");
+            Item val = _map_read_field(field, m->data);
+            Item val_str = py_builtin_repr(val);
+            if (get_type_id(val_str) == LMD_TYPE_STRING) {
+                String* s = it2s(val_str);
+                strbuf_append_str_n(sb, s->chars, s->len);
+            }
+            field = field->next;
+            idx++;
+        }
+        strbuf_append_char(sb, '}');
+        Item map_result = (Item){.item = s2it(heap_create_name(sb->str))};
+        strbuf_free(sb);
+        return map_result;
+    }    case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("<function>"))};
     default:
         return (Item){.item = s2it(heap_create_name("<object>"))};
@@ -197,7 +242,7 @@ static Item py_make_number(double d) {
     return (Item){.item = d2it(ptr)};
 }
 
-static double py_get_number(Item value) {
+double py_get_number(Item value) {
     TypeId type = get_type_id(value);
     switch (type) {
     case LMD_TYPE_INT: return (double)it2i(value);
@@ -318,6 +363,8 @@ extern "C" Item py_divide(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: division by zero");
+        py_exception_pending = true;
+        py_exception_value = ItemNull;
         return ItemNull;
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -333,6 +380,8 @@ extern "C" Item py_floor_divide(Item left, Item right) {
         int64_t a = it2i(left), b = it2i(right);
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer floor division by zero");
+            py_exception_pending = true;
+            py_exception_value = ItemNull;
             return ItemNull;
         }
         // Python floor division rounds toward negative infinity
@@ -345,24 +394,182 @@ extern "C" Item py_floor_divide(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float floor division by zero");
+        py_exception_pending = true;
+        py_exception_value = ItemNull;
         return ItemNull;
     }
     return py_make_number(floor(l / r));
+}
+
+// ============================================================================
+// String % formatting
+// ============================================================================
+
+static Item py_string_format_percent(Item left, Item right) {
+    String* fmt = it2s(left);
+    if (!fmt) return left;
+
+    // collect format arguments: single value or tuple (array) of values
+    Array* args_arr = NULL;
+    Item single_arg = right;
+    int nargs = 1;
+    if (get_type_id(right) == LMD_TYPE_ARRAY) {
+        args_arr = it2arr(right);
+        nargs = args_arr ? args_arr->length : 0;
+    }
+
+    StrBuf* sb = strbuf_new();
+    int arg_idx = 0;
+    const char* p = fmt->chars;
+    const char* end = p + fmt->len;
+
+    while (p < end) {
+        if (*p != '%') {
+            strbuf_append_char(sb, *p++);
+            continue;
+        }
+        p++; // skip '%'
+        if (p >= end) break;
+
+        // %% → literal %
+        if (*p == '%') {
+            strbuf_append_char(sb, '%');
+            p++;
+            continue;
+        }
+
+        // parse optional flags: -, +, 0, space
+        bool flag_minus = false, flag_zero = false, flag_plus = false;
+        while (p < end && (*p == '-' || *p == '+' || *p == '0' || *p == ' ')) {
+            if (*p == '-') flag_minus = true;
+            else if (*p == '0') flag_zero = true;
+            else if (*p == '+') flag_plus = true;
+            p++;
+        }
+
+        // parse optional width
+        int width = 0;
+        while (p < end && *p >= '0' && *p <= '9') {
+            width = width * 10 + (*p - '0');
+            p++;
+        }
+
+        // parse optional precision
+        int precision = -1;
+        if (p < end && *p == '.') {
+            p++;
+            precision = 0;
+            while (p < end && *p >= '0' && *p <= '9') {
+                precision = precision * 10 + (*p - '0');
+                p++;
+            }
+        }
+
+        if (p >= end) break;
+        char spec = *p++;
+
+        // get current argument
+        Item arg;
+        if (args_arr) {
+            arg = (arg_idx < nargs) ? args_arr->items[arg_idx] : ItemNull;
+        } else {
+            arg = (arg_idx == 0) ? single_arg : ItemNull;
+        }
+        arg_idx++;
+
+        char buf[128];
+        const char* formatted = buf;
+        int flen = 0;
+
+        switch (spec) {
+        case 's': {
+            Item str_val = py_to_str(arg);
+            String* s = it2s(str_val);
+            if (s) {
+                if (precision >= 0 && precision < (int)s->len) {
+                    flen = precision;
+                } else {
+                    flen = s->len;
+                }
+                formatted = s->chars;
+            }
+            break;
+        }
+        case 'r': {
+            Item repr_val = py_builtin_repr(arg);
+            String* s = it2s(repr_val);
+            if (s) { formatted = s->chars; flen = s->len; }
+            break;
+        }
+        case 'd':
+        case 'i': {
+            int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+            flen = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+            break;
+        }
+        case 'f': {
+            double val = py_get_number(arg);
+            if (precision < 0) precision = 6;
+            flen = snprintf(buf, sizeof(buf), "%.*f", precision, val);
+            break;
+        }
+        case 'x': {
+            int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+            flen = snprintf(buf, sizeof(buf), "%llx", (long long)val);
+            break;
+        }
+        case 'o': {
+            int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+            flen = snprintf(buf, sizeof(buf), "%llo", (long long)val);
+            break;
+        }
+        default:
+            strbuf_append_char(sb, '%');
+            strbuf_append_char(sb, spec);
+            continue;
+        }
+
+        // apply width padding
+        if (width > 0 && flen < width) {
+            char pad = (flag_zero && !flag_minus) ? '0' : ' ';
+            if (flag_minus) {
+                strbuf_append_str_n(sb, formatted, flen);
+                for (int j = flen; j < width; j++) strbuf_append_char(sb, ' ');
+            } else {
+                // for zero-padding, handle sign
+                int start = 0;
+                if (flag_zero && flen > 0 && (formatted[0] == '-' || formatted[0] == '+')) {
+                    strbuf_append_char(sb, formatted[0]);
+                    start = 1;
+                }
+                for (int j = flen; j < width; j++) strbuf_append_char(sb, pad);
+                strbuf_append_str_n(sb, formatted + start, flen - start);
+            }
+        } else {
+            strbuf_append_str_n(sb, formatted, flen);
+        }
+    }
+
+    Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+    strbuf_free(sb);
+    return result;
 }
 
 extern "C" Item py_modulo(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
 
-    // string % args → format (simplified: just return string)
+    // string % args → format
     if (lt == LMD_TYPE_STRING) {
-        return left;
+        return py_string_format_percent(left, right);
     }
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer modulo by zero");
+            py_exception_pending = true;
+            py_exception_value = ItemNull;
             return ItemNull;
         }
         // Python modulo: result has same sign as divisor
@@ -375,6 +582,8 @@ extern "C" Item py_modulo(Item left, Item right) {
     double r = py_get_number(right);
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float modulo by zero");
+        py_exception_pending = true;
+        py_exception_value = ItemNull;
         return ItemNull;
     }
     return py_make_number(fmod(l, r) + (fmod(l, r) != 0 && ((l < 0) != (r < 0)) ? r : 0));
@@ -748,6 +957,107 @@ extern "C" Item py_subscript_set(Item object, Item key, Item value) {
 }
 
 // ============================================================================
+// Slice operations
+// ============================================================================
+
+// resolve a slice index: handle None (null), negative indices, and clamping
+static int64_t py_resolve_slice_idx(Item idx_item, int64_t len, int64_t default_val) {
+    if (get_type_id(idx_item) == LMD_TYPE_NULL) return default_val;
+    int64_t idx = (get_type_id(idx_item) == LMD_TYPE_INT) ? it2i(idx_item) : 0;
+    if (idx < 0) idx += len;
+    if (idx < 0) idx = 0;
+    if (idx > len) idx = len;
+    return idx;
+}
+
+extern "C" Item py_slice_get(Item object, Item start_item, Item stop_item, Item step_item) {
+    TypeId ot = get_type_id(object);
+
+    int64_t step = (get_type_id(step_item) == LMD_TYPE_NULL) ? 1 :
+                   (get_type_id(step_item) == LMD_TYPE_INT) ? it2i(step_item) : 1;
+    if (step == 0) {
+        log_error("py: ValueError: slice step cannot be zero");
+        return ItemNull;
+    }
+
+    if (ot == LMD_TYPE_ARRAY) {
+        Array* arr = it2arr(object);
+        if (!arr) return (Item){.array = array()};
+        int64_t len = arr->length;
+
+        int64_t start, stop;
+        if (step > 0) {
+            start = py_resolve_slice_idx(start_item, len, 0);
+            stop = py_resolve_slice_idx(stop_item, len, len);
+        } else {
+            // for negative step, defaults are len-1 and -len-1 (clamped to -1)
+            start = (get_type_id(start_item) == LMD_TYPE_NULL) ? len - 1 :
+                    py_resolve_slice_idx(start_item, len, len - 1);
+            stop = (get_type_id(stop_item) == LMD_TYPE_NULL) ? -1 :
+                   py_resolve_slice_idx(stop_item, len, -1);
+            // stop of -1 means "before index 0", clamp for the loop
+            if (get_type_id(stop_item) != LMD_TYPE_NULL) {
+                int64_t raw = it2i(stop_item);
+                if (raw < 0) raw += len;
+                stop = raw;
+                if (stop < -1) stop = -1;
+            }
+        }
+
+        Array* result = array();
+        if (step > 0) {
+            for (int64_t i = start; i < stop; i += step) {
+                if (i >= 0 && i < len) array_push(result, arr->items[i]);
+            }
+        } else {
+            for (int64_t i = start; i > stop; i += step) {
+                if (i >= 0 && i < len) array_push(result, arr->items[i]);
+            }
+        }
+        return (Item){.array = result};
+    }
+
+    if (ot == LMD_TYPE_STRING) {
+        String* str = it2s(object);
+        if (!str) return (Item){.item = s2it(heap_create_name(""))};
+        int64_t len = str->len;
+
+        int64_t start, stop;
+        if (step > 0) {
+            start = py_resolve_slice_idx(start_item, len, 0);
+            stop = py_resolve_slice_idx(stop_item, len, len);
+        } else {
+            start = (get_type_id(start_item) == LMD_TYPE_NULL) ? len - 1 :
+                    py_resolve_slice_idx(start_item, len, len - 1);
+            stop = (get_type_id(stop_item) == LMD_TYPE_NULL) ? -1 :
+                   py_resolve_slice_idx(stop_item, len, -1);
+            if (get_type_id(stop_item) != LMD_TYPE_NULL) {
+                int64_t raw = it2i(stop_item);
+                if (raw < 0) raw += len;
+                stop = raw;
+                if (stop < -1) stop = -1;
+            }
+        }
+
+        StrBuf* sb = strbuf_new();
+        if (step > 0) {
+            for (int64_t i = start; i < stop; i += step) {
+                if (i >= 0 && i < len) strbuf_append_char(sb, str->chars[i]);
+            }
+        } else {
+            for (int64_t i = start; i > stop; i += step) {
+                if (i >= 0 && i < len) strbuf_append_char(sb, str->chars[i]);
+            }
+        }
+        Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+        strbuf_free(sb);
+        return result;
+    }
+
+    return ItemNull;
+}
+
+// ============================================================================
 // Iterator protocol (simplified)
 // ============================================================================
 
@@ -823,17 +1133,56 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
     Function* fn = func.function;
     if (!fn || !fn->ptr) return ItemNull;
 
-    // call through function pointer — cast to appropriate type
+    int arity = fn->arity;
+    bool is_closure = (fn->closure_field_count > 0 && fn->closure_env != NULL);
+
+    // for closures, env is a hidden first argument — MIR function has arity+1 params
+    // typedef for closure calls: first arg is uint64_t* (env), rest are Item
+    typedef Item (*PyClosure1)(uint64_t*);
+    typedef Item (*PyClosure2)(uint64_t*, Item);
+    typedef Item (*PyClosure3)(uint64_t*, Item, Item);
+    typedef Item (*PyClosure4)(uint64_t*, Item, Item, Item);
+    typedef Item (*PyClosure5)(uint64_t*, Item, Item, Item, Item);
+    typedef Item (*PyClosure6)(uint64_t*, Item, Item, Item, Item, Item);
+    typedef Item (*PyClosure7)(uint64_t*, Item, Item, Item, Item, Item, Item);
+
+    // pad missing args with ItemNull for default parameter handling
+    Item padded[16];
+    for (int i = 0; i < arity && i < 16; i++) {
+        padded[i] = (i < arg_count && args) ? args[i] : ItemNull;
+    }
+
+    if (is_closure) {
+        uint64_t* env = (uint64_t*)fn->closure_env;
+        switch (arity) {
+        case 0: return ((PyClosure1)fn->ptr)(env);
+        case 1: return ((PyClosure2)fn->ptr)(env, padded[0]);
+        case 2: return ((PyClosure3)fn->ptr)(env, padded[0], padded[1]);
+        case 3: return ((PyClosure4)fn->ptr)(env, padded[0], padded[1], padded[2]);
+        case 4: return ((PyClosure5)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3]);
+        case 5: return ((PyClosure6)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4]);
+        case 6: return ((PyClosure7)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], padded[5]);
+        default: return ItemNull;
+        }
+    }
+
+    // non-closure call
     typedef Item (*PyFunc0)();
     typedef Item (*PyFunc1)(Item);
     typedef Item (*PyFunc2)(Item, Item);
     typedef Item (*PyFunc3)(Item, Item, Item);
+    typedef Item (*PyFunc4)(Item, Item, Item, Item);
+    typedef Item (*PyFunc5)(Item, Item, Item, Item, Item);
+    typedef Item (*PyFunc6)(Item, Item, Item, Item, Item, Item);
 
-    switch (fn->arity) {
+    switch (arity) {
     case 0: return ((PyFunc0)fn->ptr)();
-    case 1: return arg_count >= 1 ? ((PyFunc1)fn->ptr)(args[0]) : ItemNull;
-    case 2: return arg_count >= 2 ? ((PyFunc2)fn->ptr)(args[0], args[1]) : ItemNull;
-    case 3: return arg_count >= 3 ? ((PyFunc3)fn->ptr)(args[0], args[1], args[2]) : ItemNull;
+    case 1: return ((PyFunc1)fn->ptr)(padded[0]);
+    case 2: return ((PyFunc2)fn->ptr)(padded[0], padded[1]);
+    case 3: return ((PyFunc3)fn->ptr)(padded[0], padded[1], padded[2]);
+    case 4: return ((PyFunc4)fn->ptr)(padded[0], padded[1], padded[2], padded[3]);
+    case 5: return ((PyFunc5)fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4]);
+    case 6: return ((PyFunc6)fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], padded[5]);
     default: return ItemNull;
     }
 }

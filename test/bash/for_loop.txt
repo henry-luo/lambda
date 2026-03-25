@@ -1,0 +1,22 @@
+apple
+banana
+cherry
+hello world
+foo bar
+1
+2
+3
+4
+5
+count: 0
+count: 1
+count: 2
+count: 3
+count: 4
+100
+1x
+1y
+2x
+2y
+3x
+3y

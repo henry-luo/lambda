@@ -82,6 +82,7 @@ Item py_tuple_set(Item tuple, int index, Item value);
 // ========================================================================
 Item py_subscript_get(Item object, Item key);
 Item py_subscript_set(Item object, Item key, Item value);
+Item py_slice_get(Item object, Item start, Item stop, Item step);
 
 // ========================================================================
 // Iterator protocol
@@ -117,6 +118,7 @@ void py_reset_module_vars(void);
 // Built-in functions
 // ========================================================================
 Item py_print(Item* args, int argc);
+Item py_print_ex(Item* args, int argc, Item sep, Item end);
 Item py_builtin_len(Item obj);
 Item py_builtin_type(Item obj);
 Item py_builtin_isinstance(Item obj, Item classinfo);
@@ -145,6 +147,17 @@ Item py_builtin_list(Item iterable);
 Item py_builtin_dict(Item* args, int argc);
 Item py_builtin_set(Item iterable);
 Item py_builtin_tuple(Item iterable);
+Item py_builtin_round(Item x, Item ndigits);
+Item py_builtin_all(Item iterable);
+Item py_builtin_any(Item iterable);
+Item py_builtin_bin(Item n);
+Item py_builtin_oct(Item n);
+Item py_builtin_hex(Item n);
+Item py_builtin_divmod(Item a, Item b);
+Item py_builtin_pow(Item base, Item exp, Item mod);
+Item py_builtin_callable(Item obj);
+Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_flag);
+Item py_list_sort_ex(Item list, Item key_func, Item reverse_flag);
 
 // ========================================================================
 // String methods (dispatcher)

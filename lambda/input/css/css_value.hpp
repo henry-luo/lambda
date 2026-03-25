@@ -59,6 +59,8 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_TABLE_LAYOUT,        // auto, fixed
     CSS_VALUE_GROUP_BORDER_COLLAPSE,     // collapse, separate
     CSS_VALUE_GROUP_EMPTY_CELLS,         // show, hide
+    CSS_VALUE_GROUP_TEXT_BOX_TRIM,       // none, trim-start, trim-end, trim-both
+    CSS_VALUE_GROUP_TEXT_BOX_EDGE,       // auto, text, cap, ex, ideographic, alphabetic
     CSS_VALUE_GROUP_SPECIAL_TYPE,        // _length, _percentage, _number, _integer, _angle
     CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
     CSS_VALUE_GROUP_RADINT,              // Radiant specific values
@@ -488,6 +490,13 @@ typedef enum CssEnum : int16_t {
     // object-fit values
     CSS_VALUE_FILL,
     CSS_VALUE_SCALE_DOWN,
+    // text-box-trim values
+    CSS_VALUE_TRIM_START,
+    CSS_VALUE_TRIM_END,
+    CSS_VALUE_TRIM_BOTH,
+    // text-box-edge values (reuse existing: CSS_VALUE_AUTO, CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, CSS_VALUE_IDEOGRAPHIC)
+    CSS_VALUE_CAP,
+    CSS_VALUE_EX,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

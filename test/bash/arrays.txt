@@ -1,0 +1,12 @@
+alpha
+beta
+gamma
+delta
+4
+alpha beta gamma delta
+BETA
+5
+epsilon
+150
+c d e
+a c d e f

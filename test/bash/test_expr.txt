@@ -1,0 +1,15 @@
+eq pass
+ne pass
+gt pass
+ge pass
+lt pass
+le pass
+str eq pass
+str ne pass
+str lt pass
+str gt pass
+and pass
+or pass
+not pass
+regex pass
+glob pass

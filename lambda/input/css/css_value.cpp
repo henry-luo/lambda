@@ -433,6 +433,13 @@ static const CssEnumInfo css_value_definitions[] = {
     // object-fit values (must match enum order: FILL, SCALE_DOWN after SMALL_CAPS)
     {"fill", 4, CSS_VALUE_FILL, CSS_VALUE_GROUP_OBJECT_FIT},
     {"scale-down", 10, CSS_VALUE_SCALE_DOWN, CSS_VALUE_GROUP_OBJECT_FIT},
+    // text-box-trim values
+    {"trim-start", 10, CSS_VALUE_TRIM_START, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
+    {"trim-end", 8, CSS_VALUE_TRIM_END, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
+    {"trim-both", 9, CSS_VALUE_TRIM_BOTH, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
+    // text-box-edge values (auto, text, alphabetic, ideographic reuse existing enums)
+    {"cap", 3, CSS_VALUE_CAP, CSS_VALUE_GROUP_TEXT_BOX_EDGE},
+    {"ex", 2, CSS_VALUE_EX, CSS_VALUE_GROUP_TEXT_BOX_EDGE},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

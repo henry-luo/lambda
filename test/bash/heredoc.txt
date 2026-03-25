@@ -1,0 +1,9 @@
+Hello from heredoc
+Line two
+Line three
+Hello, Lambda!
+Version: 1.0
+No expansion: $name
+No substitution: $(echo test)
+single line here-string
+Howdy, partner!

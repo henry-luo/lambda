@@ -973,6 +973,829 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
     return last->bound->margin.bottom;
 }
 
+// ============================================================================
+// CSS Inline Level 3 §5: text-box-trim
+// ============================================================================
+
+// Compute the half-leading (lead_y) for a block element from its font metrics.
+// Returns 0 if the block has no font or line-height information.
+static float compute_block_lead_y(ViewBlock* block) {
+    if (!block->font || !block->font->font_handle) return 0;
+
+    // Get ascender/descender, preferring OS/2 typo metrics when USE_TYPO_METRICS is set
+    float ascender, descender;
+    TypoMetrics typo = get_os2_typo_metrics(block->font->font_handle);
+    if (typo.valid && typo.use_typo_metrics) {
+        ascender = typo.ascender;
+        descender = typo.descender;
+    } else {
+        ascender = block->font->ascender;
+        descender = block->font->descender;
+    }
+
+    // Resolve line-height: walk up parent chain to find inherited value
+    float line_height;
+    const CssValue* lh = nullptr;
+    ViewElement* ancestor = (ViewElement*)block;
+    while (ancestor) {
+        if (ancestor->blk && ancestor->blk->line_height) {
+            lh = ancestor->blk->line_height;
+            if (lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_INHERIT) {
+                ancestor = ancestor->parent_view();
+                continue;
+            }
+            break;
+        }
+        ancestor = ancestor->parent_view();
+    }
+
+    if (lh) {
+        if (lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_NORMAL) {
+            line_height = calc_normal_line_height(block->font->font_handle);
+        } else if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+            line_height = lh->data.number.value * block->font->font_size;
+        } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+            line_height = (float)lh->data.length.value;
+            if (lh->data.length.unit == CSS_UNIT_EM) {
+                line_height *= block->font->font_size;
+            }
+        } else {
+            line_height = calc_normal_line_height(block->font->font_handle);
+        }
+    } else {
+        line_height = calc_normal_line_height(block->font->font_handle);
+    }
+
+    float lead_y = max(0.0f, (line_height - (ascender + descender)) / 2);
+    log_debug("[text-box-trim] compute_block_lead_y: asc=%.1f, desc=%.1f, lh=%.1f, lead_y=%.1f",
+              ascender, descender, line_height, lead_y);
+    return lead_y;
+}
+
+// Check if a block view is out-of-flow (absolutely positioned, fixed, or floated)
+static bool is_out_of_flow_block(ViewBlock* vb) {
+    if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                          vb->position->position == CSS_VALUE_FIXED)) {
+        return true;
+    }
+    if (element_has_float(vb)) return true;
+    return false;
+}
+
+// Find the first in-flow block child inside an inline wrapper (block-in-inline).
+// In Radiant, a <span> containing a <div> remains as RDT_VIEW_INLINE with a
+// block child, rather than being split into anonymous blocks per CSS 2.1 §9.2.1.1.
+// Returns null if the inline view has no block children.
+static ViewBlock* find_first_block_in_inline(View* inline_view) {
+    if (inline_view->view_type != RDT_VIEW_INLINE) return nullptr;
+    ViewElement* span = (ViewElement*)inline_view;
+    View* child = span->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) return vb;
+        }
+        child = child->next();
+    }
+    return nullptr;
+}
+
+// Find the last in-flow block child inside an inline wrapper (block-in-inline).
+static ViewBlock* find_last_block_in_inline(View* inline_view) {
+    if (inline_view->view_type != RDT_VIEW_INLINE) return nullptr;
+    ViewElement* span = (ViewElement*)inline_view;
+    View* child = span->first_placed_child();
+    ViewBlock* last = nullptr;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) last = vb;
+        }
+        child = child->next();
+    }
+    return last;
+}
+
+// Check whether any inline/text views exist before the first in-flow block child.
+// If so, an implicit anonymous block would wrap them per CSS 2.1 §9.2.1.1.
+// Inline wrappers containing blocks (block-in-inline) are treated as block children.
+static bool has_any_inline_before_first_block(ViewBlock* container) {
+    View* child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                return false; // hit first in-flow block without finding inline content
+            }
+            child = child->next();
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_INLINE) {
+            // An inline wrapping a block is effectively a block, not inline content
+            if (find_first_block_in_inline(child)) {
+                return false; // block-in-inline acts as first block
+            }
+            return true;
+        }
+        if (child->view_type == RDT_VIEW_TEXT) {
+            return true;
+        }
+        child = child->next();
+    }
+    return false;
+}
+
+// Check whether any inline/text views exist after the last in-flow block child.
+// Inline wrappers containing blocks (block-in-inline) are treated as block children.
+static bool has_any_inline_after_last_block(ViewBlock* container) {
+    View* child = container->first_placed_child();
+    View* last_block = nullptr;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                last_block = child;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
+            // Block-in-inline acts as a block child
+            last_block = child;
+        }
+        child = child->next();
+    }
+    if (!last_block) return false;
+
+    child = last_block->next();
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT) {
+            return true;
+        }
+        if (child->view_type == RDT_VIEW_INLINE && !find_first_block_in_inline(child)) {
+            return true; // pure inline after last block
+        }
+        child = child->next();
+    }
+    return false;
+}
+
+// Check whether inline content before the first block child has real content
+// (non-whitespace text or non-empty inline elements that generate line boxes).
+// Inline wrappers containing blocks (block-in-inline) are treated as block children.
+static bool has_inline_content_before_first_block(ViewBlock* container) {
+    View* child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                return false;
+            }
+            child = child->next();
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
+            return false; // block-in-inline acts as first block
+        }
+        if (child->view_type == RDT_VIEW_TEXT && child->width > 0) return true;
+        if (child->view_type == RDT_VIEW_INLINE && (child->width > 0 || child->height > 0)) return true;
+        child = child->next();
+    }
+    return false;
+}
+
+// Check whether inline content after the last block child has real content.
+// Inline wrappers containing blocks (block-in-inline) are treated as block children.
+static bool has_inline_content_after_last_block(ViewBlock* container) {
+    View* child = container->first_placed_child();
+    View* last_block = nullptr;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                last_block = child;
+            }
+        } else if (child->view_type == RDT_VIEW_INLINE && find_first_block_in_inline(child)) {
+            last_block = child; // block-in-inline acts as a block
+        }
+        child = child->next();
+    }
+    if (!last_block) return false;
+
+    child = last_block->next();
+    while (child) {
+        if (child->view_type == RDT_VIEW_TEXT && child->width > 0) return true;
+        if (child->view_type == RDT_VIEW_INLINE && !find_first_block_in_inline(child) &&
+            (child->width > 0 || child->height > 0)) return true;
+        child = child->next();
+    }
+    return false;
+}
+
+// Find the block containing the first formatted line, following CSS Inline 3 §5 rules.
+// For a block container with block-level content, the first formatted line is
+// the first formatted line of its first in-flow block-level child.
+// Also handles block-in-inline: an inline wrapper (span) containing a block child.
+// Returns nullptr if no first formatted line exists.
+static ViewBlock* find_first_formatted_line_block(ViewBlock* container) {
+    // Check if container has any in-flow block children (direct or via inline wrapper).
+    bool has_block_child = false;
+    View* child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                has_block_child = true;
+                break;
+            }
+        } else if (find_first_block_in_inline(child)) {
+            has_block_child = true;
+            break;
+        }
+        child = child->next();
+    }
+
+    if (!has_block_child) {
+        // Pure inline content container: check if there's any content
+        child = container->first_placed_child();
+        while (child) {
+            if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
+                return container;
+            }
+            child = child->next();
+        }
+        return nullptr; // empty container
+    }
+
+    // Container has block children. Per CSS 2.1 §9.2.1.1, inline content
+    // alongside block children creates anonymous block boxes.
+    //
+    // Per CSS Inline 3 §5: "The first formatted line of a block container
+    // that contains block-level content is the first formatted line of its
+    // first in-flow block-level child."
+    //
+    // If there's any inline content before the first explicit block child,
+    // an anonymous block wraps it — and THAT anonymous block is the first
+    // in-flow block-level child. If it has real content → return container.
+    // If it has no formatted line (whitespace-only) → no first formatted line.
+    if (has_any_inline_before_first_block(container)) {
+        if (has_inline_content_before_first_block(container)) {
+            return container; // anonymous block has real content
+        }
+        return nullptr; // anonymous block has no formatted line
+    }
+
+    // No inline content before first block child — walk to it and recurse.
+    // Also handles block-in-inline: recurse into blocks found inside inline wrappers.
+    child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (is_out_of_flow_block(vb)) {
+                child = child->next();
+                continue;
+            }
+            return find_first_formatted_line_block(vb);
+        }
+        ViewBlock* bii = find_first_block_in_inline(child);
+        if (bii) {
+            return find_first_formatted_line_block(bii);
+        }
+        child = child->next();
+    }
+    return nullptr;
+}
+
+// Find the block containing the last formatted line.
+// Returns nullptr if no last formatted line exists.
+static ViewBlock* find_last_formatted_line_block(ViewBlock* container) {
+    // Check if container has any in-flow block children (direct or via inline wrapper).
+    bool has_block_child = false;
+    View* child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                has_block_child = true;
+                break;
+            }
+        } else if (find_first_block_in_inline(child)) {
+            has_block_child = true;
+            break;
+        }
+        child = child->next();
+    }
+
+    if (!has_block_child) {
+        // Pure inline content container
+        child = container->first_placed_child();
+        while (child) {
+            if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_INLINE) {
+                return container;
+            }
+            child = child->next();
+        }
+        return nullptr;
+    }
+
+    // Container has block children. Check if inline content after last block
+    // forms an implicit anonymous block (which would be the last in-flow
+    // block-level child per CSS 2.1 §9.2.1.1).
+    if (has_any_inline_after_last_block(container)) {
+        if (has_inline_content_after_last_block(container)) {
+            return container; // anonymous block after last explicit block has content
+        }
+        return nullptr; // anonymous block has no formatted line
+    }
+
+    // Find last in-flow block child and recurse.
+    // Also handles block-in-inline: check inline wrappers for block children.
+    View* last_in_flow = nullptr;
+    bool last_is_in_inline = false;
+    child = container->first_placed_child();
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                last_in_flow = child;
+                last_is_in_inline = false;
+            }
+        } else {
+            ViewBlock* bii = find_last_block_in_inline(child);
+            if (bii) {
+                last_in_flow = (View*)bii;
+                last_is_in_inline = true;
+            }
+        }
+        child = child->next();
+    }
+    if (last_in_flow) {
+        if (last_is_in_inline) {
+            return find_last_formatted_line_block((ViewBlock*)last_in_flow);
+        }
+        return find_last_formatted_line_block((ViewBlock*)last_in_flow);
+    }
+    return nullptr;
+}
+
+// Get text-box-edge values from a block, walking up to ancestors if not set.
+// text-box-edge is an inherited property (CSS Inline 3 §5.1).
+static void get_text_box_edge(ViewBlock* block, CssEnum* over_edge, CssEnum* under_edge) {
+    // Check the block itself first
+    if (block->blk && block->blk->text_box_over_edge != CSS_VALUE__UNDEF) {
+        *over_edge = block->blk->text_box_over_edge;
+        *under_edge = block->blk->text_box_under_edge;
+        return;
+    }
+    // Walk up parent chain (inheritance)
+    ViewElement* parent = block->parent_view();
+    while (parent) {
+        ViewBlock* pb = (ViewBlock*)parent;
+        if (pb->blk && pb->blk->text_box_over_edge != CSS_VALUE__UNDEF) {
+            *over_edge = pb->blk->text_box_over_edge;
+            *under_edge = pb->blk->text_box_under_edge;
+            return;
+        }
+        parent = parent->parent_view();
+    }
+    // Default: auto → text
+    *over_edge = CSS_VALUE_TEXT;
+    *under_edge = CSS_VALUE_TEXT;
+}
+
+// Compute the over-edge (block-start) trim amount based on text-box-edge and font.
+// Get block container font ascender/descender, matching compute_block_lead_y logic.
+static void get_block_font_metrics(ViewBlock* block, float* ascender, float* descender) {
+    if (!block->font || !block->font->font_handle) {
+        *ascender = *descender = 0;
+        return;
+    }
+    TypoMetrics typo = get_os2_typo_metrics(block->font->font_handle);
+    if (typo.valid && typo.use_typo_metrics) {
+        *ascender = typo.ascender;
+        *descender = typo.descender;
+    } else {
+        *ascender = block->font->ascender;
+        *descender = block->font->descender;
+    }
+}
+
+// Compute the over-edge (block-start) trim based on text-box-edge and font.
+// CSS Inline 3 §5: The trim is the distance from the line box's over edge
+// to the block container's text-box-edge metric. When tall inline descendants
+// expand the line box beyond the block's own half-leading, the trim must account
+// for the full line box extent, not just the block's half-leading.
+static float compute_over_trim(ViewBlock* line_block, CssEnum over_edge) {
+    float block_ascender, block_descender;
+    get_block_font_metrics(line_block, &block_ascender, &block_descender);
+
+    // Use stored first-line max_ascender if available (captures tall inline descendants)
+    float line_box_over = 0;
+    if (line_block->blk && line_block->blk->first_line_max_ascender > 0) {
+        line_box_over = line_block->blk->first_line_max_ascender;
+    } else {
+        // Fallback: strut-only (block's own ascender + half-leading)
+        line_box_over = block_ascender + compute_block_lead_y(line_block);
+    }
+
+    if (over_edge == CSS_VALUE_TEXT || over_edge == CSS_VALUE_AUTO) {
+        float trim = line_box_over - block_ascender;
+        log_debug("[text-box-trim] compute_over_trim(text): line_box_over=%.1f, block_asc=%.1f, trim=%.1f",
+                  line_box_over, block_ascender, trim);
+        return max(0.0f, trim);
+    }
+    // cap/ex: trim to metric height instead of ascender
+    if (!line_block->font || !line_block->font->font_handle) {
+        return max(0.0f, line_box_over - block_ascender);
+    }
+    const FontMetrics* m = font_get_metrics(line_block->font->font_handle);
+    if (!m) return max(0.0f, line_box_over - block_ascender);
+    if (over_edge == CSS_VALUE_CAP) {
+        float cap_height = m->cap_height;
+        if (cap_height > 0) {
+            return max(0.0f, line_box_over - cap_height);
+        }
+    } else if (over_edge == CSS_VALUE_EX) {
+        float x_height = m->x_height;
+        if (x_height > 0) {
+            return max(0.0f, line_box_over - x_height);
+        }
+    }
+    return max(0.0f, line_box_over - block_ascender);
+}
+
+// Compute the under-edge (block-end) trim based on text-box-edge and font.
+// CSS Inline 3 §5: Same principle as over-edge, using last line's max_descender.
+static float compute_under_trim(ViewBlock* line_block, CssEnum under_edge) {
+    float block_ascender, block_descender;
+    get_block_font_metrics(line_block, &block_ascender, &block_descender);
+
+    // Use stored last-line max_descender if available
+    float line_box_under = 0;
+    if (line_block->blk && line_block->blk->last_line_max_descender > 0) {
+        line_box_under = line_block->blk->last_line_max_descender;
+    } else {
+        line_box_under = block_descender + compute_block_lead_y(line_block);
+    }
+
+    if (under_edge == CSS_VALUE_TEXT || under_edge == CSS_VALUE_AUTO) {
+        float trim = line_box_under - block_descender;
+        log_debug("[text-box-trim] compute_under_trim(text): line_box_under=%.1f, block_desc=%.1f, trim=%.1f",
+                  line_box_under, block_descender, trim);
+        return max(0.0f, trim);
+    }
+    if (under_edge == CSS_VALUE_ALPHABETIC) {
+        // Trim to alphabetic baseline: entire under extent
+        return max(0.0f, line_box_under);
+    }
+    return max(0.0f, line_box_under - block_descender);
+}
+
+// Apply start trim: at each level from 'container' down to 'target',
+// reduce the first in-flow block child's height and shift subsequent siblings up.
+// When container == target, shift inline content up instead.
+// Shift all TextRect positions within a view subtree by the given delta.
+// Text rectangles store absolute positions, so they need separate adjustment
+// when the block's content is shifted for text-box-trim.
+static void shift_text_rects_y(View* view, float delta) {
+    if (view->view_type == RDT_VIEW_TEXT) {
+        TextRect* rect = ((ViewText*)view)->rect;
+        while (rect) {
+            rect->y += delta;
+            rect = rect->next;
+        }
+        return;
+    }
+    if (view->is_group()) {
+        // Recurse into both block and inline containers (ViewBlock, ViewSpan).
+        // Inline wrappers (e.g. <span> containing block-in-inline) can have
+        // text and block descendants whose TextRects need shifting.
+        View* child = ((ViewElement*)view)->first_placed_child();
+        while (child) {
+            shift_text_rects_y(child, delta);
+            child = child->next();
+        }
+    }
+}
+
+// Shift text rects within an inline view, skipping block children.
+// Block children inside inline wrappers (block-in-inline) have their text rects
+// shifted separately when the block itself is shifted by apply_start_trim_recursive.
+static void shift_text_rects_y_inline_only(View* view, float delta) {
+    if (view->view_type == RDT_VIEW_TEXT) {
+        TextRect* rect = ((ViewText*)view)->rect;
+        while (rect) {
+            rect->y += delta;
+            rect = rect->next;
+        }
+        return;
+    }
+    if (view->view_type == RDT_VIEW_INLINE) {
+        View* child = ((ViewSpan*)view)->first_placed_child();
+        while (child) {
+            if (!child->is_block()) {
+                shift_text_rects_y_inline_only(child, delta);
+            }
+            child = child->next();
+        }
+    }
+}
+
+static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
+    if (container == target) {
+        // Inline content in this block. Shift all children up,
+        // including their TextRect positions.
+        // Floats are also shifted: they're positioned relative to the content
+        // area, and trim-start shrinks the top of the content area.
+        // Absolute/fixed elements are NOT shifted — they're positioned
+        // relative to the containing block edges, not the content area.
+        View* child = container->first_placed_child();
+        while (child) {
+            bool skip = false;
+            if (child->is_block()) {
+                ViewBlock* vb = (ViewBlock*)child;
+                if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                      vb->position->position == CSS_VALUE_FIXED)) {
+                    skip = true;
+                }
+            }
+            if (!skip) {
+                child->y -= trim;
+                // Block-in-inline: block children inside inline wrappers have y
+                // relative to the containing block, not relative to the inline
+                // wrapper. Shifting the inline wrapper doesn't move them, so
+                // shift their y coordinates and text rects explicitly.
+                // Use shift_text_rects_y_inline_only to avoid double-shifting
+                // text rects inside block descendants.
+                if (child->view_type == RDT_VIEW_INLINE) {
+                    shift_text_rects_y_inline_only(child, -trim);
+                    // Block-in-inline: block children inside inline wrappers have y
+                    // relative to the containing block, not relative to the inline
+                    // wrapper. Shift their y coordinates so they move with the wrapper.
+                    // Text rects inside blocks are relative to the block, so they
+                    // don't need shifting — the absolute position recalculation
+                    // already accounts for the block's shifted y.
+                    View* ic = ((ViewSpan*)child)->first_placed_child();
+                    while (ic) {
+                        if (ic->is_block() && !is_out_of_flow_block((ViewBlock*)ic)) {
+                            ic->y -= trim;
+                        }
+                        ic = ic->next();
+                    }
+                } else {
+                    shift_text_rects_y(child, -trim);
+                }
+            }
+            child = child->next();
+        }
+        return;
+    }
+
+    // Find the first in-flow block child (which is on the path to target).
+    // Also handles block-in-inline: an inline wrapper containing the target block.
+    View* child = container->first_placed_child();
+    bool found_first = false;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (is_out_of_flow_block(vb)) {
+                child = child->next();
+                continue;
+            }
+            if (!found_first) {
+                // First in-flow child: reduce its height, recurse into it
+                found_first = true;
+                vb->height -= trim;
+                vb->content_height -= trim;
+                apply_start_trim_recursive(vb, target, trim);
+            } else {
+                // Subsequent in-flow siblings: shift up
+                child->y -= trim;
+                shift_text_rects_y(child, -trim);
+            }
+        } else if (!found_first && child->view_type == RDT_VIEW_INLINE) {
+            // Check for block-in-inline: inline wrapper containing a block child
+            ViewBlock* bii = find_first_block_in_inline(child);
+            if (bii) {
+                found_first = true;
+                // Reduce the inline wrapper's height
+                child->height -= trim;
+                // Reduce the block inside the inline
+                bii->height -= trim;
+                bii->content_height -= trim;
+                apply_start_trim_recursive(bii, target, trim);
+            }
+        } else if (!found_first) {
+            // Non-block in-flow content before any block child — skip safely
+        } else {
+            // Non-block content after first block: shift up
+            child->y -= trim;
+            if (child->view_type == RDT_VIEW_INLINE) {
+                shift_text_rects_y_inline_only(child, -trim);
+                View* ic = ((ViewSpan*)child)->first_placed_child();
+                while (ic) {
+                    if (ic->is_block() && !is_out_of_flow_block((ViewBlock*)ic)) {
+                        ic->y -= trim;
+                    }
+                    ic = ic->next();
+                }
+            } else {
+                shift_text_rects_y(child, -trim);
+            }
+        }
+        child = child->next();
+    }
+}
+
+// Apply end trim: at each level from 'container' down to 'target',
+// reduce the last in-flow block child's height.
+// Also handles block-in-inline: reduces inline wrapper height when it contains
+// the target block.
+static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
+    if (container == target) {
+        // CSS Inline 3: invisible line boxes (containing no glyphs with non-zero
+        // advance width) at the end of the container are positioned after the last
+        // formatted line. After end-trim, reposition them to the new content end.
+        // Find the bottom of the last visible line (max y+height of text/br views).
+        float last_visible_bottom = 0;
+        View* child = container->first_placed_child();
+        while (child) {
+            if (child->view_type == RDT_VIEW_TEXT || child->view_type == RDT_VIEW_BR) {
+                float bottom = child->y + child->height;
+                if (bottom > last_visible_bottom) last_visible_bottom = bottom;
+            }
+            child = child->next();
+        }
+        // Shift children on invisible lines (positioned at or after last visible bottom)
+        // Skip block-level children: in block-in-inline scenarios, block children
+        // are structural boundaries between anonymous blocks and must not be moved.
+        if (last_visible_bottom > 0) {
+            child = container->first_placed_child();
+            while (child) {
+                if (child->y >= last_visible_bottom && child->view_type != RDT_VIEW_TEXT
+                    && child->view_type != RDT_VIEW_BR && !child->is_block()) {
+                    child->y -= trim;
+                }
+                child = child->next();
+            }
+        }
+        return;
+    }
+
+    // Find the last in-flow block child, including blocks inside inline wrappers.
+    View* child = container->first_placed_child();
+    ViewBlock* last_in_flow = nullptr;
+    View* last_inline_wrapper = nullptr;
+    while (child) {
+        if (child->is_block()) {
+            ViewBlock* vb = (ViewBlock*)child;
+            if (!is_out_of_flow_block(vb)) {
+                last_in_flow = vb;
+                last_inline_wrapper = nullptr;
+            }
+        } else {
+            ViewBlock* bii = find_last_block_in_inline(child);
+            if (bii) {
+                last_in_flow = bii;
+                last_inline_wrapper = child;
+            }
+        }
+        child = child->next();
+    }
+    if (last_in_flow) {
+        if (last_inline_wrapper) {
+            // Reduce the inline wrapper's height too
+            last_inline_wrapper->height -= trim;
+        }
+        last_in_flow->height -= trim;
+        last_in_flow->content_height -= trim;
+        apply_end_trim_recursive(last_in_flow, target, trim);
+    }
+}
+
+// Check if there is any non-zero padding or border between 'container' and 'target'
+// on the block-start side (top). Returns true if trim should be suppressed.
+static bool has_start_padding_or_border_between(ViewBlock* container, ViewBlock* target) {
+    if (container == target) return false;
+    // Walk the path from container's first in-flow block child down to target
+    ViewBlock* current = container;
+    while (current != target) {
+        View* child = current->first_placed_child();
+        ViewBlock* next_block = nullptr;
+        while (child) {
+            if (child->is_block()) {
+                ViewBlock* vb = (ViewBlock*)child;
+                if (!is_out_of_flow_block(vb)) {
+                    next_block = vb;
+                    break;
+                }
+            } else {
+                ViewBlock* bii = find_first_block_in_inline(child);
+                if (bii) {
+                    next_block = bii;
+                    break;
+                }
+            }
+            child = child->next();
+        }
+        if (!next_block) break;
+        // Check this block's padding-top and border-top
+        if (next_block->bound) {
+            if (next_block->bound->padding.top > 0) return true;
+            if (next_block->bound->border && next_block->bound->border->width.top > 0) return true;
+        }
+        current = next_block;
+    }
+    return false;
+}
+
+// Check if there is any non-zero padding or border between 'container' and 'target'
+// on the block-end side (bottom). Returns true if trim should be suppressed.
+static bool has_end_padding_or_border_between(ViewBlock* container, ViewBlock* target) {
+    if (container == target) return false;
+    ViewBlock* current = container;
+    while (current != target) {
+        View* child = current->first_placed_child();
+        ViewBlock* last_block = nullptr;
+        while (child) {
+            if (child->is_block()) {
+                ViewBlock* vb = (ViewBlock*)child;
+                if (!is_out_of_flow_block(vb)) {
+                    last_block = vb;
+                }
+            } else {
+                ViewBlock* bii = find_last_block_in_inline(child);
+                if (bii) {
+                    last_block = bii;
+                }
+            }
+            child = child->next();
+        }
+        if (!last_block) break;
+        if (last_block->bound) {
+            if (last_block->bound->padding.bottom > 0) return true;
+            if (last_block->bound->border && last_block->bound->border->width.bottom > 0) return true;
+        }
+        current = last_block;
+    }
+    return false;
+}
+
+// Apply text-box-trim adjustments to a block and its children.
+// CSS Inline 3 §5: trims half-leading from first/last formatted lines.
+// CSS Inline Level 3 §5: Compute text-box-trim amounts and adjust child
+// positions.  Returns the total height to subtract from the block's flow
+// height.  The caller is responsible for reducing block->height /
+// block->content_height so that min/max-height constraints are applied
+// AFTER the trim (per spec, trim modifies intrinsic height before
+// min-height/max-height kicks in).
+static float apply_text_box_trim(ViewBlock* block) {
+    if (!block->blk || !block->blk->text_box_trim) return 0;
+
+    uint8_t trim = block->blk->text_box_trim;
+
+    float start_trim = 0, end_trim = 0;
+    ViewBlock* first_line_block = nullptr;
+    ViewBlock* last_line_block = nullptr;
+
+    if (trim & TEXT_BOX_TRIM_START) {
+        first_line_block = find_first_formatted_line_block(block);
+        if (first_line_block && !has_start_padding_or_border_between(block, first_line_block)) {
+            // CSS Inline 3 §5: text-box-edge is inherited; use the value from
+            // the formatted line block, not the trimming block.
+            CssEnum over_edge, under_edge;
+            get_text_box_edge(first_line_block, &over_edge, &under_edge);
+            start_trim = compute_over_trim(first_line_block, over_edge);
+        }
+    }
+
+    if (trim & TEXT_BOX_TRIM_END) {
+        last_line_block = find_last_formatted_line_block(block);
+        if (last_line_block && !has_end_padding_or_border_between(block, last_line_block)) {
+            CssEnum over_edge, under_edge;
+            get_text_box_edge(last_line_block, &over_edge, &under_edge);
+            end_trim = compute_under_trim(last_line_block, under_edge);
+        }
+    }
+
+    if (start_trim <= 0 && end_trim <= 0) return 0;
+
+    log_debug("[text-box-trim] applying trim: start=%.1f, end=%.1f to <%s> (height=%.1f)",
+              start_trim, end_trim, block->node_name(), block->height);
+
+    if (start_trim > 0) {
+        apply_start_trim_recursive(block, first_line_block, start_trim);
+    }
+
+    if (end_trim > 0) {
+        apply_end_trim_recursive(block, last_line_block, end_trim);
+    }
+
+    float total_trim = start_trim + end_trim;
+
+    log_debug("[text-box-trim] computed total trim: %.1f for <%s>",
+              total_trim, block->node_name());
+
+    return total_trim;
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     // finalize the block size
     float flow_width, flow_height;
@@ -1028,6 +1851,30 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 log_debug("list-item: empty content, setting min height from marker line-height: %.1f", min_line_height);
             }
         }
+    }
+
+    // CSS Inline Level 3 §5: Apply text-box-trim to the intrinsic flow height
+    // BEFORE min-height/max-height constraints (§10.7) are evaluated.
+    // The trim modifies content height (removing half-leading from first/last
+    // formatted lines) and shifts child positions accordingly.
+    // Copy line box metrics from layout context to view tree for use by trim.
+    if (block->blk) {
+        block->blk->first_line_max_ascender = lycon->block.first_line_max_ascender;
+        block->blk->first_line_max_descender = lycon->block.first_line_max_descender;
+        block->blk->last_line_max_ascender = lycon->block.last_line_max_ascender;
+        block->blk->last_line_max_descender = lycon->block.last_line_max_descender;
+    }
+    float text_box_trim_amount = apply_text_box_trim(block);
+    if (text_box_trim_amount > 0) {
+        flow_height -= text_box_trim_amount;
+        block->content_height -= text_box_trim_amount;
+        // Also reduce advance_y so that absolutely-positioned elements (whose
+        // height auto-sizing in layout_abs_block reads advance_y directly)
+        // pick up the trimmed value.  For in-flow blocks this is harmless
+        // because the parent restores its own block context afterward.
+        lycon->block.advance_y -= text_box_trim_amount;
+        log_debug("[text-box-trim] adjusted flow_height=%.1f, content_height=%.1f, advance_y=%.1f (trimmed %.1f)",
+                  flow_height, block->content_height, lycon->block.advance_y, text_box_trim_amount);
     }
 
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
@@ -1283,6 +2130,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             log_debug("finalize: enabling clip for overflow:hidden, wd:%f, hg:%f", block->width, block->height);
         }
     }
+
     log_debug("finalized block wd:%f, hg:%f", block->width, block->height);
 }
 

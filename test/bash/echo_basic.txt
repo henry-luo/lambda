@@ -1,0 +1,7 @@
+Hello, World!
+Lambda Bash Runtime
+Line 1
+Line 2
+Line 3
+
+After empty line

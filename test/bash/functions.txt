@@ -1,0 +1,14 @@
+Hello from function
+7
+30
+5
+10
+0
+1
+14
+30
+1
+120
+720
+hello world
+hello Lambda

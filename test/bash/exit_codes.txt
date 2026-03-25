@@ -1,0 +1,9 @@
+0
+1
+2
+0
+1
+and: true
+or: fallback
+chain: all true
+chain: fallback after false
