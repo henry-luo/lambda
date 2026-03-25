@@ -31,6 +31,20 @@ static int bash_last_exit_code = 0;
 static int bash_loop_control = 0;
 static int bash_loop_control_depth = 1;
 
+// Variable table (runtime)
+static struct hashmap* bash_var_table = NULL;
+
+// helper to grow a list's capacity
+static void bash_grow_list(List* list) {
+    int new_cap = list->capacity ? list->capacity * 2 : 8;
+    Item* new_items = (Item*)heap_calloc(sizeof(Item) * new_cap, LMD_TYPE_RAW_POINTER);
+    if (list->items && list->length > 0) {
+        memcpy(new_items, list->items, sizeof(Item) * list->length);
+    }
+    list->items = new_items;
+    list->capacity = new_cap;
+}
+
 // ============================================================================
 // Type conversion (Bash string-first semantics)
 // ============================================================================
@@ -305,27 +319,39 @@ static const char* bash_item_cstr(Item value, char* buf, size_t buf_size) {
 
 // numeric test comparisons: -eq, -ne, -gt, -ge, -lt, -le
 extern "C" Item bash_test_eq(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) == bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) == bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_ne(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) != bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) != bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_gt(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) > bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) > bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_ge(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) >= bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) >= bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_lt(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) < bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) < bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_le(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) <= bash_coerce_int(right))};
+    bool result = (bash_coerce_int(left) <= bash_coerce_int(right));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 // string test comparisons
@@ -333,49 +359,61 @@ extern "C" Item bash_test_str_eq(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    return (Item){.item = b2it(strcmp(l, r) == 0)};
+    bool result = (strcmp(l, r) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_str_ne(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    return (Item){.item = b2it(strcmp(l, r) != 0)};
+    bool result = (strcmp(l, r) != 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_str_lt(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    return (Item){.item = b2it(strcmp(l, r) < 0)};
+    bool result = (strcmp(l, r) < 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_str_gt(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    return (Item){.item = b2it(strcmp(l, r) > 0)};
+    bool result = (strcmp(l, r) > 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 // unary string tests
 extern "C" Item bash_test_z(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL) return (Item){.item = b2it(true)};
-    if (type == LMD_TYPE_STRING) {
+    bool result;
+    if (type == LMD_TYPE_NULL) { result = true; }
+    else if (type == LMD_TYPE_STRING) {
         String* str = it2s(value);
-        return (Item){.item = b2it(!str || str->len == 0)};
-    }
-    return (Item){.item = b2it(false)};
+        result = (!str || str->len == 0);
+    } else { result = false; }
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_n(Item value) {
     TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL) return (Item){.item = b2it(false)};
-    if (type == LMD_TYPE_STRING) {
+    bool result;
+    if (type == LMD_TYPE_NULL) { result = false; }
+    else if (type == LMD_TYPE_STRING) {
         String* str = it2s(value);
-        return (Item){.item = b2it(str && str->len > 0)};
-    }
-    return (Item){.item = b2it(true)};
+        result = (str && str->len > 0);
+    } else { result = true; }
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
 }
 
 // regex match (=~) — simplified pattern match
@@ -417,9 +455,9 @@ extern "C" Item bash_string_concat(Item left, Item right) {
 
     int new_len = l->len + r->len;
     StrBuf* sb = strbuf_new_cap(new_len + 1);
-    strbuf_append(sb, l->chars, l->len);
-    strbuf_append(sb, r->chars, r->len);
-    String* result = heap_create_name(sb->str, sb->len);
+    strbuf_append_str_n(sb, l->chars, l->len);
+    strbuf_append_str_n(sb, r->chars, r->len);
+    String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
@@ -545,10 +583,10 @@ extern "C" Item bash_string_replace(Item str, Item pattern, Item replacement, bo
 
     for (int i = 0; i < src_len; ) {
         if (i + pat_len <= src_len && memcmp(src + i, p->chars, pat_len) == 0) {
-            strbuf_append(sb, r->chars, r->len);
+            strbuf_append_str_n(sb, r->chars, r->len);
             i += pat_len;
             if (!all) {
-                strbuf_append(sb, src + i, src_len - i);
+                strbuf_append_str_n(sb, src + i, src_len - i);
                 break;
             }
         } else {
@@ -557,7 +595,7 @@ extern "C" Item bash_string_replace(Item str, Item pattern, Item replacement, bo
         }
     }
 
-    String* result = heap_create_name(sb->str, sb->len);
+    String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
@@ -574,7 +612,7 @@ extern "C" Item bash_string_upper(Item str, bool all) {
         }
         strbuf_append_char(sb, c);
     }
-    String* result = heap_create_name(sb->str, sb->len);
+    String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
@@ -591,7 +629,7 @@ extern "C" Item bash_string_lower(Item str, bool all) {
         }
         strbuf_append_char(sb, c);
     }
-    String* result = heap_create_name(sb->str, sb->len);
+    String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
 }
@@ -662,14 +700,14 @@ extern "C" Item bash_array_new(void) {
 }
 
 extern "C" Item bash_array_set(Item arr, Item index, Item value) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return arr;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0) return arr;
 
     // grow if needed
     while (idx >= list->capacity) {
-        expand_list(list);
+        bash_grow_list(list);
     }
     list->items[idx] = value;
     if (idx >= list->length) list->length = (int)(idx + 1);
@@ -677,7 +715,7 @@ extern "C" Item bash_array_set(Item arr, Item index, Item value) {
 }
 
 extern "C" Item bash_array_get(Item arr, Item index) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return (Item){.item = s2it(heap_create_name("", 0))};
     int64_t idx = bash_coerce_int(index);
     if (idx < 0 || idx >= list->length) return (Item){.item = s2it(heap_create_name("", 0))};
@@ -685,17 +723,17 @@ extern "C" Item bash_array_get(Item arr, Item index) {
 }
 
 extern "C" Item bash_array_append(Item arr, Item value) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return arr;
     if (list->length >= list->capacity) {
-        expand_list(list);
+        bash_grow_list(list);
     }
     list->items[list->length++] = value;
     return arr;
 }
 
 extern "C" Item bash_array_length(Item arr) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return (Item){.item = i2it(0)};
     return (Item){.item = i2it(list->length)};
 }
@@ -706,7 +744,7 @@ extern "C" Item bash_array_all(Item arr) {
 }
 
 extern "C" Item bash_array_unset(Item arr, Item index) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return arr;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0 || idx >= list->length) return arr;
@@ -716,7 +754,7 @@ extern "C" Item bash_array_unset(Item arr, Item index) {
 }
 
 extern "C" Item bash_array_slice(Item arr, Item offset, Item length) {
-    List* list = it2list(arr.item);
+    List* list = it2list(arr);
     if (!list) return bash_array_new();
 
     int64_t off = bash_coerce_int(offset);
@@ -726,7 +764,7 @@ extern "C" Item bash_array_slice(Item arr, Item offset, Item length) {
     if (len <= 0 || off + len > list->length) len = list->length - off;
 
     Item result = bash_array_new();
-    List* res_list = it2list(result.item);
+    List* res_list = it2list(result);
     for (int64_t i = 0; i < len; i++) {
         bash_array_append(result, list->items[off + i]);
     }
@@ -764,6 +802,10 @@ extern "C" void bash_set_exit_code(int code) {
     bash_last_exit_code = code & 0xFF;
 }
 
+extern "C" void bash_negate_exit_code(void) {
+    bash_last_exit_code = (bash_last_exit_code == 0) ? 1 : 0;
+}
+
 // ============================================================================
 // Output
 // ============================================================================
@@ -796,5 +838,160 @@ extern "C" void bash_runtime_init(void) {
 }
 
 extern "C" void bash_runtime_cleanup(void) {
+    if (bash_var_table) {
+        hashmap_free(bash_var_table);
+        bash_var_table = NULL;
+    }
     log_debug("bash: runtime cleanup");
+}
+
+// ============================================================================
+// Variable scope management (runtime)
+// ============================================================================
+
+// simple variable table using hashmap
+typedef struct BashRtVar {
+    const char* name;
+    size_t name_len;
+    Item value;
+    bool is_export;
+} BashRtVar;
+
+static uint64_t bash_rt_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const BashRtVar* v = (const BashRtVar*)item;
+    return hashmap_sip(v->name, v->name_len, seed0, seed1);
+}
+
+static int bash_rt_var_cmp(const void *a, const void *b, void *udata) {
+    const BashRtVar* va = (const BashRtVar*)a;
+    const BashRtVar* vb = (const BashRtVar*)b;
+    (void)udata;
+    if (va->name_len != vb->name_len) return 1;
+    return memcmp(va->name, vb->name, va->name_len);
+}
+
+static void bash_ensure_var_table(void) {
+    if (!bash_var_table) {
+        bash_var_table = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
+                                    bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    }
+}
+
+extern "C" void bash_set_var(Item name, Item value) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len, .value = value, .is_export = false};
+    // check if exists and preserve export flag
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &entry);
+    if (existing) entry.is_export = existing->is_export;
+    hashmap_set(bash_var_table, &entry);
+}
+
+extern "C" Item bash_get_var(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (found) return found->value;
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" void bash_set_local_var(Item name, Item value) {
+    // in Phase 1, local is the same as set_var (no function scope yet)
+    bash_set_var(name, value);
+}
+
+extern "C" void bash_export_var(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    BashRtVar* found = (BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (found) {
+        BashRtVar updated = *found;
+        updated.is_export = true;
+        hashmap_set(bash_var_table, &updated);
+    } else {
+        BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                           .value = (Item){.item = s2it(heap_create_name("", 0))},
+                           .is_export = true};
+        hashmap_set(bash_var_table, &entry);
+    }
+}
+
+extern "C" void bash_unset_var(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    hashmap_delete(bash_var_table, &key);
+}
+
+// ============================================================================
+// Positional parameters (runtime)
+// ============================================================================
+
+static Item* bash_positional_args = NULL;
+static int bash_positional_count = 0;
+static const char* bash_script_name = "";
+
+extern "C" void bash_set_positional(Item* args, int count) {
+    bash_positional_args = args;
+    bash_positional_count = count;
+}
+
+extern "C" Item bash_get_positional(int index) {
+    if (index < 1 || index > bash_positional_count) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return bash_positional_args[index - 1];
+}
+
+extern "C" Item bash_get_arg_count(void) {
+    return (Item){.item = i2it(bash_positional_count)};
+}
+
+extern "C" Item bash_get_all_args(void) {
+    // return positional args as an array
+    Item arr = bash_array_new();
+    for (int i = 0; i < bash_positional_count; i++) {
+        bash_array_append(arr, bash_positional_args[i]);
+    }
+    return arr;
+}
+
+extern "C" Item bash_shift_args(int n) {
+    if (n < 1) n = 1;
+    if (n > bash_positional_count) n = bash_positional_count;
+    bash_positional_args += n;
+    bash_positional_count -= n;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_get_script_name(void) {
+    return (Item){.item = s2it(heap_create_name(bash_script_name))};
+}
+
+// ============================================================================
+// Scope lifecycle (runtime — for JIT-emitted scope push/pop)
+// ============================================================================
+
+extern "C" void bash_scope_push(void) {
+    // Phase 1: no-op (flat scope). Phase 2 will implement dynamic scope stack.
+    log_debug("bash: runtime scope push");
+}
+
+extern "C" void bash_scope_pop(void) {
+    log_debug("bash: runtime scope pop");
+}
+
+extern "C" void bash_scope_push_subshell(void) {
+    // Phase 1: snapshot vars (simplified — just log for now)
+    log_debug("bash: runtime subshell scope push");
+}
+
+extern "C" void bash_scope_pop_subshell(void) {
+    log_debug("bash: runtime subshell scope pop");
 }
