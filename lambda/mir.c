@@ -82,33 +82,34 @@ static void init_func_map(void) {
     log_info("func_map initialized: %zu runtime functions", total);
 }
 
-// Dynamic import table for cross-module function/variable resolution
-#define MAX_DYNAMIC_IMPORTS 256
-static JitImport dynamic_import_table[MAX_DYNAMIC_IMPORTS];
-static int dynamic_import_count = 0;
+// Dynamic import table for cross-module function/variable resolution (O(1) hashmap)
+static struct hashmap* dynamic_import_map = NULL;
 
 void register_dynamic_import(const char *name, void *addr) {
-    if (dynamic_import_count >= MAX_DYNAMIC_IMPORTS) {
-        log_error("dynamic import table full (max %d)", MAX_DYNAMIC_IMPORTS);
-        return;
+    if (!dynamic_import_map) {
+        dynamic_import_map = hashmap_new(sizeof(JitImport), 64, 0, 0,
+            func_obj_hash, func_obj_compare, NULL, NULL);
     }
     log_debug("register dynamic import: %s -> %p", name, addr);
-    dynamic_import_table[dynamic_import_count].name = name;
-    dynamic_import_table[dynamic_import_count].func = (fn_ptr)addr;
-    dynamic_import_count++;
+    JitImport entry = {(char*)name, (fn_ptr)addr};
+    hashmap_set(dynamic_import_map, &entry);
 }
 
 void clear_dynamic_imports(void) {
-    dynamic_import_count = 0;
+    if (dynamic_import_map) {
+        hashmap_clear(dynamic_import_map, false);
+    }
 }
 
 void *import_resolver(const char *name) {
     log_debug("resolving name: %s", name);
-    // Check dynamic imports first (cross-module functions/variables)
-    for (int i = 0; i < dynamic_import_count; i++) {
-        if (strcmp(dynamic_import_table[i].name, name) == 0) {
-            log_debug("found dynamic import: %s at %p", name, dynamic_import_table[i].func);
-            return (void*)dynamic_import_table[i].func;
+    // Check dynamic imports first (cross-module functions/variables) — O(1) hashmap
+    if (dynamic_import_map) {
+        JitImport key = {.name = (char*)name, .func = NULL};
+        const JitImport* found = (const JitImport*)hashmap_get(dynamic_import_map, &key);
+        if (found) {
+            log_debug("found dynamic import: %s at %p", name, found->func);
+            return (void*)found->func;
         }
     }
     // Check static runtime function hashmap (O(1) lookup)
