@@ -210,7 +210,7 @@
             "name": "re2",
             "description": "RE2 regular expression library for string pattern matching",
             "include": "build_temp/re2-noabsl",
-            "lib": "build_temp/re2-noabsl/build/libre2.a",
+            "lib": "build_temp/re2-noabsl/cmake_build/libre2.a",
             "link": "static"
         }
     ],

@@ -116,7 +116,7 @@ fi
 # Install npm dependencies (jsdom for test comparators, puppeteer for browser tests)
 echo "Installing npm dependencies..."
 if [ -f "package.json" ]; then
-    npm install
+    PUPPETEER_SKIP_DOWNLOAD=true npm install
     echo "npm dependencies installed"
 else
     echo "Warning: package.json not found, skipping npm install"
