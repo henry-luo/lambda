@@ -33,6 +33,7 @@
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
+#include "py/py_transpiler.hpp"      // Python transpiler
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1027,6 +1028,68 @@ int main(int argc, char *argv[]) {
             }
 
             free(js_source);
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
+    }
+
+    // Handle Python command
+    log_debug("Checking for py command");
+    if (argc >= 2 && strcmp(argv[1], "py") == 0) {
+        log_debug("Entering Python command handler");
+
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Python Transpiler v1.0\n\n");
+            printf("Usage: %s py [file.py]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'py' command runs the Python transpiler.\n");
+            printf("  If a file is provided, it transpiles and executes the Python code.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s py script.py    # Transpile and run script.py\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        if (argc >= 3) {
+            const char* py_file = argv[2];
+            char* py_source = read_text_file(py_file);
+            if (!py_source) {
+                printf("Error: Could not read file '%s'\n", py_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+
+            Item result = transpile_py_to_mir(&runtime, py_source, py_file);
+
+            // only print non-null results (Python scripts use print() for output)
+            if (result.item != ITEM_NULL && result.item != 0) {
+                TypeId result_type = get_type_id(result);
+                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
+                    || result_type == LMD_TYPE_ELEMENT) {
+                    Pool* fmt_pool = pool_create();
+                    String* json = format_json(fmt_pool, result);
+                    if (json) {
+                        printf("%.*s\n", json->len, json->chars);
+                    }
+                    pool_destroy(fmt_pool);
+                } else {
+                    StrBuf *output = strbuf_new_cap(256);
+                    print_root_item(output, result);
+                    printf("%s\n", output->str);
+                    strbuf_free(output);
+                }
+            }
+
+            free(py_source);
         }
 
         runtime_cleanup(&runtime);

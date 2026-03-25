@@ -38,7 +38,8 @@
   ],
   "dependencies": {
     "jsdom": "^26.0.0",
-    "puppeteer": "^24.36.0"
+    "puppeteer": "^24.36.0",
+    "tree-sitter-cli": "^0.26.7"
   },
   "repository": {
     "type": "git",

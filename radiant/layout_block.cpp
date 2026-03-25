@@ -2605,12 +2605,13 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
 // inline elements with non-zero margins/padding/borders.
 static bool is_inline_substantial(ViewElement* ve) {
     if (ve->bound) {
-        float m = ve->bound->margin.left + ve->bound->margin.right +
-                  ve->bound->padding.left + ve->bound->padding.right;
+        // CSS Inline 3 §2.1: An inline box is NOT invisible if ANY individual
+        // inline-axis margin, border, or padding is non-zero.
+        if (ve->bound->margin.left != 0 || ve->bound->margin.right != 0 ||
+            ve->bound->padding.left != 0 || ve->bound->padding.right != 0) return true;
         if (ve->bound->border) {
-            m += ve->bound->border->width.left + ve->bound->border->width.right;
+            if (ve->bound->border->width.left != 0 || ve->bound->border->width.right != 0) return true;
         }
-        if (m > 0) return true;
     }
     View* c = ve->first_placed_child();
     while (c) {
@@ -2647,12 +2648,16 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
     float pt = vb->bound ? vb->bound->padding.top : 0;
     float pb = vb->bound ? vb->bound->padding.bottom : 0;
     if (bt > 0 || bb > 0 || pt > 0 || pb > 0) return false;
-    // BFC roots and floats don't self-collapse
+    // BFC roots and floats don't self-collapse (CSS 2.1 §8.3.1)
     bool creates_bfc = vb->scroller &&
         (vb->scroller->overflow_x != CSS_VALUE_VISIBLE ||
          vb->scroller->overflow_y != CSS_VALUE_VISIBLE);
     if (creates_bfc) return false;
     if (vb->position && element_has_float(vb)) return false;
+    // CSS Display 3: flow-root, flex, grid containers establish BFC
+    if (vb->display.inner == CSS_VALUE_FLOW_ROOT ||
+        vb->display.inner == CSS_VALUE_FLEX ||
+        vb->display.inner == CSS_VALUE_GRID) return false;
     // Check children recursively
     View* child = ((ViewElement*)vb)->first_placed_child();
     while (child) {
@@ -4158,10 +4163,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                             break;
                         }
                     }
-                } else if (sc_child->view_type && sc_child->height > 0) {
-                    // non-block in-flow content (text, inline) with height breaks the chain
-                    all_self_collapsing = false;
-                    break;
+                } else if (sc_child->view_type) {
+                    // non-block in-flow content (text, inline) breaks the chain
+                    if (sc_child->height > 0) {
+                        all_self_collapsing = false;
+                        break;
+                    }
+                    // CSS Inline 3 §2.1: zero-height inline with non-zero inline-axis
+                    // decorations generates a non-phantom line box
+                    if (sc_child->view_type == RDT_VIEW_INLINE &&
+                        is_inline_substantial((ViewElement*)sc_child)) {
+                        all_self_collapsing = false;
+                        break;
+                    }
                 }
                 View* next = (View*)sc_child->next_sibling;
                 while (next && !next->view_type) next = (View*)next->next_sibling;
@@ -5472,7 +5486,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         first_in_flow_child = next;
                         continue;
                     }
-                    if (!first_in_flow_child->is_block()) break;
+                    if (!first_in_flow_child->is_block()) {
+                        // CSS 2.1 §8.3.1 + CSS Inline 3 §2.1: Only real (non-phantom)
+                        // line boxes separate the parent's margin from the first block
+                        // child's margin. Skip invisible inline elements that generate
+                        // phantom line boxes.
+                        if (first_in_flow_child->view_type == RDT_VIEW_INLINE &&
+                            !is_inline_substantial((ViewElement*)first_in_flow_child)) {
+                            View* next = (View*)first_in_flow_child->next_sibling;
+                            while (next && !next->view_type) next = (View*)next->next_sibling;
+                            first_in_flow_child = next;
+                            continue;
+                        }
+                        break;
+                    }
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
                     // Skip floats
                     if (vb->position && element_has_float(vb)) {

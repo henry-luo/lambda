@@ -40,6 +40,7 @@ extern bool target_equal(Target* a, Target* b);
 
 // JS runtime functions
 #include "js/js_runtime.h"
+#include "py/py_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
@@ -1152,6 +1153,118 @@ JitImport jit_runtime_imports[] = {
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
+
+    // ========================================================================
+    // Python runtime functions
+    // ========================================================================
+    // type conversion
+    {"py_to_int", FPTR(py_to_int)},
+    {"py_to_float", FPTR(py_to_float)},
+    {"py_to_str", FPTR(py_to_str)},
+    {"py_to_bool", FPTR(py_to_bool)},
+    {"py_is_truthy", FPTR(py_is_truthy)},
+    // arithmetic
+    {"py_add", FPTR(py_add)},
+    {"py_subtract", FPTR(py_subtract)},
+    {"py_multiply", FPTR(py_multiply)},
+    {"py_divide", FPTR(py_divide)},
+    {"py_floor_divide", FPTR(py_floor_divide)},
+    {"py_modulo", FPTR(py_modulo)},
+    {"py_power", FPTR(py_power)},
+    {"py_negate", FPTR(py_negate)},
+    {"py_positive", FPTR(py_positive)},
+    {"py_bit_not", FPTR(py_bit_not)},
+    // bitwise
+    {"py_bit_and", FPTR(py_bit_and)},
+    {"py_bit_or", FPTR(py_bit_or)},
+    {"py_bit_xor", FPTR(py_bit_xor)},
+    {"py_lshift", FPTR(py_lshift)},
+    {"py_rshift", FPTR(py_rshift)},
+    // comparison
+    {"py_eq", FPTR(py_eq)},
+    {"py_ne", FPTR(py_ne)},
+    {"py_lt", FPTR(py_lt)},
+    {"py_le", FPTR(py_le)},
+    {"py_gt", FPTR(py_gt)},
+    {"py_ge", FPTR(py_ge)},
+    {"py_is", FPTR(py_is)},
+    {"py_is_not", FPTR(py_is_not)},
+    {"py_contains", FPTR(py_contains)},
+    // object/attr
+    {"py_getattr", FPTR(py_getattr)},
+    {"py_setattr", FPTR(py_setattr)},
+    {"py_new_object", FPTR(py_new_object)},
+    // collections
+    {"py_list_new", FPTR(py_list_new)},
+    {"py_list_append", FPTR(py_list_append)},
+    {"py_list_get", FPTR(py_list_get)},
+    {"py_list_set", FPTR(py_list_set)},
+    {"py_list_length", FPTR(py_list_length)},
+    {"py_dict_new", FPTR(py_dict_new)},
+    {"py_dict_get", FPTR(py_dict_get)},
+    {"py_dict_set", FPTR(py_dict_set)},
+    {"py_tuple_new", FPTR(py_tuple_new)},
+    {"py_tuple_set", FPTR(py_tuple_set)},
+    // subscript/slice
+    {"py_subscript_get", FPTR(py_subscript_get)},
+    {"py_subscript_set", FPTR(py_subscript_set)},
+    // iterator
+    {"py_get_iterator", FPTR(py_get_iterator)},
+    {"py_iterator_next", FPTR(py_iterator_next)},
+    {"py_range_new", FPTR(py_range_new)},
+    // function/closure
+    {"py_new_function", FPTR(py_new_function)},
+    {"py_new_closure", FPTR(py_new_closure)},
+    {"py_alloc_env", FPTR(py_alloc_env)},
+    {"py_call_function", FPTR(py_call_function)},
+    // exception handling
+    {"py_raise", FPTR(py_raise)},
+    {"py_check_exception", FPTR(py_check_exception)},
+    {"py_clear_exception", FPTR(py_clear_exception)},
+    {"py_new_exception", FPTR(py_new_exception)},
+    // module vars
+    {"py_set_module_var", FPTR(py_set_module_var)},
+    {"py_get_module_var", FPTR(py_get_module_var)},
+    {"py_reset_module_vars", FPTR(py_reset_module_vars)},
+    // built-in functions
+    {"py_print", FPTR(py_print)},
+    {"py_builtin_len", FPTR(py_builtin_len)},
+    {"py_builtin_type", FPTR(py_builtin_type)},
+    {"py_builtin_isinstance", FPTR(py_builtin_isinstance)},
+    {"py_builtin_range", FPTR(py_builtin_range)},
+    {"py_builtin_int", FPTR(py_builtin_int)},
+    {"py_builtin_float", FPTR(py_builtin_float)},
+    {"py_builtin_str", FPTR(py_builtin_str)},
+    {"py_builtin_bool", FPTR(py_builtin_bool)},
+    {"py_builtin_abs", FPTR(py_builtin_abs)},
+    {"py_builtin_min", FPTR(py_builtin_min)},
+    {"py_builtin_max", FPTR(py_builtin_max)},
+    {"py_builtin_sum", FPTR(py_builtin_sum)},
+    {"py_builtin_enumerate", FPTR(py_builtin_enumerate)},
+    {"py_builtin_zip", FPTR(py_builtin_zip)},
+    {"py_builtin_sorted", FPTR(py_builtin_sorted)},
+    {"py_builtin_reversed", FPTR(py_builtin_reversed)},
+    {"py_builtin_repr", FPTR(py_builtin_repr)},
+    {"py_builtin_hash", FPTR(py_builtin_hash)},
+    {"py_builtin_id", FPTR(py_builtin_id)},
+    {"py_builtin_input", FPTR(py_builtin_input)},
+    {"py_builtin_ord", FPTR(py_builtin_ord)},
+    {"py_builtin_chr", FPTR(py_builtin_chr)},
+    {"py_builtin_map", FPTR(py_builtin_map)},
+    {"py_builtin_filter", FPTR(py_builtin_filter)},
+    {"py_builtin_list", FPTR(py_builtin_list)},
+    {"py_builtin_dict", FPTR(py_builtin_dict)},
+    {"py_builtin_set", FPTR(py_builtin_set)},
+    {"py_builtin_tuple", FPTR(py_builtin_tuple)},
+    // method dispatchers
+    {"py_string_method", FPTR(py_string_method)},
+    {"py_list_method", FPTR(py_list_method)},
+    {"py_dict_method", FPTR(py_dict_method)},
+    // runtime init
+    {"py_runtime_set_input", FPTR(py_runtime_set_input)},
+    // stop iteration
+    {"py_stop_iteration", FPTR(py_stop_iteration)},
+    {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions
