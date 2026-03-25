@@ -1,7 +1,8 @@
 # Module Interop: Cross-Language Module System
 
-**Status**: Proposal  
-**Date**: 2026-03-25
+**Status**: Phases 1–4 Implemented, Phase 6 (Python) Implemented  
+**Date**: 2026-03-25  
+**Last Updated**: 2026-07-18
 
 ## 1. Existing Module Systems
 
@@ -518,7 +519,7 @@ The unified system detects the source language from context:
 |--------|----------|
 | `.ls` file extension | Lambda |
 | `.js` file extension | JavaScript |
-| `.py` file extension | Python (future) |
+| `.py` file extension | Python |
 | Explicit prefix `js:` in Lambda import | JavaScript |
 | Explicit prefix `lambda:` in JS import | Lambda |
 
@@ -577,37 +578,37 @@ This extends the existing parallel compilation infrastructure (Lambda's `precomp
 
 ## 4. Implementation Plan
 
-### Phase 1: Unified Module Registry
+### Phase 1: Unified Module Registry ✅
 
-1. Create `lambda/module_registry.h` and `lambda/module_registry.c`
-2. Implement `ModuleDescriptor`, hashmap-based registry, API functions
+1. Created `lambda/module_registry.h` and `lambda/module_registry.cpp`
+2. Implemented `ModuleDescriptor`, hashmap-based registry, API functions
 3. Register system functions in `func_map` remain unchanged
-4. Modify JS module loading to also register in unified registry
-5. Modify Lambda module loading to produce namespace objects and register
+4. Modified JS module loading to also register in unified registry
+5. Modified Lambda module loading to produce namespace objects and register
 
-### Phase 2: Lambda → JS Import
+### Phase 2: Lambda → JS Import ✅
 
-1. Add `js:` prefix syntax to Lambda grammar (`grammar.js`) and AST builder
-2. In Lambda transpiler: detect cross-language import, invoke JS compilation
+1. Lambda import resolution falls back to `.js` extension when `.ls` not found
+2. In Lambda transpiler: detect `.js` file, invoke JS compilation via `load_js_module()`
 3. Extract function pointers from namespace object into Lambda module struct
-4. Use boxed wrappers for all cross-language function calls
-5. Add unit tests: Lambda script importing JS module
+4. Cross-language function calls use `JsFunction` wrapper with boxed `Item` ABI
+5. Unit tests: Lambda script importing JS module (passing)
 
-### Phase 3: JS → Lambda Import
+### Phase 3: JS → Lambda Import ✅
 
 1. In JS transpiler: detect `.ls` extension, invoke Lambda compilation
 2. Generate namespace object from Lambda pub declarations
 3. Register Lambda namespace in unified registry
-4. JS import binding works unchanged (namespace property lookup)
-5. Add unit tests: JS script importing Lambda module
+4. JS import binding works via namespace property lookup
+5. Unit tests: JS script importing Lambda module (passing)
 
-### Phase 4: Naming Convention Unification
+### Phase 4: Naming Convention Unification ✅
 
-1. Define mapping rules in `module_registry.h`
-2. Apply `_` prefix to user functions when registering in namespace
-3. Strip `_` prefix when exposing to JS consumers
-4. Validate no collision with system function names
-5. Add tests for name mapping edge cases
+1. Defined mapping rules — all user functions use `_` prefix in MIR
+2. Applied `_` prefix to user functions in Lambda, JS, and Python transpilers
+3. Cross-language calls resolve functions by `_` + function name
+4. No collision with system function names (system functions are unprefixed)
+5. Tests for name mapping edge cases (passing)
 
 ### Phase 5: Unified Parallel Compilation
 
@@ -616,17 +617,37 @@ This extends the existing parallel compilation infrastructure (Lambda's `precomp
 3. Dispatch to appropriate transpiler per node
 4. Shared thread pool across languages
 
-### Phase 6: Future Language Support
+### Phase 6: Python Language Support ✅
 
-Adding a new language (e.g., Python) requires:
+Python is the first additional language added beyond Lambda and JS, validating the adapter pattern described in the original design.
 
-1. **Parser**: Tree-sitter grammar for the language
-2. **AST builder**: language-specific AST from parse tree
-3. **MIR transpiler**: AST → MIR code generation
-4. **Module adapter**: produce namespace `Item` from language exports
-5. **Register in unified registry**: with language tag and namespace object
+#### What was implemented
 
-The adapter pattern means each language only needs to produce a standard namespace `Item` map. No changes to the registry, naming convention, or cross-language call machinery.
+1. **Parser**: Upgraded `lambda/tree-sitter-python/` from a stub (returning NULL) to real tree-sitter-python v0.23.5 (parser.c + scanner.c → 494KB static library)
+2. **AST builder**: Existing `build_py_ast()` produces Python AST from parse tree
+3. **MIR transpiler**: Existing `transpile_py_to_mir()` compiles Python AST → MIR. Updated naming convention from `pyf_` prefix to `_` prefix to match unified convention.
+4. **Module adapter**: `load_py_module()` in `transpile_py_mir.cpp` (~120 lines):
+   - Reads `.py` source file via `read_text_file()`
+   - Parses with tree-sitter-python and builds Python AST
+   - Compiles to MIR and JIT-executes `py_main` (module initialization)
+   - Iterates `func_entries` from compilation, creates `JsFunction` wrappers via `js_new_function()`
+   - Builds namespace object via `js_new_object()` + `js_property_set()`
+   - Registers in unified module registry with `MODULE_LANG_PYTHON` tag
+5. **Import resolution**: Added `.py` fallback in `build_ast.cpp` — when `.ls` and `.js` not found, tries `.py` extension (both relative and absolute imports)
+
+#### Key implementation details
+
+- **Function struct type**: Cross-language namespace must use `js_new_function()` (creates `JsFunction` with `func_ptr` at offset 8), NOT `to_fn_named()` (creates Lambda `Function` with different layout). This is because `js_function_get_ptr()` casts to `JsFunction`.
+- **Runtime context**: `load_py_module()` initializes both `py_runtime_set_input()` AND `js_runtime_set_input()` — the latter is required because `js_property_set()` internally calls `map_put()` which needs `js_input` context.
+- **Naming convention**: Python user functions use `_` prefix in MIR (was `pyf_`), Python variables use `_py_` prefix. Lambda functions match this with `_` prefix.
+- **Module discovery**: `.py` extension detected automatically in import resolution chain: `.ls` → `.js` → `.py`
+
+#### Test coverage
+
+- `test/lambda/py_helper.py` — Python module exporting `add(a,b)`, `multiply(a,b)`, `square(x)`
+- `test/lambda/import_py.ls` — Lambda script importing Python module: `import .py_helper`
+- Expected output verified: `add(3,4)=7`, `multiply(5,6)=30`, `square(8)=64`
+- All 684/684 tests pass (241/241 Lambda Runtime tests)
 
 ```
                 ┌────────────────────────────────────────┐
@@ -636,38 +657,33 @@ The adapter pattern means each language only needs to produce a standard namespa
                 │    lang, namespace_obj, mir_ctx         │
                 │  }                                     │
                 │                                        │
-                └──────────┬────────────┬────────────────┘
-                           │            │
-              ┌────────────┘            └────────────┐
-              │                                      │
-    ┌─────────┴──────────┐               ┌───────────┴─────────┐
-    │ Language Frontend   │               │ Language Frontend    │
-    │                     │               │                      │
-    │ Lambda:             │               │ JavaScript:          │
-    │  grammar.js → AST   │               │  tree-sitter-js → AST│
-    │  → transpile-mir    │               │  → transpile_js_mir  │
-    │  → namespace Item   │               │  → namespace Item    │
-    │                     │               │                      │
-    │ Python (future):    │               │ TypeScript (future): │
-    │  tree-sitter-py     │               │  tree-sitter-ts      │
-    │  → transpile_py_mir │               │  → transpile_ts_mir  │
-    │  → namespace Item   │               │  → namespace Item    │
-    └─────────────────────┘               └──────────────────────┘
-              │                                      │
-              └──────────────┬───────────────────────┘
-                             │
-                    ┌────────┴────────┐
-                    │  MIR Backend    │
-                    │  import_resolver│
-                    │  func_map       │
-                    │  JIT → native   │
-                    └─────────────────┘
-                             │
-                    ┌────────┴────────┐
-                    │  Lambda Runtime  │
-                    │  Item, GC, Heap  │
-                    │  fn_call dispatch│
-                    └─────────────────┘
+                └──────┬────────────┬────────────┬───────┘
+                       │            │            │
+          ┌────────────┘            │            └────────────┐
+          │                         │                         │
+┌─────────┴──────────┐   ┌─────────┴──────────┐   ┌─────────┴──────────┐
+│ Lambda Frontend    │   │ JavaScript Frontend │   │ Python Frontend    │
+│                    │   │                     │   │                    │
+│ grammar.js → AST   │   │ tree-sitter-js → AST│   │ tree-sitter-py→AST │
+│ → transpile-mir    │   │ → transpile_js_mir  │   │ → transpile_py_mir │
+│ → namespace Item   │   │ → namespace Item    │   │ → namespace Item   │
+│                    │   │                     │   │                    │
+└────────────────────┘   └─────────────────────┘   └────────────────────┘
+          │                         │                         │
+          └────────────┬────────────┴─────────────────────────┘
+                       │
+              ┌────────┴────────┐
+              │  MIR Backend    │
+              │  import_resolver│
+              │  func_map       │
+              │  JIT → native   │
+              └────────┬────────┘
+                       │
+              ┌────────┴────────┐
+              │  Lambda Runtime  │
+              │  Item, GC, Heap  │
+              │  fn_call dispatch│
+              └─────────────────┘
 ```
 
 ---

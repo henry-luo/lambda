@@ -2022,6 +2022,11 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // bottom margin BEFORE applying min/max-height constraints.
             // min/max-height must not affect margin adjacency (q313).
             float collapsible_mb = compute_collapsible_bottom_margin(block);
+            // WHATWG Quirks Mode §3.6: body does not collapse margins with children
+            if (block->tag_id == HTM_TAG_BODY && lycon->doc && lycon->doc->view_tree &&
+                is_quirks_mode(lycon->doc->view_tree->html_version)) {
+                collapsible_mb = 0;
+            }
             float auto_height = flow_height - collapsible_mb;
             // CSS 2.1 §10.6.3: Auto height cannot be negative. When all children
             // are collapsed-through (self-collapsing), they don't factor in the
@@ -4571,7 +4576,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
                 float parent_border_top = parent && parent->bound && parent->bound->border ?
                     parent->bound->border->width.top : 0;
-                if (parent && parent->parent && !parent_creates_bfc &&
+                // WHATWG Quirks Mode §3.6: body does not collapse margins in quirks mode
+                bool quirks_body = parent && parent->tag_id == HTM_TAG_BODY &&
+                    lycon->doc && lycon->doc->view_tree &&
+                    is_quirks_mode(lycon->doc->view_tree->html_version);
+                if (parent && parent->parent && !parent_creates_bfc && !quirks_body &&
                     parent_padding_top == 0 && parent_border_top == 0 &&
                     own_margin_top != 0) {
                     float advance_y_before = block->y - own_margin_top;
@@ -4815,8 +4824,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Per CSS 2.1 erratum q313, min-height has no influence on bottom margin adjacency.
     bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
 
+    // WHATWG Quirks Mode §3.6: body does not collapse margins with children in quirks mode
+    bool quirks_body_bottom = block->tag_id == HTM_TAG_BODY &&
+        lycon->doc && lycon->doc->view_tree &&
+        is_quirks_mode(lycon->doc->view_tree->html_version);
+
     if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse &&
-        !has_explicit_height && block->first_child) {
+        !has_explicit_height && !quirks_body_bottom && block->first_child) {
         // collapse bottom margin with last in-flow child block
         // Skip absolutely positioned and floated children - they're out of normal flow
         // Find last in-flow child (skip abs-positioned, floated elements, and empty zero-height blocks)
@@ -6434,7 +6448,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // already accounted for the child's margin contribution. Skip the parent
                         // y-adjustment to avoid double-counting.
                         bool parent_has_clearance = parent && parent->bound && parent->bound->has_clearance;
-                        if (parent && parent->parent && !parent_creates_bfc &&
+                        // WHATWG Quirks Mode §3.6: In quirks mode, the body element does not
+                        // collapse margins with its children.
+                        bool quirks_body = parent && parent->tag_id == HTM_TAG_BODY &&
+                            lycon->doc && lycon->doc->view_tree &&
+                            is_quirks_mode(lycon->doc->view_tree->html_version);
+                        if (parent && parent->parent && !parent_creates_bfc && !quirks_body &&
                             parent_padding_top == 0 && parent_border_top == 0) {
                             // CSS 2.1 §8.3.1: collapse child and parent margins
                             float margin_top = collapse_margins(block->bound->margin.top, parent_margin_top);

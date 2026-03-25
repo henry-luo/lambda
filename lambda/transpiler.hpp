@@ -138,3 +138,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).
 Item load_js_module(Runtime* runtime, const char* js_path);
+
+// Compile a Python file as a module and return the namespace object.
+// Used for cross-language imports (Lambda/JS/Python → Python).
+Item load_py_module(Runtime* runtime, const char* py_path);

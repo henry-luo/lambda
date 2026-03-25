@@ -7,6 +7,7 @@
 #include "py_transpiler.hpp"
 #include "py_runtime.h"
 #include "../lambda-data.hpp"
+#include "../module_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/hashmap.h"
@@ -33,6 +34,15 @@ extern __thread EvalContext* context;
 extern void* heap_alloc(int size, TypeId type_id);
 extern void heap_init();
 extern "C" void py_reset_module_vars();
+
+// Forward declarations for cross-language module interop
+extern "C" Item js_property_get(Item object, Item key);
+extern "C" int js_function_get_arity(Item fn_item);
+extern "C" Item js_new_object();
+extern "C" Item js_new_function(void* func_ptr, int param_count);
+extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" char* read_text_file(const char* filename);
+extern "C" void js_runtime_set_input(void* input);
 
 // ============================================================================
 // Constants
@@ -141,6 +151,12 @@ struct PyMirTranspiler {
     // Try/except stack
     int try_depth;
     MIR_label_t try_handler_labels[16];
+
+    // Source filename for relative import resolution
+    const char* filename;
+
+    // Runtime pointer for cross-language module loading
+    Runtime* runtime;
 };
 
 // ============================================================================
@@ -1331,7 +1347,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
 
             // emit direct call to local function with ordered args
             char fn_name[140];
-            snprintf(fn_name, sizeof(fn_name), "pyf_%s", target_fc->name);
+            snprintf(fn_name, sizeof(fn_name), "_%s", target_fc->name);
 
             // build proto for the call (reuse from import cache if exists, else create)
             MIR_var_t pvars[16];
@@ -2470,6 +2486,122 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         pm_emit_label(mt, l_end);
         break;
     }
+    case PY_AST_NODE_IMPORT:
+        // bare "import module" — no-op for now (module-as-namespace not yet supported)
+        log_debug("py-mir: bare import statement (not yet supported for cross-lang)");
+        break;
+    case PY_AST_NODE_IMPORT_FROM: {
+        // from ./module import name1, name2
+        PyImportNode* imp = (PyImportNode*)stmt;
+        if (!imp->module_name) break;
+
+        const char* mod_name = imp->module_name->chars;
+        int mod_len = (int)imp->module_name->len;
+
+        // resolve module path relative to the source file's directory
+        StrBuf* path_buf = strbuf_new();
+        if (mod_name[0] == '.') {
+            // relative import
+            const char* dir = mt->filename;
+            if (dir) {
+                // extract directory from filename
+                const char* last_slash = strrchr(dir, '/');
+                if (last_slash) {
+                    strbuf_append_format(path_buf, "%.*s/", (int)(last_slash - dir), dir);
+                } else {
+                    strbuf_append_str(path_buf, "./");
+                }
+            } else {
+                strbuf_append_str(path_buf, "./");
+            }
+            // append the module path (skip leading dot, convert dots to slashes)
+            for (int i = 1; i < mod_len; i++) {
+                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+        } else {
+            // absolute module name — convert dots to slashes
+            strbuf_append_str(path_buf, "./");
+            for (int i = 0; i < mod_len; i++) {
+                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+        }
+
+        // try loading as .py, .js, .ls
+        Item ns = ItemNull;
+        const char* base_path = path_buf->str;
+        int base_len = (int)path_buf->length;
+
+        // try .py first
+        StrBuf* try_buf = strbuf_new();
+        strbuf_append_format(try_buf, "%s.py", base_path);
+        ns = load_py_module(mt->runtime, try_buf->str);
+
+        if (ns.item == ItemNull.item) {
+            // try .js
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.js", base_path);
+            ns = load_js_module(mt->runtime, try_buf->str);
+        }
+
+        if (ns.item == ItemNull.item) {
+            // try .ls — load Lambda script and build namespace
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.ls", base_path);
+            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
+            if (script && script->ast_root) {
+                ns = module_build_lambda_namespace(script);
+            }
+        }
+
+        strbuf_free(try_buf);
+        strbuf_free(path_buf);
+
+        if (ns.item == ItemNull.item) {
+            log_error("py-mir: failed to load module '%.*s'", mod_len, mod_name);
+            break;
+        }
+
+        // for each imported name, extract from namespace and store as variable
+        PyAstNode* name_node = imp->names;
+        while (name_node) {
+            if (name_node->node_type == PY_AST_NODE_IMPORT) {
+                PyImportNode* name_imp = (PyImportNode*)name_node;
+                if (name_imp->module_name) {
+                    const char* sym_name = name_imp->module_name->chars;
+                    int sym_len = (int)name_imp->module_name->len;
+
+                    // get function from namespace
+                    Item key = {.item = s2it(heap_create_name(sym_name, sym_len))};
+                    Item value = js_property_get(ns, key);
+
+                    if (value.item != ItemNull.item) {
+                        // use alias if provided, otherwise original name
+                        const char* local_name = sym_name;
+                        int local_len = sym_len;
+                        if (name_imp->alias) {
+                            local_name = name_imp->alias->chars;
+                            local_len = (int)name_imp->alias->len;
+                        }
+
+                        // store as a variable in current scope with _py_ prefix
+                        char vname[128];
+                        snprintf(vname, sizeof(vname), "_py_%.*s", local_len, local_name);
+                        MIR_reg_t val_reg = pm_new_reg(mt, "imp", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val_reg),
+                            MIR_new_int_op(mt->ctx, (int64_t)value.item)));
+                        pm_set_var(mt, vname, val_reg);
+                        log_debug("py-mir: imported '%.*s' as '%s'", sym_len, sym_name, vname);
+                    } else {
+                        log_error("py-mir: name '%.*s' not found in module '%.*s'",
+                            sym_len, sym_name, mod_len, mod_name);
+                    }
+                }
+            }
+            name_node = name_node->next;
+        }
+        break;
+    }
     default:
         log_debug("py-mir: unsupported statement type %d", stmt->node_type);
         break;
@@ -3042,7 +3174,7 @@ static void pm_collect_lambdas_r(PyMirTranspiler* mt, PyAstNode* node, int paren
             memset(lc, 0, sizeof(PyLambdaCollected));
             lc->node = (PyLambdaNode*)node;
             lc->parent_index = parent_func_index;
-            snprintf(lc->name, sizeof(lc->name), "pyf__lambda_%d", mt->lambda_count);
+            snprintf(lc->name, sizeof(lc->name), "__lambda_%d", mt->lambda_count);
             int pc = 0;
             PyAstNode* p = lc->node->params;
             while (p) { pc++; p = p->next; }
@@ -3219,7 +3351,7 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
 
 static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     char fn_name[140];
-    snprintf(fn_name, sizeof(fn_name), "pyf_%s", fc->name);
+    snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
 
     // build parameter list; closures get _py__env as hidden first param
     int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0);
@@ -3551,6 +3683,8 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     memset(mt, 0, sizeof(PyMirTranspiler));
     mt->tp = tp;
     mt->ctx = ctx;
+    mt->filename = filename;
+    mt->runtime = runtime;
     mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
         py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
     mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
@@ -3624,4 +3758,174 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     }
 
     return result;
+}
+
+// ============================================================================
+// Deferred MIR context cleanup for Python modules
+// ============================================================================
+
+#define PM_MAX_MODULE_CONTEXTS 64
+static MIR_context_t pm_module_mir_contexts[PM_MAX_MODULE_CONTEXTS];
+static int pm_module_mir_context_count = 0;
+
+static void pm_defer_mir_cleanup(MIR_context_t ctx) {
+    if (pm_module_mir_context_count < PM_MAX_MODULE_CONTEXTS) {
+        pm_module_mir_contexts[pm_module_mir_context_count++] = ctx;
+    } else {
+        log_error("py-mir: exceeded max deferred MIR contexts (%d)", PM_MAX_MODULE_CONTEXTS);
+        MIR_finish(ctx);
+    }
+}
+
+// ============================================================================
+// Load Python module for cross-language import
+// ============================================================================
+
+Item load_py_module(Runtime* runtime, const char* py_path) {
+    log_info("py-mir: loading Python module '%s' for cross-language import", py_path);
+
+    // check if already loaded in module registry
+    ModuleDescriptor* cached = module_get(py_path);
+    if (cached && cached->initialized) {
+        log_debug("py-mir: module '%s' already loaded, returning cached namespace", py_path);
+        return cached->namespace_obj;
+    }
+
+    char* source = read_text_file(py_path);
+    if (!source) {
+        log_debug("py-mir: cannot read Python file '%s'", py_path);
+        return ItemNull;
+    }
+
+    // ensure a heap context exists for module loading
+    if (!context || !context->heap) {
+        EvalContext* temp_ctx = (EvalContext*)calloc(1, sizeof(EvalContext));
+        temp_ctx->pool = pool_create();
+        temp_ctx->result = ItemNull;
+        temp_ctx->nursery = gc_nursery_create(0);
+        context = temp_ctx;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        context->type_list = arraylist_new(64);
+        _lambda_rt = (Context*)context;
+
+        Input* py_input = Input::create(context->pool);
+        py_runtime_set_input(py_input);
+        log_debug("py-mir: created persistent heap for cross-language module loading");
+    }
+
+    // ensure JS runtime Input is initialized (needed for js_property_set / map_put)
+    {
+        Input* js_inp = Input::create(context->pool);
+        js_runtime_set_input(js_inp);
+    }
+
+    // create Python transpiler (parsing + AST building)
+    PyTranspiler* tp = py_transpiler_create(runtime);
+    if (!tp) {
+        log_error("py-mir: module: failed to create transpiler for '%s'", py_path);
+        free(source);
+        return ItemNull;
+    }
+
+    if (!py_transpiler_parse(tp, source, strlen(source))) {
+        log_error("py-mir: module: parse failed for '%s'", py_path);
+        py_transpiler_destroy(tp);
+        free(source);
+        return ItemNull;
+    }
+
+    TSNode root = ts_tree_root_node(tp->tree);
+    PyAstNode* ast = build_py_ast(tp, root);
+    if (!ast) {
+        log_error("py-mir: module: AST build failed for '%s'", py_path);
+        py_transpiler_destroy(tp);
+        free(source);
+        return ItemNull;
+    }
+
+    MIR_context_t ctx = jit_init(2);
+    if (!ctx) {
+        log_error("py-mir: module: MIR context init failed for '%s'", py_path);
+        py_transpiler_destroy(tp);
+        free(source);
+        return ItemNull;
+    }
+
+    PyMirTranspiler* mt = (PyMirTranspiler*)malloc(sizeof(PyMirTranspiler));
+    if (!mt) {
+        log_error("py-mir: module: failed to allocate transpiler for '%s'", py_path);
+        MIR_finish(ctx);
+        py_transpiler_destroy(tp);
+        free(source);
+        return ItemNull;
+    }
+    memset(mt, 0, sizeof(PyMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->filename = py_path;
+    mt->runtime = runtime;
+    mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
+        py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
+        py_local_func_hash, py_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(PyVarScopeEntry), 16, 0, 0,
+        py_var_scope_hash, py_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->current_func_index = -1;
+
+    mt->module = MIR_new_module(ctx, "py_module");
+
+    // transpile AST to MIR (compiles all functions + py_main)
+    pm_transpile_ast(mt, ast);
+
+    MIR_finish_module(mt->ctx);
+    MIR_load_module(mt->ctx, mt->module);
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    // execute py_main to run module-level code (assignments, etc.)
+    typedef Item (*py_main_func_t)(Context*);
+    py_main_func_t py_main = (py_main_func_t)find_func(ctx, "py_main");
+    if (py_main) {
+        py_reset_module_vars();
+        py_main((Context*)context);
+    }
+
+    // build namespace from top-level compiled functions
+    Item ns = js_new_object();
+    for (int i = 0; i < mt->func_count; i++) {
+        PyFuncCollected* fc = &mt->func_entries[i];
+        if (fc->parent_index != -1) continue;  // skip nested functions
+
+        // get the JIT-compiled function pointer by name
+        char mir_name[140];
+        snprintf(mir_name, sizeof(mir_name), "_%s", fc->name);
+        void* func_ptr = find_func(ctx, mir_name);
+
+        if (func_ptr) {
+            Item val = js_new_function(func_ptr, fc->param_count);
+            Item key = {.item = s2it(heap_create_name(fc->name))};
+            js_property_set(ns, key, val);
+            log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
+        }
+    }
+
+    // register in unified module registry
+    module_register(py_path, "python", ns, ctx);
+
+    // cleanup transpiler state but DEFER MIR context cleanup
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->local_funcs);
+    if (mt->module_consts) hashmap_free(mt->module_consts);
+    for (int i = 0; i <= mt->scope_depth; i++) {
+        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+    }
+    free(mt);
+    pm_defer_mir_cleanup(ctx);
+    py_transpiler_destroy(tp);
+    free(source);
+
+    log_info("py-mir: module '%s' loaded successfully", py_path);
+    return ns;
 }

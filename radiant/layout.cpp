@@ -1001,6 +1001,7 @@ void line_align(LayoutContext* lycon) {
         // CSS 2.1 §16.1: RTL text-indent narrows the available width for alignment
         float available_width = lycon->block.content_width - lycon->line.text_indent_offset;
 
+
         // Skip centering/right alignment only when laying out content INSIDE an inline-block
         // with shrink-to-fit width AND content fits. When content overflows (e.g., due to
         // max-width constraint), alignment still matters for overflow direction.
@@ -1021,14 +1022,27 @@ void line_align(LayoutContext* lycon) {
 
         // Special handling for wrapped text continuation lines:
         // When text wraps within the same text node, start_view may point to a text view
-        // whose first rects belong to previous lines. Detect this by checking if the first
-        // rect's y is well below the current advance_y.
+        // whose first rects belong to previous lines. Detect this by checking if the text
+        // node has multiple rects at different y positions AND the first rect's y is well
+        // below the current advance_y.
+        // Note: A negative first_rect->y (due to font ascender above the baseline) does NOT
+        // indicate wrapping — it's normal for the first line where advance_y starts at 0.
         bool is_wrapped_continuation = false;
         if (view && view->view_type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             TextRect* first_rect = text->rect;
             if (first_rect && first_rect->y < lycon->block.advance_y - 1.0f) {
-                is_wrapped_continuation = true;
+                // Only consider this a wrapped continuation if the text actually wraps
+                // (has multiple rects at different y positions). A single rect or rects
+                // all at the same y cannot be a continuation of a previous line.
+                TextRect* r = first_rect->next;
+                while (r) {
+                    if (r->y > first_rect->y + 1.0f) {
+                        is_wrapped_continuation = true;
+                        break;
+                    }
+                    r = r->next;
+                }
             }
         }
         // Fallback: start_view is NULL but current view has wrapped text
@@ -1066,7 +1080,6 @@ void line_align(LayoutContext* lycon) {
         else if (text_align == CSS_VALUE_RIGHT) {
             offset = available_width - line_width;
         }
-
         // For center/right alignment
         // CSS 2.1 §16.2 + CSS3 Text §7.1 overflow alignment:
         // When content overflows (offset < 0), fall back to start alignment.
