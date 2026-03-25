@@ -181,6 +181,12 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
+    // 9. Multi-column containers establish BFC (CSS Multicol §3)
+    if (block->multicol &&
+        (block->multicol->column_count > 1 || block->multicol->column_width > 0)) {
+        return true;
+    }
+
     return false;
 }
 

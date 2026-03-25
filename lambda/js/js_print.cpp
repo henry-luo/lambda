@@ -71,6 +71,7 @@ static const char* js_node_type_name(JsAstNodeType type) {
         case JS_AST_NODE_AWAIT_EXPRESSION: return "await_expression";
         case JS_AST_NODE_IMPORT_DECLARATION: return "import_declaration";
         case JS_AST_NODE_EXPORT_DECLARATION: return "export_declaration";
+        case JS_AST_NODE_IMPORT_SPECIFIER: return "import_specifier";
         default: return "unknown";
     }
 }

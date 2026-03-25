@@ -215,17 +215,11 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // =========================================================================
-    // Phase 2: Calculate balanced height and redistribute blocks
+    // Phase 2: Collect block children and identify column groups
     // =========================================================================
+    // CSS Multicol §7.1: Spanners divide content into "column groups".
+    // Each column group is balanced independently.
 
-    // Calculate target height for balanced columns
-    float balanced_height = total_content_height / column_count;
-    // Add some slack to handle uneven distribution
-    balanced_height = ceilf(balanced_height * 1.05f);
-
-    log_debug("[MULTICOL] Balanced height target: %.1f", balanced_height);
-
-    // Collect block children and their heights
     struct BlockInfo {
         ViewBlock* block;
         float height;       // Total height including margins
@@ -275,84 +269,115 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // =========================================================================
-    // Phase 3: Assign blocks to columns
+    // Phase 3: Assign blocks to columns, balancing each column group
     // =========================================================================
+    // Process blocks in groups separated by spanners. For each group of
+    // non-spanner blocks, compute a balanced height and distribute across
+    // columns. Spanners are placed at full container width between groups.
 
-    int current_column = 0;
-    float column_y = 0;
-    float max_column_height = 0;
-    bool first_block_in_col0 = true;  // Track first block in column 0
+    // CSS Box 4 §3.1: margin-trim:block-end — trim the last in-flow child's
+    // block-end margin. We handle this here since layout_block_inner_content
+    // returns early for multicol containers.
+    bool trim_block_end = block->blk && (block->blk->margin_trim & MARGIN_TRIM_BLOCK_END);
+    if (trim_block_end && block_count > 0) {
+        ViewBlock* last_block = blocks[block_count - 1].block;
+        if (last_block->bound && last_block->bound->margin.bottom != 0) {
+            log_debug("[MULTICOL] margin-trim block-end: trimming margin.bottom=%.1f on last child %s",
+                      last_block->bound->margin.bottom, last_block->node_name());
+            float old_mb = last_block->bound->margin.bottom;
+            last_block->bound->margin.bottom = 0;
+            // Update the cached height in blocks array
+            blocks[block_count - 1].height -= old_mb;
+        }
+    }
 
-    for (int i = 0; i < block_count; i++) {
-        BlockInfo& info = blocks[i];
-        ViewBlock* child_block = info.block;
+    float max_column_height = 0;  // running Y offset for the entire container
+    float prev_margin_bottom = 0; // for margin collapsing between consecutive spanners
 
-        // Handle column-span: all
-        if (info.spans_all) {
-            // Spanning element spans all columns
-            max_column_height = MAX_FLOAT(max_column_height, column_y);
+    int i = 0;
+    while (i < block_count) {
+        // --- Spanner: place at full width ---
+        if (blocks[i].spans_all) {
+            ViewBlock* child_block = blocks[i].block;
+            float spanner_margin_top = child_block->bound ? child_block->bound->margin.top : 0;
+            float spanner_margin_bottom = child_block->bound ? child_block->bound->margin.bottom : 0;
+
+            // CSS 2.1 §8.3.1: Collapse margin between previous element and
+            // this spanner. Use max of the two positive margins (simplified —
+            // negative margin handling omitted for now).
+            float collapsed_margin = MAX_FLOAT(prev_margin_bottom, spanner_margin_top);
+            // Subtract the already-accounted prev_margin_bottom from max_column_height
+            max_column_height -= prev_margin_bottom;
+            max_column_height += collapsed_margin;
 
             child_block->x = 0;
             child_block->y = max_column_height;
-            child_block->width = available_width;  // Full width
+            child_block->width = available_width;
 
-            max_column_height += info.height;
-            current_column = 0;
-            column_y = max_column_height;
+            max_column_height += child_block->height + spanner_margin_bottom;
+            prev_margin_bottom = spanner_margin_bottom;
 
-            log_debug("[MULTICOL] Spanning element %s at y=%.1f, full width",
-                      child_block->node_name(), child_block->y);
+            log_debug("[MULTICOL] Spanner %s at y=%.1f, margin_top=%.1f, margin_bottom=%.1f, collapsed=%.1f",
+                      child_block->node_name(), child_block->y, spanner_margin_top, spanner_margin_bottom, collapsed_margin);
+            i++;
             continue;
         }
 
-        // Check if we should break to next column
-        bool should_break = false;
-        if (block->multicol->fill == COLUMN_FILL_BALANCE) {
-            // Break when exceeding balanced height (but not on first block in column)
-            should_break = (column_y > 0) &&
-                           (column_y + info.height > balanced_height) &&
-                           (current_column < column_count - 1);
+        // --- Column group: collect consecutive non-spanner blocks ---
+        int group_start = i;
+        float group_total_height = 0;
+        while (i < block_count && !blocks[i].spans_all) {
+            group_total_height += blocks[i].height;
+            i++;
         }
+        int group_end = i;  // exclusive
 
-        if (should_break) {
-            log_debug("[MULTICOL] Column break: column %d -> %d at y=%.1f",
-                      current_column, current_column + 1, column_y);
-            max_column_height = MAX_FLOAT(max_column_height, column_y);
-            current_column++;
-            column_y = 0;
+        // Calculate balanced height for this column group
+        float group_balanced = group_total_height / column_count;
+        // CSS Multicol §7.2: column-fill:balance distributes content evenly.
+        // Use ceiling to avoid underfilling the last column.
+        group_balanced = ceilf(group_balanced);
+
+        log_debug("[MULTICOL] Column group [%d..%d): total_h=%.1f, balanced_h=%.1f",
+                  group_start, group_end, group_total_height, group_balanced);
+
+        // Distribute this group's blocks across columns
+        int current_column = 0;
+        float column_y = 0;
+        float group_max_height = 0;
+
+        for (int j = group_start; j < group_end; j++) {
+            BlockInfo& info = blocks[j];
+            ViewBlock* cb = info.block;
+
+            // Check if we should break to next column
+            if (block->multicol->fill == COLUMN_FILL_BALANCE && column_y > 0 &&
+                column_y + info.height > group_balanced &&
+                current_column < column_count - 1) {
+                group_max_height = MAX_FLOAT(group_max_height, column_y);
+                current_column++;
+                column_y = 0;
+                log_debug("[MULTICOL] Column break -> column %d at y=%.1f", current_column, column_y);
+            }
+
+            float column_x = current_column * (column_width + gap);
+            cb->x = column_x;
+            cb->y = max_column_height + column_y;
+
+            // Ensure width fits column
+            if (cb->width > column_width) {
+                cb->width = column_width;
+            }
+
+            log_debug("[MULTICOL] Placed %s in column %d at (%.1f, %.1f)",
+                      cb->node_name(), current_column, cb->x, cb->y);
+
+            column_y += info.height;
         }
-
-        // Position block in current column
-        float column_x = current_column * (column_width + gap);
-        child_block->x = column_x;
-
-        // For the first block in column 0, preserve its original margin-top offset
-        // This matches browser behavior where margins are NOT collapsed at the start of column 0
-        // but ARE collapsed at the start of subsequent columns
-        if (first_block_in_col0 && current_column == 0) {
-            // Use the original Y position which includes margin-top
-            // The orig_y is relative to content area, so we use it directly
-            float margin_top = child_block->bound ? child_block->bound->margin.top : 0;
-            child_block->y = margin_top;
-            column_y = margin_top;  // Start subsequent blocks after this margin
-            first_block_in_col0 = false;
-        } else {
-            child_block->y = column_y;
-        }
-
-        // Ensure width fits column
-        if (child_block->width > column_width) {
-            child_block->width = column_width;
-        }
-
-        log_debug("[MULTICOL] Placed %s in column %d at (%.1f, %.1f)",
-                  child_block->node_name(), current_column, child_block->x, child_block->y);
-
-        column_y += info.height;
+        group_max_height = MAX_FLOAT(group_max_height, column_y);
+        max_column_height += group_max_height;
+        prev_margin_bottom = 0;  // column group doesn't have trailing margin
     }
-
-    // Final column height
-    max_column_height = MAX_FLOAT(max_column_height, column_y);
 
     // Calculate total height including padding
     float content_start_y = 0;
@@ -364,7 +389,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // Set block height directly (like flex layout does)
-    // Height = padding.top + border.top + content_height + padding.bottom + border.bottom
     float total_height = max_column_height;
     if (block->bound) {
         total_height += block->bound->padding.top + block->bound->padding.bottom;
@@ -376,7 +400,6 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     block->content_height = max_column_height + (block->bound ? block->bound->padding.bottom : 0);
 
     // Update layout context's advance_y to reflect actual height
-    // advance_y should be content_start_y + content_height (so finalize can add padding.bottom)
     lycon->block.advance_y = content_start_y + max_column_height;
 
     log_debug("[MULTICOL] Final layout: %d columns, max height=%.1f, block height=%.1f",

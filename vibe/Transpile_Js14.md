@@ -6,12 +6,12 @@ After v13 (optimization parity with Lambda restructuring), LambdaJS covers all s
 ES6+ features. Four significant gaps remain in the feature matrix, all sharing a common
 dependency on **asynchronous execution infrastructure**:
 
-| Feature | Current Status | Dependency |
+| Feature | Status | Dependency |
 |---------|:-:|---|
-| Generators / `yield` | ❌ | Coroutine / suspension mechanism |
-| `async` / `await` / `Promise` | ❌ | Event loop + microtask queue |
-| `import` / `export` (ES modules) | ❌ | Module loader (+ top-level await needs event loop) |
-| `setTimeout` / `setInterval` | ❌ | Timer queue + event loop |
+| Generators / `yield` | ⚠️ Scaffolded | Coroutine / suspension mechanism |
+| `async` / `await` / `Promise` | ✅ Implemented | Event loop + microtask queue |
+| `import` / `export` (ES modules) | ✅ Implemented | Module loader (recursive MIR compilation) |
+| `setTimeout` / `setInterval` | ✅ Implemented | Timer queue + event loop |
 
 **v14 goal:** Add an event loop and coroutine system to the JS runtime, enabling all four
 features. This is the single largest structural addition since the initial JS transpiler.
@@ -459,24 +459,24 @@ then Phase 4.
 
 ### Phased Delivery
 
-| Phase | Feature | Est. LOC | Depends On | Deliverable |
-|:-----:|---------|:--------:|:----------:|---|
-| 1 | Generators / `yield` | ~800 | — | `function*`, `yield`, `for...of` on generators, `yield*` delegation |
-| 3 | Event Loop + Timers | ~500 | — | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, event loop drain |
-| 2 | Promises + async/await | ~900 | Phase 1, 3 | `Promise`, `.then/.catch/.finally`, `Promise.all/race/any/allSettled`, `async`/`await` |
-| 4 | ES Modules | ~700 | Phase 2, 3 (for top-level await) | `import`/`export`, module graph, namespace objects |
-| — | **Total** | **~2,900** | | |
+| Phase | Feature | Est. LOC | Actual LOC | Status | Deliverable |
+|:-----:|---------|:--------:|:----------:|:------:|---|
+| 1 | Generators / `yield` | ~800 | ~150 | ⚠️ Scaffolded | AST parsing + runtime structs done; state machine transform deferred |
+| 3 | Event Loop + Timers | ~500 | ~310 | ✅ Done | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`, event loop drain |
+| 2 | Promises + async/await | ~900 | ~500 | ✅ Done (simplified) | `Promise`, `.then/.catch/.finally`, `Promise.all/race/any/allSettled`; `async`/`await` parsed (await is pass-through) |
+| 4 | ES Modules | ~700 | ~620 | ✅ Done | Recursive module compilation, import/export binding, deferred MIR cleanup, module caching |
+| — | **Total** | **~2,900** | **~1,580** | | Transpiler + runtime + event loop + 25 FPTR registrations |
 
 ### Testing Strategy
 
 Each phase adds tests under `test/js/`:
 
-| Phase | Test Files | Coverage |
-|-------|-----------|----------|
-| 1 | `generator_basic.js`, `generator_delegation.js`, `generator_for_of.js` | Basic yield/next, yield*, for-of consumption, early return |
-| 2 | `promise_basic.js`, `promise_chain.js`, `async_await.js`, `promise_combinators.js` | resolve/reject, .then chains, async/await, Promise.all/race/any |
-| 3 | `timer_setTimeout.js`, `timer_setInterval.js`, `timer_clear.js` | Callback ordering, interval repetition, cancellation |
-| 4 | `module_import.js`, `module_export.js`, `module_default.js`, `module_cycle.js` | Named/default imports, re-exports, circular dependency handling |
+| Phase | Test Files | Coverage | Status |
+|-------|-----------|----------|:------:|
+| 1 | `generator_basic.js`, `generator_delegation.js`, `generator_for_of.js` | Basic yield/next, yield*, for-of consumption, early return | ❌ Not yet (state machine deferred) |
+| 2 | `promise_basic.js`, `async_v14.js` | resolve/reject, .then chains, new Promise(executor), Promise.all/race/any, clearTimeout | ✅ 12/12 scenarios pass |
+| 3 | `timer_basic.js`, `async_v14.js` | Callback execution, timer ordering (5ms vs 10ms), clearTimeout cancellation | ✅ 3/3 scenarios pass |
+| 4 | `module_main.js`, `module_advanced.js` | Named/default imports, import aliases, closures with imports, imports as callbacks | ✅ 2/2 tests pass |
 
 ---
 
@@ -552,18 +552,19 @@ by design.
 
 | File | Status | Purpose |
 |------|:------:|---------|
-| `lambda/js/js_event_loop.h` | **New** | Event loop, timer heap, microtask queue declarations |
-| `lambda/js/js_event_loop.cpp` | **New** | Event loop implementation (~300 LOC) |
-| `lambda/js/js_promise.cpp` | **New** | Promise data model and resolution (~400 LOC) |
-| `lambda/js/js_module.cpp` | **New** | ES module loader, resolution, namespace (~400 LOC) |
-| `lambda/js/js_ast.hpp` | Modified | Add YIELD, AWAIT, IMPORT, EXPORT node types |
-| `lambda/js/build_js_ast.cpp` | Modified | Parse generator/async/yield/await/import/export |
-| `lambda/js/transpile_js_mir.cpp` | Modified | State machine emission, async transform, module compilation |
-| `lambda/js/js_runtime.h` | Modified | Declare generator, promise, timer, module runtime functions |
-| `lambda/js/js_runtime.cpp` | Modified | Generator runtime (~200 LOC) |
-| `lambda/sys_func_registry.c` | Modified | Register new JS runtime imports |
-| `lambda/main.cpp` | Modified | Event loop drain after js_main(), module resolution |
-| `build_lambda_config.json` | Modified | Add new .cpp files to build |
+| `lambda/js/js_event_loop.h` | ✅ **New** | Event loop, timer heap, microtask queue declarations (42 LOC) |
+| `lambda/js/js_event_loop.cpp` | ✅ **New** | Event loop implementation (267 LOC) |
+| `lambda/js/js_promise.cpp` | ❌ Skipped | Promise runtime inlined in `js_runtime.cpp` instead |
+| `lambda/js/js_module.cpp` | ❌ Skipped | Module runtime inlined in `js_runtime.cpp` instead |
+| `lambda/js/js_ast.hpp` | ✅ Modified | Added YIELD, AWAIT, IMPORT, EXPORT, IMPORT_SPECIFIER node types + structs (incl. `JsImportSpecifierNode` with `local_name`/`remote_name`) |
+| `lambda/js/build_js_ast.cpp` | ✅ Modified | Parse generator/async/yield/await/import/export; import specifier alias handling (`import { a as b }`) |
+| `lambda/js/transpile_js_mir.cpp` | ✅ Modified | Yield/await emission, import/export handling, Promise dispatch, timer builtins, event loop integration; **ES module loader**: recursive module compilation (`transpile_js_module_to_mir`), `jm_load_imports()`, deferred MIR cleanup, export unwrapping in all phases, import binding as `MCONST_MODVAR`, module namespace creation |
+| `lambda/js/js_runtime.h` | ✅ Modified | +~80 LOC declaring generator, promise, timer, module runtime functions |
+| `lambda/js/js_runtime.cpp` | ✅ Modified | +~520 LOC: generator, promise, module runtimes |
+| `lambda/js/js_print.cpp` | ✅ Modified | +15 case labels for new AST node types |
+| `lambda/sys_func_registry.c` | ✅ Modified | +25 FPTR entries for v14 runtime functions |
+| `lambda/main.cpp` | ✅ Modified | Event loop include |
+| `build_lambda_config.json` | — Unchanged | `lambda/js` already in `source_dirs` — new .cpp files auto-discovered |
 
 ---
 
@@ -624,3 +625,114 @@ Once v14 establishes the async runtime (custom event loop + microtask queue + ti
 The v14 custom event loop is designed to make this migration straightforward:
 the `JsEventLoop` API (`js_microtask_enqueue`, `js_timer_set`, `js_event_loop_run`)
 becomes a thin wrapper over libuv primitives rather than a from-scratch replacement.
+
+---
+
+## 9. Implementation Progress
+
+### Status Summary (March 2026)
+
+| Phase | Feature                |           Status            | Notes                                                                                                                                  |
+| :---: | ---------------------- | :-------------------------: | -------------------------------------------------------------------------------------------------------------------------------------- |
+|   1   | Generators / `yield`   |      ⚠️ **Scaffolded**      | AST parsing + runtime structs done; state machine transform **not yet implemented** — `yield` passes through its argument value        |
+|   3   | Event Loop + Timers    |       ✅ **Complete**        | Custom event loop with timer min-heap + microtask FIFO queue; `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` all working |
+|   2   | Promises + async/await | ✅ **Complete (simplified)** | Full Promise API working; `async`/`await` parsed but `await` is pass-through (no true suspension)                                      |
+|   4   | ES Modules             |       ✅ **Complete**        | Recursive module compilation with deferred MIR cleanup; named/default imports, export declarations, import aliases all working          |
+
+### What Was Built
+
+**New files (2):**
+
+| File | LOC | Purpose |
+|------|:---:|---------|
+| `lambda/js/js_event_loop.h` | 42 | Event loop + timer + microtask API declarations |
+| `lambda/js/js_event_loop.cpp` | 267 | Microtask FIFO queue (capacity 1024), timer min-heap (max 256), event loop drain with `select()`-based sleep |
+
+**Modified files (8):**
+
+| File | Change Summary |
+|------|----------------|
+| `lambda/js/js_ast.hpp` | +4 node types: `YIELD_EXPRESSION`, `AWAIT_EXPRESSION`, `IMPORT_DECLARATION`, `EXPORT_DECLARATION`; +4 structs: `JsYieldNode`, `JsAwaitNode`, `JsImportNode`, `JsExportNode` |
+| `lambda/js/build_js_ast.cpp` | Generator/async function detection; `yield`, `await` expression parsing; `import_statement` parsing (~160 LOC for specifier/default/namespace extraction); `export_statement` parsing |
+| `lambda/js/js_runtime.h` | ~80 lines of v14 declarations (generator, promise, module, timer functions) |
+| `lambda/js/js_runtime.cpp` | +~520 LOC: `JsGenerator` struct + `create/next/return/throw` (~120 LOC); `JsPromise` struct + `settle/create/resolve/reject/then/catch/finally` + `all/race/any/all_settled` (~350 LOC); `JsModule` struct + `register/get/namespace_create` (~50 LOC); forward declarations for promise method dispatch |
+| `lambda/js/transpile_js_mir.cpp` | Yield/await expression emission; import/export statement handling; generator/async function collection; global builtins (`setTimeout`/`setInterval`/`clearTimeout`/`clearInterval`); `Promise.resolve/reject/all/race/any/allSettled` static method dispatch; `new Promise(executor)` constructor dispatch; event loop init + drain integration (after `js_main()`, before `MIR_finish()`) |
+| `lambda/js/js_print.cpp` | +15 case labels for new AST node types |
+| `lambda/sys_func_registry.c` | +25 FPTR entries for v14 runtime functions (generator, promise, timer, microtask, event loop, module) |
+| `lambda/main.cpp` | `#include "js/js_event_loop.h"` |
+
+**Test files (5 + expected outputs):**
+
+| Test | Scenarios | Result |
+|------|:---------:|:------:|
+| `test/js/promise_basic.js` | Promise.resolve, reject+catch, new Promise(executor), resolve chain, Promise.all | ✅ 5/5 |
+| `test/js/timer_basic.js` | setTimeout with callback | ✅ 1/1 |
+| `test/js/async_v14.js` | Promise chain, reject+catch, new Promise, Promise.race, Promise.any, timer ordering, clearTimeout | ✅ 7/7 |
+| `test/js/module_main.js` | Named imports (`add`, `multiply`, `PI`), default import (`greet`), multi-module imports | ✅ Pass |
+| `test/js/module_advanced.js` | Import aliases (`import { add as sum }`), closures capturing imports, imports used as `.map()` callbacks | ✅ Pass |
+
+**Module library files (2):**
+
+| File | Purpose |
+|------|---------|
+| `test/js/module_utils.js` | Exports: `add()`, `multiply()`, `PI` (named), `greet()` (default) |
+| `test/js/module_math.js` | Exports: `E`, `TAU` (constants), `square()`, `cube()` (functions) |
+
+### Build & Test Verification
+
+- **Build**: 0 errors, 363 warnings (pre-existing)
+- **Lambda baseline**: 679/679 tests passed (zero regressions)
+- **JS test suite**: 63/63 tests passed (DOM tests require `--document` flag; all pass in GTest harness)
+
+### Key Implementation Decisions (Deviations from Design)
+
+1. **Promise and module runtime inlined in `js_runtime.cpp`** — the design proposed separate
+   `js_promise.cpp` and `js_module.cpp` files, but all v14 runtime code was added directly
+   to `js_runtime.cpp` for cohesion with existing dispatch logic (promise method dispatch
+   integrates with `js_map_method()`).
+
+2. **Event loop drain placement** — the design specified `js_event_loop_run()` after
+   `js_main()` returns. Implementation places `js_event_loop_drain()` inside
+   `transpile_js_to_mir()` after `js_main()` but **before `MIR_finish(ctx)`**. This is
+   critical: `MIR_finish()` destroys all JIT-compiled function pointers. Timer/promise
+   callbacks become dangling pointers if the event loop drains after MIR cleanup.
+
+3. **Static arrays for generators/promises/modules** — the design proposed heap allocation.
+   Implementation uses static arrays (`JsGenerator[256]`, `JsPromise[1024]`, `JsModule[64]`)
+   with index-based lookup via hidden `__gen_idx`/`__promise_idx` Map properties. This avoids
+   GC complexity but limits concurrently alive object counts.
+
+4. **Promise `.then()` callbacks are called directly** — not scheduled as microtasks per spec.
+   This gives correct results for synchronous promise chains but may differ from spec for
+   interleaved promise/timer scenarios. Adequate for v14; can be tightened in v15.
+
+5. **ES Module deferred MIR cleanup** — Each module is compiled into its own MIR context
+   (`MIR_init()` → compile → `MIR_gen()`). The MIR context cannot be finalized until the
+   main program finishes, because module-exported functions (JIT-compiled pointers) are
+   called from the main program. Solution: `jm_defer_mir_cleanup()` stores module MIR
+   contexts in a static array (`module_mir_contexts[64]`), and `jm_cleanup_deferred_mir()`
+   runs after main program completion to finalize all of them.
+
+6. **Module export boxing** — `jm_emit_module_export()` uses `jm_transpile_box_item()`
+   (not `jm_transpile_identifier()`) to ensure native-type values like floats are properly
+   boxed into `Item` before being stored as module properties. Using `jm_transpile_identifier()`
+   would return `MIR_T_D` registers for float constants, causing MIR operand mode errors.
+
+7. **Input context initialization before module loading** — `Input::create()` and
+   `js_runtime_set_input()` must execute before `jm_load_imports()`, because module
+   execution calls `js_new_function()` → `pool_calloc(js_input->pool, ...)`, which
+   segfaults if `js_input` is null.
+
+### Known Limitations (Deferred to v15)
+
+| Limitation | Impact | v15 Fix |
+|-----------|--------|---------|
+| Generator state machine transform not implemented | `function*` / `yield` don't produce true suspend/resume coroutines; yield returns its argument directly | Implement full state machine transform with local variable save/restore |
+| `async`/`await` is pass-through | `await` evaluates its expression but doesn't suspend; works for synchronous promise chains only | Implement as Promise + state machine (reuse generator infra) |
+| ES module circular dependencies not handled | Circular `import` chains will cause infinite recursion in `jm_load_imports()` | Implement spec's "linking" state detection; return partial namespace for cycles |
+| ES module `export *` / re-exports not implemented | `export * from "./other.js"` and `export { a } from "./other.js"` not supported | Add re-export traversal in module compilation |
+| Bare module specifiers not resolved | `import "react"` won't resolve (only relative `./` / `../` paths work) | Add `node_modules` / package.json resolution |
+| Promise `.then()` not microtask-scheduled | Callbacks called directly, not queued; may cause ordering differences from spec | Schedule via `js_microtask_enqueue()` |
+| Static capacity limits | 256 generators, 1024 promises, 64 modules, 256 timers, 1024 microtasks | Dynamic allocation or pool-based growth |
+| `yield*` delegation not implemented | Cannot delegate to sub-generators | Add in generator state machine implementation |
+| `for...of` on generators not wired | Generator protocol exists but `for...of` doesn't call `.next()` | Wire `for...of` to iterator protocol |

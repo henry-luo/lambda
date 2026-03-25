@@ -13,6 +13,7 @@ extern "C" {
 
 // Forward declarations
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout);
+void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
@@ -189,10 +190,13 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     log_debug("GRID START - container: %dx%d at (%d,%d)",
         container->width, container->height, container->x, container->y);
 
-    // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
-    // This affects how we determine available width for track sizing
+    // Check if container is shrink-to-fit (absolutely positioned with no explicit width,
+    // or inline-grid which uses shrink-to-fit sizing)
     bool is_shrink_to_fit_width = false;
-    if (container->position &&
+    if (container->display.outer == CSS_VALUE_INLINE_BLOCK &&
+        (!container->blk || container->blk->given_width < 0)) {
+        is_shrink_to_fit_width = true;
+    } else if (container->position &&
         (container->position->position == CSS_VALUE_ABSOLUTE ||
          container->position->position == CSS_VALUE_FIXED)) {
         bool has_explicit_width = container->blk && container->blk->given_width > 0;
@@ -397,6 +401,9 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             grid_layout->implicit_row_count = prev_implicit_rows;
         }
     }
+
+    // Phase 5.5: Auto-fit empty track collapsing is deferred until proper gutter
+    // collapsing is implemented (CSS Grid §7.2.3.2 requires collapsed gutters too).
 
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     log_debug("DEBUG: Phase 6 - Resolving track sizes");
@@ -1062,6 +1069,63 @@ static int calculate_track_pattern_min_size(GridTrackSize** tracks, int track_co
     return pattern_size;
 }
 
+// CSS Grid §7.2.3.2: Collapse empty auto-fit tracks after item placement.
+// Empty auto-fit tracks are treated as having a fixed track sizing function of 0px,
+// and their gutters are also collapsed.
+void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout) {
+    if (!grid_layout) return;
+
+    // Process columns
+    if (grid_layout->auto_fit_col_count > 0 && grid_layout->grid_template_columns) {
+        GridTrackList* cols = grid_layout->grid_template_columns;
+        // Build occupancy bitmap: which column indices (0-based) have items
+        bool col_occupied[64] = {};
+        for (int idx = 0; idx < grid_layout->item_count; idx++) {
+            ViewBlock* item = grid_layout->grid_items[idx];
+            if (!item || !item->gi) continue;
+            // computed positions are 1-based line numbers
+            int cs = item->gi->computed_grid_column_start - 1;
+            int ce = item->gi->computed_grid_column_end - 1;
+            for (int c = cs; c < ce && c < 64; c++) {
+                if (c >= 0) col_occupied[c] = true;
+            }
+        }
+        // Collapse unoccupied auto-fit tracks by setting their size to 0px
+        for (int c = 0; c < cols->track_count && c < 64; c++) {
+            if (c < grid_layout->auto_fit_col_count &&
+                grid_layout->auto_fit_columns[c] && !col_occupied[c]) {
+                // Replace with a 0px fixed track
+                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
+                cols->tracks[c] = zero_track;
+                log_debug("GRID: auto-fit collapse column %d (empty)", c);
+            }
+        }
+    }
+
+    // Process rows
+    if (grid_layout->auto_fit_row_count > 0 && grid_layout->grid_template_rows) {
+        GridTrackList* rows = grid_layout->grid_template_rows;
+        bool row_occupied[64] = {};
+        for (int idx = 0; idx < grid_layout->item_count; idx++) {
+            ViewBlock* item = grid_layout->grid_items[idx];
+            if (!item || !item->gi) continue;
+            int rs = item->gi->computed_grid_row_start - 1;
+            int re = item->gi->computed_grid_row_end - 1;
+            for (int r = rs; r < re && r < 64; r++) {
+                if (r >= 0) row_occupied[r] = true;
+            }
+        }
+        for (int r = 0; r < rows->track_count && r < 64; r++) {
+            if (r < grid_layout->auto_fit_row_count &&
+                grid_layout->auto_fit_rows[r] && !row_occupied[r]) {
+                GridTrackSize* zero_track = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, 0);
+                rows->tracks[r] = zero_track;
+                log_debug("GRID: auto-fit collapse row %d (empty)", r);
+            }
+        }
+    }
+}
+
 // Expand auto-fill/auto-fit repeat() tracks based on available space
 void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
@@ -1119,12 +1183,15 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             log_debug("GRID: Pattern size=%d, gap=%.1f, available=%d -> %d repetitions (before auto-fit adjustment)",
                       pattern_size, gap, available, repeat_count);
 
-            // For auto-fit, limit to the number of items (collapse empty tracks)
-            // For auto-fill, keep all calculated tracks
-            if (ts->is_auto_fit && item_count > 0 && repeat_count > item_count) {
-                log_debug("GRID: auto-fit: reducing from %d to %d tracks to match item count",
-                          repeat_count, item_count);
+            // For auto-fit: CSS Grid §7.2.3.2 says empty tracks should be collapsed.
+            // Current approach: limit repeat count to item count to avoid creating empty
+            // tracks, since proper gutter collapsing for empty auto-fit tracks is not yet
+            // implemented. A full implementation would expand like auto-fill, then collapse
+            // empty tracks AND their adjacent gutters after placement.
+            bool is_auto_fit = ts->is_auto_fit;
+            if (is_auto_fit && item_count > 0 && repeat_count > item_count) {
                 repeat_count = item_count;
+                log_debug("GRID: auto-fit adjusted repeat_count to %d (item_count)", repeat_count);
             }
 
             // Expand the track list
@@ -1137,16 +1204,26 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             for (int j = 0; j < i; j++) {
                 new_tracks[dest++] = cols->tracks[j];
             }
-            // Expand repeat tracks
+            // Expand repeat tracks (mark auto-fit indices)
+            int auto_fit_start = dest;
             for (int r = 0; r < repeat_count; r++) {
                 for (int t = 0; t < ts->repeat_track_count; t++) {
                     // Share the track size (don't duplicate)
                     new_tracks[dest++] = ts->repeat_tracks[t];
                 }
             }
+            int auto_fit_end = dest;
             // Copy tracks after the repeat
             for (int j = i + 1; j < cols->track_count; j++) {
                 new_tracks[dest++] = cols->tracks[j];
+            }
+
+            // Record auto-fit column indices for post-placement collapsing
+            if (is_auto_fit && new_track_count <= 64) {
+                for (int k = 0; k < new_track_count; k++) {
+                    grid_layout->auto_fit_columns[k] = (k >= auto_fit_start && k < auto_fit_end);
+                }
+                grid_layout->auto_fit_col_count = new_track_count;
             }
 
             // Replace track list (but don't free old one if shared)
@@ -1213,10 +1290,8 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             log_debug("GRID: Row pattern size=%d, gap=%.1f, available=%d -> %d repetitions (before auto-fit adjustment)",
                       pattern_size, gap, available, repeat_count);
 
-            // For auto-fit, limit to the number of row tracks needed for items
-            // This is more complex since it depends on column count too
-            // For simplicity, we don't collapse row tracks as aggressively
-            // TODO: Calculate actual row requirements based on items and columns
+            // For auto-fit: expand like auto-fill, collapse empty tracks after placement.
+            bool is_auto_fit_row = ts->is_auto_fit;
 
             int new_track_count = rows->track_count - 1 + (repeat_count * ts->repeat_track_count);
             GridTrackSize** new_tracks = (GridTrackSize**)mem_calloc(new_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
@@ -1226,13 +1301,23 @@ void expand_auto_repeat_tracks(GridContainerLayout* grid_layout) {
             for (int j = 0; j < i; j++) {
                 new_tracks[dest++] = rows->tracks[j];
             }
+            int auto_fit_row_start = dest;
             for (int r = 0; r < repeat_count; r++) {
                 for (int t = 0; t < ts->repeat_track_count; t++) {
                     new_tracks[dest++] = ts->repeat_tracks[t];
                 }
             }
+            int auto_fit_row_end = dest;
             for (int j = i + 1; j < rows->track_count; j++) {
                 new_tracks[dest++] = rows->tracks[j];
+            }
+
+            // Record auto-fit row indices for post-placement collapsing
+            if (is_auto_fit_row && new_track_count <= 64) {
+                for (int k = 0; k < new_track_count; k++) {
+                    grid_layout->auto_fit_rows[k] = (k >= auto_fit_row_start && k < auto_fit_row_end);
+                }
+                grid_layout->auto_fit_row_count = new_track_count;
             }
 
             if (grid_layout->owns_template_rows) {

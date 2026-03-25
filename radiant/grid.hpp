@@ -135,6 +135,14 @@ typedef struct GridContainerLayout : GridProp {
     // Layout context for intrinsic sizing (set during init_grid_container)
     struct LayoutContext* lycon;
 
+    // Auto-fit track indices (for collapsing empty tracks after placement)
+    // These mark which column/row indices in the expanded template came from
+    // a repeat(auto-fit, ...) expansion so we can collapse empty ones.
+    bool auto_fit_columns[64];   // true for columns from auto-fit expansion
+    bool auto_fit_rows[64];      // true for rows from auto-fit expansion
+    int auto_fit_col_count;      // number of entries in auto_fit_columns
+    int auto_fit_row_count;      // number of entries in auto_fit_rows
+
     // Ownership flags - if true, we own these and should free them
     bool owns_template_rows;
     bool owns_template_columns;
