@@ -1028,30 +1028,33 @@ Phase 1: libuv Integration Layer          (foundation — no dependencies)
     └─→ Phase 9: Network Thread Pool       (depends on Phase 1, low priority)
 ```
 
-**Practical ordering:** Phases 1 → 3 → 8 → 7 → 2 → 4 → 5 → 6 → 9
+**Practical ordering:** Phases 1 → 3 → 2 → 8 → 7 → 4 → 5 → 6 → 9
+
+**Completed:** Phases 1, 2, 3 (libuv foundation + server migration + JS event loop)
+**Next up:** Phase 8 (generators), Phase 7 (microtask fix), then Phases 4–6
 
 Rationale:
-- Phase 1 (libuv layer) unlocks everything else
-- Phase 3 (JS event loop) is the most impactful for JS development
+- Phase 1 (libuv layer) unlocks everything else — ✅ completed
+- Phase 3 (JS event loop) is the most impactful for JS development — ✅ completed
+- Phase 2 (server) is a separate subsystem — ✅ completed (ahead of original plan)
 - Phase 8 (generators) is standalone and completes a v14 gap
 - Phase 7 (microtask fix) is small and improves correctness
-- Phase 2 (server) is a separate subsystem, can be done in parallel
 - Phases 4–6 (fs/fetch/child) are incremental additions
 - Phase 9 (thread pool) is low priority, Radiant-only
 
 ### Phased Delivery
 
-| Phase | Feature | Est. LOC | Dependencies | Priority |
-|:-----:|---------|:--------:|:------------:|:--------:|
-| 1 | libuv integration layer | ~80 | None | P0 |
-| 2 | HTTP server migration + TLS | ~1,300 | Phase 1 | P1 |
-| 3 | JS event loop migration | ~150 | Phase 1 | P0 |
-| 4 | Async file I/O (`fs`) | ~600 | Phase 3 | P1 |
-| 5 | Async HTTP (`fetch`) | ~700 | Phase 3 | P1 |
-| 6 | Child processes | ~500 | Phase 3 | P2 |
-| 7 | True microtask scheduling | ~100 | Phase 3 | P1 |
-| 8 | Generator state machine | ~1,000 | None | P0 |
-| 9 | Network thread pool migration | ~100 | Phase 1 | P3 |
+| Phase | Feature | Est. LOC | Dependencies | Priority | Status |
+|:-----:|---------|:--------:|:------------:|:--------:|:------:|
+| 1 | libuv integration layer | ~80 | None | P0 | ✅ Done |
+| 2 | HTTP server migration + TLS | ~1,300 | Phase 1 | P1 | ✅ Done |
+| 3 | JS event loop migration | ~150 | Phase 1 | P0 | ✅ Done |
+| 4 | Async file I/O (`fs`) | ~600 | Phase 3 | P1 | Not started |
+| 5 | Async HTTP (`fetch`) | ~700 | Phase 3 | P1 | Not started |
+| 6 | Child processes | ~500 | Phase 3 | P2 | Not started |
+| 7 | True microtask scheduling | ~100 | Phase 3 | P1 | Not started |
+| 8 | Generator state machine | ~1,000 | None | P0 | Not started |
+| 9 | Network thread pool migration | ~100 | Phase 1 | P3 | Not started |
 | — | **Total** | **~4,530** | | |
 
 ---
@@ -1060,14 +1063,14 @@ Rationale:
 
 ### 4.1 Dependency Changes Summary
 
-| Dependency | v14 Status | v15 Status | Action |
-|-----------|:----------:|:----------:|--------|
-| **libevent** | ✅ Linked (static) | ❌ Removed | Delete from `build_lambda_config.json` |
-| **libevent_openssl** | ✅ Linked (static) | ❌ Removed | Delete from `build_lambda_config.json` |
-| **libuv** | ❌ Not used | ✅ Added (static) | Build from source, add to `build_lambda_config.json` |
-| **llhttp** | ❌ Not used | ✅ Added (vendored) | Single `.c`/`.h` in `lib/serve/` |
-| **libcurl** | ✅ Linked (static) | ✅ Unchanged | Still used, now with curl_multi + uv_poll |
-| **mbedTLS** | ✅ Linked (static) | ✅ Unchanged | Now directly integrated with uv_tcp_t |
+| Dependency | v14 Status | v15 Status | Action | Done |
+|-----------|:----------:|:----------:|--------|:----:|
+| **libevent** | ✅ Linked (static) | ❌ Removed | Deleted from `build_lambda_config.json` | ✅ |
+| **libevent_openssl** | ✅ Linked (static) | ❌ Removed | Deleted from `build_lambda_config.json` | ✅ |
+| **libuv** | ❌ Not used | ✅ Added (static) | Installed via Homebrew (`/opt/homebrew/lib/libuv.a`) | ✅ |
+| **llhttp** | ❌ Not used | ❌ Not needed | Custom HTTP parser written instead (~200 LOC) | ✅ |
+| **libcurl** | ✅ Linked (static) | ✅ Unchanged | Will use curl_multi + uv_poll for fetch() | — |
+| **mbedTLS** | ✅ Linked (static) | ✅ Unchanged | Now directly integrated with uv_tcp_t | ✅ |
 
 ### 4.2 build_lambda_config.json Changes
 
@@ -1136,33 +1139,41 @@ These should be added to the platform-specific `system_libraries` in `build_lamb
 
 ## 5. Migration Plan
 
-### 5.1 Server Rewrite Strategy
+### 5.1 Server Rewrite Strategy — ✅ COMPLETED
 
-The server rewrite is a **replacement**, not an incremental migration. The approach:
+The server was rewritten as an **in-place replacement** (simpler than the originally
+planned side-by-side approach). What was done:
 
-1. **Create `lib/serve/server_uv.c`** alongside existing `server.c`
-2. **Port the API surface**: `server_create()`, `server_start()`, `server_run()`,
-   `server_stop()`, `server_destroy()`, `server_set_handler()`
-3. **Implement HTTP parsing** with llhttp (vendored)
-4. **Implement TLS** with direct mbedTLS on `uv_tcp_t`
-5. **Test both implementations** side by side
-6. **Swap**: rename `server.c` → `server_libevent.c.bak`, `server_uv.c` → `server.c`
-7. **Remove libevent** from build config
+1. ✅ Rewrote `lib/serve/server.h` — libuv types, route table, per-connection struct
+2. ✅ Rewrote `lib/serve/server.c` (~420 LOC) — `uv_tcp_t` server with request accumulation,
+   route dispatch, connection lifecycle management
+3. ✅ Rewrote `lib/serve/http_handler.h` — custom HTTP types (`http_request_t`,
+   `http_response_t`, `http_method_t`, `http_header_t` linked list)
+4. ✅ Rewrote `lib/serve/http_handler.c` (~550 LOC) — custom HTTP/1.1 parser (request line,
+   headers, body, query params, URL decode), response formatter with `uv_write()`
+5. ✅ Updated `lib/serve/tls_handler.h/c` — `tls_create_connection(SSL_CTX*, uv_tcp_t*)`
+   using `uv_fileno()` → mbedTLS bio
+6. ✅ Updated `radiant/webdriver/webdriver_server.cpp` — new handler signature
+7. ✅ Updated `test/serve/example_server.c` and `test/serve/test_server.c`
+8. ✅ Removed libevent from `build_lambda_config.json`, added libuv on all 3 platforms
 
-### 5.2 Event Loop Migration Strategy
+**Note:** llhttp was not vendored. A custom HTTP/1.1 parser (~200 LOC in `http_handler.c`)
+was written instead, sufficient for the server's needs (simple request parsing, no
+chunked encoding or HTTP/2 required at this stage).
 
-The JS event loop migration is an **in-place replacement**:
+### 5.2 Event Loop Migration Strategy — ✅ COMPLETED
 
-1. **Keep `js_event_loop.h` unchanged** — same API
-2. **Rewrite `js_event_loop.cpp`** internals to use libuv
-3. **Run all 63 JS tests** — must pass without changes
-4. **Remove custom timer heap and `select()` code**
+The JS event loop migration was an **in-place replacement**:
+
+1. ✅ Kept `js_event_loop.h` unchanged — same API
+2. ✅ Rewrote `js_event_loop.cpp` internals to use libuv
+3. ✅ All JS tests pass without changes
+4. ✅ Custom timer heap and `select()` code removed
 
 ### 5.3 Rollback Plan
 
 If libuv integration causes unforeseen issues:
 - The custom event loop code is preserved in git history
-- `server.c` backup (`server_libevent.c.bak`) can be restored
 - Build config changes are trivially reversible (re-add libevent entries)
 
 ---
@@ -1199,8 +1210,8 @@ semantics.
 
 ### 6.4 Baseline Tests
 
-- **Lambda baseline (679/679)**: Must remain 100% — libuv integration is isolated to JS/server
-- **Radiant baseline**: Must remain 100% — thread pool migration must not regress
+- **Lambda baseline (679/679)**: Must remain 100% — ✅ verified 679/679 after Phases 1–3
+- **Radiant baseline (3656/3671)**: Must remain stable — ✅ verified 3656/3671 (15 pre-existing failures, unchanged)
 
 ---
 
@@ -1287,3 +1298,51 @@ semantics.
 | `process.env` / `process.argv` | Simple to add but low priority for v15 |
 | `Buffer` class | TypedArray exists; Buffer is a Node.js-ism |
 | Cluster mode | Multi-process; depends on Worker design |
+
+---
+
+## 10. Implementation Log
+
+### Phase 1: libuv Integration Layer — ✅ Completed (2025-03-25)
+
+- Installed libuv 1.52.1 via Homebrew (static lib at `/opt/homebrew/lib/libuv.a`)
+- Created `lib/uv_loop.h` (~35 LOC) and `lib/uv_loop.c` (~90 LOC)
+  - Global `uv_loop_t*` with `lambda_uv_init/run/stop/cleanup`
+  - `uv_prepare_t` handle for microtask drain callback (unref'd so it doesn't keep loop alive)
+- Updated `build_lambda_config.json` on all 3 platforms (macOS, Linux, Windows)
+  - Removed `libevent` and `libevent_openssl` entries
+  - Added `libuv` entries with platform-specific paths
+  - Updated CLI `exclude_libraries` from `"libevent","libevent_openssl"` to `"libuv"`
+
+### Phase 2: HTTP Server Migration — ✅ Completed (2025-03-25)
+
+- **Approach change:** Did in-place rewrite instead of side-by-side `server_uv.c`.
+  Also wrote a custom HTTP parser instead of vendoring llhttp — simpler and sufficient.
+- Rewrote `lib/serve/http_handler.h/c`:
+  - Custom types: `http_header_t` (linked list), `http_request_t`, `http_response_t`, `http_method_t`
+  - `http_request_parse(data, len)` — full HTTP/1.1 parser: request line → headers → body
+  - `http_response_create(uv_tcp_t*)` → `http_response_send()` via `uv_write()`
+  - `http_url_decode()`, `http_method_from_string/string()`, header management
+  - Convenience functions: `http_send_simple_response`, `http_send_error`, `http_send_file`, `http_send_redirect`
+- Rewrote `lib/serve/server.h/c`:
+  - Route table as linked list (`route_entry_t`)
+  - Per-connection `client_conn_t` with accumulation buffer (initial 8192, doubles on demand)
+  - `on_read()` accumulates data, detects `\r\n\r\n`, checks `Content-Length`, calls `dispatch_request()`
+  - Standard server lifecycle: `server_create/start/run/stop/destroy`
+  - `server_set_handler()` for path-based routing, `server_set_default_handler()` for fallback
+- Updated `lib/serve/tls_handler.h/c`:
+  - `tls_create_connection(SSL_CTX*, uv_tcp_t*)` using `uv_fileno()` → mbedTLS bio
+- Updated consumers: `webdriver_server.cpp`, `example_server.c`, `test_server.c`
+
+### Phase 3: JS Event Loop Migration — ✅ Completed (2025-03-25)
+
+- Rewrote `lambda/js/js_event_loop.cpp` internals to use `uv_timer_t` instead of custom min-heap
+- `js_event_loop_init()` now calls `lambda_uv_init()` + `lambda_uv_set_microtask_drain()`
+- `js_event_loop_drain()` now calls `lambda_uv_run()` (replaced 50-line manual drain loop)
+- No API changes in `js_event_loop.h`
+
+### Build Verification (2025-03-25)
+
+- Build: **0 errors**, binary 13.4 MB
+- Lambda baseline: **679/679** pass (100%)
+- Radiant baseline: **3656/3671** pass (15 pre-existing failures, unchanged)
