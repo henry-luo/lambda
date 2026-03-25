@@ -7234,6 +7234,18 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         declare_module_import(tp, ast_node);
                     }
                 } else {
+                    // .js failed — try .py fallback for cross-language import
+                    buf->str[buf->length - 2] = 'p';
+                    buf->str[buf->length - 1] = 'y';
+                    Item py_ns = load_py_module(tp->runtime, buf->str);
+                    if (py_ns.item != ItemNull.item) {
+                        ast_node->script = (Script*)create_js_import_script(
+                            buf->str, py_ns, tp->runtime);
+                        ast_node->is_cross_lang = true;
+                        if (ast_node->script) {
+                            declare_module_import(tp, ast_node);
+                        }
+                    } else {
                     // restore .ls extension for error message
                     buf->str[buf->length - 2] = 'l';
                     buf->str[buf->length - 1] = 's';
@@ -7246,6 +7258,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
                 #ifndef SIMPLE_SCHEMA_PARSER
+                    }
                 }
                 #endif
             }
@@ -7314,6 +7327,18 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         declare_module_import(tp, ast_node);
                     }
                 } else {
+                    // .js failed — try .py fallback for cross-language import
+                    buf->str[buf->length - 2] = 'p';
+                    buf->str[buf->length - 1] = 'y';
+                    Item py_ns = load_py_module(tp->runtime, buf->str);
+                    if (py_ns.item != ItemNull.item) {
+                        ast_node->script = (Script*)create_js_import_script(
+                            buf->str, py_ns, tp->runtime);
+                        ast_node->is_cross_lang = true;
+                        if (ast_node->script) {
+                            declare_module_import(tp, ast_node);
+                        }
+                    } else {
                     // restore .ls extension for error message
                     buf->str[buf->length - 2] = 'l';
                     buf->str[buf->length - 1] = 's';
@@ -7324,6 +7349,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         "  Resolved path: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
                 #ifndef SIMPLE_SCHEMA_PARSER
+                    }
                 }
                 #endif
             }

@@ -47,6 +47,7 @@ std::vector<LambdaTestInfo> discover_all_c2mir_tests() {
         if (is_slow_benchmark(test.test_name)) continue;
         if (test.test_name == "import_js") continue;  // requires JS runtime (cross-lang import)
         if (test.test_name == "import_js_naming") continue;  // requires JS runtime
+        if (test.test_name == "import_py") continue;  // requires Python runtime (cross-lang import)
         filtered.push_back(test);
     }
     return filtered;
