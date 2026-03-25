@@ -12,13 +12,13 @@ These timings reflect a single module and are the most direct measure of each co
 
 ### Phase Summary (standalone)
 
-| Phase | Total (ms) | Avg (ms) | % of Total |
-|-------|-----------|----------|------------|
-| Tree-sitter Parse | 64.61 | 0.29 | 5.6% |
-| AST Build | 243.08 | 1.09 | 20.9% |
-| MIR Transpile | 798.83 | 3.58 | 68.8% |
-| JIT Codegen | 53.90 | 0.24 | 4.6% |
-| **Total** | **1160.40** | **5.20** | 100% |
+| Phase             | Total (ms)  | Avg (ms) | % of Total |
+| ----------------- | ----------- | -------- | ---------- |
+| Tree-sitter Parse | 64.61       | 0.29     | 5.6%       |
+| AST Build         | 243.08      | 1.09     | 20.9%      |
+| MIR Transpile     | 798.83      | 3.58     | 68.8%      |
+| JIT Codegen       | 53.90       | 0.24     | 4.6%       |
+| **Total**         | **1160.40** | **5.20** | 100%       |
 
 | Suite | Scripts | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Avg (ms) |
 |-------|---------|-----------|----------|---------------|----------|-----------|----------|

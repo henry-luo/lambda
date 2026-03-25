@@ -388,16 +388,114 @@ prepare scripts  →  run benchmarks  →  report
 
 ---
 
-## 8. File Reference
+## 8. Transpile Profiling
+
+The transpile profiler measures **compilation overhead** — the time Lambda spends parsing, building the AST, transpiling to MIR, and generating native code — before any user code executes. This is distinct from the execution benchmarks above, which measure runtime performance.
+
+### What it measures
+
+The profiler breaks each script's compilation into 4 phases:
+
+| Phase | What happens |
+|-------|-------------|
+| **Tree-sitter Parse** | Source text → concrete syntax tree (CST) |
+| **AST Build** | CST → typed abstract syntax tree (includes import resolution) |
+| **MIR Transpile** | AST → MIR intermediate representation (`transpile_mir_ast` + `MIR_link`) |
+| **JIT Codegen** | MIR → native machine code (`jit_init` + `jit_gen_func`) |
+
+Timing is captured via `LAMBDA_PROFILE=1`, which enables instrumentation in the Lambda runtime. Profile data is written to `temp/phase_profile.txt` as a TSV file, then parsed by the Python script.
+
+### Script discovery
+
+The profiler discovers scripts from two source categories:
+
+| Category | Directories | Filter |
+|----------|------------|--------|
+| **Benchmark suites** | `test/benchmark/{awfy,r7rs,beng,kostya,larceny}` | `.ls` files with matching `.txt` expected output |
+| **Gtest scripts** | `test/lambda/`, `test/lambda/{chart,latex,math,proc}` | `.ls` files with matching `.txt` expected output |
+
+Scripts that require features not supported by MIR Direct are automatically skipped (e.g., object-related tests).
+
+### Running the profiler
+
+```bash
+# Profile all scripts (benchmark + gtest)
+python3 test/benchmark/profile_transpile.py
+
+# Only benchmark suite scripts
+python3 test/benchmark/profile_transpile.py -s benchmark
+
+# Only gtest scripts
+python3 test/benchmark/profile_transpile.py -s gtest
+
+# Filter by script name (substring match)
+python3 test/benchmark/profile_transpile.py -b fib,nbody
+
+# 3 iterations per script (uses median)
+python3 test/benchmark/profile_transpile.py -n 3
+
+# Sort by transpile phase time
+python3 test/benchmark/profile_transpile.py --sort transpile
+
+# Show only top 20 slowest scripts
+python3 test/benchmark/profile_transpile.py --top 20
+
+# Also produce CSV output
+python3 test/benchmark/profile_transpile.py --csv
+
+# List all discovered scripts without running
+python3 test/benchmark/profile_transpile.py --list
+```
+
+### CLI reference
+
+| Flag | Description |
+|------|-------------|
+| `-s, --suite` | Comma-separated suite filter: `benchmark`, `gtest`, `awfy`, `r7rs`, `beng`, `kostya`, `larceny`, `lambda`, `chart`, `latex`, `math`, `proc` |
+| `-b, --benchmarks` | Comma-separated script name filter (substring match) |
+| `-n, --iterations` | Number of iterations per script (default: 1, uses median) |
+| `--sort` | Sort by: `total` (default), `parse`, `ast`, `transpile`, `jit`, `name` |
+| `--top` | Show only top N slowest scripts |
+| `--csv` | Also produce CSV output alongside the Markdown report |
+| `--timeout` | Timeout per script in seconds (default: 60) |
+| `--list` | List all discovered scripts and exit |
+| `--exe` | Path to lambda executable (default: `./lambda.exe`) |
+
+### Report format
+
+The report splits results into two sets:
+
+- **Set 1: Standalone scripts** (modules == 1) — single-module timings that directly reflect each compilation phase. MIR Transpile typically dominates (~70%).
+- **Set 2: Scripts with imports** (modules > 1) — multi-module timings where AST Build dominates (~80%) due to recursive import resolution. A "Modules" column shows how many modules were compiled.
+
+Each set includes:
+- Phase summary table (total, average, percentage)
+- Per-suite breakdown table
+- Per-script breakdown sorted by total time (descending)
+
+### Output files
+
+| File | Description |
+|------|-------------|
+| `temp/transpiling_result.md` | Full Markdown report (auto-generated) |
+| `temp/transpiling_result.csv` | CSV export (when `--csv` is used) |
+| `Transpile_Result.md` | Published report (copy from `temp/`) |
+| `temp/phase_profile.txt` | Raw TSV profile data (transient, per-script) |
+
+---
+
+## 9. File Reference
 
 | File | Purpose |
 |------|---------|
 | `run_benchmarks.py` | **Unified runner**: 6 suites × 6 engines, time/memory/mir-vs-c modes |
+| `profile_transpile.py` | **Transpile profiler**: compilation phase timing for all Lambda scripts |
 | `gen_result3.py` | Generates `Overall_Result3.md` from `benchmark_results_v3.json` |
 | `summarize_benchmarks.py` | Prints summary tables to stdout |
 | `benchmark_results_v3.json` | Execution time results (ms per engine per benchmark) |
 | `memory_results.json` | Peak RSS memory results (MB + raw bytes) |
 | `Overall_Result3.md` | Generated report with tables and analysis |
+| `Transpile_Result.md` | Transpile profiling report (standalone vs with-imports) |
 | `awfy/awfy_helper.js` | AWFY timing wrapper for Node.js |
 | `awfy/*_bundle.js` | Standalone AWFY bundles for LambdaJS/QuickJS |
 | `_old/` | Archived previous runner scripts (for reference) |
