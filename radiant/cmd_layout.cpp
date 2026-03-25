@@ -95,7 +95,68 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
     log_debug("Detecting HTML version from Lambda Element tree");
     // The input->root contains the full parsed tree including DOCTYPE
     // It's typically a List containing multiple items (DOCTYPE, html element, etc.)
+    // HTML5 parser: root is #document element with children including #doctype
     TypeId root_type = get_type_id(input->root);
+    if (root_type == LMD_TYPE_ELEMENT) {
+        Element* root_elem = input->root.element;
+        TypeElmt* root_type_elmt = (TypeElmt*)root_elem->type;
+        if (root_type_elmt && strview_equal(&root_type_elmt->name, "#document")) {
+            List* doc_list = (List*)root_elem;
+            for (int64_t i = 0; i < doc_list->length; i++) {
+                Item child = doc_list->items[i];
+                if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = child.element;
+                    TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                    if (child_type && strview_equal(&child_type->name, "#doctype")) {
+                        // Found #doctype — examine attributes per WHATWG spec
+                        const char* name = extract_element_attribute(child_elem, "name", nullptr);
+                        const char* public_id = extract_element_attribute(child_elem, "publicId", nullptr);
+
+                        log_debug("Found #doctype: name=%s publicId=%s",
+                                  name ? name : "null", public_id ? public_id : "null");
+
+                        // HTML5: <!DOCTYPE html> — name="html", no publicId
+                        if (!public_id || public_id[0] == '\0') {
+                            log_debug("Detected HTML5 DOCTYPE (no publicId)");
+                            return HTML5;
+                        }
+
+                        // Check known public identifiers for HTML version
+                        if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
+                            strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
+                            log_debug("Detected HTML 4.0/4.01 Strict DOCTYPE");
+                            return HTML4_01_STRICT;
+                        }
+                        if (strstr(public_id, "Transitional")) {
+                            const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
+                            // WHATWG §13.2.6.4.1: Transitional WITHOUT system identifier → quirks
+                            // Transitional WITH system identifier → limited quirks (standards-like)
+                            if (system_id && system_id[0] != '\0') {
+                                log_debug("Detected Transitional with system ID (limited quirks / standards-like)");
+                                return HTML4_01_STRICT;
+                            }
+                            log_debug("Detected Transitional without system ID (quirks mode)");
+                            return HTML4_01_TRANSITIONAL;
+                        }
+                        if (strstr(public_id, "Frameset")) {
+                            log_debug("Detected Frameset DOCTYPE");
+                            return HTML4_01_FRAMESET;
+                        }
+                        if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
+                            if (strstr(public_id, "Strict")) return HTML4_01_STRICT;
+                            return HTML4_01_TRANSITIONAL;
+                        }
+                        // Unrecognized publicId — assume HTML5
+                        log_debug("Unrecognized publicId, defaulting to HTML5");
+                        return HTML5;
+                    }
+                }
+            }
+            // #document without #doctype → quirks mode
+            log_debug("No #doctype found in #document, using quirks mode");
+            return HTML4_01_TRANSITIONAL;
+        }
+    }
     if (root_type == LMD_TYPE_ARRAY) {
         List* root_list = input->root.list;
         log_debug("Examining root list with %lld items", root_list->length);

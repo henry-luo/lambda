@@ -1254,6 +1254,14 @@ typedef enum HtmlVersion {
     HTML1_0,                // HTML 1.0 (1991) - uses <HEADER> as head, <NEXTID> void element
 } HtmlVersion;
 
+// WHATWG Quirks Mode: https://quirks.spec.whatwg.org/
+// In quirks mode (missing DOCTYPE, or Transitional/Frameset without system identifier),
+// certain CSS behaviors differ from standards mode.
+inline bool is_quirks_mode(HtmlVersion v) {
+    return v == HTML4_01_TRANSITIONAL || v == HTML4_01_FRAMESET ||
+           v == HTML_QUIRKS || v == HTML1_0;
+}
+
 struct ViewTree {
     Pool *pool;
     View* root;
