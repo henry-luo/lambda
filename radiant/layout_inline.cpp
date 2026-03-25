@@ -43,6 +43,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         // keep a line box non-zero-height. Vertical-only borders (top/bottom) do not.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
+        float margin_left = 0, margin_right = 0;
         if (span->bound) {
             if (span->bound->border) {
                 border_left = span->bound->border->width.left;
@@ -54,9 +55,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
             pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
             pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+            margin_left = span->bound->margin.left;
+            margin_right = span->bound->margin.right;
         }
         float inline_sum = border_left + pad_left + pad_right + border_right;
-        if (inline_sum > 0) {
+        // CSS Inline 3 §2.1: non-zero inline-axis margin also makes the span not invisible
+        bool has_inline_decorations = (inline_sum > 0 || margin_left != 0 || margin_right != 0);
+        if (has_inline_decorations) {
             // CSS 2.1 §10.6.1: Horizontal decorations keep the inline box "present".
             // The inline box height includes the font content area (ascender + descender)
             // plus vertical borders and padding. Borders/padding extend around the
@@ -69,7 +74,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             span->width = (int)inline_sum;
             span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
-            // No horizontal decorations — the inline box is invisible, collapse to zero
+            // No inline-axis decorations — the inline box is invisible, collapse to zero
             span->width = 0;
             span->height = 0;
         }
@@ -85,9 +90,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     if (!child) {
         // All children are nil-views or out-of-flow — treat as effectively empty.
         // CSS 2.1 §9.4.2: Only inline-direction (horizontal) decorations keep the
-        // line box non-zero-height. If no horizontal border/padding exists, collapse.
+        // line box non-zero-height. If no horizontal border/padding/margin exists, collapse.
         float border_left = 0, border_right = 0, border_top = 0, border_bottom = 0;
         float pad_left = 0, pad_right = 0, pad_top = 0, pad_bottom = 0;
+        float margin_left = 0, margin_right = 0;
         if (span->bound) {
             if (span->bound->border) {
                 border_left = span->bound->border->width.left;
@@ -99,9 +105,12 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             pad_right = span->bound->padding.right > 0 ? span->bound->padding.right : 0;
             pad_top = span->bound->padding.top > 0 ? span->bound->padding.top : 0;
             pad_bottom = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
+            margin_left = span->bound->margin.left;
+            margin_right = span->bound->margin.right;
         }
         float inline_sum = border_left + pad_left + pad_right + border_right;
-        if (inline_sum > 0) {
+        bool has_inline_decorations = (inline_sum > 0 || margin_left != 0 || margin_right != 0);
+        if (has_inline_decorations) {
             float font_content_h = 0;
             struct FontHandle* fh = span->font ? span->font->font_handle : fallback_fh;
             if (fh) {
@@ -923,7 +932,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §9.4.2: An inline element with non-zero margins, borders, or
         // padding makes the line box non-empty (not subject to zero-height rule).
         // Mark the line as having content so line_break() is called at finalization.
-        if (inline_left_edge > 0 || inline_right_edge > 0) {
+        // CSS Inline 3 §2.1: An inline element with ANY non-zero inline-axis
+        // margin, border, or padding is not invisible — it generates a real
+        // (non-phantom) line box. Check individual properties, not the sum,
+        // because negative values cancel in sums but each is still non-zero.
+        if (span->bound &&
+            (span->bound->margin.left != 0 || span->bound->margin.right != 0 ||
+             span->bound->padding.left != 0 || span->bound->padding.right != 0 ||
+             (span->bound->border &&
+              (span->bound->border->width.left != 0 || span->bound->border->width.right != 0)))) {
             lycon->line.is_line_start = false;
         }
     }
@@ -1097,6 +1114,20 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (!span_is_multi_line && span->height > expected_height) {
                 span->height = expected_height;
                 log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+            }
+            // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
+            // and negative half-leading (line-height < font content area), position
+            // the content area above the line box using the half-leading offset.
+            if (!had_children && !lycon->block.line_height_is_normal) {
+                float ascender = 0;
+                if (span->font) {
+                    ascender = span->font->ascender;
+                } else if (lycon->font.style) {
+                    ascender = lycon->font.style->ascender;
+                }
+                if (ascender > 0 && lycon->block.line_height < content_area) {
+                    span->y = (int)(lycon->block.advance_y + lycon->line.max_ascender - ascender - bt - pt_val);
+                }
             }
         }
     }

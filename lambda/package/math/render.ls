@@ -21,6 +21,16 @@ import delims: .atoms.delimiters
 // Main render dispatch
 // ============================================================
 
+// render an AST node into a box
+// node: a Lambda element from the tree-sitter-latex-math parser
+// context: rendering context (style, font, color, etc.)
+pub fn render_node(node, context) {
+    if (node is string) render_text(node, context)
+    else if (node == null) box.text_box("", null, "ord")
+    else if (not (node is element)) box.text_box(string(node), null, "ord")
+    else dispatch_element(node, context)
+}
+
 // dispatch on element tag name — called when node is known to be an element
 fn dispatch_element(node, context) {
     let tag = name(node)
@@ -67,16 +77,6 @@ fn dispatch_element(node, context) {
         case 'limits_modifier': box.text_box("", null, "ord")
         default:                render_default(node, context)
     }
-}
-
-// render an AST node into a box
-// node: a Lambda element from the tree-sitter-latex-math parser
-// context: rendering context (style, font, color, etc.)
-pub fn render_node(node, context) {
-    if (node is string) render_text(node, context)
-    else if (node == null) box.text_box("", null, "ord")
-    else if (not (node is element)) box.text_box(string(node), null, "ord")
-    else dispatch_element(node, context)
 }
 
 // ============================================================

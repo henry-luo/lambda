@@ -1,6 +1,6 @@
 /**
  * @file server.h
- * @brief HTTP/HTTPS server implementation using libevent and mbedTLS
+ * @brief HTTP/HTTPS server implementation using libuv and mbedTLS
  *
  * this file defines the main server interface for creating and managing
  * HTTP and HTTPS servers with event-driven architecture.
@@ -9,11 +9,7 @@
 #ifndef SERVE_SERVER_H
 #define SERVE_SERVER_H
 
-#include <event2/event.h>
-#include <event2/http.h>
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/bufferevent_ssl.h>
+#include <uv.h>
 #include "mbedtls_compat.h"
 
 #ifdef __cplusplus
@@ -35,22 +31,33 @@ typedef struct {
 } server_config_t;
 
 /**
+ * http request handler function type
+ * receives parsed request and a response object for writing back
+ */
+typedef struct http_request_s http_request_t;
+typedef struct http_response_s http_response_t;
+typedef void (*request_handler_t)(http_request_t *req, http_response_t *resp, void *user_data);
+
+/**
+ * route entry for path-based dispatch (opaque, defined in server.c)
+ */
+typedef struct route_entry_s route_entry_t;
+
+/**
  * server instance structure
  */
 typedef struct {
     server_config_t config;
-    struct event_base *event_base;
-    struct evhttp *http_server;
-    struct evhttp *https_server;
+    uv_loop_t *loop;
+    uv_tcp_t tcp_server;
+    uv_tcp_t tls_server;
     SSL_CTX *ssl_ctx;
     int running;
     void *user_data;           // user-defined data pointer
+    route_entry_t *routes;     // linked list of path handlers
+    request_handler_t default_handler;
+    void *default_handler_data;
 } server_t;
-
-/**
- * http request handler function type
- */
-typedef void (*request_handler_t)(struct evhttp_request *req, void *user_data);
 
 /**
  * server lifecycle functions

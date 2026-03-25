@@ -948,6 +948,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* str = text_start;
     unsigned char* text_end = text_start + strlen((const char*)text_start);
 
+    // CSS Inline 3 §2.1: Zero-length text nodes generate no inline boxes and
+    // do not contribute to line box height. Skip immediately to avoid the
+    // do-while loop processing a null codepoint as content.
+    if (str == text_end) {
+        text_node->view_type = RDT_VIEW_NONE;
+        log_debug("skipping zero-length text node");
+        return;
+    }
+
     // Clear any existing text rects from previous layout passes (e.g., table measurement)
     // This prevents accumulation of duplicate rects when the same node is laid out multiple times
     if (text_node->view_type == RDT_VIEW_TEXT) {

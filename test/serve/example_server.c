@@ -33,19 +33,12 @@ void handle_signal(int sig) {
 /**
  * hello world request handler
  */
-void hello_handler(struct evhttp_request *req, void *user_data) {
-    const char *uri = evhttp_request_get_uri(req);
-    enum evhttp_cmd_type method = evhttp_request_get_command(req);
+void hello_handler(http_request_t *req, http_response_t *response, void *user_data) {
+    const char *uri = req->path;
+    http_method_t method = req->method;
     
     SERVE_LOG_INFO("received %s request for %s", 
                    http_method_string(method), uri);
-    
-    // create response
-    http_response_t *response = http_response_create(req);
-    if (!response) {
-        http_send_error(req, 500, "failed to create response");
-        return;
-    }
     
     // set content type
     http_response_set_header(response, "Content-Type", "text/html");
@@ -60,27 +53,18 @@ void hello_handler(struct evhttp_request *req, void *user_data) {
     http_response_add_printf(response, "<p>uri: %s</p>\n", uri);
     http_response_add_string(response, "<p>this is a simple example server.</p>\n");
     http_response_add_string(response, "</body></html>\n");
-    
-    // send response
-    http_response_destroy(response);
 }
 
 /**
  * api handler for json responses
  */
-void api_handler(struct evhttp_request *req, void *user_data) {
-    enum evhttp_cmd_type method = evhttp_request_get_command(req);
+void api_handler(http_request_t *req, http_response_t *response, void *user_data) {
+    http_method_t method = req->method;
     
     // only allow get requests
-    if (method != EVHTTP_REQ_GET) {
-        http_send_error(req, 405, "method not allowed");
-        return;
-    }
-    
-    // create json response
-    http_response_t *response = http_response_create(req);
-    if (!response) {
-        http_send_error(req, 500, "failed to create response");
+    if (method != HTTP_METHOD_GET) {
+        http_response_set_status(response, 405);
+        http_response_add_string(response, "method not allowed");
         return;
     }
     
@@ -88,22 +72,21 @@ void api_handler(struct evhttp_request *req, void *user_data) {
     http_response_add_string(response, "{\n");
     http_response_add_string(response, "  \"message\": \"hello from api\",\n");
     http_response_add_string(response, "  \"version\": \"1.0\",\n");
-    http_response_add_string(response, "  \"server\": \"jubily\"\n");
+    http_response_add_string(response, "  \"server\": \"lambda\"\n");
     http_response_add_string(response, "}\n");
-    
-    http_response_destroy(response);
 }
 
 /**
  * file serving handler
  */
-void file_handler(struct evhttp_request *req, void *user_data) {
-    const char *uri = evhttp_request_get_uri(req);
+void file_handler(http_request_t *req, http_response_t *response, void *user_data) {
+    const char *uri = req->path;
     const char *document_root = (const char *)user_data;
     
     // simple security check - prevent directory traversal
     if (strstr(uri, "..") || strstr(uri, "//")) {
-        http_send_error(req, 403, "forbidden");
+        http_response_set_status(response, 403);
+        http_response_add_string(response, "forbidden");
         return;
     }
     
@@ -118,24 +101,16 @@ void file_handler(struct evhttp_request *req, void *user_data) {
     }
     
     // try to serve the file
-    if (http_send_file(req, filepath) != 0) {
-        http_send_error(req, 404, "file not found");
-    }
+    http_send_file(req->client, filepath);
 }
 
 /**
  * default handler for unmatched requests
  */
-void default_handler(struct evhttp_request *req, void *user_data) {
-    const char *uri = evhttp_request_get_uri(req);
+void default_handler(http_request_t *req, http_response_t *response, void *user_data) {
+    const char *uri = req->path;
     
     SERVE_LOG_INFO("unmatched request for %s", uri);
-    
-    http_response_t *response = http_response_create(req);
-    if (!response) {
-        http_send_error(req, 500, "failed to create response");
-        return;
-    }
     
     http_response_set_status(response, 404);
     http_response_set_header(response, "Content-Type", "text/html");
@@ -147,8 +122,6 @@ void default_handler(struct evhttp_request *req, void *user_data) {
     http_response_add_printf(response, "<p>the requested uri '%s' was not found.</p>\n", uri);
     http_response_add_string(response, "<p><a href=\"/\">go back to home</a></p>\n");
     http_response_add_string(response, "</body></html>\n");
-    
-    http_response_destroy(response);
 }
 
 /**

@@ -17,7 +17,7 @@
 
 // Forward declarations
 extern "C" void parse_json(Input* input, const char* json_string);
-static void webdriver_request_handler(struct evhttp_request* req, void* user_data);
+static void webdriver_request_handler(http_request_t* request, http_response_t* response, void* user_data);
 
 // Simple JSON string extraction (for keys like "url", "using", "value")
 static const char* extract_json_string(const char* json, const char* key, char* buf, size_t buf_size) {
@@ -352,18 +352,15 @@ static bool parse_path(const char* path, char* session_id, char* element_id, cha
     return true;
 }
 
-static void webdriver_request_handler(struct evhttp_request* req, void* user_data) {
+static void webdriver_request_handler(http_request_t* request, http_response_t* response, void* user_data) {
     WebDriverServer* server = (WebDriverServer*)user_data;
-
-    http_request_t* request = http_request_create(req);
-    http_response_t* response = http_response_create(req);
 
     // Set JSON content type
     http_response_set_header(response, "Content-Type", "application/json; charset=utf-8");
     http_response_set_header(response, "Cache-Control", "no-cache");
 
     const char* path = request->path;
-    enum evhttp_cmd_type method = request->method;
+    http_method_t method = request->method;
 
     char session_id[WD_ELEMENT_ID_LEN] = {0};
     char element_id[WD_ELEMENT_ID_LEN] = {0};
@@ -372,114 +369,114 @@ static void webdriver_request_handler(struct evhttp_request* req, void* user_dat
     parse_path(path, session_id, element_id, extra);
 
     log_info("webdriver: %s %s (session=%s, element=%s, extra=%s)",
-             method == EVHTTP_REQ_GET ? "GET" :
-             method == EVHTTP_REQ_POST ? "POST" :
-             method == EVHTTP_REQ_DELETE ? "DELETE" : "OTHER",
+             method == HTTP_METHOD_GET ? "GET" :
+             method == HTTP_METHOD_POST ? "POST" :
+             method == HTTP_METHOD_DELETE ? "DELETE" : "OTHER",
              path, session_id, element_id, extra);
 
     // Route to handler
-    if (strcmp(path, "/status") == 0 && method == EVHTTP_REQ_GET) {
+    if (strcmp(path, "/status") == 0 && method == HTTP_METHOD_GET) {
         handle_status(server, request, response, NULL, NULL);
     }
-    else if (strcmp(path, "/session") == 0 && method == EVHTTP_REQ_POST) {
+    else if (strcmp(path, "/session") == 0 && method == HTTP_METHOD_POST) {
         handle_new_session(server, request, response, NULL, NULL);
     }
-    else if (session_id[0] && element_id[0] == '\0' && method == EVHTTP_REQ_DELETE) {
+    else if (session_id[0] && element_id[0] == '\0' && method == HTTP_METHOD_DELETE) {
         // DELETE /session/{sessionId}
         handle_delete_session(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && strcmp(extra, "timeouts") == 0) {
-        if (method == EVHTTP_REQ_GET) {
+        if (method == HTTP_METHOD_GET) {
             handle_get_timeouts(server, request, response, session_id, NULL);
-        } else if (method == EVHTTP_REQ_POST) {
+        } else if (method == HTTP_METHOD_POST) {
             handle_set_timeouts(server, request, response, session_id, NULL);
         }
     }
     else if (session_id[0] && strcmp(extra, "url") == 0) {
-        if (method == EVHTTP_REQ_GET) {
+        if (method == HTTP_METHOD_GET) {
             handle_get_url(server, request, response, session_id, NULL);
-        } else if (method == EVHTTP_REQ_POST) {
+        } else if (method == HTTP_METHOD_POST) {
             handle_navigate(server, request, response, session_id, NULL);
         }
     }
-    else if (session_id[0] && strcmp(extra, "title") == 0 && method == EVHTTP_REQ_GET) {
+    else if (session_id[0] && strcmp(extra, "title") == 0 && method == HTTP_METHOD_GET) {
         handle_get_title(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "source") == 0 && method == EVHTTP_REQ_GET) {
+    else if (session_id[0] && strcmp(extra, "source") == 0 && method == HTTP_METHOD_GET) {
         handle_get_source(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "element") == 0 && method == EVHTTP_REQ_POST) {
+    else if (session_id[0] && strcmp(extra, "element") == 0 && method == HTTP_METHOD_POST) {
         handle_find_element(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "elements") == 0 && method == EVHTTP_REQ_POST) {
+    else if (session_id[0] && strcmp(extra, "elements") == 0 && method == HTTP_METHOD_POST) {
         handle_find_elements(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "element/active") == 0 && method == EVHTTP_REQ_GET) {
+    else if (session_id[0] && strcmp(extra, "element/active") == 0 && method == HTTP_METHOD_GET) {
         handle_get_active_element(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && element_id[0]) {
         // Element-specific commands
-        if (extra[0] == '\0' && method == EVHTTP_REQ_POST) {
+        if (extra[0] == '\0' && method == HTTP_METHOD_POST) {
             // POST /session/{id}/element/{id} - not valid, but handle gracefully
             json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown command");
         }
-        else if (strcmp(extra, "click") == 0 && method == EVHTTP_REQ_POST) {
+        else if (strcmp(extra, "click") == 0 && method == HTTP_METHOD_POST) {
             handle_element_click(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "clear") == 0 && method == EVHTTP_REQ_POST) {
+        else if (strcmp(extra, "clear") == 0 && method == HTTP_METHOD_POST) {
             handle_element_clear(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "value") == 0 && method == EVHTTP_REQ_POST) {
+        else if (strcmp(extra, "value") == 0 && method == HTTP_METHOD_POST) {
             handle_element_send_keys(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "text") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "text") == 0 && method == HTTP_METHOD_GET) {
             handle_element_text(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "attribute/", 10) == 0 && method == EVHTTP_REQ_GET) {
+        else if (strncmp(extra, "attribute/", 10) == 0 && method == HTTP_METHOD_GET) {
             handle_element_attribute(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "property/", 9) == 0 && method == EVHTTP_REQ_GET) {
+        else if (strncmp(extra, "property/", 9) == 0 && method == HTTP_METHOD_GET) {
             handle_element_property(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "css/", 4) == 0 && method == EVHTTP_REQ_GET) {
+        else if (strncmp(extra, "css/", 4) == 0 && method == HTTP_METHOD_GET) {
             handle_element_css(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "rect") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "rect") == 0 && method == HTTP_METHOD_GET) {
             handle_element_rect(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "enabled") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "enabled") == 0 && method == HTTP_METHOD_GET) {
             handle_element_enabled(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "selected") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "selected") == 0 && method == HTTP_METHOD_GET) {
             handle_element_selected(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "displayed") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "displayed") == 0 && method == HTTP_METHOD_GET) {
             handle_element_displayed(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "screenshot") == 0 && method == EVHTTP_REQ_GET) {
+        else if (strcmp(extra, "screenshot") == 0 && method == HTTP_METHOD_GET) {
             handle_element_screenshot(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "element") == 0 && method == EVHTTP_REQ_POST) {
+        else if (strcmp(extra, "element") == 0 && method == HTTP_METHOD_POST) {
             handle_find_element_from_element(server, request, response, session_id, element_id);
         }
         else {
             json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown element command");
         }
     }
-    else if (session_id[0] && strcmp(extra, "screenshot") == 0 && method == EVHTTP_REQ_GET) {
+    else if (session_id[0] && strcmp(extra, "screenshot") == 0 && method == HTTP_METHOD_GET) {
         handle_screenshot(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && strcmp(extra, "actions") == 0) {
-        if (method == EVHTTP_REQ_POST) {
+        if (method == HTTP_METHOD_POST) {
             handle_perform_actions(server, request, response, session_id, NULL);
-        } else if (method == EVHTTP_REQ_DELETE) {
+        } else if (method == HTTP_METHOD_DELETE) {
             handle_release_actions(server, request, response, session_id, NULL);
         }
     }
     else if (session_id[0] && strcmp(extra, "window/rect") == 0) {
-        if (method == EVHTTP_REQ_GET) {
+        if (method == HTTP_METHOD_GET) {
             handle_get_window_rect(server, request, response, session_id, NULL);
-        } else if (method == EVHTTP_REQ_POST) {
+        } else if (method == HTTP_METHOD_POST) {
             handle_set_window_rect(server, request, response, session_id, NULL);
         }
     }
@@ -487,9 +484,7 @@ static void webdriver_request_handler(struct evhttp_request* req, void* user_dat
         json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown command");
     }
 
-    http_response_send(response);
-    http_request_destroy(request);
-    http_response_destroy(response);
+    // response send and cleanup handled by server dispatch
 }
 
 // ============================================================================
@@ -634,7 +629,7 @@ static void handle_navigate(WebDriverServer* server, http_request_t* req, http_r
         return;
     }
 
-    char* body = http_request_get_body(req);
+    const char* body = http_request_get_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -642,7 +637,6 @@ static void handle_navigate(WebDriverServer* server, http_request_t* req, http_r
 
     char url_buf[1024];
     const char* url = extract_json_string(body, "url", url_buf, sizeof(url_buf));
-    free(body);
 
     if (!url) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'url' in request");
@@ -709,7 +703,7 @@ static void handle_find_element(WebDriverServer* server, http_request_t* req, ht
         return;
     }
 
-    char* body = http_request_get_body(req);
+    const char* body = http_request_get_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -718,7 +712,6 @@ static void handle_find_element(WebDriverServer* server, http_request_t* req, ht
     char using_buf[64], value_buf[256];
     const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
     const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
-    free(body);
 
     if (!value) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
@@ -752,7 +745,7 @@ static void handle_find_elements(WebDriverServer* server, http_request_t* req, h
         return;
     }
 
-    char* body = http_request_get_body(req);
+    const char* body = http_request_get_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -761,7 +754,6 @@ static void handle_find_elements(WebDriverServer* server, http_request_t* req, h
     char using_buf[64], value_buf[256];
     const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
     const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
-    free(body);
 
     if (!value) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");

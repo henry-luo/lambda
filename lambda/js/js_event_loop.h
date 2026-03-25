@@ -1,10 +1,10 @@
 /**
- * JavaScript Event Loop for Lambda v14
+ * JavaScript Event Loop for Lambda v15
  *
- * Minimal custom event loop with:
+ * libuv-backed event loop with:
  * - Microtask queue (FIFO) for Promise callbacks
- * - Timer heap for setTimeout/setInterval
- * - Main drain loop for post-script execution
+ * - Timers via uv_timer_t for setTimeout/setInterval
+ * - Main drain via uv_run() for post-script execution
  */
 #pragma once
 

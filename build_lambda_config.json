@@ -136,17 +136,10 @@
             "link": "static"
         },
         {
-            "name": "libevent",
-            "description": "Event notification library for HTTP server",
+            "name": "libuv",
+            "description": "Cross-platform async I/O library (replaces libevent)",
             "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libevent.a",
-            "link": "static"
-        },
-        {
-            "name": "libevent_openssl",
-            "description": "Event notification library OpenSSL support",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libevent_openssl.a",
+            "lib": "/opt/homebrew/lib/libuv.a",
             "link": "static"
         },
         {
@@ -475,8 +468,7 @@
                 "gif",
                 "brotlidec",
                 "brotlicommon",
-                "libevent",
-                "libevent_openssl"
+                "libuv"
             ],
             "exclude_macos_libraries": [
                 "Cocoa",
@@ -571,17 +563,10 @@
                     "link": "static"
                 },
                 {
-                    "name": "libevent",
-                    "description": "Event notification library for HTTP server",
+                    "name": "libuv",
+                    "description": "Cross-platform async I/O library (replaces libevent)",
                     "include": "/clang64/include",
-                    "lib": "/clang64/lib/libevent.a",
-                    "link": "static"
-                },
-                {
-                    "name": "libevent_openssl",
-                    "description": "Event notification library OpenSSL support",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libevent_openssl.a",
+                    "lib": "/clang64/lib/libuv.a",
                     "link": "static"
                 },
                 {
@@ -1001,17 +986,10 @@
                     "link": "static"
                 },
                 {
-                    "name": "libevent",
-                    "description": "Event notification library for HTTP server",
+                    "name": "libuv",
+                    "description": "Cross-platform async I/O library (replaces libevent)",
                     "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libevent.a",
-                    "link": "static"
-                },
-                {
-                    "name": "libevent_openssl",
-                    "description": "Event notification library OpenSSL support",
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libevent_openssl.a",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libuv.a",
                     "link": "static"
                 },
                 {
