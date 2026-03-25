@@ -138,7 +138,7 @@ TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
-RE2_LIB = build_temp/re2-noabsl/build/libre2.a
+RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
 
 # LaTeX grammar dependencies
 LATEX_GRAMMAR_JS = lambda/tree-sitter-latex/grammar.js
@@ -242,8 +242,8 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 # Build re2 library (reconfigures cmake if CMakeCache is stale/wrong platform)
 $(RE2_LIB):
 	@echo "Building re2 library from source..."
-	@mkdir -p build_temp/re2-noabsl/build
-	@cd build_temp/re2-noabsl/build && \
+	@mkdir -p build_temp/re2-noabsl/cmake_build
+	@cd build_temp/re2-noabsl/cmake_build && \
 		cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -Wno-dev 2>&1 | tail -3 && \
 		cmake --build . --target re2 -- -j$(JOBS)
 	@echo "re2 library built: $(RE2_LIB)"
@@ -685,7 +685,7 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
-	@rm -rf build_temp/re2-noabsl/build
+	@rm -rf build_temp/re2-noabsl/cmake_build
 	@echo "All build directories and tree-sitter libraries cleaned."
 
 distclean: clean-all clean-grammar clean-test
