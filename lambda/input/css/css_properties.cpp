@@ -112,6 +112,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_BLOCK, "border-block", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_START, "border-block-start", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_END, "border-block-end", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_WIDTH, "border-block-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", false, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_COLOR, "border-block-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", false, true, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_START_WIDTH, "border-block-start-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_START_COLOR, "border-block-start-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_END_COLOR, "border-block-end-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_END_WIDTH, "border-block-end-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
 
@@ -380,6 +384,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BASELINE_SHIFT, "baseline-shift", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "baseline", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BASELINE_SOURCE, "baseline-source", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_DOMINANT_BASELINE, "dominant-baseline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+
+    // Text Box Trim Properties (CSS Inline Level 3)
+    {CSS_PROPERTY_TEXT_BOX_TRIM, "text-box-trim", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_BOX_EDGE, "text-box-edge", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
 
     // Additional Properties
     {CSS_PROPERTY_ISOLATION, "isolation", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},

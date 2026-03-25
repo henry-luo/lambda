@@ -3831,6 +3831,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_MARGIN_TRIM: {
             log_debug("[CSS] Processing margin-trim property");
+            // CSS Box 4 §3.1: margin-trim is spec-correct but Chrome does not
+            // support it yet. Disabled to match browser reference output.
+            // Re-enable when browser support catches up and references are
+            // regenerated.
+            break;
+#if 0
             if (!block || !block->blk) {
                 if (block) {
                     block->blk = alloc_block_prop(lycon);
@@ -3873,6 +3879,60 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 }
                 block->blk->margin_trim = trim;
                 log_debug("[CSS] margin-trim (multi): 0x%02X", trim);
+            }
+            break;
+#endif
+        }
+
+        case CSS_PROPERTY_TEXT_BOX_TRIM: {
+            if (!block) break;
+            if (!block->blk) block->blk = alloc_block_prop(lycon);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_NONE) {
+                    block->blk->text_box_trim = 0;
+                } else if (val == CSS_VALUE_TRIM_START) {
+                    block->blk->text_box_trim = TEXT_BOX_TRIM_START;
+                } else if (val == CSS_VALUE_TRIM_END) {
+                    block->blk->text_box_trim = TEXT_BOX_TRIM_END;
+                } else if (val == CSS_VALUE_TRIM_BOTH || val == CSS_VALUE_BOTH) {
+                    block->blk->text_box_trim = TEXT_BOX_TRIM_START | TEXT_BOX_TRIM_END;
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_BOX_EDGE: {
+            // CSS Inline Level 3 §5.1: text-box-edge defines over/under edge metrics
+            // Single value: auto | text → both edges use same metric
+            // Two values: <over-edge> <under-edge> (e.g., "text alphabetic", "cap text", "ex text")
+            if (!block) break;
+            if (!block->blk) block->blk = alloc_block_prop(lycon);
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum val = value->data.keyword;
+                if (val == CSS_VALUE_AUTO || val == CSS_VALUE_TEXT) {
+                    // text-box-edge: auto → both edges = text (for horizontal-tb)
+                    // text-box-edge: text → both edges = text
+                    block->blk->text_box_over_edge = CSS_VALUE_TEXT;
+                    block->blk->text_box_under_edge = CSS_VALUE_TEXT;
+                } else if (val == CSS_VALUE_CAP) {
+                    block->blk->text_box_over_edge = CSS_VALUE_CAP;
+                    block->blk->text_box_under_edge = CSS_VALUE_TEXT;
+                } else if (val == CSS_VALUE_EX) {
+                    block->blk->text_box_over_edge = CSS_VALUE_EX;
+                    block->blk->text_box_under_edge = CSS_VALUE_TEXT;
+                } else if (val == CSS_VALUE_ALPHABETIC) {
+                    block->blk->text_box_over_edge = CSS_VALUE_TEXT;
+                    block->blk->text_box_under_edge = CSS_VALUE_ALPHABETIC;
+                }
+                log_debug("[CSS] text-box-edge: over=%d, under=%d", block->blk->text_box_over_edge, block->blk->text_box_under_edge);
+            } else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
+                // Two-value form: <over-edge> <under-edge>
+                CssValue* v0 = value->data.list.values[0];
+                CssValue* v1 = value->data.list.values[1];
+                block->blk->text_box_over_edge = (v0->type == CSS_VALUE_TYPE_KEYWORD) ? v0->data.keyword : CSS_VALUE_TEXT;
+                block->blk->text_box_under_edge = (v1->type == CSS_VALUE_TYPE_KEYWORD) ? v1->data.keyword : CSS_VALUE_TEXT;
+                log_debug("[CSS] text-box-edge (2-val): over=%d, under=%d", block->blk->text_box_over_edge, block->blk->text_box_under_edge);
             }
             break;
         }
@@ -6045,6 +6105,44 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
             span->bound->border->width.bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, value);
             span->bound->border->width.bottom_specificity = specificity;
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_WIDTH: {
+            log_debug("[CSS] Processing border-block-width (maps to border-top-width + border-bottom-width)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            float w = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, value);
+            span->bound->border->width.top = w;
+            span->bound->border->width.top_specificity = specificity;
+            span->bound->border->width.bottom = w;
+            span->bound->border->width.bottom_specificity = specificity;
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR: {
+            log_debug("[CSS] Processing border-block-color (maps to border-top-color + border-bottom-color)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            Color c = resolve_color_value(lycon, value);
+            span->bound->border->top_color = c;
+            span->bound->border->top_color_specificity = specificity;
+            span->bound->border->bottom_color = c;
+            span->bound->border->bottom_color_specificity = specificity;
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH: {
+            log_debug("[CSS] Processing border-block-start-width (maps to border-top-width)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            span->bound->border->width.top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, value);
+            span->bound->border->width.top_specificity = specificity;
+            break;
+        }
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR: {
+            log_debug("[CSS] Processing border-block-start-color (maps to border-top-color)");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->border) { span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            span->bound->border->top_color = resolve_color_value(lycon, value);
+            span->bound->border->top_color_specificity = specificity;
             break;
         }
 
