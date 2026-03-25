@@ -677,14 +677,12 @@ becomes a thin wrapper over libuv primitives rather than a from-scratch replacem
 |------|---------|
 | `test/js/module_utils.js` | Exports: `add()`, `multiply()`, `PI` (named), `greet()` (default) |
 | `test/js/module_math.js` | Exports: `E`, `TAU` (constants), `square()`, `cube()` (functions) |
-| `test/js/module_main.js` | Named imports (`add`, `multiply`, `PI`), default import (`greet`), multi-module imports | ✅ Pass |
-| `test/js/module_advanced.js` | Import aliases (`import { add as sum }`), closures capturing imports, imports used as `.map()` callbacks | ✅ Pass |
 
 ### Build & Test Verification
 
 - **Build**: 0 errors, 363 warnings (pre-existing)
 - **Lambda baseline**: 679/679 tests passed (zero regressions)
-- **JS test suite**: 64/64 tests passed (DOM tests require `--document` flag; all pass in GTest harness)
+- **JS test suite**: 63/63 tests passed (DOM tests require `--document` flag; all pass in GTest harness)
 
 ### Key Implementation Decisions (Deviations from Design)
 

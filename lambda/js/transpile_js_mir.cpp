@@ -11672,7 +11672,7 @@ static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filena
                         (int)imp->source->len, imp->source->chars);
                 }
 
-                // Check if already loaded
+                // Check if already loaded (also catches circular imports via placeholder)
                 String* spec_str = heap_create_name(resolved, strlen(resolved));
                 Item spec_item = (Item){.item = s2it(spec_str)};
                 Item existing = js_module_get(spec_item);
@@ -11681,7 +11681,11 @@ static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filena
                     continue;
                 }
 
-                // Read and compile the module
+                // Register placeholder namespace to guard against circular imports
+                Item placeholder_ns = js_new_object();
+                js_module_register(spec_item, placeholder_ns);
+
+                // Read and compile the module (will re-register with real exports)
                 char* mod_source = read_text_file(resolved);
                 if (mod_source) {
                     transpile_js_module_to_mir(runtime, mod_source, resolved);
