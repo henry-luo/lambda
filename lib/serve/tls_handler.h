@@ -10,7 +10,7 @@
 #define SERVE_TLS_HANDLER_H
 
 #include "mbedtls_compat.h"
-#include <event2/bufferevent_ssl.h>
+#include <uv.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -104,23 +104,12 @@ void tls_set_verify(SSL_CTX *ctx, int verify_peer, int verify_depth);
  */
 
 /**
- * create ssl bufferevent for secure connection
- * @param base event base
+ * create an ssl connection wrapper for a libuv tcp handle
  * @param ctx ssl context
- * @param socket socket file descriptor
- * @param state ssl connection state (BUFFEREVENT_SSL_ACCEPTING, etc.)
- * @return ssl bufferevent or NULL on error
+ * @param client libuv tcp handle for the connected client
+ * @return ssl connection or NULL on error
  */
-struct bufferevent* tls_create_bufferevent(struct event_base *base,
-                                          SSL_CTX *ctx, evutil_socket_t socket,
-                                          enum bufferevent_ssl_state state);
-
-/**
- * get ssl object from bufferevent
- * @param bev ssl bufferevent
- * @return ssl object or NULL
- */
-SSL* tls_get_ssl(struct bufferevent *bev);
+SSL* tls_create_connection(SSL_CTX *ctx, uv_tcp_t *client);
 
 /**
  * get peer certificate from ssl connection

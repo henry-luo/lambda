@@ -275,57 +275,50 @@ void tls_set_verify(SSL_CTX *ctx, int verify_peer, int verify_depth) {
 /**
  * ssl connection management implementation
  *
- * NOTE: libevent's bufferevent_openssl_* functions are OpenSSL-specific.
- * To properly integrate mbedTLS with libevent, you'll need to either:
- * 1. Use libevent's generic bufferevent and handle SSL I/O manually
- * 2. Create a custom bufferevent filter for mbedTLS
- * 3. Use a library that provides mbedTLS support for libevent
- *
- * The functions below provide a placeholder API that maintains compatibility
- * with the existing interface, but will need proper implementation.
+ * With libuv, TLS is handled at the application level using mbedTLS
+ * bio callbacks on raw socket data read from uv_tcp_t handles.
  */
 
-struct bufferevent* tls_create_bufferevent(struct event_base *base,
-                                          SSL_CTX *ctx, evutil_socket_t socket,
-                                          enum bufferevent_ssl_state state) {
-    if (!base || !ctx) {
+SSL* tls_create_connection(SSL_CTX *ctx, uv_tcp_t *client) {
+    if (!ctx || !client) {
         serve_set_error("invalid parameters");
         return NULL;
     }
 
-    // TODO: Implement mbedTLS integration with libevent
-    // This requires creating a custom bufferevent or using a compatibility layer
-    serve_set_error("mbedtls bufferevent integration not yet implemented");
-    return NULL;
-
-    /* Example approach:
-    // Create a new SSL connection
-    SSL *ssl = calloc(1, sizeof(SSL));
-    if (!ssl) return NULL;
-
-    mbedtls_ssl_init(&ssl->ssl);
-    ssl->ctx = ctx;
-    ssl->socket_fd = socket;
-
-    // Setup SSL with the context configuration
-    mbedtls_ssl_setup(&ssl->ssl, &ctx->conf);
-
-    // Set the socket
-    mbedtls_ssl_set_bio(&ssl->ssl, &socket, mbedtls_net_send, mbedtls_net_recv, NULL);
-
-    // Create a bufferevent socket and wrap it with SSL handling
-    // This would require a custom implementation
-    */
-}
-
-SSL* tls_get_ssl(struct bufferevent *bev) {
-    if (!bev) {
+    SSL *ssl = (SSL *)calloc(1, sizeof(SSL));
+    if (!ssl) {
+        serve_set_error("failed to allocate ssl connection");
         return NULL;
     }
 
-    // TODO: Extract SSL from bufferevent
-    // This depends on the bufferevent implementation
-    return NULL;
+    mbedtls_ssl_init(&ssl->ssl);
+    ssl->ctx = ctx;
+
+    int ret = mbedtls_ssl_setup(&ssl->ssl, &ctx->conf);
+    if (ret != 0) {
+        serve_set_error("mbedtls_ssl_setup failed: -0x%04x", -ret);
+        mbedtls_ssl_free(&ssl->ssl);
+        free(ssl);
+        return NULL;
+    }
+
+    // get the file descriptor from the uv_tcp_t handle
+    uv_os_fd_t fd;
+    if (uv_fileno((uv_handle_t *)client, &fd) != 0) {
+        serve_set_error("failed to get socket fd from uv handle");
+        mbedtls_ssl_free(&ssl->ssl);
+        free(ssl);
+        return NULL;
+    }
+
+    ssl->socket_fd = (int)fd;
+
+    // set up bio to use the raw socket
+    mbedtls_ssl_set_bio(&ssl->ssl, &ssl->socket_fd,
+                        mbedtls_net_send, mbedtls_net_recv, NULL);
+
+    SERVE_LOG_DEBUG("tls connection created on fd %d", ssl->socket_fd);
+    return ssl;
 }
 
 X509* tls_get_peer_certificate(SSL *ssl) {

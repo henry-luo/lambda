@@ -83,7 +83,12 @@ static void init_func_map(void) {
 }
 
 // Dynamic import table for cross-module function/variable resolution (O(1) hashmap)
-static struct hashmap* dynamic_import_map = NULL;
+// Thread-local: each compilation thread gets its own map for parallel module compilation.
+static __thread struct hashmap* dynamic_import_map = NULL;
+
+void ensure_jit_imports_initialized(void) {
+    init_func_map();
+}
 
 void register_dynamic_import(const char *name, void *addr) {
     if (!dynamic_import_map) {

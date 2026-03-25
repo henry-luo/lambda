@@ -1601,13 +1601,14 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             // Handle imported function references
             if (ident->entry->import) {
                 // Get the function name (use boxed wrapper for typed params or inferred native params)
+                // Include module index prefix to prevent name collisions across modules
                 StrBuf* fn_import_name = strbuf_new_cap(64);
                 bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
                     (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
                 if (use_wrapper) {
-                    write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
+                    write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
                 } else {
-                    write_fn_name(fn_import_name, fn_node, NULL);
+                    write_fn_name(fn_import_name, fn_node, ident->entry->import);
                 }
                 log_debug("mir: imported function reference '%s'", fn_import_name->str);
 
@@ -1651,6 +1652,8 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             // Phase 4: For native functions used as first-class values, use the
             // boxed wrapper (_b) since dynamic dispatch uses the Item ABI.
             NativeFuncInfo* nfi_ref = find_native_func_info(mt, nm_buf->str);
+            log_debug("mir: LOCAL fn ref '%s' nfi_ref=%p has_native=%d func_item=%p",
+                nm_buf->str, (void*)nfi_ref, nfi_ref ? nfi_ref->has_native : -1, (void*)func_item);
             if (nfi_ref && nfi_ref->has_native) {
                 StrBuf* wrapper_buf = strbuf_new_cap(64);
                 write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
@@ -6007,13 +6010,15 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Determine the import function name:
             // Use boxed wrapper (_b) for typed-param functions, direct for untyped.
             // Also use _b when the function has inferred native params (e.g. i in arr[i]).
+            // Include module index prefix to disambiguate functions with same name+offset
+            // across different modules (e.g. fraction.ls and style.ls both have _render_574).
             StrBuf* fn_import_name = strbuf_new_cap(64);
             bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
                 (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
             if (use_wrapper) {
-                write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
+                write_fn_name_ex(fn_import_name, fn_node, ident->entry->import, "_b");
             } else {
-                write_fn_name(fn_import_name, fn_node, NULL);
+                write_fn_name(fn_import_name, fn_node, ident->entry->import);
             }
             log_debug("mir: imported function call '%s' (wrapper=%d)", fn_import_name->str, use_wrapper);
 
@@ -6189,7 +6194,17 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         StrBuf* name_buf = nullptr;
         MIR_item_t local_func = nullptr;
 
-        if (entry_node && (entry_node->node_type == AST_NODE_FUNC ||
+        // Guard: if the identifier is a variable/parameter (has a MIR var registered),
+        // it holds a function value at runtime — must use dynamic dispatch, not direct call.
+        // This prevents treating `render_fn(args)` as a direct call to the function
+        // that was propagated to the parameter via AST type inference.
+        char ident_name_str[128];
+        snprintf(ident_name_str, sizeof(ident_name_str), "%.*s",
+            (int)ident->name->len, ident->name->chars);
+        MirVarEntry* ident_var = find_var(mt, ident_name_str);
+        bool is_fn_variable = (ident_var != nullptr);
+
+        if (!is_fn_variable && entry_node && (entry_node->node_type == AST_NODE_FUNC ||
             entry_node->node_type == AST_NODE_FUNC_EXPR ||
             entry_node->node_type == AST_NODE_PROC)) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
@@ -6210,6 +6225,9 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         }
 
         if (fn_mangled && (local_func || entry_node)) {
+            log_debug("mir: DIRECT call '%s' local_func=%p entry_type=%d",
+                fn_mangled, (void*)local_func,
+                entry_node ? entry_node->node_type : -1);
 
             // ======== TCO interception ========
             // If this is a tail-recursive call to the current TCO function,
@@ -10748,24 +10766,39 @@ static void register_module_pub_fns(AstImportNode* imp) {
             if (fn_type && fn_type->is_public) {
                 // Register boxed wrapper (_b suffix) if the function needs one
                 // (due to declared typed params OR inferred native params)
+                // Use module-local name to find the function in its own MIR context,
+                // then register with module-prefixed name for cross-module resolution.
+                // This prevents name collisions when different modules have functions
+                // with the same name at the same byte offset (e.g. fraction.ls and
+                // style.ls both have pub fn render at byte 574 → _render_574).
                 StrBuf* fn_name = strbuf_new_cap(64);
                 if (mod_child->node_type != AST_NODE_PROC &&
                     (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node))) {
+                    // Find by local name (no module prefix)
                     write_fn_name_ex(fn_name, fn_node, NULL, "_b");
                     void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
                     if (fn_ptr) {
-                        register_dynamic_import(strdup(fn_name->str), fn_ptr);
-                        log_debug("mir: registered import wrapper fn: %s -> %p", fn_name->str, fn_ptr);
+                        // Register with module-prefixed name for unique cross-module lookup
+                        StrBuf* reg_name = strbuf_new_cap(64);
+                        write_fn_name_ex(reg_name, fn_node, imp, "_b");
+                        register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                        log_debug("mir: registered import wrapper fn: %s -> %p", reg_name->str, fn_ptr);
+                        strbuf_free(reg_name);
                     }
                 }
                 // Register the direct (non-boxed) version
                 strbuf_free(fn_name);
                 fn_name = strbuf_new_cap(64);
+                // Find by local name (no module prefix)
                 write_fn_name(fn_name, fn_node, NULL);
                 void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
                 if (fn_ptr) {
-                    register_dynamic_import(strdup(fn_name->str), fn_ptr);
-                    log_debug("mir: registered import fn: %s -> %p", fn_name->str, fn_ptr);
+                    // Register with module-prefixed name for unique cross-module lookup
+                    StrBuf* reg_name = strbuf_new_cap(64);
+                    write_fn_name(reg_name, fn_node, imp);
+                    register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                    log_debug("mir: registered import fn: %s -> %p", reg_name->str, fn_ptr);
+                    strbuf_free(reg_name);
                 }
                 strbuf_free(fn_name);
             }
