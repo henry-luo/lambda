@@ -3831,6 +3831,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
         case CSS_PROPERTY_MARGIN_TRIM: {
             log_debug("[CSS] Processing margin-trim property");
+            // CSS Box 4 §3.1: margin-trim is spec-correct but Chrome does not
+            // support it yet. Disabled to match browser reference output.
+            // Re-enable when browser support catches up and references are
+            // regenerated.
+            break;
+#if 0
             if (!block || !block->blk) {
                 if (block) {
                     block->blk = alloc_block_prop(lycon);
@@ -3875,6 +3881,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 log_debug("[CSS] margin-trim (multi): 0x%02X", trim);
             }
             break;
+#endif
         }
 
         case CSS_PROPERTY_TEXT_BOX_TRIM: {
