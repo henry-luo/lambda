@@ -138,6 +138,7 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_AWAIT_EXPRESSION,
     JS_AST_NODE_IMPORT_DECLARATION,
     JS_AST_NODE_EXPORT_DECLARATION,
+    JS_AST_NODE_IMPORT_SPECIFIER,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -567,6 +568,13 @@ typedef struct JsImportNode {
     String* default_name;            // Default import name (NULL if none)
     String* namespace_name;          // Namespace import name for * as X (NULL if none)
 } JsImportNode;
+
+// v14: Import specifier node (for named imports: import { remote as local })  
+typedef struct JsImportSpecifierNode {
+    JsAstNode base;
+    String* local_name;              // Local binding name (alias if present, else export name)
+    String* remote_name;             // Name exported by the module
+} JsImportSpecifierNode;
 
 // v14: Export declaration node
 typedef struct JsExportNode {

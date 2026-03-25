@@ -533,6 +533,14 @@ TEST(JavaScriptTests, test_opt_p7_method_native) {
     test_js_script_against_file("test/js/opt_p7_method_native.js", "test/js/opt_p7_method_native.txt");
 }
 
+TEST(JavaScriptTests, test_es_modules) {
+    test_js_script_against_file("test/js/module_main.js", "test/js/module_main.txt");
+}
+
+TEST(JavaScriptTests, test_es_modules_advanced) {
+    test_js_script_against_file("test/js/module_advanced.js", "test/js/module_advanced.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

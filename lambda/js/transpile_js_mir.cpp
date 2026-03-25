@@ -18,6 +18,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/mempool.h"
 #include "../../lib/file_utils.h"
+#include "../../lib/file.h"
 #include "../transpiler.hpp"
 #include <mir.h>
 #include <mir-gen.h>
@@ -228,6 +229,11 @@ struct JsMirTranspiler {
     MIR_reg_t scope_env_reg;         // register holding current func's scope env (0 if none)
     int scope_env_slot_count;        // number of slots in current scope env
     int current_func_index;          // index of current func in func_entries (-1 if not set)
+
+    // ES module support
+    bool is_module;                  // true when compiling an ES module (not main script)
+    MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
+    const char* filename;            // path of current file being compiled
 };
 
 // ============================================================================
@@ -1970,6 +1976,8 @@ static int jm_count_params(JsFunctionNode* fn) {
 
 static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt);
+static void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
+                                   char* out, int out_size);
 
 // ============================================================================
 // Function collection (pre-pass) - post-order to get innermost first
@@ -9641,14 +9649,103 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         log_error("js-mir: unsupported statement type %d", stmt->node_type);
         break;
     case JS_AST_NODE_IMPORT_DECLARATION: {
-        // v14: import statement — for now, log and skip (module loading is deferred)
+        // ES module import: resolve module and bind imported names
         JsImportNode* imp = (JsImportNode*)stmt;
-        if (imp->source) {
-            log_debug("js-mir: import from '%.*s' (module loading deferred)", 
-                (int)imp->source->len, imp->source->chars);
+        if (!imp->source) break;
+
+        // Resolve module path relative to current file
+        char resolved[512];
+        if (mt->filename) {
+            jm_resolve_module_path(mt->filename, imp->source->chars, (int)imp->source->len,
+                resolved, sizeof(resolved));
+        } else {
+            snprintf(resolved, sizeof(resolved), "%.*s", (int)imp->source->len, imp->source->chars);
         }
-        // In v14, imports are resolved at the module level before transpilation.
-        // The module runtime will pre-populate the module variable table.
+
+        // Get module namespace: ns = js_module_get(specifier_string)
+        MIR_reg_t spec = jm_box_string_literal(mt, resolved, (int)strlen(resolved));
+        MIR_reg_t ns = jm_call_1(mt, "js_module_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, spec));
+
+        // Bind default import: import X from 'module'
+        if (imp->default_name) {
+            MIR_reg_t key = jm_box_string_literal(mt, "default", 7);
+            MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s",
+                (int)imp->default_name->len, imp->default_name->chars);
+            MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_reg_op(mt->ctx, val)));
+            jm_set_var(mt, vname, var_reg);
+            // Also update module var for closure access
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mce && mce->const_type == MCONST_MODVAR) {
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
+        }
+
+        // Bind namespace import: import * as X from 'module'
+        if (imp->namespace_name) {
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_js_%.*s",
+                (int)imp->namespace_name->len, imp->namespace_name->chars);
+            MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_reg_op(mt->ctx, ns)));
+            jm_set_var(mt, vname, var_reg);
+            JsModuleConstEntry lookup;
+            snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+            JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+            if (mce && mce->const_type == MCONST_MODVAR) {
+                jm_call_void_2(mt, "js_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, ns));
+            }
+        }
+
+        // Bind named imports: import { a, b as c } from 'module'
+        {
+            JsAstNode* spec = imp->specifiers;
+            while (spec) {
+                if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
+                    JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
+                    // Get exported value: val = js_property_get(ns, remote_name)
+                    MIR_reg_t key = jm_box_string_literal(mt, isp->remote_name->chars,
+                        (int)isp->remote_name->len);
+                    MIR_reg_t val = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ns),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                    // Bind to local name
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                        (int)isp->local_name->len, isp->local_name->chars);
+                    MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, var_reg),
+                        MIR_new_reg_op(mt->ctx, val)));
+                    jm_set_var(mt, vname, var_reg);
+                    // Also update module var for closure access
+                    JsModuleConstEntry lookup;
+                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    JsModuleConstEntry* mce = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &lookup);
+                    if (mce && mce->const_type == MCONST_MODVAR) {
+                        jm_call_void_2(mt, "js_set_module_var",
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                    }
+                }
+                spec = spec->next;
+            }
+        }
         break;
     }
     case JS_AST_NODE_EXPORT_DECLARATION: {
@@ -10247,6 +10344,81 @@ static bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double*
     return false;
 }
 
+// ============================================================================
+// ES Module support: deferred MIR cleanup and path resolution
+// ============================================================================
+
+// Module MIR contexts must survive until main program finishes
+// (exported functions have JIT-compiled pointers that must remain valid)
+#define MAX_MODULE_CONTEXTS 64
+static MIR_context_t module_mir_contexts[MAX_MODULE_CONTEXTS];
+static int module_mir_context_count = 0;
+
+static void jm_defer_mir_cleanup(MIR_context_t ctx) {
+    if (module_mir_context_count < MAX_MODULE_CONTEXTS) {
+        module_mir_contexts[module_mir_context_count++] = ctx;
+    } else {
+        log_error("module: exceeded max deferred MIR contexts (%d)", MAX_MODULE_CONTEXTS);
+        MIR_finish(ctx);
+    }
+}
+
+static void jm_cleanup_deferred_mir() {
+    for (int i = 0; i < module_mir_context_count; i++) {
+        MIR_finish(module_mir_contexts[i]);
+    }
+    module_mir_context_count = 0;
+}
+
+// Resolve a module specifier relative to the importing file's directory
+static void jm_resolve_module_path(const char* base_file, const char* specifier, int spec_len,
+                                   char* out, int out_size) {
+    const char* last_slash = strrchr(base_file, '/');
+    int dir_len = last_slash ? (int)(last_slash - base_file + 1) : 0;
+
+    if (spec_len >= 2 && specifier[0] == '.' && specifier[1] == '/') {
+        // Relative: ./utils.js → dir/utils.js
+        snprintf(out, out_size, "%.*s%.*s", dir_len, base_file, spec_len - 2, specifier + 2);
+    } else if (spec_len >= 3 && specifier[0] == '.' && specifier[1] == '.' && specifier[2] == '/') {
+        // Parent: ../utils.js
+        snprintf(out, out_size, "%.*s%.*s", dir_len, base_file, spec_len, specifier);
+    } else {
+        // Absolute or bare — use as-is
+        snprintf(out, out_size, "%.*s", spec_len, specifier);
+    }
+
+    // If doesn't end in .js, append .js
+    int len = (int)strlen(out);
+    if (len < 3 || strcmp(out + len - 3, ".js") != 0) {
+        if (len + 3 < out_size) {
+            strcat(out, ".js");
+        }
+    }
+}
+
+// Forward declarations for module loading
+static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename);
+
+// Helper: emit code to store an exported identifier value into module namespace
+static void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int name_len,
+                                  bool is_default) {
+    // Resolve the value through box_item (handles native-typed variables)
+    JsIdentifierNode temp_id;
+    memset(&temp_id, 0, sizeof(temp_id));
+    temp_id.base.node_type = JS_AST_NODE_IDENTIFIER;
+    temp_id.name = name_pool_create_len(mt->tp->name_pool, name, name_len);
+
+    MIR_reg_t val = jm_transpile_box_item(mt, (JsAstNode*)&temp_id);
+    const char* export_key = is_default ? "default" : name;
+    int export_key_len = is_default ? 7 : name_len;
+    MIR_reg_t key = jm_box_string_literal(mt, export_key, export_key_len);
+    jm_call_3(mt, "js_property_set", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+}
+
 void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
@@ -10268,8 +10440,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         JsAstNode* s = program->body;
         while (s) {
-            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
+            // Unwrap export declarations to reach inner const declarations
+            JsAstNode* actual = s;
+            if (s->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+                JsExportNode* exp = (JsExportNode*)s;
+                if (exp->declaration) actual = exp->declaration;
+            }
+            if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
                 // Only const declarations can be inlined as compile-time constants.
                 // let/var are mutable and will be registered as module vars in third pass.
                 if (v->kind != JS_VAR_CONST) { s = s->next; continue; }
@@ -10330,8 +10508,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         JsAstNode* s = program->body;
         while (s) {
-            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
+            // Unwrap export declarations for constant folding
+            JsAstNode* actual = s;
+            if (s->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+                JsExportNode* exp = (JsExportNode*)s;
+                if (exp->declaration) actual = exp->declaration;
+            }
+            if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
                 if (v->kind != JS_VAR_CONST) { s = s->next; continue; }
                 JsAstNode* d = v->declarations;
                 while (d) {
@@ -10383,8 +10567,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     {
         JsAstNode* s = program->body;
         while (s) {
-            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)s;
+            // Unwrap export declarations to reach inner variable declarations
+            JsAstNode* actual = s;
+            if (s->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+                JsExportNode* exp = (JsExportNode*)s;
+                if (exp->declaration) actual = exp->declaration;
+            }
+            if (actual->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual;
                 JsAstNode* d = v->declarations;
                 while (d) {
                     if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
@@ -10431,7 +10621,78 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Third pass (b): detect implicit globals — variables assigned but never declared
+    // Third pass (c): assign module var indices for import bindings
+    // so closures can access imported names via js_get_module_var()
+    {
+        JsAstNode* s = program->body;
+        while (s) {
+            if (s->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+                JsImportNode* imp = (JsImportNode*)s;
+
+                // Default import: import X from 'module'
+                if (imp->default_name) {
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                        (int)imp->default_name->len, imp->default_name->chars);
+                    JsModuleConstEntry lookup;
+                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 256) {
+                        JsModuleConstEntry mce;
+                        memset(&mce, 0, sizeof(mce));
+                        snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                        mce.const_type = MCONST_MODVAR;
+                        mce.int_val = mt->module_var_count++;
+                        hashmap_set(mt->module_consts, &mce);
+                        log_debug("js-mir: import default '%s' → module_var[%d]", vname, (int)mce.int_val);
+                    }
+                }
+
+                // Namespace import: import * as X from 'module'
+                if (imp->namespace_name) {
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s",
+                        (int)imp->namespace_name->len, imp->namespace_name->chars);
+                    JsModuleConstEntry lookup;
+                    snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                    if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 256) {
+                        JsModuleConstEntry mce;
+                        memset(&mce, 0, sizeof(mce));
+                        snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                        mce.const_type = MCONST_MODVAR;
+                        mce.int_val = mt->module_var_count++;
+                        hashmap_set(mt->module_consts, &mce);
+                        log_debug("js-mir: import namespace '%s' → module_var[%d]", vname, (int)mce.int_val);
+                    }
+                }
+
+                // Named imports: import { a, b as c } from 'module'
+                JsAstNode* spec = imp->specifiers;
+                while (spec) {
+                    if (spec->node_type == JS_AST_NODE_IMPORT_SPECIFIER) {
+                        JsImportSpecifierNode* isp = (JsImportSpecifierNode*)spec;
+                        char vname[128];
+                        snprintf(vname, sizeof(vname), "_js_%.*s",
+                            (int)isp->local_name->len, isp->local_name->chars);
+                        JsModuleConstEntry lookup;
+                        snprintf(lookup.name, sizeof(lookup.name), "%s", vname);
+                        if (!hashmap_get(mt->module_consts, &lookup) && mt->module_var_count < 256) {
+                            JsModuleConstEntry mce;
+                            memset(&mce, 0, sizeof(mce));
+                            snprintf(mce.name, sizeof(mce.name), "%s", vname);
+                            mce.const_type = MCONST_MODVAR;
+                            mce.int_val = mt->module_var_count++;
+                            hashmap_set(mt->module_consts, &mce);
+                            log_debug("js-mir: import named '%s' → module_var[%d]", vname, (int)mce.int_val);
+                        }
+                    }
+                    spec = spec->next;
+                }
+            }
+            s = s->next;
+        }
+    }
+
+    // Third pass (d): detect implicit globals — variables assigned but never declared
     // in their enclosing function. In JS sloppy mode, assigning to an undeclared
     // variable creates a global. We do per-function analysis: for each function
     // (declaration or expression), collect assignments and declarations, and any
@@ -11024,6 +11285,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
 
+    // Module mode: create namespace object to hold exports
+    if (mt->is_module) {
+        mt->namespace_reg = jm_call_0(mt, "js_new_object", MIR_T_I64);
+    }
+
     // Emit variable bindings for named function declarations (so they can be
     // used as first-class values, e.g., passed as callbacks).
     // Non-capturing function declarations are hoisted (bound before any statements).
@@ -11031,8 +11297,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // (bound inline with statements, after preceding const/let are in scope).
     JsAstNode* stmt = program->body;
     while (stmt) {
-        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+        // Unwrap export declarations to hoist exported function declarations
+        JsAstNode* actual_stmt = stmt;
+        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            JsExportNode* exp = (JsExportNode*)stmt;
+            if (exp->declaration) actual_stmt = exp->declaration;
+        }
+        if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
             if (fn->name && fn->name->chars) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item && fc->capture_count == 0) {
@@ -11088,8 +11360,33 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     stmt = program->body;
     while (stmt) {
-        if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-            JsFunctionNode* fn = (JsFunctionNode*)stmt;
+        // Unwrap export declarations to reach the inner declaration
+        JsAstNode* actual_stmt = stmt;
+        JsExportNode* current_export = NULL;
+        if (stmt->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            current_export = (JsExportNode*)stmt;
+            if (current_export->declaration) {
+                actual_stmt = current_export->declaration;
+            } else if (current_export->specifiers && mt->is_module) {
+                // export { a, b } — emit exports for each specifier
+                JsAstNode* spec = current_export->specifiers;
+                while (spec) {
+                    if (spec->node_type == JS_AST_NODE_IDENTIFIER) {
+                        JsIdentifierNode* id = (JsIdentifierNode*)spec;
+                        jm_emit_module_export(mt, id->name->chars, (int)id->name->len, false);
+                    }
+                    spec = spec->next;
+                }
+                stmt = stmt->next;
+                continue;
+            } else {
+                stmt = stmt->next;
+                continue;
+            }
+        }
+
+        if (actual_stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)actual_stmt;
             if (fn->name && fn->name->chars) {
                 JsFuncCollected* fc = jm_find_collected_func(mt, fn);
                 if (fc && fc->func_item && fc->capture_count > 0) {
@@ -11145,14 +11442,19 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
             // Non-capturing function declarations already handled above
+            // Module mode: export the function to namespace
+            if (current_export && mt->is_module && fn->name) {
+                jm_emit_module_export(mt, fn->name->chars, (int)fn->name->len,
+                    current_export->is_default);
+            }
             stmt = stmt->next;
             continue;
         }
 
-        if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        if (actual_stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
             // Emit static field initializers at the class's source position.
             // Static fields may reference functions/variables declared before.
-            JsClassNode* cls_node = (JsClassNode*)stmt;
+            JsClassNode* cls_node = (JsClassNode*)actual_stmt;
             if (cls_node->name && cls_node->name->chars) {
                 JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
                 if (ce) {
@@ -11175,8 +11477,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             continue;
         }
 
-        if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-            JsExpressionStatementNode* es = (JsExpressionStatementNode*)stmt;
+        // Module mode: handle export default <expression>
+        if (current_export && current_export->is_default && mt->is_module) {
+            MIR_reg_t val = jm_transpile_box_item(mt, actual_stmt);
+            MIR_reg_t key = jm_box_string_literal(mt, "default", 7);
+            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            stmt = stmt->next;
+            continue;
+        }
+
+        if (actual_stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+            JsExpressionStatementNode* es = (JsExpressionStatementNode*)actual_stmt;
             if (es->expression) {
                 MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -11184,14 +11498,36 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     MIR_new_reg_op(mt->ctx, val)));
             }
         } else {
-            jm_transpile_statement(mt, stmt);
+            jm_transpile_statement(mt, actual_stmt);
+            // Module mode: after transpiling exported variable declarations,
+            // emit exports for each declared name
+            if (current_export && mt->is_module &&
+                actual_stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)actual_stmt;
+                JsAstNode* d = v->declarations;
+                while (d) {
+                    if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                        JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
+                        if (vd->id && vd->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                            JsIdentifierNode* vid = (JsIdentifierNode*)vd->id;
+                            jm_emit_module_export(mt, vid->name->chars, (int)vid->name->len,
+                                current_export->is_default);
+                        }
+                    }
+                    d = d->next;
+                }
+            }
         }
 
         stmt = stmt->next;
     }
 
-    // Return result
-    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
+    // Module mode: return namespace instead of result
+    if (mt->is_module) {
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, mt->namespace_reg)));
+    } else {
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
+    }
 
     jm_pop_scope(mt);
     MIR_finish_func(mt->ctx);
@@ -11199,6 +11535,164 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Load module for linking
     MIR_load_module(mt->ctx, mt->module);
+}
+
+// ============================================================================
+// ES Module loading: compile and execute a module, returning its namespace
+// ============================================================================
+
+static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+    log_debug("js-mir: compiling module '%s'", filename ? filename : "<module>");
+
+    JsTranspiler* tp = js_transpiler_create(runtime);
+    if (!tp) {
+        log_error("js-mir: module: failed to create transpiler for '%s'", filename);
+        return ItemNull;
+    }
+
+    if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
+        log_error("js-mir: module: parse failed for '%s'", filename);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
+
+    TSNode root = ts_tree_root_node(tp->tree);
+    JsAstNode* js_ast = build_js_ast(tp, root);
+    if (!js_ast) {
+        log_error("js-mir: module: AST build failed for '%s'", filename);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
+
+    // Recursively load this module's imports first
+    jm_load_imports(runtime, js_ast, filename);
+
+    MIR_context_t ctx = jit_init(2);
+    if (!ctx) {
+        log_error("js-mir: module: MIR context init failed for '%s'", filename);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
+
+    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    if (!mt) {
+        log_error("js-mir: module: failed to allocate transpiler for '%s'", filename);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->is_module = true;
+    mt->filename = filename;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
+        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
+        js_local_func_hash, js_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
+
+    mt->module = MIR_new_module(ctx, "js_module");
+
+    transpile_js_mir_ast(mt, js_ast);
+
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
+
+    if (!js_main) {
+        log_error("js-mir: module: failed to find js_main for '%s'", filename);
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
+
+    // Execute module — js_main returns the namespace object in module mode
+    js_reset_module_vars();
+    Item namespace_obj = js_main((Context*)context);
+
+    // Register the module with its resolved path as key
+    String* spec_str = heap_create_name(filename, strlen(filename));
+    Item spec_item = (Item){.item = s2it(spec_str)};
+    js_module_register(spec_item, namespace_obj);
+
+    log_debug("js-mir: module '%s' loaded successfully", filename);
+
+    // Cleanup transpiler state but DEFER MIR context cleanup
+    // (module function pointers must remain alive for the main program)
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->local_funcs);
+    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+    if (mt->module_consts) hashmap_free(mt->module_consts);
+    for (int i = 0; i <= mt->scope_depth; i++) {
+        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+    }
+    free(mt);
+    jm_defer_mir_cleanup(ctx);
+    js_transpiler_destroy(tp);
+
+    return namespace_obj;
+}
+
+// ============================================================================
+// Pre-scan AST for imports and recursively load all imported modules
+// ============================================================================
+
+static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filename) {
+    if (!ast || ast->node_type != JS_AST_NODE_PROGRAM) return;
+    JsProgramNode* program = (JsProgramNode*)ast;
+
+    JsAstNode* s = program->body;
+    while (s) {
+        if (s->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+            JsImportNode* imp = (JsImportNode*)s;
+            if (imp->source) {
+                // Resolve module path relative to current file
+                char resolved[512];
+                if (filename) {
+                    jm_resolve_module_path(filename, imp->source->chars,
+                        (int)imp->source->len, resolved, sizeof(resolved));
+                } else {
+                    snprintf(resolved, sizeof(resolved), "%.*s",
+                        (int)imp->source->len, imp->source->chars);
+                }
+
+                // Check if already loaded
+                String* spec_str = heap_create_name(resolved, strlen(resolved));
+                Item spec_item = (Item){.item = s2it(spec_str)};
+                Item existing = js_module_get(spec_item);
+                if (get_type_id(existing) != LMD_TYPE_NULL) {
+                    s = s->next;
+                    continue;
+                }
+
+                // Read and compile the module
+                char* mod_source = read_text_file(resolved);
+                if (mod_source) {
+                    transpile_js_module_to_mir(runtime, mod_source, resolved);
+                    free(mod_source);
+                } else {
+                    log_error("js-mir: cannot read module '%s'", resolved);
+                }
+            }
+        }
+        s = s->next;
+    }
 }
 
 // ============================================================================
@@ -11232,6 +11726,37 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Set up evaluation context EARLY — needed before module loading
+    // so that heap-allocated module objects (namespaces, strings) persist.
+    EvalContext js_context;
+    memset(&js_context, 0, sizeof(EvalContext));
+    EvalContext* old_context = context;
+    bool reusing_context = false;
+
+    if (old_context && old_context->heap) {
+        context = old_context;
+        reusing_context = true;
+        if (!context->nursery) {
+            context->nursery = gc_nursery_create(0);
+        }
+    } else {
+        js_context.nursery = gc_nursery_create(0);
+        context = &js_context;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        context->type_list = arraylist_new(64);
+    }
+
+    _lambda_rt = (Context*)context;
+
+    // Create Input context for JS runtime — must be before module loading
+    Input* js_input = Input::create(context->pool);
+    js_runtime_set_input(js_input);
+
+    // Load imported modules before main compilation (recursive)
+    jm_load_imports(runtime, js_ast, filename);
+
     // Initialize MIR context
     MIR_context_t ctx = jit_init(2);
     if (!ctx) {
@@ -11262,6 +11787,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->current_func_index = -1;
+    mt->filename = filename;
 
     // Create module
     mt->module = MIR_new_module(ctx, "js_script");
@@ -11300,33 +11826,6 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
-
-    // Set up evaluation context (same logic as js_transpiler_compile in js_scope.cpp)
-    EvalContext js_context;
-    memset(&js_context, 0, sizeof(EvalContext));
-    EvalContext* old_context = context;
-    bool reusing_context = false;
-
-    if (old_context && old_context->heap) {
-        context = old_context;
-        reusing_context = true;
-        if (!context->nursery) {
-            context->nursery = gc_nursery_create(0);
-        }
-    } else {
-        js_context.nursery = gc_nursery_create(0);
-        context = &js_context;
-        heap_init();
-        context->pool = context->heap->pool;
-        context->name_pool = name_pool_create(context->pool, nullptr);
-        context->type_list = arraylist_new(64);
-    }
-
-    _lambda_rt = (Context*)context;
-
-    // Create Input context for JS runtime map_put operations
-    Input* js_input = Input::create(context->pool);
-    js_runtime_set_input(js_input);
 
     // v14: initialize event loop before execution
     js_event_loop_init();
@@ -11381,6 +11880,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     }
     free(mt);
     MIR_finish(ctx);
+    jm_cleanup_deferred_mir();
     js_transpiler_destroy(tp);
 
     log_debug("js-mir: transpilation completed");
