@@ -41,6 +41,7 @@ extern bool target_equal(Target* a, Target* b);
 // JS runtime functions
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
+#include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
@@ -1278,6 +1279,113 @@ JitImport jit_runtime_imports[] = {
     // stop iteration
     {"py_stop_iteration", FPTR(py_stop_iteration)},
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
+
+    // ========================================================================
+    // Bash runtime functions
+    // ========================================================================
+    // type conversion
+    {"bash_to_int", FPTR(bash_to_int)},
+    {"bash_to_string", FPTR(bash_to_string)},
+    {"bash_is_truthy", FPTR(bash_is_truthy)},
+    {"bash_exit_code", FPTR(bash_exit_code)},
+    {"bash_from_exit_code", FPTR(bash_from_exit_code)},
+    // arithmetic
+    {"bash_add", FPTR(bash_add)},
+    {"bash_subtract", FPTR(bash_subtract)},
+    {"bash_multiply", FPTR(bash_multiply)},
+    {"bash_divide", FPTR(bash_divide)},
+    {"bash_modulo", FPTR(bash_modulo)},
+    {"bash_power", FPTR(bash_power)},
+    {"bash_negate", FPTR(bash_negate)},
+    // bitwise
+    {"bash_bit_and", FPTR(bash_bit_and)},
+    {"bash_bit_or", FPTR(bash_bit_or)},
+    {"bash_bit_xor", FPTR(bash_bit_xor)},
+    {"bash_bit_not", FPTR(bash_bit_not)},
+    {"bash_lshift", FPTR(bash_lshift)},
+    {"bash_rshift", FPTR(bash_rshift)},
+    // arithmetic comparison
+    {"bash_arith_eq", FPTR(bash_arith_eq)},
+    {"bash_arith_ne", FPTR(bash_arith_ne)},
+    {"bash_arith_lt", FPTR(bash_arith_lt)},
+    {"bash_arith_le", FPTR(bash_arith_le)},
+    {"bash_arith_gt", FPTR(bash_arith_gt)},
+    {"bash_arith_ge", FPTR(bash_arith_ge)},
+    // test operators
+    {"bash_test_eq", FPTR(bash_test_eq)},
+    {"bash_test_ne", FPTR(bash_test_ne)},
+    {"bash_test_gt", FPTR(bash_test_gt)},
+    {"bash_test_ge", FPTR(bash_test_ge)},
+    {"bash_test_lt", FPTR(bash_test_lt)},
+    {"bash_test_le", FPTR(bash_test_le)},
+    {"bash_test_str_eq", FPTR(bash_test_str_eq)},
+    {"bash_test_str_ne", FPTR(bash_test_str_ne)},
+    {"bash_test_str_lt", FPTR(bash_test_str_lt)},
+    {"bash_test_str_gt", FPTR(bash_test_str_gt)},
+    {"bash_test_z", FPTR(bash_test_z)},
+    {"bash_test_n", FPTR(bash_test_n)},
+    {"bash_test_regex", FPTR(bash_test_regex)},
+    // string operations
+    {"bash_string_length", FPTR(bash_string_length)},
+    {"bash_string_concat", FPTR(bash_string_concat)},
+    {"bash_string_substring", FPTR(bash_string_substring)},
+    {"bash_string_trim_prefix", FPTR(bash_string_trim_prefix)},
+    {"bash_string_trim_suffix", FPTR(bash_string_trim_suffix)},
+    {"bash_string_replace", FPTR(bash_string_replace)},
+    {"bash_string_upper", FPTR(bash_string_upper)},
+    {"bash_string_lower", FPTR(bash_string_lower)},
+    // parameter expansion
+    {"bash_expand_default", FPTR(bash_expand_default)},
+    {"bash_expand_assign_default", FPTR(bash_expand_assign_default)},
+    {"bash_expand_alt", FPTR(bash_expand_alt)},
+    {"bash_expand_error", FPTR(bash_expand_error)},
+    // array operations
+    {"bash_array_new", FPTR(bash_array_new)},
+    {"bash_array_set", FPTR(bash_array_set)},
+    {"bash_array_get", FPTR(bash_array_get)},
+    {"bash_array_append", FPTR(bash_array_append)},
+    {"bash_array_length", FPTR(bash_array_length)},
+    {"bash_array_all", FPTR(bash_array_all)},
+    {"bash_array_unset", FPTR(bash_array_unset)},
+    {"bash_array_slice", FPTR(bash_array_slice)},
+    // variable scope
+    {"bash_set_var", FPTR(bash_set_var)},
+    {"bash_get_var", FPTR(bash_get_var)},
+    {"bash_set_local_var", FPTR(bash_set_local_var)},
+    {"bash_export_var", FPTR(bash_export_var)},
+    {"bash_unset_var", FPTR(bash_unset_var)},
+    {"bash_set_positional", FPTR(bash_set_positional)},
+    {"bash_get_positional", FPTR(bash_get_positional)},
+    {"bash_get_arg_count", FPTR(bash_get_arg_count)},
+    {"bash_get_all_args", FPTR(bash_get_all_args)},
+    {"bash_shift_args", FPTR(bash_shift_args)},
+    {"bash_get_exit_code", FPTR(bash_get_exit_code)},
+    {"bash_set_exit_code", FPTR(bash_set_exit_code)},
+    {"bash_negate_exit_code", FPTR(bash_negate_exit_code)},
+    {"bash_get_script_name", FPTR(bash_get_script_name)},
+    // scope lifecycle
+    {"bash_scope_push", FPTR(bash_scope_push)},
+    {"bash_scope_pop", FPTR(bash_scope_pop)},
+    {"bash_scope_push_subshell", FPTR(bash_scope_push_subshell)},
+    {"bash_scope_pop_subshell", FPTR(bash_scope_pop_subshell)},
+    // built-in commands
+    {"bash_builtin_echo", FPTR(bash_builtin_echo)},
+    {"bash_builtin_printf", FPTR(bash_builtin_printf)},
+    {"bash_builtin_test", FPTR(bash_builtin_test)},
+    {"bash_builtin_true", FPTR(bash_builtin_true)},
+    {"bash_builtin_false", FPTR(bash_builtin_false)},
+    {"bash_builtin_exit", FPTR(bash_builtin_exit)},
+    {"bash_builtin_return", FPTR(bash_builtin_return)},
+    {"bash_builtin_read", FPTR(bash_builtin_read)},
+    {"bash_builtin_shift", FPTR(bash_builtin_shift)},
+    {"bash_builtin_local", FPTR(bash_builtin_local)},
+    {"bash_builtin_export", FPTR(bash_builtin_export)},
+    {"bash_builtin_unset", FPTR(bash_builtin_unset)},
+    {"bash_builtin_cd", FPTR(bash_builtin_cd)},
+    {"bash_builtin_pwd", FPTR(bash_builtin_pwd)},
+    // runtime init/cleanup
+    {"bash_runtime_init", FPTR(bash_runtime_init)},
+    {"bash_runtime_cleanup", FPTR(bash_runtime_cleanup)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

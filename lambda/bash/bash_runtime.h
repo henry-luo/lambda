@@ -127,6 +127,7 @@ Item bash_shift_args(int n);                        // shift [n]
 // Special variables
 Item bash_get_exit_code(void);                      // $?
 void bash_set_exit_code(int code);
+void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_get_script_name(void);                    // $0
 
 // ========================================================================

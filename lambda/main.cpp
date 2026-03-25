@@ -34,6 +34,7 @@
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "py/py_transpiler.hpp"      // Python transpiler
+#include "bash/bash_transpiler.hpp"  // Bash transpiler
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1090,6 +1091,62 @@ int main(int argc, char *argv[]) {
             }
 
             free(py_source);
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
+    }
+
+    // Handle Bash command
+    log_debug("Checking for bash command");
+    if (argc >= 2 && strcmp(argv[1], "bash") == 0) {
+        log_debug("Entering Bash command handler");
+
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Bash Transpiler v0.1\n\n");
+            printf("Usage: %s bash [file.sh]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'bash' command runs the Bash transpiler.\n");
+            printf("  If a file is provided, it transpiles and executes the Bash script.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s bash script.sh    # Transpile and run script.sh\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        if (argc >= 3) {
+            const char* bash_file = argv[2];
+            char* bash_source = read_text_file(bash_file);
+            if (!bash_source) {
+                printf("Error: Could not read file '%s'\n", bash_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+
+            Item result = transpile_bash_to_mir(&runtime, bash_source, bash_file);
+
+            if (result.item != ITEM_NULL && result.item != 0 && result.item != ITEM_ERROR) {
+                TypeId result_type = get_type_id(result);
+                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
+                    || result_type == LMD_TYPE_ELEMENT) {
+                    Pool* fmt_pool = pool_create();
+                    String* json = format_json(fmt_pool, result);
+                    if (json) {
+                        printf("%.*s\n", json->len, json->chars);
+                    }
+                    pool_destroy(fmt_pool);
+                }
+            }
+
+            free(bash_source);
         }
 
         runtime_cleanup(&runtime);

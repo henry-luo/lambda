@@ -30,13 +30,13 @@ BashScope* bash_scope_create(BashTranspiler* tp, BashScopeType scope_type, BashS
     return scope;
 }
 
-void bash_scope_push(BashTranspiler* tp, BashScope* scope) {
+void bash_ct_scope_push(BashTranspiler* tp, BashScope* scope) {
     scope->parent = tp->current_scope;
     tp->current_scope = scope;
     log_debug("bash: pushed scope type: %d", scope->scope_type);
 }
 
-void bash_scope_pop(BashTranspiler* tp) {
+void bash_ct_scope_pop(BashTranspiler* tp) {
     if (tp->current_scope) {
         BashScope* old_scope = tp->current_scope;
         tp->current_scope = old_scope->parent;
