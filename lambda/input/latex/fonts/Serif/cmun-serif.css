@@ -1,6 +1,6 @@
 @font-face {
 	font-family: 'Computer Modern Serif';
-	src: url('cmunrm.woff') format('woff');
+	src: url('cmunrm.woff2') format('woff2');
 	font-weight: normal;
 	font-style: normal;
 }
@@ -8,7 +8,7 @@
 
 @font-face {
 	font-family: 'Computer Modern Serif';
-	src: url('cmunbx.woff') format('woff');
+	src: url('cmunbx.woff2') format('woff2');
 	font-weight: bold;
 	font-style: normal;
 }
@@ -16,7 +16,7 @@
 
 @font-face {
 	font-family: 'Computer Modern Serif';
-	src: url('cmunti.woff') format('woff');
+	src: url('cmunti.woff2') format('woff2');
 	font-weight: normal;
 	font-style: italic;
 }
@@ -24,7 +24,7 @@
 
 @font-face {
 	font-family: 'Computer Modern Serif';
-	src: url('cmunbi.woff') format('woff');
+	src: url('cmunbi.woff2') format('woff2');
 	font-weight: bold;
 	font-style: italic;
 }
