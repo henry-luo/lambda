@@ -70,6 +70,45 @@ static inline bool has_margin_chain(BoundaryProp* bound) {
     return bound && (bound->margin_chain_positive != 0 || bound->margin_chain_negative != 0);
 }
 
+// Quirks mode: check if an element has "quirky" block-start margin.
+// In quirks mode, certain HTML elements have their UA default margins ignored
+// when collapsing with a quirky container (body, table cell). This matches
+// Chromium's HasMarginBlockStartQuirk / quirky container behavior.
+// A margin is quirky when: (1) element is in the quirky list, AND
+// (2) margin-top still has UA specificity (not overridden by author CSS).
+static inline bool has_quirky_margin_top(ViewBlock* block) {
+    if (!block || !block->bound || block->bound->margin.top_specificity >= 0)
+        return false;
+    uintptr_t tag = block->tag_id;
+    return tag == HTM_TAG_P || tag == HTM_TAG_H1 || tag == HTM_TAG_H2 ||
+           tag == HTM_TAG_H3 || tag == HTM_TAG_H4 || tag == HTM_TAG_H5 ||
+           tag == HTM_TAG_H6 || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
+           tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_PRE ||
+           tag == HTM_TAG_DL || tag == HTM_TAG_FIGURE || tag == HTM_TAG_HR ||
+           tag == HTM_TAG_FIELDSET || tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+}
+
+// Same check for block-end (bottom) margin.
+static inline bool has_quirky_margin_bottom(ViewBlock* block) {
+    if (!block || !block->bound || block->bound->margin.bottom_specificity >= 0)
+        return false;
+    uintptr_t tag = block->tag_id;
+    return tag == HTM_TAG_P || tag == HTM_TAG_H1 || tag == HTM_TAG_H2 ||
+           tag == HTM_TAG_H3 || tag == HTM_TAG_H4 || tag == HTM_TAG_H5 ||
+           tag == HTM_TAG_H6 || tag == HTM_TAG_UL || tag == HTM_TAG_OL ||
+           tag == HTM_TAG_BLOCKQUOTE || tag == HTM_TAG_PRE ||
+           tag == HTM_TAG_DL || tag == HTM_TAG_FIGURE || tag == HTM_TAG_HR ||
+           tag == HTM_TAG_FIELDSET || tag == HTM_TAG_MENU || tag == HTM_TAG_DIR;
+}
+
+// Check if a block is a "quirky container" — in quirks mode, body and table cells
+// ignore quirky margins from their children during margin collapse.
+static inline bool is_quirky_container(ViewBlock* block, LayoutContext* lycon) {
+    if (!block || !lycon->doc || !lycon->doc->view_tree) return false;
+    if (!is_quirks_mode(lycon->doc->view_tree->html_version)) return false;
+    return block->tag_id == HTM_TAG_BODY;
+}
+
 // CSS 2.1 §10.6.4: When an ancestor block's y changes after its absolutely positioned
 // descendants have already had their static positions computed (e.g., due to margin
 // collapse), the descendants' positions must be updated by the same delta.
@@ -2022,10 +2061,26 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // bottom margin BEFORE applying min/max-height constraints.
             // min/max-height must not affect margin adjacency (q313).
             float collapsible_mb = compute_collapsible_bottom_margin(block);
-            // WHATWG Quirks Mode §3.6: body does not collapse margins with children
-            if (block->tag_id == HTM_TAG_BODY && lycon->doc && lycon->doc->view_tree &&
-                is_quirks_mode(lycon->doc->view_tree->html_version)) {
-                collapsible_mb = 0;
+            // Quirks mode: in a quirky container, quirky margins from children
+            // don't collapse with the parent, so they aren't collapsible.
+            if (collapsible_mb != 0 && is_quirky_container(block, lycon)) {
+                // Find last in-flow child to check if its margin is quirky
+                View* last_child = (View*)block->first_child;
+                View* last_in_flow = nullptr;
+                while (last_child) {
+                    if (last_child->view_type && last_child->is_block()) {
+                        ViewBlock* vb = (ViewBlock*)last_child;
+                        bool is_out_of_flow = (vb->view_type == RDT_VIEW_INLINE_BLOCK) ||
+                            (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                             vb->position->position == CSS_VALUE_FIXED || element_has_float(vb)));
+                        if (!is_out_of_flow) last_in_flow = last_child;
+                    }
+                    last_child = (View*)last_child->next_sibling;
+                }
+                if (last_in_flow && last_in_flow->is_block() &&
+                    has_quirky_margin_bottom((ViewBlock*)last_in_flow)) {
+                    collapsible_mb = 0;
+                }
             }
             float auto_height = flow_height - collapsible_mb;
             // CSS 2.1 §10.6.3: Auto height cannot be negative. When all children
@@ -4576,13 +4631,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 float parent_padding_top = parent && parent->bound ? parent->bound->padding.top : 0;
                 float parent_border_top = parent && parent->bound && parent->bound->border ?
                     parent->bound->border->width.top : 0;
-                // WHATWG Quirks Mode §3.6: body does not collapse margins in quirks mode
-                bool quirks_body = parent && parent->tag_id == HTM_TAG_BODY &&
-                    lycon->doc && lycon->doc->view_tree &&
-                    is_quirks_mode(lycon->doc->view_tree->html_version);
-                if (parent && parent->parent && !parent_creates_bfc && !quirks_body &&
+                // Quirks mode: effective margin is 0 for quirky margins in a quirky container
+                float effective_mt = own_margin_top;
+                if (is_quirky_container(parent, lycon) && has_quirky_margin_top(block))
+                    effective_mt = 0;
+                if (parent && parent->parent && !parent_creates_bfc &&
                     parent_padding_top == 0 && parent_border_top == 0 &&
-                    own_margin_top != 0) {
+                    effective_mt != 0) {
                     float advance_y_before = block->y - own_margin_top;
                     hypothetical_y = advance_y_before;
                 }
@@ -4824,13 +4879,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Per CSS 2.1 erratum q313, min-height has no influence on bottom margin adjacency.
     bool has_explicit_height = (block->blk && block->blk->given_height >= 0);
 
-    // WHATWG Quirks Mode §3.6: body does not collapse margins with children in quirks mode
-    bool quirks_body_bottom = block->tag_id == HTM_TAG_BODY &&
-        lycon->doc && lycon->doc->view_tree &&
-        is_quirks_mode(lycon->doc->view_tree->html_version);
+    // Quirks mode: quirky container flag for bottom margin collapse
+    bool quirky_container_bottom = is_quirky_container(block, lycon);
 
     if (!has_border_bottom && !has_padding_bottom && !creates_bfc_for_collapse &&
-        !has_explicit_height && !quirks_body_bottom && block->first_child) {
+        !has_explicit_height && block->first_child) {
         // collapse bottom margin with last in-flow child block
         // Skip absolutely positioned and floated children - they're out of normal flow
         // Find last in-flow child (skip abs-positioned, floated elements, and empty zero-height blocks)
@@ -4893,7 +4946,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // CSS 2.1 §8.3.1: Check if last child has margin to collapse with parent.
             // Also check chain components — a scalar 0 may represent mixed-sign margins
             // (e.g., {+16, -16}) that need to participate in further collapse.
-            if (last_child_block->bound->margin.bottom != 0 || has_margin_chain(last_child_block->bound)) {
+            // Quirks mode: quirky margins are treated as 0 in a quirky container.
+            bool child_mb_is_quirky = quirky_container_bottom &&
+                has_quirky_margin_bottom(last_child_block);
+            float effective_child_mb = child_mb_is_quirky ? 0 : last_child_block->bound->margin.bottom;
+            if (effective_child_mb != 0 || (!child_mb_is_quirky && has_margin_chain(last_child_block->bound))) {
                 // CSS 2.1 §8.3.1: Bottom margins collapse regardless of sign (positive or negative).
                 // CSS 2.2 Section 8.3.1: Margins collapse only if there's NO content separating them.
                 // Check if there's any inline-level content (inline-blocks, text) AFTER the last
@@ -4951,14 +5008,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                     // This preserves mixed-sign information through parent-child bottom collapse.
                     float margin_bottom;
                     float chain_pos = 0, chain_neg = 0;
-                    if (has_margin_chain(last_child_block->bound)) {
+                    if (!child_mb_is_quirky && has_margin_chain(last_child_block->bound)) {
                         float parent_pos, parent_neg;
                         margin_to_chain(parent_margin, &parent_pos, &parent_neg);
                         chain_pos = max(parent_pos, last_child_block->bound->margin_chain_positive);
                         chain_neg = min(parent_neg, last_child_block->bound->margin_chain_negative);
                         margin_bottom = chain_pos + chain_neg;
                     } else {
-                        margin_bottom = collapse_margins(parent_margin, last_child_block->bound->margin.bottom);
+                        margin_bottom = collapse_margins(parent_margin, effective_child_mb);
                         margin_to_chain(margin_bottom, &chain_pos, &chain_neg);
                     }
                     // CSS 2.1 §10.6.3 + erratum q313: The collapsible margin was already
@@ -6448,15 +6505,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         // already accounted for the child's margin contribution. Skip the parent
                         // y-adjustment to avoid double-counting.
                         bool parent_has_clearance = parent && parent->bound && parent->bound->has_clearance;
-                        // WHATWG Quirks Mode §3.6: In quirks mode, the body element does not
-                        // collapse margins with its children.
-                        bool quirks_body = parent && parent->tag_id == HTM_TAG_BODY &&
-                            lycon->doc && lycon->doc->view_tree &&
-                            is_quirks_mode(lycon->doc->view_tree->html_version);
-                        if (parent && parent->parent && !parent_creates_bfc && !quirks_body &&
+                        // Quirks mode: in a quirky container (body), quirky margins
+                        // (UA default margins from h1-h6, p, ul, ol, etc.) are ignored
+                        // during parent-child margin collapse. Non-quirky margins
+                        // (author-specified) still collapse normally.
+                        bool quirky_container = is_quirky_container(parent, lycon);
+                        if (parent && parent->parent && !parent_creates_bfc &&
                             parent_padding_top == 0 && parent_border_top == 0) {
+                            // Effective child margin-top for collapse: 0 if quirky in quirky container
+                            float child_mt = (quirky_container && has_quirky_margin_top(block))
+                                ? 0 : block->bound->margin.top;
                             // CSS 2.1 §8.3.1: collapse child and parent margins
-                            float margin_top = collapse_margins(block->bound->margin.top, parent_margin_top);
+                            float margin_top = collapse_margins(child_mt, parent_margin_top);
 
                             // CSS 2.1 §8.3.1: For self-collapsing first children, both mt and mb
                             // are adjoining to parent's mt through transitivity:
@@ -6467,10 +6527,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                 // CSS 2.1 §8.3.1: Use chain-aware 3-way collapse to avoid
                                 // information loss from pairwise collapse_margins with mixed signs.
                                 // collapse(collapse(a,b),c) != collapse(a,b,c) for mixed signs.
-                                float chain_pos = max(max(block->bound->margin.top, parent_margin_top), 0.f);
-                                chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
-                                float chain_neg = min(min(block->bound->margin.top, parent_margin_top), 0.f);
-                                chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                float child_mb = (quirky_container && has_quirky_margin_bottom(block))
+                                    ? 0 : block->bound->margin.bottom;
+                                float chain_pos = max(max(child_mt, parent_margin_top), 0.f);
+                                chain_pos = max(chain_pos, max(child_mb, 0.f));
+                                float chain_neg = min(min(child_mt, parent_margin_top), 0.f);
+                                chain_neg = min(chain_neg, min(child_mb, 0.f));
                                 // CSS 2.1 §8.3.1: If child has a margin chain from its own
                                 // self-collapsing descendants (propagated via bottom margin
                                 // collapse), incorporate those values into the collapse set.
@@ -6532,10 +6594,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             // then collapse(0,+16)=16 instead of the correct 3-way result 0).
                             if (first_child_self_collapsing) {
                                 // Use original_margin_top (saved before block->bound->margin.top was zeroed)
-                                float chain_pos = max(max(original_margin_top, parent_margin_top), 0.f);
-                                chain_pos = max(chain_pos, max(block->bound->margin.bottom, 0.f));
-                                float chain_neg = min(min(original_margin_top, parent_margin_top), 0.f);
-                                chain_neg = min(chain_neg, min(block->bound->margin.bottom, 0.f));
+                                float sc_mt = (quirky_container && has_quirky_margin_top(block))
+                                    ? 0 : original_margin_top;
+                                float sc_mb = (quirky_container && has_quirky_margin_bottom(block))
+                                    ? 0 : block->bound->margin.bottom;
+                                float chain_pos = max(max(sc_mt, parent_margin_top), 0.f);
+                                chain_pos = max(chain_pos, max(sc_mb, 0.f));
+                                float chain_neg = min(min(sc_mt, parent_margin_top), 0.f);
+                                chain_neg = min(chain_neg, min(sc_mb, 0.f));
                                 // CSS 2.1 §8.3.1: Incorporate child's existing margin chain
                                 // from descendants (propagated via bottom margin collapse).
                                 if (has_margin_chain(block->bound)) {
