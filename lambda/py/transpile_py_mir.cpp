@@ -39,6 +39,7 @@ extern "C" void py_reset_module_vars();
 extern "C" Item js_property_get(Item object, Item key);
 extern "C" int js_function_get_arity(Item fn_item);
 extern "C" Item js_new_object();
+extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" char* read_text_file(const char* filename);
 extern "C" void js_runtime_set_input(void* input);
@@ -3903,9 +3904,8 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         void* func_ptr = find_func(ctx, mir_name);
 
         if (func_ptr) {
-            Function* fn = to_fn_named((fn_ptr)func_ptr, fc->param_count, fc->name);
+            Item val = js_new_function(func_ptr, fc->param_count);
             Item key = {.item = s2it(heap_create_name(fc->name))};
-            Item val = {.function = fn};
             js_property_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
         }
