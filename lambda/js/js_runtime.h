@@ -347,6 +347,92 @@ Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
 Item js_symbol_to_string(Item sym);
 
+// =============================================================================
+// v14: Generator Runtime
+// =============================================================================
+
+/**
+ * Create a generator object from a state machine function pointer.
+ * The func_ptr is the MIR-compiled generator body (state machine form).
+ * env/env_size represent captured closure variables.
+ */
+Item js_generator_create(void* func_ptr, Item* env, int env_size);
+
+/**
+ * Advance the generator: execute next state, return {value, done} result.
+ * input is the value passed to next() (ItemUndefined for first call).
+ */
+Item js_generator_next(Item generator, Item input);
+
+/**
+ * Force generator to return: set state to done, return {value, done:true}.
+ */
+Item js_generator_return(Item generator, Item value);
+
+/**
+ * Throw an error into the generator (at yield point).
+ */
+Item js_generator_throw(Item generator, Item error);
+
+// =============================================================================
+// v14: Promise Runtime
+// =============================================================================
+
+Item js_promise_create(Item executor);           // new Promise((resolve, reject) => ...)
+Item js_promise_resolve(Item value);             // Promise.resolve(value)
+Item js_promise_reject(Item reason);             // Promise.reject(reason)
+Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+Item js_promise_catch(Item promise, Item on_rejected);
+Item js_promise_finally(Item promise, Item on_finally);
+Item js_promise_all(Item iterable);              // Promise.all([...])
+Item js_promise_race(Item iterable);             // Promise.race([...])
+Item js_promise_any(Item iterable);              // Promise.any([...])
+Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
+
+// =============================================================================
+// v14: Event Loop & Timers
+// =============================================================================
+
+Item js_setTimeout(Item callback, Item delay);         // returns timer id
+Item js_setInterval(Item callback, Item delay);        // returns timer id
+void js_clearTimeout(Item timer_id);
+void js_clearInterval(Item timer_id);
+
+/**
+ * Drain the event loop: process all microtasks, then fire due timers.
+ * Returns 0 when nothing is pending, nonzero if work remains.
+ */
+int js_event_loop_drain(void);
+
+/**
+ * Initialize/reset the event loop state. Called before JS program execution.
+ */
+void js_event_loop_init(void);
+
+/**
+ * Schedule a microtask (used by Promise resolution).
+ */
+void js_microtask_enqueue(Item callback);
+
+// =============================================================================
+// v14: ES Module Runtime
+// =============================================================================
+
+/**
+ * Register a module namespace object keyed by module specifier.
+ */
+void js_module_register(Item specifier, Item namespace_obj);
+
+/**
+ * Get a registered module namespace object.
+ */
+Item js_module_get(Item specifier);
+
+/**
+ * Create a module namespace object from an export map.
+ */
+Item js_module_namespace_create(Item exports_map);
+
 #ifdef __cplusplus
 }
 #endif

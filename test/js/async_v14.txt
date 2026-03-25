@@ -1,0 +1,9 @@
+10
+oops
+100
+fast
+ok
+sync
+timer2
+timer1
+0

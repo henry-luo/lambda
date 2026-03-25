@@ -7,6 +7,7 @@
 #include "js_runtime.h"
 #include "js_dom.h"
 #include "js_typed_array.h"
+#include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -1842,6 +1843,13 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
     }
 }
 
+// Forward declarations for v14 promise support
+struct JsPromise;
+static JsPromise* js_get_promise(Item promise_obj);
+extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
+extern "C" Item js_promise_catch(Item promise, Item on_rejected);
+extern "C" Item js_promise_finally(Item promise, Item on_finally);
+
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
     // Check if this is a Map/Set collection
@@ -1876,6 +1884,27 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             }
         }
     }
+    // v14: Promise instance methods (.then, .catch, .finally)
+    JsPromise* promise = js_get_promise(obj);
+    if (promise) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 4 && strncmp(method->chars, "then", 4) == 0) {
+                Item on_fulfilled = argc > 0 ? args[0] : ItemNull;
+                Item on_rejected = argc > 1 ? args[1] : ItemNull;
+                return js_promise_then(obj, on_fulfilled, on_rejected);
+            }
+            if (method->len == 5 && strncmp(method->chars, "catch", 5) == 0) {
+                Item on_rejected = argc > 0 ? args[0] : ItemNull;
+                return js_promise_catch(obj, on_rejected);
+            }
+            if (method->len == 7 && strncmp(method->chars, "finally", 7) == 0) {
+                Item on_finally = argc > 0 ? args[0] : ItemNull;
+                return js_promise_finally(obj, on_finally);
+            }
+        }
+    }
+
     // Fallback: property access + call
     Item fn = js_property_access(obj, method_name);
     return js_call_function(fn, obj, args, argc);
@@ -2928,4 +2957,497 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
         e = e->next;
     }
     return rest;
+}
+
+// =============================================================================
+// v14: Generator Runtime
+// =============================================================================
+
+// Generator state: the MIR-compiled state machine function takes
+// (Item* env, Item input, int64_t state) and returns {value, done, next_state}
+// packed as a 3-element array.
+struct JsGenerator {
+    TypeId type_id;           // LMD_TYPE_MAP (treated as object)
+    void*  state_fn;          // compiled state machine function pointer
+    Item*  env;               // captured closure variables
+    int    env_size;
+    int64_t state;            // current state index (0=initial, -1=done)
+    bool   done;
+};
+
+#define JS_MAX_GENERATORS 256
+static JsGenerator js_generators[JS_MAX_GENERATORS];
+static int js_generator_count = 0;
+
+// Helper: create {value, done} iterator result object
+static Item js_make_iter_result(Item value, bool done) {
+    Item result = js_new_object();
+    String* val_key = heap_create_name("value", 5);
+    String* done_key = heap_create_name("done", 4);
+    js_property_set(result, (Item){.item = s2it(val_key)}, value);
+    js_property_set(result, (Item){.item = s2it(done_key)}, (Item){.item = b2it(done)});
+    return result;
+}
+
+extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
+    if (js_generator_count >= JS_MAX_GENERATORS) {
+        log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
+        return ItemNull;
+    }
+
+    int idx = js_generator_count++;
+    JsGenerator* gen = &js_generators[idx];
+    gen->type_id = LMD_TYPE_MAP;
+    gen->state_fn = func_ptr;
+    gen->env = env;
+    gen->env_size = env_size;
+    gen->state = 0;
+    gen->done = false;
+
+    // Create a map object that references this generator via a hidden index
+    Item obj = js_new_object();
+    String* gen_key = heap_create_name("__gen_idx", 9);
+    js_property_set(obj, (Item){.item = s2it(gen_key)}, (Item){.item = i2it(idx)});
+
+    return obj;
+}
+
+static JsGenerator* js_get_generator(Item gen_obj) {
+    if (get_type_id(gen_obj) != LMD_TYPE_MAP) return NULL;
+    String* gen_key = heap_create_name("__gen_idx", 9);
+    Item idx_item = js_property_get(gen_obj, (Item){.item = s2it(gen_key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return NULL;
+    int64_t idx = it2i(idx_item);
+    if (idx < 0 || idx >= js_generator_count) return NULL;
+    return &js_generators[idx];
+}
+
+extern "C" Item js_generator_next(Item generator, Item input) {
+    JsGenerator* gen = js_get_generator(generator);
+    if (!gen) {
+        log_error("generator_next: invalid generator object");
+        return js_make_iter_result(ItemNull, true);
+    }
+
+    if (gen->done) {
+        return js_make_iter_result(ItemNull, true);
+    }
+
+    // Call the state machine: fn(env, input, state) -> [value, next_state]
+    // The state machine returns {value, next_state} as a 2-element array
+    // If next_state == -1, the generator is done
+    typedef Item (*GenFn)(Item*, Item, int64_t);
+
+    Item result = ((GenFn)gen->state_fn)(gen->env, input, gen->state);
+
+    if (get_type_id(result) == LMD_TYPE_ARRAY) {
+        Array* arr = result.array;
+        Item value = (arr->length > 0) ? arr->items[0] : ItemNull;
+        int64_t next_state = -1;
+        if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
+            next_state = it2i(arr->items[1]);
+        }
+
+        if (next_state < 0) {
+            gen->done = true;
+            gen->state = -1;
+            return js_make_iter_result(value, true);
+        } else {
+            gen->state = next_state;
+            return js_make_iter_result(value, false);
+        }
+    }
+
+    // Fallback: function returned a plain value (final return)
+    gen->done = true;
+    gen->state = -1;
+    return js_make_iter_result(result, true);
+}
+
+extern "C" Item js_generator_return(Item generator, Item value) {
+    JsGenerator* gen = js_get_generator(generator);
+    if (gen) {
+        gen->done = true;
+        gen->state = -1;
+    }
+    return js_make_iter_result(value, true);
+}
+
+extern "C" Item js_generator_throw(Item generator, Item error) {
+    JsGenerator* gen = js_get_generator(generator);
+    if (gen) {
+        gen->done = true;
+        gen->state = -1;
+    }
+    // Throw the error via the JS exception mechanism
+    js_throw_value(error);
+    return js_make_iter_result(ItemNull, true);
+}
+
+// =============================================================================
+// v14: Promise Runtime
+// =============================================================================
+
+enum JsPromiseState {
+    JS_PROMISE_PENDING,
+    JS_PROMISE_FULFILLED,
+    JS_PROMISE_REJECTED,
+};
+
+struct JsPromise {
+    TypeId type_id;                // LMD_TYPE_MAP
+    JsPromiseState state;
+    Item result;                   // fulfilled value or rejection reason
+    Item on_fulfilled[8];          // then() callbacks (max chain depth)
+    Item on_rejected[8];
+    int  then_count;
+};
+
+#define JS_MAX_PROMISES 1024
+static JsPromise js_promises[JS_MAX_PROMISES];
+static int js_promise_count = 0;
+
+static JsPromise* js_alloc_promise() {
+    if (js_promise_count >= JS_MAX_PROMISES) {
+        log_error("promise: exceeded max promises (%d)", JS_MAX_PROMISES);
+        return NULL;
+    }
+    JsPromise* p = &js_promises[js_promise_count++];
+    p->type_id = LMD_TYPE_MAP;
+    p->state = JS_PROMISE_PENDING;
+    p->result = ItemNull;
+    p->then_count = 0;
+    memset(p->on_fulfilled, 0, sizeof(p->on_fulfilled));
+    memset(p->on_rejected, 0, sizeof(p->on_rejected));
+    return p;
+}
+
+static Item js_promise_to_item(JsPromise* p) {
+    // Create a map object that holds a reference to the promise by index
+    int idx = (int)(p - js_promises);
+    Item obj = js_new_object();
+    String* key = heap_create_name("__promise_idx", 13);
+    js_property_set(obj, (Item){.item = s2it(key)}, (Item){.item = i2it(idx)});
+    return obj;
+}
+
+static JsPromise* js_get_promise(Item promise_obj) {
+    if (get_type_id(promise_obj) != LMD_TYPE_MAP) return NULL;
+    String* key = heap_create_name("__promise_idx", 13);
+    Item idx_item = js_property_get(promise_obj, (Item){.item = s2it(key)});
+    if (get_type_id(idx_item) != LMD_TYPE_INT) return NULL;
+    int64_t idx = it2i(idx_item);
+    if (idx < 0 || idx >= js_promise_count) return NULL;
+    return &js_promises[idx];
+}
+
+static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
+    if (p->state != JS_PROMISE_PENDING) return; // already settled
+
+    p->state = state;
+    p->result = result;
+
+    // Schedule handlers as microtasks
+    for (int i = 0; i < p->then_count; i++) {
+        Item handler = (state == JS_PROMISE_FULFILLED) ? p->on_fulfilled[i] : p->on_rejected[i];
+        if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            // Create a thunk that calls handler(result)
+            // For simplicity, we directly call here since we're in microtask context anyway
+            Item args[1] = {result};
+            Item handler_result = js_call_function(handler, ItemNull, args, 1);
+
+            // If handler returns a thenable, chain it
+            // (simplified: just check for promise)
+            JsPromise* next_p = js_get_promise(handler_result);
+            if (next_p) {
+                // chain resolution — not implemented in v14 initial pass
+            }
+        }
+    }
+}
+
+// Resolve/reject callbacks passed to the executor
+static JsPromise* js_resolving_promise = NULL;
+
+static Item js_resolve_callback(Item value) {
+    if (js_resolving_promise) {
+        js_promise_settle(js_resolving_promise, JS_PROMISE_FULFILLED, value);
+    }
+    return ItemNull;
+}
+
+static Item js_reject_callback(Item reason) {
+    if (js_resolving_promise) {
+        js_promise_settle(js_resolving_promise, JS_PROMISE_REJECTED, reason);
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_promise_create(Item executor) {
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+
+    if (get_type_id(executor) == LMD_TYPE_FUNC) {
+        // Create resolve/reject function items
+        Item resolve_fn = js_new_function((void*)js_resolve_callback, 1);
+        Item reject_fn = js_new_function((void*)js_reject_callback, 1);
+
+        js_resolving_promise = p;
+        Item args[2] = {resolve_fn, reject_fn};
+        js_call_function(executor, ItemNull, args, 2);
+        js_resolving_promise = NULL;
+    }
+
+    return js_promise_to_item(p);
+}
+
+extern "C" Item js_promise_resolve(Item value) {
+    // If value is already a promise, return it
+    JsPromise* existing = js_get_promise(value);
+    if (existing) return value;
+
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+    js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+    return js_promise_to_item(p);
+}
+
+extern "C" Item js_promise_reject(Item reason) {
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+    js_promise_settle(p, JS_PROMISE_REJECTED, reason);
+    return js_promise_to_item(p);
+}
+
+extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
+    JsPromise* p = js_get_promise(promise);
+    if (!p) return ItemNull;
+
+    // Create a new promise for the then chain
+    JsPromise* next = js_alloc_promise();
+    if (!next) return ItemNull;
+
+    if (p->state == JS_PROMISE_PENDING) {
+        // Register callbacks
+        if (p->then_count < 8) {
+            p->on_fulfilled[p->then_count] = on_fulfilled;
+            p->on_rejected[p->then_count] = on_rejected;
+            p->then_count++;
+        }
+    } else if (p->state == JS_PROMISE_FULFILLED) {
+        if (get_type_id(on_fulfilled) == LMD_TYPE_FUNC) {
+            Item args[1] = {p->result};
+            Item result = js_call_function(on_fulfilled, ItemNull, args, 1);
+            js_promise_settle(next, JS_PROMISE_FULFILLED, result);
+        } else {
+            js_promise_settle(next, JS_PROMISE_FULFILLED, p->result);
+        }
+    } else {
+        if (get_type_id(on_rejected) == LMD_TYPE_FUNC) {
+            Item args[1] = {p->result};
+            Item result = js_call_function(on_rejected, ItemNull, args, 1);
+            js_promise_settle(next, JS_PROMISE_FULFILLED, result);
+        } else {
+            js_promise_settle(next, JS_PROMISE_REJECTED, p->result);
+        }
+    }
+
+    return js_promise_to_item(next);
+}
+
+extern "C" Item js_promise_catch(Item promise, Item on_rejected) {
+    Item undef = (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+    return js_promise_then(promise, undef, on_rejected);
+}
+
+extern "C" Item js_promise_finally(Item promise, Item on_finally) {
+    JsPromise* p = js_get_promise(promise);
+    if (!p) return ItemNull;
+
+    JsPromise* next = js_alloc_promise();
+    if (!next) return ItemNull;
+
+    if (p->state != JS_PROMISE_PENDING) {
+        if (get_type_id(on_finally) == LMD_TYPE_FUNC) {
+            js_call_function(on_finally, ItemNull, NULL, 0);
+        }
+        js_promise_settle(next, p->state, p->result);
+    } else {
+        if (p->then_count < 8) {
+            p->on_fulfilled[p->then_count] = on_finally;
+            p->on_rejected[p->then_count] = on_finally;
+            p->then_count++;
+        }
+    }
+
+    return js_promise_to_item(next);
+}
+
+extern "C" Item js_promise_all(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+
+    Array* arr = iterable.array;
+    int count = arr->length;
+
+    if (count == 0) {
+        Item empty_arr = js_array_new(0);
+        return js_promise_resolve(empty_arr);
+    }
+
+    // Simplified: resolve all synchronously settled promises
+    Item results_arr = js_array_new(count);
+    Array* results = results_arr.array;
+    results->length = count;
+    int resolved = 0;
+
+    for (int i = 0; i < count; i++) {
+        JsPromise* p = js_get_promise(arr->items[i]);
+        if (p) {
+            if (p->state == JS_PROMISE_REJECTED) {
+                return js_promise_reject(p->result);
+            }
+            results->items[i] = (p->state == JS_PROMISE_FULFILLED) ? p->result : ItemNull;
+            if (p->state == JS_PROMISE_FULFILLED) resolved++;
+        } else {
+            results->items[i] = arr->items[i]; // non-promise value
+            resolved++;
+        }
+    }
+
+    return js_promise_resolve(results_arr);
+}
+
+extern "C" Item js_promise_race(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+
+    Array* arr = iterable.array;
+    for (int i = 0; i < arr->length; i++) {
+        JsPromise* p = js_get_promise(arr->items[i]);
+        if (p && p->state == JS_PROMISE_FULFILLED) {
+            return js_promise_resolve(p->result);
+        }
+        if (p && p->state == JS_PROMISE_REJECTED) {
+            return js_promise_reject(p->result);
+        }
+        if (!p) {
+            return js_promise_resolve(arr->items[i]);
+        }
+    }
+
+    // All pending — return a pending promise
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    return js_promise_to_item(result);
+}
+
+extern "C" Item js_promise_any(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+
+    Array* arr = iterable.array;
+    for (int i = 0; i < arr->length; i++) {
+        JsPromise* p = js_get_promise(arr->items[i]);
+        if (p && p->state == JS_PROMISE_FULFILLED) {
+            return js_promise_resolve(p->result);
+        }
+        if (!p) {
+            return js_promise_resolve(arr->items[i]);
+        }
+    }
+
+    // All rejected
+    Item err = js_new_error((Item){.item = s2it(heap_create_name("All promises were rejected", 26))});
+    return js_promise_reject(err);
+}
+
+extern "C" Item js_promise_all_settled(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
+
+    Array* arr = iterable.array;
+    Item results_arr = js_array_new(arr->length);
+    Array* results = results_arr.array;
+
+    for (int i = 0; i < arr->length; i++) {
+        JsPromise* p = js_get_promise(arr->items[i]);
+        Item entry = js_new_object();
+        String* status_key = heap_create_name("status", 6);
+
+        if (p) {
+            if (p->state == JS_PROMISE_FULFILLED) {
+                js_property_set(entry, (Item){.item = s2it(status_key)},
+                    (Item){.item = s2it(heap_create_name("fulfilled", 9))});
+                String* val_key = heap_create_name("value", 5);
+                js_property_set(entry, (Item){.item = s2it(val_key)}, p->result);
+            } else if (p->state == JS_PROMISE_REJECTED) {
+                js_property_set(entry, (Item){.item = s2it(status_key)},
+                    (Item){.item = s2it(heap_create_name("rejected", 8))});
+                String* reason_key = heap_create_name("reason", 6);
+                js_property_set(entry, (Item){.item = s2it(reason_key)}, p->result);
+            } else {
+                js_property_set(entry, (Item){.item = s2it(status_key)},
+                    (Item){.item = s2it(heap_create_name("pending", 7))});
+            }
+        } else {
+            js_property_set(entry, (Item){.item = s2it(status_key)},
+                (Item){.item = s2it(heap_create_name("fulfilled", 9))});
+            String* val_key = heap_create_name("value", 5);
+            js_property_set(entry, (Item){.item = s2it(val_key)}, arr->items[i]);
+        }
+        results->items[i] = entry;
+    }
+
+    return js_promise_resolve(results_arr);
+}
+
+// =============================================================================
+// v14: ES Module Runtime
+// =============================================================================
+
+#define JS_MAX_MODULES 64
+
+struct JsModule {
+    String* specifier;
+    Item    namespace_obj;
+};
+
+static JsModule js_modules[JS_MAX_MODULES];
+static int js_module_count_v14 = 0;
+
+extern "C" void js_module_register(Item specifier, Item namespace_obj) {
+    if (js_module_count_v14 >= JS_MAX_MODULES) {
+        log_error("module: exceeded max modules (%d)", JS_MAX_MODULES);
+        return;
+    }
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return;
+
+    String* spec = it2s(specifier);
+    // Check for existing registration
+    for (int i = 0; i < js_module_count_v14; i++) {
+        if (js_modules[i].specifier->len == spec->len &&
+            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
+            js_modules[i].namespace_obj = namespace_obj;
+            return;
+        }
+    }
+
+    JsModule* m = &js_modules[js_module_count_v14++];
+    m->specifier = spec;
+    m->namespace_obj = namespace_obj;
+}
+
+extern "C" Item js_module_get(Item specifier) {
+    if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
+    String* spec = it2s(specifier);
+
+    for (int i = 0; i < js_module_count_v14; i++) {
+        if (js_modules[i].specifier->len == spec->len &&
+            memcmp(js_modules[i].specifier->chars, spec->chars, spec->len) == 0) {
+            return js_modules[i].namespace_obj;
+        }
+    }
+    return ItemNull;
+}
+
+extern "C" Item js_module_namespace_create(Item exports_map) {
+    // Module namespace is just a frozen map object
+    return exports_map;
 }

@@ -132,6 +132,12 @@ typedef enum JsAstNodeType {
 
     // v11: Regex literal
     JS_AST_NODE_REGEX,
+
+    // v14: Generators, async/await, ES modules
+    JS_AST_NODE_YIELD_EXPRESSION,
+    JS_AST_NODE_AWAIT_EXPRESSION,
+    JS_AST_NODE_IMPORT_DECLARATION,
+    JS_AST_NODE_EXPORT_DECLARATION,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -539,3 +545,34 @@ typedef struct JsRegexNode {
     const char* flags;               // Regex flags (g, i, m, etc.)
     int flags_len;
 } JsRegexNode;
+
+// v14: Yield expression node (for generators)
+typedef struct JsYieldNode {
+    JsAstNode base;
+    JsAstNode* argument;             // Yielded expression (NULL for bare yield)
+    bool delegate;                   // true for yield* (delegation)
+} JsYieldNode;
+
+// v14: Await expression node
+typedef struct JsAwaitNode {
+    JsAstNode base;
+    JsAstNode* argument;             // Awaited expression
+} JsAwaitNode;
+
+// v14: Import declaration node
+typedef struct JsImportNode {
+    JsAstNode base;
+    String* source;                  // Module specifier string
+    JsAstNode* specifiers;           // Linked list of import specifiers (identifiers)
+    String* default_name;            // Default import name (NULL if none)
+    String* namespace_name;          // Namespace import name for * as X (NULL if none)
+} JsImportNode;
+
+// v14: Export declaration node
+typedef struct JsExportNode {
+    JsAstNode base;
+    JsAstNode* declaration;          // Exported declaration (function, class, variable)
+    JsAstNode* specifiers;           // Linked list of export specifiers
+    String* source;                  // Re-export source (NULL for local exports)
+    bool is_default;                 // true for export default
+} JsExportNode;

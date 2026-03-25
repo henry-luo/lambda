@@ -42,6 +42,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
+#include "js/js_event_loop.h"
 
 // shared runtime context (defined in mir.c)
 extern Context* _lambda_rt;
@@ -1123,6 +1124,34 @@ JitImport jit_runtime_imports[] = {
     {"js_dom_contains", FPTR(js_dom_contains)},
     // v12b: DOM extensions
     {"js_dom_style_method", FPTR(js_dom_style_method)},
+    // v14: Generator runtime
+    {"js_generator_create", FPTR(js_generator_create)},
+    {"js_generator_next", FPTR(js_generator_next)},
+    {"js_generator_return", FPTR(js_generator_return)},
+    {"js_generator_throw", FPTR(js_generator_throw)},
+    // v14: Promise runtime
+    {"js_promise_create", FPTR(js_promise_create)},
+    {"js_promise_resolve", FPTR(js_promise_resolve)},
+    {"js_promise_reject", FPTR(js_promise_reject)},
+    {"js_promise_then", FPTR(js_promise_then)},
+    {"js_promise_catch", FPTR(js_promise_catch)},
+    {"js_promise_finally", FPTR(js_promise_finally)},
+    {"js_promise_all", FPTR(js_promise_all)},
+    {"js_promise_race", FPTR(js_promise_race)},
+    {"js_promise_any", FPTR(js_promise_any)},
+    {"js_promise_all_settled", FPTR(js_promise_all_settled)},
+    // v14: Event loop & timers
+    {"js_setTimeout", FPTR(js_setTimeout)},
+    {"js_setInterval", FPTR(js_setInterval)},
+    {"js_clearTimeout", FPTR(js_clearTimeout)},
+    {"js_clearInterval", FPTR(js_clearInterval)},
+    {"js_event_loop_init", FPTR(js_event_loop_init)},
+    {"js_event_loop_drain", FPTR(js_event_loop_drain)},
+    {"js_microtask_enqueue", FPTR(js_microtask_enqueue)},
+    // v14: ES Module runtime
+    {"js_module_register", FPTR(js_module_register)},
+    {"js_module_get", FPTR(js_module_get)},
+    {"js_module_namespace_create", FPTR(js_module_namespace_create)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

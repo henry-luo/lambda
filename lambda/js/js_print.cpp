@@ -57,6 +57,20 @@ static const char* js_node_type_name(JsAstNodeType type) {
         case JS_AST_NODE_PARAMETER: return "parameter";
         case JS_AST_NODE_REST_ELEMENT: return "rest_element";
         case JS_AST_NODE_REST_PROPERTY: return "rest_property";
+        case JS_AST_NODE_NEW_EXPRESSION: return "new_expression";
+        case JS_AST_NODE_SWITCH_STATEMENT: return "switch_statement";
+        case JS_AST_NODE_SWITCH_CASE: return "switch_case";
+        case JS_AST_NODE_DO_WHILE_STATEMENT: return "do_while_statement";
+        case JS_AST_NODE_FOR_OF_STATEMENT: return "for_of_statement";
+        case JS_AST_NODE_FOR_IN_STATEMENT: return "for_in_statement";
+        case JS_AST_NODE_SEQUENCE_EXPRESSION: return "sequence_expression";
+        case JS_AST_NODE_LABELED_STATEMENT: return "labeled_statement";
+        case JS_AST_NODE_REGEX: return "regex";
+        case JS_AST_NODE_FIELD_DEFINITION: return "field_definition";
+        case JS_AST_NODE_YIELD_EXPRESSION: return "yield_expression";
+        case JS_AST_NODE_AWAIT_EXPRESSION: return "await_expression";
+        case JS_AST_NODE_IMPORT_DECLARATION: return "import_declaration";
+        case JS_AST_NODE_EXPORT_DECLARATION: return "export_declaration";
         default: return "unknown";
     }
 }
