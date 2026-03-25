@@ -417,13 +417,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
-        br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
+        br_view->x = lycon->line.advance_x;
         br_view->width = 0;
         // The <br> element's bounding box height is the font content area (cell height),
         // not the CSS line-height. The line-height is used by line_break() to advance
         // the block cursor, but the element's own reported height matches the font metrics.
         struct FontHandle* br_fh = lycon->font.font_handle;
         br_view->height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
+        // CSS 2.1 §10.8.1: Position <br> at text content top using half-leading,
+        // consistent with how text nodes are positioned within the line box.
+        br_view->y = lycon->block.advance_y + lycon->block.lead_y;
         // CSS Text 3 §7.2: text-align-last applies to lines immediately before
         // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
         lycon->line.is_last_line = true;

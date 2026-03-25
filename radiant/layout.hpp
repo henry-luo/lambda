@@ -85,6 +85,14 @@ typedef struct BlockContext {
     float given_height;         // CSS specified height (-1 if auto)
     float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)
 
+    // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
+    // These store the max ascender/descender of the first and last line boxes,
+    // capturing inline descendants' contributions to line box extent.
+    float first_line_max_ascender;
+    float first_line_max_descender;
+    float last_line_max_ascender;
+    float last_line_max_descender;
+
     // CSS text-indent: applies only to the first line of a block container
     float text_indent;          // Resolved text-indent value in pixels
     bool is_first_line;         // True if we're laying out the first line of this block
