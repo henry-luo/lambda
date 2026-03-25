@@ -45,6 +45,12 @@ extern void heap_init();
 // External from js_runtime.cpp
 extern "C" void js_reset_module_vars();
 
+// External declarations for parallel module compilation
+extern "C" {
+    const TSLanguage* tree_sitter_javascript(void);
+    void ensure_jit_imports_initialized(void);
+}
+
 // ============================================================================
 // JsMirTranspiler Context
 struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
@@ -11538,6 +11544,392 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
 }
 
 // ============================================================================
+// Parallel JS Module Compilation
+// ============================================================================
+// Pre-discovers all import dependencies via Tree-sitter shallow parse, then
+// compiles modules in parallel (per topological depth level) and executes
+// serially in dependency order.  Mirrors Lambda's precompile_imports() design.
+// Enabled only on non-Windows platforms with >=2 imported modules.
+
+#ifndef _WIN32
+#include <pthread.h>
+#include <unistd.h>
+
+// Graph node for JS import dependency discovery
+typedef struct {
+    char* path;            // resolved file path (owned)
+    char* source;          // source text (owned)
+    int* deps;             // indices of dependency nodes (owned)
+    int dep_count;
+    int dep_cap;
+    int depth;             // topological depth (-1 = uncomputed)
+    // Compiled state (populated by compile phase):
+    MIR_context_t mir_ctx;
+    void* js_main_func;    // typed as js_main_func_t at call sites
+    bool compiled;
+} JsImportGraphNode;
+
+// Hashmap entry for path->index dedup
+typedef struct {
+    const char* path;
+    int index;
+} JsPathIndexEntry;
+
+static uint64_t js_path_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsPathIndexEntry* e = (const JsPathIndexEntry*)item;
+    return hashmap_sip(e->path, strlen(e->path), seed0, seed1);
+}
+
+static int js_path_index_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    return strcmp(((const JsPathIndexEntry*)a)->path, ((const JsPathIndexEntry*)b)->path);
+}
+
+// Add dependency edge from parent to dep
+static void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx) {
+    JsImportGraphNode* parent = &nodes[parent_idx];
+    if (parent->dep_count >= parent->dep_cap) {
+        parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
+        parent->deps = (int*)realloc(parent->deps, sizeof(int) * parent->dep_cap);
+    }
+    parent->deps[parent->dep_count++] = dep_idx;
+}
+
+// Discover imports from a JS source using Tree-sitter shallow CST walk.
+// Extracts import_statement source specifiers, resolves paths, recurses.
+static void jm_discover_js_imports_recursive(
+    TSParser* parser, int parent_idx,
+    JsImportGraphNode** nodes, int* count, int* capacity,
+    struct hashmap* path_map)
+{
+    JsImportGraphNode* parent = &(*nodes)[parent_idx];
+    if (!parent->source) return;
+
+    TSTree* tree = ts_parser_parse_string(parser, NULL, parent->source, strlen(parent->source));
+    if (!tree) return;
+
+    // save path before potential realloc
+    const char* parent_path = parent->path;
+
+    TSNode root = ts_tree_root_node(tree);
+    uint32_t child_count = ts_node_named_child_count(root);
+
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(root, i);
+        const char* node_type = ts_node_type(child);
+
+        if (strcmp(node_type, "import_statement") != 0) continue;
+
+        // extract source specifier (string literal)
+        TSNode source_node = ts_node_child_by_field_name(child, "source", 6);
+        if (ts_node_is_null(source_node)) continue;
+
+        uint32_t start = ts_node_start_byte(source_node);
+        uint32_t end = ts_node_end_byte(source_node);
+        const char* src_text = (*nodes)[parent_idx].source + start;
+        int src_len = (int)(end - start);
+
+        // strip quotes
+        if (src_len >= 2 && (src_text[0] == '\'' || src_text[0] == '"')) {
+            src_text++;
+            src_len -= 2;
+        }
+
+        // resolve module path
+        char resolved[512];
+        jm_resolve_module_path(parent_path, src_text, src_len, resolved, sizeof(resolved));
+
+        // dedup check
+        JsPathIndexEntry key = { .path = resolved, .index = 0 };
+        const JsPathIndexEntry* existing = (const JsPathIndexEntry*)hashmap_get(path_map, &key);
+
+        int dep_idx;
+        if (existing) {
+            dep_idx = existing->index;
+        } else {
+            // new module discovered
+            if (*count >= *capacity) {
+                *capacity *= 2;
+                *nodes = (JsImportGraphNode*)realloc(*nodes, sizeof(JsImportGraphNode) * (*capacity));
+            }
+            dep_idx = *count;
+            JsImportGraphNode* n = &(*nodes)[dep_idx];
+            memset(n, 0, sizeof(JsImportGraphNode));
+            n->path = strdup(resolved);
+            n->source = read_text_file(resolved);
+            n->depth = -1;
+
+            JsPathIndexEntry entry = { .path = n->path, .index = dep_idx };
+            hashmap_set(path_map, &entry);
+            (*count)++;
+
+            // recurse for transitive deps
+            if (n->source) {
+                jm_discover_js_imports_recursive(parser, dep_idx, nodes, count, capacity, path_map);
+            }
+        }
+        // record dependency
+        jm_add_dep(*nodes, parent_idx, dep_idx);
+    }
+
+    ts_tree_delete(tree);
+}
+
+// Compute topological depth (0 = leaf, max(deps)+1 for others)
+static int jm_compute_depth(JsImportGraphNode* nodes, int idx) {
+    if (nodes[idx].depth >= 0) return nodes[idx].depth;
+    nodes[idx].depth = 0;  // mark as computing (breaks cycles)
+    int max_dep = -1;
+    for (int i = 0; i < nodes[idx].dep_count; i++) {
+        int d = jm_compute_depth(nodes, nodes[idx].deps[i]);
+        if (d > max_dep) max_dep = d;
+    }
+    nodes[idx].depth = max_dep + 1;
+    return nodes[idx].depth;
+}
+
+// Compile a single JS module (parse + AST + MIR transpile + link).
+// Does NOT execute the module or call jm_load_imports() — dependencies
+// are pre-compiled and will be registered before this module executes.
+// Returns true on success; populates node->mir_ctx and node->js_main_func.
+static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
+    JsTranspiler* tp = js_transpiler_create(runtime);
+    if (!tp) {
+        log_error("js-parallel: failed to create transpiler for '%s'", node->path);
+        return false;
+    }
+
+    if (!js_transpiler_parse(tp, node->source, strlen(node->source))) {
+        log_error("js-parallel: parse failed for '%s'", node->path);
+        js_transpiler_destroy(tp);
+        return false;
+    }
+
+    TSNode root = ts_tree_root_node(tp->tree);
+    JsAstNode* js_ast = build_js_ast(tp, root);
+    if (!js_ast) {
+        log_error("js-parallel: AST build failed for '%s'", node->path);
+        js_transpiler_destroy(tp);
+        return false;
+    }
+
+    // NOTE: No jm_load_imports() — dependencies compiled separately
+
+    MIR_context_t ctx = jit_init(2);
+    if (!ctx) {
+        log_error("js-parallel: MIR init failed for '%s'", node->path);
+        js_transpiler_destroy(tp);
+        return false;
+    }
+
+    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    if (!mt) {
+        log_error("js-parallel: failed to allocate JsMirTranspiler for '%s'", node->path);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return false;
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->is_module = true;
+    mt->filename = node->path;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
+        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
+        js_local_func_hash, js_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
+
+    mt->module = MIR_new_module(ctx, "js_module");
+
+    transpile_js_mir_ast(mt, js_ast);
+
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
+
+    // cleanup transpiler state
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->local_funcs);
+    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+    if (mt->module_consts) hashmap_free(mt->module_consts);
+    for (int i = 0; i <= mt->scope_depth; i++) {
+        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+    }
+    free(mt);
+    js_transpiler_destroy(tp);
+
+    if (!js_main) {
+        log_error("js-parallel: failed to find js_main for '%s'", node->path);
+        MIR_finish(ctx);
+        return false;
+    }
+
+    node->mir_ctx = ctx;
+    node->js_main_func = (void*)js_main;
+    node->compiled = true;
+    return true;
+}
+
+// Worker argument for parallel JS module compilation
+typedef struct {
+    Runtime* runtime;
+    JsImportGraphNode* node;
+    bool success;
+} JsCompileWorkerArg;
+
+// Worker thread for parallel module compilation
+static void* jm_compile_js_worker(void* arg) {
+    JsCompileWorkerArg* work = (JsCompileWorkerArg*)arg;
+    work->success = jm_compile_js_module(work->runtime, work->node);
+    return NULL;
+}
+
+// Pre-compile all JS import dependencies in parallel, then execute serially.
+// Called from transpile_js_to_mir() after heap/context setup.
+// Returns the number of modules successfully precompiled and executed.
+static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename) {
+    if (!filename) return 0;
+
+    // create JS parser for discovery
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_javascript());
+
+    // initialize graph with main script as sentinel (index 0, not compiled here)
+    int capacity = 16;
+    int count = 1;
+    JsImportGraphNode* nodes = (JsImportGraphNode*)calloc(capacity, sizeof(JsImportGraphNode));
+    nodes[0].path = strdup(filename);
+    nodes[0].source = strdup(js_source);
+    nodes[0].depth = -1;
+
+    struct hashmap* path_map = hashmap_new(sizeof(JsPathIndexEntry), 64, 0, 0,
+        js_path_index_hash, js_path_index_compare, NULL, NULL);
+    JsPathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
+    hashmap_set(path_map, &main_entry);
+
+    // discover all imports recursively
+    jm_discover_js_imports_recursive(parser, 0, &nodes, &count, &capacity, path_map);
+    ts_parser_delete(parser);
+    hashmap_free(path_map);
+
+    int import_count = count - 1;
+    if (import_count < 2) {
+        // not enough modules to justify parallelism — let serial jm_load_imports handle it
+        for (int i = 0; i < count; i++) {
+            free(nodes[i].path);
+            free(nodes[i].source);
+            free(nodes[i].deps);
+        }
+        free(nodes);
+        return 0;
+    }
+
+    log_info("js-parallel: discovered %d JS modules, pre-compiling...", import_count);
+
+    // ensure one-time inits before spawning threads
+    ensure_jit_imports_initialized();
+
+    // compute topological depths
+    int max_depth = 0;
+    for (int i = 1; i < count; i++) {
+        int d = jm_compute_depth(nodes, i);
+        if (d > max_depth) max_depth = d;
+    }
+
+    // compile level by level (leaves first), then execute serially at each level
+    long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+    if (ncpus < 1) ncpus = 1;
+    if (ncpus > 8) ncpus = 8;
+
+    int precompiled = 0;
+
+    for (int level = 0; level <= max_depth; level++) {
+        // collect modules at this depth
+        int batch_indices[64];
+        int batch_count = 0;
+        for (int i = 1; i < count && batch_count < 64; i++) {
+            if (nodes[i].depth == level && nodes[i].source)
+                batch_indices[batch_count++] = i;
+        }
+        if (batch_count == 0) continue;
+
+        // parallel compile phase
+        if (batch_count == 1) {
+            // single module — compile inline without thread overhead
+            jm_compile_js_module(runtime, &nodes[batch_indices[0]]);
+        } else {
+            JsCompileWorkerArg* args = (JsCompileWorkerArg*)calloc(batch_count, sizeof(JsCompileWorkerArg));
+            pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * batch_count);
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
+
+            for (int i = 0; i < batch_count; i++) {
+                args[i].runtime = runtime;
+                args[i].node = &nodes[batch_indices[i]];
+                args[i].success = false;
+                pthread_create(&threads[i], &attr, jm_compile_js_worker, &args[i]);
+            }
+
+            pthread_attr_destroy(&attr);
+            for (int i = 0; i < batch_count; i++) {
+                pthread_join(threads[i], NULL);
+            }
+
+            free(threads);
+            free(args);
+        }
+
+        // serial execute phase: run js_main for each compiled module at this level
+        for (int b = 0; b < batch_count; b++) {
+            int idx = batch_indices[b];
+            if (!nodes[idx].compiled) continue;
+
+            typedef Item (*js_main_func_t)(Context*);
+            js_main_func_t js_main = (js_main_func_t)nodes[idx].js_main_func;
+
+            js_reset_module_vars();
+            Item namespace_obj = js_main((Context*)context);
+
+            // register in module cache
+            String* spec_str = heap_create_name(nodes[idx].path, strlen(nodes[idx].path));
+            Item spec_item = (Item){.item = s2it(spec_str)};
+            js_module_register(spec_item, namespace_obj);
+
+            // defer MIR cleanup (keep function pointers alive)
+            jm_defer_mir_cleanup(nodes[idx].mir_ctx);
+            nodes[idx].mir_ctx = NULL;
+
+            precompiled++;
+            log_debug("js-parallel: module '%s' compiled and executed", nodes[idx].path);
+        }
+    }
+
+    log_info("js-parallel: pre-compiled and executed %d modules", precompiled);
+
+    // cleanup graph
+    for (int i = 0; i < count; i++) {
+        free(nodes[i].path);
+        free(nodes[i].source);
+        free(nodes[i].deps);
+        if (nodes[i].mir_ctx) MIR_finish(nodes[i].mir_ctx);
+    }
+    free(nodes);
+
+    return precompiled;
+}
+
+#endif // !_WIN32
+
+// ============================================================================
 // ES Module loading: compile and execute a module, returning its namespace
 // ============================================================================
 
@@ -11758,7 +12150,16 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
 
+    // Pre-compile imported modules in parallel (macOS/Linux only).
+    // Discovers dependency graph, compiles modules by depth level using thread pool,
+    // then executes serially.  jm_load_imports() below will skip already-loaded modules.
+#ifndef _WIN32
+    jm_precompile_js_imports(runtime, js_source, filename);
+#endif
+
     // Load imported modules before main compilation (recursive)
+    // After precompile, all modules with >=2 imports are already loaded — this handles
+    // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
     jm_load_imports(runtime, js_ast, filename);
 
     // Initialize MIR context

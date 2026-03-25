@@ -415,6 +415,7 @@ Combining all MIR transpile optimizations for standalone scripts (current averag
 | **P2b**  | A. Merge prepass 3+4                  | ⏭️ Skipped     | —                          |
 | **P3**   | C. Hashmap dynamic imports            | ✅ Done         | `lambda/mir.c`             |
 | **P4**   | Multi-thread imports (Part 1)         | ✅ Done         | `runner.cpp`, `mir.c`, `build_ast.cpp` |
+| **P4-JS**| JS parallel module imports (Part 3)   | ✅ Done         | `lambda/js/transpile_js_mir.cpp` |
 | **P5**   | D. Function index cache               | 🔲 Not started | —                          |
 | **P6**   | E. MIR opt level tuning               | 🔲 Not started | —                          |
 
@@ -526,6 +527,82 @@ The r7rs suite showed the largest improvement (21.5%) because its Scheme-style s
 - **Build**: 0 errors, 221 warnings (no new warnings)
 - **Lambda baseline tests**: 676/677 pass (1 pre-existing failure: `math_test_math_html_output` — UTF-8 encoding issue in expected output, unrelated)
 - **Radiant baseline tests**: 3671/3671 pass
+
+---
+
+## Part 3: JS Parallel Module Import Transpiling
+
+### 3.1 Motivation
+
+The JS transpiler's ES module loading (`jm_load_imports()` → `transpile_js_module_to_mir()`) follows the same serial depth-first pattern as Lambda's original import loading: each import recursively compiles and executes its dependencies before the importing module can proceed. For scripts with multiple independent imports, this serialization is a bottleneck.
+
+### 3.2 Architecture: Two-Phase Parallel Import Compilation
+
+Adapted from Lambda's `precompile_imports()` (Part 1, §1.2), but with a key difference: JS modules must be **executed** immediately after compilation to produce namespace objects (exported values are runtime-computed). The design separates compilation (parallelizable) from execution (serial).
+
+**Phase 1 — Import Discovery (single-threaded, lightweight)**
+
+Uses a dedicated Tree-sitter JS parser to shallow-parse each source file and extract `import_statement` source specifiers. Builds a dependency graph with topological depth annotations:
+
+```
+jm_discover_js_imports_recursive(parser, parent_idx, nodes, count, capacity, path_map):
+    tree = ts_parser_parse_string(parser, source)
+    for each named child of root:
+        if node_type == "import_statement":
+            extract source specifier from "source" field
+            resolve path via jm_resolve_module_path()
+            deduplicate via path_map hashmap
+            if new: read source, recurse for transitive imports
+            record dependency edge
+```
+
+**Phase 2 — Parallel Compile + Serial Execute (per depth level)**
+
+For each topological depth level (leaves first):
+
+1. **Parallel compile**: Each module gets its own `JsTranspiler` (with own `TSParser`, `Pool`, `NamePool`) and `MIR_context_t`. Parse → AST build → `transpile_js_mir_ast()` → `MIR_link()` all happen independently per thread. No `jm_load_imports()` call — dependencies are pre-compiled.
+
+2. **Serial execute**: Run `js_main()` for each compiled module on the main thread. Register namespace objects in the module cache via `js_module_register()`. This must be serial because modules share the heap/GC and `js_module_vars[]`.
+
+After precompilation, `jm_load_imports()` runs as usual but finds all modules already registered in the cache →  all imports skip compilation.
+
+### 3.3 Thread Safety
+
+| State | Thread Safety | Solution |
+|-------|--------------|---------|
+| `JsTranspiler` (TSParser, Pool, NamePool) | Per-module instance | Each thread creates its own |
+| `MIR_context_t` | Per-module instance | Each thread creates its own |
+| `JsMirTranspiler` | Per-module instance | Each thread allocates its own |
+| `func_map` (import_resolver) | Init-once, read-only | `ensure_jit_imports_initialized()` called before threading |
+| `dynamic_import_map` | `__thread` (per Lambda P4) | Each thread has its own; JS modules don't use dynamic imports |
+| `module_mir_contexts[]` | Serial execution phase only | No mutex needed |
+| `js_modules[]` registry | Serial execution phase only | No mutex needed |
+| `js_module_vars[]` | Serial execution phase only | No mutex needed |
+| Heap/GC | Serial execution phase only | No mutex needed |
+
+### 3.4 Implementation
+
+Added ~300 lines to `lambda/js/transpile_js_mir.cpp`:
+
+- **`JsImportGraphNode`** — graph node with compiled state (MIR context + js_main function pointer)
+- **`jm_discover_js_imports_recursive()`** — Tree-sitter JS shallow parse for import discovery
+- **`jm_compute_depth()`** — topological depth computation (same algorithm as Lambda's)
+- **`jm_compile_js_module()`** — compile single module without jm_load_imports or execution
+- **`jm_compile_js_worker()`** — pthread entry point for parallel compilation
+- **`jm_precompile_js_imports()`** — orchestrator: discovery → depth → parallel compile → serial execute
+
+Integration point: called from `transpile_js_to_mir()` after heap/context setup, before `jm_load_imports()`.
+
+**Activation threshold**: ≥2 imported modules (same as Lambda). Single-module imports fall through to the existing serial `jm_load_imports()` path.
+
+**Platform**: macOS/Linux only (`#ifndef _WIN32`). Windows uses the serial path.
+
+### 3.5 Verification
+
+- **Build**: 0 errors (no new warnings)
+- **Lambda baseline tests**: 679/679 pass
+- **JS module tests**: `test_es_modules` and `test_es_modules_advanced` both pass
+- **Parallel path confirmed**: Log output shows `js-parallel: discovered 2 JS modules, pre-compiling...` for multi-module imports
 
 ---
 

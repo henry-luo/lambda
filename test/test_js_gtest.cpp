@@ -541,6 +541,14 @@ TEST(JavaScriptTests, test_es_modules_advanced) {
     test_js_script_against_file("test/js/module_advanced.js", "test/js/module_advanced.txt");
 }
 
+TEST(JavaScriptTests, test_es_modules_parallel) {
+    test_js_script_against_file("test/js/module_parallel.js", "test/js/module_parallel.txt");
+}
+
+TEST(JavaScriptTests, test_es_modules_parallel_chain) {
+    test_js_script_against_file("test/js/module_parallel_chain.js", "test/js/module_parallel_chain.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

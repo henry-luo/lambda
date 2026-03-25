@@ -1,0 +1,9 @@
+mid_val: 200
+mid_quad: 20
+negate: -7
+base_val: 100
+half: 5
+extra_val: 42
+sum: 142
+result: 52
+null

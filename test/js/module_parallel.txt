@@ -1,0 +1,11 @@
+rgb: rgb(255,128,0)
+colors: red blue
+area: 15
+perimeter: 16
+unit: 1
+repeat: ababab
+upper: HELLO
+sep: -
+combined: RED-rgb(0,0,0)
+stars: ****
+null
