@@ -1500,15 +1500,23 @@ static void shift_text_rects_y_inline_only(View* view, float delta) {
 
 static void apply_start_trim_recursive(ViewBlock* container, ViewBlock* target, float trim) {
     if (container == target) {
-        // Inline content in this block. Shift all in-flow children up,
+        // Inline content in this block. Shift all children up,
         // including their TextRect positions.
+        // Floats are also shifted: they're positioned relative to the content
+        // area, and trim-start shrinks the top of the content area.
+        // Absolute/fixed elements are NOT shifted — they're positioned
+        // relative to the containing block edges, not the content area.
         View* child = container->first_placed_child();
         while (child) {
-            bool oflow = false;
+            bool skip = false;
             if (child->is_block()) {
-                oflow = is_out_of_flow_block((ViewBlock*)child);
+                ViewBlock* vb = (ViewBlock*)child;
+                if (vb->position && (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                      vb->position->position == CSS_VALUE_FIXED)) {
+                    skip = true;
+                }
             }
-            if (!oflow) {
+            if (!skip) {
                 child->y -= trim;
                 // Block-in-inline: block children inside inline wrappers have y
                 // relative to the containing block, not relative to the inline
@@ -1616,11 +1624,13 @@ static void apply_end_trim_recursive(ViewBlock* container, ViewBlock* target, fl
             child = child->next();
         }
         // Shift children on invisible lines (positioned at or after last visible bottom)
+        // Skip block-level children: in block-in-inline scenarios, block children
+        // are structural boundaries between anonymous blocks and must not be moved.
         if (last_visible_bottom > 0) {
             child = container->first_placed_child();
             while (child) {
                 if (child->y >= last_visible_bottom && child->view_type != RDT_VIEW_TEXT
-                    && child->view_type != RDT_VIEW_BR) {
+                    && child->view_type != RDT_VIEW_BR && !child->is_block()) {
                     child->y -= trim;
                 }
                 child = child->next();
@@ -1858,8 +1868,13 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     if (text_box_trim_amount > 0) {
         flow_height -= text_box_trim_amount;
         block->content_height -= text_box_trim_amount;
-        log_debug("[text-box-trim] adjusted flow_height=%.1f, content_height=%.1f (trimmed %.1f)",
-                  flow_height, block->content_height, text_box_trim_amount);
+        // Also reduce advance_y so that absolutely-positioned elements (whose
+        // height auto-sizing in layout_abs_block reads advance_y directly)
+        // pick up the trimmed value.  For in-flow blocks this is harmless
+        // because the parent restores its own block context afterward.
+        lycon->block.advance_y -= text_box_trim_amount;
+        log_debug("[text-box-trim] adjusted flow_height=%.1f, content_height=%.1f, advance_y=%.1f (trimmed %.1f)",
+                  flow_height, block->content_height, lycon->block.advance_y, text_box_trim_amount);
     }
 
     log_debug("finalizing block, display=%d, given wd:%f", display, lycon->block.given_width);
