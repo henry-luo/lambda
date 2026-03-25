@@ -32,6 +32,7 @@
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/input-graph.h"
+#include "js/js_event_loop.h"        // v14: event loop drain
 
 // Network module includes
 #include "network/network_downloader.h"
