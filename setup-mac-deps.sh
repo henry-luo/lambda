@@ -277,6 +277,7 @@ cleanup_intermediate_files() {
 # Function to build MIR for Mac (local to project, no sudo required)
 build_mir_for_mac() {
     echo "Building MIR for Mac (local install to mac-deps/mir)..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built locally
     if [ -f "mac-deps/mir/libmir.a" ] && [ -f "mac-deps/mir/mir.h" ] && [ -f "mac-deps/mir/mir-dlist.h" ]; then
@@ -317,6 +318,7 @@ build_mir_for_mac() {
 # Function to build rpmalloc for Mac
 build_rpmalloc_for_mac() {
     echo "Building rpmalloc for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Enhanced check if already built in mac-deps with proper verification
     if [ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && [ -f "mac-deps/rpmalloc-install/include/rpmalloc/rpmalloc.h" ]; then
@@ -400,6 +402,7 @@ build_rpmalloc_for_mac() {
 # Function to build ThorVG v1.0-pre34 for Mac
 build_thorvg_v1_0_pre34_for_mac() {
     echo "Building ThorVG v1.0-pre34 for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built in mac-deps and verify headers
     if [ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ]; then
@@ -541,6 +544,7 @@ build_thorvg_v1_0_pre34_for_mac() {
 # Function to build Brotli for Mac (required by WOFF2)
 build_brotli_for_mac() {
     echo "Building Brotli for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built
     if [ -f "mac-deps/brotli/out/libbrotlidec.a" ] && [ -f "mac-deps/brotli/out/libbrotlicommon.a" ]; then
@@ -592,8 +596,7 @@ build_brotli_for_mac() {
                     echo "   - libbrotlidec.a: ✓ Available"
                     echo "   - libbrotlicommon.a: ✓ Available"
                     echo "   - Location: mac-deps/brotli/out/"
-                    cd - > /dev/null
-                    cd - > /dev/null
+                    cd "$SCRIPT_DIR"
                     return 0
                 fi
             fi
@@ -601,14 +604,14 @@ build_brotli_for_mac() {
     fi
 
     echo "❌ Brotli build failed"
-    cd - > /dev/null
-    cd - > /dev/null
+    cd "$SCRIPT_DIR"
     return 1
 }
 
 # Function to build WOFF2 for Mac
 build_woff2_for_mac() {
     echo "Building WOFF2 for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built
     if [ -f "mac-deps/woff2/out/libwoff2dec.a" ] && [ -f "mac-deps/woff2/out/libwoff2common.a" ]; then
@@ -677,8 +680,7 @@ build_woff2_for_mac() {
                     echo "   - libwoff2dec.a: ✓ Available"
                     echo "   - libwoff2common.a: ✓ Available"
                     echo "   - Location: mac-deps/woff2/out/"
-                    cd - > /dev/null
-                    cd - > /dev/null
+                    cd "$SCRIPT_DIR"
                     return 0
                 fi
             fi
@@ -686,14 +688,14 @@ build_woff2_for_mac() {
     fi
 
     echo "❌ WOFF2 build failed"
-    cd - > /dev/null
-    cd - > /dev/null
+    cd "$SCRIPT_DIR"
     return 1
 }
 
 # Function to build Google Test for Mac
 build_gtest_for_mac() {
     echo "Building Google Test for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
@@ -736,16 +738,14 @@ build_gtest_for_mac() {
             # Verify the build
             if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
                 echo "✅ Google Test built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
+                cd "$SCRIPT_DIR"
                 return 0
             fi
         fi
     fi
 
     echo "❌ Google Test build failed"
-    cd - > /dev/null
-    cd - > /dev/null
+    cd "$SCRIPT_DIR"
     return 1
 }
 
@@ -831,6 +831,7 @@ setup_freetype_2_13_3_for_mac() {
 # Function to build nghttp2 for Mac
 build_nghttp2_for_mac() {
     echo "Building nghttp2 for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built
     if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
@@ -871,8 +872,7 @@ build_nghttp2_for_mac() {
                 echo "Installing nghttp2 (CMake)..."
                 if make install; then
                     echo "✅ nghttp2 built successfully (CMake)"
-                    cd - > /dev/null
-                    cd - > /dev/null
+                    cd "$SCRIPT_DIR"
                     return 0
                 fi
             fi
@@ -944,6 +944,7 @@ build_nghttp2_for_mac() {
 # Function to build libcurl with HTTP/2 support for Mac (using mbedTLS)
 build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
+    cd "$SCRIPT_DIR"
 
     # Check if already built
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -1256,6 +1257,50 @@ else
     echo "✅ FreeType 2.13.3 setup completed successfully"
 fi
 
+# Clone RE2 source (no-abseil version) for building via Makefile
+echo "Setting up RE2..."
+RE2_SRC="build_temp/re2-noabsl"
+if [ -d "$RE2_SRC" ] && [ -f "$RE2_SRC/CMakeLists.txt" ]; then
+    echo "✅ RE2 source already available"
+else
+    echo "Cloning RE2 (2023-03-01, no-abseil version)..."
+    mkdir -p build_temp
+    rm -rf "$RE2_SRC"
+    if git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git "$RE2_SRC"; then
+        echo "✅ RE2 source cloned to $RE2_SRC"
+    else
+        echo "❌ Failed to clone RE2 - required for regex support"
+        exit 1
+    fi
+fi
+
+# Build utf8proc from source (static library required by build config)
+echo "Setting up utf8proc..."
+UTF8PROC_LIB="build_temp/utf8proc/build/libutf8proc.a"
+if [ -f "$UTF8PROC_LIB" ]; then
+    echo "✅ utf8proc static library already built"
+else
+    echo "Building utf8proc from source..."
+    mkdir -p build_temp
+    if [ ! -d "build_temp/utf8proc" ] || [ ! -f "build_temp/utf8proc/CMakeLists.txt" ]; then
+        rm -rf build_temp/utf8proc
+        if ! git clone --depth 1 https://github.com/JuliaStrings/utf8proc.git build_temp/utf8proc; then
+            echo "❌ Failed to clone utf8proc - required for Unicode support"
+            exit 1
+        fi
+    fi
+    mkdir -p build_temp/utf8proc/build
+    cd build_temp/utf8proc/build
+    if cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DUTF8PROC_INSTALL=OFF -DUTF8PROC_ENABLE_TESTING=OFF && \
+       cmake --build . -j$(sysctl -n hw.ncpu); then
+        echo "✅ utf8proc built successfully"
+    else
+        echo "❌ utf8proc build failed"
+        exit 1
+    fi
+    cd "$SCRIPT_DIR"
+fi
+
 # Install Homebrew dependencies that are required by build_lambda_config.json
 echo "Installing Homebrew dependencies..."
 
@@ -1389,6 +1434,8 @@ echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Brotli: $([ -f "mac-deps/brotli/out/libbrotlidec.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- WOFF2: $([ -f "mac-deps/woff2/out/libwoff2dec.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- RE2: $([ -f "build_temp/re2-noabsl/CMakeLists.txt" ] && echo "✓ Source available" || echo "✗ Missing")"
+echo "- utf8proc: $([ -f "build_temp/utf8proc/build/libutf8proc.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make build           # Build Lambda main project"

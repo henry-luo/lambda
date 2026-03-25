@@ -10499,8 +10499,13 @@ static void register_module_pub_fns(AstImportNode* imp) {
 // Called from transpile_script() when runtime->use_mir_direct is true, for both
 // imported modules and the main script.  Depth-first import loading guarantees that
 // all of this module's sub-imports are already compiled before we are called.
-void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path) {
+void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
+                                   double* out_jit_init_ms,
+                                   double* out_transpile_ms,
+                                   double* out_mir_gen_ms) {
     log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
+
+    bool timing = out_jit_init_ms || out_transpile_ms || out_mir_gen_ms;
 
     // Clear the dynamic-import table and populate it with this module's direct imports only.
     // Because imports are compiled depth-first, every sub-import's symbols were already
@@ -10518,15 +10523,43 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
         child = child->next;
     }
 
+    // Profiling timestamps (only when profiling is requested)
+#ifdef _WIN32
+    LARGE_INTEGER pt0, pt1, pt2, pt3, pfreq;
+    if (timing) { QueryPerformanceFrequency(&pfreq); QueryPerformanceCounter(&pt0); }
+#else
+    struct timespec pt0, pt1, pt2, pt3;
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &pt0);
+#endif
+
     // Transpile the AST directly to MIR (no C code generated)
     unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
     MIR_context_t ctx = jit_init(opt_level);
+
+#ifdef _WIN32
+    if (timing) QueryPerformanceCounter(&pt1);
+#else
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &pt1);
+#endif
+
     transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->pool);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+#ifdef _WIN32
+    if (timing) QueryPerformanceCounter(&pt2);
+#else
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &pt2);
+#endif
 
     // Store results in the transpiler and propagate back to script
     tp->jit_context = ctx;
     tp->main_func = (main_func_t)jit_gen_func(ctx, "main");
+
+#ifdef _WIN32
+    if (timing) QueryPerformanceCounter(&pt3);
+#else
+    if (timing) clock_gettime(CLOCK_MONOTONIC, &pt3);
+#endif
 
     // Set per-module consts BSS AFTER jit_gen_func: jit_gen_func re-invokes MIR_link
     // which reallocates BSS memory, so any earlier write would be overwritten.
@@ -10560,6 +10593,26 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     memcpy(script, tp, sizeof(Script));
     script->jit_context = tp->jit_context;
     script->main_func   = tp->main_func;
+
+    // Write out profiling results
+    if (timing) {
+#ifdef _WIN32
+        double f = 1000.0 / (double)pfreq.QuadPart;
+        if (out_jit_init_ms)  *out_jit_init_ms  = (double)(pt1.QuadPart - pt0.QuadPart) * f;
+        if (out_transpile_ms) *out_transpile_ms = (double)(pt2.QuadPart - pt1.QuadPart) * f;
+        if (out_mir_gen_ms)   *out_mir_gen_ms   = (double)(pt3.QuadPart - pt2.QuadPart) * f;
+#else
+        auto elapsed = [](struct timespec a, struct timespec b) -> double {
+            long sec = b.tv_sec - a.tv_sec;
+            long nsec = b.tv_nsec - a.tv_nsec;
+            if (nsec < 0) { sec--; nsec += 1000000000L; }
+            return sec * 1000.0 + nsec / 1e6;
+        };
+        if (out_jit_init_ms)  *out_jit_init_ms  = elapsed(pt0, pt1);
+        if (out_transpile_ms) *out_transpile_ms = elapsed(pt1, pt2);
+        if (out_mir_gen_ms)   *out_mir_gen_ms   = elapsed(pt2, pt3);
+#endif
+    }
 
     if (tp->main_func) {
         log_info("MIR Direct: compiled '%s' ctx=%p main=%p",

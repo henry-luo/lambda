@@ -115,7 +115,10 @@ void clear_dynamic_imports(void);
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
-void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path);
+void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
+                                   double* out_jit_init_ms = nullptr,
+                                   double* out_transpile_ms = nullptr,
+                                   double* out_mir_gen_ms = nullptr);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);

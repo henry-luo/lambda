@@ -429,7 +429,23 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // compile_script_as_mir_direct() handles import registration, transpile_mir_ast(),
     // MIR_link(), and stores jit_context/main_func on the script.
     if (tp->runtime && tp->runtime->use_mir_direct) {
-        compile_script_as_mir_direct(tp, script, script_path);
+        double mir_jit_init_ms = 0, mir_transpile_ms = 0, mir_gen_ms = 0;
+        compile_script_as_mir_direct(tp, script, script_path,
+                                      profiling ? &mir_jit_init_ms : NULL,
+                                      profiling ? &mir_transpile_ms : NULL,
+                                      profiling ? &mir_gen_ms : NULL);
+        if (profiling) {
+            PhaseProfile* prof = &profile_data[profile_count++];
+            prof->script_path = script_path;
+            prof->parse_ms = elapsed_ms_val(p0, p1);
+            prof->ast_ms = elapsed_ms_val(p1, p2);
+            prof->transpile_ms = mir_transpile_ms;
+            prof->jit_init_ms = mir_jit_init_ms;
+            prof->file_write_ms = 0;
+            prof->c2mir_ms = 0;
+            prof->mir_gen_ms = mir_gen_ms;
+            prof->code_len = 0;
+        }
         return;
     }
 
