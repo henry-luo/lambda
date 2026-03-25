@@ -5032,6 +5032,81 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        // CSS Multicol §3.3: The 'columns' shorthand
+        // Syntax: columns = <'column-width'> || <'column-count'>
+        // A single integer → column-count; a single length → column-width;
+        // 'auto' resets both to auto.
+        case CSS_PROPERTY_COLUMNS: {
+            log_debug("[CSS] Processing columns shorthand property");
+            if (!block) {
+                log_debug("[CSS] columns: Cannot apply to non-block element");
+                break;
+            }
+
+            if (!block->multicol) {
+                block->multicol = (MultiColumnProp*)alloc_prop(lycon, sizeof(MultiColumnProp));
+                block->multicol->column_count = 0;
+                block->multicol->column_width = 0;
+                block->multicol->column_gap = 16.0f;
+                block->multicol->column_gap_is_normal = true;
+                block->multicol->rule_width = 0;
+                block->multicol->rule_style = CSS_VALUE_NONE;
+                block->multicol->rule_color.r = 0;
+                block->multicol->rule_color.g = 0;
+                block->multicol->rule_color.b = 0;
+                block->multicol->rule_color.a = 255;
+                block->multicol->span = COLUMN_SPAN_NONE;
+                block->multicol->fill = COLUMN_FILL_BALANCE;
+            }
+
+            // Reset both longhands to initial (auto) per shorthand rules
+            block->multicol->column_count = 0;
+            block->multicol->column_width = 0;
+
+            // Process value(s) — can be single value or list of two
+            int val_count = 1;
+            const CssValue* vals[2] = { value, nullptr };
+            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
+                val_count = value->data.list.count < 2 ? value->data.list.count : 2;
+                vals[0] = value->data.list.values[0];
+                if (val_count > 1) vals[1] = value->data.list.values[1];
+            }
+
+            for (int vi = 0; vi < val_count; vi++) {
+                const CssValue* v = vals[vi];
+                if (!v) continue;
+                if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+                    // 'auto' — already reset above
+                    log_debug("[CSS] columns: auto component");
+                } else if (v->type == CSS_VALUE_TYPE_NUMBER && v->data.number.is_integer) {
+                    int count = (int)v->data.number.value;
+                    if (count > 0) {
+                        block->multicol->column_count = count;
+                        log_debug("[CSS] columns shorthand: column-count=%d", count);
+                    }
+                } else if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                    float width = resolve_length_value(lycon, prop_id, v);
+                    if (width > 0) {
+                        block->multicol->column_width = width;
+                        log_debug("[CSS] columns shorthand: column-width=%.2fpx", width);
+                    }
+                } else if (v->type == CSS_VALUE_TYPE_NUMBER && !v->data.number.is_integer) {
+                    // Non-integer number: could be column-width in px (unitless)
+                    // CSS Multicol spec says column-width must be a length, but
+                    // some parsers may emit unitless numbers. Treat as count if integer-valued.
+                    int count = (int)v->data.number.value;
+                    if (v->data.number.value == (double)count && count > 0) {
+                        block->multicol->column_count = count;
+                        log_debug("[CSS] columns shorthand: column-count=%d (from non-integer number)", count);
+                    }
+                }
+            }
+
+            log_debug("[CSS] columns shorthand resolved: count=%d, width=%.2f",
+                block->multicol->column_count, block->multicol->column_width);
+            break;
+        }
+
         case CSS_PROPERTY_COLUMN_RULE_WIDTH: {
             log_debug("[CSS] Processing column-rule-width property");
             if (!block) break;

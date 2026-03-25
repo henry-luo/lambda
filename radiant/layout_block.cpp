@@ -833,6 +833,11 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
     // CSS 2.1 §8.3.1: Root element margins do not collapse.
     if (!block->parent || !block->parent->is_block()) return 0;
 
+    // CSS Box 4 §3.1: When margin-trim:block-end is set, the last child's
+    // block-end margin is trimmed, so no margin escapes through the parent's
+    // bottom edge.
+    if (block->blk && (block->blk->margin_trim & MARGIN_TRIM_BLOCK_END)) return 0;
+
     // Bottom margin collapse requires: no bottom border, no bottom padding
     bool has_border_bottom = block->bound && block->bound->border && block->bound->border->width.bottom > 0;
     bool has_padding_bottom = block->bound && block->bound->padding.bottom > 0;
@@ -876,6 +881,8 @@ static float compute_collapsible_bottom_margin(ViewBlock* block) {
         }
     }
     if (!creates_bfc && block->view_type == RDT_VIEW_INLINE_BLOCK) creates_bfc = true;
+    // CSS Multicol §3: Multi-column containers establish a new BFC
+    if (!creates_bfc && is_multicol_container(block)) creates_bfc = true;
     if (creates_bfc) return 0;
 
     // Explicit height prevents bottom margin collapse
@@ -1159,12 +1166,9 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         log_debug("finalize block flow: has_embed=%d, has_flex=%d, is_table=%d, block=%s",
                   has_embed, has_flex, is_table, block->node_name());
         if (!has_flex && !is_table) {
-            // CSS Box 4 §margin-trim: block-end trims the last child's block-end margin.
-            // For non-BFC containers without border/padding-bottom, this is equivalent to
-            // normal bottom margin collapse through (the child's margin escapes to the outside,
-            // and is not added to the container height). For BFC containers, browser behavior
-            // shows the margin is NOT trimmed. Both cases are handled correctly by the
-            // bottom margin collapse logic — no special pre-processing is needed here.
+            // CSS Box 4 §margin-trim: block-end is handled earlier in
+            // layout_block_inner_content() — the last child's margin.bottom is
+            // zeroed and advance_y adjusted before we reach this point.
 
             // CSS 2.1 §10.6.3 + erratum q313: When computing auto height, exclude
             // the last child's bottom margin that will collapse with the parent's
@@ -2088,6 +2092,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                     log_debug("[MULTICOL] Container detected: %s", block->node_name());
                     // Multi-column layout handles its own content distribution
                     layout_multicol_content(lycon, block);
+
+                    finalize_block_flow(lycon, block, block->display.outer);
+                    return;
                 } else {
                     // Pre-scan and layout floats BEFORE laying out inline content
                     // This ensures floats are positioned and affect line bounds correctly
@@ -2309,6 +2316,94 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
         if (!lycon->line.is_line_start) {
             lycon->line.is_last_line = true;
             line_break(lycon);
+        }
+
+        // CSS Box 4 §3.1 margin-trim: block-end — trim the last in-flow child's
+        // block-end margin. Applied after all children are laid out so we know
+        // which child is last.
+        if (block->blk && (block->blk->margin_trim & MARGIN_TRIM_BLOCK_END)) {
+            View* last = block->last_placed_child();
+            // skip floats and abspos from the end to find last in-flow child
+            while (last && last->is_block()) {
+                ViewBlock* lvb = (ViewBlock*)last;
+                if (lvb->position && (element_has_float(lvb) ||
+                    lvb->position->position == CSS_VALUE_ABSOLUTE ||
+                    lvb->position->position == CSS_VALUE_FIXED)) {
+                    last = last->prev_placed_view();
+                    continue;
+                }
+                break;
+            }
+            if (last && last->is_block()) {
+                ViewBlock* last_block = (ViewBlock*)last;
+                if (last_block->bound) {
+                    bool is_sc = is_block_self_collapsing(last_block);
+                    if (is_sc) {
+                        // CSS Box 4 §3.1: When the last in-flow child is self-collapsing,
+                        // its margins (and any previous sibling margins that collapsed
+                        // through it) form a trailing margin chain. Trim the entire chain
+                        // by walking backward to find the last non-self-collapsing sibling
+                        // and setting advance_y to its bottom edge.
+                        View* prev = last_block;
+                        while (prev) {
+                            ViewBlock* vb = (ViewBlock*)prev;
+                            if (vb->bound) {
+                                vb->bound->margin.bottom = 0;
+                                vb->bound->margin_chain_positive = 0;
+                                vb->bound->margin_chain_negative = 0;
+                            }
+                            // find prev in-flow sibling
+                            View* p = prev->prev_placed_view();
+                            while (p && p->is_block()) {
+                                ViewBlock* pb = (ViewBlock*)p;
+                                if (pb->position && (element_has_float(pb) ||
+                                    pb->position->position == CSS_VALUE_ABSOLUTE ||
+                                    pb->position->position == CSS_VALUE_FIXED)) {
+                                    p = p->prev_placed_view();
+                                    continue;
+                                }
+                                break;
+                            }
+                            if (p && p->is_block() && is_block_self_collapsing((ViewBlock*)p)) {
+                                prev = p;
+                                continue;
+                            }
+                            // p is either non-self-collapsing block or null
+                            if (p && p->is_block()) {
+                                ViewBlock* anchor = (ViewBlock*)p;
+                                // Trim anchor's margin.bottom too — it collapsed through
+                                // the self-collapsing chain
+                                if (anchor->bound) {
+                                    anchor->bound->margin.bottom = 0;
+                                    anchor->bound->margin_chain_positive = 0;
+                                    anchor->bound->margin_chain_negative = 0;
+                                }
+                                lycon->block.advance_y = anchor->y + anchor->height;
+                                log_debug("[MARGIN-TRIM] block-end: self-collapsing chain, "
+                                    "set advance_y=%.1f from anchor %s (y=%.1f h=%.1f)",
+                                    lycon->block.advance_y, anchor->node_name(),
+                                    anchor->y, anchor->height);
+                            } else {
+                                // All children are self-collapsing — no content height
+                                lycon->block.advance_y = 0;
+                                log_debug("[MARGIN-TRIM] block-end: all children self-collapsing, advance_y=0");
+                            }
+                            break;
+                        }
+                    } else {
+                        // Non-self-collapsing last child: simple case
+                        float trimmed = last_block->bound->margin.bottom;
+                        if (trimmed != 0) {
+                            log_debug("[MARGIN-TRIM] block-end: trimming margin.bottom=%f on last child %s",
+                                trimmed, last_block->node_name());
+                            lycon->block.advance_y -= trimmed;
+                            last_block->bound->margin.bottom = 0;
+                        }
+                        last_block->bound->margin_chain_positive = 0;
+                        last_block->bound->margin_chain_negative = 0;
+                    }
+                }
+            }
         }
 
         finalize_block_flow(lycon, block, block->display.outer);
@@ -3390,14 +3485,35 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
 
-        // margin-trim: inline — parent trims children's inline margins
+        // margin-trim — parent trims children's margins (CSS Box 4 §3.1)
         if (block->parent && block->parent->is_block()) {
             ViewBlock* mt_pa = (ViewBlock*)block->parent;
-            if (mt_pa->blk) {
-                if (mt_pa->blk->margin_trim & MARGIN_TRIM_INLINE_START)
-                    block->bound->margin.left = 0;
-                if (mt_pa->blk->margin_trim & MARGIN_TRIM_INLINE_END)
-                    block->bound->margin.right = 0;
+            if (mt_pa->blk && mt_pa->blk->margin_trim) {
+                // CSS Box 4 §3.1: margin-trim:inline on a block container only
+                // trims the inline-start/end margins of the first/last line boxes,
+                // NOT the margins of block-level children. So skip inline trim here
+                // (block-level child path). Inline-level trim is handled elsewhere.
+
+                // block-start margin-trim: trim the first in-flow child's block-start margin
+                if ((mt_pa->blk->margin_trim & MARGIN_TRIM_BLOCK_START) && block->bound->margin.top != 0) {
+                    View* first = mt_pa->first_placed_child();
+                    while (first && first->is_block()) {
+                        ViewBlock* fvb = (ViewBlock*)first;
+                        if (fvb->view_type == RDT_VIEW_MARKER ||
+                            (fvb->position && element_has_float(fvb))) {
+                            View* next = (View*)first->next_sibling;
+                            while (next && !next->view_type) next = (View*)next->next_sibling;
+                            first = next;
+                            continue;
+                        }
+                        break;
+                    }
+                    if (first == (View*)block) {
+                        log_debug("[MARGIN-TRIM] block-start: trimming margin.top=%f on first child %s",
+                            block->bound->margin.top, block->node_name());
+                        block->bound->margin.top = 0;
+                    }
+                }
             }
         }
 
@@ -5415,11 +5531,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
                 if (first_in_flow_child == block) {  // first in-flow child
                     // CSS Box 4 §margin-trim: block-start trims the first child's block-start
-                    // margin. For non-BFC containers without border/padding-top, this is
-                    // equivalent to normal parent-child margin collapse (the child's margin
-                    // escapes to the outside). For BFC containers, browser behavior shows the
-                    // margin is NOT trimmed (remains inside). Both cases are handled correctly
-                    // by the parent-child collapse logic below — no special pre-processing needed.
+                    // margin. This is done earlier in the layout (before position calculation)
+                    // by zeroing margin.top when the parent has MARGIN_TRIM_BLOCK_START.
+                    // By the time we reach here, the margin is already 0 if trimmed.
 
                     // CSS 2.1 §9.5.2: If clearance was applied (saved_clear_y >= 0),
                     // skip parent-child margin collapse.

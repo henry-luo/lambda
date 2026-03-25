@@ -1604,6 +1604,77 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
             }
 
+            // CSS Flexbox §9.9.1: Flex item intrinsic contributions include
+            // the item's outer size (content + padding + border + margin).
+            // Add flex item margins to child_sizes before accumulating.
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_view = (ViewBlock*)child_elem;
+                float ml = 0, mr = 0;
+                if (child_view->bound) {
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.left >= 0)
+                        ml = child_view->bound->margin.left;
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO &&
+                        child_view->bound->margin.right >= 0)
+                        mr = child_view->bound->margin.right;
+                } else if (child_elem->specified_style) {
+                    // Try margin-left / margin-right first
+                    CssDeclaration* ml_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+                    if (ml_decl && ml_decl->value && ml_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                        ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_decl->value);
+                    CssDeclaration* mr_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+                    if (mr_decl && mr_decl->value && mr_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                        mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_decl->value);
+                    // Try margin-inline-start / margin-inline-end (individual logical properties)
+                    if (ml == 0) {
+                        CssDeclaration* mis_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE_START);
+                        if (mis_decl && mis_decl->value && mis_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                            ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE_START, mis_decl->value);
+                    }
+                    if (mr == 0) {
+                        CssDeclaration* mie_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE_END);
+                        if (mie_decl && mie_decl->value && mie_decl->value->type == CSS_VALUE_TYPE_LENGTH)
+                            mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE_END, mie_decl->value);
+                    }
+                    // Try margin-inline shorthand (logical property → physical left/right in LTR)
+                    if (ml == 0 && mr == 0) {
+                        CssDeclaration* mi_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN_INLINE);
+                        if (mi_decl && mi_decl->value && mi_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                            ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_INLINE, mi_decl->value);
+                        }
+                    }
+                    // Try margin shorthand
+                    if (ml == 0 && mr == 0) {
+                        CssDeclaration* m_decl = style_tree_get_declaration(
+                            child_elem->specified_style, CSS_PROPERTY_MARGIN);
+                        if (m_decl && m_decl->value) {
+                            const CssValue* val = m_decl->value;
+                            if (val->type == CSS_VALUE_TYPE_LENGTH) {
+                                ml = mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, val);
+                            } else if (val->type == CSS_VALUE_TYPE_LIST && val->data.list.count >= 1) {
+                                int cnt = val->data.list.count;
+                                CssValue** vals = val->data.list.values;
+                                if (cnt <= 3) {
+                                    float lr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[cnt >= 2 ? 1 : 0]);
+                                    ml = mr = lr;
+                                } else {
+                                    mr = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[1]);
+                                    ml = resolve_length_value(lycon, CSS_PROPERTY_MARGIN, vals[3]);
+                                }
+                            }
+                        }
+                    }
+                }
+                child_sizes.min_content += ml + mr;
+                child_sizes.max_content += ml + mr;
+            }
+
             if (is_row_flex) {
                 // Row flex: sum widths horizontally
                 sizes.min_content += child_sizes.min_content;

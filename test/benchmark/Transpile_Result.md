@@ -1,269 +1,265 @@
 # Transpiling Time Profile Report
 
-Scripts profiled: 278 (223 standalone, 55 with imports, 1 skipped)
+Scripts profiled: 277 (220 standalone, 57 with imports, 2 skipped)
 
 
 ---
 
-## Set 1: Standalone Scripts (no imports) — 223 scripts
+## Set 1: Standalone Scripts (no imports) — 220 scripts
 
 These timings reflect a single module and are the most direct measure of each compilation phase.
 
 
 ### Phase Summary (standalone)
 
-| Phase             | Total (ms)  | Avg (ms) | % of Total |
-| ----------------- | ----------- | -------- | ---------- |
-| Tree-sitter Parse | 64.61       | 0.29     | 5.6%       |
-| AST Build         | 243.08      | 1.09     | 20.9%      |
-| MIR Transpile     | 798.83      | 3.58     | 68.8%      |
-| JIT Codegen       | 53.90       | 0.24     | 4.6%       |
-| **Total**         | **1160.40** | **5.20** | 100%       |
+| Phase | Total (ms) | Avg (ms) | % of Total |
+|-------|-----------|----------|------------|
+| Tree-sitter Parse | 56.03 | 0.25 | 6.0% |
+| AST Build | 83.56 | 0.38 | 9.0% |
+| MIR Transpile | 741.80 | 3.37 | 79.9% |
+| JIT Codegen | 47.24 | 0.21 | 5.1% |
+| **Total** | **928.63** | **4.22** | 100% |
 
 | Suite | Scripts | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Avg (ms) |
 |-------|---------|-----------|----------|---------------|----------|-----------|----------|
-| awfy | 24 | 15.56 | 18.78 | 163.22 | 7.63 | 205.19 | 8.55 |
-| beng | 7 | 2.46 | 2.14 | 23.85 | 1.52 | 29.98 | 4.28 |
-| chart | 1 | 0.12 | 132.60 | 1.02 | 0.10 | 133.85 | 133.85 |
-| kostya | 7 | 1.56 | 1.66 | 16.71 | 1.44 | 21.38 | 3.05 |
-| lambda | 116 | 30.30 | 45.17 | 453.77 | 28.56 | 557.79 | 4.81 |
-| larceny | 14 | 3.79 | 3.58 | 33.03 | 2.91 | 43.31 | 3.09 |
-| latex | 1 | 0.24 | 24.91 | 3.39 | 0.13 | 28.67 | 28.67 |
-| math | 1 | 0.37 | 2.99 | 4.20 | 0.14 | 7.70 | 7.70 |
-| proc | 32 | 7.07 | 7.56 | 66.55 | 7.61 | 88.79 | 2.77 |
-| r7rs | 20 | 3.14 | 3.69 | 33.08 | 3.84 | 43.75 | 2.19 |
+| awfy | 24 | 14.66 | 17.05 | 152.07 | 6.87 | 190.64 | 7.94 |
+| beng | 7 | 1.93 | 2.02 | 23.08 | 1.44 | 28.47 | 4.07 |
+| kostya | 6 | 1.20 | 1.33 | 12.98 | 1.17 | 16.68 | 2.78 |
+| lambda | 113 | 25.23 | 32.11 | 424.16 | 24.49 | 506.00 | 4.48 |
+| larceny | 14 | 3.00 | 3.46 | 32.18 | 2.75 | 41.39 | 2.96 |
+| latex | 2 | 0.29 | 9.89 | 2.68 | 0.20 | 13.06 | 6.53 |
+| math | 2 | 0.52 | 7.42 | 6.39 | 0.41 | 14.74 | 7.37 |
+| proc | 32 | 6.34 | 7.06 | 62.30 | 6.29 | 82.00 | 2.56 |
+| r7rs | 20 | 2.86 | 3.22 | 25.96 | 3.62 | 35.66 | 1.78 |
 
 ### Per-Script Breakdown (standalone)
 
 | # | Suite | Script | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) |
 |---|-------|--------|-----------|----------|---------------|----------|-----------|
-| 1 | chart | chart_test_repeat_chart | 0.12 | 132.60 | 1.02 | 0.10 | 133.85 |
-| 2 | lambda | complex_iot_report_html | 2.31 | 3.61 | 49.21 | 0.65 | 55.78 |
-| 3 | awfy | awfy_cd | 2.14 | 3.15 | 32.45 | 0.79 | 38.53 |
-| 4 | lambda | type_pattern | 1.51 | 2.18 | 25.16 | 0.46 | 29.31 |
-| 5 | latex | latex_test_latex_picture | 0.24 | 24.91 | 3.39 | 0.13 | 28.67 |
-| 6 | awfy | awfy_deltablue2 | 2.10 | 2.57 | 19.93 | 0.79 | 25.40 |
-| 7 | awfy | awfy_deltablue | 1.93 | 2.25 | 17.90 | 0.57 | 22.65 |
-| 8 | awfy | awfy_havlak2 | 1.94 | 2.46 | 15.41 | 0.59 | 20.40 |
-| 9 | awfy | awfy_havlak | 1.67 | 2.26 | 15.17 | 0.58 | 19.67 |
-| 10 | lambda | vector_sys_func | 0.65 | 0.97 | 12.97 | 0.34 | 14.94 |
-| 11 | lambda | expr_stam | 0.67 | 0.65 | 12.74 | 0.37 | 14.44 |
-| 12 | lambda | pipe_where | 0.26 | 0.30 | 12.41 | 0.34 | 13.30 |
-| 13 | lambda | for_clauses_test | 0.49 | 0.64 | 11.12 | 0.30 | 12.55 |
-| 14 | lambda | numeric_sys_func | 0.40 | 0.58 | 11.21 | 0.33 | 12.52 |
-| 15 | proc | proc_proc_fill | 0.57 | 0.64 | 10.47 | 0.42 | 12.10 |
-| 16 | awfy | awfy_nbody | 0.39 | 0.44 | 10.76 | 0.30 | 11.89 |
-| 17 | awfy | awfy_richards2 | 1.12 | 1.11 | 8.93 | 0.36 | 11.52 |
-| 18 | lambda | comp_expr | 0.47 | 0.56 | 9.84 | 0.33 | 11.19 |
-| 19 | lambda | array_float | 1.80 | 2.91 | 4.21 | 1.66 | 10.58 |
-| 20 | awfy | awfy_richards | 0.90 | 0.96 | 8.33 | 0.34 | 10.54 |
-| 21 | lambda | numeric_expr | 0.34 | 0.44 | 8.62 | 0.38 | 9.78 |
-| 22 | lambda | comp_expr_edge | 0.32 | 0.34 | 7.96 | 0.30 | 8.92 |
-| 23 | lambda | decimal | 0.25 | 0.67 | 7.40 | 0.28 | 8.59 |
-| 24 | beng | beng_nbody | 0.55 | 0.53 | 7.04 | 0.27 | 8.38 |
-| 25 | awfy | awfy_nbody2 | 0.42 | 0.46 | 7.00 | 0.25 | 8.13 |
-| 26 | lambda | type_occurrence | 0.41 | 0.59 | 6.68 | 0.25 | 7.93 |
-| 27 | lambda | expr | 0.39 | 0.45 | 6.63 | 0.27 | 7.74 |
-| 28 | math | math_test_math_util | 0.37 | 2.99 | 4.20 | 0.14 | 7.70 |
-| 29 | lambda | error_propagation | 0.69 | 0.59 | 5.88 | 0.37 | 7.52 |
-| 30 | lambda | string_pattern | 0.35 | 0.47 | 6.33 | 0.27 | 7.42 |
-| 31 | lambda | vector_performance | 0.37 | 0.51 | 6.24 | 0.27 | 7.38 |
-| 32 | r7rs | r7rs_sum2 | 0.14 | 0.28 | 6.66 | 0.21 | 7.30 |
-| 33 | lambda | box_unbox_advanced | 0.85 | 0.55 | 5.38 | 0.31 | 7.09 |
-| 34 | lambda | pipe_spread | 0.17 | 0.20 | 6.41 | 0.28 | 7.06 |
-| 35 | lambda | vector_advanced | 0.35 | 0.49 | 5.69 | 0.25 | 6.78 |
-| 36 | lambda | string_funcs | 0.26 | 0.34 | 5.77 | 0.23 | 6.59 |
-| 37 | larceny | larceny_paraffins | 0.40 | 0.42 | 5.18 | 0.23 | 6.23 |
-| 38 | lambda | for_decompose | 0.26 | 0.35 | 5.25 | 0.24 | 6.10 |
-| 39 | lambda | match_expr | 0.32 | 0.35 | 5.16 | 0.27 | 6.10 |
-| 40 | lambda | datetime | 0.41 | 0.40 | 4.88 | 0.23 | 5.92 |
-| 41 | lambda | path | 0.29 | 0.34 | 5.04 | 0.24 | 5.90 |
-| 42 | beng | beng_knucleotide | 0.39 | 0.38 | 4.88 | 0.24 | 5.90 |
-| 43 | lambda | func_param2 | 0.32 | 0.44 | 4.83 | 0.25 | 5.84 |
-| 44 | lambda | sys_func_native_cmp | 0.35 | 0.43 | 4.77 | 0.28 | 5.83 |
-| 45 | lambda | constrained_type | 0.20 | 0.23 | 5.09 | 0.27 | 5.79 |
-| 46 | larceny | larceny_triangl | 0.61 | 0.48 | 4.44 | 0.23 | 5.76 |
-| 47 | lambda | import | 0.08 | 4.80 | 0.73 | 0.10 | 5.72 |
-| 48 | lambda | simple_expr | 0.34 | 0.39 | 4.72 | 0.25 | 5.70 |
-| 49 | lambda | vector_basic | 0.25 | 0.40 | 4.77 | 0.24 | 5.66 |
-| 50 | lambda | structural_equality | 0.25 | 0.27 | 4.82 | 0.25 | 5.59 |
-| 51 | lambda | test_string_pattern_integration | 0.31 | 0.37 | 4.32 | 0.24 | 5.24 |
-| 52 | larceny | larceny_deriv2 | 0.60 | 0.36 | 3.99 | 0.25 | 5.20 |
-| 53 | kostya | kostya_base64 | 0.27 | 0.32 | 4.21 | 0.23 | 5.04 |
-| 54 | lambda | string_indexable | 0.20 | 0.25 | 4.24 | 0.23 | 4.93 |
-| 55 | awfy | awfy_bounce2 | 0.25 | 0.27 | 4.17 | 0.23 | 4.92 |
-| 56 | lambda | namespace | 0.26 | 0.32 | 4.08 | 0.22 | 4.87 |
-| 57 | lambda | value | 0.20 | 0.24 | 4.11 | 0.23 | 4.79 |
-| 58 | proc | proc_proc_typed_array_param | 0.44 | 0.34 | 3.65 | 0.29 | 4.73 |
-| 59 | awfy | awfy_bounce | 0.23 | 0.24 | 4.00 | 0.22 | 4.69 |
-| 60 | lambda | func | 0.22 | 0.28 | 3.84 | 0.26 | 4.59 |
-| 61 | lambda | int64 | 0.27 | 0.32 | 3.78 | 0.22 | 4.58 |
-| 62 | lambda | that_implicit_name | 0.15 | 0.17 | 4.02 | 0.24 | 4.58 |
-| 63 | lambda | transpile_typed_closure | 0.23 | 0.30 | 3.67 | 0.26 | 4.47 |
-| 64 | lambda | pipe_type_infer | 0.15 | 0.20 | 3.79 | 0.24 | 4.39 |
-| 65 | beng | beng_fannkuch | 0.60 | 0.26 | 3.26 | 0.22 | 4.34 |
-| 66 | lambda | closure_advanced | 0.25 | 0.35 | 3.43 | 0.28 | 4.31 |
-| 67 | r7rs | r7rs_nqueens2 | 0.29 | 0.36 | 3.41 | 0.23 | 4.29 |
-| 68 | proc | proc_proc_array_type_convert | 0.24 | 0.29 | 3.51 | 0.25 | 4.29 |
-| 69 | lambda | vmap | 0.21 | 0.29 | 3.56 | 0.22 | 4.27 |
-| 70 | lambda | for_element_spread | 0.17 | 0.23 | 3.56 | 0.22 | 4.18 |
-| 71 | lambda | let_for_array | 0.38 | 0.31 | 3.18 | 0.23 | 4.09 |
-| 72 | lambda | transpile_bitwise | 0.26 | 0.31 | 3.23 | 0.24 | 4.04 |
-| 73 | lambda | type2 | 0.16 | 0.18 | 3.35 | 0.21 | 3.90 |
-| 74 | lambda | tail_call | 0.29 | 0.25 | 3.10 | 0.24 | 3.88 |
-| 75 | r7rs | r7rs_fft | 0.22 | 0.25 | 3.09 | 0.20 | 3.77 |
-| 76 | lambda | type_negation | 0.17 | 0.22 | 3.15 | 0.21 | 3.76 |
-| 77 | lambda | decimal_big | 0.14 | 0.18 | 3.14 | 0.23 | 3.70 |
-| 78 | lambda | transpile_error_ret_types | 0.27 | 0.32 | 2.76 | 0.28 | 3.64 |
-| 79 | lambda | sys_func_native_math | 0.25 | 0.30 | 2.80 | 0.25 | 3.60 |
-| 80 | lambda | large_int_map | 0.21 | 0.23 | 2.92 | 0.22 | 3.58 |
-| 81 | lambda | is_in_precedence | 0.24 | 0.34 | 2.77 | 0.22 | 3.58 |
-| 82 | lambda | for_element_filter | 0.15 | 0.19 | 3.04 | 0.20 | 3.58 |
-| 83 | lambda | child_query | 0.51 | 0.29 | 2.54 | 0.20 | 3.54 |
-| 84 | r7rs | r7rs_nqueens | 0.26 | 0.27 | 2.77 | 0.22 | 3.53 |
-| 85 | proc | proc_proc_element_mutation | 0.30 | 0.26 | 2.73 | 0.23 | 3.53 |
-| 86 | kostya | kostya_brainfuck | 0.23 | 0.24 | 2.83 | 0.21 | 3.51 |
-| 87 | lambda | sys_func_is_nan | 0.15 | 0.19 | 2.92 | 0.21 | 3.48 |
-| 88 | r7rs | r7rs_fft2 | 0.27 | 0.28 | 2.70 | 0.22 | 3.48 |
-| 89 | proc | proc_proc_var | 0.35 | 0.40 | 2.45 | 0.23 | 3.43 |
-| 90 | kostya | kostya_levenshtein | 0.25 | 0.27 | 2.69 | 0.21 | 3.43 |
-| 91 | lambda | null_safe_member | 0.22 | 0.29 | 2.71 | 0.21 | 3.42 |
-| 92 | lambda | match_string_pattern | 0.14 | 0.18 | 2.90 | 0.19 | 3.41 |
-| 93 | kostya | kostya_json_gen | 0.29 | 0.27 | 2.62 | 0.21 | 3.39 |
-| 94 | larceny | larceny_pnpoly | 0.23 | 0.28 | 2.65 | 0.21 | 3.36 |
-| 95 | beng | beng_spectralnorm | 0.25 | 0.28 | 2.60 | 0.21 | 3.34 |
-| 96 | beng | beng_regexredux | 0.28 | 0.27 | 2.56 | 0.20 | 3.31 |
-| 97 | lambda | unboxed_field_access | 0.21 | 0.23 | 2.62 | 0.22 | 3.29 |
-| 98 | proc | proc_test_pipe_file | 0.23 | 0.31 | 2.48 | 0.25 | 3.27 |
-| 99 | larceny | larceny_ray | 0.29 | 0.32 | 2.42 | 0.20 | 3.23 |
-| 100 | lambda | comment | 0.18 | 0.23 | 2.60 | 0.21 | 3.23 |
-| 101 | proc | proc_proc_param_type_infer | 0.28 | 0.30 | 2.38 | 0.21 | 3.18 |
-| 102 | lambda | transpile_idiv_mod | 0.19 | 0.26 | 2.48 | 0.21 | 3.15 |
-| 103 | lambda | unboxed_sys_func | 0.19 | 0.24 | 2.48 | 0.24 | 3.15 |
-| 104 | proc | proc_clock | 0.33 | 0.18 | 1.64 | 0.99 | 3.14 |
-| 105 | proc | proc_proc_array_set | 0.17 | 0.20 | 2.53 | 0.23 | 3.13 |
-| 106 | lambda | sys_func_math_extended | 0.25 | 0.27 | 2.38 | 0.22 | 3.13 |
-| 107 | proc | proc_proc_map_type_change | 0.27 | 0.28 | 2.25 | 0.21 | 3.01 |
-| 108 | proc | proc_vmap | 0.25 | 0.27 | 2.27 | 0.22 | 3.01 |
-| 109 | awfy | awfy_queens | 0.21 | 0.23 | 2.33 | 0.22 | 2.99 |
-| 110 | kostya | kostya_matmul | 0.23 | 0.23 | 2.24 | 0.22 | 2.92 |
-| 111 | lambda | in_container | 0.12 | 0.19 | 2.39 | 0.21 | 2.90 |
-| 112 | larceny | larceny_deriv | 0.27 | 0.27 | 2.14 | 0.21 | 2.89 |
-| 113 | lambda | string_prefix_suffix | 0.14 | 0.18 | 2.37 | 0.21 | 2.89 |
-| 114 | lambda | query | 0.18 | 0.23 | 2.27 | 0.19 | 2.87 |
-| 115 | proc | proc_proc_closure_mutation | 0.23 | 0.26 | 2.12 | 0.22 | 2.83 |
-| 116 | proc | proc_while_swap | 0.33 | 0.36 | 1.92 | 0.21 | 2.83 |
-| 117 | proc | proc_proc_arr_concat | 0.18 | 0.26 | 2.19 | 0.20 | 2.82 |
-| 118 | lambda | closure | 0.18 | 0.26 | 2.13 | 0.22 | 2.79 |
-| 119 | larceny | larceny_gcbench | 0.22 | 0.22 | 2.13 | 0.21 | 2.78 |
-| 120 | larceny | larceny_quicksort | 0.20 | 0.22 | 2.14 | 0.21 | 2.77 |
-| 121 | awfy | awfy_towers2 | 0.25 | 0.25 | 2.04 | 0.22 | 2.76 |
-| 122 | awfy | awfy_queens2 | 0.22 | 0.23 | 2.09 | 0.22 | 2.75 |
-| 123 | proc | proc_proc_semicolon | 0.26 | 0.31 | 1.92 | 0.25 | 2.74 |
-| 124 | lambda | nested_shadowing | 0.16 | 0.19 | 2.15 | 0.22 | 2.73 |
-| 125 | lambda | method_call | 0.16 | 0.23 | 2.07 | 0.26 | 2.72 |
-| 126 | lambda | transpile_len_typed | 0.19 | 0.25 | 2.03 | 0.21 | 2.68 |
-| 127 | lambda | string_pattern_ops | 0.15 | 0.20 | 2.12 | 0.20 | 2.67 |
-| 128 | proc | proc_proc_else_if | 0.27 | 0.26 | 1.91 | 0.21 | 2.65 |
-| 129 | r7rs | r7rs_mbrot2 | 0.23 | 0.24 | 1.92 | 0.20 | 2.58 |
-| 130 | beng | beng_binarytrees | 0.19 | 0.20 | 1.97 | 0.20 | 2.56 |
-| 131 | lambda | empty_string_null | 0.16 | 0.17 | 2.01 | 0.21 | 2.55 |
-| 132 | lambda | float_conversion | 0.15 | 0.19 | 1.96 | 0.19 | 2.49 |
-| 133 | proc | proc_tail_call_proc | 0.19 | 0.21 | 1.86 | 0.21 | 2.48 |
-| 134 | lambda | pipe_sysfunc | 0.12 | 0.16 | 1.94 | 0.20 | 2.42 |
-| 135 | larceny | larceny_puzzle | 0.18 | 0.19 | 1.78 | 0.26 | 2.41 |
-| 136 | larceny | larceny_gcbench2 | 0.20 | 0.20 | 1.79 | 0.20 | 2.40 |
-| 137 | lambda | typed_map_direct_access | 0.16 | 0.17 | 1.86 | 0.20 | 2.39 |
-| 138 | lambda | error_handling | 0.19 | 0.22 | 1.74 | 0.22 | 2.37 |
-| 139 | awfy | awfy_towers | 0.21 | 0.23 | 1.71 | 0.21 | 2.36 |
-| 140 | lambda | spread | 0.14 | 0.20 | 1.81 | 0.19 | 2.35 |
-| 141 | lambda | string | 0.11 | 0.15 | 1.87 | 0.20 | 2.33 |
-| 142 | lambda | string_ord_chr | 0.11 | 0.15 | 1.87 | 0.18 | 2.32 |
-| 143 | lambda | mixed_numeric_ops | 0.25 | 0.16 | 1.70 | 0.20 | 2.31 |
-| 144 | proc | proc_proc_dir_listing | 0.20 | 0.17 | 1.75 | 0.18 | 2.30 |
-| 145 | proc | proc_proc_control | 0.23 | 0.26 | 1.61 | 0.19 | 2.30 |
-| 146 | lambda | first_class_fn | 0.15 | 0.17 | 1.73 | 0.20 | 2.25 |
-| 147 | lambda | box_unbox_negative | 0.15 | 0.19 | 1.68 | 0.21 | 2.23 |
-| 148 | proc | proc_proc_bitwise_int64 | 0.18 | 0.20 | 1.66 | 0.18 | 2.22 |
-| 149 | lambda | sys_func_math_constants | 0.18 | 0.20 | 1.63 | 0.19 | 2.21 |
-| 150 | lambda | namespace_v2 | 0.17 | 0.20 | 1.64 | 0.19 | 2.20 |
-| 151 | r7rs | r7rs_mbrot | 0.19 | 0.22 | 1.58 | 0.19 | 2.19 |
-| 152 | proc | proc_proc_param_mutation | 0.16 | 0.18 | 1.64 | 0.19 | 2.18 |
-| 153 | lambda | chained_comparisons | 0.12 | 0.11 | 1.74 | 0.20 | 2.17 |
-| 154 | beng | beng_mandelbrot | 0.19 | 0.22 | 1.54 | 0.19 | 2.15 |
-| 155 | proc | proc_proc_div_mod | 0.16 | 0.18 | 1.61 | 0.19 | 2.14 |
-| 156 | lambda | trim | 0.12 | 0.18 | 1.60 | 0.18 | 2.08 |
-| 157 | lambda | correlation_math | 0.15 | 0.17 | 1.56 | 0.20 | 2.08 |
-| 158 | lambda | split_null_concat | 0.11 | 0.16 | 1.61 | 0.19 | 2.06 |
-| 159 | lambda | box_unbox | 0.12 | 0.35 | 1.36 | 0.21 | 2.04 |
-| 160 | lambda | typed_param_string | 0.12 | 0.15 | 1.53 | 0.19 | 1.99 |
-| 161 | awfy | awfy_storage2 | 0.19 | 0.19 | 1.38 | 0.21 | 1.97 |
-| 162 | awfy | awfy_mandelbrot2 | 0.22 | 0.24 | 1.32 | 0.20 | 1.97 |
-| 163 | awfy | awfy_permute2 | 0.18 | 0.20 | 1.39 | 0.19 | 1.97 |
-| 164 | lambda | import_arrays | 0.08 | 1.30 | 0.46 | 0.11 | 1.94 |
-| 165 | lambda | forward_ref | 0.12 | 0.15 | 1.44 | 0.23 | 1.94 |
-| 166 | awfy | awfy_storage | 0.16 | 0.17 | 1.37 | 0.20 | 1.90 |
-| 167 | proc | proc_proc_cmd | 0.14 | 0.16 | 1.40 | 0.19 | 1.89 |
-| 168 | lambda | map_spread_override | 0.16 | 0.19 | 1.35 | 0.19 | 1.89 |
-| 169 | lambda | func_param | 0.14 | 0.18 | 1.33 | 0.20 | 1.84 |
-| 170 | lambda | builtin_import_alias | 0.11 | 0.16 | 1.17 | 0.39 | 1.82 |
-| 171 | lambda | math_random | 0.12 | 0.17 | 1.34 | 0.19 | 1.81 |
-| 172 | lambda | robust_coverage | 0.13 | 0.15 | 1.33 | 0.20 | 1.81 |
-| 173 | lambda | if_expr_types | 0.14 | 0.15 | 1.32 | 0.19 | 1.79 |
-| 174 | awfy | awfy_list | 0.17 | 0.19 | 1.21 | 0.20 | 1.76 |
-| 175 | proc | proc_proc_var_type_widen | 0.16 | 0.21 | 1.17 | 0.20 | 1.75 |
-| 176 | proc | proc_proc_map_set | 0.15 | 0.15 | 1.25 | 0.19 | 1.74 |
-| 177 | larceny | larceny_divrec | 0.15 | 0.17 | 1.23 | 0.18 | 1.73 |
-| 178 | awfy | awfy_permute | 0.15 | 0.16 | 1.22 | 0.18 | 1.72 |
-| 179 | lambda | csv_test | 0.22 | 0.24 | 0.92 | 0.34 | 1.71 |
-| 180 | r7rs | r7rs_fibfp2 | 0.12 | 0.13 | 1.23 | 0.20 | 1.68 |
-| 181 | larceny | larceny_diviter | 0.14 | 0.15 | 1.18 | 0.18 | 1.66 |
-| 182 | awfy | awfy_mandelbrot | 0.20 | 0.21 | 1.05 | 0.19 | 1.66 |
-| 183 | kostya | kostya_primes | 0.15 | 0.16 | 1.13 | 0.18 | 1.63 |
-| 184 | lambda | parent_access | 0.10 | 0.10 | 1.21 | 0.21 | 1.61 |
-| 185 | awfy | awfy_sieve2 | 0.15 | 0.16 | 1.09 | 0.19 | 1.60 |
-| 186 | proc | proc_match_stam | 0.12 | 0.12 | 1.17 | 0.18 | 1.59 |
-| 187 | proc | proc_test_io_module | 0.14 | 0.15 | 1.09 | 0.18 | 1.56 |
-| 188 | larceny | larceny_primes | 0.15 | 0.16 | 1.07 | 0.18 | 1.56 |
-| 189 | r7rs | r7rs_fibfp | 0.10 | 0.12 | 1.13 | 0.19 | 1.54 |
-| 190 | proc | proc_proc_markup_mutation | 0.13 | 0.14 | 1.07 | 0.18 | 1.53 |
-| 191 | proc | proc_proc_bitwise | 0.13 | 0.14 | 1.07 | 0.18 | 1.53 |
-| 192 | lambda | error_union_param | 0.09 | 0.14 | 1.08 | 0.20 | 1.51 |
-| 193 | kostya | kostya_collatz | 0.14 | 0.16 | 0.99 | 0.18 | 1.47 |
-| 194 | lambda | name_member | 0.12 | 0.14 | 1.03 | 0.18 | 1.47 |
-| 195 | lambda | sys_fn | 0.09 | 0.13 | 1.06 | 0.18 | 1.45 |
-| 196 | awfy | awfy_sieve | 0.13 | 0.15 | 0.97 | 0.19 | 1.44 |
-| 197 | proc | proc_proc_error | 0.13 | 0.15 | 0.96 | 0.19 | 1.43 |
-| 198 | lambda | sort_advanced | 0.11 | 0.15 | 0.97 | 0.18 | 1.42 |
-| 199 | r7rs | r7rs_cpstak2 | 0.14 | 0.16 | 0.91 | 0.18 | 1.39 |
-| 200 | larceny | larceny_array1 | 0.14 | 0.14 | 0.89 | 0.17 | 1.34 |
-| 201 | lambda | builtin_import_global | 0.08 | 0.14 | 0.93 | 0.19 | 1.34 |
-| 202 | lambda | import_vars | 0.05 | 0.88 | 0.27 | 0.12 | 1.32 |
-| 203 | r7rs | r7rs_tak2 | 0.14 | 0.15 | 0.86 | 0.17 | 1.32 |
-| 204 | r7rs | r7rs_sumfp2 | 0.13 | 0.14 | 0.86 | 0.18 | 1.31 |
-| 205 | r7rs | r7rs_ack2 | 0.13 | 0.15 | 0.84 | 0.18 | 1.30 |
-| 206 | lambda | input_jsonld | 0.09 | 0.12 | 0.85 | 0.19 | 1.25 |
-| 207 | lambda | builtin_import | 0.26 | 0.11 | 0.67 | 0.18 | 1.22 |
-| 208 | lambda | reduce | 0.09 | 0.13 | 0.80 | 0.18 | 1.21 |
-| 209 | r7rs | r7rs_cpstak | 0.12 | 0.14 | 0.75 | 0.18 | 1.19 |
-| 210 | r7rs | r7rs_fib2 | 0.12 | 0.13 | 0.76 | 0.18 | 1.18 |
-| 211 | r7rs | r7rs_sumfp | 0.11 | 0.13 | 0.75 | 0.18 | 1.17 |
-| 212 | r7rs | r7rs_sum | 0.11 | 0.12 | 0.76 | 0.17 | 1.17 |
-| 213 | r7rs | r7rs_tak | 0.12 | 0.14 | 0.73 | 0.18 | 1.17 |
-| 214 | r7rs | r7rs_ack | 0.11 | 0.12 | 0.72 | 0.17 | 1.12 |
-| 215 | r7rs | r7rs_fib | 0.10 | 0.15 | 0.64 | 0.18 | 1.07 |
-| 216 | lambda | input_csv | 0.08 | 0.10 | 0.70 | 0.18 | 1.06 |
-| 217 | lambda | parse | 0.07 | 0.10 | 0.55 | 0.17 | 0.89 |
-| 218 | proc | proc_proc2 | 0.06 | 0.11 | 0.44 | 0.18 | 0.78 |
-| 219 | lambda | type | 0.08 | 0.10 | 0.40 | 0.18 | 0.76 |
-| 220 | lambda | input_dir | 0.07 | 0.10 | 0.39 | 0.17 | 0.73 |
-| 221 | proc | proc_proc1 | 0.06 | 0.09 | 0.36 | 0.17 | 0.67 |
-| 222 | lambda | single_let | 0.04 | 0.04 | 0.23 | 0.18 | 0.49 |
-| 223 | lambda | single | 0.02 | 0.04 | 0.23 | 0.18 | 0.48 |
+| 1 | lambda | complex_iot_report_html | 2.16 | 2.68 | 48.34 | 0.65 | 53.80 |
+| 2 | awfy | awfy_cd | 2.08 | 2.65 | 30.02 | 0.70 | 35.44 |
+| 3 | lambda | type_pattern | 1.43 | 2.14 | 22.67 | 0.44 | 26.69 |
+| 4 | awfy | awfy_deltablue2 | 2.14 | 2.47 | 18.21 | 0.58 | 23.40 |
+| 5 | awfy | awfy_deltablue | 1.88 | 2.16 | 16.91 | 0.52 | 21.50 |
+| 6 | awfy | awfy_havlak2 | 1.64 | 2.06 | 14.22 | 0.54 | 18.46 |
+| 7 | awfy | awfy_havlak | 1.69 | 2.02 | 13.94 | 0.53 | 18.18 |
+| 8 | lambda | vector_sys_func | 0.64 | 0.94 | 12.25 | 0.32 | 14.18 |
+| 9 | lambda | expr_stam | 0.66 | 0.62 | 11.76 | 0.33 | 13.36 |
+| 10 | lambda | pipe_where | 0.24 | 0.28 | 11.76 | 0.32 | 12.61 |
+| 11 | lambda | for_clauses_test | 0.47 | 0.54 | 10.85 | 0.32 | 12.19 |
+| 12 | lambda | numeric_sys_func | 0.40 | 0.54 | 10.57 | 0.31 | 11.83 |
+| 13 | proc | proc_proc_fill | 0.57 | 0.63 | 9.68 | 0.37 | 11.27 |
+| 14 | awfy | awfy_nbody | 0.37 | 0.43 | 10.20 | 0.26 | 11.25 |
+| 15 | lambda | comp_expr | 0.46 | 0.53 | 9.68 | 0.31 | 10.97 |
+| 16 | latex | latex_test_latex_includegraphics | 0.17 | 9.07 | 1.43 | 0.10 | 10.77 |
+| 17 | awfy | awfy_richards2 | 0.90 | 0.98 | 8.20 | 0.33 | 10.43 |
+| 18 | awfy | awfy_richards | 0.87 | 0.95 | 7.97 | 0.34 | 10.13 |
+| 19 | lambda | numeric_expr | 0.34 | 0.43 | 8.39 | 0.31 | 9.47 |
+| 20 | lambda | comp_expr_edge | 0.30 | 0.33 | 7.31 | 0.27 | 8.20 |
+| 21 | math | math_test_math_spacing | 0.34 | 3.23 | 4.17 | 0.30 | 8.10 |
+| 22 | beng | beng_nbody | 0.45 | 0.50 | 6.83 | 0.25 | 8.03 |
+| 23 | awfy | awfy_nbody2 | 0.42 | 0.45 | 6.62 | 0.24 | 7.71 |
+| 24 | lambda | decimal | 0.24 | 0.32 | 6.85 | 0.27 | 7.68 |
+| 25 | lambda | type_occurrence | 0.40 | 0.55 | 6.35 | 0.24 | 7.54 |
+| 26 | lambda | expr | 0.38 | 0.42 | 6.47 | 0.25 | 7.53 |
+| 27 | lambda | string_pattern | 0.34 | 0.47 | 6.15 | 0.25 | 7.24 |
+| 28 | lambda | vector_performance | 0.35 | 0.50 | 5.99 | 0.23 | 7.08 |
+| 29 | math | math_test_math_css | 0.17 | 4.18 | 2.23 | 0.11 | 6.69 |
+| 30 | lambda | vector_advanced | 0.34 | 0.46 | 5.61 | 0.24 | 6.64 |
+| 31 | lambda | error_propagation | 0.41 | 0.54 | 5.24 | 0.30 | 6.56 |
+| 32 | lambda | pipe_spread | 0.17 | 0.20 | 5.92 | 0.26 | 6.52 |
+| 33 | lambda | string_funcs | 0.26 | 0.33 | 5.53 | 0.23 | 6.32 |
+| 34 | lambda | box_unbox_advanced | 0.39 | 0.52 | 4.96 | 0.28 | 6.12 |
+| 35 | larceny | larceny_paraffins | 0.37 | 0.41 | 4.91 | 0.23 | 5.92 |
+| 36 | lambda | for_decompose | 0.25 | 0.34 | 5.09 | 0.23 | 5.91 |
+| 37 | lambda | path | 0.28 | 0.33 | 4.87 | 0.22 | 5.69 |
+| 38 | beng | beng_knucleotide | 0.37 | 0.37 | 4.70 | 0.23 | 5.66 |
+| 39 | lambda | match_expr | 0.30 | 0.34 | 4.76 | 0.25 | 5.64 |
+| 40 | lambda | datetime | 0.39 | 0.39 | 4.63 | 0.22 | 5.64 |
+| 41 | lambda | sys_func_native_cmp | 0.32 | 0.40 | 4.58 | 0.26 | 5.56 |
+| 42 | lambda | constrained_type | 0.18 | 0.21 | 4.91 | 0.24 | 5.53 |
+| 43 | larceny | larceny_triangl | 0.31 | 0.46 | 4.51 | 0.23 | 5.51 |
+| 44 | lambda | vector_basic | 0.24 | 0.38 | 4.62 | 0.24 | 5.49 |
+| 45 | lambda | simple_expr | 0.30 | 0.36 | 4.58 | 0.23 | 5.48 |
+| 46 | lambda | func_param2 | 0.29 | 0.41 | 4.53 | 0.24 | 5.45 |
+| 47 | lambda | structural_equality | 0.23 | 0.26 | 4.68 | 0.24 | 5.39 |
+| 48 | lambda | test_string_pattern_integration | 0.30 | 0.36 | 4.07 | 0.22 | 4.94 |
+| 49 | kostya | kostya_base64 | 0.26 | 0.32 | 4.07 | 0.22 | 4.86 |
+| 50 | lambda | string_indexable | 0.20 | 0.24 | 4.16 | 0.23 | 4.83 |
+| 51 | lambda | namespace | 0.26 | 0.32 | 4.00 | 0.22 | 4.80 |
+| 52 | larceny | larceny_deriv2 | 0.31 | 0.34 | 3.81 | 0.23 | 4.69 |
+| 53 | awfy | awfy_bounce2 | 0.23 | 0.24 | 3.97 | 0.21 | 4.69 |
+| 54 | awfy | awfy_bounce | 0.22 | 0.24 | 3.88 | 0.22 | 4.58 |
+| 55 | lambda | int64 | 0.24 | 0.31 | 3.73 | 0.22 | 4.49 |
+| 56 | lambda | transpile_typed_closure | 0.24 | 0.30 | 3.62 | 0.26 | 4.42 |
+| 57 | lambda | value | 0.20 | 0.24 | 3.71 | 0.22 | 4.37 |
+| 58 | lambda | that_implicit_name | 0.14 | 0.16 | 3.85 | 0.22 | 4.36 |
+| 59 | lambda | pipe_type_infer | 0.14 | 0.18 | 3.72 | 0.21 | 4.28 |
+| 60 | proc | proc_proc_typed_array_param | 0.30 | 0.32 | 3.42 | 0.23 | 4.27 |
+| 61 | lambda | func | 0.20 | 0.25 | 3.56 | 0.23 | 4.24 |
+| 62 | lambda | for_element_spread | 0.16 | 0.21 | 3.49 | 0.21 | 4.08 |
+| 63 | lambda | closure_advanced | 0.22 | 0.31 | 3.28 | 0.24 | 4.05 |
+| 64 | proc | proc_proc_array_type_convert | 0.23 | 0.27 | 3.29 | 0.23 | 4.01 |
+| 65 | lambda | transpile_bitwise | 0.27 | 0.32 | 3.18 | 0.23 | 4.00 |
+| 66 | r7rs | r7rs_nqueens2 | 0.27 | 0.27 | 3.12 | 0.21 | 3.88 |
+| 67 | lambda | vmap | 0.20 | 0.27 | 3.16 | 0.19 | 3.83 |
+| 68 | beng | beng_fannkuch | 0.21 | 0.23 | 3.13 | 0.20 | 3.80 |
+| 69 | lambda | let_for_array | 0.24 | 0.27 | 2.90 | 0.21 | 3.61 |
+| 70 | lambda | tail_call | 0.21 | 0.24 | 2.87 | 0.22 | 3.56 |
+| 71 | r7rs | r7rs_fft | 0.21 | 0.24 | 2.86 | 0.19 | 3.50 |
+| 72 | lambda | for_element_filter | 0.14 | 0.18 | 2.98 | 0.20 | 3.48 |
+| 73 | lambda | is_in_precedence | 0.23 | 0.32 | 2.69 | 0.21 | 3.46 |
+| 74 | lambda | transpile_error_ret_types | 0.25 | 0.29 | 2.62 | 0.27 | 3.44 |
+| 75 | proc | proc_proc_var | 0.35 | 0.38 | 2.48 | 0.22 | 3.43 |
+| 76 | r7rs | r7rs_fft2 | 0.25 | 0.26 | 2.70 | 0.20 | 3.43 |
+| 77 | lambda | sys_func_native_math | 0.24 | 0.29 | 2.63 | 0.23 | 3.39 |
+| 78 | larceny | larceny_pnpoly | 0.22 | 0.29 | 2.68 | 0.20 | 3.38 |
+| 79 | kostya | kostya_levenshtein | 0.24 | 0.26 | 2.67 | 0.20 | 3.37 |
+| 80 | lambda | decimal_big | 0.12 | 0.15 | 2.90 | 0.21 | 3.37 |
+| 81 | beng | beng_spectralnorm | 0.25 | 0.27 | 2.62 | 0.21 | 3.35 |
+| 82 | r7rs | r7rs_nqueens | 0.24 | 0.26 | 2.61 | 0.20 | 3.33 |
+| 83 | lambda | large_int_map | 0.21 | 0.22 | 2.67 | 0.21 | 3.30 |
+| 84 | lambda | comment | 0.18 | 0.23 | 2.65 | 0.21 | 3.24 |
+| 85 | lambda | null_safe_member | 0.19 | 0.27 | 2.59 | 0.19 | 3.24 |
+| 86 | proc | proc_proc_element_mutation | 0.24 | 0.25 | 2.48 | 0.21 | 3.19 |
+| 87 | lambda | type2 | 0.16 | 0.18 | 2.63 | 0.20 | 3.17 |
+| 88 | larceny | larceny_ray | 0.27 | 0.31 | 2.37 | 0.19 | 3.14 |
+| 89 | lambda | child_query | 0.21 | 0.28 | 2.45 | 0.19 | 3.14 |
+| 90 | beng | beng_regexredux | 0.28 | 0.25 | 2.43 | 0.18 | 3.13 |
+| 91 | lambda | sys_func_is_nan | 0.13 | 0.16 | 2.62 | 0.20 | 3.11 |
+| 92 | proc | proc_proc_param_type_infer | 0.26 | 0.27 | 2.33 | 0.20 | 3.08 |
+| 93 | proc | proc_proc_array_set | 0.17 | 0.20 | 2.50 | 0.21 | 3.08 |
+| 94 | lambda | array_float | 0.25 | 0.41 | 2.24 | 0.18 | 3.07 |
+| 95 | kostya | kostya_json_gen | 0.23 | 0.25 | 2.36 | 0.21 | 3.04 |
+| 96 | lambda | sys_func_math_extended | 0.24 | 0.25 | 2.33 | 0.21 | 3.03 |
+| 97 | lambda | type_negation | 0.16 | 0.19 | 2.50 | 0.18 | 3.03 |
+| 98 | lambda | unboxed_field_access | 0.17 | 0.20 | 2.48 | 0.20 | 3.03 |
+| 99 | lambda | unboxed_sys_func | 0.17 | 0.22 | 2.41 | 0.21 | 3.00 |
+| 100 | proc | proc_vmap | 0.24 | 0.25 | 2.27 | 0.20 | 2.96 |
+| 101 | proc | proc_proc_map_type_change | 0.25 | 0.26 | 2.15 | 0.20 | 2.86 |
+| 102 | lambda | query | 0.17 | 0.23 | 2.26 | 0.20 | 2.86 |
+| 103 | proc | proc_proc_arr_concat | 0.17 | 0.20 | 2.30 | 0.19 | 2.86 |
+| 104 | larceny | larceny_deriv | 0.24 | 0.27 | 2.13 | 0.20 | 2.85 |
+| 105 | lambda | transpile_idiv_mod | 0.18 | 0.24 | 2.17 | 0.20 | 2.80 |
+| 106 | lambda | in_container | 0.10 | 0.16 | 2.31 | 0.19 | 2.76 |
+| 107 | proc | proc_while_swap | 0.33 | 0.35 | 1.86 | 0.19 | 2.75 |
+| 108 | lambda | string_prefix_suffix | 0.13 | 0.17 | 2.24 | 0.19 | 2.74 |
+| 109 | awfy | awfy_queens2 | 0.22 | 0.22 | 2.08 | 0.21 | 2.73 |
+| 110 | larceny | larceny_gcbench | 0.20 | 0.20 | 2.10 | 0.20 | 2.70 |
+| 111 | proc | proc_test_pipe_file | 0.21 | 0.25 | 2.07 | 0.19 | 2.70 |
+| 112 | larceny | larceny_quicksort | 0.19 | 0.21 | 2.06 | 0.20 | 2.66 |
+| 113 | awfy | awfy_towers2 | 0.23 | 0.23 | 1.98 | 0.20 | 2.64 |
+| 114 | lambda | closure | 0.18 | 0.23 | 1.98 | 0.20 | 2.59 |
+| 115 | lambda | string_pattern_ops | 0.15 | 0.20 | 2.04 | 0.19 | 2.58 |
+| 116 | proc | proc_proc_closure_mutation | 0.20 | 0.25 | 1.91 | 0.21 | 2.56 |
+| 117 | awfy | awfy_queens | 0.18 | 0.19 | 1.99 | 0.19 | 2.55 |
+| 118 | proc | proc_proc_semicolon | 0.25 | 0.30 | 1.76 | 0.20 | 2.53 |
+| 119 | proc | proc_proc_else_if | 0.25 | 0.25 | 1.84 | 0.18 | 2.52 |
+| 120 | beng | beng_binarytrees | 0.19 | 0.20 | 1.92 | 0.19 | 2.49 |
+| 121 | lambda | transpile_len_typed | 0.17 | 0.21 | 1.90 | 0.19 | 2.47 |
+| 122 | lambda | method_call | 0.15 | 0.21 | 1.89 | 0.18 | 2.42 |
+| 123 | lambda | nested_shadowing | 0.15 | 0.18 | 1.87 | 0.20 | 2.39 |
+| 124 | lambda | empty_string_null | 0.12 | 0.15 | 1.93 | 0.18 | 2.39 |
+| 125 | r7rs | r7rs_mbrot2 | 0.22 | 0.23 | 1.76 | 0.19 | 2.38 |
+| 126 | proc | proc_tail_call_proc | 0.19 | 0.20 | 1.79 | 0.20 | 2.38 |
+| 127 | kostya | kostya_matmul | 0.19 | 0.20 | 1.79 | 0.19 | 2.38 |
+| 128 | latex | latex_test_latex_css | 0.11 | 0.82 | 1.25 | 0.10 | 2.36 |
+| 129 | lambda | float_conversion | 0.15 | 0.19 | 1.81 | 0.20 | 2.35 |
+| 130 | lambda | error_handling | 0.18 | 0.22 | 1.70 | 0.22 | 2.32 |
+| 131 | awfy | awfy_towers | 0.20 | 0.22 | 1.69 | 0.19 | 2.31 |
+| 132 | larceny | larceny_gcbench2 | 0.19 | 0.20 | 1.71 | 0.19 | 2.27 |
+| 133 | proc | proc_proc_control | 0.23 | 0.25 | 1.58 | 0.19 | 2.27 |
+| 134 | lambda | pipe_sysfunc | 0.11 | 0.15 | 1.77 | 0.19 | 2.22 |
+| 135 | lambda | spread | 0.12 | 0.17 | 1.72 | 0.18 | 2.20 |
+| 136 | larceny | larceny_puzzle | 0.16 | 0.18 | 1.67 | 0.18 | 2.19 |
+| 137 | proc | proc_proc_dir_listing | 0.17 | 0.16 | 1.68 | 0.17 | 2.19 |
+| 138 | proc | proc_proc_bitwise_int64 | 0.17 | 0.20 | 1.64 | 0.18 | 2.19 |
+| 139 | r7rs | r7rs_mbrot | 0.19 | 0.21 | 1.58 | 0.18 | 2.18 |
+| 140 | lambda | first_class_fn | 0.14 | 0.16 | 1.66 | 0.19 | 2.17 |
+| 141 | lambda | string | 0.10 | 0.13 | 1.74 | 0.18 | 2.14 |
+| 142 | proc | proc_proc_param_mutation | 0.16 | 0.17 | 1.62 | 0.19 | 2.12 |
+| 143 | lambda | mixed_numeric_ops | 0.12 | 0.15 | 1.64 | 0.19 | 2.11 |
+| 144 | lambda | namespace_v2 | 0.16 | 0.19 | 1.54 | 0.18 | 2.07 |
+| 145 | lambda | string_ord_chr | 0.10 | 0.14 | 1.65 | 0.17 | 2.06 |
+| 146 | lambda | chained_comparisons | 0.12 | 0.11 | 1.65 | 0.19 | 2.06 |
+| 147 | lambda | match_string_pattern | 0.13 | 0.17 | 1.55 | 0.19 | 2.04 |
+| 148 | lambda | sys_func_math_constants | 0.16 | 0.18 | 1.52 | 0.18 | 2.04 |
+| 149 | lambda | typed_map_direct_access | 0.14 | 0.15 | 1.54 | 0.18 | 2.03 |
+| 150 | beng | beng_mandelbrot | 0.19 | 0.21 | 1.46 | 0.17 | 2.03 |
+| 151 | lambda | box_unbox_negative | 0.13 | 0.16 | 1.51 | 0.18 | 1.97 |
+| 152 | awfy | awfy_permute2 | 0.18 | 0.18 | 1.33 | 0.19 | 1.89 |
+| 153 | lambda | if_expr_types | 0.13 | 0.14 | 1.44 | 0.18 | 1.89 |
+| 154 | lambda | trim | 0.11 | 0.14 | 1.46 | 0.18 | 1.87 |
+| 155 | proc | proc_proc_cmd | 0.14 | 0.16 | 1.39 | 0.19 | 1.87 |
+| 156 | lambda | split_null_concat | 0.10 | 0.14 | 1.45 | 0.17 | 1.87 |
+| 157 | proc | proc_proc_div_mod | 0.15 | 0.18 | 1.38 | 0.18 | 1.87 |
+| 158 | lambda | correlation_math | 0.12 | 0.16 | 1.44 | 0.16 | 1.86 |
+| 159 | lambda | typed_param_string | 0.11 | 0.14 | 1.39 | 0.18 | 1.82 |
+| 160 | awfy | awfy_storage2 | 0.16 | 0.18 | 1.31 | 0.18 | 1.81 |
+| 161 | lambda | map_spread_override | 0.15 | 0.18 | 1.28 | 0.18 | 1.80 |
+| 162 | lambda | func_param | 0.14 | 0.17 | 1.22 | 0.19 | 1.75 |
+| 163 | awfy | awfy_mandelbrot2 | 0.20 | 0.22 | 1.14 | 0.18 | 1.73 |
+| 164 | larceny | larceny_divrec | 0.14 | 0.15 | 1.20 | 0.19 | 1.70 |
+| 165 | awfy | awfy_permute | 0.15 | 0.16 | 1.19 | 0.18 | 1.69 |
+| 166 | awfy | awfy_storage | 0.15 | 0.16 | 1.16 | 0.18 | 1.64 |
+| 167 | lambda | box_unbox | 0.09 | 0.13 | 1.23 | 0.17 | 1.63 |
+| 168 | proc | proc_proc_var_type_widen | 0.14 | 0.19 | 1.11 | 0.18 | 1.62 |
+| 169 | larceny | larceny_diviter | 0.13 | 0.14 | 1.15 | 0.18 | 1.61 |
+| 170 | r7rs | r7rs_fibfp2 | 0.10 | 0.12 | 1.18 | 0.18 | 1.59 |
+| 171 | awfy | awfy_mandelbrot | 0.17 | 0.21 | 1.03 | 0.17 | 1.57 |
+| 172 | proc | proc_proc_map_set | 0.13 | 0.14 | 1.08 | 0.19 | 1.56 |
+| 173 | lambda | forward_ref | 0.10 | 0.13 | 1.13 | 0.19 | 1.56 |
+| 174 | awfy | awfy_list | 0.15 | 0.16 | 1.08 | 0.18 | 1.56 |
+| 175 | kostya | kostya_primes | 0.14 | 0.15 | 1.10 | 0.17 | 1.56 |
+| 176 | lambda | robust_coverage | 0.12 | 0.12 | 1.11 | 0.17 | 1.52 |
+| 177 | lambda | math_random | 0.11 | 0.15 | 1.08 | 0.17 | 1.51 |
+| 178 | r7rs | r7rs_fibfp | 0.09 | 0.11 | 1.11 | 0.18 | 1.50 |
+| 179 | proc | proc_test_io_module | 0.13 | 0.14 | 1.05 | 0.18 | 1.50 |
+| 180 | awfy | awfy_sieve2 | 0.12 | 0.14 | 1.05 | 0.17 | 1.49 |
+| 181 | proc | proc_match_stam | 0.12 | 0.12 | 1.07 | 0.17 | 1.48 |
+| 182 | larceny | larceny_primes | 0.14 | 0.14 | 1.03 | 0.17 | 1.48 |
+| 183 | kostya | kostya_collatz | 0.14 | 0.16 | 0.99 | 0.17 | 1.47 |
+| 184 | proc | proc_proc_markup_mutation | 0.13 | 0.14 | 1.01 | 0.18 | 1.46 |
+| 185 | lambda | parent_access | 0.10 | 0.10 | 1.07 | 0.18 | 1.44 |
+| 186 | proc | proc_proc_bitwise | 0.11 | 0.13 | 1.00 | 0.17 | 1.41 |
+| 187 | lambda | name_member | 0.11 | 0.13 | 0.99 | 0.18 | 1.41 |
+| 188 | proc | proc_proc_error | 0.12 | 0.14 | 0.94 | 0.18 | 1.38 |
+| 189 | proc | proc_clock | 0.13 | 0.15 | 0.88 | 0.18 | 1.35 |
+| 190 | awfy | awfy_sieve | 0.12 | 0.13 | 0.91 | 0.17 | 1.34 |
+| 191 | r7rs | r7rs_tak2 | 0.13 | 0.14 | 0.87 | 0.17 | 1.31 |
+| 192 | lambda | sys_fn | 0.07 | 0.11 | 0.96 | 0.16 | 1.31 |
+| 193 | r7rs | r7rs_sum2 | 0.12 | 0.13 | 0.88 | 0.18 | 1.30 |
+| 194 | lambda | error_union_param | 0.08 | 0.11 | 0.93 | 0.18 | 1.29 |
+| 195 | r7rs | r7rs_cpstak2 | 0.13 | 0.15 | 0.84 | 0.17 | 1.28 |
+| 196 | lambda | builtin_import_alias | 0.10 | 0.12 | 0.88 | 0.17 | 1.27 |
+| 197 | larceny | larceny_array1 | 0.13 | 0.14 | 0.85 | 0.16 | 1.26 |
+| 198 | lambda | sort_advanced | 0.09 | 0.12 | 0.89 | 0.17 | 1.26 |
+| 199 | r7rs | r7rs_sumfp2 | 0.12 | 0.13 | 0.82 | 0.17 | 1.24 |
+| 200 | r7rs | r7rs_ack2 | 0.12 | 0.13 | 0.81 | 0.17 | 1.22 |
+| 201 | lambda | builtin_import_global | 0.07 | 0.11 | 0.85 | 0.16 | 1.20 |
+| 202 | r7rs | r7rs_sumfp | 0.10 | 0.13 | 0.74 | 0.18 | 1.16 |
+| 203 | r7rs | r7rs_cpstak | 0.11 | 0.13 | 0.72 | 0.17 | 1.14 |
+| 204 | lambda | reduce | 0.08 | 0.12 | 0.74 | 0.17 | 1.12 |
+| 205 | lambda | input_jsonld | 0.08 | 0.11 | 0.77 | 0.17 | 1.11 |
+| 206 | r7rs | r7rs_fib2 | 0.10 | 0.12 | 0.71 | 0.17 | 1.11 |
+| 207 | lambda | csv_test | 0.07 | 0.11 | 0.75 | 0.17 | 1.09 |
+| 208 | r7rs | r7rs_ack | 0.10 | 0.12 | 0.67 | 0.18 | 1.08 |
+| 209 | r7rs | r7rs_tak | 0.10 | 0.12 | 0.69 | 0.16 | 1.08 |
+| 210 | r7rs | r7rs_sum | 0.09 | 0.11 | 0.71 | 0.16 | 1.07 |
+| 211 | lambda | builtin_import | 0.08 | 0.10 | 0.67 | 0.17 | 1.02 |
+| 212 | lambda | input_csv | 0.08 | 0.10 | 0.67 | 0.17 | 1.01 |
+| 213 | r7rs | r7rs_fib | 0.08 | 0.11 | 0.58 | 0.17 | 0.95 |
+| 214 | lambda | parse | 0.07 | 0.10 | 0.53 | 0.18 | 0.86 |
+| 215 | proc | proc_proc2 | 0.05 | 0.09 | 0.38 | 0.16 | 0.67 |
+| 216 | lambda | type | 0.08 | 0.09 | 0.34 | 0.16 | 0.67 |
+| 217 | lambda | input_dir | 0.05 | 0.08 | 0.36 | 0.16 | 0.66 |
+| 218 | proc | proc_proc1 | 0.05 | 0.09 | 0.35 | 0.17 | 0.66 |
+| 219 | lambda | single_let | 0.03 | 0.05 | 0.20 | 0.17 | 0.44 |
+| 220 | lambda | single | 0.02 | 0.03 | 0.19 | 0.17 | 0.40 |
 
 ---
 
-## Set 2: Scripts with Imports — 55 scripts
+## Set 2: Scripts with Imports — 57 scripts
 
 Timings include all imported modules. Module count shown in last column.
 
@@ -272,78 +268,80 @@ Timings include all imported modules. Module count shown in last column.
 
 | Phase | Total (ms) | Avg (ms) | % of Total |
 |-------|-----------|----------|------------|
-| Tree-sitter Parse | 135.73 | 2.47 | 1.6% |
-| AST Build | 6828.18 | 124.15 | 79.7% |
-| MIR Transpile | 1559.91 | 28.36 | 18.2% |
-| JIT Codegen | 47.86 | 0.87 | 0.6% |
-| **Total** | **8571.68** | **155.85** | 100% |
+| Tree-sitter Parse | 266.31 | 4.67 | 2.3% |
+| AST Build | 7925.74 | 139.05 | 69.7% |
+| MIR Transpile | 3098.06 | 54.35 | 27.2% |
+| JIT Codegen | 88.67 | 1.56 | 0.8% |
+| **Total** | **11378.79** | **199.63** | 100% |
 
 | Suite | Scripts | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Avg (ms) |
 |-------|---------|-----------|----------|---------------|----------|-----------|----------|
-| chart | 24 | 93.57 | 5361.79 | 1004.09 | 25.46 | 6484.92 | 270.20 |
-| lambda | 6 | 0.60 | 8.34 | 5.69 | 1.83 | 16.46 | 2.74 |
-| latex | 12 | 26.85 | 836.04 | 379.53 | 12.28 | 1254.70 | 104.56 |
-| math | 13 | 14.71 | 622.01 | 170.59 | 8.29 | 815.60 | 62.74 |
+| chart | 25 | 219.65 | 5633.70 | 2441.90 | 65.48 | 8360.72 | 334.43 |
+| lambda | 9 | 0.92 | 14.13 | 11.62 | 2.53 | 29.20 | 3.24 |
+| latex | 11 | 21.36 | 1193.87 | 318.16 | 8.77 | 1542.16 | 140.20 |
+| math | 12 | 24.39 | 1084.04 | 326.39 | 11.89 | 1446.72 | 120.56 |
 
 ### Per-Script Breakdown (with imports)
 
 | # | Suite | Script | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Modules |
 |---|-------|--------|-----------|----------|---------------|----------|-----------|---------|
-| 1 | latex | latex_test_latex_m7 | 16.02 | 588.70 | 219.56 | 6.29 | 830.57 | 28 |
-| 2 | math | math_test_math_html_output | 5.97 | 364.17 | 63.41 | 2.42 | 435.98 | 15 |
-| 3 | chart | chart_test_histogram | 10.07 | 266.16 | 113.50 | 3.19 | 392.92 | 16 |
-| 4 | chart | chart_test_rule_chart | 10.13 | 264.38 | 111.75 | 3.06 | 389.31 | 16 |
-| 5 | chart | chart_test_bubble_chart | 9.54 | 265.50 | 108.57 | 2.86 | 386.46 | 15 |
-| 6 | chart | chart_test_stacked_bar_chart | 9.63 | 263.99 | 108.24 | 2.87 | 384.73 | 15 |
-| 7 | chart | chart_test_concat_chart | 9.81 | 260.36 | 109.70 | 2.92 | 382.80 | 15 |
-| 8 | chart | chart_test_boxplot | 3.35 | 240.78 | 32.20 | 0.74 | 277.07 | 3 |
-| 9 | chart | chart_test_stacked_area_chart | 3.72 | 240.38 | 31.96 | 0.76 | 276.83 | 3 |
-| 10 | chart | chart_test_line_chart | 3.31 | 240.04 | 31.10 | 0.77 | 275.22 | 3 |
-| 11 | chart | chart_test_errorbar | 3.03 | 240.00 | 31.35 | 0.76 | 275.15 | 3 |
-| 12 | chart | chart_test_area_chart | 2.56 | 241.31 | 27.07 | 0.51 | 271.44 | 2 |
-| 13 | chart | chart_test_annotation | 2.56 | 239.37 | 28.59 | 0.53 | 271.05 | 2 |
-| 14 | chart | chart_test_theme_dark | 3.01 | 234.63 | 32.54 | 0.74 | 270.93 | 3 |
-| 15 | chart | chart_test_temporal_axis | 3.08 | 234.21 | 32.89 | 0.74 | 270.91 | 3 |
-| 16 | chart | chart_test_tick_chart | 2.58 | 239.71 | 27.37 | 0.49 | 270.15 | 2 |
-| 17 | chart | chart_test_grouped_bar_chart | 2.52 | 239.07 | 28.05 | 0.49 | 270.13 | 2 |
-| 18 | chart | chart_test_candlestick | 2.55 | 238.52 | 28.39 | 0.50 | 269.97 | 2 |
-| 19 | chart | chart_test_scatter_chart | 2.60 | 239.10 | 27.48 | 0.53 | 269.71 | 2 |
-| 20 | chart | chart_test_heatmap | 2.61 | 237.10 | 28.52 | 0.51 | 268.75 | 2 |
-| 21 | chart | chart_test_text_chart | 2.72 | 237.64 | 27.31 | 0.50 | 268.18 | 2 |
-| 22 | chart | chart_test_tooltip | 1.57 | 157.40 | 16.53 | 0.55 | 176.04 | 2 |
-| 23 | chart | chart_test_bar_chart | 0.59 | 138.38 | 4.31 | 0.33 | 143.61 | 2 |
-| 24 | chart | chart_test_layered_chart | 0.61 | 137.58 | 4.49 | 0.35 | 143.03 | 2 |
-| 25 | chart | chart_test_conditional_color | 0.68 | 133.08 | 6.17 | 0.36 | 140.29 | 2 |
-| 26 | chart | chart_test_facet_chart | 0.74 | 133.11 | 6.04 | 0.37 | 140.25 | 2 |
-| 27 | latex | latex_test_latex_symbols | 1.47 | 62.27 | 51.20 | 0.80 | 115.75 | 4 |
-| 28 | latex | latex_test_latex_analyze | 2.47 | 61.25 | 27.20 | 1.07 | 91.99 | 4 |
-| 29 | math | math_test_math_atom_enclose | 1.69 | 50.01 | 16.99 | 0.85 | 69.55 | 6 |
-| 30 | math | math_test_math_delimiters | 1.45 | 44.22 | 17.14 | 0.95 | 63.76 | 6 |
-| 31 | math | math_test_math_atom_color | 1.21 | 40.07 | 14.63 | 0.96 | 56.87 | 6 |
-| 32 | latex | latex_test_latex_macros | 1.59 | 29.98 | 17.95 | 0.75 | 50.27 | 3 |
-| 33 | math | math_test_math_atom_spacing | 0.80 | 33.47 | 8.07 | 0.45 | 42.80 | 3 |
-| 34 | math | math_test_math_atom_style | 0.46 | 37.18 | 3.55 | 0.27 | 41.46 | 2 |
-| 35 | latex | latex_test_latex_spacing | 1.06 | 22.27 | 12.22 | 0.64 | 36.18 | 3 |
-| 36 | latex | latex_test_latex_boxes | 0.65 | 24.43 | 8.14 | 0.31 | 33.54 | 2 |
-| 37 | math | math_test_math_symbols | 0.65 | 15.53 | 16.49 | 0.41 | 33.09 | 2 |
-| 38 | latex | latex_test_latex_color | 0.84 | 15.60 | 10.82 | 0.46 | 27.73 | 2 |
-| 39 | latex | latex_test_latex_util | 0.92 | 10.39 | 12.34 | 0.48 | 24.14 | 2 |
-| 40 | math | math_test_math_box | 0.40 | 15.10 | 5.61 | 0.34 | 21.45 | 2 |
-| 41 | latex | latex_test_latex_includegraphics | 0.87 | 10.23 | 9.13 | 0.47 | 20.70 | 2 |
-| 42 | math | math_test_math_context | 0.44 | 6.69 | 4.68 | 0.33 | 12.14 | 2 |
-| 43 | math | math_test_math_css | 0.44 | 5.08 | 5.97 | 0.35 | 11.83 | 2 |
-| 44 | latex | latex_test_latex_font_decl | 0.36 | 5.01 | 4.78 | 0.35 | 10.49 | 2 |
-| 45 | latex | latex_test_latex_to_html | 0.42 | 4.79 | 4.61 | 0.37 | 10.19 | 2 |
-| 46 | math | math_test_math_optimize | 0.47 | 3.48 | 5.42 | 0.33 | 9.70 | 2 |
-| 47 | math | math_test_math_spacing | 0.38 | 3.47 | 4.64 | 0.32 | 8.81 | 2 |
-| 48 | math | math_test_math_metrics | 0.35 | 3.52 | 3.99 | 0.31 | 8.18 | 2 |
-| 49 | lambda | import_multi | 0.13 | 1.79 | 1.62 | 0.44 | 3.98 | 3 |
-| 50 | latex | latex_test_latex_css | 0.17 | 1.10 | 1.59 | 0.28 | 3.15 | 2 |
-| 51 | lambda | import_chain | 0.08 | 2.24 | 0.42 | 0.19 | 2.93 | 2 |
-| 52 | lambda | import_types | 0.10 | 1.18 | 1.04 | 0.26 | 2.59 | 2 |
-| 53 | lambda | import_compute | 0.10 | 1.21 | 0.92 | 0.30 | 2.52 | 2 |
-| 54 | lambda | import_pub_types | 0.10 | 0.91 | 0.90 | 0.34 | 2.25 | 2 |
-| 55 | lambda | import_error_destr | 0.10 | 1.01 | 0.79 | 0.30 | 2.19 | 2 |
+| 1 | latex | latex_test_latex_m7 | 11.65 | 944.46 | 171.82 | 4.44 | 1132.37 | 30 |
+| 2 | math | math_test_math_html_output | 15.71 | 849.04 | 218.50 | 5.99 | 1089.24 | 32 |
+| 3 | chart | chart_test_rule_chart | 9.56 | 254.50 | 106.08 | 2.78 | 371.31 | 16 |
+| 4 | chart | chart_test_text_chart | 9.79 | 251.86 | 106.56 | 2.88 | 371.17 | 16 |
+| 5 | chart | chart_test_stacked_bar_chart | 9.77 | 251.06 | 106.98 | 2.85 | 370.46 | 16 |
+| 6 | chart | chart_test_errorbar | 9.53 | 251.02 | 106.96 | 2.87 | 370.38 | 15 |
+| 7 | chart | chart_test_layered_chart | 9.67 | 250.61 | 106.82 | 2.83 | 370.14 | 16 |
+| 8 | chart | chart_test_bubble_chart | 9.83 | 251.60 | 106.50 | 2.80 | 368.92 | 16 |
+| 9 | chart | chart_test_stacked_area_chart | 9.63 | 249.00 | 106.35 | 2.78 | 367.76 | 14 |
+| 10 | chart | chart_test_area_chart | 9.60 | 251.93 | 105.12 | 2.76 | 367.41 | 16 |
+| 11 | chart | chart_test_boxplot | 9.25 | 250.98 | 103.82 | 2.63 | 367.17 | 16 |
+| 12 | chart | chart_test_heatmap | 9.63 | 250.09 | 104.40 | 2.78 | 366.52 | 16 |
+| 13 | chart | chart_test_tick_chart | 9.24 | 251.01 | 103.13 | 2.61 | 365.99 | 15 |
+| 14 | chart | chart_test_candlestick | 9.26 | 249.30 | 103.44 | 2.69 | 365.63 | 15 |
+| 15 | chart | chart_test_line_chart | 9.63 | 249.45 | 104.06 | 2.74 | 363.37 | 16 |
+| 16 | chart | chart_test_histogram | 9.15 | 247.77 | 102.22 | 2.59 | 361.73 | 16 |
+| 17 | chart | chart_test_bar_chart | 9.11 | 245.90 | 101.51 | 2.64 | 361.02 | 15 |
+| 18 | chart | chart_test_scatter_chart | 9.07 | 246.02 | 101.21 | 2.58 | 358.84 | 15 |
+| 19 | chart | chart_test_grouped_bar_chart | 9.09 | 245.57 | 101.21 | 2.57 | 358.44 | 16 |
+| 20 | chart | chart_test_temporal_axis | 9.30 | 243.91 | 102.05 | 2.69 | 358.01 | 14 |
+| 21 | chart | chart_test_annotation | 8.69 | 245.82 | 99.08 | 2.43 | 356.02 | 15 |
+| 22 | chart | chart_test_tooltip | 6.90 | 150.46 | 78.17 | 2.39 | 237.92 | 14 |
+| 23 | chart | chart_test_conditional_color | 6.80 | 149.60 | 78.09 | 2.34 | 236.83 | 14 |
+| 24 | chart | chart_test_concat_chart | 6.83 | 149.35 | 78.14 | 2.33 | 236.64 | 14 |
+| 25 | chart | chart_test_repeat_chart | 6.80 | 148.79 | 77.49 | 2.32 | 235.41 | 14 |
+| 26 | chart | chart_test_facet_chart | 6.76 | 149.12 | 76.29 | 2.29 | 231.91 | 13 |
+| 27 | chart | chart_test_theme_dark | 6.75 | 148.97 | 76.23 | 2.28 | 231.88 | 13 |
+| 28 | latex | latex_test_latex_symbols | 1.41 | 62.35 | 51.90 | 0.73 | 116.36 | 4 |
+| 29 | latex | latex_test_latex_analyze | 1.65 | 57.03 | 15.93 | 0.45 | 75.06 | 5 |
+| 30 | math | math_test_math_atom_color | 1.16 | 38.90 | 14.00 | 0.87 | 54.93 | 6 |
+| 31 | math | math_test_math_atom_enclose | 1.11 | 38.32 | 13.97 | 0.74 | 54.07 | 5 |
+| 32 | math | math_test_math_atom_style | 1.08 | 36.27 | 12.43 | 0.76 | 50.56 | 6 |
+| 33 | latex | latex_test_latex_picture | 1.82 | 25.17 | 21.91 | 0.59 | 49.56 | 2 |
+| 34 | math | math_test_math_delimiters | 0.99 | 32.66 | 12.53 | 0.71 | 46.60 | 5 |
+| 35 | latex | latex_test_latex_macros | 1.43 | 27.46 | 16.45 | 0.67 | 46.01 | 3 |
+| 36 | math | math_test_math_atom_spacing | 0.86 | 31.25 | 11.45 | 0.67 | 41.16 | 4 |
+| 37 | math | math_test_math_box | 0.94 | 23.33 | 9.61 | 0.58 | 34.36 | 4 |
+| 38 | math | math_test_math_symbols | 0.64 | 14.67 | 15.76 | 0.38 | 31.49 | 2 |
+| 39 | latex | latex_test_latex_color | 0.60 | 22.63 | 6.75 | 0.29 | 30.22 | 2 |
+| 40 | latex | latex_test_latex_boxes | 0.62 | 14.86 | 7.69 | 0.29 | 26.83 | 2 |
+| 41 | latex | latex_test_latex_spacing | 0.47 | 20.83 | 4.60 | 0.30 | 26.21 | 2 |
+| 42 | latex | latex_test_latex_util | 0.88 | 9.74 | 11.53 | 0.44 | 22.61 | 2 |
+| 43 | math | math_test_math_context | 0.63 | 9.26 | 6.43 | 0.43 | 16.74 | 3 |
+| 44 | latex | latex_test_latex_font_decl | 0.43 | 4.74 | 5.22 | 0.25 | 10.57 | 3 |
+| 45 | latex | latex_test_latex_to_html | 0.40 | 4.60 | 4.36 | 0.32 | 9.67 | 2 |
+| 46 | lambda | import | 0.24 | 4.58 | 4.23 | 0.34 | 9.39 | 2 |
+| 47 | math | math_test_math_optimize | 0.45 | 3.36 | 5.15 | 0.32 | 9.29 | 2 |
+| 48 | math | math_test_math_util | 0.48 | 3.54 | 2.62 | 0.14 | 8.19 | 2 |
+| 49 | math | math_test_math_metrics | 0.34 | 3.45 | 3.95 | 0.31 | 8.11 | 2 |
+| 50 | lambda | import_multi | 0.10 | 1.61 | 1.45 | 0.34 | 3.52 | 3 |
+| 51 | lambda | import_chain | 0.08 | 2.08 | 0.82 | 0.32 | 3.35 | 3 |
+| 52 | lambda | import_arrays | 0.11 | 1.25 | 1.20 | 0.26 | 2.83 | 2 |
+| 53 | lambda | import_types | 0.09 | 1.08 | 0.95 | 0.25 | 2.36 | 2 |
+| 54 | lambda | import_compute | 0.07 | 1.12 | 0.87 | 0.24 | 2.33 | 2 |
+| 55 | lambda | import_error_destr | 0.08 | 0.89 | 0.68 | 0.27 | 1.90 | 2 |
+| 56 | lambda | import_vars | 0.07 | 0.80 | 0.69 | 0.25 | 1.81 | 2 |
+| 57 | lambda | import_pub_types | 0.08 | 0.73 | 0.72 | 0.25 | 1.73 | 2 |
 
 ---
 
@@ -352,3 +350,4 @@ Timings include all imported modules. Module count shown in last column.
 | Script | Reason |
 |--------|--------|
 | awfy_cd2 | no profile data |
+| kostya_brainfuck | timeout |

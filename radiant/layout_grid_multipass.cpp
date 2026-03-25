@@ -377,9 +377,13 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     // smaller due to percentage clamping).
     // ========================================================================
     if (grid_layout && grid_layout->computed_column_count > 0) {
-        // Check if container is shrink-to-fit (absolutely positioned with no explicit width)
+        // Check if container is shrink-to-fit (inline-grid, or absolutely
+        // positioned with no explicit width)
         bool is_shrink_to_fit = false;
-        if (grid_container->position &&
+        if (grid_container->display.outer == CSS_VALUE_INLINE_BLOCK &&
+            (!grid_container->blk || grid_container->blk->given_width < 0)) {
+            is_shrink_to_fit = true;
+        } else if (grid_container->position &&
             (grid_container->position->position == CSS_VALUE_ABSOLUTE ||
              grid_container->position->position == CSS_VALUE_FIXED)) {
             // Check if width is auto (not explicitly set)

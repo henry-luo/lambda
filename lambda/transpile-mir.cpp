@@ -206,6 +206,9 @@ struct MirTranspiler {
 
     // Variadic function body context: when true, return/raise must emit restore_vargs
     bool in_variadic_body;
+
+    // Infer cache: AstFuncNode* -> InferCacheEntry (cached param type inference results)
+    struct hashmap* infer_cache;
 };
 
 // ============================================================================
@@ -290,6 +293,26 @@ static int global_var_cmp(const void *a, const void *b, void *udata) {
 static uint64_t global_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const GlobalVarEntry* e = (const GlobalVarEntry*)item;
     return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
+}
+
+// Infer cache entry: caches inferred parameter types per function to avoid
+// redundant body walks between prepass_forward_declare and transpile_func_def.
+// Keyed by AstFuncNode pointer (stable across the compilation).
+struct InferCacheEntry {
+    AstFuncNode* fn;
+    TypeId param_types[16];
+    int param_count;
+};
+
+static int infer_cache_cmp(const void *a, const void *b, void *udata) {
+    (void)udata;
+    const InferCacheEntry* ea = (const InferCacheEntry*)a;
+    const InferCacheEntry* eb = (const InferCacheEntry*)b;
+    return (ea->fn == eb->fn) ? 0 : (ea->fn < eb->fn ? -1 : 1);
+}
+static uint64_t infer_cache_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const InferCacheEntry* e = (const InferCacheEntry*)item;
+    return hashmap_xxhash3(&e->fn, sizeof(e->fn), seed0, seed1);
 }
 
 // ============================================================================
@@ -8637,6 +8660,286 @@ static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, 
 }
 
 // ============================================================================
+// Batched parameter type inference: infer types for ALL untyped params
+// in a single body walk instead of walking once per parameter.
+// ============================================================================
+
+// Multi-context alias finding: walks body once checking all InferCtx contexts
+static void find_aliases_multi(AstNode* node, InferCtx* ctxs, int ctx_count) {
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_CONTENT: {
+            AstListNode* list = (AstListNode*)node;
+            find_aliases_multi(list->declare, ctxs, ctx_count);
+            find_aliases_multi(list->item, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM: {
+            AstLetNode* let_node = (AstLetNode*)node;
+            find_aliases_multi(let_node->declare, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_ASSIGN: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            if (named->as && named->name) {
+                for (int c = 0; c < ctx_count; c++) {
+                    if (is_tracked_ref(named->as, &ctxs[c])) {
+                        add_alias(&ctxs[c], named->name->chars, (int)named->name->len);
+                    }
+                }
+            }
+            break;
+        }
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* ifn = (AstIfNode*)node;
+            find_aliases_multi(ifn->then, ctxs, ctx_count);
+            find_aliases_multi(ifn->otherwise, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* wh = (AstWhileNode*)node;
+            find_aliases_multi(wh->body, ctxs, ctx_count);
+            break;
+        }
+        default:
+            break;
+        }
+        node = node->next;
+    }
+}
+
+// Multi-context evidence gathering: walks body once checking all InferCtx contexts
+static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) {
+    while (node) {
+        switch (node->node_type) {
+        case AST_NODE_BINARY: {
+            AstBinaryNode* bi = (AstBinaryNode*)node;
+            int op = bi->op;
+            bool is_arith = (op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
+                             op == OPERATOR_DIV || op == OPERATOR_IDIV || op == OPERATOR_MOD ||
+                             op == OPERATOR_POW);
+            bool is_cmp = (op >= OPERATOR_EQ && op <= OPERATOR_GE);
+
+            if (is_arith || is_cmp) {
+                for (int c = 0; c < ctx_count; c++) {
+                    bool left_is_tracked = is_tracked_ref(bi->left, &ctxs[c]);
+                    bool right_is_tracked = is_tracked_ref(bi->right, &ctxs[c]);
+                    if (left_is_tracked && bi->right && bi->right->type && bi->right->type->is_literal) {
+                        TypeId rtid = node_type_id(bi->right);
+                        ctxs[c].evidence |= classify_other_type(rtid);
+                    }
+                    if (right_is_tracked && bi->left && bi->left->type && bi->left->type->is_literal) {
+                        TypeId ltid = node_type_id(bi->left);
+                        ctxs[c].evidence |= classify_other_type(ltid);
+                    }
+                    if (left_is_tracked || right_is_tracked) {
+                        ctxs[c].evidence |= INFER_NUMERIC_USE;
+                        if (is_arith) ctxs[c].evidence |= INFER_ARITH_USE;
+                    }
+                    if ((left_is_tracked || right_is_tracked) &&
+                        !(ctxs[c].evidence & (INFER_INT | INFER_FLOAT))) {
+                        TypeId bi_tid = node_type_id((AstNode*)bi);
+                        if (bi_tid == LMD_TYPE_INT) ctxs[c].evidence |= INFER_INT;
+                        else if (bi_tid == LMD_TYPE_FLOAT) ctxs[c].evidence |= INFER_FLOAT;
+                    }
+                }
+            }
+
+            gather_evidence_multi(bi->left, ctxs, ctx_count);
+            gather_evidence_multi(bi->right, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_UNARY: {
+            AstUnaryNode* un = (AstUnaryNode*)node;
+            if (un->op == OPERATOR_NEG) {
+                for (int c = 0; c < ctx_count; c++) {
+                    if (is_tracked_ref(un->operand, &ctxs[c])) {
+                        ctxs[c].evidence |= INFER_NUMERIC_USE;
+                    }
+                }
+            }
+            gather_evidence_multi(un->operand, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* ifn = (AstIfNode*)node;
+            gather_evidence_multi(ifn->cond, ctxs, ctx_count);
+            gather_evidence_multi(ifn->then, ctxs, ctx_count);
+            gather_evidence_multi(ifn->otherwise, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* wh = (AstWhileNode*)node;
+            gather_evidence_multi(wh->cond, ctxs, ctx_count);
+            gather_evidence_multi(wh->body, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_RETURN_STAM: {
+            AstReturnNode* ret = (AstReturnNode*)node;
+            gather_evidence_multi(ret->value, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_ASSIGN_STAM: {
+            AstAssignStamNode* asn = (AstAssignStamNode*)node;
+            gather_evidence_multi(asn->value, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_CONTENT: {
+            AstListNode* list = (AstListNode*)node;
+            gather_evidence_multi(list->declare, ctxs, ctx_count);
+            gather_evidence_multi(list->item, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_VAR_STAM:
+        case AST_NODE_LET_STAM: {
+            AstLetNode* let_node = (AstLetNode*)node;
+            gather_evidence_multi(let_node->declare, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_ASSIGN: {
+            AstNamedNode* named = (AstNamedNode*)node;
+            gather_evidence_multi(named->as, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_CALL_EXPR: {
+            AstCallNode* call = (AstCallNode*)node;
+            gather_evidence_multi(call->function, ctxs, ctx_count);
+            gather_evidence_multi(call->argument, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_INDEX_EXPR: {
+            AstBinaryNode* idx = (AstBinaryNode*)node;
+            for (int c = 0; c < ctx_count; c++) {
+                if (is_tracked_ref(idx->right, &ctxs[c])) {
+                    TypeId left_tid = (idx->left && idx->left->type)
+                        ? idx->left->type->type_id : LMD_TYPE_ANY;
+                    bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_INT  ||
+                                           left_tid == LMD_TYPE_ARRAY_FLOAT ||
+                                           left_tid == LMD_TYPE_ARRAY_INT64);
+                    if (is_typed_array) ctxs[c].evidence |= INFER_INT;
+                }
+            }
+            gather_evidence_multi(idx->left, ctxs, ctx_count);
+            gather_evidence_multi(idx->right, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_PRIMARY: {
+            AstPrimaryNode* pri = (AstPrimaryNode*)node;
+            if (node->type && node->type->is_literal && node->type->type_id == LMD_TYPE_FLOAT) {
+                for (int c = 0; c < ctx_count; c++) {
+                    ctxs[c].evidence |= INFER_FLOAT_CONTEXT;
+                }
+            }
+            gather_evidence_multi(pri->expr, ctxs, ctx_count);
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)node;
+            gather_evidence_multi(match->scrutinee, ctxs, ctx_count);
+            AstMatchArm* arm = match->first_arm;
+            while (arm) {
+                gather_evidence_multi(arm->body, ctxs, ctx_count);
+                arm = (AstMatchArm*)arm->next;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+
+        node = node->next;
+    }
+}
+
+// Resolve evidence flags to a TypeId (same logic as infer_param_type)
+static TypeId resolve_inferred_type(InferCtx* ctx, bool is_proc) {
+    if (ctx->evidence & INFER_STOP) return LMD_TYPE_ANY;
+    if ((ctx->evidence & INFER_INT) && !(ctx->evidence & INFER_FLOAT)) return LMD_TYPE_INT;
+    if (ctx->evidence & INFER_FLOAT) return LMD_TYPE_FLOAT;
+    if (is_proc && (ctx->evidence & INFER_ARITH_USE)) {
+        if (!(ctx->evidence & INFER_FLOAT_CONTEXT)) return LMD_TYPE_INT;
+    }
+    return LMD_TYPE_ANY;
+}
+
+// Infer parameter types for ALL untyped params in a single body traversal.
+// out_types must be pre-filled with declared types; untyped params (LMD_TYPE_ANY)
+// will be overwritten with inferred types. Skips optional-without-default params.
+static void infer_param_types_batched(AstFuncNode* fn_node, bool is_proc,
+                                       TypeId* out_types, int param_count) {
+    if (!fn_node->body || param_count == 0) return;
+
+    AstNode* fn_as = (AstNode*)fn_node;
+    TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
+        ? (TypeFunc*)fn_as->type : nullptr;
+
+    // Collect InferCtx for each untyped param
+    InferCtx ctxs[16];
+    int ctx_indices[16];  // maps ctx index → param index
+    int ctx_count = 0;
+
+    TypeParam* tp = ft ? ft->param : nullptr;
+    AstNamedNode* p = fn_node->param;
+    for (int i = 0; i < param_count && p; i++) {
+        if (out_types[i] != LMD_TYPE_ANY || !p->name) {
+            p = (AstNamedNode*)p->next;
+            tp = tp ? tp->next : nullptr;
+            continue;
+        }
+        // Skip optional params without defaults (may_be_null — must remain ANY)
+        bool may_be_null = tp && tp->is_optional && !tp->default_value;
+        if (may_be_null) {
+            p = (AstNamedNode*)p->next;
+            tp = tp ? tp->next : nullptr;
+            continue;
+        }
+
+        InferCtx* ctx = &ctxs[ctx_count];
+        memset(ctx, 0, sizeof(InferCtx));
+        int len = (int)p->name->len;
+        if (len >= 64) len = 63;
+        memcpy(ctx->names[0], p->name->chars, len);
+        ctx->names[0][len] = '\0';
+        ctx->name_lens[0] = len;
+        ctx->name_count = 1;
+        ctx_indices[ctx_count] = i;
+        ctx_count++;
+
+        p = (AstNamedNode*)p->next;
+        tp = tp ? tp->next : nullptr;
+    }
+
+    if (ctx_count == 0) return;
+
+    // Alias finding: iterate until convergence (single walk per round for ALL params)
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        int prev_counts[16];
+        for (int c = 0; c < ctx_count; c++) prev_counts[c] = ctxs[c].name_count;
+        find_aliases_multi(fn_node->body, ctxs, ctx_count);
+        for (int c = 0; c < ctx_count; c++) {
+            if (ctxs[c].name_count != prev_counts[c]) changed = true;
+        }
+    }
+
+    // Single body walk gathers evidence for ALL params
+    gather_evidence_multi(fn_node->body, ctxs, ctx_count);
+
+    // Resolve each param's type from evidence
+    for (int c = 0; c < ctx_count; c++) {
+        int pi = ctx_indices[c];
+        TypeId inferred = resolve_inferred_type(&ctxs[c], is_proc);
+        log_debug("mir: infer_param_types_batched('%s') aliases=%d evidence=%d → %d",
+            ctxs[c].names[0], ctxs[c].name_count - 1, ctxs[c].evidence, inferred);
+        if (inferred != LMD_TYPE_ANY) {
+            out_types[pi] = inferred;
+        }
+    }
+}
+
+// ============================================================================
 // Phase 4 (P4-3.3): Infer function return type from declaration and body.
 // Returns a native TypeId (INT, FLOAT, BOOL) or LMD_TYPE_ANY if unknown.
 // Only returns native types for simple cases where the return path is singular.
@@ -8852,8 +9155,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // ===== Phase 4: Pre-resolve all parameter types (declared + inferred) =====
     // We resolve types BEFORE creating the MIR function so we can decide whether
     // to generate a native-typed version or the traditional all-Item version.
+    // Uses infer_cache from prepass_forward_declare to avoid redundant body walks.
     TypeId resolved_param_types[16];
     int user_param_count = 0;
+
+    // First pass: collect declared types and TypeUnary array resolution
     {
         TypeParam* tp_iter = fn_type ? fn_type->param : NULL;
         AstNamedNode* p = fn_node->param;
@@ -8862,8 +9168,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
 
             // Resolve typed array annotations: float[] → ARRAY_FLOAT, int[] → ARRAY_INT, etc.
-            // Note: p->type is a TypeParam (not TypeUnary), so we must use full_type
-            // to access the actual TypeUnary structure with its operand pointer.
             if (p->type && p->type->kind == TYPE_KIND_UNARY) {
                 TypeParam* tp_cast = (TypeParam*)p->type;
                 Type* full = tp_cast->full_type;
@@ -8888,17 +9192,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 }
             }
 
-            // Infer type from body usage for untyped params
-            if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
-                TypeId inferred = infer_param_type(fn_node->body,
-                    p->name->chars, (int)p->name->len, is_proc_fn);
-                if (inferred != LMD_TYPE_ANY) {
-                    log_debug("mir: param '%.*s' pre-resolved inferred type_id=%d",
-                        (int)p->name->len, p->name->chars, inferred);
-                    tid = inferred;
-                }
-            }
-
             // Optional params without defaults must remain boxed (could be null)
             if (may_be_null) tid = LMD_TYPE_ANY;
 
@@ -8906,6 +9199,26 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             user_param_count++;
             tp_iter = tp_iter ? tp_iter->next : NULL;
             p = (AstNamedNode*)p->next;
+        }
+    }
+
+    // Infer types for untyped params: use cache from prepass_forward_declare, or batch-infer
+    if (fn_node->body) {
+        InferCacheEntry cache_key;
+        cache_key.fn = fn_node;
+        InferCacheEntry* cached = (InferCacheEntry*)hashmap_get(mt->infer_cache, &cache_key);
+        if (cached && cached->param_count == user_param_count) {
+            // Apply cached inference results from prepass_forward_declare
+            for (int i = 0; i < user_param_count; i++) {
+                if (resolved_param_types[i] == LMD_TYPE_ANY &&
+                    cached->param_types[i] != LMD_TYPE_ANY) {
+                    log_debug("mir: param[%d] inferred type_id=%d (cached)", i, cached->param_types[i]);
+                    resolved_param_types[i] = cached->param_types[i];
+                }
+            }
+        } else {
+            // No cache hit (closure/variadic/method): batch-infer in single body walk
+            infer_param_types_batched(fn_node, is_proc_fn, resolved_param_types, user_param_count);
         }
     }
 
@@ -9593,18 +9906,28 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                         while (p && fwd_param_count < 16) {
                             TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
                             bool may_be_null = tp && tp->is_optional && !tp->default_value;
-                            if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
-                                TypeId inferred = infer_param_type(fn_node->body,
-                                    p->name->chars, (int)p->name->len, is_proc);
-                                if (inferred != LMD_TYPE_ANY) tid = inferred;
-                            }
                             if (may_be_null) tid = LMD_TYPE_ANY;
                             fwd_param_types[fwd_param_count] = tid;
-                            if (mir_is_native_param_type(tid)) has_native = true;
                             fwd_param_count++;
                             tp = tp ? tp->next : NULL;
                             p = (AstNamedNode*)p->next;
                         }
+                    }
+                    // Batch-infer types for all untyped params in a single body walk
+                    infer_param_types_batched(fn_node, is_proc, fwd_param_types, fwd_param_count);
+                    for (int i = 0; i < fwd_param_count; i++) {
+                        if (mir_is_native_param_type(fwd_param_types[i])) has_native = true;
+                    }
+                    // Cache inferred param types so transpile_func_def can skip re-inference
+                    {
+                        InferCacheEntry ice;
+                        memset(&ice, 0, sizeof(ice));
+                        ice.fn = fn_node;
+                        ice.param_count = fwd_param_count;
+                        for (int i = 0; i < fwd_param_count; i++) {
+                            ice.param_types[i] = fwd_param_types[i];
+                        }
+                        hashmap_set(mt->infer_cache, &ice);
                     }
                     if (has_native) {
                         // Forward-declare the _b wrapper
@@ -10186,6 +10509,8 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         local_func_hash, local_func_cmp, NULL, NULL);
     mt.global_vars = hashmap_new(sizeof(GlobalVarEntry), 32, 0, 0,
         global_var_hash, global_var_cmp, NULL, NULL);
+    mt.infer_cache = hashmap_new(sizeof(InferCacheEntry), 32, 0, 0,
+        infer_cache_hash, infer_cache_cmp, NULL, NULL);
 
     // Create module
     mt.module = MIR_new_module(ctx, "lambda_script");
@@ -10391,6 +10716,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     hashmap_free(mt.import_cache);
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
+    hashmap_free(mt.infer_cache);
 }
 
 // ============================================================================

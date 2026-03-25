@@ -524,6 +524,42 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
     float margin_right  = resolve_margin_side(item, 1, (float)available_width);
     float margin_top    = resolve_margin_side(item, 2, (float)available_width);
     float margin_bottom = resolve_margin_side(item, 3, (float)available_width);
+
+    // CSS Box 4 §3.2 margin-trim for grid containers: trim margins of items
+    // adjacent to the container edges.
+    ViewBlock* grid_container = item->parent->is_block() ? (ViewBlock*)item->parent : NULL;
+    uint8_t grid_margin_trim = (grid_container && grid_container->blk) ? grid_container->blk->margin_trim : 0;
+    if (grid_margin_trim) {
+        int row_start = item->gi->computed_grid_row_start - 1;
+        int row_end = item->gi->computed_grid_row_end - 1;
+        int col_start = item->gi->computed_grid_column_start - 1;
+        int col_end = item->gi->computed_grid_column_end - 1;
+        // block-start: first row items
+        if ((grid_margin_trim & MARGIN_TRIM_BLOCK_START) && row_start == 0) {
+            log_debug("[MARGIN-TRIM] grid block-start: trimming margin_top=%f", margin_top);
+            margin_top = 0;
+            if (item->bound) item->bound->margin.top = 0;
+        }
+        // block-end: last row items
+        if ((grid_margin_trim & MARGIN_TRIM_BLOCK_END) && row_end >= grid_layout->computed_row_count) {
+            log_debug("[MARGIN-TRIM] grid block-end: trimming margin_bottom=%f", margin_bottom);
+            margin_bottom = 0;
+            if (item->bound) item->bound->margin.bottom = 0;
+        }
+        // inline-start: first column items
+        if ((grid_margin_trim & MARGIN_TRIM_INLINE_START) && col_start == 0) {
+            log_debug("[MARGIN-TRIM] grid inline-start: trimming margin_left=%f", margin_left);
+            margin_left = 0;
+            if (item->bound) item->bound->margin.left = 0;
+        }
+        // inline-end: last column items
+        if ((grid_margin_trim & MARGIN_TRIM_INLINE_END) && col_end >= grid_layout->computed_column_count) {
+            log_debug("[MARGIN-TRIM] grid inline-end: trimming margin_right=%f", margin_right);
+            margin_right = 0;
+            if (item->bound) item->bound->margin.right = 0;
+        }
+    }
+
     // Reduce available area by the fixed margins before any alignment calculation
     available_width  -= (int)(margin_left + margin_right);
     available_height -= (int)(margin_top  + margin_bottom);
