@@ -41,12 +41,13 @@ std::vector<LambdaTestInfo> discover_all_c2mir_tests() {
         all_tests.insert(all_tests.end(), dir_tests.begin(), dir_tests.end());
     }
 
-    // filter out slow benchmarks
+    // filter out slow benchmarks and tests requiring features not available in C2MIR
     std::vector<LambdaTestInfo> filtered;
     for (const auto& test : all_tests) {
-        if (!is_slow_benchmark(test.test_name)) {
-            filtered.push_back(test);
-        }
+        if (is_slow_benchmark(test.test_name)) continue;
+        if (test.test_name == "import_js") continue;  // requires JS runtime (cross-lang import)
+        if (test.test_name == "import_js_naming") continue;  // requires JS runtime
+        filtered.push_back(test);
     }
     return filtered;
 }

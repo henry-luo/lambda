@@ -20,6 +20,7 @@
 #include "../../lib/file_utils.h"
 #include "../../lib/file.h"
 #include "../transpiler.hpp"
+#include "../module_registry.h"
 #include <mir.h>
 #include <mir-gen.h>
 #include <cstring>
@@ -12023,6 +12024,9 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     Item spec_item = (Item){.item = s2it(spec_str)};
     js_module_register(spec_item, namespace_obj);
 
+    // Also register in unified module registry for cross-language access
+    module_register(filename, "js", namespace_obj, ctx);
+
     log_debug("js-mir: module '%s' loaded successfully", filename);
 
     // Cleanup transpiler state but DEFER MIR context cleanup
@@ -12077,13 +12081,34 @@ static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filena
                 Item placeholder_ns = js_new_object();
                 js_module_register(spec_item, placeholder_ns);
 
-                // Read and compile the module (will re-register with real exports)
-                char* mod_source = read_text_file(resolved);
-                if (mod_source) {
-                    transpile_js_module_to_mir(runtime, mod_source, resolved);
-                    free(mod_source);
+                // Detect cross-language import: .ls extension → Lambda module
+                size_t rlen = strlen(resolved);
+                bool is_lambda_module = (rlen > 3 && strcmp(resolved + rlen - 3, ".ls") == 0);
+
+                if (is_lambda_module) {
+                    // Cross-language import: JS importing a Lambda module
+                    log_info("js-mir: cross-language import of Lambda module '%s'", resolved);
+                    Script* lambda_script = load_script(runtime, resolved, NULL, true);
+                    if (lambda_script && lambda_script->jit_context) {
+                        // Build namespace object from Lambda's pub declarations
+                        Item ns = module_build_lambda_namespace(lambda_script);
+                        // Register in JS module system (replaces placeholder)
+                        js_module_register(spec_item, ns);
+                        // Register in unified module registry
+                        module_register(resolved, "lambda", ns, lambda_script->jit_context);
+                        log_info("js-mir: Lambda module '%s' loaded as JS namespace", resolved);
+                    } else {
+                        log_error("js-mir: failed to compile Lambda module '%s'", resolved);
+                    }
                 } else {
-                    log_error("js-mir: cannot read module '%s'", resolved);
+                    // Same-language import: read and compile JS module
+                    char* mod_source = read_text_file(resolved);
+                    if (mod_source) {
+                        transpile_js_module_to_mir(runtime, mod_source, resolved);
+                        free(mod_source);
+                    } else {
+                        log_error("js-mir: cannot read module '%s'", resolved);
+                    }
                 }
             }
         }
@@ -12290,4 +12315,42 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 
     log_debug("js-mir: transpilation completed");
     return final_result;
+}
+
+// ============================================================================
+// Public API: load a JS file as a module for cross-language import
+// ============================================================================
+
+Item load_js_module(Runtime* runtime, const char* js_path) {
+    log_info("js-mir: loading JS module '%s' for cross-language import", js_path);
+    char* source = read_text_file(js_path);
+    if (!source) {
+        log_error("js-mir: cannot read JS file '%s'", js_path);
+        return ItemNull;
+    }
+
+    // transpile_js_module_to_mir assumes a heap context is already active
+    // (normally provided by transpile_js_to_mir). When called from build_ast
+    // during Lambda→JS import, no context exists yet. Set up a persistent one.
+    if (!context || !context->heap) {
+        EvalContext* temp_ctx = (EvalContext*)calloc(1, sizeof(EvalContext));
+        temp_ctx->pool = pool_create();
+        temp_ctx->result = ItemNull;
+        temp_ctx->nursery = gc_nursery_create(0);
+        context = temp_ctx;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        context->type_list = arraylist_new(64);
+        _lambda_rt = (Context*)context;
+
+        // Create Input context for JS runtime
+        Input* js_input = Input::create(context->pool);
+        js_runtime_set_input(js_input);
+        log_debug("js-mir: created persistent heap for cross-language module loading");
+    }
+
+    Item ns = transpile_js_module_to_mir(runtime, source, js_path);
+    free(source);
+    return ns;
 }

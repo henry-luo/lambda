@@ -407,6 +407,7 @@ struct AstImportNode : AstNode {
     StrView module;             // Keep module as StrView (file path)
     Script* script;             // imported script
     bool is_relative;
+    bool is_cross_lang;         // true if importing a module from another language (e.g., JS from Lambda)
 };
 
 typedef struct AstLetNode : AstNode {
