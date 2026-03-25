@@ -134,3 +134,7 @@ void runtime_cleanup(Runtime* runtime);
 
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
+
+// Compile a JS file as a module and return the namespace object.
+// Used for cross-language imports (Lambda → JS).
+Item load_js_module(Runtime* runtime, const char* js_path);

@@ -10,7 +10,11 @@
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
+#include "module_registry.h"
+#include "js/js_runtime.h"
 #include "../lib/file_utils.h"
+
+extern "C" Item js_property_get(Item object, Item key);
 
 // ============================================================================
 // Lambda Home Path
@@ -270,85 +274,141 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             }
             uint8_t* mod_def = (uint8_t*)imp->addr;
 
-            // Initialize the module's constants by calling _init_mod_consts
-            typedef void (*init_consts_fn)(void**);
-            init_consts_fn init_fn = (init_consts_fn)find_func(import->script->jit_context, "_init_mod_consts");
-            if (init_fn) {
-                log_debug("Initializing module constants for %.*s", (int)(import->module.length), import->module.str);
-                init_fn(import->script->const_list->data);
-            } else {
-                log_debug("Module %.*s has no _init_mod_consts (may have no constants)",
-                    (int)(import->module.length), import->module.str);
-            }
+            if (import->is_cross_lang) {
+                // Cross-language import (e.g., JS module from Lambda)
+                // JS modules have no _init_mod_consts, _init_mod_types, _init_mod_vars
+                log_debug("cross-lang import: %.*s (ref: %s)",
+                    (int)(import->module.length), import->module.str,
+                    import->script->reference);
 
-            // Initialize the module's type_list by calling _init_mod_types
-            typedef void (*init_types_fn)(void*);
-            init_types_fn init_types = (init_types_fn)find_func(import->script->jit_context, "_init_mod_types");
-            if (init_types) {
-                log_debug("Initializing module type_list for %.*s", (int)(import->module.length), import->module.str);
-                init_types(import->script->type_list);
-            } else {
-                log_debug("Module %.*s has no _init_mod_types (may have no types)",
-                    (int)(import->module.length), import->module.str);
-            }
+                // skip consts pointer field
+                mod_def += sizeof(void**);
 
-            // skip consts pointer field
-            mod_def += sizeof(void**);
+                // _mod_main = NULL (JS modules have no Lambda-style main entry)
+                *(main_func_t*)mod_def = NULL;
+                mod_def += sizeof(main_func_t);
 
-            // populate _mod_main: module's main() entry point
-            *(main_func_t*) mod_def = import->script->main_func;
-            log_debug("set _mod_main for %.*s: %p", (int)(import->module.length), import->module.str, import->script->main_func);
-            mod_def += sizeof(main_func_t);
+                // _init_vars = NULL (no module variables to initialize)
+                typedef void (*init_vars_fn)(void*);
+                *(init_vars_fn*)mod_def = NULL;
+                mod_def += sizeof(init_vars_fn);
 
-            // populate _init_vars: function that copies module globals into Mod struct
-            typedef void (*init_vars_fn)(void*);
-            init_vars_fn init_vars_func = (init_vars_fn)find_func(import->script->jit_context, "_init_mod_vars");
-            *(init_vars_fn*) mod_def = init_vars_func;
-            log_debug("set _init_vars for %.*s: %p", (int)(import->module.length), import->module.str, (void*)init_vars_func);
-            mod_def += sizeof(init_vars_fn);
-
-            // populate function pointer fields for each public function
-            AstNode *node = import->script->ast_root;
-            assert(node->node_type == AST_SCRIPT);
-            node = ((AstScript*)node)->child;
-            while (node) {
-                log_debug("checking node: %d", node->node_type);
-                if (node->node_type == AST_NODE_CONTENT) {
-                    node = ((AstListNode*)node)->item;  // drill down
-                    continue;
+                // Look up namespace from unified module registry
+                ModuleDescriptor* desc = module_get(import->script->reference);
+                if (!desc) {
+                    log_error("Error: cross-lang module '%s' not found in registry",
+                        import->script->reference);
+                    goto RETURN;
                 }
-                else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
-                    AstFuncNode *func_node = (AstFuncNode*)node;
-                    if (((TypeFunc*)func_node->type)->is_public) {
-                        // get func addr
-                        StrBuf *func_name = strbuf_new();
-                        write_fn_name(func_name, func_node, NULL);
-                        log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
-                        void* fn_ptr = find_func(import->script->jit_context, func_name->str);
-                        log_debug("got imported fn: %s, func_ptr: %p", func_name->str, fn_ptr);
-                        strbuf_free(func_name);
-                        *(main_func_t*) mod_def = (main_func_t)fn_ptr;
-                        mod_def += sizeof(main_func_t);
+                Item ns = desc->namespace_obj;
 
-                        // also populate _b boxed wrapper pointer if this function needs fn_call* wrapper
-                        if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
-                            StrBuf *wrapper_name = strbuf_new();
-                            write_fn_name_ex(wrapper_name, func_node, NULL, "_b");
-                            log_debug("loading boxed wrapper fn: %s", wrapper_name->str);
-                            void* b_ptr = find_func(import->script->jit_context, wrapper_name->str);
-                            log_debug("got boxed wrapper fn: %s, ptr: %p", wrapper_name->str, b_ptr);
-                            strbuf_free(wrapper_name);
-                            *(main_func_t*) mod_def = (main_func_t)b_ptr;
+                // Populate function pointer fields from JS namespace
+                AstNode *node = import->script->ast_root;
+                assert(node->node_type == AST_SCRIPT);
+                node = ((AstScript*)node)->child;
+                while (node) {
+                    if (node->node_type == AST_NODE_FUNC) {
+                        AstFuncNode *func_node = (AstFuncNode*)node;
+                        if (((TypeFunc*)func_node->type)->is_public) {
+                            Item key = {.item = s2it(heap_create_name(
+                                func_node->name->chars, func_node->name->len))};
+                            Item fn_item = js_property_get(ns, key);
+                            if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
+                                void* fn_ptr = js_function_get_ptr(fn_item);
+                                *(main_func_t*)mod_def = (main_func_t)fn_ptr;
+                
+                            } else {
+                                *(main_func_t*)mod_def = NULL;
+                                log_debug("cross-lang fn '%.*s' not found in namespace",
+                                    (int)func_node->name->len, func_node->name->chars);
+                            }
                             mod_def += sizeof(main_func_t);
+                            // No _b wrapper for JS functions (synthetic nodes have no typed params)
                         }
                     }
+                    node = node->next;
                 }
-                // pub var fields are populated at runtime by _init_mod_vars, skip pointer arithmetic
-                // (struct layout matches but values are set when module main() runs)
-                else if (node->node_type == AST_NODE_PUB_STAM) {
-                    // no-op: pub vars initialized via _init_mod_vars at runtime
+            } else {
+                // Regular Lambda module import
+                typedef void (*init_consts_fn)(void**);
+                init_consts_fn init_fn = (init_consts_fn)find_func(import->script->jit_context, "_init_mod_consts");
+                if (init_fn) {
+                    log_debug("Initializing module constants for %.*s", (int)(import->module.length), import->module.str);
+                    init_fn(import->script->const_list->data);
+                } else {
+                    log_debug("Module %.*s has no _init_mod_consts (may have no constants)",
+                        (int)(import->module.length), import->module.str);
                 }
-                node = node->next;
+
+                // Initialize the module's type_list by calling _init_mod_types
+                typedef void (*init_types_fn)(void*);
+                init_types_fn init_types = (init_types_fn)find_func(import->script->jit_context, "_init_mod_types");
+                if (init_types) {
+                    log_debug("Initializing module type_list for %.*s", (int)(import->module.length), import->module.str);
+                    init_types(import->script->type_list);
+                } else {
+                    log_debug("Module %.*s has no _init_mod_types (may have no types)",
+                        (int)(import->module.length), import->module.str);
+                }
+
+                // skip consts pointer field
+                mod_def += sizeof(void**);
+
+                // populate _mod_main: module's main() entry point
+                *(main_func_t*) mod_def = import->script->main_func;
+                log_debug("set _mod_main for %.*s: %p", (int)(import->module.length), import->module.str, import->script->main_func);
+                mod_def += sizeof(main_func_t);
+
+                // populate _init_vars: function that copies module globals into Mod struct
+                typedef void (*init_vars_fn)(void*);
+                init_vars_fn init_vars_func = (init_vars_fn)find_func(import->script->jit_context, "_init_mod_vars");
+                *(init_vars_fn*) mod_def = init_vars_func;
+                log_debug("set _init_vars for %.*s: %p", (int)(import->module.length), import->module.str, (void*)init_vars_func);
+                mod_def += sizeof(init_vars_fn);
+
+                // populate function pointer fields for each public function
+                AstNode *node = import->script->ast_root;
+                assert(node->node_type == AST_SCRIPT);
+                node = ((AstScript*)node)->child;
+                while (node) {
+                    log_debug("checking node: %d", node->node_type);
+                    if (node->node_type == AST_NODE_CONTENT) {
+                        node = ((AstListNode*)node)->item;  // drill down
+                        continue;
+                    }
+                    else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
+                        AstFuncNode *func_node = (AstFuncNode*)node;
+                        if (((TypeFunc*)func_node->type)->is_public) {
+                            // get func addr
+                            StrBuf *func_name = strbuf_new();
+                            write_fn_name(func_name, func_node, NULL);
+                            log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
+                            void* fn_ptr = find_func(import->script->jit_context, func_name->str);
+                            log_debug("got imported fn: %s, func_ptr: %p", func_name->str, fn_ptr);
+                            strbuf_free(func_name);
+                            *(main_func_t*) mod_def = (main_func_t)fn_ptr;
+                            mod_def += sizeof(main_func_t);
+
+                            // also populate _b boxed wrapper pointer if this function needs fn_call* wrapper
+                            if (node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(func_node)) {
+                                StrBuf *wrapper_name = strbuf_new();
+                                write_fn_name_ex(wrapper_name, func_node, NULL, "_b");
+                                log_debug("loading boxed wrapper fn: %s", wrapper_name->str);
+                                void* b_ptr = find_func(import->script->jit_context, wrapper_name->str);
+                                log_debug("got boxed wrapper fn: %s, ptr: %p", wrapper_name->str, b_ptr);
+                                strbuf_free(wrapper_name);
+                                *(main_func_t*) mod_def = (main_func_t)b_ptr;
+                                mod_def += sizeof(main_func_t);
+                            }
+                        }
+                    }
+                    // pub var fields are populated at runtime by _init_mod_vars, skip pointer arithmetic
+                    // (struct layout matches but values are set when module main() runs)
+                    else if (node->node_type == AST_NODE_PUB_STAM) {
+                        // no-op: pub vars initialized via _init_mod_vars at runtime
+                    }
+                    node = node->next;
+                }
             }
         }
         child = child->next;
@@ -1064,6 +1124,17 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         return NULL;
     }
 
+    // Register in unified module registry for cross-language imports.
+    // Only when the runtime context (heap, name_pool) is already initialized —
+    // module_build_lambda_namespace creates heap objects (maps, strings).
+    // During pure Lambda→Lambda compilation, context isn't set up yet (it's
+    // initialized later by runner_setup_context). The JS→Lambda path sets up
+    // context before calling load_script, so registration works there.
+    if (!new_script->is_main && context && context->heap) {
+        Item ns = module_build_lambda_namespace(new_script);
+        module_register(new_script->reference, "lambda", ns, new_script->jit_context);
+    }
+
     log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
@@ -1345,11 +1416,14 @@ void runtime_init(Runtime* runtime) {
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
     runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
+    module_registry_init();
 }
 
 void runtime_cleanup(Runtime* runtime) {
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
+
+    module_registry_cleanup();
 
     if (runtime->parser) ts_parser_delete(runtime->parser);
     if (runtime->scripts) {

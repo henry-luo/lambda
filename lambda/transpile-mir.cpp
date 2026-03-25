@@ -2,6 +2,8 @@
 #include "re2_wrapper.hpp"
 #include "mark_builder.hpp"
 #include "safety_analyzer.hpp"
+#include "module_registry.h"
+#include "js/js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
@@ -10854,6 +10856,59 @@ static void register_module_pub_fns(AstImportNode* imp) {
     }
 }
 
+// Register cross-language (e.g., JS) module exports for MIR import resolution.
+// Unlike register_module_pub_fns which looks up compiled MIR functions from a jit_context,
+// this reads native function pointers directly from the JS namespace object stored in the
+// unified module registry, then registers them with module-prefixed names so that
+// import_resolver() can resolve them during MIR_link().
+static void register_cross_lang_pub_fns(AstImportNode* imp) {
+    if (!imp->script || !imp->script->reference) return;
+    AstNode* mod_node = imp->script->ast_root;
+    if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
+
+    ModuleDescriptor* desc = module_get(imp->script->reference);
+    if (!desc) {
+        log_error("mir: cross-lang module '%s' not found in registry", imp->script->reference);
+        return;
+    }
+    Item ns = desc->namespace_obj;
+
+    log_debug("mir: registering cross-lang pub symbols from '%.*s' (index=%d)",
+        (int)imp->module.length, imp->module.str, imp->script->index);
+
+    AstNode* child = ((AstScript*)mod_node)->child;
+    while (child) {
+        if (child->node_type == AST_NODE_FUNC) {
+            AstFuncNode* fn_node = (AstFuncNode*)child;
+            TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+            if (fn_type && fn_type->is_public) {
+                // Look up the function in the JS namespace
+                char name_buf[256];
+                snprintf(name_buf, sizeof(name_buf), "%.*s",
+                    (int)fn_node->name->len, fn_node->name->chars);
+                Item key = {.item = s2it(heap_create_name(name_buf, strlen(name_buf)))};
+                Item fn_item = js_property_get(ns, key);
+                if (get_type_id(fn_item) == LMD_TYPE_FUNC) {
+                    void* fn_ptr = js_function_get_ptr(fn_item);
+                    if (fn_ptr) {
+                        // Register with module-prefixed name (e.g., "m2._add_1000000")
+                        StrBuf* reg_name = strbuf_new_cap(64);
+                        write_fn_name(reg_name, fn_node, imp);
+                        register_dynamic_import(strdup(reg_name->str), fn_ptr);
+                        strbuf_free(reg_name);
+                    } else {
+                        log_error("mir: cross-lang fn '%s' has null ptr", name_buf);
+                    }
+                } else {
+                    log_error("mir: cross-lang fn '%s' not found in namespace (type=%d)",
+                        name_buf, get_type_id(fn_item));
+                }
+            }
+        }
+        child = child->next;
+    }
+}
+
 // Compile a module whose AST is already built (tp->ast_root set) via MIR Direct.
 // Called from transpile_script() when runtime->use_mir_direct is true, for both
 // imported modules and the main script.  Depth-first import loading guarantees that
@@ -10877,7 +10932,11 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
             AstImportNode* imp = (AstImportNode*)child;
-            register_module_pub_fns(imp);
+            if (imp->is_cross_lang) {
+                register_cross_lang_pub_fns(imp);
+            } else {
+                register_module_pub_fns(imp);
+            }
         }
         child = child->next;
     }

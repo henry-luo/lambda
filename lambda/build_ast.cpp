@@ -1,6 +1,9 @@
 #include "transpiler.hpp"
 #include "lambda-decimal.hpp"
 #include "lambda-error.h"
+#ifndef SIMPLE_SCHEMA_PARSER
+#include "module_registry.h"
+#endif
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/log.h"
@@ -7209,19 +7212,42 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             ast_node->script = nullptr;
             #else
             ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            if (ast_node->script && !ast_node->script->ast_root) {
+                ast_node->script = NULL; // stub from failed precompile — treat as absent
+            }
             #endif
 
             if (ast_node->script) {
                 declare_module_import(tp, ast_node);
             }
             else {
-                log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
-                    (int)ast_node->module.length, ast_node->module.str, buf->str,
-                    tp->reference ? tp->reference : "<unknown>");
-                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
-                    "  Resolved path: %s\n  Importing script: %s\n",
-                    (int)ast_node->module.length, ast_node->module.str, buf->str,
-                    tp->reference ? tp->reference : "<unknown>");
+                #ifndef SIMPLE_SCHEMA_PARSER
+                // .ls failed — try .js fallback for cross-language import
+                buf->str[buf->length - 2] = 'j';
+                buf->str[buf->length - 1] = 's';
+                Item ns = load_js_module(tp->runtime, buf->str);
+                if (ns.item != ItemNull.item) {
+                    ast_node->script = (Script*)create_js_import_script(
+                        buf->str, ns, tp->runtime);
+                    ast_node->is_cross_lang = true;
+                    if (ast_node->script) {
+                        declare_module_import(tp, ast_node);
+                    }
+                } else {
+                    // restore .ls extension for error message
+                    buf->str[buf->length - 2] = 'l';
+                    buf->str[buf->length - 1] = 's';
+                #endif
+                    log_error("Error: failed to load module '%.*s' (resolved: %s, from: %s)",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str,
+                        tp->reference ? tp->reference : "<unknown>");
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                        "  Resolved path: %s\n  Importing script: %s\n",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str,
+                        tp->reference ? tp->reference : "<unknown>");
+                #ifndef SIMPLE_SCHEMA_PARSER
+                }
+                #endif
             }
             strbuf_free(buf);
         }
@@ -7266,17 +7292,40 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             ast_node->script = nullptr;
             #else
             ast_node->script = load_script(tp->runtime, buf->str, NULL, true);
+            if (ast_node->script && !ast_node->script->ast_root) {
+                ast_node->script = NULL; // stub from failed precompile — treat as absent
+            }
             #endif
 
             if (ast_node->script) {
                 declare_module_import(tp, ast_node);
             }
             else {
-                log_error("Error: failed to load module '%.*s' (resolved: %s)",
-                    (int)ast_node->module.length, ast_node->module.str, buf->str);
-                fprintf(stderr, "Error: Failed to import module '%.*s'\n"
-                    "  Resolved path: %s\n",
-                    (int)ast_node->module.length, ast_node->module.str, buf->str);
+                #ifndef SIMPLE_SCHEMA_PARSER
+                // .ls failed — try .js fallback for cross-language import
+                buf->str[buf->length - 2] = 'j';
+                buf->str[buf->length - 1] = 's';
+                Item ns = load_js_module(tp->runtime, buf->str);
+                if (ns.item != ItemNull.item) {
+                    ast_node->script = (Script*)create_js_import_script(
+                        buf->str, ns, tp->runtime);
+                    ast_node->is_cross_lang = true;
+                    if (ast_node->script) {
+                        declare_module_import(tp, ast_node);
+                    }
+                } else {
+                    // restore .ls extension for error message
+                    buf->str[buf->length - 2] = 'l';
+                    buf->str[buf->length - 1] = 's';
+                #endif
+                    log_error("Error: failed to load module '%.*s' (resolved: %s)",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str);
+                    fprintf(stderr, "Error: Failed to import module '%.*s'\n"
+                        "  Resolved path: %s\n",
+                        (int)ast_node->module.length, ast_node->module.str, buf->str);
+                #ifndef SIMPLE_SCHEMA_PARSER
+                }
+                #endif
             }
             strbuf_free(buf);
         }

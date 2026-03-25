@@ -645,6 +645,18 @@ struct JsFunction {
     int bound_argc;  // v11: number of bound arguments
 };
 
+extern "C" void* js_function_get_ptr(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
+    JsFunction* jsfn = (JsFunction*)fn_item.function;
+    return jsfn->func_ptr;
+}
+
+extern "C" int js_function_get_arity(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return 0;
+    JsFunction* jsfn = (JsFunction*)fn_item.function;
+    return jsfn->param_count;
+}
+
 // P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.
 // Skips the class-index lookup in gc_heap_alloc and uses the bump-pointer fast path.
 #define JS_MAP_SIZE_CLASS 1
