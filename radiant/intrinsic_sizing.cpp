@@ -887,72 +887,71 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     // CSS 2.1 §10.3.2/§10.6.2: Replaced element intrinsic sizing
     // For replaced elements (img, video, iframe, etc.), use intrinsic dimensions
-    // when no explicit CSS width is set
+    // when no explicit CSS width is set.
+    // Note: we set sizes but do NOT return early — we fall through to the
+    // padding/border section at the bottom so padding+border are correctly included.
+    bool replaced_intrinsic_set = false;
     ViewBlock* view_block_replaced = (ViewBlock*)element;
-    if (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) {
-        uintptr_t elem_tag = element->tag();
+    // Check both resolved display.inner AND element tag for replaced element detection,
+    // since display.inner may not yet be resolved during early intrinsic sizing passes.
+    uintptr_t replaced_tag = element->tag();
+    bool is_replaced_element = (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) ||
+        (replaced_tag == HTM_TAG_IMG || replaced_tag == HTM_TAG_VIDEO ||
+         replaced_tag == HTM_TAG_IFRAME || replaced_tag == HTM_TAG_HR ||
+         replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS);
+    if (is_replaced_element) {
+        float replaced_width = -1;
 
-        if (elem_tag == HTM_TAG_IMG) {
+        if (replaced_tag == HTM_TAG_IMG) {
             // Try to get image dimensions - first check if already loaded
             if (view_block_replaced->embed && view_block_replaced->embed->img) {
-                ImageSurface* img = view_block_replaced->embed->img;
-                sizes.min_content = img->width;
-                sizes.max_content = img->width;
-                log_debug("  -> replaced IMG intrinsic width: %d (from loaded image)", img->width);
-                return sizes;
+                replaced_width = view_block_replaced->embed->img->width;
+                log_debug("  -> replaced IMG intrinsic width: %d (from loaded image)", (int)replaced_width);
             }
             // Try to load the image to get intrinsic dimensions
-            const char* src_value = element->get_attribute("src");
-            if (src_value && lycon->ui_context) {
-                if (!view_block_replaced->embed) {
-                    view_block_replaced->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
-                }
-                size_t src_len = strlen(src_value);
-                StrBuf* src_buf = strbuf_new_cap(src_len);
-                strbuf_append_str_n(src_buf, src_value, src_len);
-                view_block_replaced->embed->img = load_image(lycon->ui_context, src_buf->str);
-                strbuf_free(src_buf);
-                if (view_block_replaced->embed->img) {
-                    ImageSurface* img = view_block_replaced->embed->img;
-                    sizes.min_content = img->width;
-                    sizes.max_content = img->width;
-                    log_debug("  -> replaced IMG intrinsic width: %d (newly loaded)", img->width);
-                    return sizes;
+            if (replaced_width < 0) {
+                const char* src_value = element->get_attribute("src");
+                if (src_value && lycon->ui_context) {
+                    if (!view_block_replaced->embed) {
+                        view_block_replaced->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                    }
+                    size_t src_len = strlen(src_value);
+                    StrBuf* src_buf = strbuf_new_cap(src_len);
+                    strbuf_append_str_n(src_buf, src_value, src_len);
+                    view_block_replaced->embed->img = load_image(lycon->ui_context, src_buf->str);
+                    strbuf_free(src_buf);
+                    if (view_block_replaced->embed->img) {
+                        replaced_width = view_block_replaced->embed->img->width;
+                        log_debug("  -> replaced IMG intrinsic width: %d (newly loaded)", (int)replaced_width);
+                    }
                 }
             }
             // Fallback for unloadable images — use HTML width/height attributes if present
-            const char* attr_w = element->get_attribute("width");
-            if (attr_w) {
-                int w = atoi(attr_w);
-                if (w > 0) {
-                    sizes.min_content = w;
-                    sizes.max_content = w;
-                    log_debug("  -> replaced IMG width from HTML attribute: %d", w);
-                    return sizes;
+            if (replaced_width < 0) {
+                const char* attr_w = element->get_attribute("width");
+                if (attr_w) {
+                    int w = atoi(attr_w);
+                    if (w > 0) {
+                        replaced_width = w;
+                        log_debug("  -> replaced IMG width from HTML attribute: %d", w);
+                    }
                 }
             }
             // Ultimate fallback — placeholder size
-            sizes.min_content = 40;
-            sizes.max_content = 40;
-            log_debug("  -> replaced IMG fallback width: 40");
-            return sizes;
+            if (replaced_width < 0) {
+                replaced_width = 40;
+                log_debug("  -> replaced IMG fallback width: 40");
+            }
         }
-        else if (elem_tag == HTM_TAG_IFRAME) {
-            // Default iframe size per CSS spec: 300x150
-            sizes.min_content = 300;
-            sizes.max_content = 300;
+        else if (replaced_tag == HTM_TAG_IFRAME) {
+            replaced_width = 300;
             log_debug("  -> replaced IFRAME intrinsic width: 300");
-            return sizes;
         }
-        else if (elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
-            // Default video/canvas size: 300x150
-            sizes.min_content = 300;
-            sizes.max_content = 300;
+        else if (replaced_tag == HTM_TAG_VIDEO || replaced_tag == HTM_TAG_CANVAS) {
+            replaced_width = 300;
             log_debug("  -> replaced VIDEO/CANVAS intrinsic width: 300");
-            return sizes;
         }
-        else if (elem_tag == HTM_TAG_SVG) {
-            // SVG intrinsic width from attributes or viewBox
+        else if (replaced_tag == HTM_TAG_SVG) {
             float svg_width = 300.0f;  // CSS default
             const char* attr_w = element->get_attribute("width");
             if (attr_w) {
@@ -967,23 +966,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             }
-            sizes.min_content = (int)(svg_width + 0.5f);
-            sizes.max_content = (int)(svg_width + 0.5f);
+            replaced_width = svg_width;
             log_debug("  -> replaced SVG intrinsic width: %.0f", svg_width);
-            return sizes;
         }
-        else if (elem_tag == HTM_TAG_HR) {
-            // HR stretches to available width, min is 0
-            sizes.min_content = 0;
-            sizes.max_content = 0;
-            return sizes;
+        else if (replaced_tag == HTM_TAG_HR) {
+            replaced_width = 0;
         }
         // Form controls (INPUT, SELECT, TEXTAREA, BUTTON) fall through to
         // normal measurement — they already have intrinsic sizing via FormControlProp
+
+        if (replaced_width >= 0) {
+            sizes.min_content = (int)(replaced_width + 0.5f);
+            sizes.max_content = (int)(replaced_width + 0.5f);
+            replaced_intrinsic_set = true;
+        }
     }
 
     // SVG fallback: handle SVG elements even when display.inner is not yet resolved
-    if (element->tag() == HTM_TAG_SVG) {
+    if (!replaced_intrinsic_set && element->tag() == HTM_TAG_SVG) {
         float svg_width = 300.0f;
         const char* attr_w = element->get_attribute("width");
         if (attr_w) {
@@ -1000,8 +1000,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
         sizes.min_content = (int)(svg_width + 0.5f);
         sizes.max_content = (int)(svg_width + 0.5f);
+        replaced_intrinsic_set = true;
         log_debug("  -> SVG (tag-based) intrinsic width: %.0f", svg_width);
-        return sizes;
     }
 
     // ========================================================================
