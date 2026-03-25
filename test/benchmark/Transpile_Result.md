@@ -351,3 +351,135 @@ Timings include all imported modules. Module count shown in last column.
 |--------|--------|
 | awfy_cd2 | no profile data |
 | kostya_brainfuck | timeout |
+
+---
+---
+
+# Post-P4: Parallel Module Pre-compilation Results
+
+Scripts profiled: 279 (263 standalone, 16 with imports, 0 skipped)
+
+## Change Summary
+
+P4 introduced **parallel module pre-compilation**: before the main script runs, all
+transitive imports are discovered via a fast Tree-sitter scan, topologically sorted
+by depth, and compiled in parallel using pthreads (threshold ≥ 2 imported modules).
+
+**Profiling note:** The profiling script measures `load_script()` time only. With
+pre-compilation, all transitive imports are already compiled and cached *before*
+`load_script()` is called for the main script. This means that the 41 previously
+heavy-import scripts (chart ×25, latex ×7, math ×6, etc.) now appear as
+**standalone** scripts in the profiler with dramatically lower times — they only
+measure the main script's own compilation, not the imports.
+
+### Before / After — Phase Totals
+
+**Standalone scripts:**
+
+| Metric | Before (220) | After (263) | Note |
+|--------|-------------|-------------|------|
+| Total | 928.63 ms | 880.54 ms | −5.2% (43 more scripts counted here) |
+| Avg | 4.22 ms | 3.35 ms | −20.6% |
+
+**Scripts with imports:**
+
+| Metric | Before (57) | After (16) | Note |
+|--------|-------------|------------|------|
+| Total | 11,378.79 ms | 142.47 ms | −98.7% (41 moved to standalone via precompile) |
+| Avg | 199.63 ms | 8.90 ms | −95.5% (remaining 16 each have only 2 modules) |
+
+### Before / After — Heaviest Scripts (profiler)
+
+Scripts that previously dominated compilation time. "After (profiler)" shows main-script-only
+time since precompile already handled the transitive imports:
+
+| Script | Modules | Before (ms) | After standalone (ms) | Reduction |
+|--------|---------|-------------|----------------------|-----------|
+| latex_test_latex_m7 | 30 | 1,132.37 | 2.58 | 99.8% |
+| math_test_math_html_output | 32 | 1,089.24 | 0.19 | 99.98% |
+| chart_test_rule_chart | 16 | 371.31 | 0.58 | 99.8% |
+| chart_test_candlestick | 15 | 365.63 | 1.78 | 99.5% |
+| Chart suite (25 scripts) | 13–16 | avg 334.43 | avg 0.99 | 99.7% |
+
+### Wall-Clock End-to-End (including precompile)
+
+True wall-clock time for the full process (precompile + load_script + execution),
+measured with `/usr/bin/time` on release build, 3 runs each (best of 3):
+
+| Script | Modules | Wall (s) | User (s) | Sys (s) | CPU% | Note |
+|--------|---------|----------|----------|---------|------|------|
+| latex_test_latex_m7 | 30 | 0.19 | 0.33 | 0.02 | ~184% | Parallel threads active |
+| math_test_math_html_output | 32 | 0.19 | 0.34 | 0.02 | ~189% | Parallel threads active |
+| chart_test_candlestick | 15 | 0.09 | 0.13 | 0.00 | ~144% | Parallel threads active |
+| chart_test_rule_chart | 16 | 0.09 | 0.13 | 0.00 | ~144% | Parallel threads active |
+
+CPU% > 100% confirms that parallel threads are executing concurrently
+(user time exceeds wall-clock time).
+
+---
+
+## Set 1: Standalone Scripts (no imports) — 263 scripts
+
+### Phase Summary (standalone)
+
+| Phase | Total (ms) | Avg (ms) | % of Total |
+|-------|-----------|----------|------------|
+| Tree-sitter Parse | 49.44 | 0.19 | 5.6% |
+| AST Build | 65.37 | 0.25 | 7.4% |
+| MIR Transpile | 718.10 | 2.73 | 81.6% |
+| JIT Codegen | 47.63 | 0.18 | 5.4% |
+| **Total** | **880.54** | **3.35** | 100% |
+
+| Suite | Scripts | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Avg (ms) |
+|-------|---------|-----------|----------|---------------|----------|-----------|----------|
+| awfy | 25 | 15.03 | 12.68 | 156.77 | 7.17 | 191.65 | 7.67 |
+| beng | 7 | 1.38 | 1.37 | 19.26 | 1.26 | 23.27 | 3.32 |
+| chart | 25 | 1.91 | 2.69 | 17.68 | 2.38 | 24.67 | 0.99 |
+| kostya | 7 | 0.90 | 1.08 | 12.77 | 1.16 | 15.91 | 2.27 |
+| lambda | 116 | 19.24 | 26.54 | 375.02 | 22.57 | 443.38 | 3.82 |
+| larceny | 14 | 1.97 | 2.45 | 26.29 | 2.42 | 33.13 | 2.37 |
+| latex | 9 | 1.69 | 9.54 | 24.12 | 1.12 | 36.46 | 4.05 |
+| math | 8 | 1.37 | 1.40 | 14.65 | 0.87 | 18.29 | 2.29 |
+| proc | 32 | 4.33 | 5.29 | 50.75 | 5.54 | 65.91 | 2.06 |
+| r7rs | 20 | 1.61 | 2.33 | 20.78 | 3.14 | 27.86 | 1.39 |
+
+## Set 2: Scripts with Imports — 16 scripts
+
+All remaining import scripts have exactly 2 modules (precompile handled ≥2 transitive imports).
+
+### Phase Summary (with imports)
+
+| Phase | Total (ms) | Avg (ms) | % of Total |
+|-------|-----------|----------|------------|
+| Tree-sitter Parse | 4.50 | 0.28 | 3.2% |
+| AST Build | 68.72 | 4.29 | 48.2% |
+| MIR Transpile | 64.77 | 4.05 | 45.5% |
+| JIT Codegen | 4.50 | 0.28 | 3.2% |
+| **Total** | **142.47** | **8.90** | 100% |
+
+| Suite | Scripts | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Avg (ms) |
+|-------|---------|-----------|----------|---------------|----------|-----------|----------|
+| lambda | 6 | 0.33 | 7.40 | 6.40 | 1.51 | 15.63 | 2.61 |
+| latex | 4 | 2.32 | 33.14 | 25.21 | 1.26 | 61.93 | 15.48 |
+| math | 6 | 1.85 | 28.17 | 33.15 | 1.73 | 64.90 | 10.82 |
+
+### Per-Script Breakdown (with imports)
+
+| # | Suite | Script | Parse (ms) | AST (ms) | Transpile (ms) | JIT (ms) | Total (ms) | Modules |
+|---|-------|--------|-----------|----------|---------------|----------|-----------|---------|
+| 1 | latex | latex_test_latex_picture | 1.76 | 20.85 | 18.87 | 0.61 | 41.99 | 2 |
+| 2 | math | math_test_math_symbols | 0.56 | 13.96 | 15.02 | 0.38 | 29.92 | 2 |
+| 3 | latex | latex_test_latex_includegraphics | 0.14 | 7.90 | 1.54 | 0.12 | 9.83 | 2 |
+| 4 | math | math_test_math_css | 0.28 | 3.60 | 4.59 | 0.30 | 8.77 | 2 |
+| 5 | latex | latex_test_latex_to_html | 0.31 | 3.78 | 3.59 | 0.29 | 7.93 | 2 |
+| 6 | math | math_test_math_optimize | 0.34 | 2.73 | 4.39 | 0.31 | 7.89 | 2 |
+| 7 | lambda | import | 0.15 | 3.74 | 3.44 | 0.30 | 7.63 | 2 |
+| 8 | math | math_test_math_spacing | 0.27 | 2.70 | 3.63 | 0.31 | 6.90 | 2 |
+| 9 | math | math_test_math_metrics | 0.26 | 2.88 | 3.28 | 0.30 | 6.73 | 2 |
+| 10 | math | math_test_math_util | 0.13 | 2.29 | 2.24 | 0.13 | 4.94 | 2 |
+| 11 | latex | latex_test_latex_css | 0.11 | 0.61 | 1.22 | 0.25 | 2.19 | 2 |
+| 12 | lambda | import_types | 0.04 | 0.86 | 0.74 | 0.24 | 1.88 | 2 |
+| 13 | lambda | import_compute | 0.03 | 0.89 | 0.65 | 0.23 | 1.80 | 2 |
+| 14 | lambda | import_error_destr | 0.04 | 0.69 | 0.52 | 0.26 | 1.50 | 2 |
+| 15 | lambda | import_vars | 0.03 | 0.65 | 0.51 | 0.24 | 1.43 | 2 |
+| 16 | lambda | import_pub_types | 0.03 | 0.57 | 0.55 | 0.24 | 1.40 | 2 |

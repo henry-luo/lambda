@@ -137,6 +137,10 @@ static void init_sys_func_maps() {
              count, hashmap_count(sys_func_name_set));
 }
 
+void ensure_sys_func_maps_initialized() {
+    init_sys_func_maps();
+}
+
 // Check if a name matches any system function (regardless of arg count)
 // Returns true if the name is reserved for system functions
 bool is_sys_func_name(const char* name, int name_len) {

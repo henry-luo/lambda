@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <pthread.h>
+#include <unistd.h>
+#endif
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
 #include "lambda-decimal.hpp"
@@ -193,14 +197,25 @@ char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+void ensure_jit_imports_initialized(void);
 }
 void transpile_ast_root(Transpiler* tp, AstScript *script);
+void ensure_sys_func_maps_initialized(void);
 void check_memory_leak();
 void print_heap_entries();
 
 // thread-specific runtime context
 __thread EvalContext* context = NULL;
 extern __thread Context* input_context;
+
+// Thread-local parser for parallel module compilation.
+// When non-NULL, load_script() uses this instead of runtime->parser.
+static __thread TSParser* tls_parser = NULL;
+
+#ifndef _WIN32
+// Mutex for thread-safe access to runtime->scripts during parallel compilation
+static pthread_mutex_t scripts_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 // Persistent last error (survives beyond runner lifetime)
 // This is needed because context points to runner's stack-allocated EvalContext
@@ -353,7 +368,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     win_timer start, end;
 
     // Phase profiling: use high-res timer for release-accurate timing
-    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS;
+    // Skip profiling for worker threads (parallel module compilation) to avoid data races
+    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS && !tls_parser;
     profile_time_t p0, p1, p2, p3, p4, p5, p6, p7;
     if (profiling) profile_get_time(&p0);
 
@@ -541,8 +557,395 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     print_elapsed_time("JIT compiling", start, end);
 }
 
+// ============================================================================
+// Parallel Module Compilation
+// ============================================================================
+// Pre-discovers all import dependencies and compiles modules in parallel,
+// organized by topological depth (leaves first, dependents after).
+// Enabled only for MIR Direct path with ≥3 modules on non-Windows platforms.
+
+#ifndef _WIN32
+
+// Import graph node for dependency discovery
+typedef struct {
+    char* path;        // canonical absolute path (owned)
+    char* source;      // source text (owned)
+    char* directory;   // directory for relative imports (owned)
+    int* deps;         // indices of dependency nodes (owned)
+    int dep_count;
+    int dep_cap;
+    int depth;         // topological depth (0 = leaf, -1 = uncomputed)
+} ImportGraphNode;
+
+// Hashmap entry for path→index dedup
+typedef struct {
+    const char* path;
+    int index;
+} PathIndexEntry;
+
+static uint64_t path_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const PathIndexEntry* e = (const PathIndexEntry*)item;
+    return hashmap_xxhash3(e->path, strlen(e->path), seed0, seed1);
+}
+static int path_index_compare(const void* a, const void* b, void* udata) {
+    return strcmp(((const PathIndexEntry*)a)->path, ((const PathIndexEntry*)b)->path);
+}
+
+// Resolve a module import path to a canonical absolute path.
+// Returns malloc'd canonical path, or NULL for built-in/URI imports.
+static char* resolve_module_path(const char* module_text, int module_len, const char* import_dir) {
+    if (module_len <= 0) return NULL;
+
+    // skip built-in modules
+    if ((module_len == 4 && strncmp(module_text, "math", 4) == 0) ||
+        (module_len == 2 && strncmp(module_text, "io", 2) == 0))
+        return NULL;
+
+    // skip bare URI imports
+    if (module_text[0] == '\'') return NULL;
+
+    StrBuf* buf = strbuf_new();
+
+    if (module_text[0] == '.') {
+        // relative import: .foo.bar → base_dir/foo/bar.ls
+        const char* base_dir = import_dir ? import_dir : "./";
+        strbuf_append_format(buf, "%s%.*s", base_dir, module_len - 1, module_text + 1);
+        char* ch = buf->str + buf->length - (module_len - 1);
+        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
+        strbuf_append_str(buf, ".ls");
+    } else {
+        // absolute import: lambda.package.chart → g_lambda_home/package/chart.ls
+        strbuf_append_format(buf, "./%.*s", module_len, module_text);
+        char* ch = buf->str + 2;
+        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
+        strbuf_append_str(buf, ".ls");
+
+        // replace first segment with g_lambda_home
+        char* segment_end = strchr(buf->str + 2, '/');
+        if (segment_end) {
+            StrBuf* fixed = strbuf_new();
+            const char* home = g_lambda_home;
+            if (home[0] == '.' && home[1] == '/') home += 2;
+            strbuf_append_str(fixed, "./");
+            strbuf_append_str(fixed, home);
+            strbuf_append_str(fixed, segment_end);
+            strbuf_free(buf);
+            buf = fixed;
+        }
+    }
+
+    char* resolved = realpath(buf->str, NULL);
+    strbuf_free(buf);
+    return resolved;
+}
+
+// Add a dependency edge from parent_idx to dep_idx
+static void add_dep(ImportGraphNode* nodes, int parent_idx, int dep_idx) {
+    ImportGraphNode* parent = &nodes[parent_idx];
+    if (parent->dep_count >= parent->dep_cap) {
+        parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
+        parent->deps = (int*)realloc(parent->deps, sizeof(int) * parent->dep_cap);
+    }
+    parent->deps[parent->dep_count++] = dep_idx;
+}
+
+// Recursively discover all import dependencies starting from a source file.
+// Adds new modules to the graph and records dependency edges.
+static void discover_imports_recursive(
+    TSParser* parser, int parent_idx,
+    ImportGraphNode** nodes, int* count, int* capacity,
+    struct hashmap* path_map)
+{
+    ImportGraphNode* parent = &(*nodes)[parent_idx];
+    TSTree* tree = lambda_parse_source(parser, parent->source);
+    if (!tree) return;
+
+    // Save source and directory pointers BEFORE any recursive calls that might
+    // realloc the nodes array and invalidate the parent pointer.  These are
+    // separate heap allocations that remain valid until cleanup.
+    const char* parent_source = parent->source;
+    const char* parent_dir = parent->directory;
+
+    TSNode root = ts_tree_root_node(tree);
+    TSNode child = ts_node_named_child(root, 0);
+
+    while (!ts_node_is_null(child)) {
+        if (ts_node_symbol(child) == sym_import_module) {
+            TSNode module_node = ts_node_child_by_field_id(child, field_module);
+            if (!ts_node_is_null(module_node)) {
+                uint32_t start = ts_node_start_byte(module_node);
+                uint32_t end_byte = ts_node_end_byte(module_node);
+                const char* module_text = parent_source + start;
+                int module_len = (int)(end_byte - start);
+
+                char* dep_path = resolve_module_path(module_text, module_len, parent_dir);
+                if (dep_path) {
+                    PathIndexEntry key = { .path = dep_path, .index = 0 };
+                    const PathIndexEntry* existing = (const PathIndexEntry*)hashmap_get(path_map, &key);
+
+                    int dep_idx;
+                    if (existing) {
+                        dep_idx = existing->index;
+                        free(dep_path);
+                    } else {
+                        // new module discovered
+                        if (*count >= *capacity) {
+                            *capacity *= 2;
+                            *nodes = (ImportGraphNode*)realloc(*nodes, sizeof(ImportGraphNode) * (*capacity));
+                        }
+                        dep_idx = *count;
+                        ImportGraphNode* n = &(*nodes)[dep_idx];
+                        memset(n, 0, sizeof(ImportGraphNode));
+                        n->path = dep_path;
+                        n->source = read_text_file(dep_path);
+                        n->depth = -1;
+
+                        // extract directory
+                        const char* last_slash = strrchr(dep_path, '/');
+                        if (last_slash) {
+                            int dir_len = (int)(last_slash - dep_path + 1);
+                            n->directory = (char*)malloc(dir_len + 1);
+                            memcpy(n->directory, dep_path, dir_len);
+                            n->directory[dir_len] = '\0';
+                        } else {
+                            n->directory = strdup("./");
+                        }
+
+                        PathIndexEntry entry = { .path = n->path, .index = dep_idx };
+                        hashmap_set(path_map, &entry);
+                        (*count)++;
+
+                        // recurse to discover transitive imports
+                        if (n->source) {
+                            discover_imports_recursive(parser, dep_idx,
+                                nodes, count, capacity, path_map);
+                        }
+                    }
+                    // record dependency: parent depends on dep_idx
+                    // re-fetch parent pointer since realloc may have moved the array
+                    add_dep(*nodes, parent_idx, dep_idx);
+                }
+            }
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    ts_tree_delete(tree);
+}
+
+// Compute topological depth for a node (0 = leaf, max(deps)+1 for others).
+// Uses recursive DFS with memoization.
+static int compute_depth(ImportGraphNode* nodes, int idx) {
+    if (nodes[idx].depth >= 0) return nodes[idx].depth;
+    nodes[idx].depth = 0;  // mark as computing (breaks cycles)
+    int max_dep = -1;
+    for (int i = 0; i < nodes[idx].dep_count; i++) {
+        int d = compute_depth(nodes, nodes[idx].deps[i]);
+        if (d > max_dep) max_dep = d;
+    }
+    nodes[idx].depth = max_dep + 1;
+    return nodes[idx].depth;
+}
+
+// Worker argument for parallel compilation thread
+typedef struct {
+    Runtime* runtime;
+    ImportGraphNode* node;
+    bool success;
+} CompileWorkerArg;
+
+static void* compile_module_worker(void* arg) {
+    CompileWorkerArg* work = (CompileWorkerArg*)arg;
+
+    // create thread-local parser
+    tls_parser = lambda_parser();
+
+    // compile the module via load_script (thread-safe version)
+    // pass pre-read source to avoid redundant file I/O
+    Script* result = load_script(work->runtime, work->node->path, work->node->source, true);
+    work->success = (result != NULL && result->jit_context != NULL);
+
+    // cleanup thread-local parser
+    ts_parser_delete(tls_parser);
+    tls_parser = NULL;
+
+    return NULL;
+}
+
+// Pre-compile all import dependencies in parallel before the main script starts.
+// Discovers the full dependency graph, then compiles level by level (leaves first).
+static void precompile_imports(Runtime* runtime, const char* main_script_path) {
+    // read main script source for discovery
+    char* canonical = realpath(main_script_path, NULL);
+    const char* main_path = canonical ? canonical : main_script_path;
+    const char* main_source = read_text_file(main_path);
+    if (!main_source) {
+        if (canonical) free(canonical);
+        return;
+    }
+
+    // extract main script directory
+    char* main_dir = NULL;
+    const char* last_slash = strrchr(main_path, '/');
+    if (last_slash) {
+        int dir_len = (int)(last_slash - main_path + 1);
+        main_dir = (char*)malloc(dir_len + 1);
+        memcpy(main_dir, main_path, dir_len);
+        main_dir[dir_len] = '\0';
+    } else {
+        main_dir = strdup("./");
+    }
+
+    // initialize graph with main script as sentinel node (index 0, not compiled here)
+    int capacity = 32;
+    int count = 1;
+    ImportGraphNode* nodes = (ImportGraphNode*)calloc(capacity, sizeof(ImportGraphNode));
+    nodes[0].path = strdup(main_path);
+    nodes[0].source = (char*)main_source;
+    nodes[0].directory = main_dir;
+    nodes[0].depth = -1;
+
+    struct hashmap* path_map = hashmap_new(sizeof(PathIndexEntry), 64, 0, 0,
+        path_index_hash, path_index_compare, NULL, NULL);
+    PathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
+    hashmap_set(path_map, &main_entry);
+
+    // discover all imports recursively using a temporary parser
+    TSParser* discovery_parser = lambda_parser();
+    discover_imports_recursive(discovery_parser, 0, &nodes, &count, &capacity, path_map);
+    ts_parser_delete(discovery_parser);
+
+    // check if there are enough modules to justify parallelism
+    int import_count = count - 1;  // exclude main script (index 0)
+    if (import_count >= 2) {
+        log_info("parallel import: discovered %d modules, pre-compiling...", import_count);
+
+        // ensure one-time init before spawning threads
+        ensure_jit_imports_initialized();
+        ensure_sys_func_maps_initialized();
+
+        // compute topological depths
+        int max_depth = 0;
+        for (int i = 1; i < count; i++) {
+            int d = compute_depth(nodes, i);
+            if (d > max_depth) max_depth = d;
+        }
+
+        // compile level by level: depth 0 first (leaves), then 1, 2, ...
+        // main script (index 0) has the highest depth — skip it
+        long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+        if (ncpus < 1) ncpus = 1;
+        if (ncpus > 8) ncpus = 8;
+
+        int pre_start = runtime->scripts->length;  // track scripts added by precompile
+
+        for (int level = 0; level <= max_depth; level++) {
+            // collect modules at this depth
+            int batch_count = 0;
+            for (int i = 1; i < count; i++) {
+                if (nodes[i].depth == level && nodes[i].source) batch_count++;
+            }
+            if (batch_count == 0) continue;
+
+            // skip already-cached modules
+            CompileWorkerArg* args = (CompileWorkerArg*)calloc(batch_count, sizeof(CompileWorkerArg));
+            int actual = 0;
+            pthread_mutex_lock(&scripts_mutex);
+            for (int i = 1; i < count; i++) {
+                if (nodes[i].depth != level || !nodes[i].source) continue;
+                // check if already in cache
+                bool cached = false;
+                for (int j = 0; j < runtime->scripts->length; j++) {
+                    Script* s = (Script*)runtime->scripts->data[j];
+                    if (strcmp(s->reference, nodes[i].path) == 0) {
+                        cached = true;
+                        break;
+                    }
+                }
+                if (!cached) {
+                    args[actual].runtime = runtime;
+                    args[actual].node = &nodes[i];
+                    args[actual].success = false;
+                    actual++;
+                }
+            }
+            pthread_mutex_unlock(&scripts_mutex);
+
+            if (actual == 0) {
+                free(args);
+                continue;
+            }
+
+            if (actual == 1) {
+                // single module — compile in-place without thread overhead
+                tls_parser = lambda_parser();
+                load_script(runtime, args[0].node->path, args[0].node->source, true);
+                ts_parser_delete(tls_parser);
+                tls_parser = NULL;
+            } else {
+                // parallel compilation
+                pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * actual);
+                pthread_attr_t attr;
+                pthread_attr_init(&attr);
+                pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); // 8MB stack for deep transpiler recursion
+
+                for (int i = 0; i < actual; i++) {
+                    pthread_create(&threads[i], &attr, compile_module_worker, &args[i]);
+                }
+                pthread_attr_destroy(&attr);
+                for (int i = 0; i < actual; i++) {
+                    pthread_join(threads[i], NULL);
+                }
+                free(threads);
+            }
+            free(args);
+        }
+
+        log_info("parallel import: pre-compilation complete");
+
+        // Reverse the precompiled scripts in the runtime list.
+        // run_script_mir() calls init functions in REVERSE list order, expecting the
+        // deepest transitive imports at the end (as produced by sequential depth-first loading).
+        // Precompile adds them in topological order (leaves first), so we reverse.
+        int pre_end = runtime->scripts->length;
+        for (int i = pre_start, j = pre_end - 1; i < j; i++, j--) {
+            void* tmp = runtime->scripts->data[i];
+            runtime->scripts->data[i] = runtime->scripts->data[j];
+            runtime->scripts->data[j] = tmp;
+            ((Script*)runtime->scripts->data[i])->index = i;
+            ((Script*)runtime->scripts->data[j])->index = j;
+        }
+    }
+
+    // cleanup graph
+    hashmap_free(path_map);
+    for (int i = 0; i < count; i++) {
+        // don't free source for index 0 — that was read_text_file'd and will be freed
+        // when load_script reads it again (or it might be the same pointer)
+        if (i > 0) free(nodes[i].source);
+        free(nodes[i].path);
+        free(nodes[i].directory);
+        free(nodes[i].deps);
+    }
+    // index 0's source was malloc'd by read_text_file — free it
+    free((void*)main_source);
+    // main_dir is nodes[0].directory, already freed above
+    free(nodes);
+    if (canonical) free(canonical);
+}
+
+#endif  // !_WIN32
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
+
+#ifndef _WIN32
+    // For the main script, pre-compile all imports in parallel.
+    // Only trigger when: not an import, no source provided (file-based), MIR Direct mode,
+    // and not already in a worker thread (tls_parser == NULL).
+    if (!is_import && !source && runtime->use_mir_direct && !tls_parser) {
+        precompile_imports(runtime, script_path);
+    }
+#endif
 
     // Normalize path to canonical absolute path for reliable deduplication
     // (skip for source-provided scripts like REPL which have synthetic paths)
@@ -560,33 +963,51 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
 
-    // find the script in the list of scripts
+    // find the script in the list of scripts (thread-safe)
+#ifndef _WIN32
+    pthread_mutex_lock(&scripts_mutex);
+#endif
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
         if (strcmp(script->reference, lookup_path) == 0) {
             // circular import detection: script is in list but still being loaded
             if (script->is_loading) {
+#ifndef _WIN32
+                pthread_mutex_unlock(&scripts_mutex);
+#endif
                 log_error("Circular import detected: %s", lookup_path);
                 fprintf(stderr, "Error: Circular import detected: %s\n", lookup_path);
                 if (canonical_path) free(canonical_path);
                 return NULL;
             }
+#ifndef _WIN32
+            pthread_mutex_unlock(&scripts_mutex);
+#endif
             log_info("Script %s is already loaded.", lookup_path);
             if (canonical_path) free(canonical_path);
             return script;
         }
     }
-    // script not found, create a new one
+    // script not found — create stub and register immediately to prevent duplicates
+    Script *new_script = (Script*)calloc(1, sizeof(Script));
+    new_script->reference = strdup(lookup_path);
+    new_script->is_loading = true;
+    arraylist_append(runtime->scripts, new_script);
+    new_script->index = runtime->scripts->length - 1;
+#ifndef _WIN32
+    pthread_mutex_unlock(&scripts_mutex);
+#endif
+
     // strdup when source is provided externally (e.g. REPL) so the script owns its copy
     // and runtime_cleanup can safely free it without a double-free
     const char* script_source = source ? strdup(source) : read_text_file(lookup_path);
     if (!script_source) {
         log_error("Error: Failed to read source code from %s", lookup_path);
+        new_script->is_loading = false;
         if (canonical_path) free(canonical_path);
         return NULL;
     }
-    Script *new_script = (Script*)calloc(1, sizeof(Script));
-    new_script->reference = strdup(lookup_path);
+
     // extract directory from script path for script-relative imports
     const char* last_slash = strrchr(lookup_path, '/');
 #ifdef _WIN32
@@ -610,8 +1031,6 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (canonical_path) free(canonical_path);
     new_script->source = script_source;
     log_debug("script source length: %d", (int)strlen(new_script->source));
-    arraylist_append(runtime->scripts, new_script);
-    new_script->index = runtime->scripts->length - 1;
     new_script->is_main = !is_import;  // main script is not an import
 
     // Initialize decimal context (use shared unlimited context for transpiler)
@@ -619,12 +1038,12 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
-    transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
+    transpiler.parser = tls_parser ? tls_parser : runtime->parser;
+    transpiler.runtime = runtime;
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
     transpiler.errors = arraylist_new(8);  // initialize error list for structured errors
 
-    new_script->is_loading = true;  // mark as loading for circular import detection
     transpile_script(&transpiler, new_script, script_path);
     new_script->is_loading = false;  // loading complete
 

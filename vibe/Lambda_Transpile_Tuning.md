@@ -404,6 +404,131 @@ Combining all MIR transpile optimizations for standalone scripts (current averag
 
 ---
 
+## Implementation Progress
+
+### Completed Optimizations
+
+| Priority | Optimization                          | Status         | Files Changed              |
+| -------- | ------------------------------------- | -------------- | -------------------------- |
+| **P1**   | B. Batch param inference              | ✅ Done         | `lambda/transpile-mir.cpp` |
+| **P2**   | D. Cache inferred types across phases | ✅ Done         | `lambda/transpile-mir.cpp` |
+| **P2b**  | A. Merge prepass 3+4                  | ⏭️ Skipped     | —                          |
+| **P3**   | C. Hashmap dynamic imports            | ✅ Done         | `lambda/mir.c`             |
+| **P4**   | Multi-thread imports (Part 1)         | ✅ Done         | `runner.cpp`, `mir.c`, `build_ast.cpp` |
+| **P5**   | D. Function index cache               | 🔲 Not started | —                          |
+| **P6**   | E. MIR opt level tuning               | 🔲 Not started | —                          |
+
+### P3: Hashmap Dynamic Imports (mir.c)
+
+Replaced the global `dynamic_import_table[256]` array + linear O(n) scan with a Robin Hood hashmap (`lib/hashmap.h`). Three functions changed:
+
+- `register_dynamic_import()` — now lazily creates `dynamic_import_map` and uses `hashmap_set()`  
+- `clear_dynamic_imports()` — uses `hashmap_clear()`  
+- `import_resolver()` — uses `hashmap_get()` for O(1) lookup instead of O(n) `strcmp` loop
+
+Reuses the existing `func_obj_hash` / `func_obj_compare` functions already used by `func_map`.
+
+### P2: Cache Inferred Types Across Phases (transpile-mir.cpp)
+
+Added an `InferCacheEntry` struct + hashmap (`infer_cache`) to `MirTranspiler` that stores inferred parameter types keyed by `AstFuncNode*` pointer:
+
+```cpp
+struct InferCacheEntry {
+    AstFuncNode* fn;
+    TypeId param_types[16];
+    int param_count;
+};
+```
+
+- **`prepass_forward_declare()`**: After computing parameter types (declared + inferred), stores them in `infer_cache`
+- **`transpile_func_def()`**: Checks `infer_cache` first before running inference again; only falls back to `infer_param_types_batched()` on cache miss
+
+This eliminates redundant body walks between the prepass and definition phases — every function's parameters are inferred exactly once.
+
+### P1: Batch Parameter Type Inference (transpile-mir.cpp)
+
+Replaced per-parameter `infer_param_type()` calls with a batched version that walks the function body once for all untyped parameters simultaneously:
+
+- **`find_aliases_multi()`** — single body walk checking aliases for all `InferCtx` contexts at once
+- **`gather_evidence_multi()`** — single body walk gathering type evidence for all contexts at once
+- **`resolve_inferred_type()`** — shared evidence→type resolution (extracted from `infer_param_type`)
+- **`infer_param_types_batched()`** — orchestrator: collects untyped params, runs batched alias/evidence passes, resolves all types
+
+For a function with M untyped parameters, body traversal is now O(body_size) instead of O(M × body_size).
+
+### P2b: Merge Prepass 3+4 — Skipped
+
+### P4: Multi-thread Imports — Part 1 (runner.cpp, mir.c, build_ast.cpp)
+
+Added parallel pre-compilation of imported modules. When a main script is loaded with MIR Direct, all imports are discovered upfront and compiled by topological depth level before the main script's normal compilation begins.
+
+**Architecture — two-phase approach:**
+
+1. **Discovery phase** (single-threaded): Parse main script with Tree-sitter, extract `import_module` nodes, resolve module paths, recurse into transitive imports. Build a dependency graph with depth annotations.
+
+2. **Compilation phase** (parallel per depth level): Compile modules level-by-level starting from depth 0 (leaves). At each level, if there's 1 module, compile inline; if 2+, spawn worker threads via `pthread_create`. Workers call `load_script()` which handles AST building, transpilation, and MIR code generation independently.
+
+**Key changes:**
+
+- `runner.cpp`: `precompile_imports()` — orchestrator function (~200 lines) with import discovery, depth computation, and level-by-level parallel compilation. `compile_module_worker()` — pthread entry point. `discover_imports_recursive()` — Tree-sitter-based import graph builder. `resolve_module_path()` — mirrors `build_module_import()` path resolution logic. `load_script()` restructured with mutex-protected script cache, `tls_parser` for worker threads, and precompile hook.
+- `mir.c`: `dynamic_import_map` made `__thread` for per-thread isolation during parallel MIR linking. Added `ensure_jit_imports_initialized()`.
+- `build_ast.cpp`: Added `ensure_sys_func_maps_initialized()` for thread-safe one-time init.
+
+**Thread safety:**
+- `pthread_mutex_t scripts_mutex` guards `runtime->scripts` arraylist
+- `__thread TSParser* tls_parser` — thread-local parser for worker threads
+- `__thread dynamic_import_map` — per-thread MIR import resolution
+- Worker thread stack size set to 8MB (matches main thread) for deep transpiler recursion
+- Scripts list reversed after precompile to match `run_script_mir()` reverse-order init expectation
+
+**Current status:** Infrastructure complete and passing all tests (676/677, 1 pre-existing failure). Threshold set to ≥2 imported modules. The current test suite scripts have small import graphs (2-3 modules), so parallel threading benefit is minimal. Real speedup expected for larger module graphs with multiple independent imports at the same depth level.
+
+Analysis determined this is **unsafe** due to mutual recursion. If function A (defined earlier in source) references function B (defined later as a sibling), B must be forward-declared in Pass 3 before A's body is transpiled in Pass 4. A merged single pass would attempt to define A's body before B is declared, causing a missing-function error. The cache optimization (P2) already eliminates the redundant inference work that motivated this merge.
+
+### Measured Results
+
+**Before** (baseline, 223 standalone scripts):
+
+| Phase | Total (ms) | Avg (ms) | % of Total |
+|-------|-----------|----------|------------|
+| Tree-sitter Parse | 56.13 | 0.25 | 4.8% |
+| AST Build | 242.33 | 1.09 | 20.9% |
+| MIR Transpile | 798.83 | 3.58 | 68.8% |
+| JIT Codegen | 63.72 | 0.29 | 5.5% |
+| **Total** | **1161.01** | **5.20** | 100% |
+
+**After** (P1 + P2 + P3, 220 standalone scripts):
+
+| Phase | Total (ms) | Avg (ms) | % of Total |
+|-------|-----------|----------|------------|
+| Tree-sitter Parse | 56.03 | 0.25 | 6.0% |
+| AST Build | 83.56 | 0.38 | 9.0% |
+| MIR Transpile | 741.80 | 3.37 | 79.9% |
+| JIT Codegen | 47.24 | 0.21 | 5.1% |
+| **Total** | **928.63** | **4.22** | 100% |
+
+**Transpile phase reduction by suite:**
+
+| Suite | Before (ms) | After (ms) | Reduction |
+|-------|------------|-----------|-----------|
+| awfy | 163.22 | 152.07 | **6.8%** |
+| lambda | 453.77 | 424.16 | **6.5%** |
+| proc | 66.55 | 62.30 | **6.4%** |
+| r7rs | 33.08 | 25.96 | **21.5%** |
+| larceny | 33.03 | 32.18 | **2.6%** |
+| beng | 23.85 | 23.08 | **3.2%** |
+| **Total** | **798.83** | **741.80** | **7.1%** |
+
+The r7rs suite showed the largest improvement (21.5%) because its Scheme-style scripts have many untyped parameters — exactly the case batched inference optimizes most.
+
+### Verification
+
+- **Build**: 0 errors, 221 warnings (no new warnings)
+- **Lambda baseline tests**: 676/677 pass (1 pre-existing failure: `math_test_math_html_output` — UTF-8 encoding issue in expected output, unrelated)
+- **Radiant baseline tests**: 3671/3671 pass
+
+---
+
 ## Appendix: Profiling Data Reference
 
 Full profiling report: [`test/benchmark/Transpile_Result.md`](../test/benchmark/Transpile_Result.md)
