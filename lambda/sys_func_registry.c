@@ -1208,6 +1208,7 @@ JitImport jit_runtime_imports[] = {
     // subscript/slice
     {"py_subscript_get", FPTR(py_subscript_get)},
     {"py_subscript_set", FPTR(py_subscript_set)},
+    {"py_slice_get", FPTR(py_slice_get)},
     // iterator
     {"py_get_iterator", FPTR(py_get_iterator)},
     {"py_iterator_next", FPTR(py_iterator_next)},
@@ -1228,6 +1229,7 @@ JitImport jit_runtime_imports[] = {
     {"py_reset_module_vars", FPTR(py_reset_module_vars)},
     // built-in functions
     {"py_print", FPTR(py_print)},
+    {"py_print_ex", FPTR(py_print_ex)},
     {"py_builtin_len", FPTR(py_builtin_len)},
     {"py_builtin_type", FPTR(py_builtin_type)},
     {"py_builtin_isinstance", FPTR(py_builtin_isinstance)},
@@ -1256,6 +1258,17 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_dict", FPTR(py_builtin_dict)},
     {"py_builtin_set", FPTR(py_builtin_set)},
     {"py_builtin_tuple", FPTR(py_builtin_tuple)},
+    {"py_builtin_round", FPTR(py_builtin_round)},
+    {"py_builtin_all", FPTR(py_builtin_all)},
+    {"py_builtin_any", FPTR(py_builtin_any)},
+    {"py_builtin_bin", FPTR(py_builtin_bin)},
+    {"py_builtin_oct", FPTR(py_builtin_oct)},
+    {"py_builtin_hex", FPTR(py_builtin_hex)},
+    {"py_builtin_divmod", FPTR(py_builtin_divmod)},
+    {"py_builtin_pow", FPTR(py_builtin_pow)},
+    {"py_builtin_callable", FPTR(py_builtin_callable)},
+    {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
+    {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers
     {"py_string_method", FPTR(py_string_method)},
     {"py_list_method", FPTR(py_list_method)},

@@ -8,6 +8,7 @@
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
+#include "../../lib/strbuf.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +36,7 @@ extern "C" Item py_dict_new(void);
 extern "C" Item py_dict_set(Item dict, Item key, Item value);
 extern "C" Item py_range_new(Item start, Item stop, Item step);
 extern "C" Item py_call_function(Item func, Item* args, int arg_count);
+double py_get_number(Item value);
 
 // ============================================================================
 // print()
@@ -50,6 +52,33 @@ extern "C" Item py_print(Item* args, int argc) {
         }
     }
     printf("\n");
+    return ItemNull;
+}
+
+extern "C" Item py_print_ex(Item* args, int argc, Item sep, Item end) {
+    // sep defaults to " ", end defaults to "\n"
+    const char* sep_str = " ";
+    int sep_len = 1;
+    if (get_type_id(sep) == LMD_TYPE_STRING) {
+        String* s = it2s(sep);
+        if (s) { sep_str = s->chars; sep_len = (int)s->len; }
+    }
+    const char* end_str = "\n";
+    int end_len = 1;
+    if (get_type_id(end) == LMD_TYPE_STRING) {
+        String* s = it2s(end);
+        if (s) { end_str = s->chars; end_len = (int)s->len; }
+    }
+
+    for (int i = 0; i < argc; i++) {
+        if (i > 0) printf("%.*s", sep_len, sep_str);
+        Item str = py_to_str(args[i]);
+        if (get_type_id(str) == LMD_TYPE_STRING) {
+            String* s = it2s(str);
+            printf("%.*s", (int)s->len, s->chars);
+        }
+    }
+    printf("%.*s", end_len, end_str);
     return ItemNull;
 }
 
@@ -411,6 +440,253 @@ extern "C" Item py_builtin_chr(Item code) {
 }
 
 // ============================================================================
+// round()
+// ============================================================================
+
+extern "C" Item py_builtin_round(Item x, Item ndigits) {
+    double val = py_get_number(x);
+    int64_t n = (get_type_id(ndigits) == LMD_TYPE_INT) ? it2i(ndigits) : 0;
+    if (n == 0 && get_type_id(ndigits) != LMD_TYPE_INT) {
+        // round(x) with no second arg → return int
+        long long r = llround(val);
+        return (Item){.item = i2it(r)};
+    }
+    double scale = pow(10.0, (double)n);
+    double rounded = round(val * scale) / scale;
+    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *ptr = rounded;
+    return (Item){.item = d2it(ptr)};
+}
+
+// ============================================================================
+// all(), any()
+// ============================================================================
+
+extern "C" Item py_builtin_all(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_TRUE};
+    Array* arr = it2arr(iterable);
+    if (!arr) return (Item){.item = ITEM_TRUE};
+    for (int i = 0; i < arr->length; i++) {
+        if (!py_is_truthy(arr->items[i])) return (Item){.item = ITEM_FALSE};
+    }
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item py_builtin_any(Item iterable) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return (Item){.item = ITEM_FALSE};
+    Array* arr = it2arr(iterable);
+    if (!arr) return (Item){.item = ITEM_FALSE};
+    for (int i = 0; i < arr->length; i++) {
+        if (py_is_truthy(arr->items[i])) return (Item){.item = ITEM_TRUE};
+    }
+    return (Item){.item = ITEM_FALSE};
+}
+
+// ============================================================================
+// bin(), oct(), hex()
+// ============================================================================
+
+extern "C" Item py_builtin_bin(Item n) {
+    int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
+    char buf[68];
+    int pos = 0;
+    if (val < 0) { buf[pos++] = '-'; val = -val; }
+    buf[pos++] = '0'; buf[pos++] = 'b';
+    if (val == 0) {
+        buf[pos++] = '0';
+    } else {
+        char tmp[64];
+        int tpos = 0;
+        uint64_t v = (uint64_t)val;
+        while (v > 0) { tmp[tpos++] = '0' + (v & 1); v >>= 1; }
+        for (int i = tpos - 1; i >= 0; i--) buf[pos++] = tmp[i];
+    }
+    buf[pos] = '\0';
+    return (Item){.item = s2it(heap_strcpy(buf, pos))};
+}
+
+extern "C" Item py_builtin_oct(Item n) {
+    int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
+    char buf[32];
+    int len;
+    if (val < 0) {
+        len = snprintf(buf, sizeof(buf), "-0o%llo", (unsigned long long)(-val));
+    } else {
+        len = snprintf(buf, sizeof(buf), "0o%llo", (unsigned long long)val);
+    }
+    return (Item){.item = s2it(heap_strcpy(buf, len))};
+}
+
+extern "C" Item py_builtin_hex(Item n) {
+    int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
+    char buf[32];
+    int len;
+    if (val < 0) {
+        len = snprintf(buf, sizeof(buf), "-0x%llx", (unsigned long long)(-val));
+    } else {
+        len = snprintf(buf, sizeof(buf), "0x%llx", (unsigned long long)val);
+    }
+    return (Item){.item = s2it(heap_strcpy(buf, len))};
+}
+
+// ============================================================================
+// divmod()
+// ============================================================================
+
+extern "C" Item py_builtin_divmod(Item a, Item b) {
+    double da = py_get_number(a);
+    double db = py_get_number(b);
+    if (db == 0.0) {
+        log_error("py: ZeroDivisionError: divmod()");
+        return ItemNull;
+    }
+    int64_t quotient = (int64_t)floor(da / db);
+    double remainder = da - quotient * db;
+    Item tuple = py_tuple_new(2);
+    py_tuple_set(tuple, 0, (Item){.item = i2it(quotient)});
+    if (get_type_id(a) == LMD_TYPE_FLOAT || get_type_id(b) == LMD_TYPE_FLOAT) {
+        double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        *ptr = remainder;
+        py_tuple_set(tuple, 1, (Item){.item = d2it(ptr)});
+    } else {
+        py_tuple_set(tuple, 1, (Item){.item = i2it((int64_t)remainder)});
+    }
+    return tuple;
+}
+
+// ============================================================================
+// pow()
+// ============================================================================
+
+extern "C" Item py_builtin_pow(Item base, Item exp, Item mod) {
+    double b = py_get_number(base);
+    double e = py_get_number(exp);
+    if (get_type_id(mod) != LMD_TYPE_NULL) {
+        // modular exponentiation (integer only)
+        int64_t bv = (int64_t)b;
+        int64_t ev = (int64_t)e;
+        int64_t mv = (int64_t)py_get_number(mod);
+        if (mv == 0) {
+            log_error("py: ValueError: pow() 3rd argument cannot be 0");
+            return ItemNull;
+        }
+        int64_t result = 1;
+        bv = bv % mv;
+        while (ev > 0) {
+            if (ev & 1) result = (result * bv) % mv;
+            ev >>= 1;
+            bv = (bv * bv) % mv;
+        }
+        return (Item){.item = i2it(result)};
+    }
+    double result = pow(b, e);
+    if (get_type_id(base) == LMD_TYPE_INT && get_type_id(exp) == LMD_TYPE_INT && e >= 0) {
+        return (Item){.item = i2it((int64_t)result)};
+    }
+    double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+    *ptr = result;
+    return (Item){.item = d2it(ptr)};
+}
+
+// ============================================================================
+// callable()
+// ============================================================================
+
+extern "C" Item py_builtin_callable(Item obj) {
+    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_FUNC)};
+}
+
+// ============================================================================
+// sorted() with key= and reverse=
+// ============================================================================
+
+extern "C" Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_flag) {
+    if (get_type_id(iterable) != LMD_TYPE_ARRAY) return py_list_new(0);
+    Array* src = it2arr(iterable);
+    if (!src || src->length == 0) return py_list_new(0);
+
+    bool has_key = (get_type_id(key_func) == LMD_TYPE_FUNC);
+    bool reverse = py_is_truthy(reverse_flag);
+
+    // copy array
+    Array* result = array();
+    for (int i = 0; i < src->length; i++) array_push(result, src->items[i]);
+
+    // compute sort keys if key function provided
+    Item* keys = NULL;
+    if (has_key) {
+        keys = (Item*)malloc(result->length * sizeof(Item));
+        for (int i = 0; i < result->length; i++) {
+            Item arg = result->items[i];
+            keys[i] = py_call_function(key_func, &arg, 1);
+        }
+    }
+
+    // insertion sort using keys or direct values
+    for (int i = 1; i < result->length; i++) {
+        Item key_i = has_key ? keys[i] : result->items[i];
+        Item val_i = result->items[i];
+        Item saved_key = key_i;
+        int j = i - 1;
+        while (j >= 0) {
+            Item key_j = has_key ? keys[j] : result->items[j];
+            bool do_swap = reverse ? it2b(py_lt(key_j, saved_key)) : it2b(py_lt(saved_key, key_j));
+            if (!do_swap) break;
+            result->items[j + 1] = result->items[j];
+            if (has_key) keys[j + 1] = keys[j];
+            j--;
+        }
+        result->items[j + 1] = val_i;
+        if (has_key) keys[j + 1] = saved_key;
+    }
+
+    if (keys) free(keys);
+    return (Item){.array = result};
+}
+
+// ============================================================================
+// list.sort() with key= and reverse=
+// ============================================================================
+
+extern "C" Item py_list_sort_ex(Item list_item, Item key_func, Item reverse_flag) {
+    if (get_type_id(list_item) != LMD_TYPE_ARRAY) return ItemNull;
+    Array* arr = it2arr(list_item);
+    if (!arr || arr->length == 0) return ItemNull;
+
+    bool has_key = (get_type_id(key_func) == LMD_TYPE_FUNC);
+    bool reverse = py_is_truthy(reverse_flag);
+
+    Item* keys = NULL;
+    if (has_key) {
+        keys = (Item*)malloc(arr->length * sizeof(Item));
+        for (int i = 0; i < arr->length; i++) {
+            Item arg = arr->items[i];
+            keys[i] = py_call_function(key_func, &arg, 1);
+        }
+    }
+
+    for (int i = 1; i < arr->length; i++) {
+        Item key_i = has_key ? keys[i] : arr->items[i];
+        Item val_i = arr->items[i];
+        Item saved_key = key_i;
+        int j = i - 1;
+        while (j >= 0) {
+            Item key_j = has_key ? keys[j] : arr->items[j];
+            bool do_swap = reverse ? it2b(py_lt(key_j, saved_key)) : it2b(py_lt(saved_key, key_j));
+            if (!do_swap) break;
+            arr->items[j + 1] = arr->items[j];
+            if (has_key) keys[j + 1] = keys[j];
+            j--;
+        }
+        arr->items[j + 1] = val_i;
+        if (has_key) keys[j + 1] = saved_key;
+    }
+
+    if (keys) free(keys);
+    return ItemNull;
+}
+
+// ============================================================================
 // map(), filter()
 // ============================================================================
 
@@ -767,8 +1043,344 @@ extern "C" Item py_string_method(Item str_item, Item method_name, Item* args, in
         return result;
     }
     if (strcmp(method->chars, "format") == 0) {
-        // simplified: just return the string
-        return str_item;
+        // implement str.format() with {} positional and {N} indexed replacement
+        StrBuf* sb = strbuf_new();
+        int auto_idx = 0;
+        const char* p = s->chars;
+        const char* end = p + s->len;
+
+        while (p < end) {
+            if (*p == '{') {
+                if (p + 1 < end && *(p + 1) == '{') {
+                    // escaped {{ → literal {
+                    strbuf_append_char(sb, '{');
+                    p += 2;
+                    continue;
+                }
+                p++; // skip '{'
+                // parse field: optional index/name, optional :format_spec
+                int idx = -1;
+                const char* spec_start = NULL;
+                int spec_len = 0;
+
+                if (p < end && *p >= '0' && *p <= '9') {
+                    // explicit index {N}
+                    idx = 0;
+                    while (p < end && *p >= '0' && *p <= '9') {
+                        idx = idx * 10 + (*p - '0');
+                        p++;
+                    }
+                } else if (p < end && *p == ':') {
+                    // auto-index with format spec
+                    idx = auto_idx++;
+                } else if (p < end && *p == '}') {
+                    // auto-index {}
+                    idx = auto_idx++;
+                }
+
+                // check for format spec
+                if (p < end && *p == ':') {
+                    p++; // skip ':'
+                    spec_start = p;
+                    while (p < end && *p != '}') p++;
+                    spec_len = (int)(p - spec_start);
+                }
+
+                if (p < end && *p == '}') p++; // skip '}'
+
+                // get argument
+                Item arg = (idx >= 0 && idx < argc) ? args[idx] : ItemNull;
+
+                // apply format spec if present
+                if (spec_start && spec_len > 0) {
+                    char spec[64];
+                    int slen = spec_len < 63 ? spec_len : 63;
+                    memcpy(spec, spec_start, slen);
+                    spec[slen] = '\0';
+
+                    // parse format spec: [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+                    char fill = ' ';
+                    char align = '\0';
+                    int width = 0;
+                    int precision = -1;
+                    char type = '\0';
+                    const char* sp = spec;
+
+                    // check for fill+align or just align
+                    if (slen >= 2 && (sp[1] == '<' || sp[1] == '>' || sp[1] == '^')) {
+                        fill = sp[0];
+                        align = sp[1];
+                        sp += 2;
+                    } else if (slen >= 1 && (sp[0] == '<' || sp[0] == '>' || sp[0] == '^')) {
+                        align = sp[0];
+                        sp++;
+                    }
+
+                    // check for 0-padding
+                    bool zero_pad = false;
+                    if (*sp == '0') { zero_pad = true; sp++; if (!align) { fill = '0'; align = '>'; } }
+
+                    // width
+                    while (*sp >= '0' && *sp <= '9') { width = width * 10 + (*sp - '0'); sp++; }
+
+                    // precision
+                    if (*sp == '.') {
+                        sp++;
+                        precision = 0;
+                        while (*sp >= '0' && *sp <= '9') { precision = precision * 10 + (*sp - '0'); sp++; }
+                    }
+
+                    // type
+                    if (*sp) type = *sp;
+
+                    char buf[128];
+                    const char* formatted = buf;
+                    int flen = 0;
+
+                    if (type == 'd' || type == 'n') {
+                        int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+                        flen = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+                    } else if (type == 'f' || type == 'F') {
+                        double val = py_get_number(arg);
+                        if (precision < 0) precision = 6;
+                        flen = snprintf(buf, sizeof(buf), "%.*f", precision, val);
+                    } else if (type == 'e' || type == 'E') {
+                        double val = py_get_number(arg);
+                        if (precision < 0) precision = 6;
+                        flen = snprintf(buf, sizeof(buf), type == 'e' ? "%.*e" : "%.*E", precision, val);
+                    } else if (type == 'x' || type == 'X') {
+                        int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+                        flen = snprintf(buf, sizeof(buf), type == 'x' ? "%llx" : "%llX", (long long)val);
+                    } else if (type == 'o') {
+                        int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+                        flen = snprintf(buf, sizeof(buf), "%llo", (long long)val);
+                    } else if (type == 'b') {
+                        int64_t val = (get_type_id(arg) == LMD_TYPE_INT) ? it2i(arg) : (int64_t)py_get_number(arg);
+                        // binary format
+                        if (val == 0) { buf[0] = '0'; flen = 1; }
+                        else {
+                            uint64_t v = val < 0 ? (uint64_t)(-val) : (uint64_t)val;
+                            int pos = 0;
+                            char tmp[66];
+                            while (v > 0) { tmp[pos++] = '0' + (v & 1); v >>= 1; }
+                            if (val < 0) { buf[0] = '-'; flen = 1; }
+                            else flen = 0;
+                            for (int j = pos - 1; j >= 0; j--) buf[flen++] = tmp[j];
+                        }
+                        buf[flen] = '\0';
+                    } else {
+                        // default: string conversion, apply precision as max width
+                        Item str_val = py_to_str(arg);
+                        String* sv = it2s(str_val);
+                        if (sv) {
+                            formatted = sv->chars;
+                            flen = (precision >= 0 && precision < (int)sv->len) ? precision : sv->len;
+                        }
+                    }
+
+                    // apply width/alignment padding
+                    if (width > 0 && flen < width) {
+                        if (!align) align = (type == 'd' || type == 'f' || type == 'e' || type == 'x' || type == 'o' || type == 'b') ? '>' : '<';
+                        int pad = width - flen;
+                        if (align == '<') {
+                            strbuf_append_str_n(sb, formatted, flen);
+                            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+                        } else if (align == '^') {
+                            int left_pad = pad / 2;
+                            int right_pad = pad - left_pad;
+                            for (int j = 0; j < left_pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_str_n(sb, formatted, flen);
+                            for (int j = 0; j < right_pad; j++) strbuf_append_char(sb, fill);
+                        } else { // '>'
+                            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+                            strbuf_append_str_n(sb, formatted, flen);
+                        }
+                    } else {
+                        strbuf_append_str_n(sb, formatted, flen);
+                    }
+                } else {
+                    // no format spec: just convert to string
+                    Item str_val = py_to_str(arg);
+                    if (get_type_id(str_val) == LMD_TYPE_STRING) {
+                        String* sv = it2s(str_val);
+                        strbuf_append_str_n(sb, sv->chars, sv->len);
+                    }
+                }
+            } else if (*p == '}' && p + 1 < end && *(p + 1) == '}') {
+                // escaped }} → literal }
+                strbuf_append_char(sb, '}');
+                p += 2;
+            } else {
+                strbuf_append_char(sb, *p++);
+            }
+        }
+
+        Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+        strbuf_free(sb);
+        return result;
+    }
+
+    if (strcmp(method->chars, "index") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_STRING) return (Item){.item = i2it(-1)};
+        String* sub = it2s(args[0]);
+        if (sub->len > s->len) {
+            log_error("py: ValueError: substring not found");
+            return (Item){.item = i2it(-1)};
+        }
+        for (int64_t i = 0; i <= s->len - sub->len; i++) {
+            if (memcmp(s->chars + i, sub->chars, sub->len) == 0)
+                return (Item){.item = i2it(i)};
+        }
+        log_error("py: ValueError: substring not found");
+        return (Item){.item = i2it(-1)};
+    }
+    if (strcmp(method->chars, "rfind") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_STRING) return (Item){.item = i2it(-1)};
+        String* sub = it2s(args[0]);
+        if (sub->len > s->len) return (Item){.item = i2it(-1)};
+        for (int64_t i = s->len - sub->len; i >= 0; i--) {
+            if (memcmp(s->chars + i, sub->chars, sub->len) == 0)
+                return (Item){.item = i2it(i)};
+        }
+        return (Item){.item = i2it(-1)};
+    }
+    if (strcmp(method->chars, "splitlines") == 0) {
+        Array* result = array();
+        int64_t start = 0;
+        for (int64_t i = 0; i <= s->len; i++) {
+            if (i == s->len || s->chars[i] == '\n') {
+                int64_t end = i;
+                if (end > start && s->chars[end - 1] == '\r') end--;
+                array_push(result, (Item){.item = s2it(heap_strcpy(s->chars + start, end - start))});
+                start = i + 1;
+            }
+        }
+        return (Item){.array = result};
+    }
+    if (strcmp(method->chars, "isalnum") == 0) {
+        if (s->len == 0) return (Item){.item = ITEM_FALSE};
+        for (int64_t i = 0; i < s->len; i++) {
+            if (!isalnum((uint8_t)s->chars[i])) return (Item){.item = ITEM_FALSE};
+        }
+        return (Item){.item = ITEM_TRUE};
+    }
+    if (strcmp(method->chars, "isspace") == 0) {
+        if (s->len == 0) return (Item){.item = ITEM_FALSE};
+        for (int64_t i = 0; i < s->len; i++) {
+            if (!isspace((uint8_t)s->chars[i])) return (Item){.item = ITEM_FALSE};
+        }
+        return (Item){.item = ITEM_TRUE};
+    }
+    if (strcmp(method->chars, "islower") == 0) {
+        if (s->len == 0) return (Item){.item = ITEM_FALSE};
+        bool has_cased = false;
+        for (int64_t i = 0; i < s->len; i++) {
+            if (isalpha((uint8_t)s->chars[i])) {
+                has_cased = true;
+                if (!islower((uint8_t)s->chars[i])) return (Item){.item = ITEM_FALSE};
+            }
+        }
+        return (Item){.item = b2it(has_cased)};
+    }
+    if (strcmp(method->chars, "isupper") == 0) {
+        if (s->len == 0) return (Item){.item = ITEM_FALSE};
+        bool has_cased = false;
+        for (int64_t i = 0; i < s->len; i++) {
+            if (isalpha((uint8_t)s->chars[i])) {
+                has_cased = true;
+                if (!isupper((uint8_t)s->chars[i])) return (Item){.item = ITEM_FALSE};
+            }
+        }
+        return (Item){.item = b2it(has_cased)};
+    }
+    if (strcmp(method->chars, "swapcase") == 0) {
+        char* buf = (char*)malloc(s->len + 1);
+        for (int64_t i = 0; i < s->len; i++) {
+            if (islower((uint8_t)s->chars[i])) buf[i] = toupper((uint8_t)s->chars[i]);
+            else if (isupper((uint8_t)s->chars[i])) buf[i] = tolower((uint8_t)s->chars[i]);
+            else buf[i] = s->chars[i];
+        }
+        buf[s->len] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, s->len))};
+        free(buf);
+        return result;
+    }
+    if (strcmp(method->chars, "center") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_INT) return (Item){.item = s2it(s)};
+        int64_t width = it2i(args[0]);
+        if (width <= s->len) return (Item){.item = s2it(s)};
+        char fill = ' ';
+        if (argc >= 2 && get_type_id(args[1]) == LMD_TYPE_STRING) {
+            String* fc = it2s(args[1]);
+            if (fc && fc->len > 0) fill = fc->chars[0];
+        }
+        int64_t pad = width - s->len;
+        int64_t left = pad / 2;
+        int64_t right = pad - left;
+        char* buf = (char*)malloc(width + 1);
+        for (int64_t i = 0; i < left; i++) buf[i] = fill;
+        memcpy(buf + left, s->chars, s->len);
+        for (int64_t i = 0; i < right; i++) buf[left + s->len + i] = fill;
+        buf[width] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
+        free(buf);
+        return result;
+    }
+    if (strcmp(method->chars, "ljust") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_INT) return (Item){.item = s2it(s)};
+        int64_t width = it2i(args[0]);
+        if (width <= s->len) return (Item){.item = s2it(s)};
+        char fill = ' ';
+        if (argc >= 2 && get_type_id(args[1]) == LMD_TYPE_STRING) {
+            String* fc = it2s(args[1]);
+            if (fc && fc->len > 0) fill = fc->chars[0];
+        }
+        char* buf = (char*)malloc(width + 1);
+        memcpy(buf, s->chars, s->len);
+        for (int64_t i = s->len; i < width; i++) buf[i] = fill;
+        buf[width] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
+        free(buf);
+        return result;
+    }
+    if (strcmp(method->chars, "rjust") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_INT) return (Item){.item = s2it(s)};
+        int64_t width = it2i(args[0]);
+        if (width <= s->len) return (Item){.item = s2it(s)};
+        char fill = ' ';
+        if (argc >= 2 && get_type_id(args[1]) == LMD_TYPE_STRING) {
+            String* fc = it2s(args[1]);
+            if (fc && fc->len > 0) fill = fc->chars[0];
+        }
+        int64_t pad = width - s->len;
+        char* buf = (char*)malloc(width + 1);
+        for (int64_t i = 0; i < pad; i++) buf[i] = fill;
+        memcpy(buf + pad, s->chars, s->len);
+        buf[width] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
+        free(buf);
+        return result;
+    }
+    if (strcmp(method->chars, "zfill") == 0) {
+        if (argc == 0 || get_type_id(args[0]) != LMD_TYPE_INT) return (Item){.item = s2it(s)};
+        int64_t width = it2i(args[0]);
+        if (width <= s->len) return (Item){.item = s2it(s)};
+        int64_t pad = width - s->len;
+        char* buf = (char*)malloc(width + 1);
+        int64_t start = 0;
+        if (s->len > 0 && (s->chars[0] == '+' || s->chars[0] == '-')) {
+            buf[0] = s->chars[0];
+            start = 1;
+            for (int64_t i = 0; i < pad; i++) buf[start + i] = '0';
+            memcpy(buf + start + pad, s->chars + 1, s->len - 1);
+        } else {
+            for (int64_t i = 0; i < pad; i++) buf[i] = '0';
+            memcpy(buf + pad, s->chars, s->len);
+        }
+        buf[width] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, width))};
+        free(buf);
+        return result;
     }
 
     log_debug("py: str.%s() not implemented", method->chars);
@@ -978,6 +1590,42 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
         m->type = &EmptyMap;
         m->data = NULL;
         return ItemNull;
+    }
+    if (strcmp(method->chars, "copy") == 0) {
+        // shallow copy via walking shape entries
+        Item new_dict = py_dict_new();
+        Map* nm = it2map(new_dict);
+        ShapeEntry* field = tm->shape;
+        while (field) {
+            Item val = _map_read_field(field, m->data);
+            if (field->name && py_input) {
+                String* key_name = heap_create_name(field->name->str);
+                map_put(nm, key_name, val, py_input);
+            }
+            field = field->next;
+        }
+        return new_dict;
+    }
+    if (strcmp(method->chars, "setdefault") == 0 && argc >= 1) {
+        if (get_type_id(args[0]) != LMD_TYPE_STRING) return (argc >= 2) ? args[1] : ItemNull;
+        String* key = it2s(args[0]);
+        bool found = false;
+        Item val = _map_get(tm, m->data, key->chars, &found);
+        if (found) return val;
+        Item def_val = (argc >= 2) ? args[1] : ItemNull;
+        if (py_input) map_put(m, heap_create_name(key->chars), def_val, py_input);
+        return def_val;
+    }
+    if (strcmp(method->chars, "popitem") == 0) {
+        // return last key-value pair
+        ShapeEntry* field = tm->shape;
+        ShapeEntry* last = NULL;
+        while (field) { last = field; field = field->next; }
+        if (!last || !last->name) return ItemNull;
+        Item tuple = py_tuple_new(2);
+        py_tuple_set(tuple, 0, (Item){.item = s2it(heap_create_name(last->name->str))});
+        py_tuple_set(tuple, 1, _map_read_field(last, m->data));
+        return tuple;
     }
 
     log_debug("py: dict.%s() not implemented", method->chars);
