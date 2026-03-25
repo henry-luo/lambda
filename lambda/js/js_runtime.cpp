@@ -3112,6 +3112,9 @@ static JsPromise* js_alloc_promise() {
         log_error("promise: exceeded max promises (%d)", JS_MAX_PROMISES);
         return NULL;
     }
+    if (js_promise_count >= JS_MAX_PROMISES - 16 && (js_promise_count % 16 == 0)) {
+        log_info("promise: approaching capacity limit (%d/%d)", js_promise_count, JS_MAX_PROMISES);
+    }
     JsPromise* p = &js_promises[js_promise_count++];
     p->type_id = LMD_TYPE_MAP;
     p->state = JS_PROMISE_PENDING;
@@ -3416,6 +3419,9 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     if (js_module_count_v14 >= JS_MAX_MODULES) {
         log_error("module: exceeded max modules (%d)", JS_MAX_MODULES);
         return;
+    }
+    if (js_module_count_v14 >= JS_MAX_MODULES - 4) {
+        log_info("module: approaching capacity limit (%d/%d)", js_module_count_v14, JS_MAX_MODULES);
     }
     if (get_type_id(specifier) != LMD_TYPE_STRING) return;
 

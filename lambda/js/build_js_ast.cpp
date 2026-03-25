@@ -1466,18 +1466,25 @@ JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node) {
                         TSNode spec = ts_node_named_child(clause_child, k);
                         const char* spec_type = ts_node_type(spec);
                         if (strcmp(spec_type, "import_specifier") == 0) {
-                            // Use the "name" field (local binding) or "alias" if present
                             TSNode name_node = ts_node_child_by_field_name(spec, "name", 4);
+                            TSNode alias_node = ts_node_child_by_field_name(spec, "alias", 5);
                             if (!ts_node_is_null(name_node)) {
-                                JsAstNode* ident = build_js_identifier(tp, name_node);
-                                if (ident) {
-                                    if (!prev_spec) {
-                                        node->specifiers = ident;
-                                    } else {
-                                        prev_spec->next = ident;
-                                    }
-                                    prev_spec = ident;
+                                StrView remote = js_node_source(tp, name_node);
+                                StrView local = remote; // default: local = remote
+                                if (!ts_node_is_null(alias_node)) {
+                                    local = js_node_source(tp, alias_node);
                                 }
+                                JsImportSpecifierNode* ispec = (JsImportSpecifierNode*)alloc_js_ast_node(
+                                    tp, JS_AST_NODE_IMPORT_SPECIFIER, spec, sizeof(JsImportSpecifierNode));
+                                ispec->remote_name = name_pool_create_len(tp->name_pool, remote.str, remote.length);
+                                ispec->local_name = name_pool_create_len(tp->name_pool, local.str, local.length);
+                                JsAstNode* spec_node = (JsAstNode*)ispec;
+                                if (!prev_spec) {
+                                    node->specifiers = spec_node;
+                                } else {
+                                    prev_spec->next = spec_node;
+                                }
+                                prev_spec = spec_node;
                             }
                         }
                     }
