@@ -415,7 +415,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // the block cursor, but the element's own reported height matches the font metrics.
         struct FontHandle* br_fh = lycon->font.font_handle;
         br_view->height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
+        // CSS Text 3 §7.2: text-align-last applies to lines immediately before
+        // a forced line break. <br> is a forced break per CSS Text 3 §4.1.
+        lycon->line.is_last_line = true;
         line_break(lycon);
+        lycon->line.is_last_line = false;
 
         // CSS 2.1 §9.5.2: check if the <br> has a 'clear' property and apply float clearance.
         // Browsers treat <br style="clear:both"> as clearing floats at the line break point.

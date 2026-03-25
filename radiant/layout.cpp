@@ -141,30 +141,40 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     const char* str = (const char*)text_node->text_data();
     if (!is_only_whitespace(str)) return false;
 
-    // Case 1: Whitespace at start of block (no previous sibling)
-    // AND there's a block-level sibling after it
+    // CSS 2.1 §9.2.2.1: Whitespace between/around block-level elements is always
+    // collapsed regardless of white-space property (inter-element whitespace rule).
+    // Case 1: Whitespace at start of block, followed by a block-level element
     if (!text_node->prev_sibling && text_node->next_sibling) {
         if (is_block_level_element(text_node->next_sibling)) {
             return true;
         }
     }
 
-    // Case 2: Whitespace at end of block (no next sibling)
-    // This is already handled, but let's be consistent
-    if (!text_node->next_sibling) {
-        return true;
-    }
-
-    // Case 3: Whitespace between two block-level elements
+    // Case 3: Whitespace between two elements where either neighbor is block-level
     if (text_node->prev_sibling && text_node->next_sibling) {
         bool prev_is_block = is_block_level_element(text_node->prev_sibling);
         bool next_is_block = is_block_level_element(text_node->next_sibling);
 
-        // If either neighbor is a block, collapse the whitespace
-        // (This follows browser behavior more closely)
         if (prev_is_block || next_is_block) {
             return true;
         }
+    }
+
+    // Case 2: Whitespace at end of block (no next sibling)
+    // CSS 2.1 §16.6.1: When white-space preserves spaces (pre, pre-wrap, break-spaces),
+    // this whitespace is meaningful content — do NOT collapse it.
+    if (!text_node->next_sibling) {
+        if (text_node->parent->is_element()) {
+            DomElement* parent_elem = text_node->parent->as_element();
+            if (parent_elem->blk && parent_elem->blk->white_space != 0) {
+                CssEnum ws = parent_elem->blk->white_space;
+                if (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+                    ws == CSS_VALUE_BREAK_SPACES) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     return false;
@@ -963,10 +973,20 @@ void line_align(LayoutContext* lycon) {
     CssEnum text_align = lycon->block.text_align;
 
     // CSS Text 3 §7.2: text-align-last overrides text-align on the last line
+    // or the line immediately before a forced line break.
     // (when text_align_last is not 'auto' and not unset)
+    bool text_align_last_applied = false;
     if (lycon->line.is_last_line && lycon->block.text_align_last != 0 &&
         lycon->block.text_align_last != CSS_VALUE_AUTO) {
         text_align = lycon->block.text_align_last;
+        text_align_last_applied = true;
+    }
+
+    // CSS Text 3 §7.1: justify-all computes to justify but eliminates the
+    // special last-line behavior. All lines are justified including the last.
+    if (text_align == CSS_VALUE_JUSTIFY_ALL) {
+        text_align = CSS_VALUE_JUSTIFY;
+        text_align_last_applied = true;  // prevent last-line skip
     }
 
     if (text_align == CSS_VALUE_START) {
@@ -1101,8 +1121,9 @@ void line_align(LayoutContext* lycon) {
         if (text_align == CSS_VALUE_JUSTIFY) {
                 // CSS 2.1 §16.2: "If 'text-align' is set to 'justify', the UA adjusts spacing
                 // in inline boxes to fit each line... except for the last line of the block."
-                // The is_last_line flag is set by the block layout caller before the final line_break().
-                if (lycon->line.is_last_line) {
+                // CSS Text 3 §7.2: But text-align-last: justify explicitly requests justify
+                // on the last line / line before forced break, so do NOT skip in that case.
+                if (lycon->line.is_last_line && !text_align_last_applied) {
                     // Last line: fall back to start alignment (left for LTR, right for RTL)
                     if (is_rtl) {
                         float offset = available_width - line_width;

@@ -1129,7 +1129,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             } else {
                 str++;
             }
+            // CSS Text 3 §7.2: text-align-last applies to lines immediately before
+            // a forced line break. A preserved newline is a forced break.
+            lycon->line.is_last_line = true;
             line_break(lycon);
+            lycon->line.is_last_line = false;
             if (*str) {
                 // CSS 2.1 §16.6.1: When collapsing spaces (pre-line), skip leading
                 // spaces at the start of the new line after a preserved newline.
