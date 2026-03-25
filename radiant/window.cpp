@@ -481,10 +481,13 @@ void render(GLFWwindow* window) {
 }
 
 void log_init_wrapper() {
-    // empty existing log file
-    FILE *file = fopen("log.txt", "w");
-    if (file ) { fclose(file); }
-    log_parse_config_file("log.conf");
+    // empty existing log file and load config only when log.conf is present (dev/debug mode)
+    // in release mode (no log.conf), skip to avoid creating log.txt in the working directory
+    if (access("log.conf", F_OK) == 0) {
+        FILE *file = fopen("log.txt", "w");
+        if (file) { fclose(file); }
+        log_parse_config_file("log.conf");
+    }
 }
 void log_cleanup() {
     log_finish();

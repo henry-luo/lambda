@@ -536,6 +536,16 @@ Map* map_with_data(int64_t type_index) {
     return m;
 }
 
+// MIR Direct module-type-list-aware wrapper: saves/restores context->type_list around
+// map_with_data so cross-module calls use this module's own type_list.
+Map* map_with_tl(int64_t type_index, void* type_list_ptr) {
+    void* saved = context->type_list;
+    context->type_list = type_list_ptr;
+    Map* r = map_with_data(type_index);
+    context->type_list = saved;
+    return r;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
@@ -668,6 +678,15 @@ Element* elmt(int64_t type_index) {
     return elmt;
 }
 
+// MIR Direct module-type-list-aware wrapper for elmt.
+Element* elmt_with_tl(int64_t type_index, void* type_list_ptr) {
+    void* saved = context->type_list;
+    context->type_list = type_list_ptr;
+    Element* r = elmt(type_index);
+    context->type_list = saved;
+    return r;
+}
+
 Object* object(int64_t type_index) {
     Object *obj = (Object *)heap_calloc(sizeof(Object), LMD_TYPE_OBJECT);
     obj->type_id = LMD_TYPE_OBJECT;
@@ -699,6 +718,15 @@ Object* object_with_data(int64_t type_index) {
         obj->data_cap = (int)byte_size;
     }
     return obj;
+}
+
+// MIR Direct module-type-list-aware wrapper for object_with_data.
+Object* object_with_tl(int64_t type_index, void* type_list_ptr) {
+    void* saved = context->type_list;
+    context->type_list = type_list_ptr;
+    Object* r = object_with_data(type_index);
+    context->type_list = saved;
+    return r;
 }
 
 Object* object_fill(Object* obj, ...) {

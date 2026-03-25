@@ -4,28 +4,28 @@
 /* Computer Modern Serif */
 @font-face {
     font-family: 'Computer Modern Serif';
-    src: url('Serif/cmunrm.woff') format('woff');
+    src: url('Serif/cmunrm.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Serif';
-    src: url('Serif/cmunbx.woff') format('woff');
+    src: url('Serif/cmunbx.woff2') format('woff2');
     font-weight: bold;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Serif';
-    src: url('Serif/cmunti.woff') format('woff');
+    src: url('Serif/cmunti.woff2') format('woff2');
     font-weight: normal;
     font-style: italic;
 }
 
 @font-face {
     font-family: 'Computer Modern Serif';
-    src: url('Serif/cmunbi.woff') format('woff');
+    src: url('Serif/cmunbi.woff2') format('woff2');
     font-weight: bold;
     font-style: italic;
 }
@@ -33,14 +33,14 @@
 /* Computer Modern Serif Slanted */
 @font-face {
     font-family: 'Computer Modern Serif Slanted';
-    src: url('Serif%20Slanted/cmunsl.woff') format('woff');
+    src: url('Serif%20Slanted/cmunsl.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Serif Slanted';
-    src: url('Serif%20Slanted/cmunbl.woff') format('woff');
+    src: url('Serif%20Slanted/cmunbl.woff2') format('woff2');
     font-weight: bold;
     font-style: normal;
 }
@@ -48,28 +48,28 @@
 /* Computer Modern Sans */
 @font-face {
     font-family: 'Computer Modern Sans';
-    src: url('Sans/cmunss.woff') format('woff');
+    src: url('Sans/cmunss.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Sans';
-    src: url('Sans/cmunsx.woff') format('woff');
+    src: url('Sans/cmunsx.woff2') format('woff2');
     font-weight: bold;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Sans';
-    src: url('Sans/cmunsi.woff') format('woff');
+    src: url('Sans/cmunsi.woff2') format('woff2');
     font-weight: normal;
     font-style: italic;
 }
 
 @font-face {
     font-family: 'Computer Modern Sans';
-    src: url('Sans/cmunso.woff') format('woff');
+    src: url('Sans/cmunso.woff2') format('woff2');
     font-weight: bold;
     font-style: oblique;
 }
@@ -77,28 +77,28 @@
 /* Computer Modern Typewriter */
 @font-face {
     font-family: 'Computer Modern Typewriter';
-    src: url('Typewriter/cmuntt.woff') format('woff');
+    src: url('Typewriter/cmuntt.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Typewriter';
-    src: url('Typewriter/cmuntb.woff') format('woff');
+    src: url('Typewriter/cmuntb.woff2') format('woff2');
     font-weight: bold;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Typewriter';
-    src: url('Typewriter/cmunit.woff') format('woff');
+    src: url('Typewriter/cmunit.woff2') format('woff2');
     font-weight: normal;
     font-style: italic;
 }
 
 @font-face {
     font-family: 'Computer Modern Typewriter';
-    src: url('Typewriter/cmuntx.woff') format('woff');
+    src: url('Typewriter/cmuntx.woff2') format('woff2');
     font-weight: bold;
     font-style: italic;
 }
@@ -106,14 +106,14 @@
 /* Computer Modern Typewriter Slanted */
 @font-face {
     font-family: 'Computer Modern Typewriter Slanted';
-    src: url('Typewriter%20Slanted/cmunst.woff') format('woff');
+    src: url('Typewriter%20Slanted/cmunst.woff2') format('woff2');
     font-weight: normal;
     font-style: normal;
 }
 
 @font-face {
     font-family: 'Computer Modern Typewriter Slanted';
-    src: url('Typewriter%20Slanted/cmunsto.woff') format('woff');
+    src: url('Typewriter%20Slanted/cmunsto.woff2') format('woff2');
     font-weight: normal;
     font-style: oblique;
 }

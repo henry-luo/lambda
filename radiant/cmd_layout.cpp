@@ -1626,17 +1626,15 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         return nullptr;
     }
 
-    // write html to 'html_tree.txt' for debugging (skip in batch mode when logging is disabled)
-    if (log_default_category && log_default_category->enabled) {
-        StrBuf* htm_buf = strbuf_new();
-        print_item(htm_buf, input->root, 0);
-        FILE* htm_file = fopen("html_tree.txt", "w");
-        if (htm_file) {
-            fwrite(htm_buf->str, 1, htm_buf->length, htm_file);
-            fclose(htm_file);
-        }
-        strbuf_free(htm_buf);
-    }
+    // [debug] write html tree to 'html_tree.txt' — disabled; enable locally for inspection
+    // if (log_default_category && log_default_category->output &&
+    //     log_default_category->output != stdout && log_default_category->output != stderr) {
+    //     StrBuf* htm_buf = strbuf_new();
+    //     print_item(htm_buf, input->root, 0);
+    //     FILE* htm_file = fopen("html_tree.txt", "w");
+    //     if (htm_file) { fwrite(htm_buf->str, 1, htm_buf->length, htm_file); fclose(htm_file); }
+    //     strbuf_free(htm_buf);
+    // }
 
     auto t_debug = high_resolution_clock::now();
     log_info("[TIMING] load: debug output: %.1fms", duration<double, std::milli>(t_debug - t_parse).count());
@@ -3563,8 +3561,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     runtime_init(&runtime);
 
     log_debug("[Lambda Script] Evaluating script...");
-    // Use tree-walking interpreter instead of MIR for simple scripts
-    // MIR JIT requires a main() function which simple expression scripts don't have
+    // Use C2MIR JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
     Input* script_output = run_script(&runtime, nullptr, script_filepath, false);
 
     if (!script_output || !script_output->root.item) {
@@ -4163,9 +4160,11 @@ static char* generate_output_path(const char* input_file, const char* output_dir
  * Supports both single-file and batch modes.
  */
 int cmd_layout(int argc, char** argv) {
-    // Initialize logging system
-    FILE *file = fopen("log.txt", "w");
-    if (file) { fclose(file); }
+    // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
+    if (access("log.conf", F_OK) == 0) {
+        FILE *file = fopen("log.txt", "w");
+        if (file) { fclose(file); }
+    }
     log_parse_config_file("log.conf");
 
     // Parse command-line options

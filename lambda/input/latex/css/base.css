@@ -219,6 +219,11 @@ html, .page {
     font-family: "Computer Modern Sans" !important;  /* for KaTeX_SansSerif */
 }
 
+.katex .mathtt,
+.katex .texttt {
+    font-family: "Computer Modern Typewriter" !important;  /* for KaTeX_Typewriter */
+}
+
 
 
 /* family */

@@ -425,6 +425,14 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
 
+    // MIR Direct path: skip C code generation entirely; compile the AST straight to MIR.
+    // compile_script_as_mir_direct() handles import registration, transpile_mir_ast(),
+    // MIR_link(), and stores jit_context/main_func on the script.
+    if (tp->runtime && tp->runtime->use_mir_direct) {
+        compile_script_as_mir_direct(tp, script, script_path);
+        return;
+    }
+
     // print the AST for debugging
     log_debug("AST: %s ---------", tp->reference);
     print_ast_root(tp);
@@ -454,15 +462,20 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // compile user code to MIR
     log_debug("compiling to MIR...");
-    // Write transpiled code for debugging (module index as suffix)
-    char transpiled_filename[256];
-    if (tp->runtime->transpile_dir) {
-        create_dir_recursive(tp->runtime->transpile_dir);
-        snprintf(transpiled_filename, sizeof(transpiled_filename), "%s/_transpiled_%d.c", tp->runtime->transpile_dir, script->index);
-    } else {
-        snprintf(transpiled_filename, sizeof(transpiled_filename), "_transpiled_%d.c", script->index);
+    // Write transpiled C code when:
+    //   (a) user explicitly passed --transpile-dir (transpile_dir != NULL), or
+    //   (b) dev mode: log is configured to a file (not stdout/stderr)
+    // In release mode without --transpile-dir, skip the write to keep the working directory clean.
+    bool log_to_file = (log_default_category && log_default_category->output &&
+        log_default_category->output != stdout && log_default_category->output != stderr);
+    const char* write_dir = tp->runtime->transpile_dir;
+    if (write_dir || log_to_file) {
+        if (!write_dir) write_dir = "temp";  // dev mode fallback
+        char transpiled_filename[256];
+        create_dir_recursive(write_dir);
+        snprintf(transpiled_filename, sizeof(transpiled_filename), "%s/_transpiled_%d.c", write_dir, script->index);
+        write_text_file(transpiled_filename, tp->code_buf->str);
     }
-    write_text_file(transpiled_filename, tp->code_buf->str);
 
     if (profiling) profile_get_time(&p5);
 
@@ -895,7 +908,7 @@ void runtime_init(Runtime* runtime) {
     runtime->scripts = arraylist_new(16);
     runtime->max_errors = 10;  // default error threshold
     runtime->optimize_level = 2;  // default MIR optimization level (0=debug, 2=release)
-    runtime->transpile_dir = "temp";  // default: write to ./temp/ directory
+    runtime->transpile_dir = NULL;  // default: no file output; set via --transpile-dir
     runtime->dry_run = false;  // default: real IO
 }
 

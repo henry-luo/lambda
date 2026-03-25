@@ -149,6 +149,18 @@ struct MirTranspiler {
     // Consts pointer register
     MIR_reg_t consts_reg;
 
+    // Per-module BSS item that holds this module's const_list pointer.
+    // Stored here during transpile_mir_ast so all functions in the module use it
+    // instead of context->consts, enabling correct cross-module function calls.
+    MIR_item_t consts_bss;
+
+    // Type-list pointer register: holds this module's type_list ArrayList* so that
+    // cross-module function calls use the right type_list for map/elmt/object allocation.
+    MIR_reg_t type_list_reg;
+
+    // Per-module BSS item that holds this module's type_list pointer.
+    MIR_item_t type_list_bss;
+
     // Current pipe context
     MIR_reg_t pipe_item_reg;
     MIR_reg_t pipe_index_reg;
@@ -1362,6 +1374,8 @@ static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index);
 static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node);
 static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node);
 static bool has_index_mutation(const char* var_name, AstNode* node);  // P4-3.2
+static TypeId infer_param_type(AstNode* body, const char* pname, int pname_len, bool is_proc);
+static bool has_inferred_native_params(AstFuncNode* fn_node);  // check for inferred-native params
 
 // ============================================================================
 // Expression transpilation
@@ -1509,24 +1523,29 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             StrBuf* var_name = strbuf_new_cap(64);
             write_var_name(var_name, named, NULL);
 
-            // Determine native MIR type from the variable's declared type
-            // BSS stores native values (not boxed Items): doubles for float, i64 for int, etc.
             TypeId var_tid = entry_node->type ? entry_node->type->type_id : LMD_TYPE_ANY;
-            MIR_type_t load_type = type_to_mir(var_tid);
-            log_debug("mir: loading imported variable '%s' as type %d (native %d)", var_name->str, var_tid, load_type);
+            log_debug("mir: loading imported variable '%s' type_id=%d", var_name->str, var_tid);
 
-            // Create MIR import for the BSS variable address
-            MIR_item_t imp = MIR_new_import(mt->ctx, var_name->str);
+            // MIR Direct BSS always stores a boxed Item (uint64_t), matching store_global_var.
+            // Load as int64 then unbox — same pattern as load_global_var.
+            MIR_item_t imp_item = MIR_new_import(mt->ctx, var_name->str);
             MIR_reg_t addr_reg = new_reg(mt, "impvar_addr", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                 MIR_new_reg_op(mt->ctx, addr_reg),
-                MIR_new_ref_op(mt->ctx, imp)));
-            // Load the native value from the BSS address with correct type
-            MIR_reg_t val_reg = new_reg(mt, "impvar", load_type);
-            MIR_insn_code_t load_insn = (load_type == MIR_T_D) ? MIR_DMOV : MIR_MOV;
-            emit_insn(mt, MIR_new_insn(mt->ctx, load_insn,
-                MIR_new_reg_op(mt->ctx, val_reg),
-                MIR_new_mem_op(mt->ctx, load_type, 0, addr_reg, 0, 1)));
+                MIR_new_ref_op(mt->ctx, imp_item)));
+            // Load boxed Item (uint64) from BSS
+            MIR_reg_t boxed_reg = new_reg(mt, "impvar_boxed", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, boxed_reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr_reg, 0, 1)));
+            // Unbox to native type if the declared type is a simple scalar
+            MIR_reg_t val_reg;
+            if (var_tid == LMD_TYPE_INT || var_tid == LMD_TYPE_FLOAT || var_tid == LMD_TYPE_BOOL ||
+                var_tid == LMD_TYPE_STRING || var_tid == LMD_TYPE_INT64) {
+                val_reg = emit_unbox(mt, boxed_reg, var_tid);
+            } else {
+                val_reg = boxed_reg;
+            }
 
             strbuf_free(var_name);
             return val_reg;
@@ -1558,9 +1577,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
 
             // Handle imported function references
             if (ident->entry->import) {
-                // Get the function name (use boxed wrapper for typed params)
+                // Get the function name (use boxed wrapper for typed params or inferred native params)
                 StrBuf* fn_import_name = strbuf_new_cap(64);
-                bool use_wrapper = (entry_node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node));
+                bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
+                    (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
                 if (use_wrapper) {
                     write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
                 } else {
@@ -1718,17 +1738,21 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             TypePattern* pattern_type = (TypePattern*)pattern_def->type;
             log_debug("mir: pattern reference '%s', index=%d", name_buf, pattern_type->pattern_index);
 
-            // emit const_pattern(pattern_index) call
-            MIR_reg_t pat_reg = emit_call_1(mt, "const_pattern", MIR_T_P,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pattern_type->pattern_index));
+            // emit const_pattern_with_tl(pattern_index, type_list_ptr) call
+            // Use the module-local type_list (loaded from BSS in prologue) so cross-module
+            // pattern references use the correct type_list.
+            MIR_reg_t pat_reg = emit_call_2(mt, "const_pattern_with_tl", MIR_T_P,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pattern_type->pattern_index),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
             return pat_reg;  // TypePattern* used as Item by fn_is etc.
         }
     }
 
     log_error("mir: undefined variable '%s'", name_buf);
+    uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
     MIR_reg_t r = new_reg(mt, "undef", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, 0)));
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
     return r;
 }
 
@@ -3392,6 +3416,14 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     snprintf(err_name_buf, sizeof(err_name_buf), "%.*s",
                         (int)asn->error_name->len, asn->error_name->chars);
                     set_var(mt, err_name_buf, err_result, MIR_T_I64, LMD_TYPE_ANY);
+
+                    // Store error var to BSS global at module level
+                    if (!mt->in_user_func) {
+                        GlobalVarEntry* err_gvar = find_global_var(mt, err_name_buf);
+                        if (err_gvar) {
+                            store_global_var(mt, err_gvar, err_result, LMD_TYPE_ANY);
+                        }
+                    }
                 }
             }
         } else if (declare->node_type == AST_NODE_DECOMPOSE) {
@@ -3437,6 +3469,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                    declare->node_type == AST_NODE_PROC) {
             // Function definitions are handled in the module-level pre-pass
             // (MIR requires all functions to be defined before generating code)
+        } else if (declare->node_type == AST_NODE_OBJECT_TYPE) {
+            // pub type Counter { ... } → emit method registration code
+            log_debug("mir: transpile_let_stam handling OBJECT_TYPE declare");
+            transpile_expr(mt, declare);
         }
         declare = declare->next;
     }
@@ -3815,6 +3851,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
                     item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                     transpile_let_stam(mt, (AstLetNode*)item);
+                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                    transpile_expr(mt, item); // emit method registration
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
@@ -3849,6 +3887,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
                     item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                     transpile_let_stam(mt, (AstLetNode*)item);
+                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                    transpile_expr(mt, item); // emit method registration
                 }
                 // Func defs handled in module-level pre-pass
             } else if (is_side_effect_stam(item->node_type)) {
@@ -3882,6 +3922,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
                     item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                     transpile_let_stam(mt, (AstLetNode*)item);
+                } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                    transpile_expr(mt, item); // emit method registration
                 }
             } else if (is_side_effect_stam(item->node_type)) {
                 transpile_expr(mt, item);
@@ -3920,6 +3962,8 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM ||
                 item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_VAR_STAM) {
                 transpile_let_stam(mt, (AstLetNode*)item);
+            } else if (item->node_type == AST_NODE_OBJECT_TYPE) {
+                transpile_expr(mt, item); // emit method registration
             }
             item = item->next;
             continue;
@@ -4214,9 +4258,11 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         }
     }
 
-    // Non-direct path: allocate map via map_with_data()
-    m = emit_call_1(mt, "map_with_data", MIR_T_P,
-        MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
+    // Non-direct path: allocate map via map_with_tl() (saves/restores context->type_list
+    // so cross-module calls always use this module's own type_list).
+    m = emit_call_2(mt, "map_with_tl", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
 
     if (val_count == 0) {
         return m;
@@ -4269,9 +4315,10 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
 
     TypeElmt* type = (TypeElmt*)elmt_node->type;
 
-    // Create element: Element* el = elmt(type_index)
-    MIR_reg_t el = emit_call_1(mt, "elmt", MIR_T_P, MIR_T_I64,
-        MIR_new_int_op(mt->ctx, type->type_index));
+    // Create element: Element* el = elmt_with_tl(type_index, type_list_ptr)
+    MIR_reg_t el = emit_call_2(mt, "elmt_with_tl", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, type->type_index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
 
     // Fill attributes if present
     AstNode* item = elmt_node->item;
@@ -5935,9 +5982,11 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             AstFuncNode* fn_node = (AstFuncNode*)entry_node;
 
             // Determine the import function name:
-            // Use boxed wrapper (_b) for typed-param functions, direct for untyped
+            // Use boxed wrapper (_b) for typed-param functions, direct for untyped.
+            // Also use _b when the function has inferred native params (e.g. i in arr[i]).
             StrBuf* fn_import_name = strbuf_new_cap(64);
-            bool use_wrapper = (entry_node->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node));
+            bool use_wrapper = (entry_node->node_type != AST_NODE_PROC &&
+                (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node)));
             if (use_wrapper) {
                 write_fn_name_ex(fn_import_name, fn_node, NULL, "_b");
             } else {
@@ -7309,9 +7358,12 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
     return emit_call_1(mt, "base_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, tid));
 }
 
-// Emit const_type(type_index) for complex types that need runtime type_index lookup
+// Emit const_type_with_tl(type_index, type_list_ptr) for complex types that need
+// runtime type_index lookup. Uses module-local type_list to support cross-module calls.
 static MIR_reg_t transpile_const_type(MirTranspiler* mt, int type_index) {
-    return emit_call_1(mt, "const_type", MIR_T_P, MIR_T_I64, MIR_new_int_op(mt->ctx, type_index));
+    return emit_call_2(mt, "const_type_with_tl", MIR_T_P,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
 }
 
 // ============================================================================
@@ -7752,9 +7804,10 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         TypeObject* obj_type = (TypeObject*)obj_lit->type;
         int type_index = obj_type->type_index;
 
-        // create object with inline data: Object* o = object_with_data(type_index)
-        MIR_reg_t o = emit_call_1(mt, "object_with_data", MIR_T_P, MIR_T_I64,
-            MIR_new_int_op(mt->ctx, type_index));
+        // create object with inline data via object_with_tl (saves/restores context->type_list)
+        MIR_reg_t o = emit_call_2(mt, "object_with_tl", MIR_T_P,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, type_index),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
 
         // count and evaluate field values
         AstNode* item = obj_lit->item;
@@ -7816,6 +7869,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                         write_fn_name(fn_name_buf, fn_method, NULL);
                         // Find the compiled MIR function
                         MIR_item_t method_func = find_local_func(mt, fn_name_buf->str);
+                        log_debug("mir: AST_NODE_OBJECT_TYPE: looking for method '%s' → %s",
+                            fn_name_buf->str, method_func ? "FOUND" : "NOT FOUND");
                         if (method_func) {
                             // Get function address
                             MIR_reg_t fn_addr = new_reg(mt, "mthaddr", MIR_T_I64);
@@ -7914,14 +7969,15 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return r;
     }
     case AST_NODE_BINARY_TYPE: {
-        // Union type in match pattern: const_type(type_index)
+        // Union type in match pattern: const_type_with_tl(type_index, type_list_ptr)
         AstBinaryNode* bin = (AstBinaryNode*)node;
         if (bin->type && bin->type->type_id == LMD_TYPE_TYPE) {
             TypeType* tt = (TypeType*)bin->type;
             if (tt->type) {
                 TypeBinary* bt = (TypeBinary*)tt->type;
-                return emit_call_1(mt, "const_type", MIR_T_P, MIR_T_I64,
-                    MIR_new_int_op(mt->ctx, bt->type_index));
+                return emit_call_2(mt, "const_type_with_tl", MIR_T_P,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bt->type_index),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
             }
         }
         return transpile_base_type(mt, (AstTypeNode*)node);
@@ -8332,9 +8388,14 @@ static void add_alias(InferCtx* ctx, const char* name, int name_len) {
 
 // Classify the "other side" type for a binary op involving our param
 static int classify_other_type(TypeId tid) {
-    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_BOOL) return INFER_INT;
+    if (tid == LMD_TYPE_INT) return INFER_INT;
     if (tid == LMD_TYPE_FLOAT) return INFER_FLOAT;
     if (tid == LMD_TYPE_ANY) return 0;  // unknown other — no evidence
+    // BOOL comparison is NOT evidence of INT — e.g. `param == false` means
+    // the param is boolean, not integer. Treating BOOL as INFER_INT would
+    // cause boolean params to be stored as INT when boxed, breaking type-
+    // strict equality comparisons later (INT 1 != BOOL true).
+    if (tid == LMD_TYPE_BOOL) return 0;
     return INFER_STOP;  // string, map, list, etc.
 }
 
@@ -8482,7 +8543,15 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
         case AST_NODE_INDEX_EXPR: {
             AstBinaryNode* idx = (AstBinaryNode*)node;
             if (is_tracked_ref(idx->right, ctx)) {
-                ctx->evidence |= INFER_INT;
+                // Only infer INT when the array operand has a confirmed array type.
+                // For maps, elements, objects and untyped (ANY) arrays the index
+                // key may be a string, so we must NOT assume the index is INT.
+                TypeId left_tid = (idx->left && idx->left->type)
+                    ? idx->left->type->type_id : LMD_TYPE_ANY;
+                bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_INT  ||
+                                       left_tid == LMD_TYPE_ARRAY_FLOAT ||
+                                       left_tid == LMD_TYPE_ARRAY_INT64);
+                if (is_typed_array) ctx->evidence |= INFER_INT;
             }
             gather_evidence(idx->left, ctx);
             gather_evidence(idx->right, ctx);
@@ -8609,6 +8678,44 @@ static TypeId infer_return_type(AstFuncNode* fn_node) {
     return LMD_TYPE_ANY;
 }
 
+// Returns true if the function has any parameter that would be inferred as a
+// native type by the MIR transpiler (causing a _b wrapper to be generated).
+// Cross-module callers must use the _b wrapper to correctly pass boxed Items
+// to functions with inferred native params (e.g. fn get_item(arr, i) => arr[i]).
+static bool has_inferred_native_params(AstFuncNode* fn_node) {
+    AstNode* fn_as = (AstNode*)fn_node;
+    if (fn_node->captures) return false;
+    TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
+        ? (TypeFunc*)fn_as->type : NULL;
+    if (ft && ft->is_variadic) return false;
+    bool is_proc = (fn_as->node_type == AST_NODE_PROC);
+    TypeParam* tp = ft ? ft->param : NULL;
+    AstNamedNode* p = fn_node->param;
+    while (p) {
+        TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
+        bool may_be_null = tp && tp->is_optional && !tp->default_value;
+        if (!may_be_null && tid == LMD_TYPE_ANY && fn_node->body) {
+            TypeId inferred = infer_param_type(fn_node->body,
+                p->name->chars, (int)p->name->len, is_proc);
+            if (mir_is_native_param_type(inferred)) return true;
+        }
+        tp = tp ? tp->next : NULL;
+        p = (AstNamedNode*)p->next;
+    }
+    // P4-3.4: Also check native return type. When a function has params (all untyped)
+    // but the body's return type is native (INT/FLOAT/BOOL), the MIR transpiler enables
+    // generate_native=true and generates a _b wrapper. needs_fn_call_wrapper() misses
+    // this case (it only checks no-param functions for native return).
+    // Examples: fn starts_with(s, prefix) returns bool from 'false'/'slice == prefix'.
+    if (fn_node->param) {
+        TypeId ret_tid = infer_return_type(fn_node);
+        if (ret_tid == LMD_TYPE_INT || ret_tid == LMD_TYPE_FLOAT || ret_tid == LMD_TYPE_BOOL) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // Phase 4: Boxed wrapper for dual-version functions
 // Generates a thin "_b" suffixed function with all-Item ABI that unboxes params,
@@ -8728,11 +8835,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
     log_debug("mir: transpile_func_def '%s'", name_buf->str);
 
-    // Check if this function is a closure (has captured variables)
-    bool is_closure = (fn_node->captures != nullptr);
-
     // Check if this is a method inside an object type definition
     bool is_method = (mt->method_owner != nullptr);
+
+    // Check if this function is a closure (has captured variables)
+    // Methods are NOT treated as closures: field captures are loaded from _self, not a closure env.
+    // This matches the C transpiler which clears fn_node->captures for methods.
+    bool is_closure = (fn_node->captures != nullptr) && !is_method;
 
     AstNode* fn_as_node = (AstNode*)fn_node;
     TypeFunc* fn_type = (fn_as_node->type && fn_as_node->type->type_id == LMD_TYPE_FUNC)
@@ -8917,8 +9026,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Free our strdup copies (MIR made its own)
     for (int i = 0; i < param_count; i++) free(param_name_copies[i]);
 
-    // Set up consts_reg for this function by loading from global _lambda_rt
-    // _lambda_rt is a Context* stored at a global address resolved by import
+    // Set up consts_reg from per-module BSS _mod_consts_ptr so that cross-module
+    // function calls always use this module's own const_list (not context->consts).
     MIR_item_t rt_import_fn = MIR_new_import(mt->ctx, "_lambda_rt");
     MIR_reg_t rt_addr_fn = new_reg(mt, "rt_addr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr_fn),
@@ -8927,10 +9036,23 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     MIR_reg_t runtime_fn = new_reg(mt, "runtime", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_fn),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr_fn, 0, 1)));
-    // Load consts: runtime->consts
+    // Load this module's consts from the per-module BSS (module-local address, so correct even
+    // when the function is called from another module that has a different context->consts).
+    MIR_reg_t mod_consts_bss_addr_fn = new_reg(mt, "mod_consts_bss", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_consts_bss_addr_fn),
+        MIR_new_ref_op(mt->ctx, mt->consts_bss)));
     mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(Context, consts), runtime_fn, 0, 1)));
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_consts_bss_addr_fn, 0, 1)));
+
+    // Load this module's type_list from per-module BSS _mod_type_list_ptr. Used by
+    // map_with_tl/elmt_with_tl/etc. to pass the module's own type_list to those calls.
+    MIR_reg_t mod_tl_bss_addr_fn = new_reg(mt, "mod_tl_bss", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr_fn),
+        MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
+    mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->type_list_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_tl_bss_addr_fn, 0, 1)));
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
     MIR_reg_t heap_reg_fn = new_reg(mt, "heap_ptr", MIR_T_I64);
@@ -8992,6 +9114,54 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
 
             cap_index++;
             cap = cap->next;
+        }
+    }
+
+    // Method body setup: load object fields from _self into local scope.
+    // _self receives the boxed self Item (passed as void* via closure mechanism).
+    // Fields are accessed via item_attr(self_item, "fieldname") for each shape entry.
+    if (is_method) {
+        // _self param is (void*)(uintptr_t)boxed_self_item — move to I64 register
+        MIR_reg_t self_ptr_reg = MIR_reg(mt->ctx, "_self", func);
+        MIR_reg_t self_item_reg = new_reg(mt, "self_it", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, self_item_reg),
+            MIR_new_reg_op(mt->ctx, self_ptr_reg)));
+
+        // make '~' (current item / self) refer to self inside method body
+        mt->pipe_item_reg = self_item_reg;
+
+        // Load each field of the object type as a local variable
+        TypeObject* obj_type = mt->method_owner;
+        ShapeEntry* se = obj_type->shape;
+        while (se) {
+            if (se->name) {
+                char field_name[128];
+                snprintf(field_name, sizeof(field_name), "%.*s",
+                    (int)se->name->length, se->name->str);
+
+                // Load: field_val = item_attr(self_item, "fieldname")
+                MIR_reg_t name_str = emit_load_string_literal(mt, se->name->str);
+                MIR_reg_t field_val = emit_call_2(mt, "item_attr", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, self_item_reg),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, name_str));
+
+                // Unbox to native type if known
+                TypeId ftid = se->type ? se->type->type_id : LMD_TYPE_ANY;
+                if (ftid == LMD_TYPE_INT || ftid == LMD_TYPE_INT64 || ftid == LMD_TYPE_BOOL) {
+                    MIR_reg_t unboxed = emit_unbox(mt, field_val, ftid);
+                    set_var(mt, field_name, unboxed, type_to_mir(ftid), ftid);
+                } else if (ftid == LMD_TYPE_FLOAT) {
+                    MIR_reg_t unboxed = emit_unbox(mt, field_val, ftid);
+                    set_var(mt, field_name, unboxed, MIR_T_D, ftid);
+                } else {
+                    set_var(mt, field_name, field_val, MIR_T_I64, LMD_TYPE_ANY);
+                }
+
+                log_debug("mir: method '%s' - loaded field '%s' (type=%d) from self",
+                    name_buf->str, field_name, ftid);
+            }
+            se = se->next;
         }
     }
 
@@ -9690,6 +9860,23 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
                     entry.type_id = tid;
                     entry.mir_type = type_to_mir(tid);
                     hashmap_set(mt->global_vars, &entry);
+
+                    // Also create BSS for the error variable (e.g. pub val^err = ...)
+                    if (asn->error_name) {
+                        char err_name[128];
+                        snprintf(err_name, sizeof(err_name), "%.*s",
+                            (int)asn->error_name->len, asn->error_name->chars);
+                        char err_bss_name[140];
+                        snprintf(err_bss_name, sizeof(err_bss_name), "_gvar_%s", err_name);
+                        MIR_item_t err_bss = MIR_new_bss(mt->ctx, err_bss_name, 8);
+                        GlobalVarEntry err_entry;
+                        memset(&err_entry, 0, sizeof(err_entry));
+                        snprintf(err_entry.name, sizeof(err_entry.name), "%s", err_name);
+                        err_entry.bss_item = err_bss;
+                        err_entry.type_id = LMD_TYPE_ANY;
+                        err_entry.mir_type = MIR_T_I64;
+                        hashmap_set(mt->global_vars, &err_entry);
+                    }
                 } else if (decl->node_type == AST_NODE_DECOMPOSE) {
                     AstDecomposeNode* dec = (AstDecomposeNode*)decl;
                     for (int i = 0; i < dec->name_count; i++) {
@@ -10003,6 +10190,14 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     // Create module
     mt.module = MIR_new_module(ctx, "lambda_script");
 
+    // Per-module BSS: stores this module's const_list pointer so that all functions
+    // (including those called cross-module) load their own module's consts.
+    mt.consts_bss = MIR_new_bss(ctx, "_mod_consts_ptr", 8);
+
+    // Per-module BSS: stores this module's type_list pointer so that cross-module
+    // map/element/object allocations use the right type_list.
+    mt.type_list_bss = MIR_new_bss(ctx, "_mod_type_list_ptr", 8);
+
     // Import _lambda_rt (shared context pointer)
     MIR_item_t rt_import = MIR_new_import(ctx, "_lambda_rt");
 
@@ -10042,10 +10237,24 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         MIR_new_mem_op(ctx, MIR_T_I64, 0, rt_addr, 0, 1),
         MIR_new_reg_op(ctx, runtime_reg)));
 
-    // Load consts pointer: rt->consts (at offset 8)
+    // Load consts from per-module BSS _mod_consts_ptr (set by compile_script_as_mir_direct
+    // after MIR_link). This ensures all functions in this module use the module's own
+    // const_list even when called from a different module with a different context->consts.
+    MIR_reg_t mod_consts_bss_addr = new_reg(&mt, "mod_consts_bss", MIR_T_I64);
+    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mod_consts_bss_addr),
+        MIR_new_ref_op(ctx, mt.consts_bss)));
     mt.consts_reg = new_reg(&mt, "consts", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.consts_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, offsetof(Context, consts), runtime_reg, 0, 1)));
+        MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_consts_bss_addr, 0, 1)));
+
+    // Load type_list from per-module BSS _mod_type_list_ptr so all map/elmt/object
+    // allocations in this module use the module's own type_list via the _with_tl wrappers.
+    MIR_reg_t mod_tl_bss_addr = new_reg(&mt, "mod_tl_bss", MIR_T_I64);
+    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mod_tl_bss_addr),
+        MIR_new_ref_op(ctx, mt.type_list_bss)));
+    mt.type_list_reg = new_reg(&mt, "type_list", MIR_T_I64);
+    emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.type_list_reg),
+        MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
     // EvalContext.heap is at offset 64 (sizeof(Context)), Heap.gc is at offset 8
@@ -10185,6 +10394,180 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
 }
 
 // ============================================================================
+// Per-module MIR Direct compilation (used when runtime->use_mir_direct is set)
+// ============================================================================
+
+// Registers all pub functions and pub variable BSS addresses from imp's already-compiled
+// jit_context into the global dynamic_import_table so import_resolver can resolve them
+// when MIR_link() is called for the module that imports this one.
+static void register_module_pub_fns(AstImportNode* imp) {
+    if (!imp->script || !imp->script->jit_context) return;
+    AstNode* mod_node = imp->script->ast_root;
+    if (!mod_node || mod_node->node_type != AST_SCRIPT) return;
+
+    log_info("mir: registering pub symbols from module '%.*s' (index=%d)",
+        (int)imp->module.length, imp->module.str, imp->script->index);
+
+    AstNode* mod_child = ((AstScript*)mod_node)->child;
+    while (mod_child) {
+        if (mod_child->node_type == AST_NODE_CONTENT) {
+            mod_child = ((AstListNode*)mod_child)->item;
+            continue;
+        }
+        if (mod_child->node_type == AST_NODE_FUNC ||
+            mod_child->node_type == AST_NODE_FUNC_EXPR ||
+            mod_child->node_type == AST_NODE_PROC) {
+            AstFuncNode* fn_node = (AstFuncNode*)mod_child;
+            TypeFunc* fn_type = (TypeFunc*)fn_node->type;
+            if (fn_type && fn_type->is_public) {
+                // Register boxed wrapper (_b suffix) if the function needs one
+                // (due to declared typed params OR inferred native params)
+                StrBuf* fn_name = strbuf_new_cap(64);
+                if (mod_child->node_type != AST_NODE_PROC &&
+                    (needs_fn_call_wrapper(fn_node) || has_inferred_native_params(fn_node))) {
+                    write_fn_name_ex(fn_name, fn_node, NULL, "_b");
+                    void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
+                    if (fn_ptr) {
+                        register_dynamic_import(strdup(fn_name->str), fn_ptr);
+                        log_debug("mir: registered import wrapper fn: %s -> %p", fn_name->str, fn_ptr);
+                    }
+                }
+                // Register the direct (non-boxed) version
+                strbuf_free(fn_name);
+                fn_name = strbuf_new_cap(64);
+                write_fn_name(fn_name, fn_node, NULL);
+                void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
+                if (fn_ptr) {
+                    register_dynamic_import(strdup(fn_name->str), fn_ptr);
+                    log_debug("mir: registered import fn: %s -> %p", fn_name->str, fn_ptr);
+                }
+                strbuf_free(fn_name);
+            }
+        } else if (mod_child->node_type == AST_NODE_PUB_STAM) {
+            // Register pub variable BSS addresses.
+            // MIR Direct names BSS items "_gvar_<name>" (see prepass_create_global_vars).
+            // C2MIR names them the same as write_var_name: "_<name>".
+            // The consuming module always imports via write_var_name ("_<name>"),
+            // so we register the lookup result under that key regardless of format.
+            AstNode* declare = ((AstLetNode*)mod_child)->declare;
+            while (declare) {
+                AstNamedNode* named = (AstNamedNode*)declare;
+                if (named->name) {
+                    // Import key (what the consumer's MIR_new_import uses)
+                    StrBuf* import_key = strbuf_new_cap(64);
+                    write_var_name(import_key, named, NULL);  // e.g. "_pi"
+                    // MIR Direct BSS name: "_gvar_<rawname>"
+                    char gvar[200];
+                    snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);
+                    MIR_item_t bss_item = find_import(imp->script->jit_context, gvar);
+                    if (!bss_item || !bss_item->addr) {
+                        // fall back for C2MIR-compiled modules (BSS == import_key)
+                        bss_item = find_import(imp->script->jit_context, import_key->str);
+                    }
+                    if (bss_item && bss_item->addr) {
+                        register_dynamic_import(strdup(import_key->str), bss_item->addr);
+                        log_debug("mir: registered import var BSS: %s -> %p", import_key->str, bss_item->addr);
+                    }
+                    strbuf_free(import_key);
+                }
+                if (named->error_name) {
+                    // Same dual-lookup for error variable BSS
+                    StrBuf* err_key = strbuf_new_cap(64);
+                    strbuf_append_char(err_key, '_');
+                    strbuf_append_str_n(err_key, named->error_name->chars, named->error_name->len);
+                    char gvar_err[200];
+                    snprintf(gvar_err, sizeof(gvar_err), "_gvar_%.*s",
+                             (int)named->error_name->len, named->error_name->chars);
+                    MIR_item_t err_bss = find_import(imp->script->jit_context, gvar_err);
+                    if (!err_bss || !err_bss->addr) {
+                        err_bss = find_import(imp->script->jit_context, err_key->str);
+                    }
+                    if (err_bss && err_bss->addr) {
+                        register_dynamic_import(strdup(err_key->str), err_bss->addr);
+                        log_debug("mir: registered import error var BSS: %s -> %p", err_key->str, err_bss->addr);
+                    }
+                    strbuf_free(err_key);
+                }
+                declare = declare->next;
+            }
+        }
+        mod_child = mod_child->next;
+    }
+}
+
+// Compile a module whose AST is already built (tp->ast_root set) via MIR Direct.
+// Called from transpile_script() when runtime->use_mir_direct is true, for both
+// imported modules and the main script.  Depth-first import loading guarantees that
+// all of this module's sub-imports are already compiled before we are called.
+void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path) {
+    log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
+
+    // Clear the dynamic-import table and populate it with this module's direct imports only.
+    // Because imports are compiled depth-first, every sub-import's symbols were already
+    // registered by their own compile_script_as_mir_direct() call; we clear here so that
+    // only THIS module's direct dependencies are visible to import_resolver during MIR_link().
+    clear_dynamic_imports();
+
+    AstScript* ast_root = (AstScript*)tp->ast_root;
+    AstNode* child = ast_root->child;
+    while (child) {
+        if (child->node_type == AST_NODE_IMPORT) {
+            AstImportNode* imp = (AstImportNode*)child;
+            register_module_pub_fns(imp);
+        }
+        child = child->next;
+    }
+
+    // Transpile the AST directly to MIR (no C code generated)
+    unsigned int opt_level = tp->runtime ? tp->runtime->optimize_level : 2;
+    MIR_context_t ctx = jit_init(opt_level);
+    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->pool);
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    // Store results in the transpiler and propagate back to script
+    tp->jit_context = ctx;
+    tp->main_func = (main_func_t)jit_gen_func(ctx, "main");
+
+    // Set per-module consts BSS AFTER jit_gen_func: jit_gen_func re-invokes MIR_link
+    // which reallocates BSS memory, so any earlier write would be overwritten.
+    // After jit_gen_func, BSS addresses are final.
+    MIR_item_t consts_bss_item = find_import(ctx, "_mod_consts_ptr");
+    if (consts_bss_item && consts_bss_item->addr) {
+        *(void**)(consts_bss_item->addr) = tp->const_list ? tp->const_list->data : nullptr;
+    } else {
+        log_error("MIR Direct: _mod_consts_ptr BSS not found or no addr for '%s' (addr=%p)",
+                  script_path ? script_path : "<unknown>",
+                  consts_bss_item ? consts_bss_item->addr : nullptr);
+    }
+
+    // Set per-module type_list BSS (same timing: must be after jit_gen_func).
+    MIR_item_t tl_bss_item = find_import(ctx, "_mod_type_list_ptr");
+    if (tl_bss_item && tl_bss_item->addr) {
+        *(void**)(tl_bss_item->addr) = tp->type_list;
+    } else {
+        log_error("MIR Direct: _mod_type_list_ptr BSS not found or no addr for '%s'",
+                  script_path ? script_path : "<unknown>");
+    }
+
+    if (!tp->main_func) {
+        log_error("MIR Direct: failed to generate 'main' for '%s'",
+                  script_path ? script_path : "<unknown>");
+        jit_cleanup(ctx);
+        tp->jit_context = NULL;
+    }
+
+    // Copy Script-sized portion of Transpiler back to the Script object
+    memcpy(script, tp, sizeof(Script));
+    script->jit_context = tp->jit_context;
+    script->main_func   = tp->main_func;
+
+    if (tp->main_func) {
+        log_info("MIR Direct: compiled '%s' ctx=%p main=%p",
+                 script_path ? script_path : "<unknown>", ctx, tp->main_func);
+    }
+}
+
+// ============================================================================
 // Main entry point for MIR compilation
 // ============================================================================
 
@@ -10195,13 +10578,22 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     Runner runner;
     runner_init(runtime, &runner);
 
-    // Load and parse script (includes AST build, type inference, const allocation)
-    // Note: load_script recursively compiles imported modules via C transpiler path
+    // Enable MIR Direct mode: load_script will call compile_script_as_mir_direct() for every
+    // module (main + all imports) instead of going through the C transpiler (C2MIR) path.
+    // Each compile_script_as_mir_direct() call clears dynamic_imports, registers the module's
+    // direct sub-imports' pub symbols, then does transpile_mir_ast() + MIR_link().
+    // Imports are compiled depth-first, so by the time any module is linked its dependencies
+    // are already in dynamic_imports.
+    bool was_mir_direct = runtime->use_mir_direct;
+    runtime->use_mir_direct = true;
+
     if (source) {
         runner.script = load_script(runtime, script_path, source, false);
     } else {
         runner.script = load_script(runtime, script_path, NULL, false);
     }
+
+    runtime->use_mir_direct = was_mir_direct;  // restore for any nested/reentrant calls
 
     if (!runner.script || !runner.script->ast_root) {
         log_error("Failed to parse script");
@@ -10216,157 +10608,25 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         return output;
     }
 
-    // Register imported module functions and variables for cross-module resolution
-    clear_dynamic_imports();
-    AstScript* ast_script = (AstScript*)runner.script->ast_root;
-    AstNode* import_child = ast_script->child;
-    while (import_child) {
-        if (import_child->node_type == AST_NODE_IMPORT) {
-            AstImportNode* imp = (AstImportNode*)import_child;
-            if (imp->script && imp->script->jit_context) {
-                log_info("mir: registering imports from module '%.*s' (index=%d)",
-                    (int)imp->module.length, imp->module.str, imp->script->index);
+    // All modules (main + imports) are now compiled via MIR Direct.
+    // runner.script->jit_context and runner.script->main_func are already set.
+    MIR_context_t ctx = (MIR_context_t)runner.script->jit_context;
 
-                // Register pub functions from the imported module
-                AstNode* mod_node = imp->script->ast_root;
-                if (mod_node && mod_node->node_type == AST_SCRIPT) {
-                    AstNode* mod_child = ((AstScript*)mod_node)->child;
-                    while (mod_child) {
-                        if (mod_child->node_type == AST_NODE_CONTENT) {
-                            mod_child = ((AstListNode*)mod_child)->item;
-                            continue;
-                        }
-                        if (mod_child->node_type == AST_NODE_FUNC ||
-                            mod_child->node_type == AST_NODE_FUNC_EXPR ||
-                            mod_child->node_type == AST_NODE_PROC) {
-                            AstFuncNode* fn_node = (AstFuncNode*)mod_child;
-                            TypeFunc* fn_type = (TypeFunc*)fn_node->type;
-                            if (fn_type && fn_type->is_public) {
-                                // Register the boxed wrapper version if it exists, otherwise direct
-                                StrBuf* fn_name = strbuf_new_cap(64);
-                                if (mod_child->node_type != AST_NODE_PROC && needs_fn_call_wrapper(fn_node)) {
-                                    write_fn_name_ex(fn_name, fn_node, NULL, "_b");
-                                    void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
-                                    if (fn_ptr) {
-                                        register_dynamic_import(strdup(fn_name->str), fn_ptr);
-                                        log_debug("mir: registered import wrapper fn: %s -> %p", fn_name->str, fn_ptr);
-                                    }
-                                }
-                                // Also register the direct version
-                                strbuf_free(fn_name);
-                                fn_name = strbuf_new_cap(64);
-                                write_fn_name(fn_name, fn_node, NULL);
-                                void* fn_ptr = find_func(imp->script->jit_context, fn_name->str);
-                                if (fn_ptr) {
-                                    register_dynamic_import(strdup(fn_name->str), fn_ptr);
-                                    log_debug("mir: registered import fn: %s -> %p", fn_name->str, fn_ptr);
-                                }
-                                strbuf_free(fn_name);
-                            }
-                        }
-                        else if (mod_child->node_type == AST_NODE_PUB_STAM) {
-                            // Register pub variable BSS addresses
-                            AstNode* declare = ((AstLetNode*)mod_child)->declare;
-                            while (declare) {
-                                AstNamedNode* named = (AstNamedNode*)declare;
-                                if (named->name) {
-                                    StrBuf* var_name = strbuf_new_cap(64);
-                                    write_var_name(var_name, named, NULL);
-                                    MIR_item_t bss_item = find_import(imp->script->jit_context, var_name->str);
-                                    if (bss_item && bss_item->addr) {
-                                        // Register BSS address — the main script will load the value at runtime
-                                        register_dynamic_import(strdup(var_name->str), bss_item->addr);
-                                        log_debug("mir: registered import var BSS: %s -> %p", var_name->str, bss_item->addr);
-                                    }
-                                    strbuf_free(var_name);
-                                }
-                                // also register error variable BSS for ^err destructuring
-                                if (named->error_name) {
-                                    StrBuf* err_name = strbuf_new_cap(64);
-                                    strbuf_append_char(err_name, '_');
-                                    strbuf_append_str_n(err_name, named->error_name->chars, named->error_name->len);
-                                    MIR_item_t err_bss = find_import(imp->script->jit_context, err_name->str);
-                                    if (err_bss && err_bss->addr) {
-                                        register_dynamic_import(strdup(err_name->str), err_bss->addr);
-                                        log_debug("mir: registered import error var BSS: %s -> %p", err_name->str, err_bss->addr);
-                                    }
-                                    strbuf_free(err_name);
-                                }
-                                declare = declare->next;
-                            }
-                        }
-                        mod_child = mod_child->next;
-                    }
-                }
-            }
-        }
-        import_child = import_child->next;
-    }
-
-    // Initialize MIR context
-    unsigned int opt_level = runtime ? runtime->optimize_level : 2;
-
-    // MIR path profiling probes
-    bool profiling = is_profile_enabled() && profile_count < PROFILE_MAX_SCRIPTS;
-    profile_time_t m0, m1, m2, m3;
-
-    if (profiling) profile_get_time(&m0);
-
-    MIR_context_t ctx = jit_init(opt_level);
-
-    if (profiling) profile_get_time(&m1);
-
-    // Transpile AST to MIR directly
-    transpile_mir_ast(ctx, (AstScript*)runner.script->ast_root, runner.script->source,
-                      runner.script->type_list, runner.script->pool);
-
-    if (profiling) profile_get_time(&m2);
-
-    // Link and generate
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
-
-    if (profiling) profile_get_time(&m3);
-
-    // Record MIR path profiling data
-    // Fields reused: jit_init_ms = MIR ctx init, transpile_ms = AST->MIR transpile,
-    //                c2mir_ms = MIR_link (link+gen), script_path prefixed with "[MIR]"
-    if (profiling) {
-        PhaseProfile* prof = &profile_data[profile_count++];
-        char* mir_path_buf = (char*)malloc(512);
-        snprintf(mir_path_buf, 512, "[MIR] %s",
-                 runner.script->reference ? runner.script->reference : "unknown");
-        prof->script_path = mir_path_buf;
-        prof->parse_ms = 0;    // already captured in C2MIR entry
-        prof->ast_ms = 0;      // already captured in C2MIR entry
-        prof->transpile_ms = elapsed_ms_val(m1, m2);  // AST->MIR direct transpile
-        prof->jit_init_ms = elapsed_ms_val(m0, m1);   // MIR context init
-        prof->file_write_ms = 0;
-        prof->c2mir_ms = elapsed_ms_val(m2, m3);      // MIR_link (link + codegen)
-        prof->mir_gen_ms = 0;
-        prof->code_len = 0;
-        // Dump immediately — --mir path may crash during execution/cleanup
-        profile_dump_to_file();
-    }
-
-    // Find the main function
-    runner.script->main_func = (main_func_t)find_func(ctx, "main");
     if (!runner.script->main_func) {
-        log_error("Failed to find main function");
-        jit_cleanup(ctx);
+        log_error("MIR Direct: 'main' missing after compilation of '%s'", script_path);
         Pool* error_pool = pool_create();
         Input* output = Input::create(error_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create error output Input");
-            if (error_pool) pool_destroy(error_pool);
-            return nullptr;
-        }
-        output->root = ItemError;
+        if (output) output->root = ItemError;
         return output;
     }
 
-    // Initialize imported modules before executing main script
-    // This runs each module's _init_consts + _mod_main to compute pub variable values
-    import_child = ast_script->child;
+    // Initialize imported modules before executing the main script.
+    // For each import: call _init_mod_consts/_init_mod_types (C2MIR helpers; graceful no-op
+    // for MIR Direct modules where these don't exist), then run its main_func to compute
+    // pub variable values.  MIR Direct modules access constants via context->consts which
+    // is set to the import's const_list->data immediately before its main_func call.
+    AstScript* ast_script = (AstScript*)runner.script->ast_root;
+    AstNode* import_child = ast_script->child;
     bool has_imports = false;
     while (import_child) {
         if (import_child->node_type == AST_NODE_IMPORT) has_imports = true;
@@ -10377,42 +10637,34 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         runner_setup_context(&runner);
         runner.context.run_main = run_main;
 
-        // Register BSS global variables as GC roots (after context/heap is created)
-        register_bss_gc_roots((void*)ctx);
-
-        import_child = ast_script->child;
-        while (import_child) {
-            if (import_child->node_type == AST_NODE_IMPORT) {
-                AstImportNode* imp = (AstImportNode*)import_child;
-                if (imp->script && imp->script->jit_context) {
-                    // Initialize module constants
-                    typedef void (*init_consts_fn)(void**);
-                    init_consts_fn init_fn = (init_consts_fn)find_func(imp->script->jit_context, "_init_mod_consts");
-                    if (init_fn && imp->script->const_list) {
-                        init_fn(imp->script->const_list->data);
-                    }
-                    // Initialize module types
-                    typedef void (*init_types_fn)(void*);
-                    init_types_fn init_types = (init_types_fn)find_func(imp->script->jit_context, "_init_mod_types");
-                    if (init_types && imp->script->type_list) {
-                        init_types(imp->script->type_list);
-                    }
-                    // Run module main to compute pub variables
-                    if (imp->script->main_func) {
-                        log_info("mir: running imported module main for '%.*s'",
-                            (int)imp->module.length, imp->module.str);
-                        // Set up context for the imported module
-                        runner.context.consts = imp->script->const_list ? imp->script->const_list->data : nullptr;
-                        runner.context.type_list = imp->script->type_list;
-                        imp->script->main_func(&runner.context);
-                        // Restore main script context
-                        runner.context.consts = runner.script->const_list ? runner.script->const_list->data : nullptr;
-                        runner.context.type_list = runner.script->type_list;
-                    }
-                }
+        // Register BSS GC roots for ALL modules (imports + main) in dependency order.
+        // runtime->scripts is pre-order DFS: main script is first (index 0), imports are
+        // appended as they are discovered during transpilation.
+        for (int si = 0; si < runtime->scripts->length; si++) {
+            Script* s = (Script*)runtime->scripts->data[si];
+            if (s && s->jit_context) {
+                register_bss_gc_roots((void*)s->jit_context);
             }
-            import_child = import_child->next;
         }
+
+        // Run ALL imported modules' main_func in dependency order (deepest dep first).
+        // runtime->scripts: main script = index runner.script->index (typically 0).
+        // Imports are at higher indices; deepest transitive imports are at the highest indices.
+        // Iterate in reverse so transitive imports (e.g. mod_vars imported by mod_chain)
+        // are initialized before the modules that depend on them.
+        int main_idx = runner.script->index;
+        for (int si = runtime->scripts->length - 1; si >= 0; si--) {
+            if (si == main_idx) continue;  // skip main script; it runs after this loop
+            Script* imp_script = (Script*)runtime->scripts->data[si];
+            if (!imp_script || !imp_script->main_func) continue;
+            log_info("mir: running imported module main index=%d", si);
+            runner.context.consts = imp_script->const_list ? imp_script->const_list->data : nullptr;
+            runner.context.type_list = imp_script->type_list;
+            imp_script->main_func(&runner.context);
+        }
+        // Restore context for main script execution
+        runner.context.consts = runner.script->const_list ? runner.script->const_list->data : nullptr;
+        runner.context.type_list = runner.script->type_list;
 
         // Execute main script using already-initialized context
         log_notice("Executing JIT compiled code...");
@@ -10439,6 +10691,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         if (!output) {
             log_error("Failed to create output Input");
             if (output_pool) pool_destroy(output_pool);
+            runner.script->jit_context = NULL;
             jit_cleanup(ctx);
             return nullptr;
         }
@@ -10446,36 +10699,27 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         MarkBuilder builder(output);
         output->root = builder.deep_copy(result);
 
-        // Preserve runtime error before cleanup (transfer ownership to persistent storage)
+        // Preserve runtime error before cleanup
         if (context && context->last_error) {
             clear_persistent_last_error();
             persistent_last_error = context->last_error;
             context->last_error = NULL;
         }
 
-        // Clean up execution context (heap, nursery, validator) before runner goes out of scope
         runner_cleanup(&runner);
 
+        // Prevent double-cleanup: runtime_cleanup() iterates scripts and calls jit_cleanup
+        runner.script->jit_context = NULL;
         jit_cleanup(ctx);
         return output;
     }
 
     // Execute (no imports — use standard path)
-    // Save original C2MIR context (created by load_script) before overwriting
-    MIR_context_t c2mir_ctx = runner.script->jit_context;
-    runner.script->jit_context = ctx;  // store for BSS root registration
     Input* output = execute_script_and_create_output(&runner, run_main);
 
-    // Cleanup MIR direct context
-    jit_cleanup(ctx);
-
-    // Cleanup original C2MIR context (leaked when we overwrote jit_context)
-    if (c2mir_ctx && c2mir_ctx != ctx) {
-        jit_cleanup(c2mir_ctx);
-    }
-
-    // Null out to prevent double-cleanup in runtime_cleanup
+    // Prevent double-cleanup
     runner.script->jit_context = NULL;
+    jit_cleanup(ctx);
 
     return output;
 }
