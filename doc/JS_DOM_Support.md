@@ -16,51 +16,51 @@ LambdaJS is Lambda's built-in JavaScript JIT and browser DOM engine (~18K LOC). 
 
 ### Language Syntax
 
-| Feature                                            | Status | Notes                                                    |
-| -------------------------------------------------- | :----: | -------------------------------------------------------- |
-| Variable declarations (`var`, `let`, `const`)      |   ✅    | Hoisting for `var`; block scoping for `let`/`const`      |
-| Function declarations & expressions                |   ✅    | Including hoisting                                       |
-| Arrow functions                                    |   ✅    | Lexical `this`                                           |
-| Template literals                                  |   ✅    | Backtick strings with `${expr}` interpolation            |
-| Spread operator (`...`)                            |   ✅    | In function calls and array literals                     |
-| Rest parameters (`...args`)                        |   ✅    |                                                          |
-| Default parameters                                 |   ✅    |                                                          |
-| Destructuring — arrays                             |   ✅    | `const [a, b] = arr`                                     |
-| Destructuring — objects                            |   ✅    | `const {x, y} = obj`, rename `{x: px}`, for-of           |
-| Destructuring — rest (`...rest`)                   |   ✅    | Object rest `{a, ...rest}` and array rest `[a, ...rest]` |
-| ES6 classes                                        |   ✅    | `class`, `extends`, `super()`, `static`, getters/setters |
-| Prototype-based OOP                                |   ✅    | `Foo.prototype.method = fn`, `new Foo()`                 |
-| Closures                                           |   ✅    | Multi-level transitive capture, shared scope env         |
-| `typeof` operator                                  |   ✅    | All JS quirks (`null → "object"`)                        |
-| `instanceof` operator                              |   ✅    |                                                          |
-| `in` operator                                      |   ✅    |                                                          |
-| `delete` operator                                  |   ✅    | Sets property to null (simplified)                       |
-| Nullish coalescing (`??`)                          |   ✅    |                                                          |
-| Conditional (ternary) `? :`                        |   ✅    |                                                          |
-| `switch` / `case`                                  |   ✅    | With fallthrough support                                 |
-| `for...of`                                         |   ✅    |                                                          |
-| `for...in`                                         |   ✅    |                                                          |
-| `do...while`                                       |   ✅    |                                                          |
-| `try` / `catch` / `finally`                        |   ✅    | Including return-in-try                                  |
-| `throw`                                            |   ✅    |                                                          |
-| IIFE `(function(){...})()`                         |   ✅    |                                                          |
-| Regex literals                                     |   ✅    | Via RE2 backend; `.test()`, `.exec()`                    |
-| Sequence expressions (comma)                       |   ✅    |                                                          |
-| Labeled statements                                 |   ✅    | `break label`, `continue label`                          |
-| Nullish/logical assignment (`??=`, `&&=`, `\|\|=`) |   ✅    |                                                          |
-| Optional chaining (`?.`)                           |   ✅    | Property, method, computed, nested chains                |
-| `Map` / `Set` collections                          |   ✅    | `new Map()`, `new Set()` with full method API            |
-| Generators / `yield`                               |   ❌    |                                                          |
-| `async` / `await` / `Promise`                      |   ❌    |                                                          |
-| `import` / `export` (ES modules)                   |   ❌    |                                                          |
-| `WeakMap` / `WeakSet`                              |   ❌    |                                                          |
+| Feature                                            | Status | Notes                                                             |
+| -------------------------------------------------- | :----: | ----------------------------------------------------------------- |
+| Variable declarations (`var`, `let`, `const`)      |   ✅    | Hoisting for `var`; block scoping for `let`/`const`               |
+| Function declarations & expressions                |   ✅    | Including hoisting                                                |
+| Arrow functions                                    |   ✅    | Lexical `this`                                                    |
+| Template literals                                  |   ✅    | Backtick strings with `${expr}` interpolation                     |
+| Spread operator (`...`)                            |   ✅    | In function calls and array literals                              |
+| Rest parameters (`...args`)                        |   ✅    |                                                                   |
+| Default parameters                                 |   ✅    |                                                                   |
+| Destructuring — arrays                             |   ✅    | `const [a, b] = arr`                                              |
+| Destructuring — objects                            |   ✅    | `const {x, y} = obj`, rename `{x: px}`, for-of                    |
+| Destructuring — rest (`...rest`)                   |   ✅    | Object rest `{a, ...rest}` and array rest `[a, ...rest]`          |
+| ES6 classes                                        |   ✅    | `class`, `extends`, `super()`, `static`, getters/setters          |
+| Prototype-based OOP                                |   ✅    | `Foo.prototype.method = fn`, `new Foo()`                          |
+| Closures                                           |   ✅    | Multi-level transitive capture, shared scope env                  |
+| `typeof` operator                                  |   ✅    | All JS quirks (`null → "object"`)                                 |
+| `instanceof` operator                              |   ✅    |                                                                   |
+| `in` operator                                      |   ✅    |                                                                   |
+| `delete` operator                                  |   ✅    | Sets property to null (simplified)                                |
+| Nullish coalescing (`??`)                          |   ✅    |                                                                   |
+| Conditional (ternary) `? :`                        |   ✅    |                                                                   |
+| `switch` / `case`                                  |   ✅    | With fallthrough support                                          |
+| `for...of`                                         |   ✅    |                                                                   |
+| `for...in`                                         |   ✅    |                                                                   |
+| `do...while`                                       |   ✅    |                                                                   |
+| `try` / `catch` / `finally`                        |   ✅    | Including return-in-try                                           |
+| `throw`                                            |   ✅    |                                                                   |
+| IIFE `(function(){...})()`                         |   ✅    |                                                                   |
+| Regex literals                                     |   ✅    | Via RE2 backend; `.test()`, `.exec()`                             |
+| Sequence expressions (comma)                       |   ✅    |                                                                   |
+| Labeled statements                                 |   ✅    | `break label`, `continue label`                                   |
+| Nullish/logical assignment (`??=`, `&&=`, `\|\|=`) |   ✅    |                                                                   |
+| Optional chaining (`?.`)                           |   ✅    | Property, method, computed, nested chains                         |
+| `Map` / `Set` collections                          |   ✅    | `new Map()`, `new Set()` with full method API                     |
+| Generators / `yield`                               |   ❌    |                                                                   |
+| `async` / `await` / `Promise`                      |   ❌    |                                                                   |
+| `import` / `export` (ES modules)                   |   ❌    |                                                                   |
+| `WeakMap` / `WeakSet`                              |   ❌    |                                                                   |
 | `Symbol` API                                       |   ✅    | `Symbol()`, `Symbol.for()`, `Symbol.keyFor()`, well-known symbols |
-| `Proxy` / `Reflect`                                |   ❌    |                                                          |
-| `setTimeout` / `setInterval`                       |   ❌    |                                                          |
-| `encodeURIComponent` / `decodeURIComponent`        |   ✅    | RFC 3986 percent-encoding via `lib/url.c`                |
-| `structuredClone`                                  |   ❌    |                                                          |
-| `globalThis`                                       |   ✅    | Singleton global object with `undefined`, `NaN`, `Infinity` |
-| `Intl`                                             |   ❌    |                                                          |
+| `Proxy` / `Reflect`                                |   ❌    |                                                                   |
+| `setTimeout` / `setInterval`                       |   ❌    |                                                                   |
+| `encodeURIComponent` / `decodeURIComponent`        |   ✅    | RFC 3986 percent-encoding via `lib/url.c`                         |
+| `structuredClone`                                  |   ❌    |                                                                   |
+| `globalThis`                                       |   ✅    | Singleton global object with `undefined`, `NaN`, `Infinity`       |
+| `Intl`                                             |   ❌    |                                                                   |
 
 ### Operators
 

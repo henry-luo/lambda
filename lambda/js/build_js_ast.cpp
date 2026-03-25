@@ -71,6 +71,8 @@ JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node);
 JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node);
 JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node);
 JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node);
+JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node);
+JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node);
 
 // Allocate JavaScript AST node
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size) {
@@ -607,7 +609,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
 JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     const char* node_type = ts_node_type(func_node);
     bool is_arrow = (strcmp(node_type, "arrow_function") == 0);
-    bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0);
+    bool is_generator = (strcmp(node_type, "generator_function") == 0 ||
+                         strcmp(node_type, "generator_function_declaration") == 0);
+    bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0) ||
+                         strcmp(node_type, "generator_function") == 0;
 
     JsAstNodeType ast_type = is_arrow ? JS_AST_NODE_ARROW_FUNCTION :
                              is_expression ? JS_AST_NODE_FUNCTION_EXPRESSION :
@@ -616,8 +621,19 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, ast_type, func_node, sizeof(JsFunctionNode));
 
     func->is_arrow = is_arrow;
-    func->is_async = false; // TODO: Check for async keyword
-    func->is_generator = false; // TODO: Check for generator
+    func->is_generator = is_generator;
+
+    // Detect async: check for "async" anonymous child before "function" keyword
+    func->is_async = false;
+    if (!is_arrow) {
+        uint32_t ccount = ts_node_child_count(func_node);
+        for (uint32_t ci = 0; ci < ccount; ci++) {
+            TSNode child = ts_node_child(func_node, ci);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "async") == 0) { func->is_async = true; break; }
+            if (strcmp(ctype, "function") == 0) break; // past the keyword
+        }
+    }
 
     // Get function name (optional for expressions)
     TSNode name_node = ts_node_child_by_field_name(func_node, "name", strlen("name"));
@@ -961,8 +977,40 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return build_js_array_expression(tp, expr_node);
     } else if (strcmp(node_type, "object") == 0) {
         return build_js_object_expression(tp, expr_node);
-    } else if (strcmp(node_type, "function_expression") == 0 || strcmp(node_type, "arrow_function") == 0) {
+    } else if (strcmp(node_type, "function_expression") == 0 || strcmp(node_type, "arrow_function") == 0 ||
+               strcmp(node_type, "generator_function") == 0) {
         return build_js_function(tp, expr_node);
+    } else if (strcmp(node_type, "yield_expression") == 0) {
+        // yield / yield expr / yield* expr
+        JsYieldNode* yield_node = (JsYieldNode*)alloc_js_ast_node(tp, JS_AST_NODE_YIELD_EXPRESSION, expr_node, sizeof(JsYieldNode));
+        yield_node->delegate = false;
+        yield_node->argument = NULL;
+
+        // Check for '*' (delegate) among anonymous children
+        uint32_t ccount = ts_node_child_count(expr_node);
+        for (uint32_t ci = 0; ci < ccount; ci++) {
+            TSNode child = ts_node_child(expr_node, ci);
+            if (!ts_node_is_named(child)) {
+                StrView src = js_node_source(tp, child);
+                if (src.length == 1 && src.str[0] == '*') { yield_node->delegate = true; break; }
+            }
+        }
+
+        // The named child (if any) is the argument expression
+        if (ts_node_named_child_count(expr_node) > 0) {
+            TSNode arg = ts_node_named_child(expr_node, 0);
+            yield_node->argument = build_js_expression(tp, arg);
+        }
+        yield_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)yield_node;
+    } else if (strcmp(node_type, "await_expression") == 0) {
+        JsAwaitNode* await_node = (JsAwaitNode*)alloc_js_ast_node(tp, JS_AST_NODE_AWAIT_EXPRESSION, expr_node, sizeof(JsAwaitNode));
+        if (ts_node_named_child_count(expr_node) > 0) {
+            TSNode arg = ts_node_named_child(expr_node, 0);
+            await_node->argument = build_js_expression(tp, arg);
+        }
+        await_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)await_node;
     } else if (strcmp(node_type, "assignment_expression") == 0 ||
                strcmp(node_type, "augmented_assignment_expression") == 0) {
         // Handle both plain (=) and augmented (+=, -=, etc.) assignment expressions
@@ -1252,7 +1300,8 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
 
     if (strcmp(node_type, "variable_declaration") == 0 || strcmp(node_type, "lexical_declaration") == 0) {
         return build_js_variable_declaration(tp, stmt_node);
-    } else if (strcmp(node_type, "function_declaration") == 0) {
+    } else if (strcmp(node_type, "function_declaration") == 0 ||
+               strcmp(node_type, "generator_function_declaration") == 0) {
         return build_js_function(tp, stmt_node);
     } else if (strcmp(node_type, "if_statement") == 0) {
         return build_js_if_statement(tp, stmt_node);
@@ -1304,6 +1353,10 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         return build_js_throw_statement(tp, stmt_node);
     } else if (strcmp(node_type, "class_declaration") == 0) {
         return build_js_class_declaration(tp, stmt_node);
+    } else if (strcmp(node_type, "import_statement") == 0) {
+        return build_js_import_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "export_statement") == 0) {
+        return build_js_export_statement(tp, stmt_node);
     } else if (strcmp(node_type, "labeled_statement") == 0) {
         JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_LABELED_STATEMENT, stmt_node, sizeof(JsLabeledStatementNode));
         labeled->base.type = &TYPE_NULL;
@@ -1360,6 +1413,165 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         log_error("Unsupported JavaScript statement type: %s", node_type);
         return NULL;
     }
+}
+
+// Build JavaScript import statement
+// import X from 'module'  |  import { a, b } from 'module'  |  import * as X from 'module'
+JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node) {
+    JsImportNode* node = (JsImportNode*)alloc_js_ast_node(tp, JS_AST_NODE_IMPORT_DECLARATION, import_node, sizeof(JsImportNode));
+    node->source = NULL;
+    node->specifiers = NULL;
+    node->default_name = NULL;
+    node->namespace_name = NULL;
+
+    // Get source (module path string)
+    TSNode source_node = ts_node_child_by_field_name(import_node, "source", strlen("source"));
+    if (!ts_node_is_null(source_node)) {
+        StrView src = js_node_source(tp, source_node);
+        // Strip quotes from the string literal
+        if (src.length >= 2) {
+            node->source = name_pool_create_len(tp->name_pool, src.str + 1, src.length - 2);
+        }
+    }
+
+    // Process children: import_clause contains identifiers, named_imports, namespace_import
+    uint32_t ccount = ts_node_named_child_count(import_node);
+    JsAstNode* prev_spec = NULL;
+
+    for (uint32_t i = 0; i < ccount; i++) {
+        TSNode child = ts_node_named_child(import_node, i);
+        const char* ctype = ts_node_type(child);
+
+        if (strcmp(ctype, "import_clause") == 0) {
+            uint32_t clause_count = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < clause_count; j++) {
+                TSNode clause_child = ts_node_named_child(child, j);
+                const char* cc_type = ts_node_type(clause_child);
+
+                if (strcmp(cc_type, "identifier") == 0) {
+                    // Default import: import X from 'module'
+                    StrView name = js_node_source(tp, clause_child);
+                    node->default_name = name_pool_create_len(tp->name_pool, name.str, name.length);
+                } else if (strcmp(cc_type, "namespace_import") == 0) {
+                    // import * as X from 'module' — the identifier inside namespace_import
+                    if (ts_node_named_child_count(clause_child) > 0) {
+                        TSNode ns_id = ts_node_named_child(clause_child, 0);
+                        StrView name = js_node_source(tp, ns_id);
+                        node->namespace_name = name_pool_create_len(tp->name_pool, name.str, name.length);
+                    }
+                } else if (strcmp(cc_type, "named_imports") == 0) {
+                    // import { a, b as c } from 'module'
+                    uint32_t spec_count = ts_node_named_child_count(clause_child);
+                    for (uint32_t k = 0; k < spec_count; k++) {
+                        TSNode spec = ts_node_named_child(clause_child, k);
+                        const char* spec_type = ts_node_type(spec);
+                        if (strcmp(spec_type, "import_specifier") == 0) {
+                            // Use the "name" field (local binding) or "alias" if present
+                            TSNode name_node = ts_node_child_by_field_name(spec, "name", 4);
+                            if (!ts_node_is_null(name_node)) {
+                                JsAstNode* ident = build_js_identifier(tp, name_node);
+                                if (ident) {
+                                    if (!prev_spec) {
+                                        node->specifiers = ident;
+                                    } else {
+                                        prev_spec->next = ident;
+                                    }
+                                    prev_spec = ident;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    node->base.type = &TYPE_NULL;
+    return (JsAstNode*)node;
+}
+
+// Build JavaScript export statement
+// export default X  |  export function f() {}  |  export { a, b }  |  export { a } from 'module'
+JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
+    JsExportNode* node = (JsExportNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPORT_DECLARATION, export_node, sizeof(JsExportNode));
+    node->declaration = NULL;
+    node->specifiers = NULL;
+    node->source = NULL;
+    node->is_default = false;
+
+    // Check for "default" keyword among anonymous children
+    uint32_t ccount = ts_node_child_count(export_node);
+    for (uint32_t ci = 0; ci < ccount; ci++) {
+        TSNode child = ts_node_child(export_node, ci);
+        if (!ts_node_is_named(child)) {
+            StrView src = js_node_source(tp, child);
+            if (src.length == 7 && memcmp(src.str, "default", 7) == 0) {
+                node->is_default = true;
+                break;
+            }
+        }
+    }
+
+    // Get declaration (function, class, variable, or expression for default)
+    TSNode decl_node = ts_node_child_by_field_name(export_node, "declaration", strlen("declaration"));
+    if (!ts_node_is_null(decl_node)) {
+        const char* dtype = ts_node_type(decl_node);
+        if (strcmp(dtype, "function_declaration") == 0 ||
+            strcmp(dtype, "generator_function_declaration") == 0 ||
+            strcmp(dtype, "class_declaration") == 0 ||
+            strcmp(dtype, "lexical_declaration") == 0 ||
+            strcmp(dtype, "variable_declaration") == 0) {
+            node->declaration = build_js_statement(tp, decl_node);
+        } else {
+            node->declaration = build_js_expression(tp, decl_node);
+        }
+    }
+
+    // Get value (for export default <expr>)
+    TSNode value_node = ts_node_child_by_field_name(export_node, "value", strlen("value"));
+    if (!ts_node_is_null(value_node) && !node->declaration) {
+        node->declaration = build_js_expression(tp, value_node);
+    }
+
+    // Get source (for re-exports: export { a } from 'module')
+    TSNode source_node = ts_node_child_by_field_name(export_node, "source", strlen("source"));
+    if (!ts_node_is_null(source_node)) {
+        StrView src = js_node_source(tp, source_node);
+        if (src.length >= 2) {
+            node->source = name_pool_create_len(tp->name_pool, src.str + 1, src.length - 2);
+        }
+    }
+
+    // Get export specifiers (for export { a, b })
+    JsAstNode* prev_spec = NULL;
+    uint32_t ncount = ts_node_named_child_count(export_node);
+    for (uint32_t i = 0; i < ncount; i++) {
+        TSNode child = ts_node_named_child(export_node, i);
+        const char* ctype = ts_node_type(child);
+        if (strcmp(ctype, "export_clause") == 0) {
+            uint32_t spec_count = ts_node_named_child_count(child);
+            for (uint32_t k = 0; k < spec_count; k++) {
+                TSNode spec = ts_node_named_child(child, k);
+                if (strcmp(ts_node_type(spec), "export_specifier") == 0) {
+                    TSNode name_node = ts_node_child_by_field_name(spec, "name", 4);
+                    if (!ts_node_is_null(name_node)) {
+                        JsAstNode* ident = build_js_identifier(tp, name_node);
+                        if (ident) {
+                            if (!prev_spec) {
+                                node->specifiers = ident;
+                            } else {
+                                prev_spec->next = ident;
+                            }
+                            prev_spec = ident;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    node->base.type = &TYPE_NULL;
+    return (JsAstNode*)node;
 }
 
 // Build JavaScript program (root node)
