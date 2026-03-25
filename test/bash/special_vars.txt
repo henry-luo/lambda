@@ -1,0 +1,12 @@
+argc: 0
+count: 3
+first: hello
+second: world
+all: hello world test
+all-star: hello world test
+exit: 0
+before: a b c
+after: b c
+final: c
+provided
+default_value

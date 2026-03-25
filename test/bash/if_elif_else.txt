@@ -1,0 +1,8 @@
+x is greater than 5
+y is not greater than 5
+z is greater than 5 but not greater than 10
+name is Lambda
+a is between 10 and 20
+b is not greater than 5
+empty is empty
+notempty is not empty

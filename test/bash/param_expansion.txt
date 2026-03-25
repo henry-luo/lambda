@@ -1,0 +1,14 @@
+default_val
+
+assigned
+assigned
+alternate
+
+14
+usr/local/bin/lambda
+lambda
+archive.tar
+archive
+goodbye world hello
+goodbye world goodbye
+World

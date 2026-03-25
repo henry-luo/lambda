@@ -1,0 +1,7 @@
+Lambda
+1.0
+Hello, Lambda!
+LambdaScript
+Bash
+42
+first second third
