@@ -122,6 +122,12 @@ Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
 void js_set_this(Item this_val);
 
+// Get the native function pointer from a JsFunction Item (handles JsFunction layout)
+void* js_function_get_ptr(Item fn_item);
+
+// Get the parameter count from a JsFunction Item
+int js_function_get_arity(Item fn_item);
+
 // =============================================================================
 // Console Functions
 // =============================================================================

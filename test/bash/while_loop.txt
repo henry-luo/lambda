@@ -1,0 +1,18 @@
+0
+1
+2
+3
+4
+sum: 55
+countdown: 5
+countdown: 4
+countdown: 3
+countdown: 2
+countdown: 1
+j=0
+j=1
+j=2
+k=1
+k=2
+k=4
+k=5

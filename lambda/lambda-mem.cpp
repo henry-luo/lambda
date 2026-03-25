@@ -134,6 +134,10 @@ extern "C" void* heap_calloc(size_t size, TypeId type_id) {
 // Specialized allocator for JIT: uses bump-pointer fast path with pre-computed
 // size class. Falls back to free list recycling when bump is full.
 extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
+    if (!context || !context->heap) {
+        log_error("heap_calloc_class: context=%p — called before runtime init", (void*)context);
+        return NULL;
+    }
     gc_heap_t *gc = context->heap->gc;
     size_t class_size = gc_object_zone_class_size(cls);
     size_t slot_size = sizeof(gc_header_t) + class_size;
@@ -148,6 +152,10 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
 // allocate variable-size data (items[], data buffers) from the GC data zone
 // these are bump-allocated, not individually freeable — reclaimed at GC
 extern "C" void* heap_data_alloc(size_t size) {
+    if (!context || !context->heap) {
+        log_error("heap_data_alloc: context=%p — called before runtime init", (void*)context);
+        return NULL;
+    }
     gc_heap_t *gc = context->heap->gc;
     void* ptr = gc_data_alloc(gc, size);
     if (!ptr) {

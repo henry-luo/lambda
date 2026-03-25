@@ -1,0 +1,10 @@
+hello
+15
+nested
+inside: 20
+outside: 10
+a
+b
+c
+total: 6
+Hello, Lambda!
