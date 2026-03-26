@@ -95,6 +95,10 @@ struct PyFuncCollected {
     bool has_star_args;             // true if function has *args parameter
     char star_args_name[128];       // name of *args parameter (with _py_ prefix)
     int star_args_index;            // index of *args in param list (regular params before it)
+    // class method info
+    bool is_method;                 // true if this function is a class method
+    char class_name[128];           // name of the class this method belongs to (without _py_ prefix)
+    int class_depth;                // nesting depth of class within which method is defined (top=0)
 };
 
 struct PyLambdaCollected {
@@ -807,6 +811,52 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         const char* name = fn_id->name->chars;
         int name_len = fn_id->name->len;
 
+        // super()
+        if (name_len == 5 && strncmp(name, "super", 5) == 0) {
+            // Python 3 zero-arg super: super() in a method implicitly uses
+            // the enclosing class and self (first parameter)
+            int cur = mt->current_func_index;
+            if (cur >= 0 && mt->func_entries[cur].is_method) {
+                const char* cls_name = mt->func_entries[cur].class_name;
+                // load the class variable — look up scope then module vars
+                char cls_var[132];
+                snprintf(cls_var, sizeof(cls_var), "_py_%s", cls_name);
+                MIR_reg_t cls_reg;
+                {
+                    // try scope first
+                    PyMirVarEntry* cv = pm_find_var(mt, cls_var);
+                    if (cv) {
+                        cls_reg = cv->from_env ? pm_load_env_slot(mt, cv->env_reg, cv->env_slot) : cv->reg;
+                    } else {
+                        // try module var
+                        int midx = pm_get_global_var_index(mt, cls_var);
+                        if (midx >= 0) {
+                            cls_reg = pm_call_1(mt, "py_get_module_var", MIR_T_I64,
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, midx));
+                        } else {
+                            cls_reg = pm_emit_null(mt);
+                        }
+                    }
+                }
+                // load self — first param of the method
+                MIR_reg_t self_reg;
+                PyAstNode* first_param = mt->func_entries[cur].node->params;
+                if (first_param) {
+                    String* pn = ((PyParamNode*)first_param)->name;
+                    char self_var[132];
+                    snprintf(self_var, sizeof(self_var), "_py_%.*s", (int)pn->len, pn->chars);
+                    PyMirVarEntry* sv2 = pm_find_var(mt, self_var);
+                    self_reg = sv2 ? (sv2->from_env ? pm_load_env_slot(mt, sv2->env_reg, sv2->env_slot) : sv2->reg) : pm_emit_null(mt);
+                } else {
+                    self_reg = pm_emit_null(mt);
+                }
+                return pm_call_2(mt, "py_super", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, self_reg));
+            }
+            return pm_emit_null(mt);
+        }
+
         // print()
         if (name_len == 5 && strncmp(name, "print", 5) == 0) {
             // check for sep= and end= keyword arguments
@@ -1336,8 +1386,27 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
             MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_null),
+            MIR_new_reg_op(mt->ctx, dict_result),
+            MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
+        MIR_label_t l_try_instance = pm_new_label(mt);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_instance),
+            MIR_new_reg_op(mt->ctx, is_null)));
         pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, dict_result)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        // fallback: user-defined class method — get bound method via py_getattr + call it
+        pm_emit_label(mt, l_try_instance);
+        MIR_reg_t bound_method = pm_call_2(mt, "py_getattr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+        MIR_reg_t instance_result = pm_call_3(mt, "py_call_function", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, bound_method),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, instance_result)));
 
         pm_emit_label(mt, l_end);
         return result;
@@ -2495,6 +2564,79 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         // non-closures are already registered in local_funcs by pm_compile_function
         break;
     }
+    case PY_AST_NODE_CLASS_DEF: {
+        PyClassDefNode* cls = (PyClassDefNode*)stmt;
+
+        // 1. build name string item
+        MIR_reg_t name_reg = pm_box_string_literal(mt,
+            cls->name->chars, cls->name->len);
+
+        // 2. build bases list
+        MIR_reg_t bases_reg = pm_call_1(mt, "py_list_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        PyAstNode* base = cls->bases;
+        while (base) {
+            MIR_reg_t base_val = pm_transpile_expression(mt, base);
+            pm_call_2(mt, "py_list_append", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, base_val));
+            base = base->next;
+        }
+
+        // 3. build methods dict — gather methods belonging to this class
+        MIR_reg_t methods_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            PyFuncCollected* fc = &mt->func_entries[fi];
+            if (!fc->is_method) continue;
+            if (strcmp(fc->class_name, cls->name->chars) != 0) continue;
+            // only direct methods (parent == -1 or parent is in a different class)
+            if (fc->parent_index >= 0 &&
+                mt->func_entries[fc->parent_index].is_method &&
+                strcmp(mt->func_entries[fc->parent_index].class_name, cls->name->chars) == 0)
+                continue;  // nested function inside a method — skip
+            if (!fc->func_item) continue;
+
+            MIR_reg_t fptr = pm_new_reg(mt, "mfp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, fptr),
+                MIR_new_ref_op(mt->ctx, fc->func_item)));
+            MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc->param_count));
+            MIR_reg_t mname_reg = pm_box_string_literal(mt,
+                fc->name, strlen(fc->name));
+            pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mname_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+        }
+
+        // 4. call py_class_new(name, bases, methods)
+        MIR_reg_t class_reg = pm_call_3(mt, "py_class_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg));
+
+        // 5. store class as a local scope variable AND as a module var (for super() in methods)
+        char class_var_name[132];
+        snprintf(class_var_name, sizeof(class_var_name),
+            "_py_%.*s", (int)cls->name->len, cls->name->chars);
+        MIR_reg_t reg = pm_new_reg(mt, class_var_name, MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, reg),
+            MIR_new_reg_op(mt->ctx, class_reg)));
+        pm_set_var(mt, class_var_name, reg);
+        // also store in module var so methods can retrieve it
+        {
+            int midx = pm_get_global_var_index(mt, class_var_name);
+            if (midx >= 0) {
+                pm_call_void_2(mt, "py_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, midx),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+            }
+        }
+        break;
+    }
     case PY_AST_NODE_BLOCK: {
         pm_push_scope(mt);
         PyBlockNode* blk = (PyBlockNode*)stmt;
@@ -2908,6 +3050,32 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
     case PY_AST_NODE_FOR: {
         PyForNode* fn = (PyForNode*)node;
         pm_collect_functions_r(mt, fn->body, parent_index);
+        break;
+    }
+    case PY_AST_NODE_CLASS_DEF: {
+        // collect methods inside the class body; mark them as methods
+        PyClassDefNode* cls = (PyClassDefNode*)node;
+        int before = mt->func_count;
+        // recurse: methods are direct children of class body (top-level block)
+        PyAstNode* body_stmt = NULL;
+        if (cls->body && cls->body->node_type == PY_AST_NODE_BLOCK) {
+            body_stmt = ((PyBlockNode*)cls->body)->statements;
+        } else {
+            body_stmt = cls->body;
+        }
+        while (body_stmt) {
+            pm_collect_functions_r(mt, body_stmt, parent_index);
+            body_stmt = body_stmt->next;
+        }
+        // tag the newly added entries as methods of this class
+        for (int mi = before; mi < mt->func_count; mi++) {
+            if (!mt->func_entries[mi].is_method) {
+                mt->func_entries[mi].is_method = true;
+                snprintf(mt->func_entries[mi].class_name,
+                    sizeof(mt->func_entries[mi].class_name),
+                    "%.*s", (int)cls->name->len, cls->name->chars);
+            }
+        }
         break;
     }
     default:
@@ -3665,8 +3833,12 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
 }
 
 static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
-    char fn_name[140];
-    snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+    char fn_name[260];
+    if (fc->is_method && fc->class_name[0]) {
+        snprintf(fn_name, sizeof(fn_name), "_%s_%s", fc->class_name, fc->name);
+    } else {
+        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+    }
 
     // build parameter list; closures get _py__env as hidden first param
     // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
@@ -3859,12 +4031,14 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     mt->scope_env_reg = old_env_reg;
     mt->scope_env_slot_count = old_env_slot_count;
 
-    // register in local_funcs
-    PyLocalFuncEntry lfe;
-    memset(&lfe, 0, sizeof(lfe));
-    snprintf(lfe.name, sizeof(lfe.name), "_py_%s", fc->name);
-    lfe.func_item = fc->func_item;
-    hashmap_set(mt->local_funcs, &lfe);
+    // register in local_funcs (methods are accessed via py_getattr, not by bare name)
+    if (!fc->is_method) {
+        PyLocalFuncEntry lfe;
+        memset(&lfe, 0, sizeof(lfe));
+        snprintf(lfe.name, sizeof(lfe.name), "_py_%s", fc->name);
+        lfe.func_item = fc->func_item;
+        hashmap_set(mt->local_funcs, &lfe);
+    }
 }
 
 // ============================================================================
@@ -3872,8 +4046,31 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 // ============================================================================
 
 static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
-    // no-op: all variables are managed through the scope system
-    (void)mt; (void)root;
+    // register class names as module vars so they're accessible from within methods
+    // (e.g. super() needs to read the class object at runtime)
+    if (!root || root->node_type != PY_AST_NODE_MODULE) return;
+    PyModuleNode* program = (PyModuleNode*)root;
+    PyAstNode* s = program->body;
+    while (s) {
+        if (s->node_type == PY_AST_NODE_CLASS_DEF) {
+            PyClassDefNode* cls = (PyClassDefNode*)s;
+            char cls_var[132];
+            snprintf(cls_var, sizeof(cls_var), "_py_%.*s", (int)cls->name->len, cls->name->chars);
+            // only register if not already present
+            bool already = false;
+            for (int i = 0; i < mt->global_var_count; i++) {
+                if (strcmp(mt->global_var_names[i], cls_var) == 0) { already = true; break; }
+            }
+            if (!already && mt->global_var_count < 64) {
+                int idx = mt->module_var_count++;
+                snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", cls_var);
+                mt->global_var_indices[mt->global_var_count] = idx;
+                mt->global_var_count++;
+                log_debug("py-mir: class var '%s' → module_var[%d]", cls_var, idx);
+            }
+        }
+        s = s->next;
+    }
 }
 
 // ============================================================================
@@ -3936,6 +4133,10 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
             // skip — already compiled
             s = s->next;
             continue;
+        }
+        if (s->node_type == PY_AST_NODE_CLASS_DEF) {
+            // class objects are created at runtime via pm_transpile_statement
+            // (NOT skipped — we need to run the class creation at module init time)
         }
         if (s->node_type == PY_AST_NODE_EXPRESSION_STATEMENT) {
             PyExpressionStatementNode* es = (PyExpressionStatementNode*)s;

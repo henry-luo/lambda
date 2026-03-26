@@ -4,6 +4,31 @@
 
 This document proposes adding Python 3 support to the Lambda runtime, following the same architecture used by LambdaJS. Python source files (`.py`) would be compiled to native machine code through the Lambda JIT pipeline: Tree-sitter parsing → typed AST → MIR IR → native execution. All Python values would be represented as Lambda `Item` values, enabling zero-cost interop with Lambda's existing infrastructure (GC, name pool, shape system, input parsers, output formatters).
 
+> **Implementation Status (audited 2026-03-26):** The core of this proposal is **implemented and working** (~10,865 LOC). Phases 1–2 and 4–5 from Appendix B are fully complete. Phase 3 (classes), Phase 6 (generators), and Phase 7 (standard library modules) are explicitly deferred to v3+.
+>
+> | Area | Status |
+> |------|--------|
+> | Architecture / pipeline | ✅ Complete |
+> | AST builder (`build_py_ast.cpp`) | ✅ Complete — all node types parsed |
+> | Core transpiler — expressions, control flow, functions | ✅ Complete |
+> | LEGB scoping, `global`/`nonlocal` | ✅ Complete |
+> | Closures, cell variables | ✅ Complete |
+> | Comprehensions (list/dict/set), lambda | ✅ Complete |
+> | Iterators (`iter`/`next`/`range`/`enumerate`/`zip`) | ✅ Complete |
+> | Exception handling (`try`/`except`/`finally`/`raise`) | ✅ Complete (type matching + exception hierarchy strings) |
+> | String/list/dict methods (30+/11/10) | ✅ Complete |
+> | 40+ built-in functions | ✅ Complete |
+> | `*args` variadic parameters | ✅ Complete |
+> | F-strings with format specs, `%` formatting, `str.format()` | ✅ Complete |
+> | Slice read + assignment | ✅ Complete |
+> | Build integration, CLI `./lambda.exe py` | ✅ Complete |
+> | **Class definitions** (`class`, MRO, `super()`) | ❌ Deferred to v3 |
+> | **`with` statement** (context managers) | ❌ Deferred |
+> | **Generators / `yield`** | ❌ Deferred to v4+ |
+> | **`**kwargs`** | ❌ Not yet implemented |
+> | **`@` matmul operator** | ❌ Not needed yet |
+> | **Standard library modules** (`json`, `math`, `re`, etc.) | ❌ Deferred to v3+ |
+
 ### Design Goals
 
 1. **Unified runtime** — Python values are Lambda `Item` values. No conversion boundary.
@@ -355,23 +380,23 @@ typedef struct PyTranspiler {
 
 ### 5.2 Multi-Phase Compilation (Mirroring JS)
 
-| Phase | Name | Description |
-|-------|------|-------------|
-| 1.0 | Function & Class Collection | Walk AST, collect all `def` and `class` declarations |
-| 1.1 | Constant Folding | Literal `const` assignments; fold constant expressions |
-| 1.2 | Scope Analysis | Classify every name as local/global/nonlocal/free/cell using Python's LEGB rules |
-| 1.3 | Module Variables | Top-level assignments → module variable indices |
-| 1.5 | Capture Analysis | Identify free variables; determine cell variables (locals captured by inner funcs) |
-| 1.6 | Transitive Propagation | Multi-level closure captures propagated |
-| 1.7 | Scope Env Computation | Parent functions get shared cell env arrays |
-| 1.75 | Type Inference | Arithmetic patterns → int/float typing for native fast paths |
-| 1.9 | Forward Declarations | MIR forward refs for all functions |
-| 2 | Code Generation | Emit MIR for each function body |
-| 3 | Entry Point | `py_main()` creation — top-level module statements |
+| Phase | Name | Description | Status |
+|-------|------|-------------|--------|
+| 1.0 | Function & Class Collection | Walk AST, collect all `def` and `class` declarations | ✅ Done |
+| 1.1 | Constant Folding | Literal `const` assignments; fold constant expressions | ✅ Done |
+| 1.2 | Scope Analysis | Classify every name as local/global/nonlocal/free/cell using Python's LEGB rules | ✅ Done |
+| 1.3 | Module Variables | Top-level assignments → module variable indices | ✅ Done |
+| 1.5 | Capture Analysis | Identify free variables; determine cell variables (locals captured by inner funcs) | ✅ Done |
+| 1.6 | Transitive Propagation | Multi-level closure captures propagated | ✅ Done |
+| 1.7 | Scope Env Computation | Parent functions get shared cell env arrays | ✅ Done |
+| 1.75 | Type Inference | Arithmetic patterns → int/float typing for native fast paths | ✅ Done |
+| 1.9 | Forward Declarations | MIR forward refs for all functions | ✅ Done |
+| 2 | Code Generation | Emit MIR for each function body | ✅ Done |
+| 3 | Entry Point | `py_main()` creation — top-level module statements | ✅ Done |
 
 ### 5.3 Python-Specific Compilation Challenges
 
-#### 5.3.1 LEGB Scoping + `global`/`nonlocal`
+#### 5.3.1 LEGB Scoping + `global`/`nonlocal` ✅ DONE
 
 Python's scope resolution is fundamentally different from JavaScript's:
 - JS resolves variables lexically at parse time (`var`/`let`/`const` declarations are explicit).
@@ -388,7 +413,7 @@ def foo():
 
 > **Issue [S1]:** This pre-pass is unique to Python and doesn't exist in the JS transpiler. A two-pass approach per function (scan assignments first, then generate code) adds ~300–500 lines to the transpiler.
 
-#### 5.3.2 Chained Comparisons
+#### 5.3.2 Chained Comparisons ✅ DONE
 
 Python's `a < b < c` means `a < b and b < c` with `b` evaluated only once. This expands to:
 
@@ -403,7 +428,7 @@ MIR:   reg_a = <eval a>
        // result = reg_cmp2 (or False if short-circuited)
 ```
 
-#### 5.3.3 Comprehensions
+#### 5.3.3 Comprehensions ✅ DONE
 
 List/dict/set comprehensions and generator expressions each create their own scope (Python 3 semantics). They are compiled as inline anonymous functions:
 
@@ -419,7 +444,7 @@ for x in range(10):
         call py_list_append(reg_result, py_multiply(x, x))
 ```
 
-#### 5.3.4 Iterator Protocol
+#### 5.3.4 Iterator Protocol ✅ DONE
 
 Python's `for` loop operates on the iterator protocol (`__iter__` / `__next__`). The transpiler must emit:
 
@@ -437,7 +462,7 @@ This requires a runtime sentinel (`PY_STOP_ITERATION`) distinct from `None`.
 
 > **Suggestion [T3]:** Use `ItemError` with a specific error code as the StopIteration sentinel, or add a small flag on the iterator struct. Do *not* add a new `TypeId` for this — it is control flow, not a data type.
 
-#### 5.3.5 `*args` and `**kwargs`
+#### 5.3.5 `*args` and `**kwargs` — `*args` ✅ DONE, `**kwargs` ❌ Not yet
 
 Function definitions with variadic parameters:
 ```python
@@ -453,9 +478,11 @@ The transpiler must pack excess positional arguments into an Array (`*args`) and
 >
 > **Recommendation:** Approach (B). For statically-known calls (majority), emit direct MIR calls matching the parameter order, with default values filled in at the call site. Only fall back to the array+map convention for `*args`/`**kwargs` or dynamic dispatch.
 
-#### 5.3.6 Class Model
+#### 5.3.6 Class Model ❌ Deferred to v3
 
 Python classes use C3 linearization (MRO) for method resolution with multiple inheritance. This is fundamentally different from JavaScript's single-prototype chain.
+
+> **Status:** AST node `PY_AST_NODE_CLASS_DEF` is parsed by `build_py_ast.cpp`. The transpiler has no code generation for class bodies yet — classes are deferred to v3. No `py_class_new`, `py_compute_mro`, or `py_super` functions exist in the runtime.
 
 ```python
 class Animal:
@@ -481,9 +508,11 @@ class Dog(Animal):
 
 > **Issue [S3]:** C3 MRO computation adds ~200 lines. Multiple inheritance method resolution at runtime is slower than JS's single-prototype-chain lookup. For single-inheritance classes (the common case), we can fast-path to direct `__dict__` lookup on the single base class.
 
-#### 5.3.7 Exception Handling
+#### 5.3.7 Exception Handling ✅ DONE (basic mechanism + type matching; class-based hierarchy deferred)
 
 Python exceptions are class-based with inheritance. `except ValueError as e:` must check if the exception is an instance of `ValueError` or any subclass.
+
+> **Status:** Global exception state, `raise`, `try`/`except`/`finally`, and type-name matching (`except ValueError:`) are fully implemented. Runtime ops like `py_divide` set `py_exception_value` to the type name string (e.g. `"ZeroDivisionError"`); `py_exception_get_type()` handles both string and Map-based exception objects. Full class-based exception hierarchy with `isinstance` via MRO is deferred to v3.
 
 **Implementation:** Same global-exception-state approach as JS:
 ```c
@@ -497,12 +526,14 @@ static Item py_exception_type;       // the exception class
 - `finally:` → same deferred-return pattern as JS
 - Built-in exception hierarchy (TypeError, ValueError, KeyError, IndexError, etc.) created as class objects at runtime init
 
-#### 5.3.8 Context Managers (`with` statement)
+#### 5.3.8 Context Managers (`with` statement) ❌ Deferred
 
 ```python
 with open(file) as f:
     data = f.read()
 ```
+
+> **Status:** `PY_AST_NODE_WITH` is parsed by `build_py_ast.cpp`. The transpiler has no code generation for `with` blocks. `py_context_enter`/`py_context_exit` runtime functions are not yet implemented. Deferred — `open()` is available as a builtin for reading entire files, but not as a context manager.
 
 Compiles to:
 ```
@@ -518,46 +549,46 @@ This requires the transpiler to emit try/finally around the body.
 
 ## 6. Python Runtime Library Design
 
-### 6.1 File Layout (Estimated)
+### 6.1 File Layout (Actual vs Estimated)
 
-| File | Est. Lines | Purpose |
-|------|-----------|---------|
-| `transpile_py_mir.cpp` | ~13,000 | Core MIR transpiler: AST → MIR IR, LEGB scoping, type inference, comprehensions, classes |
-| `py_runtime.cpp` | ~3,500 | Runtime library: operators, type coercion, attribute access, MRO dispatch, iterator protocol |
-| `py_builtins.cpp` | ~2,000 | Built-in functions: `print`, `len`, `range`, `enumerate`, `zip`, `map`, `filter`, `sorted`, `type`, `isinstance`, etc. |
-| `py_class.cpp` | ~1,200 | Class system: C3 MRO, `__init__`/`__new__`, instance creation, `super()`, descriptor protocol (basic) |
-| `py_string.cpp` | ~800 | String methods: `split`, `join`, `strip`, `replace`, `find`, `format`, `startswith`, `endswith`, `upper`, `lower`, `encode`, `decode` |
-| `py_collections.cpp` | ~700 | `dict`, `list`, `set`, `tuple` methods |
-| `py_iterator.cpp` | ~600 | Iterator protocol: `__iter__`/`__next__`, `range` iterator, `enumerate`, `zip`, generator functions |
-| `build_py_ast.cpp` | ~2,500 | AST builder: Tree-sitter CST → typed Py AST nodes |
-| `py_ast.hpp` | ~500 | AST node types, operators, struct definitions |
-| `py_runtime.h` | ~400 | Runtime C API declarations callable from JIT code |
-| `py_transpiler.hpp` | ~250 | Transpiler context struct, scope types |
-| `py_scope.cpp` | ~400 | LEGB scope management, `global`/`nonlocal` handling |
-| `py_exception.cpp` | ~400 | Exception hierarchy, `isinstance` check, traceback formatting |
-| `py_print.cpp` | ~150 | Debug AST printer |
-| **Total** | **~26,400** | |
+| File | Est. LOC | Actual LOC | Status | Notes |
+|------|----------|-----------|--------|-------|
+| `transpile_py_mir.cpp` | ~13,000 | **4,283** | ✅ Core done | Classes/with/generators not yet generated |
+| `py_runtime.cpp` | ~3,500 | **1,587** | ✅ Core done | No MRO/class/context-manager runtime |
+| `py_builtins.cpp` | ~2,000 | **1,633** | ✅ Done | Includes string/list/dict methods (merged) |
+| `py_class.cpp` | ~1,200 | **—** | ❌ Deferred | Merged future plan; class system deferred to v3 |
+| `py_string.cpp` | ~800 | **—** | ✅ (merged) | String methods live in `py_builtins.cpp` |
+| `py_collections.cpp` | ~700 | **—** | ✅ (merged) | List/dict methods live in `py_builtins.cpp` |
+| `py_iterator.cpp` | ~600 | **—** | ✅ (merged) | Iterator protocol lives in `py_runtime.cpp` |
+| `build_py_ast.cpp` | ~2,500 | **1,937** | ✅ Done | All node types built |
+| `py_ast.hpp` | ~500 | **462** | ✅ Done | |
+| `py_runtime.h` | ~400 | **207** | ✅ Done | Excludes class/context-manager decls |
+| `py_transpiler.hpp` | ~250 | **108** | ✅ Done | |
+| `py_scope.cpp` | ~400 | **245** | ✅ Done | |
+| `py_exception.cpp` | ~400 | **—** | ✅ (merged) | Exception handling in `py_runtime.cpp` |
+| `py_print.cpp` | ~150 | **405** | ✅ Done | AST pretty-printer |
+| **Total** | **~26,400** | **~10,865** | | Lower because class system and generators not yet built |
 
 ### 6.2 Runtime Function Categories (registered in `sys_func_registry.c`)
 
-| Category | Functions (est. count) |
-|----------|----------------------|
-| Type conversion | `py_to_int`, `py_to_float`, `py_to_str`, `py_to_bool`, `py_to_list` (~8) |
-| Arithmetic | `py_add`, `py_sub`, `py_mul`, `py_div`, `py_floor_div`, `py_mod`, `py_pow`, `py_matmul` (~10) |
-| Comparison | `py_compare`, `py_eq`, `py_ne`, `py_lt`, `py_le`, `py_gt`, `py_ge`, `py_contains`, `py_is` (~10) |
-| Logical / Bitwise | `py_and`, `py_or`, `py_not`, `py_bit_and`, `py_bit_or`, `py_bit_xor`, `py_invert`, `py_lshift`, `py_rshift` (~10) |
-| Object / Attribute | `py_getattr`, `py_setattr`, `py_delattr`, `py_hasattr`, `py_new_instance` (~8) |
-| Collections | `py_list_new`, `py_list_append`, `py_list_get`, `py_list_set`, `py_dict_new`, `py_dict_get`, `py_dict_set`, `py_set_new`, `py_set_add`, `py_tuple_new` (~15) |
-| Subscript / Slice | `py_subscript_get`, `py_subscript_set`, `py_slice_new`, `py_subscript_del` (~5) |
-| Iterator | `py_get_iterator`, `py_iterator_next`, `py_range_new`, `py_enumerate_new`, `py_zip_new` (~8) |
-| Function / Closure | `py_new_function`, `py_new_closure`, `py_alloc_env`, `py_call_function`, `py_call_method` (~8) |
-| Class | `py_class_new`, `py_compute_mro`, `py_super`, `py_isinstance`, `py_issubclass` (~6) |
-| Exception | `py_raise`, `py_check_exception`, `py_clear_exception`, `py_new_exception` (~5) |
-| Context manager | `py_context_enter`, `py_context_exit` (~2) |
-| Built-in functions | `py_print`, `py_len`, `py_type`, `py_abs`, `py_min`, `py_max`, `py_sum`, `py_sorted`, `py_reversed`, `py_hash`, `py_id`, `py_repr`, `py_str_func`, `py_int_func`, `py_float_func`, `py_bool_func`, `py_input` (~20) |
-| String methods | `py_string_method` (dispatcher → split, join, strip, etc.) (~1 + ~25 internal) |
-| Module | `py_get_module_var`, `py_set_module_var` (~2) |
-| **Total** | **~120 registered functions** |
+| Category | Functions | Status |
+|----------|-----------|--------|
+| Type conversion | `py_to_int`, `py_to_float`, `py_to_str`, `py_to_bool` | ✅ Done |
+| Arithmetic | `py_add`, `py_subtract`, `py_multiply`, `py_divide`, `py_floor_divide`, `py_modulo`, `py_power`, `py_negate`, `py_positive`, `py_bit_not` | ✅ Done (`py_matmul` not needed yet ❌) |
+| Comparison | `py_eq`, `py_ne`, `py_lt`, `py_le`, `py_gt`, `py_ge`, `py_is`, `py_is_not`, `py_contains` | ✅ Done |
+| Logical / Bitwise | `py_bit_and`, `py_bit_or`, `py_bit_xor`, `py_lshift`, `py_rshift`, `py_is_truthy` | ✅ Done |
+| Object / Attribute | `py_getattr`, `py_setattr`, `py_hasattr`, `py_new_object` | ✅ Done (`py_delattr` ❌, `py_new_instance` ❌ — need class system) |
+| Collections | `py_list_new/append/get/set/length`, `py_dict_new/get/set`, `py_tuple_new/set`, `py_subscript_get/set`, `py_slice_get/set` | ✅ Done |
+| Iterator | `py_get_iterator`, `py_iterator_next`, `py_range_new`, `py_stop_iteration`, `py_is_stop_iteration` | ✅ Done |
+| Function / Closure | `py_new_function`, `py_new_closure`, `py_alloc_env`, `py_call_function` | ✅ Done (`py_call_method` handled via method dispatchers) |
+| Class | `py_class_new`, `py_compute_mro`, `py_super`, `py_isinstance`, `py_issubclass` | ❌ Deferred to v3 |
+| Exception | `py_raise`, `py_check_exception`, `py_clear_exception`, `py_new_exception`, `py_exception_get_type` | ✅ Done |
+| Context manager | `py_context_enter`, `py_context_exit` | ❌ Deferred (`with` statement not yet) |
+| Built-in functions | `py_print`, `py_print_ex`, `py_builtin_len/type/isinstance/range/int/float/str/bool/abs/min/max/sum/enumerate/zip/sorted/reversed/repr/hash/id/input/ord/chr/map/filter/list/dict/set/tuple/round/all/any/bin/oct/hex/divmod/pow/callable/open` (40+) | ✅ Done |
+| String / list / dict methods | `py_string_method` (30+), `py_list_method` (11+), `py_dict_method` (10+) | ✅ Done |
+| Module variables | `py_get_module_var`, `py_set_module_var`, `py_reset_module_vars` | ✅ Done |
+| Format | `py_format_value` (f-string format specs) | ✅ Done |
+| **Total registered** | ~75 functions | |
 
 ---
 
@@ -588,20 +619,20 @@ Reuse the same optimization playbook as the JS transpiler:
 
 ---
 
-## 8. Standard Library Modules (Built-In)
+## 8. Standard Library Modules (Built-In) ❌ Deferred to v3+
 
 Phase 1 includes a minimal set of "built-in" modules implemented in C++:
 
-| Module | Implementation Strategy | Est. LOC |
-|--------|------------------------|----------|
-| `json` | Delegate to Lambda's `parse_json_to_item()` / `format_json()` | ~100 |
-| `math` | Delegate to Lambda's math sys_funcs + C `<math.h>` | ~150 |
-| `re` | Delegate to Lambda's RE2 wrapper | ~200 |
-| `os.path` | Delegate to Lambda's `path.c` utilities | ~100 |
-| `sys` | `sys.argv`, `sys.exit`, `sys.stdout`, `sys.stderr` | ~80 |
-| `io` | Basic `open()`, `read()`, `write()`, `close()` file I/O | ~200 |
-| `string` | Constants (`ascii_lowercase`, etc.), `Template` (maybe) | ~80 |
-| `collections` | `OrderedDict` (alias for dict), `defaultdict`, `Counter` | ~300 |
+| Module | Implementation Strategy | Est. LOC | Status |
+|--------|------------------------|----------|--------|
+| `json` | Delegate to Lambda's `parse_json_to_item()` / `format_json()` | ~100 | ❌ Not yet |
+| `math` | Delegate to Lambda's math sys_funcs + C `<math.h>` | ~150 | ❌ Not yet |
+| `re` | Delegate to Lambda's RE2 wrapper | ~200 | ❌ Not yet |
+| `os.path` | Delegate to Lambda's `path.c` utilities | ~100 | ❌ Not yet |
+| `sys` | `sys.argv`, `sys.exit`, `sys.stdout`, `sys.stderr` | ~80 | ❌ Not yet |
+| `io` | Basic `open()`, `read()`, `write()`, `close()` file I/O | ~200 | ❌ Not yet (bare `open()` builtin for read-only exists) |
+| `string` | Constants (`ascii_lowercase`, etc.), `Template` (maybe) | ~80 | ❌ Not yet |
+| `collections` | `OrderedDict` (alias for dict), `defaultdict`, `Counter` | ~300 | ❌ Not yet |
 
 > **Issue [S4]:** Python's `import` system is complex (packages, `__init__.py`, relative imports, `sys.path` search). For Phase 1, we support only built-in modules and single-file imports via `from module import func`. Full package resolution is deferred.
 
@@ -711,15 +742,17 @@ Each `.py` file has a corresponding `.txt` file with expected output (same patte
 
 ### 10.2 Phased Testing
 
-| Phase | Features | Tests |
-|-------|----------|-------|
-| **Phase 1** | Literals, arithmetic, variables, `print()`, `if`/`elif`/`else`, `while`, `for`/`range`, functions, return | `test_basic`, `test_arithmetic`, `test_functions` |
-| **Phase 2** | Strings, lists, dicts, tuples, sets, slicing, comprehensions, f-strings | `test_strings`, `test_lists`, `test_dicts`, `test_comprehensions` |
-| **Phase 3** | Classes, inheritance, `super()`, `__init__`, `isinstance` | `test_classes` |
-| **Phase 4** | Closures, `global`/`nonlocal`, nested functions, decorators | `test_closures`, `test_scope` |
-| **Phase 5** | Exceptions, `try`/`except`/`finally`, `raise`, `with` statement | `test_exceptions` |
-| **Phase 6** | Iterators, generators, `yield`, `yield from` | `test_iterators` |
-| **Phase 7** | Built-in modules (`json`, `math`, `re`), `import` | `test_builtins`, `test_import` |
+> **Note:** Tests live in `test/py/` as `.py` + `.txt` pairs. Run with `./lambda.exe py <file.py>`.
+
+| Phase | Features | Tests | Status |
+|-------|----------|-------|--------|
+| **Phase 1** | Literals, arithmetic, variables, `print()`, `if`/`elif`/`else`, `while`, `for`/`range`, functions, return | `test_py_basic`, `test_py_extended` | ✅ Done |
+| **Phase 2** | Strings, lists, dicts, tuples, sets, slicing, comprehensions, f-strings, `%` formatting | `test_py_slicing`, `test_py_comprehensions`, `test_py_formatting`, `test_py_string_methods_v2`, `test_py_dict_methods_v2` | ✅ Done |
+| **Phase 3** | Classes, inheritance, `super()`, `__init__`, `isinstance` | `test_py_classes` (pending) | ❌ Deferred to v3 |
+| **Phase 4** | Closures, `global`/`nonlocal`, nested functions, default & keyword args, `*args` | `test_py_closures`, `test_py_defaults`, `test_py_builtins_v2` | ✅ Done |
+| **Phase 5** | Exceptions, `try`/`except`/`finally`, `raise`, exception type matching | `test_py_exceptions` | ✅ Done (`with` statement deferred) |
+| **Phase 6** | Iterators (`iter`/`next`), generators, `yield`, `yield from` | `test_py_extended` (iter/next ✅) | ⚠️ Partial (`iter`/`next` ✅, generators ❌ deferred to v4+) |
+| **Phase 7** | Built-in modules (`json`, `math`, `re`), `import` | (pending) | ❌ Deferred to v3+ |
 
 ---
 
@@ -727,17 +760,18 @@ Each `.py` file has a corresponding `.txt` file with expected output (same patte
 
 ### 11.1 Lines of Code
 
-| Component | JS (actual) | Python (estimated) | Delta |
-|-----------|-------------|-------------------|-------|
-| Hand-written runtime | 23,523 | ~26,400 | +2,877 |
-| Auto-generated parser | 83,887 | ~230,000 | +146,113 |
-| Grammar static lib | 391 KB | ~700–800 KB | +300–400 KB |
+| Component | Estimated | Actual | Notes |
+|-----------|-----------|--------|-------|
+| Hand-written runtime (core done) | ~26,400 | **~10,865** | Lower because class system, generators, std modules not yet built |
+| Auto-generated parser | ~230,000 | ~230,000 | Unchanged |
+| Grammar static lib | ~700–800 KB | ~700–800 KB | Unchanged |
 
-The hand-written code increase is modest (~12%) because:
-- No DOM bridge needed (JS has 2,489 lines for `js_dom.cpp`)
-- No TypedArrays needed (JS has 249 lines)
-- No event loop needed (JS has 309 lines)
-- These savings are offset by Python's class system (~1,200), iterator protocol (~600), and richer built-ins (~2,000)
+The actual LOC is ~59% lower than estimated because:
+- Class system (~1,200 + 200 transpiler lines) deferred to v3
+- Generator/yield support (~600 lines) deferred to v4+
+- Standard library modules (~1,210 lines) deferred to v3+
+- String/list/dict methods consolidated into `py_builtins.cpp` (no separate files)
+- Exception handling consolidated into `py_runtime.cpp` (no separate `py_exception.cpp`)
 
 ### 11.2 Binary Size Impact
 
@@ -755,30 +789,30 @@ Current release exe is ~8 MB → would become ~9 MB with Python support.
 
 ### Issues
 
-| ID | Issue | Severity | Description |
-|----|-------|----------|-------------|
-| G1 | External scanner required | Low | tree-sitter-python's `scanner.c` handles indent/dedent and must be bundled unmodified |
-| S1 | Two-pass function analysis | Medium | Python's "assignment makes it local" rule requires a pre-pass over function bodies before codegen |
-| S2 | Keyword argument convention | Medium | Function calling convention must handle positional, keyword, `*args`, `**kwargs` — significantly more complex than JS |
-| S3 | C3 MRO for multiple inheritance | Medium | Runtime MRO computation + method resolution adds complexity vs JS's single prototype chain |
-| S4 | Import system complexity | High | Python's full import system (packages, `__init__.py`, `sys.path`) is complex; Phase 1 must use a limited subset |
+| ID | Issue | Severity | Status | Notes |
+|----|-------|----------|--------|-------|
+| G1 | External scanner required | Low | ✅ Resolved | `scanner.c` bundled with tree-sitter-python |
+| S1 | Two-pass function analysis | Medium | ✅ Resolved | `pm_analyze_globals()` + `pm_collect_local_defs()` pre-pass implemented |
+| S2 | Keyword argument convention | Medium | ⚠️ Partial | Positional + keyword args ✅, `*args` ✅, `**kwargs` ❌ not yet |
+| S3 | C3 MRO for multiple inheritance | Medium | ❌ Deferred | Class system deferred to v3 |
+| S4 | Import system complexity | High | ❌ Deferred | `from module import name` parsed but not resolved; modules deferred to v3+ |
 
 ### Suggestions
 
-| ID | Suggestion | Description |
-|----|-----------|-------------|
-| T1 | Cap int at int64 initially | Avoid big-int complexity; add later if needed |
-| T2 | Tuple immutability via flag | Add a flag/sentinel on `Array` to mark tuples as immutable; useful for Lambda too |
-| T3 | StopIteration as ItemError | Use `ItemError` with a code, not a new TypeId, for iterator exhaustion signaling |
+| ID | Suggestion | Status |
+|----|-----------|--------|
+| T1 | Cap int at int64 initially | ✅ Done — int64 cap in place |
+| T2 | Tuple immutability via flag | ⚠️ Not done — tuples stored as arrays without immutability flag |
+| T3 | StopIteration as ItemError | ⚠️ Changed — uses `py_stop_iteration_sentinel` (a special Map object), works correctly |
 
 ### Additional Suggestions
 
-| ID | Suggestion | Description |
-|----|-----------|-------------|
-| T4 | Skip type annotations at runtime | Parse but ignore type hints (`x: int = 5`). Don't use them for type inference — Python's type system is too dynamic for this to be reliable. |
-| T5 | `__slots__` optimization | If a class defines `__slots__`, pre-allocate the shape at class creation time. This is a natural fit for Lambda's shape system and gives a significant speedup for attribute access. |
-| T6 | Shared `py_` / `js_` runtime functions | Some operations are nearly identical between JS and Python (arithmetic on boxed Items, string operations, array operations). Consider extracting common helpers to avoid duplication. Evaluate after Phase 1 to see how much actual overlap exists. |
-| T7 | Python `print()` → Lambda `format` | Python's `print()` with `sep`/`end` kwargs can delegate to Lambda's format infrastructure for output. |
+| ID | Suggestion | Status |
+|----|-----------|--------|
+| T4 | Skip type annotations at runtime | ✅ Done — annotations parsed and ignored |
+| T5 | `__slots__` optimization | ❌ Deferred — needs class system |
+| T6 | Shared `py_` / `js_` runtime functions | ⚠️ Not done — functions are separate; worth revisiting after class system |
+| T7 | Python `print()` → Lambda `format` | ✅ Done — `py_print`/`py_print_ex` with `sep`/`end` support |
 
 ---
 
@@ -808,12 +842,12 @@ Current release exe is ~8 MB → would become ~9 MB with Python support.
 
 Recommended implementation order to maximize incremental testability:
 
-1. **Parser + AST builder** — Get tree-sitter-python parsing, build typed AST. Verify with AST printer.
-2. **Basic transpiler** — Literals, arithmetic, variables, `print()`, `if`/`while`/`for`. Run first programs.
-3. **Functions + closures** — `def`, return values, default params, closures, `global`/`nonlocal`.
-4. **Data structures** — Lists, dicts, tuples, sets, slicing, comprehensions.
-5. **Classes** — Single inheritance first. `__init__`, methods, `isinstance`. Then multiple inheritance + MRO.
-6. **Exceptions** — `try`/`except`/`finally`/`raise`, exception hierarchy, `with` statement.
-7. **Iterators + generators** — Iterator protocol, `yield`, generator functions.
-8. **Built-in modules** — `json`, `math`, `re`, `sys`, basic file I/O.
-9. **Optimizations** — Native arithmetic fast paths, range loop optimization, shape pre-allocation.
+1. **Parser + AST builder** — Get tree-sitter-python parsing, build typed AST. Verify with AST printer. ✅ Done
+2. **Basic transpiler** — Literals, arithmetic, variables, `print()`, `if`/`while`/`for`. Run first programs. ✅ Done
+3. **Functions + closures** — `def`, return values, default params, closures, `global`/`nonlocal`. ✅ Done
+4. **Data structures** — Lists, dicts, tuples, sets, slicing, comprehensions. ✅ Done
+5. **Classes** — Single inheritance first. `__init__`, methods, `isinstance`. Then multiple inheritance + MRO. ❌ Deferred to v3
+6. **Exceptions** — `try`/`except`/`finally`/`raise`, exception hierarchy, `with` statement. ✅ Done (exceptions ✅, `with` ❌ deferred)
+7. **Iterators + generators** — Iterator protocol, `yield`, generator functions. ⚠️ Partial (`iter`/`next` ✅, generators ❌ deferred to v4+)
+8. **Built-in modules** — `json`, `math`, `re`, `sys`, basic file I/O. ❌ Deferred to v3+
+9. **Optimizations** — Native arithmetic fast paths, range loop optimization, shape pre-allocation. ✅ Partially done (native arithmetic, range loop fast path)

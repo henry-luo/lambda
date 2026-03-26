@@ -41,6 +41,7 @@ extern bool target_equal(Target* a, Target* b);
 // JS runtime functions
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
+#include "py/py_class.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -1226,7 +1227,20 @@ JitImport jit_runtime_imports[] = {
     // object/attr
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
+    {"py_hasattr", FPTR(py_hasattr)},
     {"py_new_object", FPTR(py_new_object)},
+    // class system
+    {"py_class_new", FPTR(py_class_new)},
+    {"py_new_instance", FPTR(py_new_instance)},
+    {"py_bind_method", FPTR(py_bind_method)},
+    {"py_is_bound_method", FPTR(py_is_bound_method)},
+    {"py_is_class", FPTR(py_is_class)},
+    {"py_is_instance", FPTR(py_is_instance)},
+    {"py_get_class", FPTR(py_get_class)},
+    {"py_mro_lookup", FPTR(py_mro_lookup)},
+    {"py_super", FPTR(py_super)},
+    {"py_isinstance_v3", FPTR(py_isinstance_v3)},
+    {"py_issubclass_v3", FPTR(py_issubclass_v3)},
     // collections
     {"py_list_new", FPTR(py_list_new)},
     {"py_list_append", FPTR(py_list_append)},

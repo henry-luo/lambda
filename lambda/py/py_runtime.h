@@ -59,6 +59,7 @@ Item py_contains(Item container, Item value);  // `in` operator
 // ========================================================================
 Item py_getattr(Item object, Item name);
 Item py_setattr(Item object, Item name, Item value);
+Item py_hasattr(Item object, Item name);
 Item py_new_object(void);
 
 // ========================================================================
@@ -190,6 +191,11 @@ Item py_list_method(Item list, Item method_name, Item* args, int argc);
 // Dict methods (dispatcher)
 // ========================================================================
 Item py_dict_method(Item dict, Item method_name, Item* args, int argc);
+
+// ========================================================================
+// Class system — see py_class.h for full declarations.
+// py_class.h is included separately when needed.
+// ========================================================================
 
 // ========================================================================
 // Runtime initialization
