@@ -182,6 +182,7 @@ Item py_builtin_hex(Item n);
 Item py_builtin_divmod(Item a, Item b);
 Item py_builtin_pow(Item base, Item exp, Item mod);
 Item py_builtin_callable(Item obj);
+Item py_builtin_property(Item fget);
 Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_flag);
 Item py_list_sort_ex(Item list, Item key_func, Item reverse_flag);
 

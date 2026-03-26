@@ -1332,6 +1332,7 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_divmod", FPTR(py_builtin_divmod)},
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
+    {"py_builtin_property", FPTR(py_builtin_property)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers

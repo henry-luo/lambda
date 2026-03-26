@@ -1664,3 +1664,19 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
     log_debug("py: dict.%s() not implemented", method->chars);
     return ItemNull;
 }
+
+// ============================================================================
+// property() builtin
+// ============================================================================
+
+// Creates a property descriptor map: {__is_property__: True, __get__: fget}
+// py_getattr checks this marker and calls __get__(instance) automatically.
+extern "C" Item py_builtin_property(Item fget) {
+    Item prop = py_dict_new();
+    Item key_prop  = (Item){.item = s2it(heap_strcpy((char*)"__is_property__", 15))};
+    Item key_get   = (Item){.item = s2it(heap_strcpy((char*)"__get__", 7))};
+    Item true_val  = (Item){.item = b2it(1)};
+    py_dict_set(prop, key_prop, true_val);
+    py_dict_set(prop, key_get,  fget);
+    return prop;
+}
