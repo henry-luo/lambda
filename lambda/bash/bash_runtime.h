@@ -297,6 +297,12 @@ void bash_trap_check(void);                          // check and run pending si
 Item bash_eval_string(Item code);                    // evaluate bash code string in current scope
 
 // ========================================================================
+// POSIX compatibility mode
+// ========================================================================
+void bash_set_posix_mode(bool mode);   // enable/disable POSIX-compatible mode
+bool bash_get_posix_mode(void);        // query current POSIX mode
+
+// ========================================================================
 // Runtime initialization
 // ========================================================================
 void bash_runtime_init(void);

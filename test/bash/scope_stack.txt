@@ -1,0 +1,7 @@
+counter=8
+x=global
+x=local
+inside=local
+x=global
+fib(7)=13
+secret=unset

@@ -77,6 +77,17 @@ static struct hashmap* bash_var_table = NULL;
 static struct hashmap* bash_subshell_stack[BASH_SUBSHELL_STACK_MAX];
 static int bash_subshell_depth = 0;
 
+// Function dynamic scope stack (Option A: runtime scope stack)
+// Each frame is a hashmap of BashRtVar holding variables declared `local`
+// in the currently-executing function call. Lookup walks top-to-bottom
+// then falls through to the global bash_var_table (dynamic scoping).
+#define BASH_FUNC_SCOPE_STACK_MAX 256
+static struct hashmap* bash_func_scope_stack[BASH_FUNC_SCOPE_STACK_MAX];
+static int bash_func_scope_depth = 0;
+
+// POSIX-compatible mode (set by --posix CLI flag)
+static bool bash_posix_mode = false;
+
 // helper to grow a list's capacity
 static void bash_grow_list(List* list) {
     int new_cap = list->capacity ? list->capacity * 2 : 8;
@@ -1797,6 +1808,8 @@ extern "C" void bash_runtime_init(void) {
         bash_trap_handlers[i] = NULL;
         bash_trap_fired[i] = 0;
     }
+    // reset function scope stack
+    bash_func_scope_depth = 0;
     bash_env_import();
     log_debug("bash: runtime initialized");
 }
@@ -1825,6 +1838,14 @@ extern "C" void bash_runtime_cleanup(void) {
     if (bash_rt_func_table) {
         hashmap_free(bash_rt_func_table);
         bash_rt_func_table = NULL;
+    }
+    // free any leaked scope frames (e.g. if script exited early)
+    while (bash_func_scope_depth > 0) {
+        bash_func_scope_depth--;
+        if (bash_func_scope_stack[bash_func_scope_depth]) {
+            hashmap_free(bash_func_scope_stack[bash_func_scope_depth]);
+            bash_func_scope_stack[bash_func_scope_depth] = NULL;
+        }
     }
     log_debug("bash: runtime cleanup");
 }
@@ -1867,6 +1888,30 @@ extern "C" void bash_set_var(Item name, Item value) {
     String* s = it2s(name);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // dynamic scoping: if the variable exists in any active function scope frame,
+    // update it there rather than writing to the global table
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            if (found->attributes & BASH_ATTR_READONLY) {
+                log_error("bash: %.*s: readonly variable", s->len, s->chars);
+                return;
+            }
+            int attrs = found->attributes;
+            Item final_value = value;
+            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+            if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+            if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+            BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                               .value = final_value, .is_export = found->is_export,
+                               .attributes = attrs};
+            hashmap_set(bash_func_scope_stack[i], &entry);
+            return;
+        }
+    }
+
+    // not in any local frame — use global table
     const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
 
     // check readonly
@@ -1880,15 +1925,9 @@ extern "C" void bash_set_var(Item name, Item value) {
 
     // apply attribute transformations
     Item final_value = value;
-    if (attrs & BASH_ATTR_INTEGER) {
-        final_value = bash_to_int(value);
-    }
-    if (attrs & BASH_ATTR_LOWERCASE) {
-        final_value = bash_string_lower(bash_to_string(final_value), true);
-    }
-    if (attrs & BASH_ATTR_UPPERCASE) {
-        final_value = bash_string_upper(bash_to_string(final_value), true);
-    }
+    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+    if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+    if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
 
     BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                        .value = final_value, .is_export = was_export,
@@ -1901,14 +1940,43 @@ extern "C" Item bash_get_var(Item name) {
     String* s = it2s(name);
     if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // dynamic scoping: walk scope stack from top (most recent) to bottom
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found->value;
+    }
+
+    // fall through to global table
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->value;
-    return (Item){.item = s2it(heap_create_name("", 0))};
+    return (Item){.item = s2it(heap_create_name("", 0))};  // unset = empty string
 }
 
 extern "C" void bash_set_local_var(Item name, Item value) {
-    // in Phase 1, local is the same as set_var (no function scope yet)
-    bash_set_var(name, value);
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+
+    if (bash_func_scope_depth > 0) {
+        // write to the top (current function) scope frame
+        struct hashmap* frame = bash_func_scope_stack[bash_func_scope_depth - 1];
+        BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+        const BashRtVar* existing = (const BashRtVar*)hashmap_get(frame, &key);
+        int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
+        Item final_value = value;
+        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+        if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+        if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+        BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                           .value = final_value, .is_export = false,
+                           .attributes = attrs};
+        hashmap_set(frame, &entry);
+        log_debug("bash: local var '%.*s' set in scope frame %d", s->len, s->chars, bash_func_scope_depth - 1);
+    } else {
+        // no active function scope (local at top-level) — behaves like set_var
+        bash_set_var(name, value);
+    }
 }
 
 extern "C" void bash_export_var(Item name) {
@@ -1947,6 +2015,13 @@ extern "C" void bash_unset_var(Item name) {
     String* s = it2s(name);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    // unset from topmost scope frame first, then global
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        if (hashmap_get(bash_func_scope_stack[i], &key)) {
+            hashmap_delete(bash_func_scope_stack[i], &key);
+            return;
+        }
+    }
     hashmap_delete(bash_var_table, &key);
 }
 
@@ -2193,12 +2268,26 @@ extern "C" Item bash_get_script_name(void) {
 // ============================================================================
 
 extern "C" void bash_scope_push(void) {
-    // Phase 1: no-op (flat scope). Phase 2 will implement dynamic scope stack.
-    log_debug("bash: runtime scope push");
+    if (bash_func_scope_depth >= BASH_FUNC_SCOPE_STACK_MAX) {
+        log_error("bash: scope stack overflow (max %d nested calls)", BASH_FUNC_SCOPE_STACK_MAX);
+        return;
+    }
+    bash_func_scope_stack[bash_func_scope_depth] = hashmap_new(
+        sizeof(BashRtVar), 16, 0, 0,
+        bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    bash_func_scope_depth++;
+    log_debug("bash: scope push → depth %d", bash_func_scope_depth);
 }
 
 extern "C" void bash_scope_pop(void) {
-    log_debug("bash: runtime scope pop");
+    if (bash_func_scope_depth <= 0) {
+        log_error("bash: scope stack underflow");
+        return;
+    }
+    bash_func_scope_depth--;
+    hashmap_free(bash_func_scope_stack[bash_func_scope_depth]);
+    bash_func_scope_stack[bash_func_scope_depth] = NULL;
+    log_debug("bash: scope pop → depth %d", bash_func_scope_depth);
 }
 
 extern "C" void bash_scope_push_subshell(void) {
@@ -2226,6 +2315,19 @@ extern "C" void bash_scope_pop_subshell(void) {
         hashmap_free(bash_var_table);
         bash_var_table = bash_subshell_stack[bash_subshell_depth];
     }
+}
+
+// ============================================================================
+// POSIX compatibility mode
+// ============================================================================
+
+void bash_set_posix_mode(bool mode) {
+    bash_posix_mode = mode;
+    log_info("bash: POSIX mode %s", mode ? "enabled" : "disabled");
+}
+
+bool bash_get_posix_mode(void) {
+    return bash_posix_mode;
 }
 
 // ============================================================================

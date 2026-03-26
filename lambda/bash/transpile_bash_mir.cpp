@@ -369,6 +369,18 @@ static void bm_emit_set_var(BashMirTranspiler* mt, const char* name, MIR_op_t va
     bm_emit_call_void_2(mt, "bash_set_var", MIR_new_reg_op(mt->ctx, name_reg), value);
 }
 
+// emit a call to bash_set_local_var(name_item, value_item)
+static void bm_emit_set_local_var(BashMirTranspiler* mt, const char* name, MIR_op_t value) {
+    String* name_str = heap_create_name(name);
+    MIR_reg_t name_reg = bm_new_temp(mt);
+    MIR_append_insn(mt->ctx, mt->current_func_item,
+        MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, name_reg),
+                     MIR_new_uint_op(mt->ctx, s2it(name_str))));
+    // in POSIX mode local is treated as a global assignment
+    const char* fn = bash_get_posix_mode() ? "bash_set_var" : "bash_set_local_var";
+    bm_emit_call_void_2(mt, fn, MIR_new_reg_op(mt->ctx, name_reg), value);
+}
+
 // emit a call to bash_get_var(name_item) → Item
 static MIR_op_t bm_emit_get_var(BashMirTranspiler* mt, const char* name) {
     String* name_str = heap_create_name(name);
@@ -610,6 +622,8 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         } else {
             ret_val = MIR_new_uint_op(mt->ctx, i2it(0));
         }
+        // pop scope frame before leaving the function
+        bm_emit_call_void_0(mt, "bash_scope_pop");
         bm_emit_call_void_0(mt, "bash_pop_positional");
         MIR_append_insn(mt->ctx, mt->current_func_item,
             MIR_new_ret_insn(mt->ctx, 1, ret_val));
@@ -1218,11 +1232,25 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "local", 5) == 0) {
-        // local var=value — treated as assignment for now
+        // local var=value — write to current function scope frame via bash_set_local_var
         BashAstNode* arg = cmd->args;
         while (arg) {
             if (arg->node_type == BASH_AST_NODE_ASSIGNMENT) {
-                bm_transpile_statement(mt, arg);
+                BashAssignmentNode* assign = (BashAssignmentNode*)arg;
+                MIR_op_t val;
+                if (assign->value) {
+                    val = bm_transpile_node(mt, assign->value);
+                } else {
+                    val = bm_emit_string_literal(mt, "", 0);
+                }
+                bm_emit_set_local_var(mt, assign->name->chars, val);
+            } else if (arg->node_type == BASH_AST_NODE_WORD) {
+                // local varname (no value) — declare as empty in current scope
+                BashWordNode* w = (BashWordNode*)arg;
+                if (w->text) {
+                    MIR_op_t val = bm_emit_string_literal(mt, "", 0);
+                    bm_emit_set_local_var(mt, w->text->chars, val);
+                }
             }
             arg = arg->next;
         }
@@ -1624,9 +1652,15 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         // var+=val → string append
         MIR_op_t old_val = bm_emit_get_var(mt, node->name->chars);
         MIR_reg_t result = bm_emit_call_2(mt, "bash_concat", old_val, value);
-        bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
+        if (node->is_local)
+            bm_emit_set_local_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
+        else
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
     } else {
-        bm_emit_set_var(mt, node->name->chars, value);
+        if (node->is_local)
+            bm_emit_set_local_var(mt, node->name->chars, value);
+        else
+            bm_emit_set_var(mt, node->name->chars, value);
     }
 
     // if variable is declared with `export`, also call bash_export_var
@@ -2085,11 +2119,14 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
     MIR_reg_t argc_reg = MIR_reg(mt->ctx, "argc", mt->current_func);
     bm_emit_call_void_2(mt, "bash_push_positional",
         MIR_new_reg_op(mt->ctx, args_reg), MIR_new_reg_op(mt->ctx, argc_reg));
+    // push a new dynamic scope frame for local variables
+    bm_emit_call_void_0(mt, "bash_scope_push");
 
     // transpile function body
     bm_transpile_statement(mt, node->body);
 
-    // restore positional params
+    // pop scope frame and restore positional params
+    bm_emit_call_void_0(mt, "bash_scope_pop");
     bm_emit_call_void_0(mt, "bash_pop_positional");
 
     // default return 0
