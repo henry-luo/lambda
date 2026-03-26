@@ -84,6 +84,26 @@ static void append_space(CssFormatter* formatter) {
     }
 }
 
+// Append a CSS identifier with proper escaping for characters that need it
+static void append_css_ident(CssFormatter* formatter, const char* ident) {
+    if (!ident) return;
+    for (const char* p = ident; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        // Characters that must be escaped in CSS identifiers
+        if (c == '@' || c == '!' || c == '#' || c == '$' || c == '%' ||
+            c == '&' || c == '*' || c == '(' || c == ')' || c == '+' ||
+            c == ',' || c == '/' || c == ';' || c == '<' || c == '=' ||
+            c == '>' || c == '?' || c == '[' || c == ']' || c == '^' ||
+            c == '`' || c == '{' || c == '|' || c == '}' || c == '~') {
+            char esc[3] = {'\\', (char)c, '\0'};
+            stringbuf_append_str(formatter->output, esc);
+        } else {
+            char ch[2] = {(char)c, '\0'};
+            stringbuf_append_str(formatter->output, ch);
+        }
+    }
+}
+
 // Helper function to determine if a property uses comma-separated lists
 // NOTE: Most CSS properties use SPACE separation between values
 // Only specific longhand properties use comma separation for multiple values
@@ -481,19 +501,19 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                 switch (simple->type) {
                     case CSS_SELECTOR_TYPE_ELEMENT:
                         if (simple->value) {
-                            stringbuf_append_str(formatter->output, simple->value);
+                            append_css_ident(formatter, simple->value);
                         }
                         break;
                     case CSS_SELECTOR_TYPE_CLASS:
                         stringbuf_append_str(formatter->output, ".");
                         if (simple->value) {
-                            stringbuf_append_str(formatter->output, simple->value);
+                            append_css_ident(formatter, simple->value);
                         }
                         break;
                     case CSS_SELECTOR_TYPE_ID:
                         stringbuf_append_str(formatter->output, "#");
                         if (simple->value) {
-                            stringbuf_append_str(formatter->output, simple->value);
+                            append_css_ident(formatter, simple->value);
                         }
                         break;
                     case CSS_SELECTOR_TYPE_UNIVERSAL:
@@ -588,6 +608,12 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         if (simple->value) {
                             stringbuf_append_str(formatter->output, ":");
                             stringbuf_append_str(formatter->output, simple->value);
+                            // Include argument for functional pseudo-classes like :where(), :not(), :is(), :has()
+                            if (simple->argument) {
+                                stringbuf_append_str(formatter->output, "(");
+                                stringbuf_append_str(formatter->output, simple->argument);
+                                stringbuf_append_str(formatter->output, ")");
+                            }
                         }
                         break;
                 }
