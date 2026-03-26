@@ -621,8 +621,12 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
         }
     }
 
-    log_debug("py-mir: undefined variable '%.*s'", (int)id->name->len, id->name->chars);
-    return pm_emit_null(mt);
+    log_debug("py-mir: undefined variable '%.*s' — trying builtin class lookup",
+        (int)id->name->len, id->name->chars);
+    // fallback: look up as a builtin class (ValueError, RuntimeError, etc.)
+    MIR_reg_t name_item = pm_box_string_literal(mt, id->name->chars, id->name->len);
+    return pm_call_1(mt, "py_resolve_name_item", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_item));
 }
 
 static const char* pm_binary_op_func(PyOperator op) {
@@ -2218,6 +2222,15 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    } else if (aug->target->node_type == PY_AST_NODE_ATTRIBUTE) {
+        // self.x += val → py_setattr(self, "x", val)
+        PyAttributeNode* attr = (PyAttributeNode*)aug->target;
+        MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
+        MIR_reg_t attr_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+        pm_call_3(mt, "py_setattr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_name),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
     }
 }
 
@@ -2842,6 +2855,123 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         // bare "import module" — no-op for now (module-as-namespace not yet supported)
         log_debug("py-mir: bare import statement (not yet supported for cross-lang)");
         break;
+    case PY_AST_NODE_WITH: {
+        // with <expr> as <target>: <body>
+        // desugars to:
+        //   mgr = expr
+        //   val = mgr.__enter__()
+        //   try: body
+        //       mgr.__exit__(None, None, None)
+        //   except: if not mgr.__exit__(exc, exc, None): re-raise
+        PyWithNode* wn = (PyWithNode*)stmt;
+
+        // 1. evaluate context manager expression
+        MIR_reg_t mgr_reg = pm_transpile_expression(mt, wn->items);
+        MIR_reg_t mgr_saved = pm_new_reg(mt, "with_mgr", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mgr_saved),
+            MIR_new_reg_op(mt->ctx, mgr_reg)));
+
+        // 2. call __enter__, check for exception
+        MIR_label_t l_with_exc  = pm_new_label(mt);
+        MIR_label_t l_with_end  = pm_new_label(mt);
+
+        MIR_reg_t enter_val = pm_call_1(mt, "py_context_enter", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved));
+        {
+            MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+            MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_with_end),
+                MIR_new_reg_op(mt->ctx, chkt)));
+        }
+
+        // 3. bind as-target if present
+        if (wn->target) {
+            char vname[132];
+            snprintf(vname, sizeof(vname), "_py_%.*s",
+                (int)wn->target->len, wn->target->chars);
+            MIR_reg_t vr = pm_new_reg(mt, vname, MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, vr),
+                MIR_new_reg_op(mt->ctx, enter_val)));
+            pm_set_var(mt, vname, vr);
+        }
+
+        // 4. push exception handler
+        if (mt->try_depth < 16) {
+            mt->try_handler_labels[mt->try_depth] = l_with_exc;
+            mt->try_depth++;
+        }
+
+        // 5. compile body with per-statement exception checks
+        {
+            PyAstNode* body = wn->body;
+            if (body && body->node_type == PY_AST_NODE_BLOCK) {
+                PyAstNode* s2 = ((PyBlockNode*)body)->statements;
+                while (s2) {
+                    pm_transpile_statement(mt, s2);
+                    MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+                    MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_with_exc),
+                        MIR_new_reg_op(mt->ctx, chkt)));
+                    s2 = s2->next;
+                }
+            } else {
+                pm_transpile_block(mt, body);
+                MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+                MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, l_with_exc),
+                    MIR_new_reg_op(mt->ctx, chkt)));
+            }
+        }
+
+        // pop try depth
+        if (mt->try_depth > 0) mt->try_depth--;
+
+        // 6. normal exit: __exit__(None, None, None)
+        {
+            MIR_reg_t n1 = pm_emit_null(mt);
+            MIR_reg_t n2 = pm_emit_null(mt);
+            MIR_reg_t n3 = pm_emit_null(mt);
+            pm_call_4(mt, "py_context_exit", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n1),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n2),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n3));
+        }
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_with_end)));
+
+        // 7. exception handler: call __exit__ with exception info
+        pm_emit_label(mt, l_with_exc);
+        {
+            MIR_reg_t exc_val = pm_call_0(mt, "py_clear_exception", MIR_T_I64);
+            MIR_reg_t null_tb = pm_emit_null(mt);
+            MIR_reg_t suppress = pm_call_4(mt, "py_context_exit", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_tb));
+            MIR_reg_t supp_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, suppress));
+            // if suppress=true: jump to end (swallow the exception)
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_with_end),
+                MIR_new_reg_op(mt->ctx, supp_t)));
+            // if suppress=false: re-raise
+            pm_call_void_1(mt, "py_raise",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+        }
+
+        pm_emit_label(mt, l_with_end);
+        break;
+    }
     case PY_AST_NODE_IMPORT_FROM: {
         // from ./module import name1, name2
         PyImportNode* imp = (PyImportNode*)stmt;

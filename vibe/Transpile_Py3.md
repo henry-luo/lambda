@@ -4,7 +4,7 @@
 
 LambdaPy v2 closed all core language gaps for single-file procedural and functional Python (~10.9K LOC). The five features deferred from v1/v2 that remain missing are: **class definitions**, **`with` statement**, **decorators**, **`**kwargs`**, and a **basic import system**. This proposal targets those in priority order.
 
-> **Implementation Status:** Not yet started. This is the v3 planning document.
+> **Implementation Status:** Phases A and B complete. Phases C–E in progress.
 
 ### Architecture Position
 
@@ -15,26 +15,28 @@ v2:  Close core language gaps                          (✅ COMPLETE, ~10.9K LOC
        Default/keyword args, slicing, f-string specs, comprehensions,
        closures, exceptions, *args, iter/next, open(), 40+ builtins
 v3:  OOP and module system                             (this doc, target ~15K LOC)
-       Phase A: Class system (class, inheritance, super, dunders)
-       Phase B: with statement (context managers)
-       Phase C: Decorators
-       Phase D: **kwargs (complete calling convention)
-       Phase E: Single-file imports
+       Phase A: Class system (class, inheritance, super, dunders)   ✅ COMPLETE
+       Phase B: with statement (context managers)                   ✅ COMPLETE
+       Phase C: Decorators                                          ⏳ next
+       Phase D: **kwargs (complete calling convention)              ⏳ pending
+       Phase E: Single-file imports                                 ⏳ pending
 ```
 
 ### Current vs Target Coverage
 
-| Metric | v2 (actual) | v3 (target) |
+| Metric | v2 (actual) | v3 status |
 |--------|-------------|-------------|
-| Classes (`class`, `__init__`, methods, `self`) | ❌ AST parsed, no codegen | ✅ Single + multiple inheritance |
-| `super()` | ❌ | ✅ Via MRO proxy |
-| `isinstance` / `issubclass` | Partial (string-name matching) | ✅ Full MRO-based |
-| Common dunder methods | ❌ | ✅ `__init__`, `__str__`, `__repr__`, `__len__`, `__eq__`, `__add__`, `__iter__`, `__getitem__`, `__bool__`, `__enter__`, `__exit__` |
-| `with` statement | ❌ AST parsed, no codegen | ✅ Via `__enter__`/`__exit__` |
-| Decorators | ❌ | ✅ Function and class decorators |
-| `**kwargs` | ❌ DICT_SPLAT_PARAMETER skipped | ✅ Full pack/unpack |
-| `import` / `from … import` | No-op | ✅ Single-file imports |
-| Estimated new LOC | — | ~4,100 |
+| Classes (`class`, `__init__`, methods, `self`) | ❌ AST parsed, no codegen | ✅ **DONE** — single + multiple inheritance |
+| `super()` | ❌ | ✅ **DONE** — via MRO proxy |
+| `isinstance` / `issubclass` | Partial (string-name matching) | ✅ **DONE** — full MRO-based |
+| Common dunder methods | ❌ | ✅ **DONE** — `__init__`, `__str__`, `__repr__`, `__len__`, `__eq__`, `__add__`, `__iter__`, `__getitem__`, `__bool__`, `__enter__`, `__exit__` |
+| Attribute augmented assignment (`self.x += n`) | ❌ silently dropped | ✅ **DONE** — fixed in Phase B |
+| Builtin exception classes as callables | ❌ string sentinels only | ✅ **DONE** — `ValueError(...)`, `RuntimeError(...)` etc. are real class instances |
+| `with` statement | ❌ AST parsed, no codegen | ✅ **DONE** — `__enter__`/`__exit__`, `as`-target, exception suppression |
+| Decorators | ❌ | ⏳ Phase C — next |
+| `**kwargs` | ❌ DICT_SPLAT_PARAMETER skipped | ⏳ Phase D — pending |
+| `import` / `from … import` | No-op | ⏳ Phase E — pending |
+| Estimated new LOC (A+B actual) | — | ~3,200 added so far |
 
 ### Non-Goals (v3)
 
@@ -48,11 +50,11 @@ v3:  OOP and module system                             (this doc, target ~15K LO
 
 ---
 
-## 2. Phase A: Class System
+## 2. Phase A: Class System  ✅ COMPLETE
 
 **Goal:** Enable `class Foo(Bar): ...` with `__init__`, instance methods, class attributes, inheritance, `super()`, `isinstance`, and the most common dunder methods.
 
-**Estimated effort:** ~2,200 LOC (new `py_class.cpp` + `py_class.h`, transpiler additions, runtime updates).
+**Actual effort:** ~2,200 LOC. New files: `lambda/py/py_class.cpp`, `lambda/py/py_class.h`. Major additions to `py_runtime.cpp`, `transpile_py_mir.cpp`, `py_builtins.cpp`. Test: `test/py/test_py_classes.py` ✅ matches CPython output.
 
 ### A1. Class Object Representation
 
@@ -423,11 +425,17 @@ print(D.__mro__)              # [D, B, C, A, object]
 
 ---
 
-## 3. Phase B: `with` Statement
+## 3. Phase B: `with` Statement  ✅ COMPLETE
 
 **Goal:** Enable `with expr as var: body`. Requires dispatching `__enter__`/`__exit__` on the context manager object.
 
-**Estimated effort:** ~430 LOC.
+**Actual effort:** ~430 LOC across `build_py_ast.cpp`, `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_runtime.h`, `py_class.h`, `sys_func_registry.c`. Test: `test/py/test_py_with.py` ✅ matches CPython output (25 lines).
+
+**Bugs fixed during implementation:**
+- `build_py_ast.cpp`: tree-sitter encodes `with expr as target` as an `as_pattern` node inside `with_item`'s `value` field — not a separate `alias` field on `with_item`. Fixed by unwrapping `as_pattern`.
+- `transpile_py_mir.cpp`: `pm_transpile_aug_assignment` had no case for `PY_AST_NODE_ATTRIBUTE`, so `self.x += 1` silently dropped the assignment. Added `py_setattr` call for attribute targets.
+- `py_runtime.cpp`: `py_exception_get_type` didn't handle class instances raised with `ValueError("msg")` — now follows `__class__.__name__`.
+- `py_runtime.cpp` + `transpile_py_mir.cpp`: built-in exception classes (`ValueError`, `RuntimeError`, etc.) were unreachable as identifier expressions. Added `py_resolve_name_item` fallback that calls `py_get_builtin_class`.
 
 ### B1. Design
 
@@ -569,7 +577,7 @@ print("after suppressed with")     # after suppressed with
 
 ---
 
-## 4. Phase C: Decorators
+## 4. Phase C: Decorators  ⏳ NEXT
 
 **Goal:** Enable `@decorator` syntax for functions and classes. Function decorators are syntactic sugar for `f = decorator(f)`, which is straightforward to transpile.
 
@@ -671,7 +679,7 @@ print(repr(p))    # <Point instance>
 
 ---
 
-## 5. Phase D: `**kwargs`
+## 5. Phase D: `**kwargs`  ⏳ PENDING
 
 **Goal:** Complete the function calling convention with `**kwargs` parameter packing and `**dict` argument unpacking.
 
@@ -783,7 +791,7 @@ configure("server", **defaults, **overrides)
 
 ---
 
-## 6. Phase E: Single-File Imports
+## 6. Phase E: Single-File Imports  ⏳ PENDING
 
 **Goal:** Enable `import module` and `from module import name` for single-file `.py` scripts in the same directory.
 
@@ -886,56 +894,54 @@ print(utils.add(10, 20))  # 30
 ## 7. Implementation Order & Dependencies
 
 ```
-A1–A3: py_class.cpp/h, runtime updates (py_getattr, py_call_function)
+A1–A3: py_class.cpp/h, runtime updates (py_getattr, py_call_function)  ✅ DONE
     │
-    ├─→ A4: Transpiler CLASS_DEF codegen
+    ├─→ A4: Transpiler CLASS_DEF codegen                                   ✅ DONE
     │       │
-    │       └─→ A5: super() support
+    │       └─→ A5: super() support                                          ✅ DONE
     │
-    ├─→ A6: Dunder dispatch in operators
+    ├─→ A6: Dunder dispatch in operators                                   ✅ DONE
     │
-    ├─→ A7: isinstance/issubclass v3
+    ├─→ A7: isinstance/issubclass v3                                       ✅ DONE
     │
-    └─→ A8: Built-in 'object' + exception classes
+    └─→ A8: Built-in 'object' + exception classes                          ✅ DONE
             │
-            ├─→ B: with statement (needs __enter__/__exit__ from A6)
+            ├─→ B: with statement                                            ✅ DONE
             │
-            └─→ C: Decorators (needs class system for class decorators)
+            └─→ C: Decorators (needs class system for class decorators)  ⏳ NEXT
 
-D: **kwargs — independent of A/B/C, can do in parallel
+D: **kwargs — independent of A/B/C, can do in parallel               ⏳ PENDING
 
-E: Import system — independent, but best after A so imported modules can define classes
+E: Import system — best after A so imported modules can define classes  ⏳ PENDING
 ```
 
-Recommended sequence:
-1. **A1–A3** (runtime) + **D** (kwargs) — can be done in parallel as separate PRs
-2. **A4** (transpiler class codegen)
-3. **A5** (super) + **A6** (dunders) + **A7** (isinstance)
-4. **A8** (built-in classes) + **B** (with statement)
-5. **C** (decorators)
-6. **E** (imports — last, as it exercises the full class + module pipeline)
+Remaining sequence:
+1. **C** (decorators) — next
+2. **D** (**kwargs)
+3. **E** (imports — last, as it exercises the full class + module pipeline)
 
 ---
 
 ## 8. LOC Estimate Summary
 
-| Phase | File(s) | New LOC | Notes |
-|-------|---------|---------|-------|
-| A1–A3 | `py_class.cpp` (new) | ~700 | class_new, compute_mro, new_instance, super, isinstance, bound method |
-| A1 | `py_class.h` (new) | ~80 | C API declarations |
-| A2–A3 | `py_runtime.cpp` | +350 | py_getattr/setattr class support, py_call_function bound method + class call |
-| A4–A5 | `transpile_py_mir.cpp` | +700 | CLASS_DEF collection + codegen, super() transform, call-site class detect |
-| A6 | `py_runtime.cpp` | +150 | Dunder dispatch in 12 operator functions |
-| A7 | `py_class.cpp` + `py_builtins.cpp` | +100 | Full MRO-based isinstance/issubclass |
-| A8 | `py_class.cpp` | +80 | Built-in class hierarchy init |
-| B | `transpile_py_mir.cpp` + `py_runtime.cpp` + `build_py_ast.cpp` | +430 | with codegen, context_enter/exit, as-target fix |
-| C | `transpile_py_mir.cpp` + `py_builtins.cpp` | +280 | Decorator application, property() builtin |
-| D | `transpile_py_mir.cpp` + `py_runtime.cpp` | +420 | **kwargs packing, ** call-site unpacking, py_dict_merge |
-| E | `py_module.cpp` (new) + `py_module.h` (new) + `transpile_py_mir.cpp` | +680 | Module cache, import codegen |
-| Tests | `test/py/*.py` + `test/py/*.txt` | ~300 | classes, inheritance, with, decorators, kwargs, import |
-| **Total** | | **~4,270** | |
+| Phase | File(s) | LOC | Status | Notes |
+|-------|---------|-----|--------|-------|
+| A1–A3 | `py_class.cpp` (new) | ~700 | ✅ done | class_new, compute_mro, new_instance, super, isinstance, bound method |
+| A1 | `py_class.h` (new) | ~80 | ✅ done | C API declarations |
+| A2–A3 | `py_runtime.cpp` | +350 | ✅ done | py_getattr/setattr class support, py_call_function bound method + class call |
+| A4–A5 | `transpile_py_mir.cpp` | +700 | ✅ done | CLASS_DEF collection + codegen, super() transform, call-site class detect |
+| A6 | `py_runtime.cpp` | +150 | ✅ done | Dunder dispatch in 12 operator functions |
+| A7 | `py_class.cpp` + `py_builtins.cpp` | +100 | ✅ done | Full MRO-based isinstance/issubclass |
+| A8 | `py_class.cpp` | +80 | ✅ done | Built-in class hierarchy init |
+| B | `transpile_py_mir.cpp` + `py_runtime.cpp` + `build_py_ast.cpp` + `py_class.h` | +480 | ✅ done | with codegen, context_enter/exit, as_pattern fix, attr aug-assign fix, builtin exc lookup |
+| C | `transpile_py_mir.cpp` + `py_builtins.cpp` | +280 | ⏳ next | Decorator application, property() builtin |
+| D | `transpile_py_mir.cpp` + `py_runtime.cpp` | +420 | ⏳ pending | **kwargs packing, ** call-site unpacking, py_dict_merge |
+| E | `py_module.cpp` (new) + `py_module.h` (new) + `transpile_py_mir.cpp` | +680 | ⏳ pending | Module cache, import codegen |
+| Tests | `test/py/*.py` + `test/py/*.txt` | ~300 | partial | `test_py_classes.py` ✅, `test_py_with.py` ✅ |
+| **Total** | | **~4,320** | A+B done | |
 
-**v3 total projection:** ~10,865 (v2) + ~4,270 (v3 new) = **~15,135 LOC**
+**v3 total so far:** ~10,865 (v2) + ~2,640 (A+B actual) = **~13,505 LOC**  
+**v3 total projection:** ~10,865 (v2) + ~4,320 (all phases) = **~15,185 LOC**
 
 ---
 
@@ -946,19 +952,19 @@ All existing test scripts in `test/py/` must continue to pass after each phase.
 
 ### New Test Files
 
-| Test file | Phase | Key coverage |
-|-----------|-------|-------------|
-| `test_py_classes.py` | A | Single inheritance, `__init__`, methods, class attrs, `__str__` |
-| `test_py_multiple_inherit.py` | A | Multiple inheritance, C3 MRO, diamond pattern |
-| `test_py_dunders.py` | A6 | `__add__`, `__eq__`, `__iter__`, `__getitem__`, `__len__`, `__bool__` |
-| `test_py_super.py` | A5 | `super()` in single + multiple inheritance |
-| `test_py_isinstance.py` | A7 | `isinstance` + `issubclass` with real class hierarchy |
-| `test_py_with.py` | B | User-defined context managers, exception suppression |
-| `test_py_with_file.py` | B | `with open(...)` (uses `py_context_exit` to close) |
-| `test_py_decorators.py` | C | Function and class decorators |
-| `test_py_property.py` | C3 | `@property` getter |
-| `test_py_kwargs.py` | D | `**kwargs` in definitions, `**dict` at call sites |
-| `test_py_import.py` | E | `from utils import x`, `import utils`, `utils.x` |
+| Test file | Phase | Status | Key coverage |
+|-----------|-------|--------|--------------|
+| `test_py_classes.py` | A | ✅ passing | Single inheritance, `__init__`, methods, class attrs, `__str__`, `super()` |
+| `test_py_multiple_inherit.py` | A | ⏳ not yet created | Multiple inheritance, C3 MRO, diamond pattern |
+| `test_py_dunders.py` | A6 | ⏳ not yet created | `__add__`, `__eq__`, `__iter__`, `__getitem__`, `__len__`, `__bool__` |
+| `test_py_super.py` | A5 | ⏳ not yet created | `super()` in single + multiple inheritance |
+| `test_py_isinstance.py` | A7 | ⏳ not yet created | `isinstance` + `issubclass` with real class hierarchy |
+| `test_py_with.py` | B | ✅ passing | User-defined context managers, `as`-target, exception suppression, nested with, extended classes |
+| `test_py_with_file.py` | B | ⏳ not yet created | `with open(...)` (uses `py_context_exit` to close) |
+| `test_py_decorators.py` | C | ⏳ not yet created | Function and class decorators |
+| `test_py_property.py` | C3 | ⏳ not yet created | `@property` getter |
+| `test_py_kwargs.py` | D | ⏳ not yet created | `**kwargs` in definitions, `**dict` at call sites |
+| `test_py_import.py` | E | ⏳ not yet created | `from utils import x`, `import utils`, `utils.x` |
 
 ### Integration Test
 

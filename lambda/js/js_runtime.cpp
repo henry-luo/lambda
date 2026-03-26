@@ -3610,6 +3610,7 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
         if (thenable) {
             if (thenable->state != JS_PROMISE_PENDING) {
                 js_promise_settle(p, thenable->state, thenable->result);
+                js_microtask_flush();
             } else {
                 // register then on thenable to forward settlement
                 Item p_item = js_promise_to_item(p);
@@ -3624,6 +3625,7 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
             }
         } else {
             js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+            js_microtask_flush();
         }
     }
     return ItemNull;
@@ -3633,6 +3635,7 @@ static Item js_reject_callback(Item promise_idx_item, Item reason) {
     int64_t idx = it2i(promise_idx_item);
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
+        js_microtask_flush();
     }
     return ItemNull;
 }
@@ -3694,6 +3697,180 @@ extern "C" Item js_promise_with_resolvers(void) {
     js_property_set(result, k_resolve, resolve_fn);
     js_property_set(result, k_reject, reject_fn);
     return result;
+}
+
+// Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
+extern "C" Item js_await_sync(Item value) {
+    // If not a promise, return value as-is (like awaiting a non-thenable)
+    JsPromise* p = js_get_promise(value);
+    if (!p) return value;
+
+    if (p->state == JS_PROMISE_FULFILLED) {
+        return p->result;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        // Rejected promise: throw the rejection reason
+        js_throw_value(p->result);
+        return ItemNull;
+    }
+    // Pending promise — synchronous fast-path cannot handle this
+    log_debug("js: await_sync: promise still pending (no async state machine yet)");
+    return make_js_undefined();
+}
+
+// ============================================================
+// Phase 6: Async/Await Full State Machine Runtime
+// ============================================================
+
+// Async context: tracks a running async function's state machine
+struct JsAsyncContext {
+    void* state_fn;      // pointer to async_sm_<name> state machine function
+    Item* env;           // env array (captures + params + locals)
+    int env_size;
+    int state;           // current resume state
+    int promise_idx;     // index into js_promises[] for the async function's result promise
+};
+
+#define JS_MAX_ASYNC_CONTEXTS 256
+static JsAsyncContext js_async_contexts[JS_MAX_ASYNC_CONTEXTS];
+static int js_async_context_count = 0;
+
+// Cached resolved value from js_async_must_suspend (fast-path)
+static Item js_async_resolved_value;
+
+// Check if an awaited value requires suspension (pending promise)
+// Returns: 1 = pending (must suspend), 0 = resolved/rejected/non-promise
+// For resolved/non-promise: caches result in js_async_resolved_value
+// For rejected: calls js_throw_value (exception mechanism handles it)
+extern "C" int64_t js_async_must_suspend(Item value) {
+    JsPromise* p = js_get_promise(value);
+    if (!p) {
+        js_async_resolved_value = value;
+        return 0;
+    }
+    if (p->state == JS_PROMISE_FULFILLED) {
+        js_async_resolved_value = p->result;
+        return 0;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        js_throw_value(p->result);
+        js_async_resolved_value = ItemNull;
+        return 0;
+    }
+    // Pending — must suspend
+    return 1;
+}
+
+// Get the cached resolved value after js_async_must_suspend returned 0
+extern "C" Item js_async_get_resolved(void) {
+    return js_async_resolved_value;
+}
+
+// Forward declarations for async callbacks
+static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value);
+static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
+
+// Core async state machine driver: calls the state machine and handles results
+static void js_async_drive(int ctx_idx, Item input, int64_t state) {
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    typedef Item (*AsyncSmFn)(Item*, Item, int64_t);
+    Item result = ((AsyncSmFn)ctx->state_fn)(ctx->env, input, state);
+
+    // Parse result: [value, next_state]
+    if (get_type_id(result) != LMD_TYPE_ARRAY) {
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, result);
+        return;
+    }
+    Array* arr = result.array;
+    if (arr->length < 2) {
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, ItemNull);
+        return;
+    }
+    Item value = arr->items[0];
+    int64_t next_state = it2i(arr->items[1]);
+
+    if (next_state == -1) {
+        // Done — fulfill the async function's promise
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_FULFILLED, value);
+        js_microtask_flush();
+    } else if (next_state == -2) {
+        // Rejected — reject the async function's promise
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value);
+        js_microtask_flush();
+    } else {
+        // Suspended on pending promise — register resume/reject callbacks
+        ctx->state = next_state;
+
+        // Create bound resume callback: js_async_resume_handler(ctx_idx, resolved_val)
+        Item resume_fn = js_new_function((void*)js_async_resume_handler, 2);
+        Item idx_item = (Item){.item = i2it(ctx_idx)};
+        Item bound_resume = js_bind_function(resume_fn, ItemNull, &idx_item, 1);
+
+        // Create bound reject callback: js_async_reject_handler(ctx_idx, reason)
+        Item reject_fn = js_new_function((void*)js_async_reject_handler, 2);
+        Item bound_reject = js_bind_function(reject_fn, ItemNull, &idx_item, 1);
+
+        // Register on the pending promise
+        js_promise_then(value, bound_resume, bound_reject);
+        js_microtask_flush();
+    }
+}
+
+// Callback when an awaited promise resolves — resumes the async state machine
+static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    js_async_drive(ctx_idx, resolved_value, ctx->state);
+    return ItemNull;
+}
+
+// Callback when an awaited promise rejects — re-enter state machine with exception set
+static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    // Set exception so the state machine's try/catch can handle it
+    js_throw_value(reason);
+    // Re-enter the state machine — it will check the exception and jump to catch
+    js_async_drive(ctx_idx, ItemNull, ctx->state);
+    return ItemNull;
+}
+
+// Create an async context: allocates promise, returns context index
+extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size) {
+    if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
+        log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
+        return (Item){.item = i2it(-1)};
+    }
+    int idx = js_async_context_count++;
+    JsAsyncContext* ctx = &js_async_contexts[idx];
+    ctx->state_fn = fn_ptr;
+    ctx->env = env;
+    ctx->env_size = (int)env_size;
+    ctx->state = 0;
+
+    // Create a pending promise for this async function's result
+    JsPromise* p = js_alloc_promise();
+    ctx->promise_idx = (int)(p - js_promises);
+
+    return (Item){.item = i2it(idx)};
+}
+
+// Start execution of an async state machine (initial call at state 0)
+extern "C" Item js_async_start(Item ctx_idx_item) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    js_async_drive(ctx_idx, make_js_undefined(), 0);
+    return ItemNull;
+}
+
+// Get the result promise for an async context
+extern "C" Item js_async_get_promise(Item ctx_idx_item) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    return js_promise_to_item(&js_promises[ctx->promise_idx]);
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {

@@ -1455,8 +1455,18 @@ extern "C" Item py_exception_get_type(Item exception) {
     if (tid == LMD_TYPE_STRING) {
         return exception;
     }
-    // for exception objects (Maps created by py_new_exception), get the "type" attribute
-    return py_getattr(exception, (Item){.item = s2it(heap_create_name("type"))});
+    // for exception objects created by py_new_exception, get the "type" attribute
+    Item type_attr = py_getattr(exception, (Item){.item = s2it(heap_create_name("type"))});
+    if (get_type_id(type_attr) != LMD_TYPE_NULL) {
+        return type_attr;
+    }
+    // for class instances (e.g. ValueError("msg")), use __class__.__name__
+    Item cls = py_getattr(exception, (Item){.item = s2it(heap_create_name("__class__"))});
+    if (get_type_id(cls) != LMD_TYPE_NULL) {
+        Item name = py_getattr(cls, (Item){.item = s2it(heap_create_name("__name__"))});
+        if (get_type_id(name) != LMD_TYPE_NULL) return name;
+    }
+    return ItemNull;
 }
 
 extern "C" Item py_builtin_open(Item path_item, Item mode_item) {
@@ -1723,6 +1733,43 @@ extern "C" Item py_new_exception(Item type_name, Item message) {
     py_setattr(obj, (Item){.item = s2it(heap_create_name("type"))}, type_name);
     py_setattr(obj, (Item){.item = s2it(heap_create_name("message"))}, message);
     return obj;
+}
+
+// ============================================================================
+// Context manager protocol (__enter__ / __exit__)
+// ============================================================================
+
+extern "C" Item py_context_enter(Item mgr) {
+    Item enter_name = {.item = s2it(heap_create_name("__enter__"))};
+    Item enter = py_getattr(mgr, enter_name);
+    if (get_type_id(enter) == LMD_TYPE_NULL) {
+        // duck-type: no __enter__ — return the object itself
+        return mgr;
+    }
+    return py_call_function(enter, NULL, 0);
+}
+
+extern "C" Item py_context_exit(Item mgr, Item exc_type, Item exc_val, Item exc_tb) {
+    Item exit_name = {.item = s2it(heap_create_name("__exit__"))};
+    Item exit_fn = py_getattr(mgr, exit_name);
+    if (get_type_id(exit_fn) == LMD_TYPE_NULL) {
+        // duck-type: no __exit__ — act as if it returned False (don't suppress)
+        return (Item){.item = b2it(false)};
+    }
+    Item args[3] = { exc_type, exc_val, exc_tb };
+    return py_call_function(exit_fn, args, 3);
+}
+
+// Resolve an identifier that wasn't found in local/module scope.
+// Checks builtin classes (ValueError, RuntimeError, etc.) and module vars by name.
+extern "C" Item py_resolve_name_item(Item name_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return ItemNull;
+    String* s = it2s(name_item);
+    if (!s) return ItemNull;
+    // check builtin classes
+    Item cls = py_get_builtin_class(s->chars);
+    if (get_type_id(cls) != LMD_TYPE_NULL) return cls;
+    return ItemNull;
 }
 
 // ============================================================================

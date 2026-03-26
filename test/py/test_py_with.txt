@@ -1,0 +1,25 @@
+open db
+using db
+True
+close db
+False
+log start
+logging
+log end
+suppressed exception
+after suppressed exception
+__exit__ called
+exception propagated: True
+enter outer
+enter inner
+both open
+1
+1
+exit inner
+exit outer
+42
+ext enter
+base enter tag1
+in extended tag1
+ext exit
+base exit tag1

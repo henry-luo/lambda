@@ -1179,6 +1179,14 @@ JitImport jit_runtime_imports[] = {
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers
     {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
+    // Phase 5: Async/Await sync fast path
+    {"js_await_sync", FPTR(js_await_sync)},
+    // Phase 6: Async state machine runtime
+    {"js_async_must_suspend", FPTR(js_async_must_suspend)},
+    {"js_async_get_resolved", FPTR(js_async_get_resolved)},
+    {"js_async_context_create", FPTR(js_async_context_create)},
+    {"js_async_start", FPTR(js_async_start)},
+    {"js_async_get_promise", FPTR(js_async_get_promise)},
     // Phase 3: TextEncoder / TextDecoder
     {"js_text_encoder_new", FPTR(js_text_encoder_new)},
     {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
@@ -1276,6 +1284,10 @@ JitImport jit_runtime_imports[] = {
     {"py_check_exception", FPTR(py_check_exception)},
     {"py_clear_exception", FPTR(py_clear_exception)},
     {"py_new_exception", FPTR(py_new_exception)},
+    // context manager protocol
+    {"py_context_enter", FPTR(py_context_enter)},
+    {"py_context_exit", FPTR(py_context_exit)},
+    {"py_resolve_name_item", FPTR(py_resolve_name_item)},
     // module vars
     {"py_set_module_var", FPTR(py_set_module_var)},
     {"py_get_module_var", FPTR(py_get_module_var)},

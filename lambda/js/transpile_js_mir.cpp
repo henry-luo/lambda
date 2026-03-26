@@ -255,6 +255,7 @@ struct JsMirTranspiler {
 
     // v15: Generator state machine
     bool in_generator;               // currently emitting a generator state machine body
+    bool in_async;                   // currently emitting an async function body (Phase 5)
     MIR_reg_t gen_env_reg;           // register for env parameter (Item*)
     MIR_reg_t gen_input_reg;         // register for input parameter (Item)
     MIR_reg_t gen_state_reg;         // register for state parameter (int64_t)
@@ -635,6 +636,161 @@ static int jm_count_yields(JsAstNode* node) {
     case JS_AST_NODE_LABELED_STATEMENT: {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         return jm_count_yields(ls->body);
+    }
+    default:
+        return 0;
+    }
+}
+
+// Phase 6: Count await expressions in an async function body (mirrors jm_count_yields)
+static int jm_count_awaits(JsAstNode* node) {
+    if (!node) return 0;
+    switch (node->node_type) {
+    case JS_AST_NODE_AWAIT_EXPRESSION: {
+        JsAwaitNode* a = (JsAwaitNode*)node;
+        return 1 + jm_count_awaits(a->argument);
+    }
+    // Don't count awaits inside nested functions
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        return 0;
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        int count = 0;
+        JsAstNode* s = blk->statements;
+        while (s) { count += jm_count_awaits(s); s = s->next; }
+        return count;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_count_awaits(es->expression);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
+        int count = 0;
+        JsAstNode* d = v->declarations;
+        while (d) { count += jm_count_awaits(d); d = d->next; }
+        return count;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
+        return jm_count_awaits(d->init);
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* r = (JsReturnNode*)node;
+        return jm_count_awaits(r->argument);
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_count_awaits(ifn->test) + jm_count_awaits(ifn->consequent) + jm_count_awaits(ifn->alternate);
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        return jm_count_awaits(w->test) + jm_count_awaits(w->body);
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        return jm_count_awaits(dw->body) + jm_count_awaits(dw->test);
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        return jm_count_awaits(f->init) + jm_count_awaits(f->test) + jm_count_awaits(f->update) + jm_count_awaits(f->body);
+    }
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT: {
+        JsForOfNode* fo = (JsForOfNode*)node;
+        return jm_count_awaits(fo->right) + jm_count_awaits(fo->body);
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        int count = jm_count_awaits(sw->discriminant);
+        JsAstNode* c = sw->cases;
+        while (c) { count += jm_count_awaits(c); c = c->next; }
+        return count;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        int count = jm_count_awaits(sc->test);
+        JsAstNode* s = sc->consequent;
+        while (s) { count += jm_count_awaits(s); s = s->next; }
+        return count;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        return jm_count_awaits(t->block) + jm_count_awaits(t->handler) + jm_count_awaits(t->finalizer);
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        return jm_count_awaits(cc->body);
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_count_awaits(bin->left) + jm_count_awaits(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_count_awaits(un->operand);
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* a = (JsAssignmentNode*)node;
+        return jm_count_awaits(a->left) + jm_count_awaits(a->right);
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        int count = jm_count_awaits(call->callee);
+        JsAstNode* arg = call->arguments;
+        while (arg) { count += jm_count_awaits(arg); arg = arg->next; }
+        return count;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* c = (JsConditionalNode*)node;
+        return jm_count_awaits(c->test) + jm_count_awaits(c->consequent) + jm_count_awaits(c->alternate);
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* m = (JsMemberNode*)node;
+        return jm_count_awaits(m->object) + jm_count_awaits(m->property);
+    }
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
+        int count = 0;
+        JsAstNode* e = tl->expressions;
+        while (e) { count += jm_count_awaits(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* ae = (JsArrayNode*)node;
+        int count = 0;
+        JsAstNode* e = ae->elements;
+        while (e) { count += jm_count_awaits(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* oe = (JsObjectNode*)node;
+        int count = 0;
+        JsAstNode* p = oe->properties;
+        while (p) { count += jm_count_awaits(p); p = p->next; }
+        return count;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        return jm_count_awaits(prop->value);
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        return jm_count_awaits(sp->argument);
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        int count = 0;
+        JsAstNode* e = seq->expressions;
+        while (e) { count += jm_count_awaits(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+        return jm_count_awaits(ls->body);
     }
     default:
         return 0;
@@ -8105,14 +8261,98 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return val;
     }
     case JS_AST_NODE_AWAIT_EXPRESSION: {
-        // v14: await expr
-        // For synchronous promises, await unwraps the resolved value.
-        // For async integration, this will be expanded in the state machine transform.
         JsAwaitNode* await_node = (JsAwaitNode*)expr;
         MIR_reg_t promise_val = jm_transpile_box_item(mt, await_node->argument);
-        // Call js_promise_then to get the resolved value synchronously
-        // For v14 initial pass, await on a resolved promise returns the value directly
-        return promise_val;
+
+        // Phase 6: Async state machine — conditional suspend/resume
+        if (mt->in_generator && mt->in_async) {
+            int next_state = ++mt->gen_yield_index;
+
+            MIR_label_t suspend_label = jm_new_label(mt);
+            MIR_label_t after_await_label = jm_new_label(mt);
+
+            // Check if the awaited value is a pending promise
+            MIR_reg_t must_suspend = jm_call_1(mt, "js_async_must_suspend", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+
+            // Check for exception (rejected promise sets exception flag, returns 0)
+            if (mt->try_ctx_depth > 0) {
+                MIR_reg_t exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[mt->try_ctx_depth - 1].catch_label),
+                    MIR_new_reg_op(mt->ctx, exc)));
+            }
+
+            // If pending, jump to suspend path
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, suspend_label),
+                MIR_new_reg_op(mt->ctx, must_suspend)));
+
+            // Fast path: resolved immediately — get cached value
+            MIR_reg_t await_result = jm_new_reg(mt, "await_res", MIR_T_I64);
+            MIR_reg_t fast_val = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, await_result),
+                MIR_new_reg_op(mt->ctx, fast_val)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, after_await_label)));
+
+            // Suspend path: save locals, return [promise, next_state]
+            jm_emit_label(mt, suspend_label);
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter = 0; void* item;
+                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, e->var.reg)));
+                    }
+                }
+            }
+            MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, suspend_result)));
+
+            // Resume label: entered when the pending promise resolves
+            jm_emit_label(mt, mt->gen_state_labels[next_state]);
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter = 0; void* item;
+                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    }
+                }
+            }
+            // Resume value comes from gen_input register (the resolved value)
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, await_result),
+                MIR_new_reg_op(mt->ctx, mt->gen_input_reg)));
+
+            // Check for exception on resume (rejection case)
+            if (mt->try_ctx_depth > 0) {
+                MIR_reg_t resume_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, mt->try_ctx_stack[mt->try_ctx_depth - 1].catch_label),
+                    MIR_new_reg_op(mt->ctx, resume_exc)));
+            }
+
+            jm_emit_label(mt, after_await_label);
+            return await_result;
+        }
+
+        // Phase 5: Synchronous fast path (non-state-machine async)
+        MIR_reg_t result = jm_call_1(mt, "js_await_sync", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+        return result;
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         // Class expression: var X = class Y {}
@@ -9898,6 +10138,12 @@ static void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         return;
     }
 
+    // Phase 5: In async function, wrap return value in Promise.resolve()
+    if (mt->in_async) {
+        val = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    }
+
     // If inside a try block, delay the return and jump to finally/end
     if (mt->try_ctx_depth > 0) {
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
@@ -10794,6 +11040,265 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             sm_name, yield_count, gen_env_total_slots);
     }
 
+    // --- Phase 6: Generate async state machine function if is_async with awaits ---
+    if (fn->is_async && !fn->is_generator) {
+        int await_count = jm_count_awaits(fn->body);
+        if (await_count > 0) {
+            if (await_count > 63) await_count = 63;  // safety cap matching gen_state_labels size
+
+            // Collect local variable names for env slot assignment
+            struct hashmap* async_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+                jm_name_hash, jm_name_cmp, NULL, NULL);
+            if (fn->body) jm_collect_body_locals(fn->body, async_locals);
+
+            int local_count = 0;
+            {
+                size_t iter = 0; void* item;
+                while (hashmap_iter(async_locals, &iter, &item)) local_count++;
+            }
+
+            // Env layout: [captures... | params... | locals...]
+            int cap_offset = 0;
+            int param_offset_sm = fc->capture_count;
+            int local_offset = fc->capture_count + param_count;
+            gen_env_total_slots = local_offset + local_count;
+
+            // Create state machine function: async_sm_<name>(Item* env, Item input, int64_t state) -> Item
+            char sm_name[160];
+            snprintf(sm_name, sizeof(sm_name), "async_sm_%s_%d", fc->name, mt->label_counter++);
+
+            MIR_var_t sm_params[3] = {
+                {MIR_T_I64, "gen_env", 0},
+                {MIR_T_I64, "gen_input", 0},
+                {MIR_T_I64, "gen_state", 0}
+            };
+            MIR_type_t sm_ret = MIR_T_I64;
+            gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 3, sm_params);
+            MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
+            jm_register_local_func(mt, sm_name, gen_sm_func_item);
+
+            // Save transpiler state
+            MIR_item_t saved_item_sm = mt->current_func_item;
+            MIR_func_t saved_func_sm = mt->current_func;
+            int saved_scope_depth_sm = mt->scope_depth;
+            int saved_loop_depth_sm = mt->loop_depth;
+            bool saved_in_native_sm = mt->in_native_func;
+            JsFuncCollected* saved_fc_sm = mt->current_fc;
+            JsClassEntry* saved_class_sm = mt->current_class;
+            MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
+            int saved_scope_env_slot_sm = mt->scope_env_slot_count;
+            int saved_func_index_sm = mt->current_func_index;
+            bool saved_in_generator = mt->in_generator;
+            bool saved_in_async = mt->in_async;
+
+            mt->current_func_item = gen_sm_func_item;
+            mt->current_func = sm_func;
+            mt->loop_depth = 0;
+            mt->pending_label_name = NULL;
+            mt->pending_label_len = 0;
+            mt->in_native_func = false;
+            mt->current_fc = fc;
+            mt->current_class = NULL;
+            mt->scope_env_reg = 0;
+            mt->scope_env_slot_count = 0;
+            mt->current_func_index = (int)(fc - mt->func_entries);
+
+            // Set both flags: in_generator reuses gen_* infrastructure, in_async for await handling
+            mt->in_generator = true;
+            mt->in_async = true;
+            mt->gen_yield_index = 0;
+            mt->gen_yield_count = await_count;
+            mt->gen_capture_offset = cap_offset;
+            mt->gen_param_offset = param_offset_sm;
+            mt->gen_local_offset = local_offset;
+            mt->gen_local_slot_count = gen_env_total_slots;
+
+            jm_push_scope(mt);
+
+            mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
+            mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
+            mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
+
+            // Create state labels (one per await + one for initial entry)
+            for (int si = 0; si <= await_count; si++) {
+                mt->gen_state_labels[si] = jm_new_label(mt);
+            }
+            mt->gen_done_label = jm_new_label(mt);
+
+            // Emit state dispatch: switch on state
+            for (int si = 0; si <= await_count; si++) {
+                MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQS, MIR_new_reg_op(mt->ctx, cmp),
+                    MIR_new_reg_op(mt->ctx, mt->gen_state_reg),
+                    MIR_new_int_op(mt->ctx, (int64_t)si)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
+                    MIR_new_reg_op(mt->ctx, cmp)));
+            }
+            // Unknown state → done
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, mt->gen_done_label)));
+
+            // State 0 label (initial entry)
+            jm_emit_label(mt, mt->gen_state_labels[0]);
+
+            // Load parameters from env
+            JsAstNode* sm_param_node = fn->params;
+            for (int i = 0; i < param_count; i++) {
+                if (sm_param_node && sm_param_node->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* pid = (JsIdentifierNode*)sm_param_node;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                    MIR_reg_t preg = jm_new_reg(mt, vname, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, preg),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                            (param_offset_sm + i) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    JsVarScopeEntry entry;
+                    memset(&entry, 0, sizeof(entry));
+                    snprintf(entry.name, sizeof(entry.name), "%s", vname);
+                    entry.var.reg = preg;
+                    entry.var.from_env = true;
+                    entry.var.env_slot = param_offset_sm + i;
+                    entry.var.env_reg = mt->gen_env_reg;
+                    entry.var.typed_array_type = -1;
+                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                }
+                sm_param_node = sm_param_node ? sm_param_node->next : NULL;
+            }
+
+            // Load captured variables from env
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cap_reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
+                entry.var.reg = cap_reg;
+                entry.var.from_env = true;
+                entry.var.env_slot = cap_offset + ci;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+
+            // Hoist var declarations with env slots
+            if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                int li = 0;
+                size_t liter = 0; void* litem;
+                while (hashmap_iter(async_locals, &liter, &litem)) {
+                    JsNameSetEntry* ns = (JsNameSetEntry*)litem;
+                    if (!jm_find_var(mt, ns->name)) {
+                        MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, vr),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                        JsVarScopeEntry entry;
+                        memset(&entry, 0, sizeof(entry));
+                        snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
+                        entry.var.reg = vr;
+                        entry.var.from_env = true;
+                        entry.var.env_slot = local_offset + li;
+                        entry.var.env_reg = mt->gen_env_reg;
+                        entry.var.typed_array_type = -1;
+                        hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                        li++;
+                    }
+                }
+            }
+
+            // Push implicit try context for async exception handling
+            MIR_label_t async_sm_catch_label = jm_new_label(mt);
+            if (mt->try_ctx_depth < 16) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = async_sm_catch_label;
+                tc->finally_label = 0;
+                tc->end_label = mt->gen_done_label;
+                tc->return_val_reg = jm_new_reg(mt, "_asm_ret", MIR_T_I64);
+                tc->has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
+                tc->has_catch = true;
+                tc->has_finally = false;
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+
+            // Transpile async body with exception checking after each statement
+            if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                JsBlockNode* blk = (JsBlockNode*)fn->body;
+                JsAstNode* s = blk->statements;
+                while (s) {
+                    jm_transpile_statement(mt, s);
+                    // Check for exception after each statement
+                    MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, async_sm_catch_label),
+                        MIR_new_reg_op(mt->ctx, exc_check)));
+                    s = s->next;
+                }
+            } else if (fn->body) {
+                // Arrow-body async: evaluate expression, return [result, -1]
+                MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
+                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+            }
+
+            // Pop try context
+            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+
+            // Done label: implicit return → [undefined, -1] (fulfilled)
+            jm_emit_label(mt, mt->gen_done_label);
+            {
+                MIR_reg_t undef_val = jm_emit_null(mt);
+                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+            }
+
+            // Catch label: exception → [error, -2] (rejected)
+            jm_emit_label(mt, async_sm_catch_label);
+            {
+                MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                MIR_reg_t reject_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-2));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, reject_result)));
+            }
+
+        async_sm_finish:
+            jm_pop_scope(mt);
+            MIR_finish_func(mt->ctx);
+
+            // Restore transpiler state
+            mt->current_func_item = saved_item_sm;
+            mt->current_func = saved_func_sm;
+            mt->scope_depth = saved_scope_depth_sm;
+            mt->loop_depth = saved_loop_depth_sm;
+            mt->in_native_func = saved_in_native_sm;
+            mt->current_fc = saved_fc_sm;
+            mt->current_class = saved_class_sm;
+            mt->scope_env_reg = saved_scope_env_reg_sm;
+            mt->scope_env_slot_count = saved_scope_env_slot_sm;
+            mt->current_func_index = saved_func_index_sm;
+            mt->in_generator = saved_in_generator;
+            mt->in_async = saved_in_async;
+
+            hashmap_free(async_locals);
+
+            log_debug("js-mir P6: generated async state machine %s (awaits: %d, env slots: %d)",
+                sm_name, await_count, gen_env_total_slots);
+        }
+    }
+
     // --- Generate boxed version (original or wrapper) ---
     int total_params = param_count + (has_captures ? 1 : 0);
     MIR_var_t* params = (MIR_var_t*)alloca(total_params * sizeof(MIR_var_t));
@@ -10973,6 +11478,66 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         goto finish_boxed;
     }
 
+    // --- Phase 6: Async wrapper (creates async context + promise instead of running body) ---
+    if (fn->is_async && gen_sm_func_item) {
+        // Allocate env array for the async state machine
+        MIR_reg_t async_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+
+        // Store captured variables into env[0..capture_count-1]
+        if (has_captures) {
+            MIR_reg_t outer_env = MIR_reg(mt->ctx, "_js_env", func);
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                MIR_reg_t cap_val = jm_new_reg(mt, "acap", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cap_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, src_slot * (int)sizeof(uint64_t), outer_env, 0, 1)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), async_env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, cap_val)));
+            }
+        }
+
+        // Store parameters into env[capture_count..capture_count+param_count-1]
+        JsAstNode* ap_node = fn->params;
+        for (int i = 0; i < param_count; i++) {
+            char vname[128] = "_js_p";
+            if (ap_node && ap_node->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)ap_node;
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+            } else {
+                snprintf(vname, sizeof(vname), "_js_p%d", i);
+            }
+            MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
+            int env_slot = fc->capture_count + i;
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, env_slot * (int)sizeof(uint64_t), async_env, 0, 1),
+                MIR_new_reg_op(mt->ctx, preg)));
+            ap_node = ap_node ? ap_node->next : NULL;
+        }
+
+        // Create async context: js_async_context_create(sm_fn_ptr, env, env_size) → ctx_idx
+        MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "asmfn", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, sm_fn_ptr),
+            MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
+        MIR_reg_t ctx_idx = jm_call_3(mt, "js_async_context_create", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, async_env),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+
+        // Start execution (runs synchronously until suspend or completion)
+        jm_call_1(mt, "js_async_start", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctx_idx));
+
+        // Return the async function's promise
+        MIR_reg_t promise = jm_call_1(mt, "js_async_get_promise", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ctx_idx));
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, promise)));
+        goto finish_boxed;
+    }
+
     // --- Full boxed version (no native available) ---
 
     // For closures: get env register and load captured variables from env slots
@@ -11101,21 +11666,115 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // Phase 5: Set in_async flag for async function bodies
+        bool saved_in_async = mt->in_async;
+        if (fn->is_async) {
+            mt->in_async = true;
+        }
+
+        // Phase 5: For async functions, wrap body in implicit try/catch
+        // so exceptions become Promise.reject(error) instead of propagating
+        MIR_label_t async_catch_label = 0;
+        MIR_label_t async_end_label = 0;
+        MIR_reg_t async_return_val_reg = 0;
+        MIR_reg_t async_has_return_reg = 0;
+        if (fn->is_async) {
+            async_catch_label = jm_new_label(mt);
+            async_end_label = jm_new_label(mt);
+            // Push try context so that exceptions in the body jump to catch
+            if (mt->try_ctx_depth < 16) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = async_catch_label;
+                tc->finally_label = 0;
+                tc->end_label = async_end_label;
+                tc->return_val_reg = jm_new_reg(mt, "_async_ret", MIR_T_I64);
+                tc->has_return_reg = jm_new_reg(mt, "_async_has_ret", MIR_T_I64);
+                tc->has_catch = true;
+                tc->has_finally = false;
+                // Save register refs before try context could be popped
+                async_return_val_reg = tc->return_val_reg;
+                async_has_return_reg = tc->has_return_reg;
+                // Initialize return tracking
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+        }
+
         // Transpile body
         if (fn->body) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 JsAstNode* s = blk->statements;
-                while (s) { jm_transpile_statement(mt, s); s = s->next; }
+                while (s) {
+                    jm_transpile_statement(mt, s);
+                    // Phase 5: After each statement in async body, check for exception
+                    if (fn->is_async && async_catch_label) {
+                        MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, async_catch_label),
+                            MIR_new_reg_op(mt->ctx, exc_check)));
+                    }
+                    s = s->next;
+                }
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
+                if (fn->is_async) {
+                    val = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
+                if (fn->is_async && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                mt->in_async = saved_in_async;
                 goto finish_boxed;
             }
         }
 
-        // Implicit return ITEM_NULL
-        {
+        // Phase 5: Async implicit return → Promise.resolve(undefined)
+        if (fn->is_async) {
+            // Normal exit: jump past catch block
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, async_end_label)));
+
+            // Catch block: convert exception to Promise.reject(error)
+            jm_emit_label(mt, async_catch_label);
+            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+            {
+                MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
+            }
+
+            // Normal end label: check if delayed return, otherwise return Promise.resolve(undefined)
+            jm_emit_label(mt, async_end_label);
+            {
+                // Check if a return statement was hit (stored in async_has_return_reg)
+                MIR_label_t async_no_return_label = jm_new_label(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, async_no_return_label),
+                    MIR_new_reg_op(mt->ctx, async_has_return_reg)));
+                // Has return: value already wrapped in Promise.resolve by return handler
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_reg_op(mt->ctx, async_return_val_reg)));
+
+                // No explicit return: return Promise.resolve(undefined)
+                jm_emit_label(mt, async_no_return_label);
+                MIR_reg_t undef_val = jm_new_reg(mt, "_async_undef", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, undef_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                MIR_reg_t resolved = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, resolved)));
+            }
+
+            mt->in_async = saved_in_async;
+        } else {
+            // Implicit return ITEM_NULL
             MIR_reg_t null_val = jm_emit_null(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, null_val)));
         }
