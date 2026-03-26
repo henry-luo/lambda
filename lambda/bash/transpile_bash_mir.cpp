@@ -130,6 +130,7 @@ static int bm_user_func_cmp(const void *a, const void *b, void *udata) {
 static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node);
 static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node);
 static MIR_op_t bm_transpile_word(BashMirTranspiler* mt, BashAstNode* node);
+static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node);
 static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd);
 static void bm_transpile_if(BashMirTranspiler* mt, BashIfNode* node);
 static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node);
@@ -307,7 +308,7 @@ static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_na
         int i = 0;
         BashAstNode* arg = cmd->args;
         while (arg && i < argc) {
-            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
@@ -843,12 +844,76 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
 }
 
+// helper: check if a word contains unquoted glob characters (*, ?, [)
+static bool word_has_glob(const char* s, int len) {
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '*' || s[i] == '?') return true;
+        if (s[i] == '[') {
+            // look for closing ]
+            for (int j = i + 1; j < len; j++) {
+                if (s[j] == ']') return true;
+            }
+        }
+    }
+    return false;
+}
+
+// helper: check if a word is a brace expansion {a,b,c} or {1..5}
+static bool word_is_brace(const char* s, int len) {
+    if (len < 3 || s[0] != '{' || s[len - 1] != '}') return false;
+    int depth = 0;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '{') depth++;
+        else if (s[i] == '}') depth--;
+        else if ((s[i] == ',' && depth == 1) ||
+                 (s[i] == '.' && i + 1 < len && s[i + 1] == '.' && depth == 1))
+            return true;
+    }
+    return false;
+}
+
 static MIR_op_t bm_transpile_word(BashMirTranspiler* mt, BashAstNode* node) {
     BashWordNode* word = (BashWordNode*)node;
     if (word->text) {
-        return bm_emit_string_literal(mt, word->text->chars, word->text->len);
+        const char* chars = word->text->chars;
+        int len = word->text->len;
+
+        // tilde expansion: ~ → $HOME, ~/path → $HOME/path
+        if (len >= 1 && chars[0] == '~' &&
+            (len == 1 || chars[1] == '/')) {
+            MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_tilde", word_val);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        // brace and glob expansion are handled at command arg level only
+        // (not here, to avoid expanding patterns in ${var#pat} contexts)
+        return bm_emit_string_literal(mt, chars, len);
     }
     return bm_emit_string_literal(mt, "", 0);
+}
+
+// transpile a word with command-argument-level expansions (brace, glob)
+static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
+    if (node->node_type == BASH_AST_NODE_WORD) {
+        BashWordNode* word = (BashWordNode*)node;
+        if (word->text) {
+            const char* chars = word->text->chars;
+            int len = word->text->len;
+            // brace expansion: {a,b,c} → "a b c", {1..5} → "1 2 3 4 5"
+            if (word_is_brace(chars, len)) {
+                MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
+                MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_brace", word_val);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
+            // glob expansion: *.txt etc.
+            if (word_has_glob(chars, len)) {
+                MIR_op_t word_val = bm_emit_string_literal(mt, chars, len);
+                MIR_reg_t result = bm_emit_call_1(mt, "bash_glob_expand", word_val);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
+        }
+    }
+    return bm_transpile_node(mt, node);
 }
 
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node) {
@@ -1030,7 +1095,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         int i = 0;
         BashAstNode* arg = cmd->args;
         while (arg && i < argc) {
-            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
@@ -1061,7 +1126,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             int i = 0;
             BashAstNode* arg = cmd->args->next;
             while (arg && i < extra_argc) {
-                MIR_op_t arg_val = bm_transpile_node(mt, arg);
+                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
                 MIR_append_insn(mt->ctx, mt->current_func_item,
                     MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
@@ -1204,7 +1269,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             int i = 0;
             BashAstNode* arg = cmd->args;
             while (arg && i < argc) {
-                MIR_op_t arg_val = bm_transpile_node(mt, arg);
+                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
                 MIR_append_insn(mt->ctx, mt->current_func_item,
                     MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
@@ -1265,7 +1330,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         int i = 1;
         BashAstNode* arg = cmd->args;
         while (arg && i < total_argc) {
-            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
@@ -1775,6 +1840,54 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARITH_BINARY: {
         BashArithBinaryNode* bin = (BashArithBinaryNode*)node;
+
+        // short-circuit for logical && and ||
+        if (bin->op == BASH_OP_LOGICAL_AND || bin->op == BASH_OP_LOGICAL_OR) {
+            // result register
+            MIR_reg_t result_reg = bm_new_temp(mt);
+            MIR_label_t skip_label = bm_new_label(mt);
+            MIR_label_t end_label = bm_new_label(mt);
+
+            // evaluate left
+            MIR_op_t left = bm_transpile_arith(mt, bin->left);
+            MIR_reg_t left_int = bm_emit_call_1(mt, "bash_to_int", left);
+            // zero value for comparison
+            MIR_op_t zero = MIR_new_uint_op(mt->ctx, i2it(0));
+
+            if (bin->op == BASH_OP_LOGICAL_AND) {
+                // &&: if left == 0, result is 0 (skip right)
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), zero));
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, end_label),
+                                 MIR_new_reg_op(mt->ctx, left_int), zero));
+            } else {
+                // ||: if left != 0, result is 1 (skip right)
+                MIR_op_t one = MIR_new_uint_op(mt->ctx, i2it(1));
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), one));
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, end_label),
+                                 MIR_new_reg_op(mt->ctx, left_int), zero));
+            }
+
+            // evaluate right
+            MIR_op_t right = bm_transpile_arith(mt, bin->right);
+            MIR_reg_t right_int = bm_emit_call_1(mt, "bash_to_int", right);
+            // result = (right != 0) ? 1 : 0
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), zero));
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, end_label),
+                             MIR_new_reg_op(mt->ctx, right_int), zero));
+            MIR_op_t one = MIR_new_uint_op(mt->ctx, i2it(1));
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), one));
+
+            MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
+            return MIR_new_reg_op(mt->ctx, result_reg);
+        }
+
         MIR_op_t left = bm_transpile_arith(mt, bin->left);
         MIR_op_t right = bm_transpile_arith(mt, bin->right);
 
@@ -1798,8 +1911,6 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
         case BASH_OP_LE: func_name = "bash_arith_le"; break;
         case BASH_OP_GT: func_name = "bash_arith_gt"; break;
         case BASH_OP_GE: func_name = "bash_arith_ge"; break;
-        case BASH_OP_LOGICAL_AND: func_name = "bash_arith_eq"; break;  // TODO: short-circuit
-        case BASH_OP_LOGICAL_OR: func_name = "bash_arith_eq"; break;   // TODO: short-circuit
         default: func_name = "bash_add"; break;
         }
 

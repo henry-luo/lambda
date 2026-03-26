@@ -805,6 +805,242 @@ extern "C" Item bash_string_concat(Item left, Item right) {
     return (Item){.item = s2it(result)};
 }
 
+// ============================================================================
+// Tilde expansion: ~ → $HOME, ~/path → $HOME/path
+// ============================================================================
+
+#include <pwd.h>
+
+extern "C" Item bash_expand_tilde(Item word) {
+    const char* w = bash_item_to_cstr(word);
+    if (!w || w[0] != '~') return word;
+
+    const char* home = NULL;
+    const char* suffix = w + 1; // after ~
+
+    if (*suffix == '\0' || *suffix == '/') {
+        // ~ or ~/path → use $HOME
+        home = getenv("HOME");
+        if (!home) {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw) home = pw->pw_dir;
+        }
+    } else {
+        // ~user → lookup user's home directory
+        const char* slash = strchr(suffix, '/');
+        char username[256];
+        int ulen = slash ? (int)(slash - suffix) : (int)strlen(suffix);
+        if (ulen >= (int)sizeof(username)) ulen = (int)sizeof(username) - 1;
+        memcpy(username, suffix, ulen);
+        username[ulen] = '\0';
+        struct passwd* pw = getpwnam(username);
+        if (pw) {
+            home = pw->pw_dir;
+            suffix = slash ? slash : suffix + ulen;
+        }
+    }
+
+    if (!home) return word; // can't expand, return literal
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, home);
+    if (*suffix) strbuf_append_str(sb, suffix);
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// ============================================================================
+// Glob expansion: *.txt → array of matching paths
+// ============================================================================
+
+#include <glob.h>
+
+extern "C" Item bash_glob_expand(Item pattern) {
+    const char* pat = bash_item_to_cstr(pattern);
+    if (!pat || !*pat) return pattern;
+
+    glob_t g;
+    int flags = GLOB_NOSORT | GLOB_NOCHECK; // NOCHECK: return pattern if no matches
+    int ret = glob(pat, flags, NULL, &g);
+
+    if (ret != 0) {
+        globfree(&g);
+        return pattern; // return pattern literally on error
+    }
+
+    if (g.gl_pathc == 1) {
+        // single match (or no match with NOCHECK) — return as string
+        String* result = heap_create_name(g.gl_pathv[0]);
+        globfree(&g);
+        return (Item){.item = s2it(result)};
+    }
+
+    // multiple matches — build space-separated string for echo, or array for for-in
+    // for command args, we need to return them as a space-separated string
+    // that the builtin will print. A proper implementation would return an array,
+    // but for now echo/printf treat args as individual items.
+    // Return space-separated string for simplicity.
+    StrBuf* sb = strbuf_new();
+    for (size_t i = 0; i < g.gl_pathc; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str(sb, g.gl_pathv[i]);
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    globfree(&g);
+    return (Item){.item = s2it(result)};
+}
+
+// ============================================================================
+// Brace expansion: {a,b,c} → "a b c", {1..5} → "1 2 3 4 5"
+// ============================================================================
+
+extern "C" Item bash_expand_brace(Item word) {
+    const char* w = bash_item_to_cstr(word);
+    if (!w || !*w) return word;
+
+    int len = (int)strlen(w);
+    // must start with { and end with }
+    if (w[0] != '{' || w[len - 1] != '}') return word;
+
+    // extract inside: between { and }
+    const char* inside = w + 1;
+    int ilen = len - 2;
+
+    // check for range: {start..end} or {start..end..step}
+    const char* dotdot = NULL;
+    for (int i = 0; i < ilen - 1; i++) {
+        if (inside[i] == '.' && inside[i + 1] == '.') {
+            dotdot = inside + i;
+            break;
+        }
+    }
+
+    if (dotdot) {
+        // range expansion
+        char start_buf[64], end_buf[64];
+        int start_len = (int)(dotdot - inside);
+        int after_dots = (int)(inside + ilen - (dotdot + 2));
+        if (start_len <= 0 || start_len >= (int)sizeof(start_buf) ||
+            after_dots <= 0 || after_dots >= (int)sizeof(end_buf))
+            return word;
+        memcpy(start_buf, inside, start_len);
+        start_buf[start_len] = '\0';
+        memcpy(end_buf, dotdot + 2, after_dots);
+        end_buf[after_dots] = '\0';
+
+        // check for step: {start..end..step}
+        int step = 1;
+        char* step_dot = strstr(end_buf, "..");
+        if (step_dot) {
+            *step_dot = '\0';
+            step = atoi(step_dot + 2);
+            if (step == 0) step = 1;
+        }
+
+        // numeric range?
+        char* endp1 = NULL;
+        char* endp2 = NULL;
+        long s = strtol(start_buf, &endp1, 10);
+        long e = strtol(end_buf, &endp2, 10);
+
+        if (endp1 && *endp1 == '\0' && endp2 && *endp2 == '\0') {
+            // numeric range: {1..5} or {10..1}
+            // check for zero-padding
+            bool zero_pad = (start_buf[0] == '0' && start_len > 1) ||
+                            (end_buf[0] == '0' && (int)strlen(end_buf) > 1);
+            int pad_width = 0;
+            if (zero_pad) {
+                pad_width = start_len > (int)strlen(end_buf) ? start_len : (int)strlen(end_buf);
+            }
+
+            StrBuf* sb = strbuf_new();
+            if (s <= e) {
+                if (step < 0) step = -step;
+                for (long i = s; i <= e; i += step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    char num[32];
+                    if (zero_pad)
+                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                    else
+                        snprintf(num, sizeof(num), "%ld", i);
+                    strbuf_append_str(sb, num);
+                }
+            } else {
+                if (step < 0) step = -step;
+                for (long i = s; i >= e; i -= step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    char num[32];
+                    if (zero_pad)
+                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                    else
+                        snprintf(num, sizeof(num), "%ld", i);
+                    strbuf_append_str(sb, num);
+                }
+            }
+            String* result = heap_create_name(sb->str, sb->length);
+            strbuf_free(sb);
+            return (Item){.item = s2it(result)};
+        }
+
+        // character range: {a..z}
+        if (start_len == 1 && (int)strlen(end_buf) == 1) {
+            char sc = start_buf[0];
+            char ec = end_buf[0];
+            StrBuf* sb = strbuf_new();
+            if (sc <= ec) {
+                for (char c = sc; c <= ec; c += (char)step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    strbuf_append_char(sb, c);
+                }
+            } else {
+                for (char c = sc; c >= ec; c -= (char)step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    strbuf_append_char(sb, c);
+                }
+            }
+            String* result = heap_create_name(sb->str, sb->length);
+            strbuf_free(sb);
+            return (Item){.item = s2it(result)};
+        }
+
+        return word; // unrecognized range format
+    }
+
+    // comma-separated list: {a,b,c}
+    // check for commas (not inside nested braces)
+    int brace_depth = 0;
+    bool has_comma = false;
+    for (int i = 0; i < ilen; i++) {
+        if (inside[i] == '{') brace_depth++;
+        else if (inside[i] == '}') brace_depth--;
+        else if (inside[i] == ',' && brace_depth == 0) { has_comma = true; break; }
+    }
+
+    if (!has_comma) return word; // no commas, return literal
+
+    StrBuf* sb = strbuf_new();
+    brace_depth = 0;
+    const char* start = inside;
+    for (int i = 0; i <= ilen; i++) {
+        bool at_end = (i == ilen);
+        if (!at_end) {
+            if (inside[i] == '{') { brace_depth++; continue; }
+            if (inside[i] == '}') { brace_depth--; continue; }
+            if (inside[i] != ',' || brace_depth != 0) continue;
+        }
+        // emit this element
+        if (sb->length > 0) strbuf_append_char(sb, ' ');
+        int elem_len = (int)(inside + i - start);
+        if (elem_len > 0) strbuf_append_str_n(sb, start, elem_len);
+        start = inside + i + 1;
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
 extern "C" Item bash_string_substring(Item str, Item offset, Item length) {
     Item s_str = bash_to_string(str);
     String* s = it2s(s_str);

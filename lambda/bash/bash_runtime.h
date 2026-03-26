@@ -220,6 +220,13 @@ Item bash_redirect_append(Item filename, Item content);  // >> file
 Item bash_redirect_read(Item filename);                  // < file
 
 // ========================================================================
+// Expansions (tilde, glob, brace)
+// ========================================================================
+Item bash_expand_tilde(Item word);                       // ~ → $HOME
+Item bash_glob_expand(Item pattern);                     // *.txt → matching paths
+Item bash_expand_brace(Item word);                       // {a,b,c} → "a b c"
+
+// ========================================================================
 // External command execution
 // ========================================================================
 Item bash_exec_external(Item* argv, int argc);           // run system binary via posix_spawn
