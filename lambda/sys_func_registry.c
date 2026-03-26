@@ -1181,6 +1181,12 @@ JitImport jit_runtime_imports[] = {
     {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
     // Phase 5: Async/Await sync fast path
     {"js_await_sync", FPTR(js_await_sync)},
+    // Phase 6: Async state machine runtime
+    {"js_async_must_suspend", FPTR(js_async_must_suspend)},
+    {"js_async_get_resolved", FPTR(js_async_get_resolved)},
+    {"js_async_context_create", FPTR(js_async_context_create)},
+    {"js_async_start", FPTR(js_async_start)},
+    {"js_async_get_promise", FPTR(js_async_get_promise)},
     // Phase 3: TextEncoder / TextDecoder
     {"js_text_encoder_new", FPTR(js_text_encoder_new)},
     {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
@@ -1514,6 +1520,26 @@ JitImport jit_runtime_imports[] = {
     // runtime init/cleanup
     {"bash_runtime_init", FPTR(bash_runtime_init)},
     {"bash_runtime_cleanup", FPTR(bash_runtime_cleanup)},
+    // environment variable integration
+    {"bash_env_import", FPTR(bash_env_import)},
+    {"bash_env_sync_export", FPTR(bash_env_sync_export)},
+    // script sourcing
+    {"bash_source_file", FPTR(bash_source_file)},
+    // runtime function registry
+    {"bash_register_rt_func", FPTR(bash_register_rt_func)},
+    {"bash_call_rt_func", FPTR(bash_call_rt_func)},
+    {"bash_lookup_rt_func", FPTR(bash_lookup_rt_func)},
+    // shell options
+    {"bash_set_option", FPTR(bash_set_option)},
+    {"bash_get_option_errexit", FPTR(bash_get_option_errexit)},
+    {"bash_get_option_nounset", FPTR(bash_get_option_nounset)},
+    {"bash_get_option_xtrace", FPTR(bash_get_option_xtrace)},
+    {"bash_get_option_pipefail", FPTR(bash_get_option_pipefail)},
+    // signal handling / trap (Phase 8)
+    {"bash_trap_set", FPTR(bash_trap_set)},
+    {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
+    {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

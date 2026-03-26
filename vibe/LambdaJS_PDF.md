@@ -22,17 +22,23 @@ Math hyperbolic functions). ES modules are bypassed via bundling.
 implemented (14/14 assertions, 690/690 baseline). `async function` transpiles to
 Promise-returning function with implicit try/catch, `await` synchronously unwraps
 resolved promises, rejected promises propagate via exception mechanism. Async arrow
-functions also supported. The remaining work is Phase 6 (full async state machine for
-pending promises) and Phase 7 (test convergence).
+functions also supported.
+
+**Update (2025-07-26):** Phase 6 complete: full async state machine for pending promises
+(10/10 assertions, 14/14 Phase 5 backward-compatible, 690/690 baseline). Async
+functions with `await` are now transformed into resumable coroutines that suspend on
+pending promises and resume when they resolve. Reuses the generator state machine
+infrastructure (env save/load, state dispatch). The only remaining work is Phase 7
+(test convergence against PDF.js CLI specs).
 
 ### Feasibility Score (Updated)
 
 | Dimension | Score | Notes |
 |-----------|:-----:|-------|
-| **Core parsing (no rendering)** | 9/10 | All critical gaps closed; sync fast-path covers fake-worker mode |
+| **Core parsing (no rendering)** | 9.5/10 | All critical gaps closed; full async/await with pending promise support |
 | **Full library (parse + render)** | 6/10 | Canvas/Worker dependencies still add layers |
 | **Test pass rate potential** | 9/10 | CLI tests (57 specs) are the right target |
-| **Implementation effort** | Low-Medium | Full async state machine is the only remaining feature work |
+| **Implementation effort** | Low | Only test convergence (Phase 7) remains |
 
 ---
 
@@ -83,7 +89,7 @@ with LambdaJS's current synchronous execution model.
 
 ### 3.1 Critical Gaps (Blocking — Must Implement)
 
-#### Gap 1: Async/Await — ⚠️ PARTIALLY CLOSED (Phase 5 sync fast-path)
+#### Gap 1: Async/Await — ✅ CLOSED (Phase 5 sync fast-path + Phase 6 full state machine)
 
 **PDF.js usage:** 100+ `await` expressions across `src/core/`. Async is architecturally
 fundamental — PDF page loading, font resolution, image decoding, and stream operations
@@ -96,35 +102,33 @@ const bytes = await content.asyncGetBytes();
 await Promise.all(promises);
 ```
 
-**LambdaJS status:** ✅ **Synchronous fast-path fully implemented** (Phase 5, 2025-07-21).
-`async function` transpiles to Promise-returning function. `await` calls `js_await_sync()`
-which unwraps resolved promises inline, throws on rejected, and passes through
-non-promise values. Async function bodies are wrapped in implicit try/catch so uncaught
-exceptions become `Promise.reject(error)`. Return values wrapped in `Promise.resolve()`.
-Async arrow functions (including expression bodies) fully supported.
+**LambdaJS status:** ✅ **Fully implemented** (Phase 5 sync fast-path 2025-07-21,
+Phase 6 full state machine 2025-07-26).
 
-**What was implemented (Phase 5):**
-- Runtime: `js_await_sync(Item value)` — unwraps fulfilled promises, throws on rejected,
-  returns non-promises as-is, warns on pending
-- Transpiler: `in_async` flag, `await expr` → `js_await_sync(expr)`,
-  `return val` → `Promise.resolve(val)`, implicit try/catch around async body
-- AST builder: Fixed arrow function async detection (was gated behind `!is_arrow`)
-- 14/14 test assertions pass (basic, resolved/rejected, nested, arrows, Promise.all)
+**Phase 5 (sync fast-path):** `async function` transpiles to Promise-returning function.
+`await` calls `js_await_sync()` which unwraps resolved promises inline, throws on
+rejected, passes through non-promise values. Bodies wrapped in implicit try/catch.
+Return values wrapped in `Promise.resolve()`. Used for async functions with no awaits
+or only immediately-resolved awaits. 14/14 assertions pass.
 
-**Remaining work (Phase 6):**
-- Full state machine transform for truly pending promises (file I/O, chunked loading)
-- Each `await` becomes a yield point; resume when promise resolves
-- Integrate with microtask queue for correct ordering
+**Phase 6 (full state machine):** Async functions containing `await` expressions are
+transformed into resumable coroutines using the generator state machine infrastructure.
+Each `await` is a conditional suspension point — resolved promises continue immediately
+(fast path), pending promises save local state to env, return `[promise, next_state]`,
+and resume when the promise settles via `.then()` callbacks. 10/10 assertions pass.
 
-**Estimated complexity for Phase 6:** MEDIUM-HIGH — Pattern mirrors v15 generator
-state machine (already implemented). The transpiler must transform async functions
-into resumable coroutines, reusing the env-save/load and state-dispatch infrastructure.
+**What was implemented (Phase 6):**
+- Runtime: `JsAsyncContext` struct, `js_async_must_suspend()` (check pending),
+  `js_async_get_resolved()` (fast-path cache), `js_async_context_create()`,
+  `js_async_start()`, `js_async_get_promise()`, `js_async_drive()` (core driver),
+  `js_async_resume_handler()` / `js_async_reject_handler()` (promise callbacks)
+- Transpiler: `jm_count_awaits()`, async state machine generation (mirrors generator
+  SM with implicit try/catch), conditional suspend in await expression handler,
+  async wrapper function (env alloc → context create → start → return promise)
+- Microtask integration: `js_microtask_flush()` in resolve/reject callbacks
+- Rejection handling: re-enters state machine with exception set (enables try/catch)
 
-**Strategy:** Two-phase approach:
-- ✅ **Phase 1 (Synchronous fast-path):** COMPLETE. Covers the majority of PDF.js
-  fake-worker mode operations where data is already loaded in memory.
-- **Phase 2 (Full state machine):** Implement proper coroutine-style suspend/resume
-  for truly async operations (file I/O, chunked loading).
+**No remaining work.** Both sync fast-path and full state machine are complete.
 
 ---
 
@@ -289,7 +293,7 @@ class WorkerTask {
 | Getters/setters | ✅ | ✅ | ✅ | Ready |
 | `instanceof` | ✅ | ✅ | ✅ | Ready |
 | Promise (basic) | ✅ | ✅ | ✅ | Ready |
-| **async/await** | ⚠️ → ✅ | ✅ | ✅ | ~~Gap 1~~ ⚠️ Sync fast-path DONE (Phase 5); full state machine in Phase 6 |
+| **async/await** | ✅ | ✅ | ✅ | ~~Gap 1~~ ✅ CLOSED (Phase 5 sync + Phase 6 state machine) |
 | **ES modules** | ❌ | ✅ | ✅ | **Gap 2** (bypassed by bundling) |
 | **Private fields (#)** | ✅ | ✅ | ✅ | ~~Gap 3~~ ✅ CLOSED (Phase 2) |
 | **ArrayBuffer/DataView** | ✅ | ✅ | ✅ | ~~Gap 4~~ ✅ CLOSED (Phase 1) |
@@ -332,8 +336,8 @@ Phase 2: Private Fields Polish      ─── ✅ DONE
 Phase 3: Promise.withResolvers      ─── ✅ DONE
 Phase 4: Generators (basic)         ─── ✅ DONE (v15)
 Phase 5: Async/Await (sync fast)    ─── ✅ DONE
-Phase 6: Async/Await (full)         ─── Next
-Phase 7: Test Convergence           ─── After Phase 6
+Phase 6: Async/Await (full)         ─── ✅ DONE
+Phase 7: Test Convergence           ─── Next
 ```
 
 ---
@@ -556,48 +560,70 @@ explicit return, `Promise.all` with async functions.
 
 ---
 
-### Phase 6: Async/Await — Full State Machine (Weeks 11–14)
+### Phase 6: Async/Await — Full State Machine
 
 **Goal:** True suspend/resume for pending promises.
 
-**Transpiler: async function → coroutine transform:**
+**Status: ✅ COMPLETE** (2025-07-26)
 
-1. Similar to generator state machine (Phase 4) but driven by Promises
-2. Each `await` becomes a suspension point:
-   ```
-   // Before transform:
-   async function load() {
-     const a = await fetchPage(1);
-     const b = await fetchPage(2);
-     return [a, b];
-   }
+**Architecture:** Reuses generator state machine infrastructure. Async functions with
+`await` expressions are transformed into `async_sm_<name>(Item* env, Item input,
+int64_t state) → Item` state machine functions. Each `await` is a conditional
+suspension point:
 
-   // After transform (conceptual):
-   function load() {
-     return new Promise((resolve, reject) => {
-       let state = 0, a, b;
-       function step(input) {
-         try {
-           switch (state) {
-             case 0: state = 1; return fetchPage(1).then(step, reject);
-             case 1: a = input; state = 2; return fetchPage(2).then(step, reject);
-             case 2: b = input; return resolve([a, b]);
-           }
-         } catch (e) { reject(e); }
-       }
-       step();
-     });
-   }
-   ```
-3. Integrate with microtask queue for correct scheduling
-4. Support `for await...of` (async iteration) if needed
+1. **Fast path:** `js_async_must_suspend(promise)` returns 0 → promise already
+   resolved/rejected → `js_async_get_resolved()` returns cached value → continue
+2. **Suspend path:** returns 1 → promise pending → save locals to env →
+   return `[promise, next_state]` → runtime registers `.then(resume, reject)` →
+   microtask flush → function returns
+3. **Resume:** Promise settles → `js_async_resume_handler` re-enters state machine
+   at saved state → load locals from env → continue from `gen_input_reg`
+4. **Rejection:** `js_async_reject_handler` sets exception + re-enters state machine
+   → implicit try/catch catches it → return `[error, -2]` → promise rejected
 
-**Runtime: event loop integration:**
-- `js_run_event_loop()` must process pending async operations
-- Microtask flush after each promise resolution
-- Correct ordering: microtasks before next macrotask
+**State machine return protocol:** `[value, next_state]` via `js_gen_yield_result`:
+- `next_state == -1`: fulfilled (value = return value)
+- `next_state == -2`: rejected (value = error)
+- `next_state >= 0`: suspended on pending promise (value = the promise)
 
-**Test:** All 57 CLI spec files.
+**Runtime functions added** (js_runtime.cpp, ~130 lines):
+- `JsAsyncContext` struct: `state_fn`, `env`, `env_size`, `state`, `promise_idx`
+- `js_async_must_suspend(Item)` — returns 1 if pending, 0 otherwise; caches resolved
+- `js_async_get_resolved()` — returns cached value from fast path
+- `js_async_drive(ctx, input, state)` — core driver: calls SM, handles result
+- `js_async_resume_handler` / `js_async_reject_handler` — `.then()`/`.catch()` callbacks
+- `js_async_context_create(fn_ptr, env, env_size)` — allocates context + pending promise
+- `js_async_start(ctx)` — initial call at state 0
+- `js_async_get_promise(ctx)` — returns the async function's result promise
+
+**Transpiler changes** (transpile_js_mir.cpp):
+- `jm_count_awaits()` — counts await expressions (mirrors `jm_count_yields`)
+- Async state machine generation block (~130 lines): env layout, SM function,
+  state dispatch, implicit try/catch, body transpilation, done/catch labels
+- Await expression handler: conditional suspend with fast/suspend paths
+- Async wrapper function: env alloc → context create → start → return promise
+- Arrow expression body support in async state machines
+
+**Microtask integration:**
+- `js_microtask_flush()` added to `js_resolve_callback`/`js_reject_callback`
+- Ensures external promise resolution (e.g., `Promise.withResolvers`) triggers
+  async function resumption
+
+**Known limitation:** Inner function declarations inside async state machines cannot
+capture enclosing scope variables (same as generators — no `scope_env_reg` in SM).
+
+**Files modified:** `js_runtime.cpp`, `js_runtime.h`, `sys_func_registry.c`,
+`transpile_js_mir.cpp`.
+
+**Result:** 10/10 Phase 6 assertions pass. 14/14 Phase 5 assertions pass (backward
+compatible). 690/690 baseline tests pass (no regressions).
+
+**Test coverage:** Pending promise resolution, mixed resolved/pending awaits, chained
+pending promises, rejection through pending promise, return pending, nested async with
+pending, already-resolved Promise.withResolvers, sequential pending awaits, computation
+after resume, async arrow with pending promise.
+
+**Test:** `phase6_async_state_machine.js` — 10 assertions.
 
 ---
 
@@ -619,7 +645,7 @@ explicit return, `Promise.all` with async functions.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|:----------:|:------:|------------|
-| Async/await state machine proves harder than expected | High | Critical | Phase 5 sync fast-path provides fallback |
+| ~~Async/await state machine proves harder than expected~~ | ~~High~~ | ~~Critical~~ | ✅ Completed — Phase 6 state machine fully working |
 | Circular module dependencies break bundling | Low | Medium | esbuild handles cycles; manual fixup if needed |
 | PDF.js relies on JS semantics LambdaJS subtly differs on | Medium | Medium | Test-driven fixes; each spec isolates issues |
 | RE2 regex limitations block parsing | Low | Medium | PDF.js uses basic regex; RE2 covers 99% |
@@ -638,7 +664,7 @@ explicit return, `Promise.all` with async functions.
 | Phase 2 complete | Private fields work | ✅ 23/23 pass |
 | Phase 3 complete | Minor polyfills work | ✅ 27/27 pass, 690/690 baseline |
 | Phase 5 complete | Async/await sync fast-path | ✅ 14/14 pass, 690/690 baseline |
-| Phase 6 complete | Full async state machine | Pending promises suspend/resume correctly |
+| Phase 6 complete | Full async state machine | ✅ 10/10 pass, 14/14 Phase 5 compat, 690/690 baseline |
 | Phase 7 complete | Full CLI suite passes | 57/57 spec files, all assertions green |
 | Stretch goal | Parse real PDFs | `lambda.exe parse file.pdf` outputs document tree |
 
