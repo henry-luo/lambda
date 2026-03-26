@@ -1179,6 +1179,8 @@ JitImport jit_runtime_imports[] = {
     {"js_fetch", FPTR(js_fetch)},
     // Phase 3: Promise.withResolvers
     {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
+    // Phase 5: Async/Await sync fast path
+    {"js_await_sync", FPTR(js_await_sync)},
     // Phase 3: TextEncoder / TextDecoder
     {"js_text_encoder_new", FPTR(js_text_encoder_new)},
     {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},

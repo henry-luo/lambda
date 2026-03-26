@@ -410,6 +410,7 @@ Item js_promise_race(Item iterable);             // Promise.race([...])
 Item js_promise_any(Item iterable);              // Promise.any([...])
 Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
+Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
 
 // =============================================================================
 // TextEncoder / TextDecoder (UTF-8 only)

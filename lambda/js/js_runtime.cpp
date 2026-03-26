@@ -3696,6 +3696,25 @@ extern "C" Item js_promise_with_resolvers(void) {
     return result;
 }
 
+// Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
+extern "C" Item js_await_sync(Item value) {
+    // If not a promise, return value as-is (like awaiting a non-thenable)
+    JsPromise* p = js_get_promise(value);
+    if (!p) return value;
+
+    if (p->state == JS_PROMISE_FULFILLED) {
+        return p->result;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        // Rejected promise: throw the rejection reason
+        js_throw_value(p->result);
+        return ItemNull;
+    }
+    // Pending promise — synchronous fast-path cannot handle this
+    log_debug("js: await_sync: promise still pending (no async state machine yet)");
+    return make_js_undefined();
+}
+
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
     JsPromise* p = js_get_promise(promise);
     if (!p) return ItemNull;
