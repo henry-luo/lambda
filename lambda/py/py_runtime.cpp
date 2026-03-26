@@ -364,7 +364,7 @@ extern "C" Item py_divide(Item left, Item right) {
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: division by zero");
         py_exception_pending = true;
-        py_exception_value = ItemNull;
+        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
         return ItemNull;
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -381,7 +381,7 @@ extern "C" Item py_floor_divide(Item left, Item right) {
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer floor division by zero");
             py_exception_pending = true;
-            py_exception_value = ItemNull;
+            py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
             return ItemNull;
         }
         // Python floor division rounds toward negative infinity
@@ -395,7 +395,7 @@ extern "C" Item py_floor_divide(Item left, Item right) {
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float floor division by zero");
         py_exception_pending = true;
-        py_exception_value = ItemNull;
+        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
         return ItemNull;
     }
     return py_make_number(floor(l / r));
@@ -569,7 +569,7 @@ extern "C" Item py_modulo(Item left, Item right) {
         if (b == 0) {
             log_error("py: ZeroDivisionError: integer modulo by zero");
             py_exception_pending = true;
-            py_exception_value = ItemNull;
+            py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
             return ItemNull;
         }
         // Python modulo: result has same sign as divisor
@@ -583,7 +583,7 @@ extern "C" Item py_modulo(Item left, Item right) {
     if (r == 0.0) {
         log_error("py: ZeroDivisionError: float modulo by zero");
         py_exception_pending = true;
-        py_exception_value = ItemNull;
+        py_exception_value = (Item){.item = s2it(heap_create_name("ZeroDivisionError"))};
         return ItemNull;
     }
     return py_make_number(fmod(l, r) + (fmod(l, r) != 0 && ((l < 0) != (r < 0)) ? r : 0));
@@ -1057,18 +1057,332 @@ extern "C" Item py_slice_get(Item object, Item start_item, Item stop_item, Item 
     return ItemNull;
 }
 
+extern "C" Item py_slice_set(Item object, Item start_item, Item stop_item, Item step_item, Item value) {
+    TypeId ot = get_type_id(object);
+    if (ot != LMD_TYPE_ARRAY) {
+        log_error("py: TypeError: slice assignment only supported for lists");
+        return ItemNull;
+    }
+
+    Array* arr = it2arr(object);
+    if (!arr) return ItemNull;
+    int64_t len = arr->length;
+
+    int64_t step = (get_type_id(step_item) == LMD_TYPE_NULL) ? 1 :
+                   (get_type_id(step_item) == LMD_TYPE_INT) ? it2i(step_item) : 1;
+    if (step == 0) {
+        log_error("py: ValueError: slice step cannot be zero");
+        return ItemNull;
+    }
+
+    int64_t start, stop;
+    if (step > 0) {
+        start = py_resolve_slice_idx(start_item, len, 0);
+        stop = py_resolve_slice_idx(stop_item, len, len);
+    } else {
+        start = (get_type_id(start_item) == LMD_TYPE_NULL) ? len - 1 :
+                py_resolve_slice_idx(start_item, len, len - 1);
+        stop = (get_type_id(stop_item) == LMD_TYPE_NULL) ? -1 :
+               py_resolve_slice_idx(stop_item, len, -1);
+        if (get_type_id(stop_item) != LMD_TYPE_NULL) {
+            int64_t raw = it2i(stop_item);
+            if (raw < 0) raw += len;
+            stop = raw;
+            if (stop < -1) stop = -1;
+        }
+    }
+
+    // get replacement items from value (must be iterable/array)
+    TypeId vt = get_type_id(value);
+    Array* val_arr = NULL;
+    if (vt == LMD_TYPE_ARRAY) {
+        val_arr = it2arr(value);
+    } else {
+        log_error("py: TypeError: can only assign an iterable to a slice");
+        return ItemNull;
+    }
+    int64_t val_len = val_arr ? val_arr->length : 0;
+
+    if (step == 1) {
+        // contiguous slice assignment: remove [start:stop], insert val_arr items
+        if (start < 0) start = 0;
+        if (stop > len) stop = len;
+        if (start > stop) start = stop;
+        int64_t remove_count = stop - start;
+        int64_t insert_count = val_len;
+        int64_t new_len = len - remove_count + insert_count;
+
+        // resize the array
+        if (new_len > len) {
+            // grow: shift tail right
+            for (int64_t i = 0; i < new_len - len; i++) {
+                array_push(arr, ItemNull);
+            }
+            // shift tail from old stop position to new position
+            for (int64_t i = len - 1; i >= stop; i--) {
+                arr->items[i + insert_count - remove_count] = arr->items[i];
+            }
+        } else if (new_len < len) {
+            // shrink: shift tail left
+            for (int64_t i = stop; i < len; i++) {
+                arr->items[i + insert_count - remove_count] = arr->items[i];
+            }
+            arr->length = new_len;
+        }
+
+        // insert replacement items
+        for (int64_t i = 0; i < insert_count; i++) {
+            arr->items[start + i] = val_arr->items[i];
+        }
+    } else {
+        // extended slice: step != 1, replacement must have same length
+        int64_t slice_count = 0;
+        if (step > 0) {
+            for (int64_t i = start; i < stop; i += step) slice_count++;
+        } else {
+            for (int64_t i = start; i > stop; i += step) slice_count++;
+        }
+        if (val_len != slice_count) {
+            log_error("py: ValueError: attempt to assign sequence of size %lld to extended slice of size %lld",
+                (long long)val_len, (long long)slice_count);
+            return ItemNull;
+        }
+        int64_t vi = 0;
+        if (step > 0) {
+            for (int64_t i = start; i < stop && vi < val_len; i += step) {
+                if (i >= 0 && i < arr->length) arr->items[i] = val_arr->items[vi];
+                vi++;
+            }
+        } else {
+            for (int64_t i = start; i > stop && vi < val_len; i += step) {
+                if (i >= 0 && i < arr->length) arr->items[i] = val_arr->items[vi];
+                vi++;
+            }
+        }
+    }
+
+    return object;
+}
+
+extern "C" Item py_format_value(Item value, Item spec_item) {
+    // format a value according to a Python format spec string
+    if (get_type_id(spec_item) != LMD_TYPE_STRING) {
+        return py_to_str(value);
+    }
+    String* spec_str = it2s(spec_item);
+    if (!spec_str || spec_str->len == 0) {
+        return py_to_str(value);
+    }
+
+    const char* sp = spec_str->chars;
+    int slen = spec_str->len;
+
+    // parse format spec: [[fill]align][sign][#][0][width][.precision][type]
+    char fill = ' ';
+    char align = '\0';
+    int width = 0;
+    int precision = -1;
+    char type = '\0';
+
+    // check for fill+align or just align
+    if (slen >= 2 && (sp[1] == '<' || sp[1] == '>' || sp[1] == '^')) {
+        fill = sp[0];
+        align = sp[1];
+        sp += 2;
+    } else if (slen >= 1 && (sp[0] == '<' || sp[0] == '>' || sp[0] == '^')) {
+        align = sp[0];
+        sp++;
+    }
+
+    // check for 0-padding
+    if (*sp == '0') { sp++; if (!align) { fill = '0'; align = '>'; } }
+
+    // width
+    while (*sp >= '0' && *sp <= '9') { width = width * 10 + (*sp - '0'); sp++; }
+
+    // precision
+    if (*sp == '.') {
+        sp++;
+        precision = 0;
+        while (*sp >= '0' && *sp <= '9') { precision = precision * 10 + (*sp - '0'); sp++; }
+    }
+
+    // type
+    if (*sp) type = *sp;
+
+    char buf[256];
+    const char* formatted = buf;
+    int flen = 0;
+
+    if (type == 'd' || type == 'n') {
+        int64_t val = (get_type_id(value) == LMD_TYPE_INT) ? it2i(value) : (int64_t)py_get_number(value);
+        flen = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+        if (flen >= (int)sizeof(buf)) flen = sizeof(buf) - 1;
+    } else if (type == 'f' || type == 'F') {
+        double val = py_get_number(value);
+        if (precision < 0) precision = 6;
+        flen = snprintf(buf, sizeof(buf), "%.*f", precision, val);
+        if (flen >= (int)sizeof(buf)) flen = sizeof(buf) - 1;
+    } else if (type == 'e' || type == 'E') {
+        double val = py_get_number(value);
+        if (precision < 0) precision = 6;
+        flen = snprintf(buf, sizeof(buf), type == 'e' ? "%.*e" : "%.*E", precision, val);
+        if (flen >= (int)sizeof(buf)) flen = sizeof(buf) - 1;
+    } else if (type == 'x' || type == 'X') {
+        int64_t val = (get_type_id(value) == LMD_TYPE_INT) ? it2i(value) : (int64_t)py_get_number(value);
+        flen = snprintf(buf, sizeof(buf), type == 'x' ? "%llx" : "%llX", (long long)val);
+        if (flen >= (int)sizeof(buf)) flen = sizeof(buf) - 1;
+    } else if (type == 'o') {
+        int64_t val = (get_type_id(value) == LMD_TYPE_INT) ? it2i(value) : (int64_t)py_get_number(value);
+        flen = snprintf(buf, sizeof(buf), "%llo", (long long)val);
+        if (flen >= (int)sizeof(buf)) flen = sizeof(buf) - 1;
+    } else {
+        // default: string conversion
+        Item str_val = py_to_str(value);
+        String* sv = it2s(str_val);
+        if (sv) {
+            formatted = sv->chars;
+            flen = (precision >= 0 && precision < (int)sv->len) ? precision : sv->len;
+        }
+    }
+
+    // apply width/alignment padding
+    if (width > 0 && flen < width) {
+        if (!align) align = (type == 'd' || type == 'f' || type == 'e' || type == 'x' || type == 'o') ? '>' : '<';
+        int pad = width - flen;
+        StrBuf* sb = strbuf_new();
+        if (align == '<') {
+            strbuf_append_str_n(sb, formatted, flen);
+            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+        } else if (align == '^') {
+            int left_pad = pad / 2;
+            int right_pad = pad - left_pad;
+            for (int j = 0; j < left_pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_str_n(sb, formatted, flen);
+            for (int j = 0; j < right_pad; j++) strbuf_append_char(sb, fill);
+        } else { // '>'
+            for (int j = 0; j < pad; j++) strbuf_append_char(sb, fill);
+            strbuf_append_str_n(sb, formatted, flen);
+        }
+        Item result = (Item){.item = s2it(heap_create_name(sb->str ? sb->str : ""))};
+        strbuf_free(sb);
+        return result;
+    }
+
+    // no padding needed
+    if (formatted == buf) {
+        buf[flen] = '\0';
+        return (Item){.item = s2it(heap_create_name(buf))};
+    }
+    // already from a string, just return truncated if needed
+    char tmp[256];
+    int clen = flen < 255 ? flen : 255;
+    memcpy(tmp, formatted, clen);
+    tmp[clen] = '\0';
+    return (Item){.item = s2it(heap_create_name(tmp))};
+}
+
+extern "C" Item py_exception_get_type(Item exception) {
+    // if the exception is a plain string, it IS the type name (raised by runtime ops like py_divide)
+    TypeId tid = get_type_id(exception);
+    if (tid == LMD_TYPE_STRING) {
+        return exception;
+    }
+    // for exception objects (Maps created by py_new_exception), get the "type" attribute
+    return py_getattr(exception, (Item){.item = s2it(heap_create_name("type"))});
+}
+
+extern "C" Item py_builtin_open(Item path_item, Item mode_item) {
+    // simplified: read entire file contents as a string (mode currently ignored, always "r")
+    if (get_type_id(path_item) != LMD_TYPE_STRING) {
+        log_error("py: TypeError: open() argument must be a string");
+        return ItemNull;
+    }
+    String* path = it2s(path_item);
+    if (!path) return ItemNull;
+
+    char filepath[1024];
+    int plen = path->len < 1023 ? path->len : 1023;
+    memcpy(filepath, path->chars, plen);
+    filepath[plen] = '\0';
+
+    // extract mode string (default "r")
+    const char* mode = "r";
+    if (get_type_id(mode_item) == LMD_TYPE_STRING) {
+        String* ms = it2s(mode_item);
+        if (ms && ms->len > 0) mode = ms->chars;
+    }
+
+    FILE* f = fopen(filepath, mode);
+    if (!f) {
+        log_error("py: FileNotFoundError: No such file: '%s'", filepath);
+        py_raise((Item){.item = s2it(heap_create_name("FileNotFoundError"))});
+        return ItemNull;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size <= 0) {
+        fclose(f);
+        return (Item){.item = s2it(heap_create_name(""))};
+    }
+
+    char* buf = (char*)malloc(size + 1);
+    size_t read_bytes = fread(buf, 1, size, f);
+    buf[read_bytes] = '\0';
+    fclose(f);
+
+    Item result = (Item){.item = s2it(heap_create_name(buf))};
+    free(buf);
+    return result;
+}
+
 // ============================================================================
 // Iterator protocol (simplified)
 // ============================================================================
 
 extern "C" Item py_get_iterator(Item iterable) {
-    // for now, just return the iterable itself (we handle arrays and ranges)
-    return iterable;
+    // create a stateful iterator object: {__data__: iterable, __idx__: 0, __len__: len}
+    Item len_item = py_builtin_len(iterable);
+    int64_t len = (get_type_id(len_item) == LMD_TYPE_INT) ? it2i(len_item) : 0;
+
+    Item iter = py_new_object();
+    py_setattr(iter, (Item){.item = s2it(heap_create_name("__data__"))}, iterable);
+    py_setattr(iter, (Item){.item = s2it(heap_create_name("__idx__"))}, (Item){.item = i2it(0)});
+    py_setattr(iter, (Item){.item = s2it(heap_create_name("__len__"))}, (Item){.item = i2it(len)});
+    return iter;
 }
 
 extern "C" Item py_iterator_next(Item iterator) {
-    // this is handled by the transpiler based on type
-    return py_stop_iteration();
+    // advance iterator: read __data__/__idx__/__len__, return next item or StopIteration
+    if (get_type_id(iterator) != LMD_TYPE_MAP) {
+        return py_stop_iteration();
+    }
+
+    Item data = py_getattr(iterator, (Item){.item = s2it(heap_create_name("__data__"))});
+    Item idx_item = py_getattr(iterator, (Item){.item = s2it(heap_create_name("__idx__"))});
+    Item len_item = py_getattr(iterator, (Item){.item = s2it(heap_create_name("__len__"))});
+
+    if (get_type_id(idx_item) != LMD_TYPE_INT || get_type_id(len_item) != LMD_TYPE_INT) {
+        return py_stop_iteration();
+    }
+
+    int64_t idx = it2i(idx_item);
+    int64_t len = it2i(len_item);
+
+    if (idx >= len) {
+        return py_stop_iteration();
+    }
+
+    // get item at current index
+    Item item = py_subscript_get(data, (Item){.item = i2it(idx)});
+
+    // advance index in-place on the iterator Map
+    py_setattr(iterator, (Item){.item = s2it(heap_create_name("__idx__"))}, (Item){.item = i2it(idx + 1)});
+
+    return item;
 }
 
 extern "C" Item py_range_new(Item start, Item stop, Item step) {
@@ -1213,6 +1527,18 @@ extern "C" Item py_new_exception(Item type_name, Item message) {
     py_setattr(obj, (Item){.item = s2it(heap_create_name("type"))}, type_name);
     py_setattr(obj, (Item){.item = s2it(heap_create_name("message"))}, message);
     return obj;
+}
+
+// ============================================================================
+// Variadic args support
+// ============================================================================
+
+extern "C" Item py_build_list_from_args(Item* args, int64_t count) {
+    Item list = py_list_new(0);
+    for (int64_t i = 0; i < count; i++) {
+        py_list_append(list, args[i]);
+    }
+    return list;
 }
 
 // ============================================================================

@@ -83,6 +83,23 @@ Item py_tuple_set(Item tuple, int index, Item value);
 Item py_subscript_get(Item object, Item key);
 Item py_subscript_set(Item object, Item key, Item value);
 Item py_slice_get(Item object, Item start, Item stop, Item step);
+Item py_slice_set(Item object, Item start, Item stop, Item step, Item value);
+
+// ========================================================================
+// Format value with spec (used by f-strings and str.format)
+// ========================================================================
+Item py_format_value(Item value, Item spec);
+Item py_exception_get_type(Item exception);
+
+// ========================================================================
+// File I/O
+// ========================================================================
+Item py_builtin_open(Item path, Item mode);
+
+// ========================================================================
+// Variadic args support
+// ========================================================================
+Item py_build_list_from_args(Item* args, int64_t count);
 
 // ========================================================================
 // Iterator protocol

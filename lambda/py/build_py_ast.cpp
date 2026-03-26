@@ -365,7 +365,36 @@ PyAstNode* build_py_fstring(PyTranspiler* tp, TSNode string_node) {
         } else if (strcmp(child_type, "interpolation") == 0) {
             TSNode expr_child = ts_node_child_by_field_name(child, "expression", 10);
             if (!ts_node_is_null(expr_child)) {
-                part = build_py_expression(tp, expr_child);
+                PyAstNode* expr = build_py_expression(tp, expr_child);
+                // check for format_specifier child (tree-sitter: "format_specifier" or "type_conversion")
+                // tree-sitter-python interpolation children: { expression [! conversion] [: format_specifier] }
+                String* fmt_spec = NULL;
+                uint32_t interp_child_count = ts_node_named_child_count(child);
+                for (uint32_t j = 0; j < interp_child_count; j++) {
+                    TSNode interp_child = ts_node_named_child(child, j);
+                    const char* ic_type = ts_node_type(interp_child);
+                    if (strcmp(ic_type, "format_specifier") == 0) {
+                        // format_specifier contains the text after ':', strip the leading ':'
+                        StrView spec_sv = py_node_source(tp, interp_child);
+                        // tree-sitter includes the colon in format_specifier, skip it
+                        if (spec_sv.length > 0 && spec_sv.str[0] == ':') {
+                            fmt_spec = name_pool_create_len(tp->name_pool, spec_sv.str + 1, spec_sv.length - 1);
+                        } else {
+                            fmt_spec = name_pool_create_len(tp->name_pool, spec_sv.str, spec_sv.length);
+                        }
+                    }
+                }
+                if (fmt_spec && fmt_spec->len > 0) {
+                    // wrap in PyFStringExprNode
+                    PyFStringExprNode* fse = (PyFStringExprNode*)alloc_py_ast_node(
+                        tp, PY_AST_NODE_FSTRING_EXPR, child, sizeof(PyFStringExprNode));
+                    fse->expression = expr;
+                    fse->format_spec = fmt_spec;
+                    fse->base.type = &TYPE_STRING;
+                    part = (PyAstNode*)fse;
+                } else {
+                    part = expr;
+                }
             }
         }
 

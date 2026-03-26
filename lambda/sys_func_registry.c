@@ -1210,6 +1210,12 @@ JitImport jit_runtime_imports[] = {
     {"py_subscript_get", FPTR(py_subscript_get)},
     {"py_subscript_set", FPTR(py_subscript_set)},
     {"py_slice_get", FPTR(py_slice_get)},
+    {"py_slice_set", FPTR(py_slice_set)},
+    {"py_format_value", FPTR(py_format_value)},
+    {"py_exception_get_type", FPTR(py_exception_get_type)},
+    {"py_builtin_open", FPTR(py_builtin_open)},
+    // variadic args
+    {"py_build_list_from_args", FPTR(py_build_list_from_args)},
     // iterator
     {"py_get_iterator", FPTR(py_get_iterator)},
     {"py_iterator_next", FPTR(py_iterator_next)},
