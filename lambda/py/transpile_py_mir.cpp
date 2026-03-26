@@ -41,6 +41,9 @@ extern "C" int js_function_get_arity(Item fn_item);
 extern "C" Item js_new_object();
 extern "C" Item js_new_function(void* func_ptr, int param_count);
 extern "C" Item js_property_set(Item object, Item key, Item value);
+extern "C" Item js_object_keys(Item object);
+extern "C" Item js_array_get_int(Item array, int64_t index);
+extern "C" int64_t js_array_length(Item array);
 extern "C" char* read_text_file(const char* filename);
 extern "C" void js_runtime_set_input(void* input);
 
@@ -3082,10 +3085,83 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         pm_emit_label(mt, l_end);
         break;
     }
-    case PY_AST_NODE_IMPORT:
-        // bare "import module" — no-op for now (module-as-namespace not yet supported)
-        log_debug("py-mir: bare import statement (not yet supported for cross-lang)");
+    case PY_AST_NODE_IMPORT: {
+        // bare "import module" — bind the module namespace as _py_<name>
+        PyImportNode* imp = (PyImportNode*)stmt;
+        if (!imp->module_name) break;
+
+        const char* mod_name = imp->module_name->chars;
+        int mod_len = (int)imp->module_name->len;
+
+        // use alias if provided; for dotted names "os.path" bind as "os"
+        const char* local_name = mod_name;
+        int local_len = mod_len;
+        if (imp->alias) {
+            local_name = imp->alias->chars;
+            local_len = (int)imp->alias->len;
+        } else {
+            // only use the first component of a dotted name
+            const char* dot = (const char*)memchr(mod_name, '.', mod_len);
+            if (dot) local_len = (int)(dot - mod_name);
+        }
+
+        // resolve module path relative to source file directory
+        StrBuf* path_buf = strbuf_new();
+        if (mt->filename) {
+            const char* last_slash = strrchr(mt->filename, '/');
+            if (last_slash) {
+                strbuf_append_format(path_buf, "%.*s/", (int)(last_slash - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(path_buf, "./");
+            }
+        } else {
+            strbuf_append_str(path_buf, "./");
+        }
+        // convert dots to slashes for sub-module paths
+        for (int i = 0; i < mod_len; i++) {
+            strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
+        }
+
+        Item ns = ItemNull;
+        StrBuf* try_buf = strbuf_new();
+
+        strbuf_append_format(try_buf, "%s.py", path_buf->str);
+        ns = load_py_module(mt->runtime, try_buf->str);
+
+        if (ns.item == ItemNull.item) {
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.js", path_buf->str);
+            ns = load_js_module(mt->runtime, try_buf->str);
+        }
+
+        if (ns.item == ItemNull.item) {
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.ls", path_buf->str);
+            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
+            if (script && script->ast_root) {
+                ns = module_build_lambda_namespace(script);
+            }
+        }
+
+        strbuf_free(try_buf);
+        strbuf_free(path_buf);
+
+        if (ns.item == ItemNull.item) {
+            log_error("py-mir: import '%.*s': module not found (no .py/.js/.ls)", mod_len, mod_name);
+            break;
+        }
+
+        // bind namespace map to _py_<localname>
+        char vname[132];
+        snprintf(vname, sizeof(vname), "_py_%.*s", local_len, local_name);
+        MIR_reg_t val_reg = pm_new_reg(mt, "imp_ns", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, val_reg),
+            MIR_new_int_op(mt->ctx, (int64_t)ns.item)));
+        pm_set_var(mt, vname, val_reg);
+        log_debug("py-mir: import '%.*s' → '%s'", mod_len, mod_name, vname);
         break;
+    }
     case PY_AST_NODE_WITH: {
         // with <expr> as <target>: <body>
         // desugars to:
@@ -3213,17 +3289,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
 
         // resolve module path relative to the source file's directory
         StrBuf* path_buf = strbuf_new();
+        // extract the directory of the current script for relative resolution
+        const char* script_dir_end = mt->filename ? strrchr(mt->filename, '/') : NULL;
         if (mod_name[0] == '.') {
-            // relative import
-            const char* dir = mt->filename;
-            if (dir) {
-                // extract directory from filename
-                const char* last_slash = strrchr(dir, '/');
-                if (last_slash) {
-                    strbuf_append_format(path_buf, "%.*s/", (int)(last_slash - dir), dir);
-                } else {
-                    strbuf_append_str(path_buf, "./");
-                }
+            // explicit relative import (leading dot)
+            if (script_dir_end) {
+                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
             } else {
                 strbuf_append_str(path_buf, "./");
             }
@@ -3232,8 +3303,12 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
             }
         } else {
-            // absolute module name — convert dots to slashes
-            strbuf_append_str(path_buf, "./");
+            // absolute module name — resolve relative to script's directory
+            if (script_dir_end) {
+                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(path_buf, "./");
+            }
             for (int i = 0; i < mod_len; i++) {
                 strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
             }
@@ -3272,6 +3347,38 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         if (ns.item == ItemNull.item) {
             log_error("py-mir: failed to load module '%.*s'", mod_len, mod_name);
             break;
+        }
+
+        // handle wildcard import: from module import *
+        if (imp->names) {
+            PyImportNode* first = (PyImportNode*)imp->names;
+            if (first->module_name && first->module_name->len == 1 &&
+                first->module_name->chars[0] == '*') {
+                Item keys_arr = js_object_keys(ns);
+                int64_t key_count = js_array_length(keys_arr);
+                for (int64_t ki = 0; ki < key_count; ki++) {
+                    Item key_item = js_array_get_int(keys_arr, ki);
+                    Item value = js_property_get(ns, key_item);
+                    if (value.item == ItemNull.item) continue;
+                    if (get_type_id(key_item) != LMD_TYPE_STRING) continue;
+                    String* key_str = it2s(key_item);
+                    if (!key_str) continue;
+                    // skip dunder names (__name__, __is_class__, etc.)
+                    if (key_str->len >= 4 &&
+                        key_str->chars[0] == '_' && key_str->chars[1] == '_') continue;
+                    char vname[132];
+                    snprintf(vname, sizeof(vname), "_py_%.*s",
+                        (int)key_str->len, key_str->chars);
+                    MIR_reg_t val_reg = pm_new_reg(mt, "star_imp", MIR_T_I64);
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, val_reg),
+                        MIR_new_int_op(mt->ctx, (int64_t)value.item)));
+                    pm_set_var(mt, vname, val_reg);
+                    log_debug("py-mir: star import '%.*s' → '%s'",
+                        (int)key_str->len, key_str->chars, vname);
+                }
+                break;
+            }
         }
 
         // for each imported name, extract from namespace and store as variable
@@ -4477,8 +4584,8 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 // ============================================================================
 
 static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
-    // register class names as module vars so they're accessible from within methods
-    // (e.g. super() needs to read the class object at runtime)
+    // register class names and top-level assignment targets as module vars
+    // so they are accessible after py_main() runs (for imports and for super())
     if (!root || root->node_type != PY_AST_NODE_MODULE) return;
     PyModuleNode* program = (PyModuleNode*)root;
     PyAstNode* s = program->body;
@@ -4498,6 +4605,31 @@ static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
                 mt->global_var_indices[mt->global_var_count] = idx;
                 mt->global_var_count++;
                 log_debug("py-mir: class var '%s' → module_var[%d]", cls_var, idx);
+            }
+        } else if (s->node_type == PY_AST_NODE_ASSIGNMENT && mt->global_var_count < 64) {
+            // register top-level simple name assignments as module vars
+            // so they can be exported to importing scripts
+            PyAssignmentNode* asgn = (PyAssignmentNode*)s;
+            PyAstNode* target = asgn->targets;
+            while (target && mt->global_var_count < 64) {
+                if (target->node_type == PY_AST_NODE_IDENTIFIER) {
+                    PyIdentifierNode* id = (PyIdentifierNode*)target;
+                    char var_name[132];
+                    snprintf(var_name, sizeof(var_name), "_py_%.*s",
+                        (int)id->name->len, id->name->chars);
+                    bool already = false;
+                    for (int i = 0; i < mt->global_var_count; i++) {
+                        if (strcmp(mt->global_var_names[i], var_name) == 0) { already = true; break; }
+                    }
+                    if (!already) {
+                        int idx = mt->module_var_count++;
+                        snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", var_name);
+                        mt->global_var_indices[mt->global_var_count] = idx;
+                        mt->global_var_count++;
+                        log_debug("py-mir: module-level var '%s' → module_var[%d]", var_name, idx);
+                    }
+                }
+                target = target->next;
             }
         }
         s = s->next;
@@ -4891,10 +5023,28 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         void* func_ptr = find_func(ctx, mir_name);
 
         if (func_ptr) {
-            Item val = js_new_function(func_ptr, fc->param_count);
+            // use py_new_function so py_call_function can invoke it correctly
+            Item val = py_new_function(func_ptr, fc->param_count);
             Item key = {.item = s2it(heap_create_name(fc->name))};
             js_property_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
+        }
+    }
+
+    // also export module-level variables (constants, class objects, etc.)
+    for (int i = 0; i < mt->global_var_count; i++) {
+        const char* var_name = mt->global_var_names[i];
+        int var_idx = mt->global_var_indices[i];
+        Item value = py_get_module_var(var_idx);
+        if (value.item == ItemNull.item) continue;
+        // strip _py_ prefix for the export key
+        const char* export_name = (strncmp(var_name, "_py_", 4) == 0) ? var_name + 4 : var_name;
+        Item key = {.item = s2it(heap_create_name(export_name))};
+        // functions exported above take priority over module vars
+        Item existing = js_property_get(ns, key);
+        if (existing.item == ItemNull.item) {
+            js_property_set(ns, key, value);
+            log_debug("py-mir: module export var '%s' type=%d", export_name, (int)get_type_id(value));
         }
     }
 
