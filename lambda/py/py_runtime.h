@@ -126,6 +126,14 @@ Item py_clear_exception(void);
 Item py_new_exception(Item type_name, Item message);
 
 // ========================================================================
+// Context manager protocol (__enter__ / __exit__)
+// ========================================================================
+Item py_context_enter(Item mgr);
+Item py_context_exit(Item mgr, Item exc_type, Item exc_val, Item exc_tb);
+// Identifier fallback: resolves builtin class names (ValueError, RuntimeError, etc.)
+Item py_resolve_name_item(Item name_item);
+
+// ========================================================================
 // Module variable table
 // ========================================================================
 void py_set_module_var(int index, Item value);

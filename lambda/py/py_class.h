@@ -93,6 +93,9 @@ Item py_map_set_cstr(Item obj, const char* key, Item value);
 // Each is stored as a module variable accessible by name.
 void py_init_builtin_classes(void);
 
+// Resolve a built-in class name (e.g. "ValueError") to its Item.
+Item py_get_builtin_class(const char* name);
+
 // Global 'object' class item (set after py_init_builtin_classes).
 extern Item py_object_class;
 

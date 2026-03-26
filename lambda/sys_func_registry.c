@@ -1266,6 +1266,10 @@ JitImport jit_runtime_imports[] = {
     {"py_check_exception", FPTR(py_check_exception)},
     {"py_clear_exception", FPTR(py_clear_exception)},
     {"py_new_exception", FPTR(py_new_exception)},
+    // context manager protocol
+    {"py_context_enter", FPTR(py_context_enter)},
+    {"py_context_exit", FPTR(py_context_exit)},
+    {"py_resolve_name_item", FPTR(py_resolve_name_item)},
     // module vars
     {"py_set_module_var", FPTR(py_set_module_var)},
     {"py_get_module_var", FPTR(py_get_module_var)},

@@ -1381,7 +1381,24 @@ PyAstNode* build_py_with_statement(PyTranspiler* tp, TSNode with_node) {
                 if (strcmp(ts_node_type(item), "with_item") == 0) {
                     TSNode value = ts_node_child_by_field_name(item, "value", 5);
                     if (!ts_node_is_null(value)) {
-                        with->items = build_py_expression(tp, value);
+                        // in tree-sitter-python, `with expr as target:` encodes the `as target`
+                        // inside the value as an `as_pattern` node (alias field), not as a
+                        // separate with_item field. Unwrap it here.
+                        if (strcmp(ts_node_type(value), "as_pattern") == 0) {
+                            // as_pattern has: expression (unnamed) + field('alias', as_pattern_target)
+                            // the context manager expression is the first named child
+                            TSNode mgr_expr = ts_node_named_child(value, 0);
+                            if (!ts_node_is_null(mgr_expr)) {
+                                with->items = build_py_expression(tp, mgr_expr);
+                            }
+                            TSNode alias_node = ts_node_child_by_field_name(value, "alias", 5);
+                            if (!ts_node_is_null(alias_node)) {
+                                StrView alias_src = py_node_source(tp, alias_node);
+                                with->target = name_pool_create_len(tp->name_pool, alias_src.str, alias_src.length);
+                            }
+                        } else {
+                            with->items = build_py_expression(tp, value);
+                        }
                     }
                     break;
                 }
