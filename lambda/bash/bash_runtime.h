@@ -75,6 +75,7 @@ Item bash_test_n(Item value);               // true if string is non-empty
 
 // regex match: =~
 Item bash_test_regex(Item string, Item pattern);
+Item bash_test_glob(Item string, Item pattern);
 
 // ========================================================================
 // String operations
@@ -92,18 +93,31 @@ Item bash_string_lower(Item str, bool all);  // ${var,} / ${var,,}
 // Parameter expansion  (${var:-default} etc.)
 // ========================================================================
 Item bash_expand_default(Item value, Item default_val);     // ${var:-default}
-Item bash_expand_assign_default(Item value, Item default_val); // ${var:=default} (returns value to assign)
+Item bash_expand_assign_default(Item var_name, Item value, Item default_val); // ${var:=default}
 Item bash_expand_alt(Item value, Item alt_val);             // ${var:+alt}
 Item bash_expand_error(Item value, Item msg);               // ${var:?msg}
+Item bash_expand_trim_prefix(Item val, Item pat);           // ${var#pat}
+Item bash_expand_trim_prefix_long(Item val, Item pat);      // ${var##pat}
+Item bash_expand_trim_suffix(Item val, Item pat);           // ${var%pat}
+Item bash_expand_trim_suffix_long(Item val, Item pat);      // ${var%%pat}
+Item bash_expand_replace(Item val, Item pat, Item repl);    // ${var/pat/str}
+Item bash_expand_replace_all(Item val, Item pat, Item repl);// ${var//pat/str}
+Item bash_expand_substring(Item val, Item offset, Item len);// ${var:off:len}
+Item bash_expand_upper_first(Item val);                     // ${var^}
+Item bash_expand_upper_all(Item val);                       // ${var^^}
+Item bash_expand_lower_first(Item val);                     // ${var,}
+Item bash_expand_lower_all(Item val);                       // ${var,,}
 
 // ========================================================================
 // Array operations
 // ========================================================================
+Item bash_int_to_item(int64_t n);                   // convert int64 to Item
 Item bash_array_new(void);                          // create empty array
 Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
 Item bash_array_length(Item arr);                   // ${#arr[@]}
+int64_t bash_array_count(Item arr);                 // raw count for iteration
 Item bash_array_all(Item arr);                      // ${arr[@]} as list
 Item bash_array_unset(Item arr, Item index);        // unset arr[i]
 Item bash_array_slice(Item arr, Item offset, Item length); // ${arr[@]:off:len}
@@ -119,15 +133,19 @@ void bash_unset_var(Item name);                     // unset var
 
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
+void bash_push_positional(Item* args, int count);   // save + set positional params
+void bash_pop_positional(void);                      // restore positional params
 Item bash_get_positional(int index);                // $1 = index 1
 Item bash_get_arg_count(void);                      // $#
-Item bash_get_all_args(void);                       // $@
+Item bash_get_all_args(void);                       // $@ (as array)
+Item bash_get_all_args_string(void);                // $@ / $* (as space-joined string)
 Item bash_shift_args(int n);                        // shift [n]
 
 // Special variables
 Item bash_get_exit_code(void);                      // $?
 void bash_set_exit_code(int code);
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
+Item bash_return_with_code(Item val);               // set exit code from value
 Item bash_get_script_name(void);                    // $0
 
 // ========================================================================
@@ -172,8 +190,13 @@ Item bash_pipe(Item left_output, Item* right_cmd, int right_argc);
 // ========================================================================
 // Output
 // ========================================================================
+void bash_write_heredoc(Item content, int is_herestring); // write heredoc/herestring
 void bash_write_stdout(Item value);                 // write string to stdout
 void bash_write_stderr(Item value);                 // write string to stderr
+void bash_raw_write(const char* data, int len);     // write raw bytes (capture-aware)
+void bash_raw_putc(char c);                         // write single char (capture-aware)
+void bash_begin_capture(void);                      // start capturing stdout
+Item bash_end_capture(void);                        // stop capturing, return string
 
 // ========================================================================
 // Runtime initialization

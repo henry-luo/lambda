@@ -1131,6 +1131,9 @@ JitImport jit_runtime_imports[] = {
     {"js_generator_next", FPTR(js_generator_next)},
     {"js_generator_return", FPTR(js_generator_return)},
     {"js_generator_throw", FPTR(js_generator_throw)},
+    // v15: Generator state machine helper
+    {"js_gen_yield_result", FPTR(js_gen_yield_result)},
+    {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v14: Promise runtime
     {"js_promise_create", FPTR(js_promise_create)},
     {"js_promise_resolve", FPTR(js_promise_resolve)},
@@ -1154,6 +1157,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
+    // v15: fetch API
+    {"js_fetch", FPTR(js_fetch)},
 
     // ========================================================================
     // Python runtime functions
@@ -1325,6 +1330,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_z", FPTR(bash_test_z)},
     {"bash_test_n", FPTR(bash_test_n)},
     {"bash_test_regex", FPTR(bash_test_regex)},
+    {"bash_test_glob", FPTR(bash_test_glob)},
     // string operations
     {"bash_string_length", FPTR(bash_string_length)},
     {"bash_string_concat", FPTR(bash_string_concat)},
@@ -1339,12 +1345,25 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_assign_default", FPTR(bash_expand_assign_default)},
     {"bash_expand_alt", FPTR(bash_expand_alt)},
     {"bash_expand_error", FPTR(bash_expand_error)},
+    {"bash_expand_trim_prefix", FPTR(bash_expand_trim_prefix)},
+    {"bash_expand_trim_prefix_long", FPTR(bash_expand_trim_prefix_long)},
+    {"bash_expand_trim_suffix", FPTR(bash_expand_trim_suffix)},
+    {"bash_expand_trim_suffix_long", FPTR(bash_expand_trim_suffix_long)},
+    {"bash_expand_replace", FPTR(bash_expand_replace)},
+    {"bash_expand_replace_all", FPTR(bash_expand_replace_all)},
+    {"bash_expand_substring", FPTR(bash_expand_substring)},
+    {"bash_expand_upper_first", FPTR(bash_expand_upper_first)},
+    {"bash_expand_upper_all", FPTR(bash_expand_upper_all)},
+    {"bash_expand_lower_first", FPTR(bash_expand_lower_first)},
+    {"bash_expand_lower_all", FPTR(bash_expand_lower_all)},
     // array operations
+    {"bash_int_to_item", FPTR(bash_int_to_item)},
     {"bash_array_new", FPTR(bash_array_new)},
     {"bash_array_set", FPTR(bash_array_set)},
     {"bash_array_get", FPTR(bash_array_get)},
     {"bash_array_append", FPTR(bash_array_append)},
     {"bash_array_length", FPTR(bash_array_length)},
+    {"bash_array_count", FPTR(bash_array_count)},
     {"bash_array_all", FPTR(bash_array_all)},
     {"bash_array_unset", FPTR(bash_array_unset)},
     {"bash_array_slice", FPTR(bash_array_slice)},
@@ -1355,14 +1374,24 @@ JitImport jit_runtime_imports[] = {
     {"bash_export_var", FPTR(bash_export_var)},
     {"bash_unset_var", FPTR(bash_unset_var)},
     {"bash_set_positional", FPTR(bash_set_positional)},
+    {"bash_push_positional", FPTR(bash_push_positional)},
+    {"bash_pop_positional", FPTR(bash_pop_positional)},
     {"bash_get_positional", FPTR(bash_get_positional)},
     {"bash_get_arg_count", FPTR(bash_get_arg_count)},
     {"bash_get_all_args", FPTR(bash_get_all_args)},
+    {"bash_get_all_args_string", FPTR(bash_get_all_args_string)},
     {"bash_shift_args", FPTR(bash_shift_args)},
     {"bash_get_exit_code", FPTR(bash_get_exit_code)},
     {"bash_set_exit_code", FPTR(bash_set_exit_code)},
     {"bash_negate_exit_code", FPTR(bash_negate_exit_code)},
+    {"bash_return_with_code", FPTR(bash_return_with_code)},
     {"bash_get_script_name", FPTR(bash_get_script_name)},
+    // output capture
+    {"bash_begin_capture", FPTR(bash_begin_capture)},
+    {"bash_end_capture", FPTR(bash_end_capture)},
+    {"bash_raw_write", FPTR(bash_raw_write)},
+    {"bash_write_heredoc", FPTR(bash_write_heredoc)},
+    {"bash_raw_putc", FPTR(bash_raw_putc)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},

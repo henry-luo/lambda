@@ -549,6 +549,26 @@ TEST(JavaScriptTests, test_es_modules_parallel_chain) {
     test_js_script_against_file("test/js/module_parallel_chain.js", "test/js/module_parallel_chain.txt");
 }
 
+TEST(JavaScriptTests, test_generator_basic) {
+    test_js_script_against_file("test/js/generator_basic.js", "test/js/generator_basic.txt");
+}
+
+TEST(JavaScriptTests, test_microtask_order) {
+    test_js_script_against_file("test/js/microtask_order.js", "test/js/microtask_order.txt");
+}
+
+TEST(JavaScriptTests, test_fs_basic) {
+    test_js_script_against_file("test/js/fs_basic.js", "test/js/fs_basic.txt");
+}
+
+TEST(JavaScriptTests, test_fetch_errors) {
+    test_js_script_against_file("test/js/fetch_errors.js", "test/js/fetch_errors.txt");
+}
+
+TEST(JavaScriptTests, test_child_process_basic) {
+    test_js_script_against_file("test/js/child_process_basic.js", "test/js/child_process_basic.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

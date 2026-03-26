@@ -1,0 +1,13 @@
+hello world
+true
+false
+11
+true
+false
+hello world appended
+2
+false
+true
+false
+async:hello world appended
+0
