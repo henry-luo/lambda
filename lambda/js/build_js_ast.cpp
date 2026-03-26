@@ -927,6 +927,20 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
     if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0 ||
         strcmp(node_type, "shorthand_property_identifier") == 0) {
         return build_js_identifier(tp, expr_node);
+    } else if (strcmp(node_type, "private_property_identifier") == 0) {
+        // Transform #field → __private_field
+        StrView source = js_node_source(tp, expr_node);
+        // Skip the '#' prefix
+        if (source.length > 1 && source.str[0] == '#') {
+            char buf[256];
+            int len = snprintf(buf, sizeof(buf), "__private_%.*s", (int)(source.length - 1), source.str + 1);
+            JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+            identifier->name = name_pool_create_len(tp->name_pool, buf, len);
+            identifier->entry = NULL;
+            identifier->base.type = &TYPE_ANY;
+            return (JsAstNode*)identifier;
+        }
+        return build_js_identifier(tp, expr_node);
     } else if (strcmp(node_type, "this") == 0) {
         // Handle 'this' keyword
         JsIdentifierNode* this_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
@@ -2008,6 +2022,7 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
     JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)alloc_js_ast_node(
         tp, JS_AST_NODE_FIELD_DEFINITION, field_node, sizeof(JsFieldDefinitionNode));
     field->is_static = false;
+    field->is_private = false;
     field->key = NULL;
     field->value = NULL;
 
@@ -2025,6 +2040,10 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
     // get property name (field name "property")
     TSNode prop_node = ts_node_child_by_field_name(field_node, "property", strlen("property"));
     if (!ts_node_is_null(prop_node)) {
+        const char* prop_type = ts_node_type(prop_node);
+        if (strcmp(prop_type, "private_property_identifier") == 0) {
+            field->is_private = true;
+        }
         field->key = build_js_expression(tp, prop_node);
     }
 
