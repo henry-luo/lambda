@@ -11,11 +11,14 @@ PDF.js is a 120+ file, zero-dependency JavaScript library that parses and render
 documents. Its core parsing engine (`src/core/`) can run without browser APIs by using
 a "fake worker" fallback path already built into the codebase.
 
-**Update (2025-07-21):** Phases 0–2 all complete: primitives baseline (33/33),
-ArrayBuffer/DataView (43/43), private fields (23/23). This closes 5 of the original
-6 gaps (generators, fetch, microtasks, ArrayBuffer/DataView, private fields). The
-primary remaining gap is **async/await** (state machine transform). ES modules are
-bypassed via bundling. Phase 3 (minor polyfills) is next.
+**Update (2025-07-21):** Phases 0–3 all complete: primitives baseline (33/33),
+ArrayBuffer/DataView (43/43), private fields (23/23), minor polyfills (27/27 assertions
+in 1 test, 690/690 baseline). This closes 5 of the original 6 gaps (generators, fetch,
+microtasks, ArrayBuffer/DataView, private fields) plus all trivial polyfills
+(Promise.withResolvers, String.match/matchAll, TextEncoder/TextDecoder, WeakMap/WeakSet,
+Math hyperbolic functions). The primary remaining gap is **async/await** (state machine
+transform). ES modules are bypassed via bundling. Phase 5 (async/await fast path)
+is next.
 
 ### Feasibility Score (Updated)
 
@@ -452,19 +455,24 @@ ArrayBuffer, DataView, and TypedArray in the `Map.type` field.
 
 ---
 
-### Phase 3: Promise.withResolvers + Minor Polyfills (Week 5)
+### Phase 3: Promise.withResolvers + Minor Polyfills — ✅ COMPLETE
 
 **Goal:** Eliminate all trivial runtime gaps.
 
-1. `Promise.withResolvers()` → return `{ promise, resolve, reject }` object
-2. `String.prototype.match()` → wrap RE2 `exec()` to return match array
-3. `String.prototype.matchAll()` → iterate exec() matches
-4. `TextEncoder` / `TextDecoder` stubs (UTF-8 only, use Lambda's internal encoding)
-5. `WeakMap` → alias to regular Map (acceptable for testing)
-6. `Object.create(null)` → empty map with no prototype (already works?)
-7. `Math.sinh/cosh/tanh` → trivial math functions
+1. ✅ `Promise.withResolvers()` → returns `{ promise, resolve, reject }` object
+2. ✅ `String.prototype.match()` → RE2-based, supports global and non-global
+3. ✅ `String.prototype.matchAll()` → iterates RE2 matches with capture groups
+4. ✅ `TextEncoder` / `TextDecoder` (UTF-8 only, handles plain arrays and TypedArrays)
+5. ✅ `WeakMap` / `WeakSet` → aliased to regular Map/Set (acceptable for testing)
+6. ✅ `Object.create(null)` → already works
+7. ✅ `Math.sinh/cosh/tanh/asinh/acosh/atanh/expm1/log1p` → 8 C stdlib functions
 
-**Test:** `util_spec.js`, `core_utils_spec.js`.
+**Test:** `phase3_polyfills.js` — 27 assertions, all passing. 690/690 baseline.
+
+**Implementation notes:**
+- TextEncoder/TextDecoder dispatched through `js_map_method()` method cascade
+- TextDecoder.decode handles both plain arrays and TypedArrays (Uint8Array etc.)
+- Promise.withResolvers creates bound resolve/reject callbacks via `js_bind_function`
 
 ---
 

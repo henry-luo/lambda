@@ -569,6 +569,10 @@ TEST(JavaScriptTests, test_child_process_basic) {
     test_js_script_against_file("test/js/child_process_basic.js", "test/js/child_process_basic.txt");
 }
 
+TEST(JavaScriptTests, test_phase3_polyfills) {
+    test_js_script_against_file("test/js/phase3_polyfills.js", "test/js/phase3_polyfills.txt");
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

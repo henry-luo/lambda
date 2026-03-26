@@ -133,6 +133,18 @@ Item bash_array_unset(Item arr, Item index);        // unset arr[i]
 Item bash_array_slice(Item arr, Item offset, Item length); // ${arr[@]:off:len}
 
 // ========================================================================
+// Associative array operations (maps)
+// ========================================================================
+Item bash_assoc_new(void);                          // create empty associative array
+Item bash_assoc_set(Item map, Item key, Item value);// map[key]=value
+Item bash_assoc_get(Item map, Item key);            // ${map[key]}
+Item bash_assoc_keys(Item map);                     // ${!map[@]} — return keys as array
+Item bash_assoc_values(Item map);                   // ${map[@]} — return values as array
+Item bash_assoc_unset(Item map, Item key);          // unset map[key]
+Item bash_assoc_length(Item map);                   // ${#map[@]}
+int64_t bash_assoc_count(Item map);                 // raw count for iteration
+
+// ========================================================================
 // Variable scope management
 // ========================================================================
 void bash_set_var(Item name, Item value);           // assign variable
@@ -140,6 +152,11 @@ Item bash_get_var(Item name);                       // read variable
 void bash_set_local_var(Item name, Item value);     // local var=value
 void bash_export_var(Item name);                    // export var
 void bash_unset_var(Item name);                     // unset var
+
+// Variable attributes (declare/typeset)
+void bash_declare_var(Item name, int flags);        // set variable attributes
+int  bash_get_var_attrs(Item name);                 // get variable attribute flags
+bool bash_is_assoc(Item name);                      // check if variable is assoc array
 
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);

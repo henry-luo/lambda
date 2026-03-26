@@ -1177,6 +1177,16 @@ JitImport jit_runtime_imports[] = {
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
+    // Phase 3: Promise.withResolvers
+    {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
+    // Phase 3: TextEncoder / TextDecoder
+    {"js_text_encoder_new", FPTR(js_text_encoder_new)},
+    {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
+    {"js_text_decoder_new", FPTR(js_text_decoder_new)},
+    {"js_text_decoder_decode", FPTR(js_text_decoder_decode)},
+    // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
+    {"js_weakmap_new", FPTR(js_weakmap_new)},
+    {"js_weakset_new", FPTR(js_weakset_new)},
 
     // ========================================================================
     // Python runtime functions
@@ -1416,6 +1426,19 @@ JitImport jit_runtime_imports[] = {
     {"bash_array_all", FPTR(bash_array_all)},
     {"bash_array_unset", FPTR(bash_array_unset)},
     {"bash_array_slice", FPTR(bash_array_slice)},
+    // associative array operations
+    {"bash_assoc_new", FPTR(bash_assoc_new)},
+    {"bash_assoc_set", FPTR(bash_assoc_set)},
+    {"bash_assoc_get", FPTR(bash_assoc_get)},
+    {"bash_assoc_keys", FPTR(bash_assoc_keys)},
+    {"bash_assoc_values", FPTR(bash_assoc_values)},
+    {"bash_assoc_unset", FPTR(bash_assoc_unset)},
+    {"bash_assoc_length", FPTR(bash_assoc_length)},
+    {"bash_assoc_count", FPTR(bash_assoc_count)},
+    // variable attributes
+    {"bash_declare_var", FPTR(bash_declare_var)},
+    {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
+    {"bash_is_assoc", FPTR(bash_is_assoc)},
     // variable scope
     {"bash_set_var", FPTR(bash_set_var)},
     {"bash_get_var", FPTR(bash_get_var)},

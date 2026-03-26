@@ -2,49 +2,55 @@
 
 ## Overview
 
-Lambda's Bash transpiler compiles `.sh` scripts to native machine code through the standard Lambda JIT pipeline: Tree-sitter parsing → typed AST → MIR IR → native execution. The current implementation covers core shell scripting — variables, arithmetic, parameter expansion, control flow, functions, arrays, test expressions, and basic builtins — with all 17 integration tests passing.
+Lambda's Bash transpiler compiles `.sh` scripts to native machine code through the standard Lambda JIT pipeline: Tree-sitter parsing → typed AST → MIR IR → native execution. The implementation covers core shell scripting plus pipelines, file I/O, external commands, shell expansions, associative arrays, and `declare` — with all 24 integration tests passing.
 
-This proposal outlines the next phases of work to bring Bash support from the current MVP (~50% feature coverage) toward a practical, self-hosting shell runtime capable of running real-world Bash scripts.
+Phases 1–6 are complete (~75% feature coverage). This document tracks the remaining phases to bring Bash support toward a practical, self-hosting shell runtime capable of running real-world Bash scripts.
 
 ### Current State Summary
 
 **Working (100%):**
 - Variables, assignment, expansion, `local`, `export`, `unset`
-- Arithmetic expansion (`$(( ))`) — all operators including bitwise and ternary
+- Arithmetic expansion (`$(( ))`) — all operators including bitwise, ternary, and short-circuit `&&`/`||`
 - Parameter expansion — all 16 forms (`:-`, `:=`, `:+`, `:?`, `#`, `##`, `%`, `%%`, `/`, `//`, `^`, `^^`, `,`, `,,`, `:off:len`, `${!var}`)
 - Control flow — `if`/`elif`/`else`, `for`-in, `for((;;))`, `while`, `until`, `case`, `break`, `continue`
 - Functions — both syntaxes, positional params, recursion, `return`
 - Indexed arrays — declaration, access, modify, append, slice, unset, iterate
 - Test expressions — `[ ]` and `[[ ]]` with numeric, string, regex (`=~`), glob operators
+- File test operators — `-f`, `-d`, `-e`, `-r`, `-w`, `-x`, `-s`, `-L` (via `stat()`/`access()`/`lstat()`)
 - Command substitution — `$(command)` with nested capture (32 levels)
 - Subshells — `( commands )` with scope isolation
 - Here-documents and here-strings
 - Special variables — `$?`, `$#`, `$@`, `$*`, `$$`, `$0`, `$1`–`$9`
 - Builtins — `echo`, `printf`, `test`, `true`, `false`, `exit`, `return`, `read`, `shift`, `local`, `export`, `unset`, `cd`, `pwd`
+- Pipeline builtins — `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut`
+- Pipelines — builtin-to-builtin zero-copy item passing, hybrid builtin/external pipes, negated pipelines
+- File redirections — `>`, `>>`, `<` with capture stack integration, `/dev/null` support
+- External command execution — `posix_spawn` with PATH resolution, stdout capture, stdin forwarding, exit code propagation
+- Tilde expansion — `~` → `$HOME`, `~/path`, `~user` via `getpwnam()`
+- Brace expansion — `{a,b,c}`, `{1..5}`, `{a..z}` with step support
+- Associative arrays — `declare -A`, key assignment, key access, `${!map[@]}` keys, `${map[@]}` values, `${#map[@]}` length, `unset` key, for-in iteration
+- `declare` builtin — `-a` (indexed array), `-A` (associative array), `-i` (integer coercion), `-r` (readonly), `-x` (export), `-l` (auto-lowercase), `-u` (auto-uppercase), combined flags
+- Glob expansion — `*.txt`, `?`, `[a-z]` via POSIX `glob()` (command-argument context only)
 
-**Not working:**
-- External command execution (unrecognized commands return exit code 127)
-- Pipelines (parsed but executed sequentially, no data passing)
-- File redirections (parsed but not executed at runtime)
-- File test operators (`-f`, `-d`, `-e` — defined in AST but no filesystem integration)
+**Not yet implemented:**
 - Associative arrays, `declare`/`typeset`
 - `source`/`.`, `eval`, `exec`, `set`, `trap`, `getopts`
-- Process substitution, job control, brace expansion, tilde expansion, glob expansion
+- Process substitution, job control
 - Word splitting, `IFS`
-- Arithmetic short-circuit (`&&`/`||` in `$(( ))`)
+- Environment variable import (`$HOME`, `$PATH` not auto-imported into bash var table)
 
 ### Architecture
 
 ```
 lambda/bash/
 ├── bash_ast.hpp              567 LOC   AST node types, operator/expansion enums
-├── build_bash_ast.cpp       1915 LOC   Tree-sitter CST → Bash AST
-├── transpile_bash_mir.cpp   1837 LOC   Bash AST → MIR code generation
-├── bash_runtime.h            209 LOC   C API for JIT-callable runtime functions
-├── bash_runtime.cpp         1357 LOC   Runtime implementations
-├── bash_builtins.cpp         396 LOC   Builtin command implementations
-├── bash_scope.cpp                      Compile-time scope/symbol management
-├── bash_transpiler.hpp                 Transpiler context struct
+├── build_bash_ast.cpp       2037 LOC   Tree-sitter CST → Bash AST (brace detection)
+├── transpile_bash_mir.cpp   2141 LOC   Bash AST → MIR code generation
+├── bash_runtime.h            254 LOC   C API for JIT-callable runtime functions
+├── bash_runtime.cpp         1974 LOC   Runtime (exec, pipes, redirects, expansions)
+├── bash_builtins.cpp         833 LOC   Builtin commands (cat, wc, grep, sort, ...)
+├── bash_scope.cpp            193 LOC   Compile-time scope/symbol management
+├── bash_transpiler.hpp       111 LOC   Transpiler context struct
 ```
 
 **CLI entry:** `./lambda.exe bash script.sh` → `main.cpp` reads source → `transpile_bash_to_mir()` → JIT → execute.
@@ -53,9 +59,11 @@ lambda/bash/
 
 ---
 
-## Phase 1: Test Harness & Stability
+## Phase 1: Test Harness & Stability ✅ COMPLETED
 
 **Goal:** Establish automated regression testing so all subsequent phases have a safety net.
+
+> **Status:** Implemented `test/test_bash_run.sh` harness and `make test-bash-baseline` Makefile target. Iterates over `test/bash/*.sh`, diffs against `.txt` expected output, reports colored pass/fail with summary. Exit code propagation added to `main.cpp`. Currently 22 test scripts, all passing.
 
 ### 1.1 Makefile Integration
 
@@ -121,9 +129,11 @@ return exit_code;
 
 ---
 
-## Phase 2: Pipelines (Builtin-to-Builtin)
+## Phase 2: Pipelines (Builtin-to-Builtin) ✅ COMPLETED
 
 **Goal:** Make `echo "hello" | cat` work by passing captured output between pipeline stages as Lambda `Item` values.
+
+> **Status:** Implemented zero-copy item passing for builtin pipelines. Added `bash_set_stdin_item()`/`bash_get_stdin_item()` API. Pipeline stages use `bash_begin_capture()` / `bash_end_capture()` chain. Added 8 pipeline builtins: `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut`. Negated pipelines (`!`) supported via `bash_negate_exit_code()`. Hybrid builtin↔external pipelines work via stdin forwarding in `bash_exec_external()`. Test: `test/bash/pipeline.sh` (22 cases).
 
 ### 2.1 Design: Zero-Copy Item Passing
 
@@ -199,9 +209,11 @@ The `BashPipelineNode.negated` flag already exists in the AST — just need to e
 
 ---
 
-## Phase 3: File Redirections
+## Phase 3: File Redirections ✅ COMPLETED
 
 **Goal:** Make `echo "data" > file.txt`, `cat < input.txt`, and `cmd >> log.txt` work.
+
+> **Status:** Implemented `bash_redirect_write()`, `bash_redirect_append()`, `bash_redirect_read()` runtime functions. Transpiler emits capture + redirect for `>`, `>>`, and `<` operators. File test operators (`-f`, `-d`, `-e`, `-r`, `-w`, `-x`, `-s`, `-L`) implemented via `stat()`/`access()`/`lstat()`. `/dev/null` redirection works. Tests: `test/bash/redirects.sh`, `test/bash/file_tests.sh`.
 
 ### 3.1 Design
 
@@ -249,9 +261,11 @@ All AST infrastructure exists — only runtime functions need implementation.
 
 ---
 
-## Phase 4: External Command Execution
+## Phase 4: External Command Execution ✅ COMPLETED
 
 **Goal:** Run system binaries when a command is not a recognized builtin.
+
+> **Status:** Implemented `bash_exec_external()` using `posix_spawn` (Approach A). Features: PATH resolution by searching `$PATH` directories, stdout capture via `pipe()`, stdin forwarding for pipeline integration, exit code propagation to `$?`. Supports absolute paths and PATH-relative commands. Unresolved commands return exit code 127. Test: `test/bash/external_cmds.sh`.
 
 ### 4.1 Design Choices
 
@@ -307,9 +321,11 @@ For external→builtin transitions: capture child's stdout, pass as stdin Item.
 
 ---
 
-## Phase 5: Expansions & Word Processing
+## Phase 5: Expansions & Word Processing ✅ COMPLETED
 
 **Goal:** Implement the missing expansion types and word processing rules that real Bash scripts rely on.
+
+> **Status:** Implemented tilde expansion (`bash_expand_tilde()` — `getenv("HOME")` + `getpwnam()` for `~user`), brace expansion (`bash_expand_brace()` — comma lists `{a,b,c}`, numeric ranges `{1..5}` with step, character ranges `{a..z}`), glob expansion (`bash_glob_expand()` — POSIX `glob()` with `GLOB_NOCHECK`), and arithmetic short-circuit (`&&`/`||` in `$(( ))` using MIR conditional branches `BEQ`/`BNE`). Tree-sitter `concatenation` nodes starting with `{` are detected in `build_concatenation()` and converted to word nodes for brace expansion. Glob/brace expansion is context-aware — only applied in command arguments via `bm_transpile_cmd_arg()`, not in parameter expansion patterns like `${var#*/}`. Word splitting (`$IFS`) deferred. Test: `test/bash/expansions.sh`.
 
 ### 5.1 Tilde Expansion
 
@@ -555,31 +571,36 @@ This bridges Bash's procedural scripting with Lambda's functional data processin
 
 ## Implementation Priorities
 
-| Phase | Effort | Impact | Priority |
-|-------|--------|--------|----------|
-| **Phase 1: Test Harness** | Small | High — enables safe iteration | **P0** |
-| **Phase 2: Pipelines** | Medium | High — core shell feature | **P0** |
-| **Phase 3: File Redirections** | Medium | High — scripts need file I/O | **P1** |
-| **Phase 4: External Commands** | Large | Critical — scripts call external tools | **P1** |
-| **Phase 5: Expansions** | Medium | Medium — needed for real scripts | **P2** |
-| **Phase 6: Assoc Arrays** | Medium | Medium — used in complex scripts | **P2** |
-| **Phase 7: Source & Env** | Medium | High — script composition | **P2** |
-| **Phase 8: Signals** | Medium | Low — specialized use | **P3** |
-| **Phase 9: Lambda Builtins** | Medium | High — unique differentiator | **P3** |
+| Phase | Effort | Impact | Status |
+|-------|--------|--------|--------|
+| **Phase 1: Test Harness** | Small | High — enables safe iteration | ✅ Done |
+| **Phase 2: Pipelines** | Medium | High — core shell feature | ✅ Done |
+| **Phase 3: File Redirections** | Medium | High — scripts need file I/O | ✅ Done |
+| **Phase 4: External Commands** | Large | Critical — scripts call external tools | ✅ Done |
+| **Phase 5: Expansions** | Medium | Medium — needed for real scripts | ✅ Done |
+| **Phase 6: Assoc Arrays** | Medium | Medium — used in complex scripts | **Next** |
+| **Phase 7: Source & Env** | Medium | High — script composition | Planned |
+| **Phase 8: Signals** | Medium | Low — specialized use | Planned |
+| **Phase 9: Lambda Builtins** | Medium | High — unique differentiator | Planned |
 
 ### Recommended Execution Order
 
 ```
-Phase 1 (Test Harness)
+Phase 1 (Test Harness)              ✅ Done — 22 tests, test_bash_run.sh harness
     │
     ▼
-Phase 2 (Pipelines)  ────→  Phase 3 (File Redirections)
-    │                              │
-    ▼                              ▼
-Phase 4 (External Commands)  ←─── ┘
+Phase 2 (Pipelines)                 ✅ Done — zero-copy item passing, 8 builtins
     │
-    ├──→ Phase 5 (Expansions)
-    ├──→ Phase 6 (Assoc Arrays & declare)
+    ▼
+Phase 3 (File Redirections)         ✅ Done — >, >>, <, file tests
+    │
+    ▼
+Phase 4 (External Commands)         ✅ Done — posix_spawn, PATH resolution
+    │
+    ▼
+Phase 5 (Expansions)                ✅ Done — tilde, brace, glob, arith short-circuit
+    │
+    ├──→ Phase 6 (Assoc Arrays & declare)    ← NEXT
     ├──→ Phase 7 (Source & Environment)
     │
     ▼
@@ -587,7 +608,7 @@ Phase 8 (Signals)
 Phase 9 (Lambda-Enhanced Builtins)
 ```
 
-Phases 5, 6, and 7 can be worked in parallel once external commands are functional.
+Phases 6 and 7 can be worked in parallel. Phase 5's word splitting (`$IFS`) may be revisited if needed by real-world scripts.
 
 ---
 
@@ -607,19 +628,32 @@ Phases 5, 6, and 7 can be worked in parallel once external commands are function
 
 ## Files to Create / Modify
 
-### New Files
+### Files Created (Phases 1–5)
 | File | Purpose |
-|------|---------|
-| `test/test_bash_run.sh` | Bash test runner script |
+|------|--------|
+| `test/test_bash_run.sh` | Bash test runner script (colored output, diff on failure) |
+| `test/bash/pipeline.sh` + `.txt` | Pipeline integration tests |
+| `test/bash/redirects.sh` + `.txt` | File redirection tests |
+| `test/bash/file_tests.sh` + `.txt` | File test operator tests (`-f`, `-d`, `-e`, etc.) |
+| `test/bash/external_cmds.sh` + `.txt` | External command execution tests |
+| `test/bash/expansions.sh` + `.txt` | Tilde, brace, glob, arithmetic short-circuit tests |
 
-### Modified Files
+### Files Modified (Phases 1–5)
 | File | Changes |
-|------|---------|
-| `Makefile` | Add `test-bash-baseline` target |
-| `lambda/main.cpp` | Propagate bash exit code; auto-detect `.sh` files |
-| `lambda/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; arithmetic short-circuit |
-| `lambda/bash/bash_runtime.h` | Stdin item API; file redirect API; glob/word-split functions; env functions |
-| `lambda/bash/bash_runtime.cpp` | Implement pipeline data passing; file redirect; external exec; stdin item |
-| `lambda/bash/bash_builtins.cpp` | Add `cat`, `wc`, `grep`, `head`, `tail`, `sort`, `cut`, `tr`, `source`, `declare`, `trap`, `set` |
-| `lambda/bash/build_bash_ast.cpp` | Brace expansion node; tilde expansion; improved redirect handling |
-| `lambda/bash/bash_ast.hpp` | `BASH_AST_NODE_BRACE_EXPAND`; variable attribute flags |
+|------|--------|
+| `Makefile` | Added `test-bash-baseline` target |
+| `lambda/main.cpp` | Propagate bash exit code to process exit |
+| `lambda/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; `bm_transpile_cmd_arg()` for context-aware glob/brace expansion; arithmetic `&&`/`||` short-circuit with MIR branches |
+| `lambda/bash/bash_runtime.h` | Stdin item API; file redirect API; expansion functions (`bash_expand_tilde`, `bash_glob_expand`, `bash_expand_brace`); external exec API |
+| `lambda/bash/bash_runtime.cpp` | Pipeline data passing; file redirects; external exec via `posix_spawn`; tilde/brace/glob expansion runtime |
+| `lambda/bash/bash_builtins.cpp` | Added `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut` (stdin-item aware) |
+| `lambda/bash/build_bash_ast.cpp` | Brace pattern detection in `build_concatenation()` (converts `{a,b,c}` to word node); redirect handling |
+| `lambda/sys_func_registry.c` | Registered all new runtime functions for JIT linking |
+
+### Files Still to Modify (Phases 6–9)
+| File | Changes |
+|------|--------|
+| `lambda/bash/bash_runtime.cpp` | Associative arrays; environment import; `source` file loading |
+| `lambda/bash/bash_builtins.cpp` | `source`, `declare`, `trap`, `set` builtins |
+| `lambda/bash/bash_ast.hpp` | Variable attribute flags for `declare` |
+| `lambda/bash/build_bash_ast.cpp` | `declare` command parsing |
