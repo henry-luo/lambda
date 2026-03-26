@@ -294,6 +294,39 @@ static void bm_emit_call_void_2(BashMirTranspiler* mt, const char* fn_name, MIR_
             arg2));
 }
 
+// emit a varargs builtin call: func(Item* args, int argc) -> Item
+// builds args buffer, fills it, and calls the function
+static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_name,
+                                          BashCommandNode* cmd) {
+    int argc = cmd->arg_count;
+    MIR_reg_t args_ptr = bm_new_temp(mt);
+    if (argc > 0) {
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
+                         MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(argc * sizeof(Item)))));
+        int i = 0;
+        BashAstNode* arg = cmd->args;
+        while (arg && i < argc) {
+            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                   args_ptr, 0, 1),
+                    arg_val));
+            arg = arg->next;
+            i++;
+        }
+    } else {
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
+                         MIR_new_uint_op(mt->ctx, 0)));
+    }
+
+    MIR_reg_t result = bm_emit_call_2(mt, fn_name,
+        MIR_new_reg_op(mt->ctx, args_ptr), MIR_new_int_op(mt->ctx, argc));
+    return MIR_new_reg_op(mt->ctx, result);
+}
+
 // get or create a variable slot index
 static int bm_get_var_index(BashMirTranspiler* mt, const char* name) {
     BashMirVar key = {.name = name, .index = 0};
@@ -390,11 +423,44 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         break;
     case BASH_AST_NODE_PIPELINE: {
         BashPipelineNode* pipeline = (BashPipelineNode*)node;
-        // for non-pipe pipelines (single command), just execute
         BashAstNode* cmd = pipeline->commands;
-        while (cmd) {
-            bm_transpile_statement(mt, cmd);
-            cmd = cmd->next;
+
+        if (pipeline->command_count <= 1) {
+            // single command, no pipe — just execute directly
+            while (cmd) {
+                bm_transpile_statement(mt, cmd);
+                cmd = cmd->next;
+            }
+        } else {
+            // multi-command pipeline: capture-and-pass chain
+            // for each stage except the last: begin_capture, execute, end_capture, set_stdin_item
+            // last stage: set_stdin_item from prev, execute normally (output goes to stdout/capture)
+            int stage = 0;
+            while (cmd) {
+                bool is_last = (cmd->next == NULL);
+
+                if (!is_last) {
+                    // capture this stage's output (raw — preserve trailing newlines for pipes)
+                    bm_emit_call_void_0(mt, "bash_begin_capture");
+                    bm_transpile_statement(mt, cmd);
+                    MIR_reg_t captured = bm_emit_call_0(mt, "bash_end_capture_raw");
+                    // pass captured output as stdin to next stage
+                    bm_emit_call_void_1(mt, "bash_set_stdin_item",
+                        MIR_new_reg_op(mt->ctx, captured));
+                } else {
+                    // last stage: just execute (reads stdin_item if needed)
+                    bm_transpile_statement(mt, cmd);
+                    // clear stdin item after pipeline completes
+                    bm_emit_call_void_0(mt, "bash_clear_stdin_item");
+                }
+                cmd = cmd->next;
+                stage++;
+            }
+        }
+
+        // handle negated pipeline (! pipeline)
+        if (pipeline->negated) {
+            bm_emit_call_void_0(mt, "bash_negate_exit_code");
         }
         break;
     }
@@ -1023,6 +1089,32 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
         }
         return bm_emit_int_literal(mt, 0);
+    }
+
+    // pipeline builtins (read from stdin item)
+    if (cmd_len == 3 && memcmp(cmd_name, "cat", 3) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_cat", cmd);
+    }
+    if (cmd_len == 2 && memcmp(cmd_name, "wc", 2) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_wc", cmd);
+    }
+    if (cmd_len == 4 && memcmp(cmd_name, "head", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_head", cmd);
+    }
+    if (cmd_len == 4 && memcmp(cmd_name, "tail", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_tail", cmd);
+    }
+    if (cmd_len == 4 && memcmp(cmd_name, "grep", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_grep", cmd);
+    }
+    if (cmd_len == 4 && memcmp(cmd_name, "sort", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_sort", cmd);
+    }
+    if (cmd_len == 2 && memcmp(cmd_name, "tr", 2) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_tr", cmd);
+    }
+    if (cmd_len == 3 && memcmp(cmd_name, "cut", 3) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_cut", cmd);
     }
 
     // check for user-defined function call
