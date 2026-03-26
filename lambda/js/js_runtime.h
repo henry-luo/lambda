@@ -409,6 +409,31 @@ Item js_promise_all(Item iterable);              // Promise.all([...])
 Item js_promise_race(Item iterable);             // Promise.race([...])
 Item js_promise_any(Item iterable);              // Promise.any([...])
 Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
+Item js_promise_with_resolvers(void);            // Promise.withResolvers()
+Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
+
+// Phase 6: Async state machine runtime
+int64_t js_async_must_suspend(Item value);       // 1 if pending promise, 0 otherwise
+Item js_async_get_resolved(void);                // get cached resolved value
+Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size);
+Item js_async_start(Item ctx_idx);               // begin async execution at state 0
+Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
+
+// =============================================================================
+// TextEncoder / TextDecoder (UTF-8 only)
+// =============================================================================
+
+Item js_text_encoder_new(void);
+Item js_text_encoder_encode(Item encoder, Item str);
+Item js_text_decoder_new(void);
+Item js_text_decoder_decode(Item decoder, Item input);
+
+// =============================================================================
+// WeakMap / WeakSet stubs
+// =============================================================================
+
+Item js_weakmap_new(void);
+Item js_weakset_new(void);
 
 // =============================================================================
 // v14: Event Loop & Timers

@@ -35,6 +35,7 @@
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "py/py_transpiler.hpp"      // Python transpiler
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
+#include "bash/bash_runtime.h"       // bash_exit_code()
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1105,14 +1106,16 @@ int main(int argc, char *argv[]) {
 
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Bash Transpiler v0.1\n\n");
-            printf("Usage: %s bash [file.sh]\n", argv[0]);
+            printf("Usage: %s bash [--posix] [file.sh]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'bash' command runs the Bash transpiler.\n");
             printf("  If a file is provided, it transpiles and executes the Bash script.\n");
             printf("\nOptions:\n");
             printf("  -h, --help    Show this help message\n");
+            printf("  --posix       Enable POSIX-compatible mode (disable bash extensions)\n");
             printf("\nExamples:\n");
-            printf("  %s bash script.sh    # Transpile and run script.sh\n", argv[0]);
+            printf("  %s bash script.sh          # Transpile and run script.sh\n", argv[0]);
+            printf("  %s bash --posix script.sh  # Run in POSIX compatibility mode\n", argv[0]);
             log_finish();
             return 0;
         }
@@ -1121,8 +1124,22 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
         lambda_stack_init();
 
-        if (argc >= 3) {
-            const char* bash_file = argv[2];
+        // scan for --posix flag and find the script file argument
+        bool bash_posix = false;
+        const char* bash_file = NULL;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--posix") == 0) {
+                bash_posix = true;
+            } else {
+                bash_file = argv[i];
+            }
+        }
+
+        if (bash_posix) {
+            bash_set_posix_mode(true);
+        }
+
+        if (bash_file) {
             char* bash_source = read_text_file(bash_file);
             if (!bash_source) {
                 printf("Error: Could not read file '%s'\n", bash_file);
@@ -1149,9 +1166,10 @@ int main(int argc, char *argv[]) {
             free(bash_source);
         }
 
+        int bash_exit = bash_exit_code(bash_get_exit_code());
         runtime_cleanup(&runtime);
         log_finish();
-        return 0;
+        return bash_exit;
     }
 
     // Handle convert command

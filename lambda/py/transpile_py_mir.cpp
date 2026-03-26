@@ -88,6 +88,20 @@ struct PyFuncCollected {
     char shared_env_names[32][128]; // vars to put in shared env (with _py_ prefix)
     int shared_env_count;           // number of shared env slots
     bool has_nonlocal_children;     // true if any child uses nonlocal
+    // global declarations
+    char global_names[16][128];     // vars declared global (with _py_ prefix)
+    int global_name_count;
+    // *args variadic parameter
+    bool has_star_args;             // true if function has *args parameter
+    char star_args_name[128];       // name of *args parameter (with _py_ prefix)
+    int star_args_index;            // index of *args in param list (regular params before it)
+    // **kwargs variadic keyword parameter
+    bool has_kwargs;                // true if function has **kwargs parameter
+    char kwargs_name[128];          // name of **kwargs variable (with _py_ prefix)
+    // class method info
+    bool is_method;                 // true if this function is a class method
+    char class_name[128];           // name of the class this method belongs to (without _py_ prefix)
+    int class_depth;                // nesting depth of class within which method is defined (top=0)
 };
 
 struct PyLambdaCollected {
@@ -131,6 +145,10 @@ struct PyMirTranspiler {
 
     // Module vars
     int module_var_count;
+    // Global variable name → module var index mapping
+    char global_var_names[64][128];  // variable names (with _py_ prefix)
+    int global_var_indices[64];      // module var index for each
+    int global_var_count;
 
     // Module-level constants
     struct hashmap* module_consts;
@@ -349,6 +367,20 @@ static MIR_reg_t pm_call_4(PyMirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+static MIR_reg_t pm_call_5(PyMirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
+    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
+    PyImportCacheEntry* ie = pm_ensure_import(mt, fn_name, ret_type, 5, args, 1);
+    MIR_reg_t res = pm_new_reg(mt, fn_name, ret_type);
+    pm_emit(mt, MIR_new_call_insn(mt->ctx, 8,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4, a5));
+    return res;
+}
+
 static void pm_call_void_1(PyMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
     MIR_var_t args[1] = {{a1t, "a", 0}};
@@ -512,6 +544,10 @@ static MIR_reg_t pm_emit_bool(PyMirTranspiler* mt, bool value) {
 // Expression transpilers
 // ============================================================================
 
+// forward declarations — global variable routing
+static bool pm_is_global_in_current_func(PyMirTranspiler* mt, const char* vname);
+static int pm_get_global_var_index(PyMirTranspiler* mt, const char* vname);
+
 static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     switch (lit->literal_type) {
     case PY_LITERAL_INT:
@@ -549,6 +585,16 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
 
     char vname[128];
     snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+
+    // check if variable is declared global in current function
+    if (pm_is_global_in_current_func(mt, vname)) {
+        int idx = pm_get_global_var_index(mt, vname);
+        if (idx >= 0) {
+            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, idx));
+        }
+    }
+
     PyMirVarEntry* var = pm_find_var(mt, vname);
     if (var) {
         if (var->from_env) return pm_load_env_slot(mt, var->env_reg, var->env_slot);
@@ -570,16 +616,25 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
                     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, fptr),
                         MIR_new_ref_op(mt->ctx, found->func_item)));
-                    return pm_call_2(mt, "py_new_function", MIR_T_I64,
+                    MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, mt->func_entries[i].param_count));
+                    if (mt->func_entries[i].has_kwargs) {
+                        pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+                    }
+                    return fn_item_reg;
                 }
             }
         }
     }
 
-    log_debug("py-mir: undefined variable '%.*s'", (int)id->name->len, id->name->chars);
-    return pm_emit_null(mt);
+    log_debug("py-mir: undefined variable '%.*s' — trying builtin class lookup",
+        (int)id->name->len, id->name->chars);
+    // fallback: look up as a builtin class (ValueError, RuntimeError, etc.)
+    MIR_reg_t name_item = pm_box_string_literal(mt, id->name->chars, id->name->len);
+    return pm_call_1(mt, "py_resolve_name_item", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_item));
 }
 
 static const char* pm_binary_op_func(PyOperator op) {
@@ -767,6 +822,52 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
         const char* name = fn_id->name->chars;
         int name_len = fn_id->name->len;
+
+        // super()
+        if (name_len == 5 && strncmp(name, "super", 5) == 0) {
+            // Python 3 zero-arg super: super() in a method implicitly uses
+            // the enclosing class and self (first parameter)
+            int cur = mt->current_func_index;
+            if (cur >= 0 && mt->func_entries[cur].is_method) {
+                const char* cls_name = mt->func_entries[cur].class_name;
+                // load the class variable — look up scope then module vars
+                char cls_var[132];
+                snprintf(cls_var, sizeof(cls_var), "_py_%s", cls_name);
+                MIR_reg_t cls_reg;
+                {
+                    // try scope first
+                    PyMirVarEntry* cv = pm_find_var(mt, cls_var);
+                    if (cv) {
+                        cls_reg = cv->from_env ? pm_load_env_slot(mt, cv->env_reg, cv->env_slot) : cv->reg;
+                    } else {
+                        // try module var
+                        int midx = pm_get_global_var_index(mt, cls_var);
+                        if (midx >= 0) {
+                            cls_reg = pm_call_1(mt, "py_get_module_var", MIR_T_I64,
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, midx));
+                        } else {
+                            cls_reg = pm_emit_null(mt);
+                        }
+                    }
+                }
+                // load self — first param of the method
+                MIR_reg_t self_reg;
+                PyAstNode* first_param = mt->func_entries[cur].node->params;
+                if (first_param) {
+                    String* pn = ((PyParamNode*)first_param)->name;
+                    char self_var[132];
+                    snprintf(self_var, sizeof(self_var), "_py_%.*s", (int)pn->len, pn->chars);
+                    PyMirVarEntry* sv2 = pm_find_var(mt, self_var);
+                    self_reg = sv2 ? (sv2->from_env ? pm_load_env_slot(mt, sv2->env_reg, sv2->env_slot) : sv2->reg) : pm_emit_null(mt);
+                } else {
+                    self_reg = pm_emit_null(mt);
+                }
+                return pm_call_2(mt, "py_super", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, self_reg));
+            }
+            return pm_emit_null(mt);
+        }
 
         // print()
         if (name_len == 5 && strncmp(name, "print", 5) == 0) {
@@ -1113,6 +1214,13 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
         }
 
+        // property(fget) — creates a property descriptor {__is_property__: True, __get__: fget}
+        if (name_len == 8 && strncmp(name, "property", 8) == 0 && call->arg_count >= 1) {
+            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_1(mt, "py_builtin_property", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
         // isinstance()
         if (name_len == 10 && strncmp(name, "isinstance", 10) == 0 && call->arg_count >= 2) {
             MIR_reg_t obj = pm_transpile_expression(mt, call->arguments);
@@ -1184,6 +1292,31 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             return pm_call_2(mt, "py_builtin_zip", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+        }
+
+        // iter()
+        if (name_len == 4 && strncmp(name, "iter", 4) == 0 && call->arg_count >= 1) {
+            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_1(mt, "py_get_iterator", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
+        // next()
+        if (name_len == 4 && strncmp(name, "next", 4) == 0 && call->arg_count >= 1) {
+            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_1(mt, "py_iterator_next", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
+        // open()
+        if (name_len == 4 && strncmp(name, "open", 4) == 0 && call->arg_count >= 1) {
+            MIR_reg_t path_arg = pm_transpile_expression(mt, call->arguments);
+            MIR_reg_t mode_arg = (call->arguments->next) ?
+                pm_transpile_expression(mt, call->arguments->next) :
+                pm_box_string_literal(mt, "r", 1);
+            return pm_call_2(mt, "py_builtin_open", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mode_arg));
         }
     }
 
@@ -1272,8 +1405,27 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
             MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_null),
+            MIR_new_reg_op(mt->ctx, dict_result),
+            MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
+        MIR_label_t l_try_instance = pm_new_label(mt);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_instance),
+            MIR_new_reg_op(mt->ctx, is_null)));
         pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
             MIR_new_reg_op(mt->ctx, dict_result)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+        // fallback: user-defined class method — get bound method via py_getattr + call it
+        pm_emit_label(mt, l_try_instance);
+        MIR_reg_t bound_method = pm_call_2(mt, "py_getattr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name));
+        MIR_reg_t instance_result = pm_call_3(mt, "py_call_function", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, bound_method),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, instance_result)));
 
         pm_emit_label(mt, l_end);
         return result;
@@ -1289,6 +1441,17 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 strncmp(fn_id->name->chars, mt->func_entries[i].name, fn_id->name->len) == 0) {
                 target_fc = &mt->func_entries[i];
                 break;
+            }
+        }
+        // Phase C: if this function was decorated, its name is now bound to the
+        // decorator's return value (stored as a local var).  Use the generic
+        // py_call_function path so the decorator takes effect.
+        if (target_fc && target_fc->node && target_fc->node->decorators) {
+            char vcheck[128];
+            snprintf(vcheck, sizeof(vcheck), "_py_%.*s",
+                (int)fn_id->name->len, fn_id->name->chars);
+            if (pm_find_var(mt, vcheck)) {
+                target_fc = NULL;  // force fall-through to generic py_call_function
             }
         }
         if (target_fc && target_fc->func_item) {
@@ -1349,9 +1512,12 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             char fn_name[140];
             snprintf(fn_name, sizeof(fn_name), "_%s", target_fc->name);
 
-            // build proto for the call (reuse from import cache if exists, else create)
-            MIR_var_t pvars[16];
-            for (int i = 0; i < total_params && i < 16; i++) {
+            // determine total MIR params (regular + optional varargs pair + optional kwargs map)
+            int mir_total = total_params + (target_fc->has_star_args ? 2 : 0) + (target_fc->has_kwargs ? 1 : 0);
+
+            // build proto for the call
+            MIR_var_t pvars[20];
+            for (int i = 0; i < mir_total && i < 20; i++) {
                 char* pb = (char*)alloca(8);
                 snprintf(pb, 8, "p%d", i);
                 pvars[i] = {MIR_T_I64, pb, 0};
@@ -1371,7 +1537,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 char proto_name[160];
                 snprintf(proto_name, sizeof(proto_name), "%s_lp", fn_name);
                 MIR_type_t res_types[1] = { MIR_T_I64 };
-                proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, total_params, pvars);
+                proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, res_types, mir_total, pvars);
                 PyImportCacheEntry new_entry;
                 memset(&new_entry, 0, sizeof(new_entry));
                 snprintf(new_entry.name, sizeof(new_entry.name), "%s", proto_key);
@@ -1380,17 +1546,125 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 hashmap_set(mt->import_cache, &new_entry);
             }
 
+            // build kwargs map for **kwargs-accepting functions
+            MIR_reg_t kwargs_map_reg = 0;
+            if (target_fc->has_kwargs) {
+                kwargs_map_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+                // third pass: collect leftover keyword args + **splat into kwargs map
+                PyAstNode* ka = call->arguments;
+                while (ka) {
+                    if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                        PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
+                        if (!kw->key) {
+                            // **expr splat — merge into kwargs map
+                            MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
+                            pm_call_2(mt, "py_dict_merge", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, kwargs_map_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, splat_val));
+                        } else {
+                            // named kwarg — add to map if it doesn't match any named param
+                            bool kw_matched = false;
+                            if (target_fc->node) {
+                                PyAstNode* pp = target_fc->node->params;
+                                int pi = 0;
+                                while (pp && pi < total_params) {
+                                    String* pname = NULL;
+                                    if (pp->node_type == PY_AST_NODE_PARAMETER ||
+                                        pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+                                        pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+                                        pname = ((PyParamNode*)pp)->name;
+                                    }
+                                    if (pname && pname->len == kw->key->len &&
+                                        strncmp(pname->chars, kw->key->chars, pname->len) == 0) {
+                                        kw_matched = true;
+                                        break;
+                                    }
+                                    pp = pp->next;
+                                    pi++;
+                                }
+                            }
+                            if (!kw_matched) {
+                                MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                                MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
+                                pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kwargs_map_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kname_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kval_reg));
+                            }
+                        }
+                    }
+                    ka = ka->next;
+                }
+            }
+
             MIR_reg_t res = pm_new_reg(mt, "dcall", MIR_T_I64);
 
-            int nops = 3 + total_params;
-            MIR_op_t ops[19]; // proto + func_ref + result + up to 16 args
-            ops[0] = MIR_new_ref_op(mt->ctx, proto);
-            ops[1] = MIR_new_ref_op(mt->ctx, target_fc->func_item);
-            ops[2] = MIR_new_reg_op(mt->ctx, res);
-            for (int i = 0; i < total_params && i < 16; i++) {
-                ops[3 + i] = MIR_new_reg_op(mt->ctx, ordered_args[i]);
+            if (target_fc->has_star_args) {
+                // collect all positional args beyond regular params as excess
+                int excess_count = 0;
+                MIR_reg_t excess_regs[16];
+                int positional = 0;
+                PyAstNode* pa = call->arguments;
+                while (pa) {
+                    if (pa->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) { pa = pa->next; continue; }
+                    positional++;
+                    if (positional > total_params) {
+                        // excess positional arg → *args
+                        excess_regs[excess_count++] = pm_transpile_expression(mt, pa);
+                    }
+                    pa = pa->next;
+                }
+
+                // build stack array for excess args
+                MIR_reg_t va_ptr = pm_new_reg(mt, "vaptr", MIR_T_I64);
+                if (excess_count > 0) {
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                        MIR_new_reg_op(mt->ctx, va_ptr),
+                        MIR_new_int_op(mt->ctx, excess_count * 8)));
+                    for (int i = 0; i < excess_count; i++) {
+                        MIR_reg_t addr = pm_new_reg(mt, "va", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                            MIR_new_reg_op(mt->ctx, addr),
+                            MIR_new_reg_op(mt->ctx, va_ptr),
+                            MIR_new_int_op(mt->ctx, i * 8)));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1),
+                            MIR_new_reg_op(mt->ctx, excess_regs[i])));
+                    }
+                } else {
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, va_ptr),
+                        MIR_new_int_op(mt->ctx, 0)));
+                }
+
+                int nops = 3 + mir_total;
+                MIR_op_t ops[24];
+                ops[0] = MIR_new_ref_op(mt->ctx, proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, target_fc->func_item);
+                ops[2] = MIR_new_reg_op(mt->ctx, res);
+                for (int i = 0; i < total_params && i < 16; i++) {
+                    ops[3 + i] = MIR_new_reg_op(mt->ctx, ordered_args[i]);
+                }
+                ops[3 + total_params] = MIR_new_reg_op(mt->ctx, va_ptr);
+                ops[3 + total_params + 1] = MIR_new_int_op(mt->ctx, excess_count);
+                if (target_fc->has_kwargs) {
+                    ops[3 + total_params + 2] = MIR_new_reg_op(mt->ctx, kwargs_map_reg);
+                }
+                pm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
+            } else {
+                int nops = 3 + mir_total;
+                MIR_op_t ops[20]; // proto + func_ref + result + up to 16 args + optional kwargs map
+                ops[0] = MIR_new_ref_op(mt->ctx, proto);
+                ops[1] = MIR_new_ref_op(mt->ctx, target_fc->func_item);
+                ops[2] = MIR_new_reg_op(mt->ctx, res);
+                for (int i = 0; i < total_params && i < 16; i++) {
+                    ops[3 + i] = MIR_new_reg_op(mt->ctx, ordered_args[i]);
+                }
+                if (target_fc->has_kwargs) {
+                    ops[3 + total_params] = MIR_new_reg_op(mt->ctx, kwargs_map_reg);
+                }
+                pm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             }
-            pm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             return res;
         }
     }
@@ -1428,6 +1702,47 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, args_ptr),
             MIR_new_int_op(mt->ctx, 0)));
+    }
+
+    // check for keyword arguments (**expr splats and named kwargs) in generic call path
+    {
+        bool has_any_kwarg = false;
+        PyAstNode* ka = call->arguments;
+        while (ka) {
+            if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) { has_any_kwarg = true; break; }
+            ka = ka->next;
+        }
+        if (has_any_kwarg) {
+            // build kwargs map from all named kwargs and **splat
+            MIR_reg_t kw_map = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+            ka = call->arguments;
+            while (ka) {
+                if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                    PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
+                    if (!kw->key) {
+                        // **expr splat — merge into kwargs map
+                        MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
+                        pm_call_2(mt, "py_dict_merge", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, splat_val));
+                    } else {
+                        // named kwarg — add to map
+                        MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                        MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
+                        pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kname_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kval_reg));
+                    }
+                }
+                ka = ka->next;
+            }
+            return pm_call_4(mt, "py_call_function_kw", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, func),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map));
+        }
     }
 
     return pm_call_3(mt, "py_call_function", MIR_T_I64,
@@ -1553,6 +1868,14 @@ static MIR_reg_t pm_transpile_fstring(PyMirTranspiler* mt, PyFStringNode* fstr) 
         MIR_reg_t val;
         if (part->node_type == PY_AST_NODE_LITERAL) {
             val = pm_transpile_literal(mt, (PyLiteralNode*)part);
+        } else if (part->node_type == PY_AST_NODE_FSTRING_EXPR) {
+            // f-string expression with format spec: f"{expr:spec}"
+            PyFStringExprNode* fse = (PyFStringExprNode*)part;
+            MIR_reg_t expr_val = pm_transpile_expression(mt, fse->expression);
+            MIR_reg_t spec_val = pm_box_string_literal(mt, fse->format_spec->chars, fse->format_spec->len);
+            val = pm_call_2(mt, "py_format_value", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, expr_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, spec_val));
         } else {
             MIR_reg_t expr = pm_transpile_expression(mt, part);
             val = pm_call_1(mt, "py_to_str", MIR_T_I64,
@@ -1868,6 +2191,18 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
 
+            // check if variable is declared global in current function
+            if (pm_is_global_in_current_func(mt, vname)) {
+                int idx = pm_get_global_var_index(mt, vname);
+                if (idx >= 0) {
+                    pm_call_void_2(mt, "py_set_module_var",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                    target = target->next;
+                    continue;
+                }
+            }
+
             PyMirVarEntry* var = pm_find_var(mt, vname);
             if (var) {
                 if (var->from_env) {
@@ -1888,11 +2223,25 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
         } else if (target->node_type == PY_AST_NODE_SUBSCRIPT) {
             PySubscriptNode* sub = (PySubscriptNode*)target;
             MIR_reg_t obj = pm_transpile_expression(mt, sub->object);
-            MIR_reg_t key = pm_transpile_expression(mt, sub->index);
-            pm_call_3(mt, "py_subscript_set", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            if (sub->index && sub->index->node_type == PY_AST_NODE_SLICE) {
+                // slice assignment: obj[start:stop:step] = val
+                PySliceNode* slice = (PySliceNode*)sub->index;
+                MIR_reg_t start = slice->start ? pm_transpile_expression(mt, slice->start) : pm_emit_null(mt);
+                MIR_reg_t stop  = slice->stop  ? pm_transpile_expression(mt, slice->stop)  : pm_emit_null(mt);
+                MIR_reg_t step  = slice->step  ? pm_transpile_expression(mt, slice->step)  : pm_emit_null(mt);
+                pm_call_5(mt, "py_slice_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, start),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, stop),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, step),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            } else {
+                MIR_reg_t key = pm_transpile_expression(mt, sub->index);
+                pm_call_3(mt, "py_subscript_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
         } else if (target->node_type == PY_AST_NODE_ATTRIBUTE) {
             PyAttributeNode* attr = (PyAttributeNode*)target;
             MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
@@ -1967,6 +2316,18 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
         PyIdentifierNode* id = (PyIdentifierNode*)aug->target;
         char vname[128];
         snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+
+        // check if variable is declared global in current function
+        if (pm_is_global_in_current_func(mt, vname)) {
+            int idx = pm_get_global_var_index(mt, vname);
+            if (idx >= 0) {
+                pm_call_void_2(mt, "py_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                return;
+            }
+        }
+
         PyMirVarEntry* var = pm_find_var(mt, vname);
         if (var) {
             if (var->from_env) {
@@ -1984,6 +2345,15 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
         pm_call_3(mt, "py_subscript_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    } else if (aug->target->node_type == PY_AST_NODE_ATTRIBUTE) {
+        // self.x += val → py_setattr(self, "x", val)
+        PyAttributeNode* attr = (PyAttributeNode*)aug->target;
+        MIR_reg_t obj = pm_transpile_expression(mt, attr->object);
+        MIR_reg_t attr_name = pm_box_string_literal(mt, attr->attribute->chars, attr->attribute->len);
+        pm_call_3(mt, "py_setattr", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_name),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
     }
 }
@@ -2226,6 +2596,59 @@ static void pm_transpile_block(PyMirTranspiler* mt, PyAstNode* body) {
 }
 
 // ============================================================================
+// Decorator application
+// ============================================================================
+
+// Apply a decorator list (bottom-to-top) to a value and return the final result.
+// Decorators are linked via ->next in source order; bottom-to-top means the last
+// decorator in the list wraps first (inner-most) and the first wraps last (outer).
+static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAstNode* decorators) {
+    if (!decorators) return value;
+
+    // collect into small fixed array so we can iterate in reverse
+    const int MAX_DECS = 16;
+    PyAstNode* dec_list[MAX_DECS];
+    int dec_count = 0;
+    PyAstNode* d = decorators;
+    while (d && dec_count < MAX_DECS) {
+        dec_list[dec_count++] = d;
+        d = d->next;
+    }
+
+    // apply bottom-to-top: last decorator in source order wraps the function first
+    for (int i = dec_count - 1; i >= 0; i--) {
+        PyDecoratorNode* dn = (PyDecoratorNode*)dec_list[i];
+
+        // Special case: @property — call py_builtin_property(value) directly,
+        // because 'property' as a bare identifier has no runtime binding.
+        if (dn->expression && dn->expression->node_type == PY_AST_NODE_IDENTIFIER) {
+            PyIdentifierNode* id = (PyIdentifierNode*)dn->expression;
+            if (id->name->len == 8 && strncmp(id->name->chars, "property", 8) == 0) {
+                value = pm_call_1(mt, "py_builtin_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                continue;
+            }
+        }
+
+        MIR_reg_t dec_val = pm_transpile_expression(mt, dn->expression);
+
+        // call dec_val(value) with exactly one positional argument
+        MIR_reg_t args_ptr = pm_new_reg(mt, "decargs", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+            MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_new_int_op(mt->ctx, 8)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, args_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, value)));
+        value = pm_call_3(mt, "py_call_function", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+    }
+    return value;
+}
+
+// ============================================================================
 // Statement dispatcher
 // ============================================================================
 
@@ -2327,8 +2750,135 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
             pm_set_var(mt, vname, closure);
+            // Phase C: apply decorators to the closure (bottom-to-top)
+            if (fdef->decorators) {
+                MIR_reg_t dec_result = pm_apply_decorators(mt, closure, fdef->decorators);
+                PyMirVarEntry* ventry = pm_find_var(mt, vname);
+                if (ventry && !ventry->from_env) {
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, ventry->reg),
+                        MIR_new_reg_op(mt->ctx, dec_result)));
+                }
+            }
+        } else if (fc_target && !fc_target->is_closure && fc_target->func_item && fdef->decorators) {
+            // non-closure function with decorators: build function item, apply decorators, store as var
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
+            MIR_reg_t fptr = pm_new_reg(mt, "dfp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, fptr),
+                MIR_new_ref_op(mt->ctx, fc_target->func_item)));
+            MIR_reg_t fn_item = pm_call_2(mt, "py_new_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc_target->param_count));
+            if (fc_target->has_kwargs) {
+                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+            }
+            MIR_reg_t dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
+            // store as local var — shadows local_funcs lookup for subsequent references
+            MIR_reg_t var_reg = pm_new_reg(mt, vname, MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_reg_op(mt->ctx, dec_result)));
+            pm_set_var(mt, vname, var_reg);
+            // if there's a module-level slot for this name, also store there
+            int midx = pm_get_global_var_index(mt, vname);
+            if (midx >= 0) {
+                pm_call_void_2(mt, "py_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, midx),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+            }
         }
-        // non-closures are already registered in local_funcs by pm_compile_function
+        // non-closures without decorators are already registered in local_funcs by pm_compile_function
+        break;
+    }
+    case PY_AST_NODE_CLASS_DEF: {
+        PyClassDefNode* cls = (PyClassDefNode*)stmt;
+
+        // 1. build name string item
+        MIR_reg_t name_reg = pm_box_string_literal(mt,
+            cls->name->chars, cls->name->len);
+
+        // 2. build bases list
+        MIR_reg_t bases_reg = pm_call_1(mt, "py_list_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        PyAstNode* base = cls->bases;
+        while (base) {
+            MIR_reg_t base_val = pm_transpile_expression(mt, base);
+            pm_call_2(mt, "py_list_append", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, base_val));
+            base = base->next;
+        }
+
+        // 3. build methods dict — gather methods belonging to this class
+        MIR_reg_t methods_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            PyFuncCollected* fc = &mt->func_entries[fi];
+            if (!fc->is_method) continue;
+            if (strcmp(fc->class_name, cls->name->chars) != 0) continue;
+            // only direct methods (parent == -1 or parent is in a different class)
+            if (fc->parent_index >= 0 &&
+                mt->func_entries[fc->parent_index].is_method &&
+                strcmp(mt->func_entries[fc->parent_index].class_name, cls->name->chars) == 0)
+                continue;  // nested function inside a method — skip
+            if (!fc->func_item) continue;
+
+            MIR_reg_t fptr = pm_new_reg(mt, "mfp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, fptr),
+                MIR_new_ref_op(mt->ctx, fc->func_item)));
+            MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc->param_count));
+            if (fc->has_kwargs) {
+                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+            }
+            // Phase C: apply method decorators (e.g. @property)
+            if (fc->node && fc->node->decorators) {
+                fn_item_reg = pm_apply_decorators(mt, fn_item_reg, fc->node->decorators);
+            }
+            MIR_reg_t mname_reg = pm_box_string_literal(mt,
+                fc->name, strlen(fc->name));
+            pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mname_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+        }
+
+        // 4. call py_class_new(name, bases, methods)
+        MIR_reg_t class_reg = pm_call_3(mt, "py_class_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg));
+
+        // 5. store class as a local scope variable AND as a module var (for super() in methods)
+        char class_var_name[132];
+        snprintf(class_var_name, sizeof(class_var_name),
+            "_py_%.*s", (int)cls->name->len, cls->name->chars);
+        MIR_reg_t reg = pm_new_reg(mt, class_var_name, MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, reg),
+            MIR_new_reg_op(mt->ctx, class_reg)));
+        pm_set_var(mt, class_var_name, reg);
+        // Phase C: apply class decorators (bottom-to-top)
+        if (cls->decorators) {
+            MIR_reg_t dec_result = pm_apply_decorators(mt, reg, cls->decorators);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, reg),
+                MIR_new_reg_op(mt->ctx, dec_result)));
+        }
+        // also store in module var so methods can retrieve it
+        {
+            int midx = pm_get_global_var_index(mt, class_var_name);
+            if (midx >= 0) {
+                pm_call_void_2(mt, "py_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, midx),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+            }
+        }
         break;
     }
     case PY_AST_NODE_BLOCK: {
@@ -2445,11 +2995,50 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_reg_t exc_val = pm_call_0(mt, "py_clear_exception", MIR_T_I64);
 
             // handle each except clause
+            MIR_label_t l_no_match = pm_new_label(mt); // fallback: re-raise if no handler matches
             PyAstNode* handler = tn->handlers;
             while (handler) {
                 if (handler->node_type == PY_AST_NODE_EXCEPT) {
                     PyExceptNode* en = (PyExceptNode*)handler;
+                    MIR_label_t l_next_handler = pm_new_label(mt);
 
+                    // if except has a type filter (e.g., except ValueError),
+                    // check if exception type matches
+                    if (en->type) {
+                        // "except Exception" catches all — skip type check
+                        bool catch_all = false;
+                        if (en->type->node_type == PY_AST_NODE_IDENTIFIER) {
+                            PyIdentifierNode* tid = (PyIdentifierNode*)en->type;
+                            if (tid->name->len == 9 && strncmp(tid->name->chars, "Exception", 9) == 0) {
+                                catch_all = true;
+                            }
+                        }
+
+                        if (!catch_all) {
+                            // get the exception's type string
+                            MIR_reg_t exc_type = pm_call_1(mt, "py_exception_get_type", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+
+                            // get the expected type name as a string
+                            MIR_reg_t expected_type;
+                            if (en->type->node_type == PY_AST_NODE_IDENTIFIER) {
+                                PyIdentifierNode* tid = (PyIdentifierNode*)en->type;
+                                expected_type = pm_box_string_literal(mt, tid->name->chars, tid->name->len);
+                            } else {
+                                expected_type = pm_transpile_expression(mt, en->type);
+                            }
+
+                            // compare: py_eq(exc_type, expected_type)
+                            MIR_reg_t match = pm_call_2(mt, "py_eq", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_type),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, expected_type));
+                            MIR_reg_t match_truthy = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, match));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                                MIR_new_label_op(mt->ctx, l_next_handler),
+                                MIR_new_reg_op(mt->ctx, match_truthy)));
+                        }
+                    }
                     // bind exception to name if present
                     if (en->name) {
                         char vname[128];
@@ -2472,9 +3061,16 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     pm_transpile_block(mt, en->body);
                     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
                         MIR_new_label_op(mt->ctx, l_finally)));
+
+                    pm_emit_label(mt, l_next_handler);
                 }
                 handler = handler->next;
             }
+
+            // no handler matched → re-raise
+            pm_call_void_1(mt, "py_raise",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+            pm_emit_label(mt, l_no_match);
         }
 
         // finally
@@ -2490,6 +3086,123 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         // bare "import module" — no-op for now (module-as-namespace not yet supported)
         log_debug("py-mir: bare import statement (not yet supported for cross-lang)");
         break;
+    case PY_AST_NODE_WITH: {
+        // with <expr> as <target>: <body>
+        // desugars to:
+        //   mgr = expr
+        //   val = mgr.__enter__()
+        //   try: body
+        //       mgr.__exit__(None, None, None)
+        //   except: if not mgr.__exit__(exc, exc, None): re-raise
+        PyWithNode* wn = (PyWithNode*)stmt;
+
+        // 1. evaluate context manager expression
+        MIR_reg_t mgr_reg = pm_transpile_expression(mt, wn->items);
+        MIR_reg_t mgr_saved = pm_new_reg(mt, "with_mgr", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mgr_saved),
+            MIR_new_reg_op(mt->ctx, mgr_reg)));
+
+        // 2. call __enter__, check for exception
+        MIR_label_t l_with_exc  = pm_new_label(mt);
+        MIR_label_t l_with_end  = pm_new_label(mt);
+
+        MIR_reg_t enter_val = pm_call_1(mt, "py_context_enter", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved));
+        {
+            MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+            MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_with_end),
+                MIR_new_reg_op(mt->ctx, chkt)));
+        }
+
+        // 3. bind as-target if present
+        if (wn->target) {
+            char vname[132];
+            snprintf(vname, sizeof(vname), "_py_%.*s",
+                (int)wn->target->len, wn->target->chars);
+            MIR_reg_t vr = pm_new_reg(mt, vname, MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, vr),
+                MIR_new_reg_op(mt->ctx, enter_val)));
+            pm_set_var(mt, vname, vr);
+        }
+
+        // 4. push exception handler
+        if (mt->try_depth < 16) {
+            mt->try_handler_labels[mt->try_depth] = l_with_exc;
+            mt->try_depth++;
+        }
+
+        // 5. compile body with per-statement exception checks
+        {
+            PyAstNode* body = wn->body;
+            if (body && body->node_type == PY_AST_NODE_BLOCK) {
+                PyAstNode* s2 = ((PyBlockNode*)body)->statements;
+                while (s2) {
+                    pm_transpile_statement(mt, s2);
+                    MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+                    MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_with_exc),
+                        MIR_new_reg_op(mt->ctx, chkt)));
+                    s2 = s2->next;
+                }
+            } else {
+                pm_transpile_block(mt, body);
+                MIR_reg_t chk = pm_call_0(mt, "py_check_exception", MIR_T_I64);
+                MIR_reg_t chkt = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                    MIR_new_label_op(mt->ctx, l_with_exc),
+                    MIR_new_reg_op(mt->ctx, chkt)));
+            }
+        }
+
+        // pop try depth
+        if (mt->try_depth > 0) mt->try_depth--;
+
+        // 6. normal exit: __exit__(None, None, None)
+        {
+            MIR_reg_t n1 = pm_emit_null(mt);
+            MIR_reg_t n2 = pm_emit_null(mt);
+            MIR_reg_t n3 = pm_emit_null(mt);
+            pm_call_4(mt, "py_context_exit", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n1),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n2),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, n3));
+        }
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_with_end)));
+
+        // 7. exception handler: call __exit__ with exception info
+        pm_emit_label(mt, l_with_exc);
+        {
+            MIR_reg_t exc_val = pm_call_0(mt, "py_clear_exception", MIR_T_I64);
+            MIR_reg_t null_tb = pm_emit_null(mt);
+            MIR_reg_t suppress = pm_call_4(mt, "py_context_exit", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mgr_saved),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, null_tb));
+            MIR_reg_t supp_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, suppress));
+            // if suppress=true: jump to end (swallow the exception)
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_with_end),
+                MIR_new_reg_op(mt->ctx, supp_t)));
+            // if suppress=false: re-raise
+            pm_call_void_1(mt, "py_raise",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+        }
+
+        pm_emit_label(mt, l_with_end);
+        break;
+    }
     case PY_AST_NODE_IMPORT_FROM: {
         // from ./module import name1, name2
         PyImportNode* imp = (PyImportNode*)stmt;
@@ -2639,11 +3352,38 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
         fc->parent_index = parent_index;
         snprintf(fc->name, sizeof(fc->name), "%.*s", (int)fn->name->len, fn->name->chars);
 
-        // count params
+        // count params, detect *args
         int pc = 0;
         int dc = 0;
         PyAstNode* p = fn->params;
         while (p) {
+            if (p->node_type == PY_AST_NODE_LIST_SPLAT_PARAMETER) {
+                // *args parameter — don't count as regular param
+                PyParamNode* sp = (PyParamNode*)p;
+                fc->has_star_args = true;
+                fc->star_args_index = pc;
+                if (sp->name) {
+                    snprintf(fc->star_args_name, sizeof(fc->star_args_name),
+                        "_py_%.*s", (int)sp->name->len, sp->name->chars);
+                } else {
+                    snprintf(fc->star_args_name, sizeof(fc->star_args_name), "_py_args");
+                }
+                p = p->next;
+                continue;
+            }
+            if (p->node_type == PY_AST_NODE_DICT_SPLAT_PARAMETER) {
+                // **kwargs — record and skip (not counted as a regular param)
+                PyParamNode* kp = (PyParamNode*)p;
+                fc->has_kwargs = true;
+                if (kp->name) {
+                    snprintf(fc->kwargs_name, sizeof(fc->kwargs_name),
+                        "_py_%.*s", (int)kp->name->len, kp->name->chars);
+                } else {
+                    snprintf(fc->kwargs_name, sizeof(fc->kwargs_name), "_py_kwargs");
+                }
+                p = p->next;
+                continue;
+            }
             if (p->node_type == PY_AST_NODE_DEFAULT_PARAMETER) dc++;
             pc++;
             p = p->next;
@@ -2679,6 +3419,32 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
     case PY_AST_NODE_FOR: {
         PyForNode* fn = (PyForNode*)node;
         pm_collect_functions_r(mt, fn->body, parent_index);
+        break;
+    }
+    case PY_AST_NODE_CLASS_DEF: {
+        // collect methods inside the class body; mark them as methods
+        PyClassDefNode* cls = (PyClassDefNode*)node;
+        int before = mt->func_count;
+        // recurse: methods are direct children of class body (top-level block)
+        PyAstNode* body_stmt = NULL;
+        if (cls->body && cls->body->node_type == PY_AST_NODE_BLOCK) {
+            body_stmt = ((PyBlockNode*)cls->body)->statements;
+        } else {
+            body_stmt = cls->body;
+        }
+        while (body_stmt) {
+            pm_collect_functions_r(mt, body_stmt, parent_index);
+            body_stmt = body_stmt->next;
+        }
+        // tag the newly added entries as methods of this class
+        for (int mi = before; mi < mt->func_count; mi++) {
+            if (!mt->func_entries[mi].is_method) {
+                mt->func_entries[mi].is_method = true;
+                snprintf(mt->func_entries[mi].class_name,
+                    sizeof(mt->func_entries[mi].class_name),
+                    "%.*s", (int)cls->name->len, cls->name->chars);
+            }
+        }
         break;
     }
     default:
@@ -2931,6 +3697,48 @@ static void pm_collect_local_defs(PyFunctionDefNode* fn, char locals[][128], int
 }
 
 // analyze captures for all collected functions
+// Helper: check if a variable is directly defined (param or local) in a function's scope
+static bool pm_var_in_func_scope(PyMirTranspiler* mt, PyFuncCollected* fc, const char* varname) {
+    // check params
+    PyAstNode* pp = fc->node->params;
+    while (pp) {
+        String* pn = NULL;
+        if (pp->node_type == PY_AST_NODE_PARAMETER ||
+            pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+            pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+            pn = ((PyParamNode*)pp)->name;
+        }
+        if (pn) {
+            char pname[128];
+            snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
+            if (strcmp(varname, pname) == 0) return true;
+        }
+        pp = pp->next;
+    }
+    // check locals
+    char locs[64][128];
+    int lcount = 0;
+    pm_collect_local_defs(fc->node, locs, &lcount, 64);
+    for (int i = 0; i < lcount; i++) {
+        if (strcmp(varname, locs[i]) == 0) return true;
+    }
+    return false;
+}
+
+// Helper: add a capture to a function if not already present; returns true if added
+static bool pm_add_capture_entry(PyFuncCollected* fc, const char* varname) {
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        if (strcmp(fc->captures[ci], varname) == 0) return false; // already present
+    }
+    if (fc->capture_count < 32) {
+        snprintf(fc->captures[fc->capture_count], 128, "%s", varname);
+        fc->capture_count++;
+        fc->is_closure = true;
+        return true;
+    }
+    return false;
+}
+
 static void pm_analyze_captures(PyMirTranspiler* mt) {
     for (int fi = 0; fi < mt->func_count; fi++) {
         PyFuncCollected* fc = &mt->func_entries[fi];
@@ -2946,16 +3754,15 @@ static void pm_analyze_captures(PyMirTranspiler* mt) {
         int local_count = 0;
         pm_collect_local_defs(fc->node, locals, &local_count, 64);
 
-        // also exclude names of known functions (they are resolved separately)
-        // check which referenced names are NOT local
         for (int ri = 0; ri < ref_count; ri++) {
+            // skip if locally defined
             bool is_local = false;
             for (int li = 0; li < local_count; li++) {
                 if (strcmp(refs[ri], locals[li]) == 0) { is_local = true; break; }
             }
             if (is_local) continue;
 
-            // check if it's a known function name
+            // skip known function names (resolved separately via local_funcs)
             bool is_func = false;
             for (int fi2 = 0; fi2 < mt->func_count; fi2++) {
                 char fname[140];
@@ -2964,48 +3771,52 @@ static void pm_analyze_captures(PyMirTranspiler* mt) {
             }
             if (is_func) continue;
 
-            // check if this variable exists in the parent function's scope
-            PyFuncCollected* parent = &mt->func_entries[fc->parent_index];
-            // check parent params
-            bool in_parent = false;
-            PyAstNode* pp = parent->node->params;
-            while (pp) {
-                String* pn = NULL;
-                if (pp->node_type == PY_AST_NODE_PARAMETER ||
-                    pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
-                    pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
-                    pn = ((PyParamNode*)pp)->name;
-                }
-                if (pn) {
-                    char pname[128];
-                    snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
-                    if (strcmp(refs[ri], pname) == 0) { in_parent = true; break; }
-                }
-                pp = pp->next;
-            }
-            // also check parent's local assignments
-            if (!in_parent) {
-                char plocs[64][128];
-                int ploc_count = 0;
-                pm_collect_local_defs(parent->node, plocs, &ploc_count, 64);
-                for (int pli = 0; pli < ploc_count; pli++) {
-                    if (strcmp(refs[ri], plocs[pli]) == 0) { in_parent = true; break; }
-                }
-            }
-            if (!in_parent) continue;
+            // Walk up the ancestor chain to find where this variable is defined.
+            // Collect the chain of intermediate ancestors (parent, grandparent, ...)
+            // so that we can propagate the capture upward if needed.
+            int chain[16];     // ancestor indices, from parent (chain[0]) up
+            int chain_len = 0;
+            int anc_idx = fc->parent_index;
+            bool found = false;
 
-            // this is a captured variable
-            if (fc->capture_count < 32) {
-                snprintf(fc->captures[fc->capture_count], 128, "%s", refs[ri]);
-                fc->capture_count++;
-                fc->is_closure = true;
-                log_debug("py-mir: function '%s' captures '%s' from parent '%s'",
-                    fc->name, refs[ri], parent->name);
+            while (anc_idx >= 0 && chain_len < 16) {
+                PyFuncCollected* anc = &mt->func_entries[anc_idx];
+                chain[chain_len++] = anc_idx;
+
+                // variable is directly defined (param or local) in this ancestor
+                if (pm_var_in_func_scope(mt, anc, refs[ri])) {
+                    found = true;
+                    break;
+                }
+                // ancestor already captures it (from its own parent)
+                for (int ci = 0; ci < anc->capture_count; ci++) {
+                    if (strcmp(anc->captures[ci], refs[ri]) == 0) { found = true; break; }
+                }
+                if (found) break;
+
+                anc_idx = anc->parent_index;
+            }
+
+            if (!found) continue;
+
+            // Add capture to fc itself
+            pm_add_capture_entry(fc, refs[ri]);
+            log_debug("py-mir: function '%s' captures '%s' (found at depth %d)",
+                fc->name, refs[ri], chain_len);
+
+            // Propagate through all intermediate ancestors:
+            // chain[0]=direct parent, ..., chain[chain_len-1]=where V was found.
+            // The last entry in chain already has V (directly or via its own capture),
+            // so only add to chain[0] .. chain[chain_len-2].
+            for (int ci = 0; ci < chain_len - 1; ci++) {
+                if (pm_add_capture_entry(&mt->func_entries[chain[ci]], refs[ri])) {
+                    log_debug("py-mir: propagated capture '%s' to intermediate function '%s'",
+                        refs[ri], mt->func_entries[chain[ci]].name);
+                }
             }
         }
     }
 }
-
 // analyze captures for lambdas — similar to functions
 static void pm_analyze_lambda_captures(PyMirTranspiler* mt) {
     for (int li = 0; li < mt->lambda_count; li++) {
@@ -3162,6 +3973,92 @@ static void pm_analyze_nonlocal(PyMirTranspiler* mt) {
             }
         }
     }
+}
+
+// collect global declarations from a function's body (not recursing into nested functions)
+static void pm_collect_global_names(PyAstNode* body, char names[][128], int* count, int max) {
+    if (!body) return;
+    if (body->node_type == PY_AST_NODE_GLOBAL) {
+        PyGlobalNonlocalNode* gn = (PyGlobalNonlocalNode*)body;
+        for (int i = 0; i < gn->name_count && *count < max; i++) {
+            snprintf(names[*count], 128, "_py_%.*s", (int)gn->names[i]->len, gn->names[i]->chars);
+            (*count)++;
+        }
+        return;
+    }
+    if (body->node_type == PY_AST_NODE_BLOCK) {
+        PyAstNode* s = ((PyBlockNode*)body)->statements;
+        while (s) { pm_collect_global_names(s, names, count, max); s = s->next; }
+        return;
+    }
+    if (body->node_type == PY_AST_NODE_IF) {
+        PyIfNode* ifn = (PyIfNode*)body;
+        pm_collect_global_names(ifn->body, names, count, max);
+        pm_collect_global_names(ifn->else_body, names, count, max);
+        return;
+    }
+    if (body->node_type == PY_AST_NODE_WHILE) {
+        pm_collect_global_names(((PyWhileNode*)body)->body, names, count, max);
+        return;
+    }
+    if (body->node_type == PY_AST_NODE_FOR) {
+        pm_collect_global_names(((PyForNode*)body)->body, names, count, max);
+        return;
+    }
+    // don't descend into nested function defs
+}
+
+// analyze global declarations: collect global names into func_entries and allocate module var indices
+static void pm_analyze_globals(PyMirTranspiler* mt) {
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        PyFuncCollected* fc = &mt->func_entries[fi];
+        // collect global names from this function's body
+        pm_collect_global_names(fc->node->body, fc->global_names, &fc->global_name_count, 16);
+        // allocate module var indices for each global name
+        for (int gi = 0; gi < fc->global_name_count; gi++) {
+            // check if already allocated
+            bool found = false;
+            for (int vi = 0; vi < mt->global_var_count; vi++) {
+                if (strcmp(mt->global_var_names[vi], fc->global_names[gi]) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && mt->global_var_count < 64) {
+                int idx = mt->module_var_count++;
+                snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", fc->global_names[gi]);
+                mt->global_var_indices[mt->global_var_count] = idx;
+                mt->global_var_count++;
+                log_debug("py-mir: global var '%s' → module_var[%d]", fc->global_names[gi], idx);
+            }
+        }
+    }
+}
+
+// check if a variable name is declared global in the current function,
+// or if at module level, check if any function declared it global
+static bool pm_is_global_in_current_func(PyMirTranspiler* mt, const char* vname) {
+    if (mt->current_func_index >= 0) {
+        // inside a function: check if this function has a `global` declaration for this name
+        PyFuncCollected* fc = &mt->func_entries[mt->current_func_index];
+        for (int i = 0; i < fc->global_name_count; i++) {
+            if (strcmp(fc->global_names[i], vname) == 0) return true;
+        }
+        return false;
+    }
+    // at module level: check if any function declared this variable as global
+    for (int i = 0; i < mt->global_var_count; i++) {
+        if (strcmp(mt->global_var_names[i], vname) == 0) return true;
+    }
+    return false;
+}
+
+// get the module var index for a global variable name
+static int pm_get_global_var_index(PyMirTranspiler* mt, const char* vname) {
+    for (int i = 0; i < mt->global_var_count; i++) {
+        if (strcmp(mt->global_var_names[i], vname) == 0) return mt->global_var_indices[i];
+    }
+    return -1;
 }
 
 // walk all AST nodes to find lambda expressions, pre-collect them
@@ -3350,13 +4247,18 @@ static void pm_compile_lambda(PyMirTranspiler* mt, PyLambdaCollected* lc) {
 }
 
 static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
-    char fn_name[140];
-    snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+    char fn_name[260];
+    if (fc->is_method && fc->class_name[0]) {
+        snprintf(fn_name, sizeof(fn_name), "_%s_%s", fc->class_name, fc->name);
+    } else {
+        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+    }
 
     // build parameter list; closures get _py__env as hidden first param
-    int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0);
-    MIR_var_t params[17];
-    char* param_name_bufs[17];
+    // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
+    int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0) + (fc->has_star_args ? 2 : 0) + (fc->has_kwargs ? 1 : 0);
+    MIR_var_t params[20];
+    char* param_name_bufs[20];
     int offset = 0;
 
     if (fc->is_closure) {
@@ -3370,13 +4272,19 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     for (int i = 0; i < fc->param_count && i < 16; i++) {
         param_name_bufs[i + offset] = (char*)alloca(128);
         String* pn = NULL;
-        if (pnode) {
+        while (pnode) {
+            if (pnode->node_type == PY_AST_NODE_LIST_SPLAT_PARAMETER ||
+                pnode->node_type == PY_AST_NODE_DICT_SPLAT_PARAMETER) {
+                pnode = pnode->next;
+                continue;
+            }
             if (pnode->node_type == PY_AST_NODE_PARAMETER ||
                 pnode->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
                 pnode->node_type == PY_AST_NODE_TYPED_PARAMETER) {
                 pn = ((PyParamNode*)pnode)->name;
             }
             pnode = pnode->next;
+            break;
         }
         if (pn) {
             snprintf(param_name_bufs[i + offset], 128, "_py_%.*s", (int)pn->len, pn->chars);
@@ -3384,6 +4292,24 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
             snprintf(param_name_bufs[i + offset], 128, "_py_p%d", i);
         }
         params[i + offset] = {MIR_T_I64, param_name_bufs[i + offset], 0};
+    }
+
+    // add *args extra params after regular params
+    int varargs_param_offset = fc->param_count + offset;
+    if (fc->has_star_args) {
+        param_name_bufs[varargs_param_offset] = (char*)alloca(128);
+        snprintf(param_name_bufs[varargs_param_offset], 128, "_py__varargs");
+        params[varargs_param_offset] = {MIR_T_I64, param_name_bufs[varargs_param_offset], 0};
+        param_name_bufs[varargs_param_offset + 1] = (char*)alloca(128);
+        snprintf(param_name_bufs[varargs_param_offset + 1], 128, "_py__varargc");
+        params[varargs_param_offset + 1] = {MIR_T_I64, param_name_bufs[varargs_param_offset + 1], 0};
+    }
+    // add **kwargs map parameter after *args (if any)
+    int kwargs_param_offset = varargs_param_offset + (fc->has_star_args ? 2 : 0);
+    if (fc->has_kwargs) {
+        param_name_bufs[kwargs_param_offset] = (char*)alloca(128);
+        snprintf(param_name_bufs[kwargs_param_offset], 128, "_py__kwargs_map");
+        params[kwargs_param_offset] = {MIR_T_I64, param_name_bufs[kwargs_param_offset], 0};
     }
 
     MIR_type_t res_type = MIR_T_I64;
@@ -3413,6 +4339,31 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     for (int i = 0; i < fc->param_count && i < 16; i++) {
         MIR_reg_t preg = MIR_reg(mt->ctx, param_name_bufs[i + offset], mt->current_func);
         pm_set_var(mt, param_name_bufs[i + offset], preg);
+    }
+
+    // if function has *args, build a list from the varargs pointer + count
+    if (fc->has_star_args) {
+        MIR_reg_t va_ptr = MIR_reg(mt->ctx, "_py__varargs", mt->current_func);
+        MIR_reg_t va_cnt = MIR_reg(mt->ctx, "_py__varargc", mt->current_func);
+        // call py_build_list_from_args(ptr, count) → list Item
+        MIR_reg_t star_list = pm_call_2(mt, "py_build_list_from_args", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, va_ptr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, va_cnt));
+        MIR_reg_t star_reg = pm_new_reg(mt, fc->star_args_name, MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, star_reg),
+            MIR_new_reg_op(mt->ctx, star_list)));
+        pm_set_var(mt, fc->star_args_name, star_reg);
+    }
+
+    // if function has **kwargs, bind the kwargs map param to the user's variable
+    if (fc->has_kwargs) {
+        MIR_reg_t kw_reg = MIR_reg(mt->ctx, "_py__kwargs_map", mt->current_func);
+        MIR_reg_t kw_var = pm_new_reg(mt, fc->kwargs_name, MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, kw_var),
+            MIR_new_reg_op(mt->ctx, kw_reg)));
+        pm_set_var(mt, fc->kwargs_name, kw_var);
     }
 
     // if this is a closure, load captured variables from env
@@ -3511,12 +4462,14 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     mt->scope_env_reg = old_env_reg;
     mt->scope_env_slot_count = old_env_slot_count;
 
-    // register in local_funcs
-    PyLocalFuncEntry lfe;
-    memset(&lfe, 0, sizeof(lfe));
-    snprintf(lfe.name, sizeof(lfe.name), "_py_%s", fc->name);
-    lfe.func_item = fc->func_item;
-    hashmap_set(mt->local_funcs, &lfe);
+    // register in local_funcs (methods are accessed via py_getattr, not by bare name)
+    if (!fc->is_method) {
+        PyLocalFuncEntry lfe;
+        memset(&lfe, 0, sizeof(lfe));
+        snprintf(lfe.name, sizeof(lfe.name), "_py_%s", fc->name);
+        lfe.func_item = fc->func_item;
+        hashmap_set(mt->local_funcs, &lfe);
+    }
 }
 
 // ============================================================================
@@ -3524,8 +4477,31 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 // ============================================================================
 
 static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
-    // no-op: all variables are managed through the scope system
-    (void)mt; (void)root;
+    // register class names as module vars so they're accessible from within methods
+    // (e.g. super() needs to read the class object at runtime)
+    if (!root || root->node_type != PY_AST_NODE_MODULE) return;
+    PyModuleNode* program = (PyModuleNode*)root;
+    PyAstNode* s = program->body;
+    while (s) {
+        if (s->node_type == PY_AST_NODE_CLASS_DEF) {
+            PyClassDefNode* cls = (PyClassDefNode*)s;
+            char cls_var[132];
+            snprintf(cls_var, sizeof(cls_var), "_py_%.*s", (int)cls->name->len, cls->name->chars);
+            // only register if not already present
+            bool already = false;
+            for (int i = 0; i < mt->global_var_count; i++) {
+                if (strcmp(mt->global_var_names[i], cls_var) == 0) { already = true; break; }
+            }
+            if (!already && mt->global_var_count < 64) {
+                int idx = mt->module_var_count++;
+                snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", cls_var);
+                mt->global_var_indices[mt->global_var_count] = idx;
+                mt->global_var_count++;
+                log_debug("py-mir: class var '%s' → module_var[%d]", cls_var, idx);
+            }
+        }
+        s = s->next;
+    }
 }
 
 // ============================================================================
@@ -3555,6 +4531,9 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     // Phase 1d: analyze nonlocal declarations → shared env
     pm_analyze_nonlocal(mt);
 
+    // Phase 1e: analyze global declarations → module var indices
+    pm_analyze_globals(mt);
+
     // Phase 2: scan module-level variables
     pm_scan_module_vars(mt, root);
 
@@ -3582,9 +4561,17 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     PyAstNode* s = program->body;
     while (s) {
         if (s->node_type == PY_AST_NODE_FUNCTION_DEF) {
-            // skip — already compiled
-            s = s->next;
-            continue;
+            PyFunctionDefNode* fdef_chk = (PyFunctionDefNode*)s;
+            if (!fdef_chk->decorators) {
+                // no decorators: skip — already compiled and accessible via local_funcs
+                s = s->next;
+                continue;
+            }
+            // has decorators: fall through to pm_transpile_statement to apply them
+        }
+        if (s->node_type == PY_AST_NODE_CLASS_DEF) {
+            // class objects are created at runtime via pm_transpile_statement
+            // (NOT skipped — we need to run the class creation at module init time)
         }
         if (s->node_type == PY_AST_NODE_EXPRESSION_STATEMENT) {
             PyExpressionStatementNode* es = (PyExpressionStatementNode*)s;

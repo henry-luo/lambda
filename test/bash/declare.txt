@@ -1,0 +1,9 @@
+42
+25
+immutable
+hello world
+HELLO WORLD
+apple
+2
+100
+999

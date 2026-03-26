@@ -442,6 +442,7 @@ typedef struct JsFieldDefinitionNode {
     JsAstNode* key;                 // Field name (identifier)
     JsAstNode* value;               // Initializer expression (optional)
     bool is_static;                 // Whether it's a static field
+    bool is_private;                // Whether it's a private field (#field)
 } JsFieldDefinitionNode;
 
 // JavaScript try statement node

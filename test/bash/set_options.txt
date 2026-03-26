@@ -1,0 +1,7 @@
+x=42
+after set -e
+true succeeded
+pipefail enabled
+pipefail disabled
+eu flags set
+eu flags cleared

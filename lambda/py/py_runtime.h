@@ -59,6 +59,7 @@ Item py_contains(Item container, Item value);  // `in` operator
 // ========================================================================
 Item py_getattr(Item object, Item name);
 Item py_setattr(Item object, Item name, Item value);
+Item py_hasattr(Item object, Item name);
 Item py_new_object(void);
 
 // ========================================================================
@@ -83,6 +84,23 @@ Item py_tuple_set(Item tuple, int index, Item value);
 Item py_subscript_get(Item object, Item key);
 Item py_subscript_set(Item object, Item key, Item value);
 Item py_slice_get(Item object, Item start, Item stop, Item step);
+Item py_slice_set(Item object, Item start, Item stop, Item step, Item value);
+
+// ========================================================================
+// Format value with spec (used by f-strings and str.format)
+// ========================================================================
+Item py_format_value(Item value, Item spec);
+Item py_exception_get_type(Item exception);
+
+// ========================================================================
+// File I/O
+// ========================================================================
+Item py_builtin_open(Item path, Item mode);
+
+// ========================================================================
+// Variadic args support
+// ========================================================================
+Item py_build_list_from_args(Item* args, int64_t count);
 
 // ========================================================================
 // Iterator protocol
@@ -97,7 +115,10 @@ Item py_range_new(Item start, Item stop, Item step);
 Item py_new_function(void* func_ptr, int param_count);
 Item py_new_closure(void* func_ptr, int param_count, uint64_t* env, int env_size);
 uint64_t* py_alloc_env(int size);
+Item py_set_kwargs_flag(Item fn_item);
+Item py_dict_merge(Item dst, Item src);
 Item py_call_function(Item func, Item* args, int arg_count);
+Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map);
 
 // ========================================================================
 // Exception handling
@@ -106,6 +127,14 @@ void py_raise(Item exception);
 Item py_check_exception(void);
 Item py_clear_exception(void);
 Item py_new_exception(Item type_name, Item message);
+
+// ========================================================================
+// Context manager protocol (__enter__ / __exit__)
+// ========================================================================
+Item py_context_enter(Item mgr);
+Item py_context_exit(Item mgr, Item exc_type, Item exc_val, Item exc_tb);
+// Identifier fallback: resolves builtin class names (ValueError, RuntimeError, etc.)
+Item py_resolve_name_item(Item name_item);
 
 // ========================================================================
 // Module variable table
@@ -156,6 +185,7 @@ Item py_builtin_hex(Item n);
 Item py_builtin_divmod(Item a, Item b);
 Item py_builtin_pow(Item base, Item exp, Item mod);
 Item py_builtin_callable(Item obj);
+Item py_builtin_property(Item fget);
 Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_flag);
 Item py_list_sort_ex(Item list, Item key_func, Item reverse_flag);
 
@@ -173,6 +203,11 @@ Item py_list_method(Item list, Item method_name, Item* args, int argc);
 // Dict methods (dispatcher)
 // ========================================================================
 Item py_dict_method(Item dict, Item method_name, Item* args, int argc);
+
+// ========================================================================
+// Class system — see py_class.h for full declarations.
+// py_class.h is included separately when needed.
+// ========================================================================
 
 // ========================================================================
 // Runtime initialization

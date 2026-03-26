@@ -11,6 +11,7 @@
  * - Unset variables expand to empty string
  */
 #include "bash_runtime.h"
+#include "bash_ast.hpp"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -23,6 +24,7 @@
 #include <cctype>
 #include <regex.h>
 #include <fnmatch.h>
+#include <signal.h>
 
 // ============================================================================
 // Runtime state
@@ -34,6 +36,39 @@ static int bash_last_exit_code = 0;
 static int bash_loop_control = 0;
 static int bash_loop_control_depth = 1;
 
+// Shell option flags (set -e, set -u, set -x, set -o pipefail)
+static bool bash_opt_errexit = false;   // -e
+static bool bash_opt_nounset = false;   // -u
+static bool bash_opt_xtrace = false;    // -x
+static bool bash_opt_pipefail = false;  // pipefail
+
+// Trap handler table — indices:
+//   0=EXIT 1=ERR 2=DEBUG 3=HUP(SIGHUP) 4=INT(SIGINT) 5=QUIT(SIGQUIT) 6=TERM(SIGTERM)
+#define BASH_TRAP_IDX_EXIT  0
+#define BASH_TRAP_IDX_ERR   1
+#define BASH_TRAP_IDX_DEBUG 2
+#define BASH_TRAP_IDX_HUP   3
+#define BASH_TRAP_IDX_INT   4
+#define BASH_TRAP_IDX_QUIT  5
+#define BASH_TRAP_IDX_TERM  6
+#define BASH_TRAP_NUM       7
+
+static char* bash_trap_handlers[BASH_TRAP_NUM];           // NULL=default, ""=ignore, else=code
+static volatile sig_atomic_t bash_trap_fired[BASH_TRAP_NUM]; // set by OS signal handler
+
+static void bash_os_signal_handler(int signum) {
+    switch (signum) {
+    case SIGHUP:  bash_trap_fired[BASH_TRAP_IDX_HUP]  = 1; break;
+    case SIGINT:  bash_trap_fired[BASH_TRAP_IDX_INT]  = 1; break;
+    case SIGQUIT: bash_trap_fired[BASH_TRAP_IDX_QUIT] = 1; break;
+    case SIGTERM: bash_trap_fired[BASH_TRAP_IDX_TERM] = 1; break;
+    default: break;
+    }
+}
+
+// Runtime function registry (for functions defined in sourced files)
+static struct hashmap* bash_rt_func_table = NULL;
+
 // Variable table (runtime)
 static struct hashmap* bash_var_table = NULL;
 
@@ -41,6 +76,17 @@ static struct hashmap* bash_var_table = NULL;
 #define BASH_SUBSHELL_STACK_MAX 32
 static struct hashmap* bash_subshell_stack[BASH_SUBSHELL_STACK_MAX];
 static int bash_subshell_depth = 0;
+
+// Function dynamic scope stack (Option A: runtime scope stack)
+// Each frame is a hashmap of BashRtVar holding variables declared `local`
+// in the currently-executing function call. Lookup walks top-to-bottom
+// then falls through to the global bash_var_table (dynamic scoping).
+#define BASH_FUNC_SCOPE_STACK_MAX 256
+static struct hashmap* bash_func_scope_stack[BASH_FUNC_SCOPE_STACK_MAX];
+static int bash_func_scope_depth = 0;
+
+// POSIX-compatible mode (set by --posix CLI flag)
+static bool bash_posix_mode = false;
 
 // helper to grow a list's capacity
 static void bash_grow_list(List* list) {
@@ -465,6 +511,78 @@ extern "C" Item bash_test_n(Item value) {
     return (Item){.item = b2it(result)};
 }
 
+// file test operators
+#include <sys/stat.h>
+#include <unistd.h>
+
+static const char* bash_item_to_cstr(Item value) {
+    Item str = bash_to_string(value);
+    String* s = it2s(str);
+    if (!s || s->len == 0) return "";
+    return s->chars;
+}
+
+extern "C" Item bash_test_f(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_d(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_e(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_r(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, R_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_w(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, W_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_x(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, X_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_s(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && st.st_size > 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_l(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (lstat(path, &st) == 0 && S_ISLNK(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 // ============================================================================
 // Parameter expansion functions
 // ============================================================================
@@ -728,6 +846,242 @@ extern "C" Item bash_string_concat(Item left, Item right) {
     StrBuf* sb = strbuf_new_cap(new_len + 1);
     strbuf_append_str_n(sb, l->chars, l->len);
     strbuf_append_str_n(sb, r->chars, r->len);
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// ============================================================================
+// Tilde expansion: ~ → $HOME, ~/path → $HOME/path
+// ============================================================================
+
+#include <pwd.h>
+
+extern "C" Item bash_expand_tilde(Item word) {
+    const char* w = bash_item_to_cstr(word);
+    if (!w || w[0] != '~') return word;
+
+    const char* home = NULL;
+    const char* suffix = w + 1; // after ~
+
+    if (*suffix == '\0' || *suffix == '/') {
+        // ~ or ~/path → use $HOME
+        home = getenv("HOME");
+        if (!home) {
+            struct passwd* pw = getpwuid(getuid());
+            if (pw) home = pw->pw_dir;
+        }
+    } else {
+        // ~user → lookup user's home directory
+        const char* slash = strchr(suffix, '/');
+        char username[256];
+        int ulen = slash ? (int)(slash - suffix) : (int)strlen(suffix);
+        if (ulen >= (int)sizeof(username)) ulen = (int)sizeof(username) - 1;
+        memcpy(username, suffix, ulen);
+        username[ulen] = '\0';
+        struct passwd* pw = getpwnam(username);
+        if (pw) {
+            home = pw->pw_dir;
+            suffix = slash ? slash : suffix + ulen;
+        }
+    }
+
+    if (!home) return word; // can't expand, return literal
+
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, home);
+    if (*suffix) strbuf_append_str(sb, suffix);
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// ============================================================================
+// Glob expansion: *.txt → array of matching paths
+// ============================================================================
+
+#include <glob.h>
+
+extern "C" Item bash_glob_expand(Item pattern) {
+    const char* pat = bash_item_to_cstr(pattern);
+    if (!pat || !*pat) return pattern;
+
+    glob_t g;
+    int flags = GLOB_NOSORT | GLOB_NOCHECK; // NOCHECK: return pattern if no matches
+    int ret = glob(pat, flags, NULL, &g);
+
+    if (ret != 0) {
+        globfree(&g);
+        return pattern; // return pattern literally on error
+    }
+
+    if (g.gl_pathc == 1) {
+        // single match (or no match with NOCHECK) — return as string
+        String* result = heap_create_name(g.gl_pathv[0]);
+        globfree(&g);
+        return (Item){.item = s2it(result)};
+    }
+
+    // multiple matches — build space-separated string for echo, or array for for-in
+    // for command args, we need to return them as a space-separated string
+    // that the builtin will print. A proper implementation would return an array,
+    // but for now echo/printf treat args as individual items.
+    // Return space-separated string for simplicity.
+    StrBuf* sb = strbuf_new();
+    for (size_t i = 0; i < g.gl_pathc; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str(sb, g.gl_pathv[i]);
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    globfree(&g);
+    return (Item){.item = s2it(result)};
+}
+
+// ============================================================================
+// Brace expansion: {a,b,c} → "a b c", {1..5} → "1 2 3 4 5"
+// ============================================================================
+
+extern "C" Item bash_expand_brace(Item word) {
+    const char* w = bash_item_to_cstr(word);
+    if (!w || !*w) return word;
+
+    int len = (int)strlen(w);
+    // must start with { and end with }
+    if (w[0] != '{' || w[len - 1] != '}') return word;
+
+    // extract inside: between { and }
+    const char* inside = w + 1;
+    int ilen = len - 2;
+
+    // check for range: {start..end} or {start..end..step}
+    const char* dotdot = NULL;
+    for (int i = 0; i < ilen - 1; i++) {
+        if (inside[i] == '.' && inside[i + 1] == '.') {
+            dotdot = inside + i;
+            break;
+        }
+    }
+
+    if (dotdot) {
+        // range expansion
+        char start_buf[64], end_buf[64];
+        int start_len = (int)(dotdot - inside);
+        int after_dots = (int)(inside + ilen - (dotdot + 2));
+        if (start_len <= 0 || start_len >= (int)sizeof(start_buf) ||
+            after_dots <= 0 || after_dots >= (int)sizeof(end_buf))
+            return word;
+        memcpy(start_buf, inside, start_len);
+        start_buf[start_len] = '\0';
+        memcpy(end_buf, dotdot + 2, after_dots);
+        end_buf[after_dots] = '\0';
+
+        // check for step: {start..end..step}
+        int step = 1;
+        char* step_dot = strstr(end_buf, "..");
+        if (step_dot) {
+            *step_dot = '\0';
+            step = atoi(step_dot + 2);
+            if (step == 0) step = 1;
+        }
+
+        // numeric range?
+        char* endp1 = NULL;
+        char* endp2 = NULL;
+        long s = strtol(start_buf, &endp1, 10);
+        long e = strtol(end_buf, &endp2, 10);
+
+        if (endp1 && *endp1 == '\0' && endp2 && *endp2 == '\0') {
+            // numeric range: {1..5} or {10..1}
+            // check for zero-padding
+            bool zero_pad = (start_buf[0] == '0' && start_len > 1) ||
+                            (end_buf[0] == '0' && (int)strlen(end_buf) > 1);
+            int pad_width = 0;
+            if (zero_pad) {
+                pad_width = start_len > (int)strlen(end_buf) ? start_len : (int)strlen(end_buf);
+            }
+
+            StrBuf* sb = strbuf_new();
+            if (s <= e) {
+                if (step < 0) step = -step;
+                for (long i = s; i <= e; i += step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    char num[32];
+                    if (zero_pad)
+                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                    else
+                        snprintf(num, sizeof(num), "%ld", i);
+                    strbuf_append_str(sb, num);
+                }
+            } else {
+                if (step < 0) step = -step;
+                for (long i = s; i >= e; i -= step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    char num[32];
+                    if (zero_pad)
+                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                    else
+                        snprintf(num, sizeof(num), "%ld", i);
+                    strbuf_append_str(sb, num);
+                }
+            }
+            String* result = heap_create_name(sb->str, sb->length);
+            strbuf_free(sb);
+            return (Item){.item = s2it(result)};
+        }
+
+        // character range: {a..z}
+        if (start_len == 1 && (int)strlen(end_buf) == 1) {
+            char sc = start_buf[0];
+            char ec = end_buf[0];
+            StrBuf* sb = strbuf_new();
+            if (sc <= ec) {
+                for (char c = sc; c <= ec; c += (char)step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    strbuf_append_char(sb, c);
+                }
+            } else {
+                for (char c = sc; c >= ec; c -= (char)step) {
+                    if (sb->length > 0) strbuf_append_char(sb, ' ');
+                    strbuf_append_char(sb, c);
+                }
+            }
+            String* result = heap_create_name(sb->str, sb->length);
+            strbuf_free(sb);
+            return (Item){.item = s2it(result)};
+        }
+
+        return word; // unrecognized range format
+    }
+
+    // comma-separated list: {a,b,c}
+    // check for commas (not inside nested braces)
+    int brace_depth = 0;
+    bool has_comma = false;
+    for (int i = 0; i < ilen; i++) {
+        if (inside[i] == '{') brace_depth++;
+        else if (inside[i] == '}') brace_depth--;
+        else if (inside[i] == ',' && brace_depth == 0) { has_comma = true; break; }
+    }
+
+    if (!has_comma) return word; // no commas, return literal
+
+    StrBuf* sb = strbuf_new();
+    brace_depth = 0;
+    const char* start = inside;
+    for (int i = 0; i <= ilen; i++) {
+        bool at_end = (i == ilen);
+        if (!at_end) {
+            if (inside[i] == '{') { brace_depth++; continue; }
+            if (inside[i] == '}') { brace_depth--; continue; }
+            if (inside[i] != ',' || brace_depth != 0) continue;
+        }
+        // emit this element
+        if (sb->length > 0) strbuf_append_char(sb, ' ');
+        int elem_len = (int)(inside + i - start);
+        if (elem_len > 0) strbuf_append_str_n(sb, start, elem_len);
+        start = inside + i + 1;
+    }
     String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
@@ -1046,12 +1400,288 @@ extern "C" Item bash_return_with_code(Item val) {
 }
 
 // ============================================================================
+// File redirect runtime
+// ============================================================================
+
+#include <fcntl.h>
+
+extern "C" Item bash_redirect_write(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // /dev/null: just discard
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for writing", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_append(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for appending", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_read(Item filename) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    int fd = open(fn->chars, O_RDONLY);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for reading", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(fd);
+
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
+    strbuf_free(buf);
+    bash_last_exit_code = 0;
+    return result;
+}
+
+// ============================================================================
+// External command execution (posix_spawn)
+// ============================================================================
+
+#include <spawn.h>
+#include <sys/wait.h>
+
+extern char** environ;
+
+// forward declarations (defined in capture section below)
+static Item bash_stdin_item;
+static bool bash_stdin_item_set;
+
+extern "C" Item bash_exec_external(Item* argv, int argc) {
+    if (argc < 1) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // convert Item argv to char* argv
+    const char** c_argv = (const char**)calloc(argc + 1, sizeof(char*));
+    if (!c_argv) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    for (int i = 0; i < argc; i++) {
+        c_argv[i] = bash_item_to_cstr(argv[i]);
+    }
+    c_argv[argc] = NULL;
+
+    const char* cmd_name = c_argv[0];
+
+    // resolve command path: if it contains '/', use directly; otherwise search PATH
+    char resolved_path[4096];
+    const char* exec_path = cmd_name;
+
+    if (!strchr(cmd_name, '/')) {
+        const char* path_env = getenv("PATH");
+        if (!path_env) path_env = "/usr/bin:/bin";
+
+        bool found = false;
+        const char* p = path_env;
+        while (*p) {
+            const char* colon = strchr(p, ':');
+            int dir_len = colon ? (int)(colon - p) : (int)strlen(p);
+            if (dir_len == 0) {
+                // empty component = current directory
+                snprintf(resolved_path, sizeof(resolved_path), "%s", cmd_name);
+            } else {
+                snprintf(resolved_path, sizeof(resolved_path), "%.*s/%s", dir_len, p, cmd_name);
+            }
+            if (access(resolved_path, X_OK) == 0) {
+                exec_path = resolved_path;
+                found = true;
+                break;
+            }
+            if (!colon) break;
+            p = colon + 1;
+        }
+        if (!found) {
+            log_debug("bash: %s: command not found", cmd_name);
+            // write error to stderr like real bash
+            fprintf(stderr, "%s: command not found\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    } else {
+        // absolute or relative path — check it exists
+        if (access(cmd_name, X_OK) != 0) {
+            log_debug("bash: %s: No such file or directory", cmd_name);
+            fprintf(stderr, "%s: No such file or directory\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    }
+
+    // set up stdout pipe to capture output
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) != 0) {
+        log_error("bash: pipe failed for command '%s'", cmd_name);
+        free(c_argv);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // set up stdin pipe if stdin_item is set
+    int stdin_pipe[2] = {-1, -1};
+    bool has_stdin = bash_stdin_item_set;
+    if (has_stdin) {
+        if (pipe(stdin_pipe) != 0) {
+            log_error("bash: stdin pipe failed for command '%s'", cmd_name);
+            close(stdout_pipe[0]);
+            close(stdout_pipe[1]);
+            free(c_argv);
+            bash_last_exit_code = 1;
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    // configure file actions for posix_spawn
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    // redirect child stdout to our pipe
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
+    posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+
+    // redirect child stdin from our pipe (if applicable)
+    if (has_stdin) {
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
+        posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO);
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]);
+    }
+
+    pid_t pid;
+    int spawn_err = posix_spawn(&pid, exec_path, &actions, NULL,
+                                 (char* const*)c_argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawn_err != 0) {
+        log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
+        free(c_argv);
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // close write end of stdout pipe in parent
+    close(stdout_pipe[1]);
+
+    // write stdin data to child if needed, then close
+    if (has_stdin) {
+        close(stdin_pipe[0]); // close read end in parent
+        Item stdin_val = bash_get_stdin_item();
+        String* s = it2s(bash_to_string(stdin_val));
+        if (s && s->len > 0) {
+            write(stdin_pipe[1], s->chars, s->len);
+        }
+        close(stdin_pipe[1]);
+    }
+
+    // read child's stdout
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(stdout_pipe[0]);
+
+    // wait for child
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    int exit_code = 0;
+    if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+    } else {
+        exit_code = 128;
+    }
+
+    // write captured output to bash stdout (capture-aware)
+    if (buf->length > 0) {
+        bash_raw_write(buf->str, (int)buf->length);
+    }
+
+    strbuf_free(buf);
+    free(c_argv);
+    bash_last_exit_code = exit_code;
+    return (Item){.item = i2it(exit_code)};
+}
+
+// ============================================================================
 // Output capture stack (for command substitution)
 // ============================================================================
 
 #define BASH_CAPTURE_STACK_MAX 32
 static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
 static int bash_capture_depth = 0;
+
+// stdin item for pipeline stage passing (declared above, before bash_exec_external)
 
 extern "C" void bash_begin_capture(void) {
     if (bash_capture_depth < BASH_CAPTURE_STACK_MAX) {
@@ -1066,10 +1696,22 @@ extern "C" Item bash_end_capture(void) {
     }
     bash_capture_depth--;
     StrBuf* buf = bash_capture_bufs[bash_capture_depth];
-    // strip trailing newlines (bash behavior)
+    // strip trailing newlines (bash behavior for command substitution)
     int len = (int)buf->length;
     while (len > 0 && buf->str[len - 1] == '\n') len--;
     Item result = (Item){.item = s2it(heap_create_name(buf->str, len))};
+    strbuf_free(buf);
+    return result;
+}
+
+// end capture without stripping trailing newlines (for pipelines)
+extern "C" Item bash_end_capture_raw(void) {
+    if (bash_capture_depth <= 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    bash_capture_depth--;
+    StrBuf* buf = bash_capture_bufs[bash_capture_depth];
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
     strbuf_free(buf);
     return result;
 }
@@ -1089,6 +1731,27 @@ extern "C" void bash_raw_putc(char c) {
     } else {
         fputc(c, stdout);
     }
+}
+
+// ============================================================================
+// Pipeline stdin item passing
+// ============================================================================
+
+extern "C" void bash_set_stdin_item(Item input) {
+    bash_stdin_item = input;
+    bash_stdin_item_set = true;
+}
+
+extern "C" Item bash_get_stdin_item(void) {
+    if (!bash_stdin_item_set) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return bash_stdin_item;
+}
+
+extern "C" void bash_clear_stdin_item(void) {
+    bash_stdin_item = (Item){0};
+    bash_stdin_item_set = false;
 }
 
 // ============================================================================
@@ -1136,13 +1799,53 @@ extern "C" void bash_runtime_init(void) {
     bash_last_exit_code = 0;
     bash_loop_control = 0;
     bash_loop_control_depth = 1;
+    bash_opt_errexit = false;
+    bash_opt_nounset = false;
+    bash_opt_xtrace = false;
+    bash_opt_pipefail = false;
+    // clear trap state
+    for (int i = 0; i < BASH_TRAP_NUM; i++) {
+        bash_trap_handlers[i] = NULL;
+        bash_trap_fired[i] = 0;
+    }
+    // reset function scope stack
+    bash_func_scope_depth = 0;
+    bash_env_import();
     log_debug("bash: runtime initialized");
 }
 
 extern "C" void bash_runtime_cleanup(void) {
+    // free trap handlers and restore default signal actions
+    static const int os_signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
+    for (int i = 0; i < BASH_TRAP_NUM; i++) {
+        if (bash_trap_handlers[i]) {
+            free(bash_trap_handlers[i]);
+            bash_trap_handlers[i] = NULL;
+        }
+        bash_trap_fired[i] = 0;
+    }
+    for (int i = 0; i < 4; i++) {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        sigaction(os_signals[i], &sa, NULL);
+    }
     if (bash_var_table) {
         hashmap_free(bash_var_table);
         bash_var_table = NULL;
+    }
+    if (bash_rt_func_table) {
+        hashmap_free(bash_rt_func_table);
+        bash_rt_func_table = NULL;
+    }
+    // free any leaked scope frames (e.g. if script exited early)
+    while (bash_func_scope_depth > 0) {
+        bash_func_scope_depth--;
+        if (bash_func_scope_stack[bash_func_scope_depth]) {
+            hashmap_free(bash_func_scope_stack[bash_func_scope_depth]);
+            bash_func_scope_stack[bash_func_scope_depth] = NULL;
+        }
     }
     log_debug("bash: runtime cleanup");
 }
@@ -1157,6 +1860,7 @@ typedef struct BashRtVar {
     size_t name_len;
     Item value;
     bool is_export;
+    int attributes;     // BashVarAttrFlags
 } BashRtVar;
 
 static uint64_t bash_rt_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
@@ -1183,10 +1887,51 @@ extern "C" void bash_set_var(Item name, Item value) {
     bash_ensure_var_table();
     String* s = it2s(name);
     if (!s) return;
-    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len, .value = value, .is_export = false};
-    // check if exists and preserve export flag
-    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &entry);
-    if (existing) entry.is_export = existing->is_export;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // dynamic scoping: if the variable exists in any active function scope frame,
+    // update it there rather than writing to the global table
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            if (found->attributes & BASH_ATTR_READONLY) {
+                log_error("bash: %.*s: readonly variable", s->len, s->chars);
+                return;
+            }
+            int attrs = found->attributes;
+            Item final_value = value;
+            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+            if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+            if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+            BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                               .value = final_value, .is_export = found->is_export,
+                               .attributes = attrs};
+            hashmap_set(bash_func_scope_stack[i], &entry);
+            return;
+        }
+    }
+
+    // not in any local frame — use global table
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+
+    // check readonly
+    if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
+        log_error("bash: %.*s: readonly variable", s->len, s->chars);
+        return;
+    }
+
+    int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
+    bool was_export = existing ? existing->is_export : false;
+
+    // apply attribute transformations
+    Item final_value = value;
+    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+    if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+    if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = final_value, .is_export = was_export,
+                       .attributes = attrs};
     hashmap_set(bash_var_table, &entry);
 }
 
@@ -1195,14 +1940,43 @@ extern "C" Item bash_get_var(Item name) {
     String* s = it2s(name);
     if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // dynamic scoping: walk scope stack from top (most recent) to bottom
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found->value;
+    }
+
+    // fall through to global table
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->value;
-    return (Item){.item = s2it(heap_create_name("", 0))};
+    return (Item){.item = s2it(heap_create_name("", 0))};  // unset = empty string
 }
 
 extern "C" void bash_set_local_var(Item name, Item value) {
-    // in Phase 1, local is the same as set_var (no function scope yet)
-    bash_set_var(name, value);
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+
+    if (bash_func_scope_depth > 0) {
+        // write to the top (current function) scope frame
+        struct hashmap* frame = bash_func_scope_stack[bash_func_scope_depth - 1];
+        BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+        const BashRtVar* existing = (const BashRtVar*)hashmap_get(frame, &key);
+        int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
+        Item final_value = value;
+        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+        if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
+        if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+        BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                           .value = final_value, .is_export = false,
+                           .attributes = attrs};
+        hashmap_set(frame, &entry);
+        log_debug("bash: local var '%.*s' set in scope frame %d", s->len, s->chars, bash_func_scope_depth - 1);
+    } else {
+        // no active function scope (local at top-level) — behaves like set_var
+        bash_set_var(name, value);
+    }
 }
 
 extern "C" void bash_export_var(Item name) {
@@ -1215,11 +1989,24 @@ extern "C" void bash_export_var(Item name) {
         BashRtVar updated = *found;
         updated.is_export = true;
         hashmap_set(bash_var_table, &updated);
+        // sync to OS environment for child processes
+        String* val_str = it2s(updated.value);
+        if (val_str) {
+            char name_buf[256];
+            snprintf(name_buf, sizeof(name_buf), "%.*s", s->len, s->chars);
+            char val_buf[4096];
+            snprintf(val_buf, sizeof(val_buf), "%.*s", val_str->len, val_str->chars);
+            setenv(name_buf, val_buf, 1);
+        }
     } else {
         BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                            .value = (Item){.item = s2it(heap_create_name("", 0))},
-                           .is_export = true};
+                           .is_export = true, .attributes = BASH_ATTR_NONE};
         hashmap_set(bash_var_table, &entry);
+        // sync empty var to OS environment
+        char name_buf[256];
+        snprintf(name_buf, sizeof(name_buf), "%.*s", s->len, s->chars);
+        setenv(name_buf, "", 1);
     }
 }
 
@@ -1228,7 +2015,167 @@ extern "C" void bash_unset_var(Item name) {
     String* s = it2s(name);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    // unset from topmost scope frame first, then global
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        if (hashmap_get(bash_func_scope_stack[i], &key)) {
+            hashmap_delete(bash_func_scope_stack[i], &key);
+            return;
+        }
+    }
     hashmap_delete(bash_var_table, &key);
+}
+
+// ============================================================================
+// Variable attributes (declare/typeset)
+// ============================================================================
+
+extern "C" void bash_declare_var(Item name, int flags) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+
+    BashRtVar entry;
+    if (existing) {
+        entry = *existing;
+        entry.attributes |= flags;
+    } else {
+        entry = {.name = s->chars, .name_len = (size_t)s->len,
+                 .value = (Item){.item = s2it(heap_create_name("", 0))},
+                 .is_export = false, .attributes = flags};
+    }
+    if (flags & BASH_ATTR_EXPORT) entry.is_export = true;
+    hashmap_set(bash_var_table, &entry);
+}
+
+extern "C" int bash_get_var_attrs(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return BASH_ATTR_NONE;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (found) return found->attributes;
+    return BASH_ATTR_NONE;
+}
+
+extern "C" bool bash_is_assoc(Item name) {
+    return (bash_get_var_attrs(name) & BASH_ATTR_ASSOC_ARRAY) != 0;
+}
+
+// ============================================================================
+// Associative arrays (string-keyed hashmaps)
+// ============================================================================
+
+typedef struct BashAssocEntry {
+    const char* key;
+    size_t key_len;
+    Item value;
+} BashAssocEntry;
+
+// wrapper struct stored as an Item (pointer)
+typedef struct BashAssocArray {
+    TypeId type_id;     // LMD_TYPE_MAP to distinguish from List (LMD_TYPE_ARRAY)
+    uint8_t flags;
+    struct hashmap* map;
+} BashAssocArray;
+
+static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const BashAssocEntry* e = (const BashAssocEntry*)item;
+    return hashmap_sip(e->key, e->key_len, seed0, seed1);
+}
+
+static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
+    const BashAssocEntry* ea = (const BashAssocEntry*)a;
+    const BashAssocEntry* eb = (const BashAssocEntry*)b;
+    (void)udata;
+    if (ea->key_len != eb->key_len) return 1;
+    return memcmp(ea->key, eb->key, ea->key_len);
+}
+
+static BashAssocArray* bash_item_to_assoc(Item map) {
+    BashAssocArray* aa = (BashAssocArray*)(uintptr_t)map.item;
+    if (!aa || aa->type_id != LMD_TYPE_MAP) return NULL;
+    return aa;
+}
+
+extern "C" Item bash_assoc_new(void) {
+    BashAssocArray* aa = (BashAssocArray*)heap_calloc(sizeof(BashAssocArray), LMD_TYPE_RAW_POINTER);
+    aa->type_id = LMD_TYPE_MAP;
+    aa->flags = 0;
+    aa->map = hashmap_new(sizeof(BashAssocEntry), 16, 0, 0,
+                          bash_assoc_entry_hash, bash_assoc_entry_cmp, NULL, NULL);
+    return (Item){.item = (uint64_t)(uintptr_t)aa};
+}
+
+extern "C" Item bash_assoc_set(Item map, Item key, Item value) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return map;
+    String* k = it2s(bash_to_string(key));
+    if (!k) return map;
+    BashAssocEntry entry = {.key = k->chars, .key_len = (size_t)k->len, .value = value};
+    hashmap_set(aa->map, &entry);
+    return map;
+}
+
+extern "C" Item bash_assoc_get(Item map, Item key) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return (Item){.item = s2it(heap_create_name("", 0))};
+    String* k = it2s(bash_to_string(key));
+    if (!k) return (Item){.item = s2it(heap_create_name("", 0))};
+    BashAssocEntry lookup = {.key = k->chars, .key_len = (size_t)k->len};
+    const BashAssocEntry* found = (const BashAssocEntry*)hashmap_get(aa->map, &lookup);
+    if (found) return found->value;
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_assoc_keys(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return bash_array_new();
+    Item arr = bash_array_new();
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(aa->map, &iter, &item)) {
+        const BashAssocEntry* e = (const BashAssocEntry*)item;
+        Item key_item = (Item){.item = s2it(heap_create_name(e->key, (int)e->key_len))};
+        bash_array_append(arr, key_item);
+    }
+    return arr;
+}
+
+extern "C" Item bash_assoc_values(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return bash_array_new();
+    Item arr = bash_array_new();
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(aa->map, &iter, &item)) {
+        const BashAssocEntry* e = (const BashAssocEntry*)item;
+        bash_array_append(arr, e->value);
+    }
+    return arr;
+}
+
+extern "C" Item bash_assoc_unset(Item map, Item key) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return map;
+    String* k = it2s(bash_to_string(key));
+    if (!k) return map;
+    BashAssocEntry lookup = {.key = k->chars, .key_len = (size_t)k->len};
+    hashmap_delete(aa->map, &lookup);
+    return map;
+}
+
+extern "C" Item bash_assoc_length(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int)hashmap_count(aa->map))};
+}
+
+extern "C" int64_t bash_assoc_count(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return 0;
+    return (int64_t)hashmap_count(aa->map);
 }
 
 // ============================================================================
@@ -1321,12 +2268,26 @@ extern "C" Item bash_get_script_name(void) {
 // ============================================================================
 
 extern "C" void bash_scope_push(void) {
-    // Phase 1: no-op (flat scope). Phase 2 will implement dynamic scope stack.
-    log_debug("bash: runtime scope push");
+    if (bash_func_scope_depth >= BASH_FUNC_SCOPE_STACK_MAX) {
+        log_error("bash: scope stack overflow (max %d nested calls)", BASH_FUNC_SCOPE_STACK_MAX);
+        return;
+    }
+    bash_func_scope_stack[bash_func_scope_depth] = hashmap_new(
+        sizeof(BashRtVar), 16, 0, 0,
+        bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    bash_func_scope_depth++;
+    log_debug("bash: scope push → depth %d", bash_func_scope_depth);
 }
 
 extern "C" void bash_scope_pop(void) {
-    log_debug("bash: runtime scope pop");
+    if (bash_func_scope_depth <= 0) {
+        log_error("bash: scope stack underflow");
+        return;
+    }
+    bash_func_scope_depth--;
+    hashmap_free(bash_func_scope_stack[bash_func_scope_depth]);
+    bash_func_scope_stack[bash_func_scope_depth] = NULL;
+    log_debug("bash: scope pop → depth %d", bash_func_scope_depth);
 }
 
 extern "C" void bash_scope_push_subshell(void) {
@@ -1353,5 +2314,313 @@ extern "C" void bash_scope_pop_subshell(void) {
         bash_subshell_depth--;
         hashmap_free(bash_var_table);
         bash_var_table = bash_subshell_stack[bash_subshell_depth];
+    }
+}
+
+// ============================================================================
+// POSIX compatibility mode
+// ============================================================================
+
+void bash_set_posix_mode(bool mode) {
+    bash_posix_mode = mode;
+    log_info("bash: POSIX mode %s", mode ? "enabled" : "disabled");
+}
+
+bool bash_get_posix_mode(void) {
+    return bash_posix_mode;
+}
+
+// ============================================================================
+// Environment variable integration
+// ============================================================================
+
+extern "C" void bash_env_import(void) {
+    bash_ensure_var_table();
+    static const char* env_names[] = {
+        "PATH", "HOME", "USER", "PWD", "SHELL", "LANG", "TERM",
+        "EDITOR", "HOSTNAME", "LOGNAME", "TMPDIR", "LC_ALL", "LC_CTYPE",
+        "OLDPWD", "SHLVL", "IFS", NULL
+    };
+    for (int i = 0; env_names[i]; i++) {
+        const char* val = getenv(env_names[i]);
+        if (val) {
+            Item name_item = {.item = s2it(heap_create_name(env_names[i], (int)strlen(env_names[i])))};
+            Item val_item = {.item = s2it(heap_create_name(val, (int)strlen(val)))};
+            // set in var table with export flag
+            BashRtVar entry = {.name = env_names[i], .name_len = strlen(env_names[i]),
+                               .value = val_item, .is_export = true,
+                               .attributes = BASH_ATTR_NONE};
+            hashmap_set(bash_var_table, &entry);
+            log_debug("bash: imported env %s=%s", env_names[i], val);
+        }
+    }
+    // also set default IFS if not in env
+    BashRtVar ifs_key = {.name = "IFS", .name_len = 3};
+    if (!hashmap_get(bash_var_table, &ifs_key)) {
+        Item ifs_val = {.item = s2it(heap_create_name(" \t\n", 3))};
+        BashRtVar ifs_entry = {.name = "IFS", .name_len = 3,
+                               .value = ifs_val, .is_export = false,
+                               .attributes = BASH_ATTR_NONE};
+        hashmap_set(bash_var_table, &ifs_entry);
+    }
+}
+
+extern "C" void bash_env_sync_export(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (found && found->is_export) {
+        String* val_str = it2s(found->value);
+        char name_buf[256];
+        snprintf(name_buf, sizeof(name_buf), "%.*s", s->len, s->chars);
+        if (val_str) {
+            char val_buf[4096];
+            snprintf(val_buf, sizeof(val_buf), "%.*s", val_str->len, val_str->chars);
+            setenv(name_buf, val_buf, 1);
+        } else {
+            setenv(name_buf, "", 1);
+        }
+    }
+}
+
+// ============================================================================
+// Script sourcing
+// ============================================================================
+
+// bash_source_file() is implemented in transpile_bash_mir.cpp
+// because it needs access to the MIR transpiler infrastructure.
+// bash_set_runtime() is also there — called by transpile_bash_to_mir.
+
+// ============================================================================
+// Runtime function registry
+// ============================================================================
+
+typedef struct BashRtFuncEntry {
+    char name[128];
+    size_t name_len;
+    BashRtFuncPtr ptr;
+} BashRtFuncEntry;
+
+static uint64_t bash_rt_func_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const BashRtFuncEntry* e = (const BashRtFuncEntry*)item;
+    return hashmap_sip(e->name, e->name_len, seed0, seed1);
+}
+
+static int bash_rt_func_cmp(const void* a, const void* b, void* udata) {
+    const BashRtFuncEntry* ea = (const BashRtFuncEntry*)a;
+    const BashRtFuncEntry* eb = (const BashRtFuncEntry*)b;
+    (void)udata;
+    if (ea->name_len != eb->name_len) return 1;
+    return memcmp(ea->name, eb->name, ea->name_len);
+}
+
+static void bash_ensure_rt_func_table(void) {
+    if (!bash_rt_func_table) {
+        bash_rt_func_table = hashmap_new(sizeof(BashRtFuncEntry), 16, 0, 0,
+                                         bash_rt_func_hash, bash_rt_func_cmp, NULL, NULL);
+    }
+}
+
+extern "C" void bash_register_rt_func(const char* name, BashRtFuncPtr ptr) {
+    bash_ensure_rt_func_table();
+    BashRtFuncEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    size_t len = strlen(name);
+    if (len >= sizeof(entry.name)) len = sizeof(entry.name) - 1;
+    memcpy(entry.name, name, len);
+    entry.name_len = len;
+    entry.ptr = ptr;
+    hashmap_set(bash_rt_func_table, &entry);
+    log_debug("bash: registered runtime function '%.*s'", (int)len, name);
+}
+
+extern "C" BashRtFuncPtr bash_lookup_rt_func(const char* name) {
+    if (!bash_rt_func_table) return NULL;
+    BashRtFuncEntry key;
+    memset(&key, 0, sizeof(key));
+    key.name_len = strlen(name);
+    if (key.name_len >= sizeof(key.name)) key.name_len = sizeof(key.name) - 1;
+    memcpy(key.name, name, key.name_len);
+    const BashRtFuncEntry* found = (const BashRtFuncEntry*)hashmap_get(bash_rt_func_table, &key);
+    return found ? found->ptr : NULL;
+}
+
+extern "C" Item bash_call_rt_func(Item name_item, Item* args, int argc) {
+    if (!bash_rt_func_table) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+    String* s = it2s(name_item);
+    if (!s) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+    BashRtFuncEntry key;
+    memset(&key, 0, sizeof(key));
+    size_t len = (size_t)s->len;
+    if (len >= sizeof(key.name)) len = sizeof(key.name) - 1;
+    memcpy(key.name, s->chars, len);
+    key.name_len = len;
+    const BashRtFuncEntry* found = (const BashRtFuncEntry*)hashmap_get(bash_rt_func_table, &key);
+    if (found && found->ptr) {
+        return found->ptr(args, argc);
+    }
+    log_debug("bash: runtime function '%.*s' not found", s->len, s->chars);
+    bash_last_exit_code = 127;
+    return (Item){.item = i2it(127)};
+}
+
+// ============================================================================
+// Shell options (set -e, set -u, set -x, set -o pipefail)
+// ============================================================================
+
+extern "C" void bash_set_option(Item option, bool enable) {
+    String* s = it2s(option);
+    if (!s) return;
+    if ((s->len == 1 && s->chars[0] == 'e') ||
+        (s->len == 7 && memcmp(s->chars, "errexit", 7) == 0)) {
+        bash_opt_errexit = enable;
+        log_debug("bash: set errexit=%s", enable ? "on" : "off");
+    } else if ((s->len == 1 && s->chars[0] == 'u') ||
+               (s->len == 7 && memcmp(s->chars, "nounset", 7) == 0)) {
+        bash_opt_nounset = enable;
+        log_debug("bash: set nounset=%s", enable ? "on" : "off");
+    } else if ((s->len == 1 && s->chars[0] == 'x') ||
+               (s->len == 6 && memcmp(s->chars, "xtrace", 6) == 0)) {
+        bash_opt_xtrace = enable;
+        log_debug("bash: set xtrace=%s", enable ? "on" : "off");
+    } else if (s->len == 8 && memcmp(s->chars, "pipefail", 8) == 0) {
+        bash_opt_pipefail = enable;
+        log_debug("bash: set pipefail=%s", enable ? "on" : "off");
+    } else {
+        log_debug("bash: set: unknown option '%.*s'", s->len, s->chars);
+    }
+}
+
+extern "C" bool bash_get_option_errexit(void) {
+    return bash_opt_errexit;
+}
+
+extern "C" bool bash_get_option_nounset(void) {
+    return bash_opt_nounset;
+}
+
+extern "C" bool bash_get_option_xtrace(void) {
+    return bash_opt_xtrace;
+}
+
+extern "C" bool bash_get_option_pipefail(void) {
+    return bash_opt_pipefail;
+}
+
+// ============================================================================
+// Signal handling / trap (Phase 8)
+// ============================================================================
+
+// map a signal name string to a trap index; returns -1 if unknown
+static int bash_signal_name_to_idx(const char* name, int len) {
+    if (len == 4 && memcmp(name, "EXIT", 4) == 0) return BASH_TRAP_IDX_EXIT;
+    if (len == 3 && memcmp(name, "ERR", 3) == 0)  return BASH_TRAP_IDX_ERR;
+    if (len == 5 && memcmp(name, "DEBUG", 5) == 0) return BASH_TRAP_IDX_DEBUG;
+    if (len == 3 && memcmp(name, "HUP", 3) == 0)   return BASH_TRAP_IDX_HUP;
+    if (len == 6 && memcmp(name, "SIGHUP", 6) == 0) return BASH_TRAP_IDX_HUP;
+    if (len == 3 && memcmp(name, "INT", 3) == 0)   return BASH_TRAP_IDX_INT;
+    if (len == 6 && memcmp(name, "SIGINT", 6) == 0) return BASH_TRAP_IDX_INT;
+    if (len == 4 && memcmp(name, "QUIT", 4) == 0)  return BASH_TRAP_IDX_QUIT;
+    if (len == 7 && memcmp(name, "SIGQUIT", 7) == 0) return BASH_TRAP_IDX_QUIT;
+    if (len == 4 && memcmp(name, "TERM", 4) == 0)  return BASH_TRAP_IDX_TERM;
+    if (len == 7 && memcmp(name, "SIGTERM", 7) == 0) return BASH_TRAP_IDX_TERM;
+    return -1;
+}
+
+// get OS signal number for an OS-signal trap index (HUP..TERM); returns 0 otherwise
+static int bash_trap_idx_to_signum(int idx) {
+    static const int sig_map[] = { 0, 0, 0, SIGHUP, SIGINT, SIGQUIT, SIGTERM };
+    return (idx >= 0 && idx < BASH_TRAP_NUM) ? sig_map[idx] : 0;
+}
+
+extern "C" void bash_trap_set(Item handler, Item signal_name) {
+    String* sig = it2s(signal_name);
+    if (!sig) return;
+
+    int idx = bash_signal_name_to_idx(sig->chars, sig->len);
+    if (idx < 0) {
+        log_debug("bash: trap: unknown signal '%.*s'", sig->len, sig->chars);
+        return;
+    }
+
+    // free existing handler
+    if (bash_trap_handlers[idx]) {
+        free(bash_trap_handlers[idx]);
+        bash_trap_handlers[idx] = NULL;
+    }
+
+    String* h = it2s(handler);
+    // '-' alone means reset to default
+    if (!h || (h->len == 1 && h->chars[0] == '-')) {
+        // restore default signal action for OS signals
+        int signum = bash_trap_idx_to_signum(idx);
+        if (signum) {
+            struct sigaction sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sa_handler = SIG_DFL;
+            sigemptyset(&sa.sa_mask);
+            sigaction(signum, &sa, NULL);
+        }
+        log_debug("bash: trap reset for '%.*s'", sig->len, sig->chars);
+        return;
+    }
+
+    // store handler code (null-terminated copy)
+    bash_trap_handlers[idx] = (char*)malloc(h->len + 1);
+    memcpy(bash_trap_handlers[idx], h->chars, h->len);
+    bash_trap_handlers[idx][h->len] = '\0';
+
+    // install OS signal handler if needed
+    int signum = bash_trap_idx_to_signum(idx);
+    if (signum) {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        if (h->len == 0) {
+            sa.sa_handler = SIG_IGN;   // empty string = ignore
+        } else {
+            sa.sa_handler = bash_os_signal_handler;
+        }
+        sigemptyset(&sa.sa_mask);
+        sigaction(signum, &sa, NULL);
+    }
+    log_debug("bash: trap set for '%.*s': '%s'", sig->len, sig->chars, bash_trap_handlers[idx]);
+}
+
+extern "C" void bash_trap_run_exit(void) {
+    if (!bash_trap_handlers[BASH_TRAP_IDX_EXIT]) return;
+    if (bash_trap_handlers[BASH_TRAP_IDX_EXIT][0] == '\0') {
+        // ignore (empty handler)
+        free(bash_trap_handlers[BASH_TRAP_IDX_EXIT]);
+        bash_trap_handlers[BASH_TRAP_IDX_EXIT] = NULL;
+        return;
+    }
+    // steal and clear before running to prevent re-entry
+    char* code = bash_trap_handlers[BASH_TRAP_IDX_EXIT];
+    bash_trap_handlers[BASH_TRAP_IDX_EXIT] = NULL;
+    log_debug("bash: running EXIT trap");
+    String* code_str = heap_create_name(code, (int)strlen(code));
+    Item code_item = {.item = s2it(code_str)};
+    bash_eval_string(code_item);
+    free(code);
+}
+
+extern "C" void bash_trap_check(void) {
+    for (int idx = BASH_TRAP_IDX_HUP; idx < BASH_TRAP_NUM; idx++) {
+        if (!bash_trap_fired[idx]) continue;
+        bash_trap_fired[idx] = 0;  // clear before running
+        if (!bash_trap_handlers[idx] || bash_trap_handlers[idx][0] == '\0') continue;
+        log_debug("bash: running signal trap idx=%d", idx);
+        String* code_str = heap_create_name(bash_trap_handlers[idx],
+                                            (int)strlen(bash_trap_handlers[idx]));
+        Item code_item = {.item = s2it(code_str)};
+        bash_eval_string(code_item);
     }
 }

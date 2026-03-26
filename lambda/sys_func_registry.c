@@ -41,6 +41,7 @@ extern bool target_equal(Target* a, Target* b);
 // JS runtime functions
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
+#include "py/py_class.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -1105,6 +1106,23 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_length", FPTR(js_typed_array_length)},
     {"js_typed_array_fill", FPTR(js_typed_array_fill)},
     {"js_is_typed_array", FPTR(js_is_typed_array)},
+    {"js_typed_array_construct", FPTR(js_typed_array_construct)},
+    {"js_typed_array_new_from_buffer", FPTR(js_typed_array_new_from_buffer)},
+    {"js_typed_array_new_from_array", FPTR(js_typed_array_new_from_array)},
+    {"js_typed_array_subarray", FPTR(js_typed_array_subarray)},
+    {"js_typed_array_slice", FPTR(js_typed_array_slice)},
+    {"js_typed_array_set_from", FPTR(js_typed_array_set_from)},
+    // ArrayBuffer
+    {"js_arraybuffer_new", FPTR(js_arraybuffer_new)},
+    {"js_is_arraybuffer", FPTR(js_is_arraybuffer)},
+    {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
+    {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},
+    {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
+    {"js_arraybuffer_wrap", FPTR(js_arraybuffer_wrap)},
+    // DataView
+    {"js_dataview_new", FPTR(js_dataview_new)},
+    {"js_is_dataview", FPTR(js_is_dataview)},
+    {"js_dataview_method", FPTR(js_dataview_method)},
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
@@ -1159,6 +1177,24 @@ JitImport jit_runtime_imports[] = {
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
     // v15: fetch API
     {"js_fetch", FPTR(js_fetch)},
+    // Phase 3: Promise.withResolvers
+    {"js_promise_with_resolvers", FPTR(js_promise_with_resolvers)},
+    // Phase 5: Async/Await sync fast path
+    {"js_await_sync", FPTR(js_await_sync)},
+    // Phase 6: Async state machine runtime
+    {"js_async_must_suspend", FPTR(js_async_must_suspend)},
+    {"js_async_get_resolved", FPTR(js_async_get_resolved)},
+    {"js_async_context_create", FPTR(js_async_context_create)},
+    {"js_async_start", FPTR(js_async_start)},
+    {"js_async_get_promise", FPTR(js_async_get_promise)},
+    // Phase 3: TextEncoder / TextDecoder
+    {"js_text_encoder_new", FPTR(js_text_encoder_new)},
+    {"js_text_encoder_encode", FPTR(js_text_encoder_encode)},
+    {"js_text_decoder_new", FPTR(js_text_decoder_new)},
+    {"js_text_decoder_decode", FPTR(js_text_decoder_decode)},
+    // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
+    {"js_weakmap_new", FPTR(js_weakmap_new)},
+    {"js_weakset_new", FPTR(js_weakset_new)},
 
     // ========================================================================
     // Python runtime functions
@@ -1199,7 +1235,20 @@ JitImport jit_runtime_imports[] = {
     // object/attr
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
+    {"py_hasattr", FPTR(py_hasattr)},
     {"py_new_object", FPTR(py_new_object)},
+    // class system
+    {"py_class_new", FPTR(py_class_new)},
+    {"py_new_instance", FPTR(py_new_instance)},
+    {"py_bind_method", FPTR(py_bind_method)},
+    {"py_is_bound_method", FPTR(py_is_bound_method)},
+    {"py_is_class", FPTR(py_is_class)},
+    {"py_is_instance", FPTR(py_is_instance)},
+    {"py_get_class", FPTR(py_get_class)},
+    {"py_mro_lookup", FPTR(py_mro_lookup)},
+    {"py_super", FPTR(py_super)},
+    {"py_isinstance_v3", FPTR(py_isinstance_v3)},
+    {"py_issubclass_v3", FPTR(py_issubclass_v3)},
     // collections
     {"py_list_new", FPTR(py_list_new)},
     {"py_list_append", FPTR(py_list_append)},
@@ -1215,6 +1264,12 @@ JitImport jit_runtime_imports[] = {
     {"py_subscript_get", FPTR(py_subscript_get)},
     {"py_subscript_set", FPTR(py_subscript_set)},
     {"py_slice_get", FPTR(py_slice_get)},
+    {"py_slice_set", FPTR(py_slice_set)},
+    {"py_format_value", FPTR(py_format_value)},
+    {"py_exception_get_type", FPTR(py_exception_get_type)},
+    {"py_builtin_open", FPTR(py_builtin_open)},
+    // variadic args
+    {"py_build_list_from_args", FPTR(py_build_list_from_args)},
     // iterator
     {"py_get_iterator", FPTR(py_get_iterator)},
     {"py_iterator_next", FPTR(py_iterator_next)},
@@ -1223,12 +1278,19 @@ JitImport jit_runtime_imports[] = {
     {"py_new_function", FPTR(py_new_function)},
     {"py_new_closure", FPTR(py_new_closure)},
     {"py_alloc_env", FPTR(py_alloc_env)},
+    {"py_set_kwargs_flag", FPTR(py_set_kwargs_flag)},
+    {"py_dict_merge", FPTR(py_dict_merge)},
     {"py_call_function", FPTR(py_call_function)},
+    {"py_call_function_kw", FPTR(py_call_function_kw)},
     // exception handling
     {"py_raise", FPTR(py_raise)},
     {"py_check_exception", FPTR(py_check_exception)},
     {"py_clear_exception", FPTR(py_clear_exception)},
     {"py_new_exception", FPTR(py_new_exception)},
+    // context manager protocol
+    {"py_context_enter", FPTR(py_context_enter)},
+    {"py_context_exit", FPTR(py_context_exit)},
+    {"py_resolve_name_item", FPTR(py_resolve_name_item)},
     // module vars
     {"py_set_module_var", FPTR(py_set_module_var)},
     {"py_get_module_var", FPTR(py_get_module_var)},
@@ -1273,6 +1335,7 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_divmod", FPTR(py_builtin_divmod)},
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
+    {"py_builtin_property", FPTR(py_builtin_property)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers
@@ -1329,6 +1392,14 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_str_gt", FPTR(bash_test_str_gt)},
     {"bash_test_z", FPTR(bash_test_z)},
     {"bash_test_n", FPTR(bash_test_n)},
+    {"bash_test_f", FPTR(bash_test_f)},
+    {"bash_test_d", FPTR(bash_test_d)},
+    {"bash_test_e", FPTR(bash_test_e)},
+    {"bash_test_r", FPTR(bash_test_r)},
+    {"bash_test_w", FPTR(bash_test_w)},
+    {"bash_test_x", FPTR(bash_test_x)},
+    {"bash_test_s", FPTR(bash_test_s)},
+    {"bash_test_l", FPTR(bash_test_l)},
     {"bash_test_regex", FPTR(bash_test_regex)},
     {"bash_test_glob", FPTR(bash_test_glob)},
     // string operations
@@ -1367,6 +1438,19 @@ JitImport jit_runtime_imports[] = {
     {"bash_array_all", FPTR(bash_array_all)},
     {"bash_array_unset", FPTR(bash_array_unset)},
     {"bash_array_slice", FPTR(bash_array_slice)},
+    // associative array operations
+    {"bash_assoc_new", FPTR(bash_assoc_new)},
+    {"bash_assoc_set", FPTR(bash_assoc_set)},
+    {"bash_assoc_get", FPTR(bash_assoc_get)},
+    {"bash_assoc_keys", FPTR(bash_assoc_keys)},
+    {"bash_assoc_values", FPTR(bash_assoc_values)},
+    {"bash_assoc_unset", FPTR(bash_assoc_unset)},
+    {"bash_assoc_length", FPTR(bash_assoc_length)},
+    {"bash_assoc_count", FPTR(bash_assoc_count)},
+    // variable attributes
+    {"bash_declare_var", FPTR(bash_declare_var)},
+    {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
+    {"bash_is_assoc", FPTR(bash_is_assoc)},
     // variable scope
     {"bash_set_var", FPTR(bash_set_var)},
     {"bash_get_var", FPTR(bash_get_var)},
@@ -1389,9 +1473,24 @@ JitImport jit_runtime_imports[] = {
     // output capture
     {"bash_begin_capture", FPTR(bash_begin_capture)},
     {"bash_end_capture", FPTR(bash_end_capture)},
+    {"bash_end_capture_raw", FPTR(bash_end_capture_raw)},
     {"bash_raw_write", FPTR(bash_raw_write)},
     {"bash_write_heredoc", FPTR(bash_write_heredoc)},
     {"bash_raw_putc", FPTR(bash_raw_putc)},
+    // pipeline stdin item passing
+    {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
+    {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
+    {"bash_clear_stdin_item", FPTR(bash_clear_stdin_item)},
+    // file redirections
+    {"bash_redirect_write", FPTR(bash_redirect_write)},
+    {"bash_redirect_append", FPTR(bash_redirect_append)},
+    {"bash_redirect_read", FPTR(bash_redirect_read)},
+    // external command execution
+    {"bash_exec_external", FPTR(bash_exec_external)},
+    // expansions (tilde, glob, brace)
+    {"bash_expand_tilde", FPTR(bash_expand_tilde)},
+    {"bash_glob_expand", FPTR(bash_glob_expand)},
+    {"bash_expand_brace", FPTR(bash_expand_brace)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
@@ -1412,9 +1511,38 @@ JitImport jit_runtime_imports[] = {
     {"bash_builtin_unset", FPTR(bash_builtin_unset)},
     {"bash_builtin_cd", FPTR(bash_builtin_cd)},
     {"bash_builtin_pwd", FPTR(bash_builtin_pwd)},
+    // pipeline builtins
+    {"bash_builtin_cat", FPTR(bash_builtin_cat)},
+    {"bash_builtin_wc", FPTR(bash_builtin_wc)},
+    {"bash_builtin_head", FPTR(bash_builtin_head)},
+    {"bash_builtin_tail", FPTR(bash_builtin_tail)},
+    {"bash_builtin_grep", FPTR(bash_builtin_grep)},
+    {"bash_builtin_sort", FPTR(bash_builtin_sort)},
+    {"bash_builtin_tr", FPTR(bash_builtin_tr)},
+    {"bash_builtin_cut", FPTR(bash_builtin_cut)},
     // runtime init/cleanup
     {"bash_runtime_init", FPTR(bash_runtime_init)},
     {"bash_runtime_cleanup", FPTR(bash_runtime_cleanup)},
+    // environment variable integration
+    {"bash_env_import", FPTR(bash_env_import)},
+    {"bash_env_sync_export", FPTR(bash_env_sync_export)},
+    // script sourcing
+    {"bash_source_file", FPTR(bash_source_file)},
+    // runtime function registry
+    {"bash_register_rt_func", FPTR(bash_register_rt_func)},
+    {"bash_call_rt_func", FPTR(bash_call_rt_func)},
+    {"bash_lookup_rt_func", FPTR(bash_lookup_rt_func)},
+    // shell options
+    {"bash_set_option", FPTR(bash_set_option)},
+    {"bash_get_option_errexit", FPTR(bash_get_option_errexit)},
+    {"bash_get_option_nounset", FPTR(bash_get_option_nounset)},
+    {"bash_get_option_xtrace", FPTR(bash_get_option_xtrace)},
+    {"bash_get_option_pipefail", FPTR(bash_get_option_pipefail)},
+    // signal handling / trap (Phase 8)
+    {"bash_trap_set", FPTR(bash_trap_set)},
+    {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
+    {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

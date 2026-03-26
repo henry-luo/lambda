@@ -80,6 +80,7 @@ typedef enum PyAstNodeType {
     PY_AST_NODE_TUPLE_UNPACK,           // a, b = ...
     PY_AST_NODE_PAIR,                   // key: value in dict literal
     PY_AST_NODE_DECORATOR,
+    PY_AST_NODE_FSTRING_EXPR,           // f-string interpolation with format spec
 
     PY_AST_NODE_COUNT
 } PyAstNodeType;
@@ -410,6 +411,13 @@ typedef struct PyFStringNode {
     PyAstNode base;
     PyAstNode* parts;               // linked list of literal strings and expressions
 } PyFStringNode;
+
+// Python f-string expression with format spec: f"{expr:spec}"
+typedef struct PyFStringExprNode {
+    PyAstNode base;
+    PyAstNode* expression;          // the expression to format
+    String* format_spec;            // the format spec string (e.g., ".2f", ">10", "05d")
+} PyFStringExprNode;
 
 // Python module node (root)
 typedef struct PyModuleNode {

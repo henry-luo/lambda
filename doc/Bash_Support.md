@@ -3,7 +3,8 @@
 Lambda can compile and execute Bash scripts via JIT compilation. Bash source code is parsed with Tree-sitter, transformed into a typed AST, transpiled to MIR (Medium Intermediate Representation), and JIT-compiled to native machine code — no interpreter loop is involved.
 
 ```bash
-./lambda.exe script.sh          # Run a Bash script
+./lambda.exe bash script.sh          # Run a Bash script
+./lambda.exe bash --posix script.sh  # Run in POSIX-compatible mode
 ```
 
 ## Compilation Pipeline
@@ -245,9 +246,9 @@ function say_hello {
 Supports:
 - Both `name()` and `function name` definition syntax
 - Positional parameters (`$1`, `$2`, ...)
-- `local` variable declarations
+- `local` variable declarations (function-scoped via dynamic scope stack)
 - `return` with exit codes
-- Recursive functions (e.g., factorial)
+- Recursive functions with correct `local` isolation per stack frame
 - Functions calling other functions
 - Command substitution to capture function output
 
@@ -299,7 +300,7 @@ All `[ ]` operators plus:
 | `\|\|` | Logical | OR (inside `[[ ]]`) |
 | `!` | Logical | NOT |
 
-**File test operators** are defined in the AST (`-f`, `-d`, `-e`, `-r`, `-w`, `-x`, `-s`, `-L`) but are not yet tested.
+**File test operators** work via `stat()`/`access()`/`lstat()` system calls — all eight operators work against the real filesystem.
 
 ### Command Substitution
 
@@ -369,18 +370,16 @@ Supports:
 
 ### Redirections
 
-The AST supports redirect nodes with these modes:
-
 | Mode | Syntax | Status |
 |------|--------|--------|
-| Read | `< file` | Parsed |
-| Write | `> file` | Parsed |
-| Append | `>> file` | Parsed |
+| Read | `< file` | ✅ |
+| Write | `> file` | ✅ |
+| Append | `>> file` | ✅ |
 | Duplicate | `>&` | Parsed |
-| Heredoc | `<<` | ✅ Fully working |
-| Here-string | `<<<` | ✅ Fully working |
+| Heredoc | `<<` | ✅ |
+| Here-string | `<<<` | ✅ |
 
-File-based redirections (`<`, `>`, `>>`) are parsed in the AST but actual file I/O redirection is not yet implemented at runtime.
+File redirections use `open()`/`dup2()` and integrate with the command substitution capture stack — explicit file redirects take precedence over capture buffers. `/dev/null` redirection is fully supported.
 
 ### Special Variables
 
@@ -409,18 +408,33 @@ File-based redirections (`<`, `>`, `>>`) are parsed in the AST but actual file I
 | `return` | Return from function | Sets `$?` |
 | `read` | Read line from stdin | Reads into variable |
 | `shift` | Shift positional parameters | Optional count argument |
-| `local` | Declare local variable | With optional value |
-| `export` | Mark variable for export | With optional value |
-| `unset` | Remove variable or array element | Supports `unset 'arr[i]'` |
+| `local` | Declare local variable | Function-scoped via dynamic scope stack |
+| `export` | Mark variable for export | Calls `setenv()` for child process inheritance |
+| `unset` | Remove variable or array element | Supports indexed arrays and associative map keys |
 | `cd` | Change directory | Falls back to `$HOME` with no arg |
 | `pwd` | Print working directory | Uses `getcwd` |
+| `declare` / `typeset` | Declare variable with attributes | `-a`, `-A`, `-i`, `-r`, `-x`, `-l`, `-u` |
+| `source` / `.` | Source a script at runtime | Shares caller's variable and function scope |
+| `eval` | Evaluate a string as Bash code | JIT-compiles and executes in current scope |
+| `set` | Set shell options | `-e`, `-u`, `-x`, `-o pipefail` |
+| `trap` | Register signal/event handler | EXIT, INT, TERM, HUP, QUIT, ERR, DEBUG |
+| `cat` | Read stdin, write to stdout | Pipeline identity stage |
+| `wc` | Count lines/words/chars | `-l`, `-w`, `-c` |
+| `head` | First N lines | `-n N` |
+| `tail` | Last N lines | `-n N` |
+| `grep` | Pattern matching | Basic regex via RE2 |
+| `sort` | Sort lines | |
+| `tr` | Character transliteration | |
+| `cut` | Field extraction | `-d` delimiter, `-f` fields |
 
 ### Scope Management
 
-- **Global scope**: Default variable scope
-- **Function scope**: `local` creates function-scoped variables; `bash_scope_push()`/`bash_scope_pop()` manage stack frames
+- **Global scope**: Default variable scope — variables live in a flat global hashmap
+- **Function scope**: `local` creates function-scoped variables. Each function call pushes a new per-call hashmap frame onto a 256-entry dynamic scope stack; the frame is automatically pushed on function entry and popped on `return` or function exit
+- **Dynamic scoping**: Bash uses dynamic scoping — a callee can read `local` variables declared in its caller. Variable lookup walks the scope stack top→bottom before falling through to the global table
 - **Subshell scope**: `( commands )` operates in an isolated snapshot; modifications don't leak to parent
 - **Positional parameter stack**: `bash_push_positional()`/`bash_pop_positional()` save/restore `$1`, `$2`, ... across function calls
+- **Early return**: `return` pops the scope frame before restoring positional parameters to prevent frame leaks
 
 ### Loop Control
 
@@ -433,9 +447,157 @@ File-based redirections (`<`, `>`, `>>`) are parsed in the AST but actual file I
 
 ---
 
+### Expansions
+
+**Tilde expansion:**
+```bash
+echo ~           # expands to $HOME
+echo ~/docs      # $HOME/docs
+echo ~user       # home directory of 'user' via getpwnam()
+```
+
+**Brace expansion:**
+```bash
+echo {a,b,c}     # a b c
+echo {1..5}      # 1 2 3 4 5
+echo {a..z}      # a b c ... z
+```
+
+Supports comma lists, numeric ranges, and character ranges. Not performed inside double quotes.
+
+**Glob expansion** (command argument context only):
+```bash
+ls *.txt
+for f in src/*.cpp; do echo "$f"; done
+```
+
+Uses POSIX `glob()` with `GLOB_NOCHECK` — returns the pattern literally if no files match. Not applied inside parameter expansion patterns (e.g., `${var#*/}` is safe).
+
+---
+
+### Associative Arrays
+
+```bash
+declare -A colors
+colors[red]="#ff0000"
+colors[green]="#00ff00"
+echo "${colors[red]}"
+for key in "${!colors[@]}"; do echo "$key=${colors[$key]}"; done
+```
+
+| Feature | Syntax | Status |
+|---------|--------|--------|
+| Declaration | `declare -A map` | ✅ |
+| Set element | `map[key]=value` | ✅ |
+| Get element | `${map[key]}` | ✅ |
+| All keys | `${!map[@]}` | ✅ |
+| All values | `${map[@]}` | ✅ |
+| Length | `${#map[@]}` | ✅ |
+| Unset key | `unset 'map[key]'` | ✅ |
+| Iterate keys | `for k in "${!map[@]}"` | ✅ |
+
+Uses Lambda's `Map` type (preserves insertion order).
+
+### `declare` / `typeset`
+
+| Flag | Meaning | Status |
+|------|---------|--------|
+| `-a` | Indexed array | ✅ |
+| `-A` | Associative array | ✅ |
+| `-i` | Integer (arithmetic coercion on assignment) | ✅ |
+| `-r` | Readonly (prevent reassignment) | ✅ |
+| `-x` | Export | ✅ |
+| `-l` | Auto-lowercase on assignment | ✅ |
+| `-u` | Auto-uppercase on assignment | ✅ |
+
+Variable attributes are stored in a parallel metadata table alongside the variable value table.
+
+---
+
+### External Commands
+
+Non-builtin commands are executed via `posix_spawn` with PATH resolution:
+
+```bash
+git status
+ls -la /tmp
+```
+
+- PATH is searched in order for executable resolution
+- Stdout is captured and returned as a string item
+- Exit code propagated to `$?`
+- Unresolved commands return exit code 127
+- Builtin→external pipeline transitions forward the stdin item to the child process
+
+---
+
+### `source` / `.` and `eval`
+
+```bash
+source ./lib.sh
+. ./helpers.sh
+eval "x=10; echo $x"
+```
+
+- `source`/`.` — re-parses and JIT-compiles the target file at runtime; functions and variables defined in the sourced file are immediately available in the caller's scope
+- `eval` — compiles and executes a Bash code string in the current runtime scope; used internally to execute `trap` handler code
+
+---
+
+### `set` Options
+
+```bash
+set -e          # exit on any error
+set -u          # error on unset variable access
+set -x          # trace commands to stderr
+set -o pipefail # pipeline exit code = last non-zero stage
+```
+
+| Option | Flag | Behavior |
+|--------|------|---------|
+| `errexit` | `-e` | Exit if any command returns non-zero |
+| `nounset` | `-u` | Error on expansion of an unset variable |
+| `xtrace` | `-x` | Print `+ command args` to stderr before each command |
+| `pipefail` | `-o pipefail` | Pipeline fails if any stage fails |
+
+---
+
+### Signal Handling / `trap`
+
+```bash
+trap 'echo "cleaning up"' EXIT
+trap 'echo "interrupted"; exit 1' INT
+trap '' TERM      # ignore SIGTERM
+trap '-' HUP      # reset to default
+```
+
+| Signal | Description |
+|--------|-------------|
+| `EXIT` | Runs at script end or on `exit N` |
+| `ERR` | Runs when a command fails (with `set -e`) |
+| `DEBUG` | Runs before each command |
+| `INT` | SIGINT (Ctrl+C) |
+| `TERM` | SIGTERM |
+| `HUP` | SIGHUP |
+| `QUIT` | SIGQUIT |
+
+OS signals are installed via `sigaction()`. Pending handlers run at safe points via `bash_trap_check()` after each loop iteration. The EXIT trap always runs, including when `exit N` is called explicitly.
+
+---
+
+### POSIX Mode
+
+```bash
+./lambda.exe bash --posix script.sh
+```
+
+The `--posix` flag enables POSIX sh compatibility. In POSIX mode, `local` is treated as a global variable assignment, matching `/bin/sh` behavior where `local` is not a recognized builtin. All other features remain unchanged.
+
+---
+
 ## Test Coverage
 
-All 17 test suites pass:
+All 31 integration tests pass:
 
 | Test Script | Features Covered |
 |-------------|-----------------|
@@ -456,6 +618,20 @@ All 17 test suites pass:
 | `test_expr.sh` | `[[ ]]` numeric/string comparisons, `&&`/`\|\|`/`!`, `=~` regex, glob |
 | `heredoc.sh` | `<<EOF`, variable expansion, quoted delimiters, `<<<` here-strings |
 | `case_conversion.sh` | `${var^}`, `${var^^}`, `${var,}`, `${var,,}` |
+| `pipeline.sh` | Builtin-to-builtin pipelines, zero-copy item passing, negated pipelines |
+| `redirects.sh` | `>`, `>>`, `<` file I/O, `/dev/null` support |
+| `file_tests.sh` | `-f`, `-d`, `-e`, `-r`, `-w`, `-x`, `-s`, `-L` file test operators |
+| `external_cmds.sh` | External command execution, PATH resolution, stdout capture, exit code |
+| `expansions.sh` | Tilde, brace, glob expansion; arithmetic `&&`/`\|\|` short-circuit |
+| `assoc_arrays.sh` | Associative array declaration, access, keys/values iteration, unset |
+| `declare.sh` | `declare` flags: `-a`, `-A`, `-i`, `-r`, `-x`, `-l`, `-u` |
+| `source_cmd.sh` | `source`/`.` — shared scope, function registration at runtime |
+| `env_vars.sh` | Environment variable import, `export` propagation, `PATH`/`HOME` |
+| `set_options.sh` | `set -e`, `-u`, `-x`, `-o pipefail` |
+| `trap.sh` | `trap` builtin, EXIT/signal handlers, reset (`-`), ignore (`''`) |
+| `exit_trap.sh` | `exit N` early termination with EXIT trap execution |
+| `scope_stack.sh` | Dynamic scope: local isolation, dynamic scoping, recursion (`fib`) |
+| `posix_mode.sh` | `--posix` flag: `local` as global assignment |
 
 ---
 
@@ -465,47 +641,31 @@ All 17 test suites pass:
 
 | Feature | Description |
 |---------|-------------|
-| **Associative arrays** | `declare -A map; map[key]=value` |
-| **`declare` / `typeset`** | Type declaration builtins (`declare -i`, `declare -a`, etc.) |
 | **`select` statement** | `select item in list; do ...; done` menu construct |
 | **Coprocesses** | `coproc` command |
 | **Process substitution** | `<(cmd)` and `>(cmd)` |
-| **Job control** | `bg`, `fg`, `jobs`, `wait`, `kill`, `&` background execution |
-| **Signal handling** | `trap` command |
-| **`source` / `.`** | Source/include another script |
-| **`eval`** | Dynamic evaluation |
-| **`exec`** | Replace shell process |
-| **`set`** | Shell option configuration (`set -e`, `set -u`, etc.) |
-| **`getopts`** | Option parsing |
-| **`let`** | Arithmetic evaluation (alternative to `$(( ))`) |
-| **`(( ))` as command** | Arithmetic evaluation without `$` (as statement, not expansion) |
-| **Brace expansion** | `{1..10}`, `{a,b,c}` |
-| **Tilde expansion** | `~` → `$HOME` |
-| **Globbing** | `*.txt`, `?`, `[a-z]` as filename expansion (glob AST node exists but no fs matching) |
+| **Job control** | `bg`, `fg`, `jobs`, `wait`, `&` background execution |
+| **`exec`** | Replace the shell process |
+| **`getopts`** | Option parsing builtin |
+| **`let`** | Arithmetic evaluation builtin (alternative to `$(( ))`) |
+| **`(( ))` as statement** | Arithmetic without `$` used as a statement (not inside `$(( ))`) |
 | **`$'...'` strings** | ANSI-C quoting (`$'\n'`, `$'\t'`) |
-| **Backtick substitution** | `` `command` `` (only `$(command)` is supported) |
-| **File redirections** | `> file`, `>> file`, `< file` (parsed but not executed — no file I/O at runtime) |
-| **File test operators** | `-f`, `-d`, `-e`, etc. (defined in AST but not tested against actual filesystem) |
+| **Backtick substitution** | `` `command` `` syntax (only `$(command)` is supported) |
 | **Here-doc indentation** | `<<-EOF` (strip leading tabs) |
-| **Arithmetic `&&`/`\|\|`** | Short-circuit evaluation in `$(( ))` (currently evaluates both sides) |
-| **Real pipe I/O** | Pipeline commands run sequentially, not with fd bridging |
-| **External commands** | Running system binaries (only builtins are supported) |
-| **`mapfile` / `readarray`** | Read lines into array |
-| **`printf -v`** | Print into variable |
-| **Multiple assignment** | `a=1 b=2 c=3` on one line (prefix assignments without command) |
-| **`IFS`** | Input field separator customization |
-| **Arithmetic in `[ ]`** | `[ $((a+b)) -gt 5 ]` (arithmetic inside test — may partially work) |
+| **Word splitting on `$IFS`** | Implicit `$IFS` splitting of unquoted expansions |
+| **`mapfile` / `readarray`** | Read lines from stdin into an array |
+| **`printf -v`** | Print formatted output into a variable |
+| **Prefix assignments** | `KEY=val command` (env prefix without a builtin/external command) |
 
 ### Partial / Limited
 
 | Feature | Limitation |
 |---------|-----------|
-| **Pipelines** | Commands execute sequentially; stdout is captured and passed, but not via real Unix pipe file descriptors |
-| **`echo -e`** | Escape sequences are supported but coverage of all sequences may be limited |
+| **`echo -e`** | Most escape sequences supported; edge cases may vary |
 | **`printf`** | Only `%s` and `%d` format specifiers |
-| **`read`** | Basic single-variable read from stdin; no `-p`, `-a`, `-t`, `-r` flags |
-| **`$$`, `$!`, `$-`** | Defined but return simulated/static values, not real process data |
-| **File tests** | AST supports `-f`, `-d`, `-e`, `-r`, `-w`, `-x`, `-s`, `-L` but no filesystem integration |
+| **`read`** | Basic single-variable read; no `-p`, `-a`, `-t`, `-r` flags |
+| **`$$`, `$!`, `$-`** | Return simulated/static values, not real process data |
+| **Duplicate redirect `>&`** | Parsed in AST but not yet executed |
 
 ---
 

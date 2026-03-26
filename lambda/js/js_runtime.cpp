@@ -894,14 +894,71 @@ extern "C" Item js_property_get(Item object, Item key) {
         Map* m = object.map;
         // Check if this is a typed array
         if (js_is_typed_array(object)) {
-            // Handle .length property
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* str_key = it2s(key);
                 if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                     return (Item){.item = i2it(js_typed_array_length(object))};
                 }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    return (Item){.item = i2it(ta->byte_length)};
+                }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    return (Item){.item = i2it(ta->byte_offset)};
+                }
+                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    if (ta->buffer) {
+                        return js_arraybuffer_wrap(ta->buffer);
+                    }
+                    return (Item){.item = ITEM_NULL};
+                }
+                if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    int bpe = 4;
+                    switch (ta->element_type) {
+                    case JS_TYPED_INT8: case JS_TYPED_UINT8: bpe = 1; break;
+                    case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
+                    case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
+                    case JS_TYPED_FLOAT64: bpe = 8; break;
+                    }
+                    return (Item){.item = i2it(bpe)};
+                }
             }
             return js_typed_array_get(object, key);
+        }
+        // Check if this is an ArrayBuffer
+        if (js_is_arraybuffer(object)) {
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
+                }
+            }
+            return (Item){.item = ITEM_NULL};
+        }
+        // Check if this is a DataView
+        if (js_is_dataview(object)) {
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    return (Item){.item = i2it(dv->byte_length)};
+                }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    return (Item){.item = i2it(dv->byte_offset)};
+                }
+                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    if (dv->buffer) {
+                        return js_arraybuffer_wrap(dv->buffer);
+                    }
+                    return (Item){.item = ITEM_NULL};
+                }
+            }
+            return (Item){.item = ITEM_NULL};
         }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
@@ -1868,6 +1925,48 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // DataView methods
+    if (js_is_dataview(obj)) {
+        return js_dataview_method(obj, method_name, args, argc);
+    }
+    // TypedArray methods
+    if (js_is_typed_array(obj)) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
+                Item value = argc > 0 ? args[0] : ItemNull;
+                return js_typed_array_fill(obj, value);
+            }
+            if (method->len == 3 && strncmp(method->chars, "set", 3) == 0) {
+                Item source = argc > 0 ? args[0] : ItemNull;
+                int offset = argc > 1 ? (int)it2i(args[1]) : 0;
+                return js_typed_array_set_from(obj, source, offset);
+            }
+            if (method->len == 8 && strncmp(method->chars, "subarray", 8) == 0) {
+                int start = argc > 0 ? (int)it2i(args[0]) : 0;
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int end = argc > 1 ? (int)it2i(args[1]) : ta->length;
+                return js_typed_array_subarray(obj, start, end);
+            }
+            if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                int start = argc > 0 ? (int)it2i(args[0]) : 0;
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int end = argc > 1 ? (int)it2i(args[1]) : ta->length;
+                return js_typed_array_slice(obj, start, end);
+            }
+        }
+    }
+    // ArrayBuffer methods
+    if (js_is_arraybuffer(obj)) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                int begin = argc > 0 ? (int)it2i(args[0]) : 0;
+                int end = argc > 1 ? (int)it2i(args[1]) : js_arraybuffer_byte_length(obj);
+                return js_arraybuffer_slice(obj, begin, end);
+            }
+        }
+    }
     // Check if this is a Map/Set collection
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) {
@@ -1954,6 +2053,21 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                     Item str = argc > 0 ? args[0] : ItemNull;
                     return js_regex_test(obj, str);
                 }
+            }
+        }
+    }
+
+    // TextEncoder/TextDecoder instance methods (.encode, .decode)
+    {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 6 && strncmp(method->chars, "encode", 6) == 0) {
+                Item str_arg = argc > 0 ? args[0] : ItemNull;
+                return js_text_encoder_encode(obj, str_arg);
+            }
+            if (method->len == 6 && strncmp(method->chars, "decode", 6) == 0) {
+                Item input_arg = argc > 0 ? args[0] : ItemNull;
+                return js_text_decoder_decode(obj, input_arg);
             }
         }
     }
@@ -2177,6 +2291,84 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     // toString
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
         return str;
+    }
+
+    // match(regex) — delegates to regex exec
+    if (method->len == 5 && strncmp(method->chars, "match", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        // If arg is a regex object, use js_regex_exec
+        if (get_type_id(args[0]) == LMD_TYPE_MAP) {
+            JsRegexData* rd = js_get_regex_data(args[0]);
+            if (rd) {
+                if (!rd->global) {
+                    return js_regex_exec(args[0], str);
+                }
+                // Global: collect all matches into array
+                String* s = it2s(str);
+                if (!s) return ItemNull;
+                Item result = js_array_new(0);
+                int offset = 0;
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                if (num_groups > 16) num_groups = 16;
+                re2::StringPiece matches[16];
+                while (offset < (int)s->len) {
+                    bool matched = rd->re2->Match(
+                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                        re2::RE2::UNANCHORED, matches, num_groups);
+                    if (!matched) break;
+                    int mlen = (int)matches[0].size();
+                    Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[0].data(), mlen))};
+                    array_push(result.array, ms);
+                    int advance = (int)(matches[0].data() - s->chars) + mlen;
+                    if (advance <= offset) advance = offset + 1;
+                    offset = advance;
+                }
+                return result;
+            }
+        }
+        // If arg is a string, treat as literal pattern
+        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+    }
+    // matchAll(regex) — returns array of all match results
+    if (method->len == 8 && strncmp(method->chars, "matchAll", 8) == 0) {
+        if (argc < 1) return js_array_new(0);
+        if (get_type_id(args[0]) == LMD_TYPE_MAP) {
+            JsRegexData* rd = js_get_regex_data(args[0]);
+            if (rd) {
+                String* s = it2s(str);
+                if (!s) return js_array_new(0);
+                Item result = js_array_new(0);
+                int offset = 0;
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                if (num_groups > 16) num_groups = 16;
+                re2::StringPiece matches[16];
+                while (offset < (int)s->len) {
+                    bool matched = rd->re2->Match(
+                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                        re2::RE2::UNANCHORED, matches, num_groups);
+                    if (!matched) break;
+                    // Build match object like regex exec
+                    Item match_arr = js_array_new(num_groups + 1);
+                    for (int i = 0; i < num_groups; i++) {
+                        if (matches[i].data()) {
+                            Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
+                            Item idx = (Item){.item = i2it(i)};
+                            js_array_set(match_arr, idx, ms);
+                        }
+                    }
+                    int match_index = (int)(matches[0].data() - s->chars);
+                    Item idx_item = (Item){.item = i2it(num_groups)};
+                    Item idx_val = (Item){.item = i2it(match_index)};
+                    js_array_set(match_arr, idx_item, idx_val);
+                    array_push(result.array, match_arr);
+                    int advance = match_index + (int)matches[0].size();
+                    if (advance <= offset) advance = offset + 1;
+                    offset = advance;
+                }
+                return result;
+            }
+        }
+        return js_array_new(0);
     }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
@@ -2870,6 +3062,46 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
         float f = (float)js_get_number(js_to_number(args[0]));
         return js_make_number((double)f);
     }
+    // Math.sinh
+    if (method->len == 4 && strncmp(method->chars, "sinh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(sinh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.cosh
+    if (method->len == 4 && strncmp(method->chars, "cosh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(cosh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.tanh
+    if (method->len == 4 && strncmp(method->chars, "tanh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(tanh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.asinh
+    if (method->len == 5 && strncmp(method->chars, "asinh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(asinh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.acosh
+    if (method->len == 5 && strncmp(method->chars, "acosh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(acosh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.atanh
+    if (method->len == 5 && strncmp(method->chars, "atanh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(atanh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.expm1
+    if (method->len == 5 && strncmp(method->chars, "expm1", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(expm1(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.log1p
+    if (method->len == 5 && strncmp(method->chars, "log1p", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(log1p(js_get_number(js_to_number(args[0]))));
+    }
 
     log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
@@ -3378,6 +3610,7 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
         if (thenable) {
             if (thenable->state != JS_PROMISE_PENDING) {
                 js_promise_settle(p, thenable->state, thenable->result);
+                js_microtask_flush();
             } else {
                 // register then on thenable to forward settlement
                 Item p_item = js_promise_to_item(p);
@@ -3392,6 +3625,7 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
             }
         } else {
             js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+            js_microtask_flush();
         }
     }
     return ItemNull;
@@ -3401,6 +3635,7 @@ static Item js_reject_callback(Item promise_idx_item, Item reason) {
     int64_t idx = it2i(promise_idx_item);
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
+        js_microtask_flush();
     }
     return ItemNull;
 }
@@ -3441,6 +3676,201 @@ extern "C" Item js_promise_reject(Item reason) {
     if (!p) return ItemNull;
     js_promise_settle(p, JS_PROMISE_REJECTED, reason);
     return js_promise_to_item(p);
+}
+
+extern "C" Item js_promise_with_resolvers(void) {
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+    int idx = (int)(p - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item promise = js_promise_to_item(p);
+    // Build { promise, resolve, reject } object
+    Item result = js_new_object();
+    Item k_promise = (Item){.item = s2it(heap_create_name("promise"))};
+    Item k_resolve = (Item){.item = s2it(heap_create_name("resolve"))};
+    Item k_reject = (Item){.item = s2it(heap_create_name("reject"))};
+    js_property_set(result, k_promise, promise);
+    js_property_set(result, k_resolve, resolve_fn);
+    js_property_set(result, k_reject, reject_fn);
+    return result;
+}
+
+// Phase 5: Synchronous await — unwraps resolved promises, throws on rejected
+extern "C" Item js_await_sync(Item value) {
+    // If not a promise, return value as-is (like awaiting a non-thenable)
+    JsPromise* p = js_get_promise(value);
+    if (!p) return value;
+
+    if (p->state == JS_PROMISE_FULFILLED) {
+        return p->result;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        // Rejected promise: throw the rejection reason
+        js_throw_value(p->result);
+        return ItemNull;
+    }
+    // Pending promise — synchronous fast-path cannot handle this
+    log_debug("js: await_sync: promise still pending (no async state machine yet)");
+    return make_js_undefined();
+}
+
+// ============================================================
+// Phase 6: Async/Await Full State Machine Runtime
+// ============================================================
+
+// Async context: tracks a running async function's state machine
+struct JsAsyncContext {
+    void* state_fn;      // pointer to async_sm_<name> state machine function
+    Item* env;           // env array (captures + params + locals)
+    int env_size;
+    int state;           // current resume state
+    int promise_idx;     // index into js_promises[] for the async function's result promise
+};
+
+#define JS_MAX_ASYNC_CONTEXTS 256
+static JsAsyncContext js_async_contexts[JS_MAX_ASYNC_CONTEXTS];
+static int js_async_context_count = 0;
+
+// Cached resolved value from js_async_must_suspend (fast-path)
+static Item js_async_resolved_value;
+
+// Check if an awaited value requires suspension (pending promise)
+// Returns: 1 = pending (must suspend), 0 = resolved/rejected/non-promise
+// For resolved/non-promise: caches result in js_async_resolved_value
+// For rejected: calls js_throw_value (exception mechanism handles it)
+extern "C" int64_t js_async_must_suspend(Item value) {
+    JsPromise* p = js_get_promise(value);
+    if (!p) {
+        js_async_resolved_value = value;
+        return 0;
+    }
+    if (p->state == JS_PROMISE_FULFILLED) {
+        js_async_resolved_value = p->result;
+        return 0;
+    }
+    if (p->state == JS_PROMISE_REJECTED) {
+        js_throw_value(p->result);
+        js_async_resolved_value = ItemNull;
+        return 0;
+    }
+    // Pending — must suspend
+    return 1;
+}
+
+// Get the cached resolved value after js_async_must_suspend returned 0
+extern "C" Item js_async_get_resolved(void) {
+    return js_async_resolved_value;
+}
+
+// Forward declarations for async callbacks
+static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value);
+static Item js_async_reject_handler(Item ctx_idx_item, Item reason);
+
+// Core async state machine driver: calls the state machine and handles results
+static void js_async_drive(int ctx_idx, Item input, int64_t state) {
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    typedef Item (*AsyncSmFn)(Item*, Item, int64_t);
+    Item result = ((AsyncSmFn)ctx->state_fn)(ctx->env, input, state);
+
+    // Parse result: [value, next_state]
+    if (get_type_id(result) != LMD_TYPE_ARRAY) {
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, result);
+        return;
+    }
+    Array* arr = result.array;
+    if (arr->length < 2) {
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, ItemNull);
+        return;
+    }
+    Item value = arr->items[0];
+    int64_t next_state = it2i(arr->items[1]);
+
+    if (next_state == -1) {
+        // Done — fulfill the async function's promise
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_FULFILLED, value);
+        js_microtask_flush();
+    } else if (next_state == -2) {
+        // Rejected — reject the async function's promise
+        js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value);
+        js_microtask_flush();
+    } else {
+        // Suspended on pending promise — register resume/reject callbacks
+        ctx->state = next_state;
+
+        // Create bound resume callback: js_async_resume_handler(ctx_idx, resolved_val)
+        Item resume_fn = js_new_function((void*)js_async_resume_handler, 2);
+        Item idx_item = (Item){.item = i2it(ctx_idx)};
+        Item bound_resume = js_bind_function(resume_fn, ItemNull, &idx_item, 1);
+
+        // Create bound reject callback: js_async_reject_handler(ctx_idx, reason)
+        Item reject_fn = js_new_function((void*)js_async_reject_handler, 2);
+        Item bound_reject = js_bind_function(reject_fn, ItemNull, &idx_item, 1);
+
+        // Register on the pending promise
+        js_promise_then(value, bound_resume, bound_reject);
+        js_microtask_flush();
+    }
+}
+
+// Callback when an awaited promise resolves — resumes the async state machine
+static Item js_async_resume_handler(Item ctx_idx_item, Item resolved_value) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    js_async_drive(ctx_idx, resolved_value, ctx->state);
+    return ItemNull;
+}
+
+// Callback when an awaited promise rejects — re-enter state machine with exception set
+static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    // Set exception so the state machine's try/catch can handle it
+    js_throw_value(reason);
+    // Re-enter the state machine — it will check the exception and jump to catch
+    js_async_drive(ctx_idx, ItemNull, ctx->state);
+    return ItemNull;
+}
+
+// Create an async context: allocates promise, returns context index
+extern "C" Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size) {
+    if (js_async_context_count >= JS_MAX_ASYNC_CONTEXTS) {
+        log_error("js: async context limit reached (%d)", JS_MAX_ASYNC_CONTEXTS);
+        return (Item){.item = i2it(-1)};
+    }
+    int idx = js_async_context_count++;
+    JsAsyncContext* ctx = &js_async_contexts[idx];
+    ctx->state_fn = fn_ptr;
+    ctx->env = env;
+    ctx->env_size = (int)env_size;
+    ctx->state = 0;
+
+    // Create a pending promise for this async function's result
+    JsPromise* p = js_alloc_promise();
+    ctx->promise_idx = (int)(p - js_promises);
+
+    return (Item){.item = i2it(idx)};
+}
+
+// Start execution of an async state machine (initial call at state 0)
+extern "C" Item js_async_start(Item ctx_idx_item) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    js_async_drive(ctx_idx, make_js_undefined(), 0);
+    return ItemNull;
+}
+
+// Get the result promise for an async context
+extern "C" Item js_async_get_promise(Item ctx_idx_item) {
+    int ctx_idx = (int)it2i(ctx_idx_item);
+    if (ctx_idx < 0 || ctx_idx >= js_async_context_count) return ItemNull;
+    JsAsyncContext* ctx = &js_async_contexts[ctx_idx];
+    return js_promise_to_item(&js_promises[ctx->promise_idx]);
 }
 
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
@@ -3697,4 +4127,90 @@ extern "C" Item js_module_get(Item specifier) {
 extern "C" Item js_module_namespace_create(Item exports_map) {
     // Module namespace is just a frozen map object
     return exports_map;
+}
+
+// =============================================================================
+// TextEncoder / TextDecoder (UTF-8 only)
+// =============================================================================
+
+extern "C" Item js_text_encoder_new(void) {
+    Item obj = js_new_object();
+    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
+    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
+    js_property_set(obj, k, v);
+    // Mark as TextEncoder for method dispatch
+    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    Item type_val = (Item){.item = s2it(heap_create_name("TextEncoder"))};
+    js_property_set(obj, type_key, type_val);
+    return obj;
+}
+
+extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
+    (void)encoder;
+    if (get_type_id(str) != LMD_TYPE_STRING) return js_array_new(0);
+    String* s = it2s(str);
+    if (!s || s->len == 0) return js_array_new(0);
+    // Create array of byte values
+    Item result = js_array_new(0);
+    for (int i = 0; i < (int)s->len; i++) {
+        array_push(result.array, (Item){.item = i2it((unsigned char)s->chars[i])});
+    }
+    return result;
+}
+
+extern "C" Item js_text_decoder_new(void) {
+    Item obj = js_new_object();
+    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
+    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
+    js_property_set(obj, k, v);
+    // Mark as TextDecoder for method dispatch
+    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    Item type_val = (Item){.item = s2it(heap_create_name("TextDecoder"))};
+    js_property_set(obj, type_key, type_val);
+    return obj;
+}
+
+extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
+    (void)decoder;
+    TypeId tid = get_type_id(input);
+    if (tid == LMD_TYPE_ARRAY) {
+        // Array of byte values → string
+        Array* arr = input.array;
+        if (!arr || arr->length == 0)
+            return (Item){.item = s2it(heap_create_name(""))};
+        char* buf = (char*)alloca(arr->length + 1);
+        for (int i = 0; i < arr->length; i++) {
+            buf[i] = (char)(unsigned char)js_get_number(arr->items[i]);
+        }
+        buf[arr->length] = '\0';
+        return (Item){.item = s2it(heap_strcpy(buf, arr->length))};
+    }
+    // Handle TypedArray (Uint8Array etc.)
+    if (tid == LMD_TYPE_MAP && js_is_typed_array(input)) {
+        Map* m = input.map;
+        JsTypedArray* ta = (JsTypedArray*)m->data;
+        if (!ta || ta->length == 0)
+            return (Item){.item = s2it(heap_create_name(""))};
+        char* buf = (char*)alloca(ta->length + 1);
+        uint8_t* bytes = (uint8_t*)ta->data;
+        for (int i = 0; i < ta->length; i++) {
+            buf[i] = (char)bytes[i];
+        }
+        buf[ta->length] = '\0';
+        return (Item){.item = s2it(heap_strcpy(buf, ta->length))};
+    }
+    if (tid == LMD_TYPE_STRING) return input;
+    return (Item){.item = s2it(heap_create_name(""))};
+}
+
+// =============================================================================
+// WeakMap / WeakSet stubs (aliased to Map/Set for PDF.js compat)
+// =============================================================================
+
+extern "C" Item js_weakmap_new(void) {
+    return js_map_collection_new();
+}
+
+extern "C" Item js_weakset_new(void) {
+    return js_set_collection_new();
 }

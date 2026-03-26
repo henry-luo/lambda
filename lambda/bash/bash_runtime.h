@@ -73,6 +73,16 @@ Item bash_test_str_gt(Item left, Item right);
 Item bash_test_z(Item value);               // true if string is empty
 Item bash_test_n(Item value);               // true if string is non-empty
 
+// file test operators
+Item bash_test_f(Item value);               // -f (regular file)
+Item bash_test_d(Item value);               // -d (directory)
+Item bash_test_e(Item value);               // -e (exists)
+Item bash_test_r(Item value);               // -r (readable)
+Item bash_test_w(Item value);               // -w (writable)
+Item bash_test_x(Item value);               // -x (executable)
+Item bash_test_s(Item value);               // -s (non-zero size)
+Item bash_test_l(Item value);               // -L (symlink)
+
 // regex match: =~
 Item bash_test_regex(Item string, Item pattern);
 Item bash_test_glob(Item string, Item pattern);
@@ -123,6 +133,18 @@ Item bash_array_unset(Item arr, Item index);        // unset arr[i]
 Item bash_array_slice(Item arr, Item offset, Item length); // ${arr[@]:off:len}
 
 // ========================================================================
+// Associative array operations (maps)
+// ========================================================================
+Item bash_assoc_new(void);                          // create empty associative array
+Item bash_assoc_set(Item map, Item key, Item value);// map[key]=value
+Item bash_assoc_get(Item map, Item key);            // ${map[key]}
+Item bash_assoc_keys(Item map);                     // ${!map[@]} — return keys as array
+Item bash_assoc_values(Item map);                   // ${map[@]} — return values as array
+Item bash_assoc_unset(Item map, Item key);          // unset map[key]
+Item bash_assoc_length(Item map);                   // ${#map[@]}
+int64_t bash_assoc_count(Item map);                 // raw count for iteration
+
+// ========================================================================
 // Variable scope management
 // ========================================================================
 void bash_set_var(Item name, Item value);           // assign variable
@@ -130,6 +152,11 @@ Item bash_get_var(Item name);                       // read variable
 void bash_set_local_var(Item name, Item value);     // local var=value
 void bash_export_var(Item name);                    // export var
 void bash_unset_var(Item name);                     // unset var
+
+// Variable attributes (declare/typeset)
+void bash_declare_var(Item name, int flags);        // set variable attributes
+int  bash_get_var_attrs(Item name);                 // get variable attribute flags
+bool bash_is_assoc(Item name);                      // check if variable is assoc array
 
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
@@ -173,6 +200,14 @@ Item bash_builtin_export(Item name, Item value);
 Item bash_builtin_unset(Item name);
 Item bash_builtin_cd(Item dir);
 Item bash_builtin_pwd(void);
+Item bash_builtin_cat(Item* args, int argc);
+Item bash_builtin_wc(Item* args, int argc);
+Item bash_builtin_head(Item* args, int argc);
+Item bash_builtin_tail(Item* args, int argc);
+Item bash_builtin_grep(Item* args, int argc);
+Item bash_builtin_sort(Item* args, int argc);
+Item bash_builtin_tr(Item* args, int argc);
+Item bash_builtin_cut(Item* args, int argc);
 
 // ========================================================================
 // Control flow support
@@ -188,6 +223,32 @@ Item bash_command_substitution(Item* args, int argc);  // $(command)
 Item bash_pipe(Item left_output, Item* right_cmd, int right_argc);
 
 // ========================================================================
+// Pipeline stdin item passing (builtin-to-builtin)
+// ========================================================================
+void bash_set_stdin_item(Item input);   // set pending stdin content for next pipe stage
+Item bash_get_stdin_item(void);         // read pending stdin (for cat, wc, grep, etc.)
+void bash_clear_stdin_item(void);       // clear after consumption
+
+// ========================================================================
+// File redirections
+// ========================================================================
+Item bash_redirect_write(Item filename, Item content);   // > file
+Item bash_redirect_append(Item filename, Item content);  // >> file
+Item bash_redirect_read(Item filename);                  // < file
+
+// ========================================================================
+// Expansions (tilde, glob, brace)
+// ========================================================================
+Item bash_expand_tilde(Item word);                       // ~ → $HOME
+Item bash_glob_expand(Item pattern);                     // *.txt → matching paths
+Item bash_expand_brace(Item word);                       // {a,b,c} → "a b c"
+
+// ========================================================================
+// External command execution
+// ========================================================================
+Item bash_exec_external(Item* argv, int argc);           // run system binary via posix_spawn
+
+// ========================================================================
 // Output
 // ========================================================================
 void bash_write_heredoc(Item content, int is_herestring); // write heredoc/herestring
@@ -196,7 +257,50 @@ void bash_write_stderr(Item value);                 // write string to stderr
 void bash_raw_write(const char* data, int len);     // write raw bytes (capture-aware)
 void bash_raw_putc(char c);                         // write single char (capture-aware)
 void bash_begin_capture(void);                      // start capturing stdout
-Item bash_end_capture(void);                        // stop capturing, return string
+Item bash_end_capture(void);                        // stop capturing, return string (strips trailing newlines)
+Item bash_end_capture_raw(void);                    // stop capturing, return string (preserves trailing newlines)
+
+// ========================================================================
+// Environment variable integration
+// ========================================================================
+void bash_env_import(void);                         // import env vars into bash var table
+void bash_env_sync_export(Item name);               // export var → setenv for child processes
+
+// ========================================================================
+// Script sourcing
+// ========================================================================
+Item bash_source_file(Item filename);               // source/. — parse & execute file
+
+// ========================================================================
+// Runtime function registry (for functions defined in sourced files)
+// ========================================================================
+typedef Item (*BashRtFuncPtr)(Item* args, int argc);
+void bash_register_rt_func(const char* name, BashRtFuncPtr ptr);  // register at JIT-link time
+Item bash_call_rt_func(Item name, Item* args, int argc);           // runtime dispatch by name
+BashRtFuncPtr bash_lookup_rt_func(const char* name);               // lookup (returns NULL if not found)
+
+// ========================================================================
+// Shell options (set -e, set -u, set -x, set -o pipefail)
+// ========================================================================
+void bash_set_option(Item option, bool enable);      // set/unset shell option
+bool bash_get_option_errexit(void);                  // -e: exit on error
+bool bash_get_option_nounset(void);                  // -u: error on undefined var
+bool bash_get_option_xtrace(void);                   // -x: trace commands
+bool bash_get_option_pipefail(void);                 // -o pipefail
+
+// ========================================================================
+// Signal handling / trap (Phase 8)
+// ========================================================================
+void bash_trap_set(Item handler, Item signal_name);  // register trap handler string
+void bash_trap_run_exit(void);                       // run EXIT trap (idempotent)
+void bash_trap_check(void);                          // check and run pending signal traps
+Item bash_eval_string(Item code);                    // evaluate bash code string in current scope
+
+// ========================================================================
+// POSIX compatibility mode
+// ========================================================================
+void bash_set_posix_mode(bool mode);   // enable/disable POSIX-compatible mode
+bool bash_get_posix_mode(void);        // query current POSIX mode
 
 // ========================================================================
 // Runtime initialization

@@ -1,0 +1,34 @@
+3
+4
+(3, 4)
+first
+second
+first
+Rex barks
+Whiskers meows
+Animal: Rex
+Buddy barks (guide dog)
+Buddy guides Alice
+Buddy
+Alice
+True
+True
+False
+True
+True
+True
+Max (service) barks
+Max
+Rect(5x3)
+15
+True
+False
+Vec2(1,2)
+Tesla
+Model3
+500
+electric car
+Tesla Model3 range=500
+True
+True
+True

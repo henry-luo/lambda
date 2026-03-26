@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
+#include <regex.h>
 
 // ============================================================================
 // echo
@@ -393,4 +394,440 @@ extern "C" Item bash_builtin_pwd(void) {
     }
     bash_set_exit_code(1);
     return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+// ============================================================================
+// Pipeline builtins: cat, wc, head, tail, grep, sort, tr, cut
+// These read from the stdin item set by the pipeline capture chain.
+// ============================================================================
+
+// cat: read stdin item and write to stdout (identity pipe stage)
+extern "C" Item bash_builtin_cat(Item* args, int argc) {
+    (void)args; (void)argc;
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (s && s->len > 0) {
+        bash_raw_write(s->chars, s->len);
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// wc: word/line/char count
+// supports -l (lines), -w (words), -c (bytes/chars)
+// default (no flags) prints lines, words, chars
+extern "C" Item bash_builtin_wc(Item* args, int argc) {
+    bool flag_l = false, flag_w = false, flag_c = false;
+    int start = 0;
+
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-') break;
+        for (int j = 1; j < (int)arg->len; j++) {
+            if (arg->chars[j] == 'l') flag_l = true;
+            else if (arg->chars[j] == 'w') flag_w = true;
+            else if (arg->chars[j] == 'c') flag_c = true;
+        }
+        start++;
+    }
+
+    if (!flag_l && !flag_w && !flag_c) {
+        flag_l = flag_w = flag_c = true;
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    int lines = 0, words = 0, chars = 0;
+    if (s && s->len > 0) {
+        chars = s->len;
+        bool in_word = false;
+        for (int i = 0; i < (int)s->len; i++) {
+            if (s->chars[i] == '\n') lines++;
+            if (s->chars[i] == ' ' || s->chars[i] == '\t' || s->chars[i] == '\n') {
+                in_word = false;
+            } else {
+                if (!in_word) words++;
+                in_word = true;
+            }
+        }
+    }
+
+    char buf[128];
+    int pos = 0;
+    if (flag_l) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", lines);
+    }
+    if (flag_w) {
+        if (pos > 0) buf[pos++] = ' ';
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", words);
+    }
+    if (flag_c) {
+        if (pos > 0) buf[pos++] = ' ';
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", chars);
+    }
+    bash_raw_write(buf, pos);
+    bash_raw_putc('\n');
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// head: first N lines (default 10)
+extern "C" Item bash_builtin_head(Item* args, int argc) {
+    int n = 10;
+    for (int i = 0; i < argc - 1; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (arg && arg->len == 2 && arg->chars[0] == '-' && arg->chars[1] == 'n') {
+            String* val = it2s(bash_to_string(args[i + 1]));
+            if (val) n = (int)strtol(val->chars, NULL, 10);
+            break;
+        }
+        if (arg && arg->len >= 2 && arg->chars[0] == '-' && arg->chars[1] >= '0' && arg->chars[1] <= '9') {
+            n = (int)strtol(arg->chars + 1, NULL, 10);
+            break;
+        }
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    int line_count = 0;
+    int end = 0;
+    for (int i = 0; i < (int)s->len && line_count < n; i++) {
+        if (s->chars[i] == '\n') line_count++;
+        end = i + 1;
+    }
+    if (end > 0) {
+        bash_raw_write(s->chars, end);
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// tail: last N lines (default 10)
+extern "C" Item bash_builtin_tail(Item* args, int argc) {
+    int n = 10;
+    for (int i = 0; i < argc - 1; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (arg && arg->len == 2 && arg->chars[0] == '-' && arg->chars[1] == 'n') {
+            String* val = it2s(bash_to_string(args[i + 1]));
+            if (val) n = (int)strtol(val->chars, NULL, 10);
+            break;
+        }
+        if (arg && arg->len >= 2 && arg->chars[0] == '-' && arg->chars[1] >= '0' && arg->chars[1] <= '9') {
+            n = (int)strtol(arg->chars + 1, NULL, 10);
+            break;
+        }
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    int total_lines = 0;
+    for (int i = 0; i < (int)s->len; i++) {
+        if (s->chars[i] == '\n') total_lines++;
+    }
+    if (s->len > 0 && s->chars[s->len - 1] != '\n') total_lines++;
+
+    int skip = total_lines - n;
+    if (skip < 0) skip = 0;
+
+    int line_count = 0;
+    int start = 0;
+    for (int i = 0; i < (int)s->len && line_count < skip; i++) {
+        if (s->chars[i] == '\n') {
+            line_count++;
+            start = i + 1;
+        }
+    }
+    if (start < (int)s->len) {
+        bash_raw_write(s->chars + start, s->len - start);
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// grep: pattern matching (POSIX regex)
+// supports -v (invert), -c (count), -i (case insensitive), -q (quiet)
+extern "C" Item bash_builtin_grep(Item* args, int argc) {
+    bool flag_v = false, flag_c = false, flag_i = false, flag_q = false;
+    int start = 0;
+
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-') break;
+        for (int j = 1; j < (int)arg->len; j++) {
+            if (arg->chars[j] == 'v') flag_v = true;
+            else if (arg->chars[j] == 'c') flag_c = true;
+            else if (arg->chars[j] == 'i') flag_i = true;
+            else if (arg->chars[j] == 'q') flag_q = true;
+        }
+        start++;
+    }
+
+    if (start >= argc) {
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+    String* pattern = it2s(bash_to_string(args[start]));
+    if (!pattern) {
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+
+    regex_t regex;
+    int cflags = REG_EXTENDED | REG_NOSUB;
+    if (flag_i) cflags |= REG_ICASE;
+    if (regcomp(&regex, pattern->chars, cflags) != 0) {
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    int match_count = 0;
+    bool any_match = false;
+
+    if (s && s->len > 0) {
+        int line_start = 0;
+        for (int i = 0; i <= (int)s->len; i++) {
+            if (i == (int)s->len || s->chars[i] == '\n') {
+                // skip trailing empty line (input ends with \n)
+                if (i == (int)s->len && i == line_start) break;
+                int line_len = i - line_start;
+                char* line_buf = (char*)malloc(line_len + 1);
+                memcpy(line_buf, s->chars + line_start, line_len);
+                line_buf[line_len] = '\0';
+
+                bool matched = (regexec(&regex, line_buf, 0, NULL, 0) == 0);
+                if (flag_v) matched = !matched;
+
+                if (matched) {
+                    any_match = true;
+                    match_count++;
+                    if (!flag_c && !flag_q) {
+                        bash_raw_write(s->chars + line_start, line_len);
+                        bash_raw_putc('\n');
+                    }
+                }
+                free(line_buf);
+                line_start = i + 1;
+            }
+        }
+    }
+
+    regfree(&regex);
+
+    if (flag_c) {
+        char buf[32];
+        int n = snprintf(buf, sizeof(buf), "%d", match_count);
+        bash_raw_write(buf, n);
+        bash_raw_putc('\n');
+    }
+
+    bash_set_exit_code(any_match ? 0 : 1);
+    return (Item){.item = i2it(any_match ? 0 : 1)};
+}
+
+// sort: line sorting
+// supports -r (reverse), -n (numeric)
+extern "C" Item bash_builtin_sort(Item* args, int argc) {
+    bool flag_r = false, flag_n = false;
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-') break;
+        for (int j = 1; j < (int)arg->len; j++) {
+            if (arg->chars[j] == 'r') flag_r = true;
+            else if (arg->chars[j] == 'n') flag_n = true;
+        }
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    int max_lines = 1024;
+    const char** lines = (const char**)malloc(max_lines * sizeof(const char*));
+    int* lens = (int*)malloc(max_lines * sizeof(int));
+    int line_count = 0;
+    int line_start = 0;
+
+    for (int i = 0; i <= (int)s->len; i++) {
+        if (i == (int)s->len || s->chars[i] == '\n') {
+            if (line_count >= max_lines) {
+                max_lines *= 2;
+                lines = (const char**)realloc(lines, max_lines * sizeof(const char*));
+                lens = (int*)realloc(lens, max_lines * sizeof(int));
+            }
+            lines[line_count] = s->chars + line_start;
+            lens[line_count] = i - line_start;
+            line_count++;
+            line_start = i + 1;
+        }
+    }
+
+    if (line_count > 0 && lens[line_count - 1] == 0 && s->len > 0 && s->chars[s->len - 1] == '\n') {
+        line_count--;
+    }
+
+    // insertion sort
+    for (int i = 1; i < line_count; i++) {
+        const char* key_line = lines[i];
+        int key_len = lens[i];
+        int j = i - 1;
+        while (j >= 0) {
+            int cmp;
+            if (flag_n) {
+                long a = strtol(lines[j], NULL, 10);
+                long b = strtol(key_line, NULL, 10);
+                cmp = (a > b) ? 1 : (a < b) ? -1 : 0;
+            } else {
+                int min_len = lens[j] < key_len ? lens[j] : key_len;
+                cmp = memcmp(lines[j], key_line, min_len);
+                if (cmp == 0) cmp = lens[j] - key_len;
+            }
+            if (flag_r) cmp = -cmp;
+            if (cmp <= 0) break;
+            lines[j + 1] = lines[j];
+            lens[j + 1] = lens[j];
+            j--;
+        }
+        lines[j + 1] = key_line;
+        lens[j + 1] = key_len;
+    }
+
+    for (int i = 0; i < line_count; i++) {
+        bash_raw_write(lines[i], lens[i]);
+        bash_raw_putc('\n');
+    }
+
+    free(lines);
+    free(lens);
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// tr: character transliteration
+// supports tr SET1 SET2 and tr -d SET1 (delete)
+extern "C" Item bash_builtin_tr(Item* args, int argc) {
+    bool flag_d = false;
+    int start = 0;
+
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-') break;
+        if (arg->len == 2 && arg->chars[1] == 'd') flag_d = true;
+        start++;
+    }
+
+    if (start >= argc) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    String* set1 = it2s(bash_to_string(args[start]));
+    String* set2 = NULL;
+    if (!flag_d && start + 1 < argc) {
+        set2 = it2s(bash_to_string(args[start + 1]));
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0 || !set1) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    for (int i = 0; i < (int)s->len; i++) {
+        char c = s->chars[i];
+        int idx = -1;
+        for (int j = 0; j < (int)set1->len; j++) {
+            if (set1->chars[j] == c) { idx = j; break; }
+        }
+        if (idx >= 0) {
+            if (flag_d) continue;
+            if (set2 && set2->len > 0) {
+                int map_idx = idx < (int)set2->len ? idx : (int)set2->len - 1;
+                bash_raw_putc(set2->chars[map_idx]);
+            }
+        } else {
+            bash_raw_putc(c);
+        }
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// cut: field extraction
+// supports -d DELIM -f FIELD
+extern "C" Item bash_builtin_cut(Item* args, int argc) {
+    char delim = '\t';
+    int field = 0; // 1-based
+
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg) continue;
+        if (arg->len == 2 && arg->chars[0] == '-' && arg->chars[1] == 'd') {
+            if (i + 1 < argc) {
+                String* d = it2s(bash_to_string(args[++i]));
+                if (d && d->len > 0) delim = d->chars[0];
+            }
+        } else if (arg->len == 2 && arg->chars[0] == '-' && arg->chars[1] == 'f') {
+            if (i + 1 < argc) {
+                String* f = it2s(bash_to_string(args[++i]));
+                if (f) field = (int)strtol(f->chars, NULL, 10);
+            }
+        }
+    }
+
+    Item input = bash_get_stdin_item();
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0 || field <= 0) {
+        if (s && s->len > 0) bash_raw_write(s->chars, s->len);
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    int line_start = 0;
+    for (int i = 0; i <= (int)s->len; i++) {
+        if (i == (int)s->len || s->chars[i] == '\n') {
+            // skip trailing empty line
+            if (i == (int)s->len && i == line_start) break;
+            int line_len = i - line_start;
+            // extract the requested field from this line
+            int cur_field = 1;
+            int field_start = line_start;
+            int field_end = line_start + line_len; // default: rest of line
+            bool found_field = false;
+            for (int j = line_start; j < line_start + line_len; j++) {
+                if (s->chars[j] == delim) {
+                    if (cur_field == field) {
+                        field_end = j;
+                        found_field = true;
+                        break;
+                    }
+                    cur_field++;
+                    field_start = j + 1;
+                }
+            }
+            if (cur_field >= field) {
+                if (!found_field) field_end = line_start + line_len;
+                bash_raw_write(s->chars + field_start, field_end - field_start);
+            }
+            if (i < (int)s->len) bash_raw_putc('\n');
+            line_start = i + 1;
+        }
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
 }

@@ -5,6 +5,7 @@
  * and method dispatchers (str.upper(), list.append(), dict.keys(), etc.)
  */
 #include "py_runtime.h"
+#include "py_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -98,6 +99,12 @@ extern "C" Item py_builtin_len(Item obj) {
         return (Item){.item = i2it(arr ? arr->length : 0)};
     }
     case LMD_TYPE_MAP: {
+        // class instance with __len__
+        if (py_is_instance(obj)) {
+            Item bm = py_getattr(obj, (Item){.item = s2it(heap_create_name("__len__"))});
+            if (get_type_id(bm) != LMD_TYPE_NULL)
+                return py_call_function(bm, NULL, 0);
+        }
         Map* m = it2map(obj);
         if (!m || !m->type) return (Item){.item = i2it(0)};
         return (Item){.item = i2it(((TypeMap*)m->type)->field_count)};
@@ -114,6 +121,20 @@ extern "C" Item py_builtin_len(Item obj) {
 
 extern "C" Item py_builtin_type(Item obj) {
     TypeId type = get_type_id(obj);
+    // class instance: return the class object
+    if (type == LMD_TYPE_MAP && py_is_instance(obj)) {
+        return py_get_class(obj);
+    }
+    // class itself: return type string showing class name
+    if (type == LMD_TYPE_MAP && py_is_class(obj)) {
+        Item cls_name = py_map_get_cstr(obj, "__name__");
+        if (get_type_id(cls_name) == LMD_TYPE_STRING) {
+            String* n = it2s(cls_name);
+            char buf[256];
+            snprintf(buf, sizeof(buf), "<class '%.*s'>", (int)n->len, n->chars);
+            return (Item){.item = s2it(heap_create_name(buf))};
+        }
+    }
     const char* name;
     switch (type) {
     case LMD_TYPE_NULL:   name = "<class 'NoneType'>"; break;
@@ -134,9 +155,7 @@ extern "C" Item py_builtin_type(Item obj) {
 // ============================================================================
 
 extern "C" Item py_builtin_isinstance(Item obj, Item classinfo) {
-    // simplified: compare type name strings
-    Item obj_type = py_builtin_type(obj);
-    return py_eq(obj_type, classinfo);
+    return (Item){.item = b2it(py_isinstance_v3(obj, classinfo))};
 }
 
 // ============================================================================
@@ -362,6 +381,12 @@ extern "C" Item py_builtin_reversed(Item iterable) {
 
 extern "C" Item py_builtin_repr(Item obj) {
     TypeId type = get_type_id(obj);
+    // instance __repr__ dunder
+    if (type == LMD_TYPE_MAP && py_is_instance(obj)) {
+        Item bm = py_getattr(obj, (Item){.item = s2it(heap_create_name("__repr__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL)
+            return py_call_function(bm, NULL, 0);
+    }
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(obj);
         // wrap in single quotes
@@ -593,7 +618,15 @@ extern "C" Item py_builtin_pow(Item base, Item exp, Item mod) {
 // ============================================================================
 
 extern "C" Item py_builtin_callable(Item obj) {
-    return (Item){.item = b2it(get_type_id(obj) == LMD_TYPE_FUNC)};
+    if (get_type_id(obj) == LMD_TYPE_FUNC) return (Item){.item = ITEM_TRUE};
+    if (py_is_class(obj)) return (Item){.item = ITEM_TRUE};
+    if (py_is_bound_method(obj)) return (Item){.item = ITEM_TRUE};
+    // instance with __call__
+    if (py_is_instance(obj)) {
+        Item bm = py_getattr(obj, (Item){.item = s2it(heap_create_name("__call__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL) return (Item){.item = ITEM_TRUE};
+    }
+    return (Item){.item = ITEM_FALSE};
 }
 
 // ============================================================================
@@ -1630,4 +1663,20 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
 
     log_debug("py: dict.%s() not implemented", method->chars);
     return ItemNull;
+}
+
+// ============================================================================
+// property() builtin
+// ============================================================================
+
+// Creates a property descriptor map: {__is_property__: True, __get__: fget}
+// py_getattr checks this marker and calls __get__(instance) automatically.
+extern "C" Item py_builtin_property(Item fget) {
+    Item prop = py_dict_new();
+    Item key_prop  = (Item){.item = s2it(heap_strcpy((char*)"__is_property__", 15))};
+    Item key_get   = (Item){.item = s2it(heap_strcpy((char*)"__get__", 7))};
+    Item true_val  = (Item){.item = b2it(1)};
+    py_dict_set(prop, key_prop, true_val);
+    py_dict_set(prop, key_get,  fget);
+    return prop;
 }
