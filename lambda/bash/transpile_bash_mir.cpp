@@ -19,6 +19,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/file.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
 #include <cstdlib>
@@ -1289,6 +1290,72 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return bm_emit_varargs_builtin(mt, "bash_builtin_cut", cmd);
     }
 
+    // source / . — execute file in current scope
+    if ((cmd_len == 6 && memcmp(cmd_name, "source", 6) == 0) ||
+        (cmd_len == 1 && cmd_name[0] == '.')) {
+        if (cmd->args) {
+            MIR_op_t filename = bm_transpile_cmd_arg(mt, cmd->args);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_source_file", filename);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        return bm_emit_int_literal(mt, 1);
+    }
+
+    // set — shell options
+    if (cmd_len == 3 && memcmp(cmd_name, "set", 3) == 0) {
+        BashAstNode* arg = cmd->args;
+        while (arg) {
+            if (arg->node_type == BASH_AST_NODE_WORD) {
+                BashWordNode* w = (BashWordNode*)arg;
+                if (w->text && w->text->len >= 2) {
+                    const char* flag = w->text->chars;
+                    int flen = w->text->len;
+                    if (flag[0] == '-' && flag[1] == 'o') {
+                        // set -o optname (next arg is the option name)
+                        arg = arg->next;
+                        if (arg && arg->node_type == BASH_AST_NODE_WORD) {
+                            BashWordNode* opt = (BashWordNode*)arg;
+                            if (opt->text) {
+                                MIR_op_t opt_val = bm_emit_string_literal(mt, opt->text->chars, opt->text->len);
+                                bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                                    MIR_new_uint_op(mt->ctx, 1));
+                            }
+                        }
+                    } else if (flag[0] == '+' && flag[1] == 'o') {
+                        // set +o optname (disable)
+                        arg = arg->next;
+                        if (arg && arg->node_type == BASH_AST_NODE_WORD) {
+                            BashWordNode* opt = (BashWordNode*)arg;
+                            if (opt->text) {
+                                MIR_op_t opt_val = bm_emit_string_literal(mt, opt->text->chars, opt->text->len);
+                                bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                                    MIR_new_uint_op(mt->ctx, 0));
+                            }
+                        }
+                    } else if (flag[0] == '-') {
+                        // set -eux etc. — each char is a flag
+                        for (int i = 1; i < flen; i++) {
+                            char opt_ch[2] = {flag[i], '\0'};
+                            MIR_op_t opt_val = bm_emit_string_literal(mt, opt_ch, 1);
+                            bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                                MIR_new_uint_op(mt->ctx, 1));
+                        }
+                    } else if (flag[0] == '+') {
+                        // set +eux etc. — disable each flag
+                        for (int i = 1; i < flen; i++) {
+                            char opt_ch[2] = {flag[i], '\0'};
+                            MIR_op_t opt_val = bm_emit_string_literal(mt, opt_ch, 1);
+                            bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                                MIR_new_uint_op(mt->ctx, 0));
+                        }
+                    }
+                }
+            }
+            if (arg) arg = arg->next;
+        }
+        return bm_emit_int_literal(mt, 0);
+    }
+
     // check for user-defined function call
     BashMirUserFunc key;
     memset(&key, 0, sizeof(key));
@@ -1348,6 +1415,60 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return MIR_new_reg_op(mt->ctx, result);
     }
 
+    // before trying external: check runtime function registry (for functions from sourced files)
+    // use a temporary result register; if exit code 127 afterward, fall through to external
+    MIR_reg_t rt_result_reg = bm_new_temp(mt);
+    MIR_label_t try_external_label = bm_new_label(mt);
+    MIR_label_t done_label_rt = bm_new_label(mt);
+
+    {
+        int argc = cmd->arg_count;
+        MIR_op_t rt_name_val = bm_emit_string_literal(mt, cmd_name, cmd_len);
+
+        MIR_reg_t rt_args_ptr = bm_new_temp(mt);
+        if (argc > 0) {
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, rt_args_ptr),
+                             MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+            int i = 0;
+            BashAstNode* arg = cmd->args;
+            while (arg && i < argc) {
+                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                       rt_args_ptr, 0, 1),
+                        arg_val));
+                arg = arg->next;
+                i++;
+            }
+        } else {
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_args_ptr),
+                             MIR_new_uint_op(mt->ctx, 0)));
+        }
+
+        MIR_reg_t rt_res = bm_emit_call_3(mt, "bash_call_rt_func",
+            rt_name_val,
+            MIR_new_reg_op(mt->ctx, rt_args_ptr),
+            MIR_new_int_op(mt->ctx, argc));
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_result_reg),
+                         MIR_new_reg_op(mt->ctx, rt_res)));
+        // if exit code == 127, function not found → try external
+        MIR_reg_t rt_ec = bm_emit_call_0(mt, "bash_get_exit_code");
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_BEQ,
+                MIR_new_label_op(mt->ctx, try_external_label),
+                MIR_new_reg_op(mt->ctx, rt_ec),
+                MIR_new_uint_op(mt->ctx, i2it(127))));
+        // runtime function ran — jump to done
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, done_label_rt)));
+    }
+
+    // label: try external command execution via posix_spawn
+    MIR_append_insn(mt->ctx, mt->current_func_item, try_external_label);
     // fallback: external command execution via posix_spawn
     // build argv[] with command name as argv[0] + all arguments
     {
@@ -1381,8 +1502,14 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         MIR_reg_t ext_result = bm_emit_call_2(mt, "bash_exec_external",
             MIR_new_reg_op(mt->ctx, ext_args_ptr),
             MIR_new_int_op(mt->ctx, total_argc));
-        return MIR_new_reg_op(mt->ctx, ext_result);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_result_reg),
+                         MIR_new_reg_op(mt->ctx, ext_result)));
     }
+
+    // done: rt_result_reg holds the final result
+    MIR_append_insn(mt->ctx, mt->current_func_item, done_label_rt);
+    return MIR_new_reg_op(mt->ctx, rt_result_reg);
 }
 
 // ============================================================================
@@ -1435,6 +1562,11 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     MIR_op_t value;
     if (node->value) {
         value = bm_transpile_node(mt, node->value);
+    } else if (node->is_export) {
+        // export var (no value) — just mark as exported, don't overwrite existing value
+        MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+        bm_emit_call_void_1(mt, "bash_export_var", name_op);
+        return;
     } else {
         value = bm_emit_string_literal(mt, "", 0);
     }
@@ -1464,6 +1596,12 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
     } else {
         bm_emit_set_var(mt, node->name->chars, value);
+    }
+
+    // if variable is declared with `export`, also call bash_export_var
+    if (node->is_export) {
+        MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+        bm_emit_call_void_1(mt, "bash_export_var", name_op);
     }
 
     // add readonly AFTER value assignment (so initial declare -r var=val works)
@@ -2094,11 +2232,186 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
 }
 
 // ============================================================================
+// Script sourcing — bash_source_file (runtime-callable from JIT)
+// ============================================================================
+
+static Runtime* bash_source_runtime = NULL;
+
+// list of MIR contexts from sourced files — kept alive for function pointer validity
+#define BASH_SOURCE_CTX_MAX 32
+static MIR_context_t bash_source_ctx_list[BASH_SOURCE_CTX_MAX];
+static int bash_source_ctx_count = 0;
+
+extern "C" Item bash_source_file(Item filename) {
+    String* s = it2s(filename);
+    if (!s || s->len == 0) {
+        log_error("bash: source: missing filename");
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    char path_buf[1024];
+    snprintf(path_buf, sizeof(path_buf), "%.*s", s->len, s->chars);
+
+    char* source_text = read_text_file(path_buf);
+    if (!source_text) {
+        log_error("bash: source: cannot open '%s'", path_buf);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    if (!bash_source_runtime) {
+        log_error("bash: source: no runtime context");
+        free(source_text);
+        return (Item){.item = i2it(1)};
+    }
+
+    log_debug("bash: sourcing file '%s'", path_buf);
+
+    BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
+    if (!tp) {
+        log_error("bash: source: failed to create transpiler");
+        free(source_text);
+        return (Item){.item = i2it(1)};
+    }
+
+    tp->source = source_text;
+    tp->source_length = strlen(source_text);
+
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_bash());
+    TSTree* tree = ts_parser_parse_string(parser, NULL, source_text, (uint32_t)tp->source_length);
+    if (!tree) {
+        log_error("bash: source: parse failed for '%s'", path_buf);
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        return (Item){.item = i2it(1)};
+    }
+
+    TSNode root = ts_tree_root_node(tree);
+    BashAstNode* ast = build_bash_ast(tp, root);
+    if (!ast) {
+        log_error("bash: source: AST build failed for '%s'", path_buf);
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        return (Item){.item = i2it(1)};
+    }
+
+    MIR_context_t ctx = jit_init(bash_source_runtime->optimize_level);
+    if (!ctx) {
+        log_error("bash: source: MIR init failed");
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        return (Item){.item = i2it(1)};
+    }
+
+    BashMirTranspiler* mt = (BashMirTranspiler*)malloc(sizeof(BashMirTranspiler));
+    memset(mt, 0, sizeof(BashMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->vars = hashmap_new(sizeof(BashMirVar), 64, 0, 0,
+                           bash_var_hash, bash_var_cmp, NULL, NULL);
+    mt->import_cache = hashmap_new(sizeof(BashMirImportEntry), 64, 0, 0,
+                                   bm_import_hash, bm_import_cmp, NULL, NULL);
+    mt->user_funcs = hashmap_new(sizeof(BashMirUserFunc), 16, 0, 0,
+                                 bm_user_func_hash, bm_user_func_cmp, NULL, NULL);
+    mt->var_count = 0;
+    mt->label_counter = 0;
+    mt->loop_depth = 0;
+
+    mt->module = MIR_new_module(ctx, "bash_source");
+
+    // Pass 1: function definitions
+    BashProgramNode* program = (BashProgramNode*)ast;
+    BashAstNode* stmt = program->body;
+    while (stmt) {
+        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
+            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
+        }
+        stmt = stmt->next;
+    }
+
+    // Pass 2: main body
+    MIR_type_t ret_type = MIR_T_I64;
+    mt->current_func_item = MIR_new_func(ctx, "bash_source_entry", 1, &ret_type, 0);
+    mt->current_func = mt->current_func_item->u.func;
+    mt->result_reg = bm_new_temp(mt);
+
+    stmt = program->body;
+    while (stmt) {
+        bm_transpile_statement(mt, stmt);
+        stmt = stmt->next;
+    }
+
+    MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
+    MIR_append_insn(mt->ctx, mt->current_func_item,
+        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+
+    MIR_finish_func(ctx);
+    MIR_finish_module(ctx);
+    MIR_load_module(ctx, mt->module);
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    typedef Item (*source_entry_t)(void);
+    source_entry_t entry = (source_entry_t)find_func(ctx, "bash_source_entry");
+
+    Item result = {.item = i2it(0)};
+    if (entry) {
+        result = entry();
+    } else {
+        log_error("bash: source: failed to find bash_source_entry");
+    }
+
+    // register user functions so caller can dispatch them by name at runtime
+    // iterate all user funcs compiled in this module and register their JIT pointers
+    size_t iter = 0;
+    void* item_ptr;
+    while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
+        BashMirUserFunc* uf = (BashMirUserFunc*)item_ptr;
+        char full_name[160];
+        snprintf(full_name, sizeof(full_name), "bash_uf_%s", uf->name);
+        BashRtFuncPtr func_ptr = (BashRtFuncPtr)find_func(ctx, full_name);
+        if (func_ptr) {
+            bash_register_rt_func(uf->name, func_ptr);
+            log_debug("bash: source: registered function '%s'", uf->name);
+        }
+    }
+
+    // save ctx — don't free yet (function pointers remain valid until cleanup)
+    if (bash_source_ctx_count < BASH_SOURCE_CTX_MAX) {
+        bash_source_ctx_list[bash_source_ctx_count++] = ctx;
+    } else {
+        // too many sourced files — must free (function pointers become invalid)
+        MIR_finish(ctx);
+    }
+
+    // cleanup everything except ctx
+    hashmap_free(mt->vars);
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->user_funcs);
+    free(mt);
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+    bash_transpiler_destroy(tp);
+    free(source_text);
+
+    return result;
+}
+
+// ============================================================================
 // Main entry point: transpile_bash_to_mir
 // ============================================================================
 
 Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char* filename) {
     log_debug("bash-mir: starting transpilation for '%s'", filename ? filename : "<string>");
+
+    // store runtime for bash_source_file() to use
+    bash_source_runtime = runtime;
 
     // create Bash transpiler
     BashTranspiler* tp = bash_transpiler_create(runtime);
@@ -2245,12 +2558,19 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     }
 
     // cleanup
+    bash_source_runtime = NULL;
     bash_runtime_cleanup();
     hashmap_free(mt->vars);
     hashmap_free(mt->import_cache);
     free(mt);
 
     MIR_finish(ctx);
+
+    // free any sourced contexts now that execution is complete
+    for (int i = 0; i < bash_source_ctx_count; i++) {
+        MIR_finish(bash_source_ctx_list[i]);
+    }
+    bash_source_ctx_count = 0;
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);

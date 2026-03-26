@@ -261,6 +261,34 @@ Item bash_end_capture(void);                        // stop capturing, return st
 Item bash_end_capture_raw(void);                    // stop capturing, return string (preserves trailing newlines)
 
 // ========================================================================
+// Environment variable integration
+// ========================================================================
+void bash_env_import(void);                         // import env vars into bash var table
+void bash_env_sync_export(Item name);               // export var → setenv for child processes
+
+// ========================================================================
+// Script sourcing
+// ========================================================================
+Item bash_source_file(Item filename);               // source/. — parse & execute file
+
+// ========================================================================
+// Runtime function registry (for functions defined in sourced files)
+// ========================================================================
+typedef Item (*BashRtFuncPtr)(Item* args, int argc);
+void bash_register_rt_func(const char* name, BashRtFuncPtr ptr);  // register at JIT-link time
+Item bash_call_rt_func(Item name, Item* args, int argc);           // runtime dispatch by name
+BashRtFuncPtr bash_lookup_rt_func(const char* name);               // lookup (returns NULL if not found)
+
+// ========================================================================
+// Shell options (set -e, set -u, set -x, set -o pipefail)
+// ========================================================================
+void bash_set_option(Item option, bool enable);      // set/unset shell option
+bool bash_get_option_errexit(void);                  // -e: exit on error
+bool bash_get_option_nounset(void);                  // -u: error on undefined var
+bool bash_get_option_xtrace(void);                   // -x: trace commands
+bool bash_get_option_pipefail(void);                 // -o pipefail
+
+// ========================================================================
 // Runtime initialization
 // ========================================================================
 void bash_runtime_init(void);
