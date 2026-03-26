@@ -1105,6 +1105,23 @@ JitImport jit_runtime_imports[] = {
     {"js_typed_array_length", FPTR(js_typed_array_length)},
     {"js_typed_array_fill", FPTR(js_typed_array_fill)},
     {"js_is_typed_array", FPTR(js_is_typed_array)},
+    {"js_typed_array_construct", FPTR(js_typed_array_construct)},
+    {"js_typed_array_new_from_buffer", FPTR(js_typed_array_new_from_buffer)},
+    {"js_typed_array_new_from_array", FPTR(js_typed_array_new_from_array)},
+    {"js_typed_array_subarray", FPTR(js_typed_array_subarray)},
+    {"js_typed_array_slice", FPTR(js_typed_array_slice)},
+    {"js_typed_array_set_from", FPTR(js_typed_array_set_from)},
+    // ArrayBuffer
+    {"js_arraybuffer_new", FPTR(js_arraybuffer_new)},
+    {"js_is_arraybuffer", FPTR(js_is_arraybuffer)},
+    {"js_arraybuffer_byte_length", FPTR(js_arraybuffer_byte_length)},
+    {"js_arraybuffer_slice", FPTR(js_arraybuffer_slice)},
+    {"js_arraybuffer_is_view", FPTR(js_arraybuffer_is_view_item)},
+    {"js_arraybuffer_wrap", FPTR(js_arraybuffer_wrap)},
+    // DataView
+    {"js_dataview_new", FPTR(js_dataview_new)},
+    {"js_is_dataview", FPTR(js_is_dataview)},
+    {"js_dataview_method", FPTR(js_dataview_method)},
     // module variable table
     {"js_set_module_var", FPTR(js_set_module_var)},
     {"js_get_module_var", FPTR(js_get_module_var)},
