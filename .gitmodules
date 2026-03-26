@@ -1,3 +1,6 @@
 [submodule "test/yaml"]
 	path = test/yaml
 	url = https://github.com/yaml/yaml-test-suite.git
+[submodule "lambda/tree-sitter-bash"]
+	path = lambda/tree-sitter-bash
+	url = https://github.com/tree-sitter/tree-sitter-bash.git
