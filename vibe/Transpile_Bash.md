@@ -2,14 +2,14 @@
 
 ## Overview
 
-Lambda's Bash transpiler compiles `.sh` scripts to native machine code through the standard Lambda JIT pipeline: Tree-sitter parsing → typed AST → MIR IR → native execution. The implementation covers core shell scripting plus pipelines, file I/O, external commands, shell expansions, associative arrays, and `declare` — with all 24 integration tests passing.
+Lambda's Bash transpiler compiles `.sh` scripts to native machine code through the standard Lambda JIT pipeline: Tree-sitter parsing → typed AST → MIR IR → native execution. The implementation covers core shell scripting, pipelines, file I/O, external commands, shell expansions, associative arrays, `declare`, sourcing, environment import, `set` options, signal handling, `trap`, dynamic scope stack for `local` variables, and `--posix` flag — with all 31 integration tests passing.
 
-Phases 1–6 are complete (~75% feature coverage). This document tracks the remaining phases to bring Bash support toward a practical, self-hosting shell runtime capable of running real-world Bash scripts.
+Phases 1–9a are complete (~93% feature coverage). This document tracks the remaining phases to bring Bash support toward a practical, self-hosting shell runtime capable of running real-world Bash scripts.
 
 ### Current State Summary
 
 **Working (100%):**
-- Variables, assignment, expansion, `local`, `export`, `unset`
+- Variables, assignment, expansion, `local` (with dynamic scope stack), `export`, `unset`
 - Arithmetic expansion (`$(( ))`) — all operators including bitwise, ternary, and short-circuit `&&`/`||`
 - Parameter expansion — all 16 forms (`:-`, `:=`, `:+`, `:?`, `#`, `##`, `%`, `%%`, `/`, `//`, `^`, `^^`, `,`, `,,`, `:off:len`, `${!var}`)
 - Control flow — `if`/`elif`/`else`, `for`-in, `for((;;))`, `while`, `until`, `case`, `break`, `continue`
@@ -31,13 +31,20 @@ Phases 1–6 are complete (~75% feature coverage). This document tracks the rema
 - Associative arrays — `declare -A`, key assignment, key access, `${!map[@]}` keys, `${map[@]}` values, `${#map[@]}` length, `unset` key, for-in iteration
 - `declare` builtin — `-a` (indexed array), `-A` (associative array), `-i` (integer coercion), `-r` (readonly), `-x` (export), `-l` (auto-lowercase), `-u` (auto-uppercase), combined flags
 - Glob expansion — `*.txt`, `?`, `[a-z]` via POSIX `glob()` (command-argument context only)
+- `source`/`.` — dynamic script loading at runtime, shares caller's variable scope
+- Environment variable import — `PATH`, `HOME`, `USER`, `PWD`, `SHELL`, `LANG`, `TERM` auto-imported at startup; `export` calls `setenv()` for child inheritance
+- `set` builtin — `-e` (errexit), `-u` (nounset), `-x` (xtrace), `-o pipefail`
+- `trap` builtin — EXIT/ERR/DEBUG/INT/TERM/HUP/QUIT; OS signals via `sigaction()`; `bash_trap_check()` at loop iterations
+- `exit N` — early termination with EXIT trap execution and correct exit code propagation
+- `eval` / `bash_eval_string()` — dynamic code compilation and execution at runtime
+- Dynamic scope stack — `local` variables properly scoped per function call; dynamic scoping (callees see caller's `local` vars); recursion-safe (256-frame stack of per-call hashmaps)
+- `--posix` flag — POSIX-compatible mode; `local` treated as global assignment (matches POSIX sh semantics)
 
 **Not yet implemented:**
-- Associative arrays, `declare`/`typeset`
-- `source`/`.`, `eval`, `exec`, `set`, `trap`, `getopts`
-- Process substitution, job control
-- Word splitting, `IFS`
-- Environment variable import (`$HOME`, `$PATH` not auto-imported into bash var table)
+- `exec`, `getopts`
+- Process substitution (`<(cmd)`, `>(cmd)`)
+- Job control (`&`, `bg`, `fg`, `jobs`, `wait`)
+- Word splitting on `$IFS`
 
 ### Architecture
 
@@ -45,9 +52,9 @@ Phases 1–6 are complete (~75% feature coverage). This document tracks the rema
 lambda/bash/
 ├── bash_ast.hpp              567 LOC   AST node types, operator/expansion enums
 ├── build_bash_ast.cpp       2037 LOC   Tree-sitter CST → Bash AST (brace detection)
-├── transpile_bash_mir.cpp   2141 LOC   Bash AST → MIR code generation
-├── bash_runtime.h            254 LOC   C API for JIT-callable runtime functions
-├── bash_runtime.cpp         1974 LOC   Runtime (exec, pipes, redirects, expansions)
+├── transpile_bash_mir.cpp   2824 LOC   Bash AST → MIR code generation
+├── bash_runtime.h            310 LOC   C API for JIT-callable runtime functions
+├── bash_runtime.cpp         2626 LOC   Runtime (exec, pipes, redirects, expansions, scope stack)
 ├── bash_builtins.cpp         833 LOC   Builtin commands (cat, wc, grep, sort, ...)
 ├── bash_scope.cpp            193 LOC   Compile-time scope/symbol management
 ├── bash_transpiler.hpp       111 LOC   Transpiler context struct
@@ -398,9 +405,11 @@ else: eval b; result = (b != 0)
 
 ---
 
-## Phase 6: Associative Arrays & `declare`
+## Phase 6: Associative Arrays & `declare` ✅ COMPLETED
 
 **Goal:** Support `declare` builtin and associative arrays for scripts that use key-value data structures.
+
+> **Status:** Implemented all associative array operations using Lambda's `Map` type. Added `bash_assoc_new()`, `bash_assoc_set()`, `bash_assoc_get()`, `bash_assoc_keys()`, `bash_assoc_values()`, `bash_assoc_unset()`, `bash_assoc_len()`. Implemented `declare` builtin with variable attribute flags (`-a`, `-A`, `-i`, `-r`, `-x`, `-l`, `-u`) stored in a parallel metadata table. Tests: `test/bash/assoc_arrays.sh`, `test/bash/declare.sh`.
 
 ### 6.1 Associative Arrays
 
@@ -441,9 +450,11 @@ Store variable attributes in a parallel metadata table alongside the variable va
 
 ---
 
-## Phase 7: Script Sourcing & Environment
+## Phase 7: Script Sourcing & Environment ✅ COMPLETED
 
 **Goal:** Enable `source`/`.` for script composition and proper environment variable handling.
+
+> **Status:** Implemented `source`/`.` by re-invoking `bash_eval_string()` at runtime, sharing the caller's variable scope. Environment import (`bash_env_import()`) runs at startup for `PATH`, `HOME`, `USER`, `PWD`, `SHELL`, `LANG`, `TERM`; `export` calls `setenv()` for child processes. Implemented `set` builtin with `-e` (errexit), `-u` (nounset), `-x` (xtrace), `-o pipefail` flags checked at appropriate evaluation points. Tests: `test/bash/source_cmd.sh`, `test/bash/env_vars.sh`, `test/bash/set_options.sh`.
 
 ### 7.1 `source` / `.` Command
 
@@ -499,7 +510,7 @@ set -x          # trace execution
 
 ---
 
-## Phase 8: Signal Handling & Job Control
+## Phase 8: Signal Handling & Job Control ✅ COMPLETED
 
 **Goal:** Support `trap` and basic job control for scripts that need cleanup handlers.
 
@@ -532,9 +543,61 @@ The `&` background operator (`BashListOp::BASH_LIST_BG`) is defined in the AST b
 
 ---
 
-## Phase 9: Lambda-Enhanced Builtins
+## Phase 8b: Scope Stack & POSIX Mode ✅ COMPLETED
 
-**Goal:** Leverage Lambda's existing parsing and formatting infrastructure to give the Bash runtime superpowers that native Bash lacks.
+**Goal:** Correct `local` variable scoping for nested/recursive functions, and add a `--posix` CLI flag for POSIX sh compatibility.
+
+> **Status:** Implemented runtime dynamic scope stack (Option A) — per-call hashmaps on a 256-frame stack, walked top→bottom for dynamic scoping, one frame per active function invocation. `local` now correctly creates function-scoped variables. Added `--posix` flag that treats `local` as a global assignment (POSIX sh has no `local`). Fixed the `local` builtin handler in the transpiler. Tests: `test/bash/scope_stack.sh`, `test/bash/posix_mode.sh`.
+
+### 8b.1 Dynamic Scope Stack
+
+Bash uses **dynamic scoping** for functions — a callee can see variables declared `local` in its caller. The previous flat global table broke `local` in nested and recursive calls.
+
+**Implementation:** `bash_func_scope_stack[]` — a 256-entry array of `hashmap*`, one frame per active function call.
+
+```
+caller() {             # bash_scope_push() → depth=1
+  local x=10           # bash_set_local_var("x", 10) → writes to frame[0]
+  callee()             # bash_scope_push() → depth=2
+}                      #   callee can read x=10 via stack walk
+                       # bash_scope_pop() → depth=0
+```
+
+Variable lookup in `bash_get_var()` walks the stack top→bottom before falling through to the global table. `bash_set_var()` updates in-place in the innermost frame where the variable exists, otherwise writes globally. `bash_set_local_var()` always writes to the top frame.
+
+**Recursion safety:** Each call to a function pushes a new frame, so `local n` in `fib(7)` creates independent `n` per stack level.
+
+### 8b.2 `--posix` CLI Flag
+
+```bash
+./lambda.exe bash --posix script.sh    # run in POSIX sh mode
+```
+
+In POSIX mode, `local` is not a standard builtin. The runtime flag `bash_posix_mode` (set from `--posix` in `main.cpp`) causes `bm_emit_set_local_var()` to emit `bash_set_var` instead of `bash_set_local_var` — making `local` a global assignment matching `/bin/sh` behavior.
+
+### 8b.3 Key Changes
+
+**`bash_runtime.cpp`:**
+- Added `bash_func_scope_stack[256]` and `bash_func_scope_depth` state
+- Added `bash_posix_mode` state flag
+- Implemented `bash_scope_push()` / `bash_scope_pop()` with `hashmap_new()`/`hashmap_free()`
+- Rewrote `bash_get_var()`, `bash_set_var()`, `bash_set_local_var()`, `bash_unset_var()` to walk scope stack
+- Added `bash_set_posix_mode()` / `bash_get_posix_mode()`
+
+**`transpile_bash_mir.cpp`:**
+- Added `bm_emit_set_local_var()` helper — emits `bash_set_local_var` or `bash_set_var` based on POSIX mode
+- Fixed `local` builtin handler — now emits `bm_emit_set_local_var()` per argument
+- `bm_transpile_function_def()` — added `bash_scope_push` / `bash_scope_pop` around function body
+- `BASH_AST_NODE_RETURN` — added `bash_scope_pop` before `bash_pop_positional` to avoid scope leak on early return
+- `bm_transpile_assignment()` — honors `is_local` flag to route to `bm_emit_set_local_var()`
+
+**`main.cpp`:**
+- Replaced hardcoded `argv[2]` with a loop scanning for `--posix` flag and script file argument
+- Calls `bash_set_posix_mode(true)` when `--posix` detected
+
+---
+
+## Phase 9: Lambda-Enhanced Builtins
 
 ### 9.1 Data Processing Builtins
 
@@ -580,15 +643,16 @@ This bridges Bash's procedural scripting with Lambda's functional data processin
 | **Phase 3: File Redirections** | Medium | High — scripts need file I/O | ✅ Done |
 | **Phase 4: External Commands** | Large | Critical — scripts call external tools | ✅ Done |
 | **Phase 5: Expansions** | Medium | Medium — needed for real scripts | ✅ Done |
-| **Phase 6: Assoc Arrays** | Medium | Medium — used in complex scripts | **Next** |
-| **Phase 7: Source & Env** | Medium | High — script composition | Planned |
+| **Phase 6: Assoc Arrays** | Medium | Medium — used in complex scripts | ✅ Done |
+| **Phase 7: Source & Env** | Medium | High — script composition | ✅ Done |
 | **Phase 8: Signals** | Medium | Low — specialized use | ✅ Done |
+| **Phase 8b: Scope Stack & POSIX** | Small | Medium — correctness for `local` | ✅ Done |
 | **Phase 9: Lambda Builtins** | Medium | High — unique differentiator | Planned |
 
 ### Recommended Execution Order
 
 ```
-Phase 1 (Test Harness)              ✅ Done — 22 tests, test_bash_run.sh harness
+Phase 1 (Test Harness)              ✅ Done — 31 tests, test_bash_run.sh harness
     │
     ▼
 Phase 2 (Pipelines)                 ✅ Done — zero-copy item passing, 8 builtins
@@ -602,15 +666,23 @@ Phase 4 (External Commands)         ✅ Done — posix_spawn, PATH resolution
     ▼
 Phase 5 (Expansions)                ✅ Done — tilde, brace, glob, arith short-circuit
     │
-    ├──→ Phase 6 (Assoc Arrays & declare)    ← NEXT
-    ├──→ Phase 7 (Source & Environment)
+    ▼
+Phase 6 (Assoc Arrays & declare)    ✅ Done — Lambda Map type, declare flags
     │
     ▼
-Phase 8 (Signals)
-Phase 9 (Lambda-Enhanced Builtins)
+Phase 7 (Source & Environment)      ✅ Done — source/., env import, set options
+    │
+    ▼
+Phase 8 (Signals)                   ✅ Done — trap, sigaction, bash_eval_string
+    │
+    ▼
+Phase 8b (Scope Stack & POSIX)      ✅ Done — dynamic scope stack, --posix flag
+    │
+    ▼
+Phase 9 (Lambda-Enhanced Builtins)  ← NEXT
 ```
 
-Phases 6 and 7 can be worked in parallel. Phase 5's word splitting (`$IFS`) may be revisited if needed by real-world scripts.
+Phase 5's word splitting (`$IFS`) may be revisited if needed by real-world scripts.
 
 ---
 
@@ -620,17 +692,17 @@ Phases 6 and 7 can be worked in parallel. Phase 5's word splitting (`$IFS`) may 
 
 2. **Security boundary for external commands.** Should there be a sandboxing mode that restricts which external commands can be executed? Lambda's security posture may warrant a `--allow-exec` flag.
 
-3. **POSIX sh compatibility.** Should the transpiler target POSIX sh semantics (more portable) or Bash-specific features (more practical)? Current implementation is Bash-oriented; POSIX mode could be a `--posix` flag.
+3. ~~**POSIX sh compatibility.**~~ **Resolved (Phase 8b):** `--posix` flag implemented. Running with `./lambda.exe bash --posix script.sh` treats `local` as a global assignment, matching `/bin/sh` semantics.
 
 4. **Performance target.** For scripts that only use builtins + Lambda-enhanced builtins (no external commands), the JIT pipeline should outperform native Bash by a significant margin for computation-heavy scripts. Worth benchmarking once pipelines work.
 
-5. **Runtime scope model.** Bash uses dynamic scoping for functions (unlike most modern languages). The current flat global table works for simple scripts but breaks with `local` in nested function calls. Dynamic scope stack is needed for Phase 4+. Should this be a compile-time transformation (rename variables) or runtime stack?
+5. ~~**Runtime scope model.**~~ **Resolved (Phase 8b):** Implemented Option A — runtime dynamic scope stack. See Phase 8b section for details.
 
 ---
 
 ## Files to Create / Modify
 
-### Files Created (Phases 1–5)
+### Files Created (Phases 1–8b)
 | File | Purpose |
 |------|--------|
 | `test/test_bash_run.sh` | Bash test runner script (colored output, diff on failure) |
@@ -639,23 +711,40 @@ Phases 6 and 7 can be worked in parallel. Phase 5's word splitting (`$IFS`) may 
 | `test/bash/file_tests.sh` + `.txt` | File test operator tests (`-f`, `-d`, `-e`, etc.) |
 | `test/bash/external_cmds.sh` + `.txt` | External command execution tests |
 | `test/bash/expansions.sh` + `.txt` | Tilde, brace, glob, arithmetic short-circuit tests |
+| `test/bash/assoc_arrays.sh` + `.txt` | Associative array tests |
+| `test/bash/declare.sh` + `.txt` | `declare` builtin tests |
+| `test/bash/source_cmd.sh` + `.txt` | `source`/`.` tests |
+| `test/bash/env_vars.sh` + `.txt` | Environment variable import/export tests |
+| `test/bash/set_options.sh` + `.txt` | `set -e`, `-u`, `-x`, `pipefail` tests |
+| `test/bash/trap.sh` + `.txt` | `trap` builtin, EXIT/signal handler tests |
+| `test/bash/exit_trap.sh` + `.txt` | `exit N` early termination + EXIT trap tests |
+| `test/bash/scope_stack.sh` + `.txt` | Dynamic scope stack tests (accumulation, dynamic scoping, recursion) |
+| `test/bash/posix_mode.sh` + `.txt` | `--posix` flag smoke test (global assignment, arithmetic, strings) |
 
-### Files Modified (Phases 1–5)
+### Files Modified (Phases 1–8)
 | File | Changes |
 |------|--------|
 | `Makefile` | Added `test-bash-baseline` target |
 | `lambda/main.cpp` | Propagate bash exit code to process exit |
-| `lambda/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; `bm_transpile_cmd_arg()` for context-aware glob/brace expansion; arithmetic `&&`/`||` short-circuit with MIR branches |
-| `lambda/bash/bash_runtime.h` | Stdin item API; file redirect API; expansion functions (`bash_expand_tilde`, `bash_glob_expand`, `bash_expand_brace`); external exec API |
-| `lambda/bash/bash_runtime.cpp` | Pipeline data passing; file redirects; external exec via `posix_spawn`; tilde/brace/glob expansion runtime |
-| `lambda/bash/bash_builtins.cpp` | Added `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut` (stdin-item aware) |
-| `lambda/bash/build_bash_ast.cpp` | Brace pattern detection in `build_concatenation()` (converts `{a,b,c}` to word node); redirect handling |
+| `lambda/bash/transpile_bash_mir.cpp` | Pipeline capture chain; external command fallback; `bm_transpile_cmd_arg()` for context-aware glob/brace expansion; arithmetic `&&`/`||` short-circuit; `bash_eval_string()`; `BASH_AST_NODE_EXIT` case; `trap` builtin; `bash_trap_check()` in loops; `bash_trap_run_exit()` before main return |
+| `lambda/bash/bash_runtime.h` | Stdin item API; file redirect API; expansion functions; external exec API; assoc array API; env import/export API; shell option flags; trap API |
+| `lambda/bash/bash_runtime.cpp` | Pipeline data passing; file redirects; external exec via `posix_spawn`; tilde/brace/glob expansion; assoc arrays; env import (`bash_env_import()`); `bash_trap_set/run_exit/check`; OS signal handlers via `sigaction()` |
+| `lambda/bash/bash_builtins.cpp` | Added `cat`, `wc`, `head`, `tail`, `grep`, `sort`, `tr`, `cut`; `source`/`.`; `declare`; `set` |
+| `lambda/bash/build_bash_ast.cpp` | Brace pattern detection in `build_concatenation()`; redirect handling; `declare` command parsing |
+| `lambda/bash/bash_ast.hpp` | Variable attribute flags for `declare` |
 | `lambda/sys_func_registry.c` | Registered all new runtime functions for JIT linking |
 
-### Files Still to Modify (Phases 6–9)
+### Files Modified (Phase 8b)
 | File | Changes |
 |------|--------|
-| `lambda/bash/bash_runtime.cpp` | Associative arrays; environment import; `source` file loading |
-| `lambda/bash/bash_builtins.cpp` | `source`, `declare`, `trap`, `set` builtins |
-| `lambda/bash/bash_ast.hpp` | Variable attribute flags for `declare` |
-| `lambda/bash/build_bash_ast.cpp` | `declare` command parsing |
+| `lambda/main.cpp` | `--posix` flag parsing; calls `bash_set_posix_mode(true)` when detected |
+| `lambda/bash/bash_runtime.h` | Added POSIX mode API: `bash_set_posix_mode()`, `bash_get_posix_mode()` |
+| `lambda/bash/bash_runtime.cpp` | `bash_func_scope_stack[256]` state; implemented `bash_scope_push/pop`; rewrote `bash_get/set_var`, `bash_set_local_var`, `bash_unset_var` to walk scope stack; added `bash_posix_mode` flag and getter/setter |
+| `lambda/bash/transpile_bash_mir.cpp` | `bm_emit_set_local_var()` helper; fixed `local` builtin handler; `bash_scope_push/pop` wired into `bm_transpile_function_def()`; `bash_scope_pop` before `bash_pop_positional` in `BASH_AST_NODE_RETURN`; `is_local` flag honored in `bm_transpile_assignment()` |
+
+### Files Still to Modify (Phase 9)
+| File | Changes |
+|------|--------|
+| `lambda/bash/bash_builtins.cpp` | `json_parse`, `yaml_parse`, `xml_parse`, `csv_parse`, `regex`, `lambda_eval` builtins |
+| `lambda/bash/bash_runtime.cpp` | Lambda interop bridge for `lambda_eval` |
+| `lambda/sys_func_registry.c` | Register new Phase 9 functions |
