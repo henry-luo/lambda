@@ -673,11 +673,12 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
         bool has_subscript = false;
         TSNode subscript_node = {0};
         bool has_hash_prefix = false;
+        bool has_bang_prefix = false;
         bool has_colon_op = false;
         BashAstNode* colon_arg1 = NULL;
         BashAstNode* colon_arg2 = NULL;
 
-        // scan for subscript and prefix #
+        // scan for subscript and prefix # or !
         for (uint32_t i = 0; i < total; i++) {
             TSNode ch = ts_node_child(node, i);
             const char* ch_type = ts_node_type(ch);
@@ -690,6 +691,9 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                 StrView ch_src = bash_node_source(tp, ch);
                 if (ch_src.length == 1 && ch_src.str[0] == '#' && !has_subscript) {
                     has_hash_prefix = true;
+                }
+                if (ch_src.length == 1 && ch_src.str[0] == '!' && !has_subscript) {
+                    has_bang_prefix = true;
                 }
                 if (ch_src.length == 1 && ch_src.str[0] == ':' && has_subscript) {
                     has_colon_op = true;
@@ -718,6 +722,14 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                     tp, BASH_AST_NODE_ARRAY_LENGTH, node, sizeof(BashArrayLengthNode));
                 len_node->name = arr_name;
                 return (BashAstNode*)len_node;
+            }
+
+            if (has_bang_prefix && is_all) {
+                // ${!arr[@]} — array keys
+                BashArrayKeysNode* keys_node = (BashArrayKeysNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_ARRAY_KEYS, node, sizeof(BashArrayKeysNode));
+                keys_node->name = arr_name;
+                return (BashAstNode*)keys_node;
             }
 
             if (has_colon_op && is_all) {
@@ -1338,8 +1350,8 @@ static BashAstNode* build_assignment(BashTranspiler* tp, TSNode node) {
         }
     }
 
-    // register in scope
-    if (assign->name) {
+    // register in scope (but not subscript assignments like arr[idx]=val)
+    if (assign->name && !assign->index) {
         bash_scope_define(tp, assign->name, (BashAstNode*)assign, BASH_VAR_GLOBAL);
     }
 
@@ -1347,11 +1359,46 @@ static BashAstNode* build_assignment(BashTranspiler* tp, TSNode node) {
 }
 
 static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
-    // local var=value, export var=value
+    // local var=value, export var=value, declare [-aAirxlup] var=value
     // first child is the keyword (local, export, declare, typeset)
     StrView source = bash_node_source(tp, node);
     bool is_local = (source.length >= 5 && strncmp(source.str, "local", 5) == 0);
     bool is_export = (source.length >= 6 && strncmp(source.str, "export", 6) == 0);
+    bool is_declare = (source.length >= 7 && strncmp(source.str, "declare", 7) == 0) ||
+                      (source.length >= 7 && strncmp(source.str, "typeset", 7) == 0);
+
+    // parse declare flags from source: "declare -Ai var=value"
+    int declare_flags = BASH_ATTR_NONE;
+    if (is_declare) {
+        const char* p = source.str;
+        const char* end = source.str + source.length;
+        // skip keyword
+        while (p < end && *p != ' ' && *p != '\t') p++;
+        // parse flag groups
+        while (p < end) {
+            while (p < end && (*p == ' ' || *p == '\t')) p++;
+            if (p < end && *p == '-') {
+                p++; // skip -
+                while (p < end && *p != ' ' && *p != '\t') {
+                    switch (*p) {
+                        case 'a': declare_flags |= BASH_ATTR_INDEXED_ARRAY; break;
+                        case 'A': declare_flags |= BASH_ATTR_ASSOC_ARRAY; break;
+                        case 'i': declare_flags |= BASH_ATTR_INTEGER; break;
+                        case 'r': declare_flags |= BASH_ATTR_READONLY; break;
+                        case 'x': declare_flags |= BASH_ATTR_EXPORT; break;
+                        case 'l': declare_flags |= BASH_ATTR_LOWERCASE; break;
+                        case 'u': declare_flags |= BASH_ATTR_UPPERCASE; break;
+                        case 'p': declare_flags |= BASH_ATTR_PRINT; break;
+                        default: break;
+                    }
+                    p++;
+                }
+            } else {
+                break; // reached variable names/assignments
+            }
+        }
+        if (declare_flags & BASH_ATTR_EXPORT) is_export = true;
+    }
 
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* result = NULL;
@@ -1366,6 +1413,7 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
             if (assign) {
                 assign->is_local = is_local;
                 assign->is_export = is_export;
+                assign->declare_flags = declare_flags;
                 if (assign->name) {
                     BashVarKind kind = is_local ? BASH_VAR_LOCAL :
                                       is_export ? BASH_VAR_EXPORT : BASH_VAR_GLOBAL;
@@ -1380,12 +1428,17 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
             }
         } else if (strcmp(child_type, "word") == 0 ||
                    strcmp(child_type, "variable_name") == 0) {
-            // declaration without assignment: local var, export var
+            // declaration without assignment: local var, export var, declare -A map
+            // skip flag words like "-A", "-i", etc.
+            StrView child_src = bash_node_source(tp, child);
+            if (child_src.length > 0 && child_src.str[0] == '-') continue;
+
             BashAssignmentNode* assign = (BashAssignmentNode*)alloc_bash_ast_node(
                 tp, BASH_AST_NODE_ASSIGNMENT, child, sizeof(BashAssignmentNode));
             assign->name = node_text(tp, child);
             assign->is_local = is_local;
             assign->is_export = is_export;
+            assign->declare_flags = declare_flags;
             if (assign->name) {
                 BashVarKind kind = is_local ? BASH_VAR_LOCAL :
                                   is_export ? BASH_VAR_EXPORT : BASH_VAR_GLOBAL;
