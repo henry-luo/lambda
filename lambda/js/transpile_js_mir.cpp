@@ -1246,6 +1246,20 @@ static MIR_reg_t jm_call_4(JsMirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+static MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5) {
+    MIR_var_t args[5] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}};
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 5, args, 1);
+    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
+    jm_emit(mt, MIR_new_call_insn(mt->ctx, 8,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4, a5));
+    return res;
+}
+
 static void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
     MIR_var_t args[1] = {{a1t, "a", 0}};
@@ -5466,6 +5480,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_array_is_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+            // ArrayBuffer.isView(x)
+            if (obj->name && obj->name->len == 11 && strncmp(obj->name->chars, "ArrayBuffer", 11) == 0 &&
+                prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "isView", 6) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_arraybuffer_is_view", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
             // Object.values(obj)
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
                 prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "values", 6) == 0) {
@@ -5965,10 +5986,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_new_reg_op(mt->ctx, rtype), MIR_new_int_op(mt->ctx, LMD_TYPE_MAP)));
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_fallback),
                 MIR_new_reg_op(mt->ctx, is_map)));
-            // Check if this is a typed array (Map with sentinel marker) -> use array method dispatch
+            // Check if this is a typed array (Map with sentinel marker) -> use map method dispatch
+            // (js_map_method handles typed array methods: fill, slice, subarray, set)
             MIR_reg_t is_ta = jm_emit_uext8(mt, jm_call_1(mt, "js_is_typed_array", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
-            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_array),
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_map),
                 MIR_new_reg_op(mt->ctx, is_ta)));
             MIR_reg_t is_dom = jm_emit_uext8(mt, jm_call_1(mt, "js_is_dom_node", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv)));
@@ -8890,6 +8912,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // Check if it's a built-in type that needs early first-arg evaluation
     bool is_builtin = false;
     int typed_array_type = -1;
+    bool is_arraybuffer = false;
+    bool is_dataview = false;
     if (ctor_len == 10 && strncmp(ctor_name, "Int32Array", 10) == 0) { typed_array_type = 4; is_builtin = true; }
     else if (ctor_len == 10 && strncmp(ctor_name, "Int16Array", 10) == 0) { typed_array_type = 2; is_builtin = true; }
     else if (ctor_len == 9 && strncmp(ctor_name, "Int8Array", 9) == 0) { typed_array_type = 0; is_builtin = true; }
@@ -8898,6 +8922,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 10 && strncmp(ctor_name, "Uint8Array", 10) == 0) { typed_array_type = 1; is_builtin = true; }
     else if (ctor_len == 12 && strncmp(ctor_name, "Float64Array", 12) == 0) { typed_array_type = 7; is_builtin = true; }
     else if (ctor_len == 12 && strncmp(ctor_name, "Float32Array", 12) == 0) { typed_array_type = 6; is_builtin = true; }
+    else if (ctor_len == 11 && strncmp(ctor_name, "ArrayBuffer", 11) == 0) { is_arraybuffer = true; is_builtin = true; }
+    else if (ctor_len == 8 && strncmp(ctor_name, "DataView", 8) == 0) { is_dataview = true; is_builtin = true; }
     else if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) is_builtin = true;
     else if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) is_builtin = true;
     else if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) is_builtin = true;
@@ -8918,11 +8944,51 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         first_arg = jm_transpile_box_item(mt, call->arguments);
     }
 
-    if (typed_array_type >= 0) {
+    // new ArrayBuffer(byteLength)
+    if (is_arraybuffer) {
         MIR_reg_t len_arg = first_arg ? first_arg : jm_box_int_const(mt, 0);
-        return jm_call_2(mt, "js_typed_array_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, typed_array_type),
+        return jm_call_1(mt, "js_arraybuffer_new", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, len_arg));
+    }
+
+    // new DataView(buffer [, byteOffset [, byteLength]])
+    if (is_dataview) {
+        MIR_reg_t buf_arg = first_arg ? first_arg : jm_emit_null(mt);
+        MIR_reg_t offset_arg = 0;
+        MIR_reg_t len_arg = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) {
+            offset_arg = jm_transpile_box_item(mt, arg2);
+            JsAstNode* arg3 = arg2->next;
+            if (arg3) len_arg = jm_transpile_box_item(mt, arg3);
+        }
+        MIR_op_t off_op = offset_arg ? MIR_new_reg_op(mt->ctx, offset_arg) : MIR_new_int_op(mt->ctx, 0);
+        MIR_op_t len_op = len_arg ? MIR_new_reg_op(mt->ctx, len_arg) : MIR_new_int_op(mt->ctx, -1);
+        return jm_call_3(mt, "js_dataview_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, buf_arg),
+            MIR_T_I64, off_op,
+            MIR_T_I64, len_op);
+    }
+
+    // new TypedArray(arg [, byteOffset [, length]])
+    if (typed_array_type >= 0) {
+        MIR_reg_t arg_val = first_arg ? first_arg : jm_emit_null(mt);
+        MIR_reg_t offset_arg = 0;
+        MIR_reg_t len_arg_r = 0;
+        JsAstNode* arg2 = call->arguments ? call->arguments->next : NULL;
+        if (arg2) {
+            offset_arg = jm_transpile_box_item(mt, arg2);
+            JsAstNode* arg3 = arg2->next;
+            if (arg3) len_arg_r = jm_transpile_box_item(mt, arg3);
+        }
+        MIR_op_t off_op = offset_arg ? MIR_new_reg_op(mt->ctx, offset_arg) : MIR_new_int_op(mt->ctx, 0);
+        MIR_op_t len_op = len_arg_r ? MIR_new_reg_op(mt->ctx, len_arg_r) : MIR_new_int_op(mt->ctx, -1);
+        return jm_call_5(mt, "js_typed_array_construct", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, typed_array_type),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, arg_val),
+            MIR_T_I64, off_op,
+            MIR_T_I64, len_op,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     // new Array(len) or new Array(a,b,c)

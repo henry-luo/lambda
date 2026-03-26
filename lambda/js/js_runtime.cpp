@@ -894,14 +894,71 @@ extern "C" Item js_property_get(Item object, Item key) {
         Map* m = object.map;
         // Check if this is a typed array
         if (js_is_typed_array(object)) {
-            // Handle .length property
             if (get_type_id(key) == LMD_TYPE_STRING) {
                 String* str_key = it2s(key);
                 if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                     return (Item){.item = i2it(js_typed_array_length(object))};
                 }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    return (Item){.item = i2it(ta->byte_length)};
+                }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    return (Item){.item = i2it(ta->byte_offset)};
+                }
+                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    if (ta->buffer) {
+                        return js_arraybuffer_wrap(ta->buffer);
+                    }
+                    return (Item){.item = ITEM_NULL};
+                }
+                if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
+                    JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    int bpe = 4;
+                    switch (ta->element_type) {
+                    case JS_TYPED_INT8: case JS_TYPED_UINT8: bpe = 1; break;
+                    case JS_TYPED_INT16: case JS_TYPED_UINT16: bpe = 2; break;
+                    case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: bpe = 4; break;
+                    case JS_TYPED_FLOAT64: bpe = 8; break;
+                    }
+                    return (Item){.item = i2it(bpe)};
+                }
             }
             return js_typed_array_get(object, key);
+        }
+        // Check if this is an ArrayBuffer
+        if (js_is_arraybuffer(object)) {
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    return (Item){.item = i2it(js_arraybuffer_byte_length(object))};
+                }
+            }
+            return (Item){.item = ITEM_NULL};
+        }
+        // Check if this is a DataView
+        if (js_is_dataview(object)) {
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteLength", 10) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    return (Item){.item = i2it(dv->byte_length)};
+                }
+                if (str_key->len == 10 && strncmp(str_key->chars, "byteOffset", 10) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    return (Item){.item = i2it(dv->byte_offset)};
+                }
+                if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
+                    JsDataView* dv = (JsDataView*)object.map->data;
+                    if (dv->buffer) {
+                        return js_arraybuffer_wrap(dv->buffer);
+                    }
+                    return (Item){.item = ITEM_NULL};
+                }
+            }
+            return (Item){.item = ITEM_NULL};
         }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
@@ -1868,6 +1925,48 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // DataView methods
+    if (js_is_dataview(obj)) {
+        return js_dataview_method(obj, method_name, args, argc);
+    }
+    // TypedArray methods
+    if (js_is_typed_array(obj)) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
+                Item value = argc > 0 ? args[0] : ItemNull;
+                return js_typed_array_fill(obj, value);
+            }
+            if (method->len == 3 && strncmp(method->chars, "set", 3) == 0) {
+                Item source = argc > 0 ? args[0] : ItemNull;
+                int offset = argc > 1 ? (int)it2i(args[1]) : 0;
+                return js_typed_array_set_from(obj, source, offset);
+            }
+            if (method->len == 8 && strncmp(method->chars, "subarray", 8) == 0) {
+                int start = argc > 0 ? (int)it2i(args[0]) : 0;
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int end = argc > 1 ? (int)it2i(args[1]) : ta->length;
+                return js_typed_array_subarray(obj, start, end);
+            }
+            if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                int start = argc > 0 ? (int)it2i(args[0]) : 0;
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int end = argc > 1 ? (int)it2i(args[1]) : ta->length;
+                return js_typed_array_slice(obj, start, end);
+            }
+        }
+    }
+    // ArrayBuffer methods
+    if (js_is_arraybuffer(obj)) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
+                int begin = argc > 0 ? (int)it2i(args[0]) : 0;
+                int end = argc > 1 ? (int)it2i(args[1]) : js_arraybuffer_byte_length(obj);
+                return js_arraybuffer_slice(obj, begin, end);
+            }
+        }
+    }
     // Check if this is a Map/Set collection
     JsCollectionData* cd = js_get_collection_data(obj);
     if (cd) {
