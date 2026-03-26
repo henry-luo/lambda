@@ -1,0 +1,23 @@
+=== Write redirect ===
+File written
+hello world
+=== Append redirect ===
+line one
+line two
+line three
+=== Overwrite redirect ===
+replaced
+=== Suppress stdout ===
+after suppress
+=== Stderr redirect ===
+visible output
+after stderr redirect
+=== Multi-line file ===
+apple
+banana
+cherry
+=== Read into wc ===
+3
+=== Empty file ===
+after empty
+=== Done ===

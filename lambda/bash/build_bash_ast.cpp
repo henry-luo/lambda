@@ -1736,6 +1736,10 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
     TSNode herestring_node = {0};
     bool has_herestring = false;
 
+    // collect file_redirect nodes
+    TSNode file_redirects[16];
+    int file_redirect_count = 0;
+
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* child_type = ts_node_type(child);
@@ -1746,7 +1750,9 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
             herestring_node = child;
             has_herestring = true;
         } else if (strcmp(child_type, "file_redirect") == 0) {
-            continue;
+            if (file_redirect_count < 16) {
+                file_redirects[file_redirect_count++] = child;
+            }
         } else {
             inner_cmd = build_statement(tp, child);
         }
@@ -1876,6 +1882,77 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
         }
         heredoc->expand = true;
         return (BashAstNode*)heredoc;
+    }
+
+    // attach file_redirect nodes to the command
+    if (file_redirect_count > 0 && inner_cmd && inner_cmd->node_type == BASH_AST_NODE_COMMAND) {
+        BashCommandNode* cmd = (BashCommandNode*)inner_cmd;
+        BashAstNode* redir_tail = NULL;
+        for (int i = 0; i < file_redirect_count; i++) {
+            TSNode fr = file_redirects[i];
+            BashRedirectNode* redir = (BashRedirectNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_REDIRECT, fr, sizeof(BashRedirectNode));
+            redir->fd = 1; // default: stdout
+            redir->mode = BASH_REDIR_WRITE; // default: >
+
+            // detect redirect operator and optional fd from anonymous children
+            uint32_t total_children = ts_node_child_count(fr);
+            for (uint32_t j = 0; j < total_children; j++) {
+                TSNode ch = ts_node_child(fr, j);
+                const char* ch_type = ts_node_type(ch);
+                if (strcmp(ch_type, "file_descriptor") == 0) {
+                    StrView fd_src = bash_node_source(tp, ch);
+                    redir->fd = (fd_src.length > 0) ? atoi(fd_src.str) : 1;
+                } else if (!ts_node_is_named(ch)) {
+                    // anonymous child = redirect operator
+                    StrView op = bash_node_source(tp, ch);
+                    if (op.length == 1 && op.str[0] == '>') {
+                        redir->mode = BASH_REDIR_WRITE;
+                    } else if (op.length == 2 && op.str[0] == '>' && op.str[1] == '>') {
+                        redir->mode = BASH_REDIR_APPEND;
+                    } else if (op.length == 1 && op.str[0] == '<') {
+                        redir->mode = BASH_REDIR_READ;
+                        redir->fd = 0;
+                    } else if (op.length == 2 && op.str[0] == '>' && op.str[1] == '&') {
+                        redir->mode = BASH_REDIR_DUP;
+                    } else if (op.length == 2 && op.str[0] == '&' && op.str[1] == '>') {
+                        redir->mode = BASH_REDIR_WRITE;
+                        redir->fd = -1; // both stdout and stderr
+                    } else if (op.length == 2 && op.str[0] == '>' && op.str[1] == '|') {
+                        redir->mode = BASH_REDIR_WRITE; // >| same as > for us
+                    }
+                }
+            }
+
+            // destination is the named child that is not file_descriptor
+            uint32_t named_count = ts_node_named_child_count(fr);
+            for (uint32_t j = 0; j < named_count; j++) {
+                TSNode dest_child = ts_node_named_child(fr, j);
+                const char* dtype = ts_node_type(dest_child);
+                if (strcmp(dtype, "file_descriptor") == 0) continue;
+                // build destination node based on its type
+                if (strcmp(dtype, "word") == 0 || strcmp(dtype, "number") == 0) {
+                    redir->target = build_word(tp, dest_child);
+                } else if (strcmp(dtype, "string") == 0) {
+                    redir->target = build_string_node(tp, dest_child);
+                } else if (strcmp(dtype, "concatenation") == 0) {
+                    redir->target = build_concatenation(tp, dest_child);
+                } else if (strcmp(dtype, "simple_expansion") == 0 ||
+                           strcmp(dtype, "expansion") == 0) {
+                    redir->target = build_expansion(tp, dest_child);
+                } else {
+                    redir->target = build_word(tp, dest_child);
+                }
+                break;
+            }
+
+            if (!cmd->redirects) {
+                cmd->redirects = (BashAstNode*)redir;
+            } else {
+                redir_tail->next = (BashAstNode*)redir;
+            }
+            redir_tail = (BashAstNode*)redir;
+        }
     }
 
     return inner_cmd;

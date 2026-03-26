@@ -396,9 +396,70 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     if (!node) return;
 
     switch (node->node_type) {
-    case BASH_AST_NODE_COMMAND:
-        bm_transpile_command(mt, (BashCommandNode*)node);
+    case BASH_AST_NODE_COMMAND: {
+        BashCommandNode* cmd = (BashCommandNode*)node;
+        if (cmd->redirects) {
+            // analyze redirects to determine what wrapping we need
+            bool has_stdout_redir = false;
+            bool has_stdin_redir = false;
+            BashRedirectNode* stdout_redir = NULL;
+            BashRedirectNode* stdin_redir = NULL;
+
+            BashAstNode* redir = cmd->redirects;
+            while (redir) {
+                if (redir->node_type == BASH_AST_NODE_REDIRECT) {
+                    BashRedirectNode* r = (BashRedirectNode*)redir;
+                    if ((r->fd == 1 || r->fd == -1) &&
+                        (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+                        has_stdout_redir = true;
+                        stdout_redir = r;
+                    } else if (r->fd == 0 && r->mode == BASH_REDIR_READ) {
+                        has_stdin_redir = true;
+                        stdin_redir = r;
+                    } else if (r->fd == 2 &&
+                               (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+                        // stderr redirect (2>/dev/null etc.) — no-op for now
+                    } else if (r->mode == BASH_REDIR_DUP) {
+                        // fd duplication (>&2, 2>&1) — no-op for now
+                    }
+                }
+                redir = redir->next;
+            }
+
+            // before command: set up stdin from file
+            if (has_stdin_redir && stdin_redir->target) {
+                MIR_op_t filename = bm_transpile_node(mt, stdin_redir->target);
+                MIR_reg_t content = bm_emit_call_1(mt, "bash_redirect_read", filename);
+                bm_emit_call_void_1(mt, "bash_set_stdin_item",
+                    MIR_new_reg_op(mt->ctx, content));
+            }
+
+            // before command: start capture for stdout redirect
+            if (has_stdout_redir) {
+                bm_emit_call_void_0(mt, "bash_begin_capture");
+            }
+
+            // execute command normally
+            bm_transpile_command(mt, cmd);
+
+            // after command: handle stdout redirect
+            if (has_stdout_redir && stdout_redir->target) {
+                MIR_reg_t captured = bm_emit_call_0(mt, "bash_end_capture_raw");
+                MIR_op_t filename = bm_transpile_node(mt, stdout_redir->target);
+                const char* func = (stdout_redir->mode == BASH_REDIR_APPEND)
+                    ? "bash_redirect_append" : "bash_redirect_write";
+                bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->ctx, captured));
+            }
+
+            // after command: clean up stdin
+            if (has_stdin_redir) {
+                bm_emit_call_void_0(mt, "bash_clear_stdin_item");
+            }
+        } else {
+            bm_transpile_command(mt, cmd);
+        }
         break;
+    }
     case BASH_AST_NODE_ASSIGNMENT:
         bm_transpile_assignment(mt, (BashAssignmentNode*)node);
         break;
@@ -716,6 +777,14 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         switch (unary->op) {
         case BASH_TEST_Z: func = "bash_test_z"; break;
         case BASH_TEST_N: func = "bash_test_n"; break;
+        case BASH_TEST_F: func = "bash_test_f"; break;
+        case BASH_TEST_D: func = "bash_test_d"; break;
+        case BASH_TEST_E: func = "bash_test_e"; break;
+        case BASH_TEST_R: func = "bash_test_r"; break;
+        case BASH_TEST_W: func = "bash_test_w"; break;
+        case BASH_TEST_X: func = "bash_test_x"; break;
+        case BASH_TEST_S: func = "bash_test_s"; break;
+        case BASH_TEST_L: func = "bash_test_l"; break;
         case BASH_TEST_NOT: {
             // ! — negate the exit code set by the operand expression
             // the operand was already transpiled (setting exit code)
@@ -1176,9 +1245,41 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return MIR_new_reg_op(mt->ctx, result);
     }
 
-    // fallback: unrecognized command — log and return exit code 127
-    log_debug("bash-mir: unrecognized command '%s'", cmd_name);
-    return bm_emit_int_literal(mt, 127);
+    // fallback: external command execution via posix_spawn
+    // build argv[] with command name as argv[0] + all arguments
+    {
+        int total_argc = 1 + cmd->arg_count;
+        MIR_reg_t ext_args_ptr = bm_new_temp(mt);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, ext_args_ptr),
+                         MIR_new_int_op(mt->ctx, total_argc * (int)sizeof(Item))));
+
+        // argv[0] = command name
+        MIR_op_t name_val = bm_emit_string_literal(mt, cmd_name, cmd_len);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ext_args_ptr, 0, 1),
+                name_val));
+
+        // argv[1..] = arguments
+        int i = 1;
+        BashAstNode* arg = cmd->args;
+        while (arg && i < total_argc) {
+            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                   ext_args_ptr, 0, 1),
+                    arg_val));
+            arg = arg->next;
+            i++;
+        }
+
+        MIR_reg_t ext_result = bm_emit_call_2(mt, "bash_exec_external",
+            MIR_new_reg_op(mt->ctx, ext_args_ptr),
+            MIR_new_int_op(mt->ctx, total_argc));
+        return MIR_new_reg_op(mt->ctx, ext_result);
+    }
 }
 
 // ============================================================================

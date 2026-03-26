@@ -1232,6 +1232,12 @@ JitImport jit_runtime_imports[] = {
     {"py_subscript_get", FPTR(py_subscript_get)},
     {"py_subscript_set", FPTR(py_subscript_set)},
     {"py_slice_get", FPTR(py_slice_get)},
+    {"py_slice_set", FPTR(py_slice_set)},
+    {"py_format_value", FPTR(py_format_value)},
+    {"py_exception_get_type", FPTR(py_exception_get_type)},
+    {"py_builtin_open", FPTR(py_builtin_open)},
+    // variadic args
+    {"py_build_list_from_args", FPTR(py_build_list_from_args)},
     // iterator
     {"py_get_iterator", FPTR(py_get_iterator)},
     {"py_iterator_next", FPTR(py_iterator_next)},
@@ -1346,6 +1352,14 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_str_gt", FPTR(bash_test_str_gt)},
     {"bash_test_z", FPTR(bash_test_z)},
     {"bash_test_n", FPTR(bash_test_n)},
+    {"bash_test_f", FPTR(bash_test_f)},
+    {"bash_test_d", FPTR(bash_test_d)},
+    {"bash_test_e", FPTR(bash_test_e)},
+    {"bash_test_r", FPTR(bash_test_r)},
+    {"bash_test_w", FPTR(bash_test_w)},
+    {"bash_test_x", FPTR(bash_test_x)},
+    {"bash_test_s", FPTR(bash_test_s)},
+    {"bash_test_l", FPTR(bash_test_l)},
     {"bash_test_regex", FPTR(bash_test_regex)},
     {"bash_test_glob", FPTR(bash_test_glob)},
     // string operations
@@ -1414,6 +1428,12 @@ JitImport jit_runtime_imports[] = {
     {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
     {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
     {"bash_clear_stdin_item", FPTR(bash_clear_stdin_item)},
+    // file redirections
+    {"bash_redirect_write", FPTR(bash_redirect_write)},
+    {"bash_redirect_append", FPTR(bash_redirect_append)},
+    {"bash_redirect_read", FPTR(bash_redirect_read)},
+    // external command execution
+    {"bash_exec_external", FPTR(bash_exec_external)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},

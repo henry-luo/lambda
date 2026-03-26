@@ -1,0 +1,33 @@
+=== ls ===
+/dev/null
+exit: 0
+=== date ===
+exit: 0
+=== basename ===
+test
+exit: 0
+=== not found ===
+exit: 127
+=== command substitution ===
+myfile.txt
+=== pipeline builtin to external ===
+Hello world
+=== absolute path ===
+from bin echo
+=== expr ===
+result: 7
+=== printf external ===
+hello-world
+=== seq to tail ===
+3
+4
+5
+=== reverse sort ===
+1
+2
+3
+4
+5
+=== exit codes ===
+false: 1
+true: 0
