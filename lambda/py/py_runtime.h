@@ -115,7 +115,10 @@ Item py_range_new(Item start, Item stop, Item step);
 Item py_new_function(void* func_ptr, int param_count);
 Item py_new_closure(void* func_ptr, int param_count, uint64_t* env, int env_size);
 uint64_t* py_alloc_env(int size);
+Item py_set_kwargs_flag(Item fn_item);
+Item py_dict_merge(Item dst, Item src);
 Item py_call_function(Item func, Item* args, int arg_count);
+Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map);
 
 // ========================================================================
 // Exception handling

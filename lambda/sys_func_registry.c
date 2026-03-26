@@ -1278,7 +1278,10 @@ JitImport jit_runtime_imports[] = {
     {"py_new_function", FPTR(py_new_function)},
     {"py_new_closure", FPTR(py_new_closure)},
     {"py_alloc_env", FPTR(py_alloc_env)},
+    {"py_set_kwargs_flag", FPTR(py_set_kwargs_flag)},
+    {"py_dict_merge", FPTR(py_dict_merge)},
     {"py_call_function", FPTR(py_call_function)},
+    {"py_call_function_kw", FPTR(py_call_function_kw)},
     // exception handling
     {"py_raise", FPTR(py_raise)},
     {"py_check_exception", FPTR(py_check_exception)},
