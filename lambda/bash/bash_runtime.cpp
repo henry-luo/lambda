@@ -1053,6 +1053,10 @@ extern "C" Item bash_return_with_code(Item val) {
 static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
 static int bash_capture_depth = 0;
 
+// stdin item for pipeline stage passing
+static Item bash_stdin_item = {0};
+static bool bash_stdin_item_set = false;
+
 extern "C" void bash_begin_capture(void) {
     if (bash_capture_depth < BASH_CAPTURE_STACK_MAX) {
         bash_capture_bufs[bash_capture_depth] = strbuf_new();
@@ -1066,10 +1070,22 @@ extern "C" Item bash_end_capture(void) {
     }
     bash_capture_depth--;
     StrBuf* buf = bash_capture_bufs[bash_capture_depth];
-    // strip trailing newlines (bash behavior)
+    // strip trailing newlines (bash behavior for command substitution)
     int len = (int)buf->length;
     while (len > 0 && buf->str[len - 1] == '\n') len--;
     Item result = (Item){.item = s2it(heap_create_name(buf->str, len))};
+    strbuf_free(buf);
+    return result;
+}
+
+// end capture without stripping trailing newlines (for pipelines)
+extern "C" Item bash_end_capture_raw(void) {
+    if (bash_capture_depth <= 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    bash_capture_depth--;
+    StrBuf* buf = bash_capture_bufs[bash_capture_depth];
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
     strbuf_free(buf);
     return result;
 }
@@ -1089,6 +1105,27 @@ extern "C" void bash_raw_putc(char c) {
     } else {
         fputc(c, stdout);
     }
+}
+
+// ============================================================================
+// Pipeline stdin item passing
+// ============================================================================
+
+extern "C" void bash_set_stdin_item(Item input) {
+    bash_stdin_item = input;
+    bash_stdin_item_set = true;
+}
+
+extern "C" Item bash_get_stdin_item(void) {
+    if (!bash_stdin_item_set) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return bash_stdin_item;
+}
+
+extern "C" void bash_clear_stdin_item(void) {
+    bash_stdin_item = (Item){0};
+    bash_stdin_item_set = false;
 }
 
 // ============================================================================

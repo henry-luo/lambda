@@ -201,12 +201,17 @@ static BashAstNode* build_statement(BashTranspiler* tp, TSNode node) {
         return (BashAstNode*)cmd;
     }
     if (strcmp(type, "negated_command") == 0) {
-        // ! command
+        // ! command — negate the exit code
         uint32_t child_count = ts_node_named_child_count(node);
         if (child_count > 0) {
             TSNode child = ts_node_named_child(node, 0);
             BashAstNode* inner = build_statement(tp, child);
-            // wrap in a pipeline with negated flag
+            if (inner && inner->node_type == BASH_AST_NODE_PIPELINE) {
+                // inner is already a pipeline — just set its negated flag
+                ((BashPipelineNode*)inner)->negated = true;
+                return inner;
+            }
+            // wrap non-pipeline in a pipeline with negated flag
             BashPipelineNode* pipeline = (BashPipelineNode*)alloc_bash_ast_node(
                 tp, BASH_AST_NODE_PIPELINE, node, sizeof(BashPipelineNode));
             pipeline->commands = inner;
@@ -1183,6 +1188,28 @@ static BashAstNode* build_pipeline(BashTranspiler* tp, TSNode node) {
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
+        const char* child_type = ts_node_type(child);
+
+        // if a child is negated_command, propagate negation to the pipeline
+        // (in bash, ! negates the entire pipeline's exit code)
+        if (strcmp(child_type, "negated_command") == 0) {
+            pipeline->negated = true;
+            uint32_t nc = ts_node_named_child_count(child);
+            if (nc > 0) {
+                TSNode inner = ts_node_named_child(child, 0);
+                BashAstNode* cmd = build_statement(tp, inner);
+                if (!cmd) continue;
+                if (!pipeline->commands) {
+                    pipeline->commands = cmd;
+                } else {
+                    tail->next = cmd;
+                }
+                tail = cmd;
+                pipeline->command_count++;
+            }
+            continue;
+        }
+
         BashAstNode* cmd = build_statement(tp, child);
         if (!cmd) continue;
 

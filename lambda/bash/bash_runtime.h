@@ -173,6 +173,14 @@ Item bash_builtin_export(Item name, Item value);
 Item bash_builtin_unset(Item name);
 Item bash_builtin_cd(Item dir);
 Item bash_builtin_pwd(void);
+Item bash_builtin_cat(Item* args, int argc);
+Item bash_builtin_wc(Item* args, int argc);
+Item bash_builtin_head(Item* args, int argc);
+Item bash_builtin_tail(Item* args, int argc);
+Item bash_builtin_grep(Item* args, int argc);
+Item bash_builtin_sort(Item* args, int argc);
+Item bash_builtin_tr(Item* args, int argc);
+Item bash_builtin_cut(Item* args, int argc);
 
 // ========================================================================
 // Control flow support
@@ -188,6 +196,13 @@ Item bash_command_substitution(Item* args, int argc);  // $(command)
 Item bash_pipe(Item left_output, Item* right_cmd, int right_argc);
 
 // ========================================================================
+// Pipeline stdin item passing (builtin-to-builtin)
+// ========================================================================
+void bash_set_stdin_item(Item input);   // set pending stdin content for next pipe stage
+Item bash_get_stdin_item(void);         // read pending stdin (for cat, wc, grep, etc.)
+void bash_clear_stdin_item(void);       // clear after consumption
+
+// ========================================================================
 // Output
 // ========================================================================
 void bash_write_heredoc(Item content, int is_herestring); // write heredoc/herestring
@@ -196,7 +211,8 @@ void bash_write_stderr(Item value);                 // write string to stderr
 void bash_raw_write(const char* data, int len);     // write raw bytes (capture-aware)
 void bash_raw_putc(char c);                         // write single char (capture-aware)
 void bash_begin_capture(void);                      // start capturing stdout
-Item bash_end_capture(void);                        // stop capturing, return string
+Item bash_end_capture(void);                        // stop capturing, return string (strips trailing newlines)
+Item bash_end_capture_raw(void);                    // stop capturing, return string (preserves trailing newlines)
 
 // ========================================================================
 // Runtime initialization

@@ -1406,9 +1406,14 @@ JitImport jit_runtime_imports[] = {
     // output capture
     {"bash_begin_capture", FPTR(bash_begin_capture)},
     {"bash_end_capture", FPTR(bash_end_capture)},
+    {"bash_end_capture_raw", FPTR(bash_end_capture_raw)},
     {"bash_raw_write", FPTR(bash_raw_write)},
     {"bash_write_heredoc", FPTR(bash_write_heredoc)},
     {"bash_raw_putc", FPTR(bash_raw_putc)},
+    // pipeline stdin item passing
+    {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
+    {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
+    {"bash_clear_stdin_item", FPTR(bash_clear_stdin_item)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
@@ -1429,6 +1434,15 @@ JitImport jit_runtime_imports[] = {
     {"bash_builtin_unset", FPTR(bash_builtin_unset)},
     {"bash_builtin_cd", FPTR(bash_builtin_cd)},
     {"bash_builtin_pwd", FPTR(bash_builtin_pwd)},
+    // pipeline builtins
+    {"bash_builtin_cat", FPTR(bash_builtin_cat)},
+    {"bash_builtin_wc", FPTR(bash_builtin_wc)},
+    {"bash_builtin_head", FPTR(bash_builtin_head)},
+    {"bash_builtin_tail", FPTR(bash_builtin_tail)},
+    {"bash_builtin_grep", FPTR(bash_builtin_grep)},
+    {"bash_builtin_sort", FPTR(bash_builtin_sort)},
+    {"bash_builtin_tr", FPTR(bash_builtin_tr)},
+    {"bash_builtin_cut", FPTR(bash_builtin_cut)},
     // runtime init/cleanup
     {"bash_runtime_init", FPTR(bash_runtime_init)},
     {"bash_runtime_cleanup", FPTR(bash_runtime_cleanup)},
