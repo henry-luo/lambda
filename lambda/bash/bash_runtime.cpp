@@ -465,6 +465,78 @@ extern "C" Item bash_test_n(Item value) {
     return (Item){.item = b2it(result)};
 }
 
+// file test operators
+#include <sys/stat.h>
+#include <unistd.h>
+
+static const char* bash_item_to_cstr(Item value) {
+    Item str = bash_to_string(value);
+    String* s = it2s(str);
+    if (!s || s->len == 0) return "";
+    return s->chars;
+}
+
+extern "C" Item bash_test_f(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_d(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_e(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_r(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, R_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_w(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, W_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_x(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, X_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_s(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && st.st_size > 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_l(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (lstat(path, &st) == 0 && S_ISLNK(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 // ============================================================================
 // Parameter expansion functions
 // ============================================================================
@@ -1043,6 +1115,102 @@ extern "C" Item bash_return_with_code(Item val) {
     int code = (int)bash_coerce_int(val);
     bash_last_exit_code = code & 0xFF;
     return (Item){.item = i2it(code)};
+}
+
+// ============================================================================
+// File redirect runtime
+// ============================================================================
+
+#include <fcntl.h>
+
+extern "C" Item bash_redirect_write(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // /dev/null: just discard
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for writing", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_append(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for appending", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_read(Item filename) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    int fd = open(fn->chars, O_RDONLY);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for reading", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(fd);
+
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
+    strbuf_free(buf);
+    bash_last_exit_code = 0;
+    return result;
 }
 
 // ============================================================================

@@ -1346,6 +1346,14 @@ JitImport jit_runtime_imports[] = {
     {"bash_test_str_gt", FPTR(bash_test_str_gt)},
     {"bash_test_z", FPTR(bash_test_z)},
     {"bash_test_n", FPTR(bash_test_n)},
+    {"bash_test_f", FPTR(bash_test_f)},
+    {"bash_test_d", FPTR(bash_test_d)},
+    {"bash_test_e", FPTR(bash_test_e)},
+    {"bash_test_r", FPTR(bash_test_r)},
+    {"bash_test_w", FPTR(bash_test_w)},
+    {"bash_test_x", FPTR(bash_test_x)},
+    {"bash_test_s", FPTR(bash_test_s)},
+    {"bash_test_l", FPTR(bash_test_l)},
     {"bash_test_regex", FPTR(bash_test_regex)},
     {"bash_test_glob", FPTR(bash_test_glob)},
     // string operations
@@ -1414,6 +1422,10 @@ JitImport jit_runtime_imports[] = {
     {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
     {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
     {"bash_clear_stdin_item", FPTR(bash_clear_stdin_item)},
+    // file redirections
+    {"bash_redirect_write", FPTR(bash_redirect_write)},
+    {"bash_redirect_append", FPTR(bash_redirect_append)},
+    {"bash_redirect_read", FPTR(bash_redirect_read)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},

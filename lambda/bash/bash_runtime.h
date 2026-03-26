@@ -73,6 +73,16 @@ Item bash_test_str_gt(Item left, Item right);
 Item bash_test_z(Item value);               // true if string is empty
 Item bash_test_n(Item value);               // true if string is non-empty
 
+// file test operators
+Item bash_test_f(Item value);               // -f (regular file)
+Item bash_test_d(Item value);               // -d (directory)
+Item bash_test_e(Item value);               // -e (exists)
+Item bash_test_r(Item value);               // -r (readable)
+Item bash_test_w(Item value);               // -w (writable)
+Item bash_test_x(Item value);               // -x (executable)
+Item bash_test_s(Item value);               // -s (non-zero size)
+Item bash_test_l(Item value);               // -L (symlink)
+
 // regex match: =~
 Item bash_test_regex(Item string, Item pattern);
 Item bash_test_glob(Item string, Item pattern);
@@ -201,6 +211,13 @@ Item bash_pipe(Item left_output, Item* right_cmd, int right_argc);
 void bash_set_stdin_item(Item input);   // set pending stdin content for next pipe stage
 Item bash_get_stdin_item(void);         // read pending stdin (for cat, wc, grep, etc.)
 void bash_clear_stdin_item(void);       // clear after consumption
+
+// ========================================================================
+// File redirections
+// ========================================================================
+Item bash_redirect_write(Item filename, Item content);   // > file
+Item bash_redirect_append(Item filename, Item content);  // >> file
+Item bash_redirect_read(Item filename);                  // < file
 
 // ========================================================================
 // Output

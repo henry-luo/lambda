@@ -1,0 +1,24 @@
+=== Test -f ===
+regular file exists
+nonexistent file not found
+=== Test -d ===
+directory exists
+file is not a directory
+=== Test -e ===
+file exists
+directory exists
+nonexistent not found
+=== Test -r ===
+file is readable
+=== Test -w ===
+file is writable
+=== Test -s ===
+file has content
+empty file has no content
+=== Test [[ -f ]] ===
+extended test: file exists
+extended test: file not found
+=== Test negation ===
+negated: nonexistent confirmed
+negated: temp is a directory
+=== Done ===
