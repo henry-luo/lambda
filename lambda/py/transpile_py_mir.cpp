@@ -5023,8 +5023,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         void* func_ptr = find_func(ctx, mir_name);
 
         if (func_ptr) {
-            // use py_new_function so py_call_function can invoke it correctly
-            Item val = py_new_function(func_ptr, fc->param_count);
+            // use js_new_function so js_function_get_ptr can extract func_ptr
+            // when Lambda imports this module via cross-language import path
+            Item val = js_new_function(func_ptr, fc->param_count);
             Item key = {.item = s2it(heap_create_name(fc->name))};
             js_property_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
