@@ -67,8 +67,8 @@ typedef struct BashTranspiler {
 // Scope management functions (bash_scope.cpp)
 // ============================================================================
 BashScope* bash_scope_create(BashTranspiler* tp, BashScopeType scope_type, BashScope* parent);
-void bash_scope_push(BashTranspiler* tp, BashScope* scope);
-void bash_scope_pop(BashTranspiler* tp);
+void bash_ct_scope_push(BashTranspiler* tp, BashScope* scope);
+void bash_ct_scope_pop(BashTranspiler* tp);
 NameEntry* bash_scope_lookup(BashTranspiler* tp, String* name);
 NameEntry* bash_scope_lookup_current(BashTranspiler* tp, String* name);
 void bash_scope_define(BashTranspiler* tp, String* name, BashAstNode* node, BashVarKind kind);
