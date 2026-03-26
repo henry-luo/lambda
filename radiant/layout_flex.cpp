@@ -733,22 +733,39 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                     while (child) {
                         if (child->view_type == RDT_VIEW_BLOCK) {
                             ViewElement* item = (ViewElement*)child->as_element();
-                            if (item && item->fi) {
-                                // Use flex-basis if specified, otherwise use intrinsic/explicit height
+                            if (item) {
                                 int item_height = 0;
-                                if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
-                                    item_height = item->fi->flex_basis;
-                                } else if (item->blk && item->blk->given_height >= 0) {
-                                    item_height = (int)item->blk->given_height;
-                                } else if (item->height > 0) {
-                                    item_height = item->height;
-                                } else {
-                                    // Empty flex items (no children) get 0 height
-                                    // Items with children get minimum height (may have content)
-                                    if (!is_empty_flex_container(item)) {
-                                        item_height = 20;  // Minimum for items with content
+                                if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+                                    // Form control: use explicit flex-basis, CSS height, or intrinsic + padding/border
+                                    if (item->form->flex_basis >= 0 && !item->form->flex_basis_is_percent) {
+                                        item_height = (int)item->form->flex_basis;
+                                    } else if (item->blk && item->blk->given_height >= 0) {
+                                        item_height = (int)item->blk->given_height;
+                                    } else {
+                                        // intrinsic height is content-box; add CSS padding + border
+                                        float h = item->form->intrinsic_height;
+                                        if (item->bound) {
+                                            h += item->bound->padding.top + item->bound->padding.bottom;
+                                            if (item->bound->border) {
+                                                h += item->bound->border->width.top + item->bound->border->width.bottom;
+                                            }
+                                        }
+                                        item_height = (int)h;
                                     }
-                                    // else: empty flex items get 0
+                                } else if (item->fi) {
+                                    // Regular flex item: use flex-basis if specified, otherwise use intrinsic/explicit height
+                                    if (item->fi->flex_basis >= 0 && !item->fi->flex_basis_is_percent) {
+                                        item_height = item->fi->flex_basis;
+                                    } else if (item->blk && item->blk->given_height >= 0) {
+                                        item_height = (int)item->blk->given_height;
+                                    } else if (item->height > 0) {
+                                        item_height = item->height;
+                                    } else {
+                                        // Items with children get minimum height
+                                        if (!is_empty_flex_container(item)) {
+                                            item_height = 20;
+                                        }
+                                    }
                                 }
                                 total_item_height += item_height;
                                 log_debug("COLUMN FLEX: item height contribution = %d", item_height);
@@ -921,6 +938,20 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         item_width = item->fi->intrinsic_width.max_content;
                         // Intrinsic sizes from calculate_item_intrinsic_sizes are content-box,
                         // add padding+border for border-box contribution
+                        if (item->bound) {
+                            item_width += item->bound->padding.left + item->bound->padding.right;
+                            if (item->bound->border) {
+                                item_width += item->bound->border->width.left + item->bound->border->width.right;
+                            }
+                        }
+                    } else if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+                        // Form control (including <button>): use form intrinsic width
+                        item_width = item->form->intrinsic_width;
+                        if (item_width <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
+                            IntrinsicSizes sizes = measure_element_intrinsic_widths(flex_layout->lycon, (DomElement*)item, true);
+                            item_width = sizes.max_content;
+                            item->form->intrinsic_width = item_width;
+                        }
                         if (item->bound) {
                             item_width += item->bound->padding.left + item->bound->padding.right;
                             if (item->bound->border) {
@@ -2537,6 +2568,19 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         // flex-basis: auto - use intrinsic size
         float basis = is_horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
 
+        // <button> elements have flow children — measure content if intrinsic size is 0
+        if (basis <= 0 && item->tag() == HTM_TAG_BUTTON && flex_layout && flex_layout->lycon) {
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(flex_layout->lycon, (DomElement*)item, true);
+            if (is_horizontal) {
+                basis = sizes.max_content;
+                item->form->intrinsic_width = basis;
+            } else {
+                basis = sizes.max_content;
+                item->form->intrinsic_height = basis;
+            }
+            log_debug("calculate_flex_basis - button content measurement: %.1f", basis);
+        }
+
         // For form controls, add padding and border to get border-box size
         // CSS uses box-sizing: border-box for form controls by default
         if (item->bound) {
@@ -2801,6 +2845,27 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
 float calculate_hypothetical_main_size(ViewElement* item, FlexContainerLayout* flex_layout) {
     float basis = calculate_flex_basis(item, flex_layout);
 
+    // Form controls use FormControlProp (union with fi) — fi pointer is invalid
+    // Read min/max constraints directly from blk (which is valid for form controls)
+    if (item->item_prop_type == DomElement::ITEM_PROP_FORM) {
+        bool is_horizontal = is_main_axis_horizontal(flex_layout);
+        float min_main = 0, max_main = FLT_MAX;
+        if (item->blk) {
+            if (is_horizontal) {
+                if (item->blk->given_min_width >= 0) min_main = item->blk->given_min_width;
+                if (item->blk->given_max_width > 0) max_main = item->blk->given_max_width;
+            } else {
+                if (item->blk->given_min_height >= 0) min_main = item->blk->given_min_height;
+                if (item->blk->given_max_height > 0) max_main = item->blk->given_max_height;
+            }
+        }
+        float hypothetical = basis;
+        if (max_main < FLT_MAX && hypothetical > max_main) hypothetical = max_main;
+        if (min_main > 0 && hypothetical < min_main) hypothetical = min_main;
+        log_debug("calculate_hypothetical_main_size: form control basis=%.1f, min=%.1f, max=%.1f, result=%.1f",
+                  basis, min_main, max_main, hypothetical);
+        return hypothetical;
+    }
     if (!item->fi) return basis;
 
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
@@ -5565,7 +5630,36 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
 
         for (int j = 0; j < line->item_count; j++) {
             ViewElement* item = (ViewElement*)line->items[j]->as_element();
-            if (!item || !item->fi) continue;
+            if (!item) continue;
+
+            // Form controls use intrinsic sizes directly - don't read fi (union aliasing)
+            if (item->item_prop_type == DomElement::ITEM_PROP_FORM && item->form) {
+                float cross = is_horizontal ? item->form->intrinsic_height : item->form->intrinsic_width;
+                // Add CSS padding and border for border-box
+                if (item->bound) {
+                    if (is_horizontal) {
+                        cross += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            cross += item->bound->border->width.top + item->bound->border->width.bottom;
+                    } else {
+                        cross += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            cross += item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                }
+                if (item->fi) {
+                    item->fi->hypothetical_outer_cross_size = cross;
+                }
+                if (is_horizontal) {
+                    item->height = (int)cross;
+                } else {
+                    item->width = (int)cross;
+                }
+                log_debug("HYPOTHETICAL_CROSS: form control item[%d][%d] cross=%.1f", i, j, cross);
+                continue;
+            }
+
+            if (!item->fi) continue;
 
             float hypothetical_cross = 0;
             float min_cross = 0;
@@ -5595,7 +5689,6 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                     // This handles nested flex containers properly
                     float measured_height = measure_flex_content_height(item);
                     if (measured_height > 0) {
-                        // Add padding and border to content height to get border-box height
                         float padding_border_height = 0;
                         if (item->bound) {
                             padding_border_height += item->bound->padding.top + item->bound->padding.bottom;
@@ -5606,7 +5699,6 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                         hypothetical_cross = measured_height + padding_border_height;
                         // Update item dimensions so alignment uses correct size
                         item->height = (int)hypothetical_cross;
-                        item->content_height = (int)measured_height;
                     } else {
                         // CSS Flexbox §9.4: "Determine the hypothetical cross size of each item
                         // by performing layout with the used main size and the available space."

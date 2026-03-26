@@ -56,7 +56,7 @@ extern "C" Item bash_builtin_echo(Item* args, int argc) {
     }
 
     for (int i = start; i < argc; i++) {
-        if (i > start) fputc(' ', stdout);
+        if (i > start) bash_raw_putc(' ');
         Item str_val = bash_to_string(args[i]);
         String* s = it2s(str_val);
         if (!s) continue;
@@ -66,25 +66,25 @@ extern "C" Item bash_builtin_echo(Item* args, int argc) {
             for (int j = 0; j < (int)s->len; j++) {
                 if (s->chars[j] == '\\' && j + 1 < (int)s->len) {
                     switch (s->chars[j + 1]) {
-                    case 'n': fputc('\n', stdout); j++; break;
-                    case 't': fputc('\t', stdout); j++; break;
-                    case '\\': fputc('\\', stdout); j++; break;
-                    case 'a': fputc('\a', stdout); j++; break;
-                    case 'b': fputc('\b', stdout); j++; break;
-                    case 'r': fputc('\r', stdout); j++; break;
-                    default: fputc(s->chars[j], stdout); break;
+                    case 'n': bash_raw_putc('\n'); j++; break;
+                    case 't': bash_raw_putc('\t'); j++; break;
+                    case '\\': bash_raw_putc('\\'); j++; break;
+                    case 'a': bash_raw_putc('\a'); j++; break;
+                    case 'b': bash_raw_putc('\b'); j++; break;
+                    case 'r': bash_raw_putc('\r'); j++; break;
+                    default: bash_raw_putc(s->chars[j]); break;
                     }
                 } else {
-                    fputc(s->chars[j], stdout);
+                    bash_raw_putc(s->chars[j]);
                 }
             }
         } else {
-            fwrite(s->chars, 1, s->len, stdout);
+            bash_raw_write(s->chars, s->len);
         }
     }
 
     if (!no_newline) {
-        fputc('\n', stdout);
+        bash_raw_putc('\n');
     }
     fflush(stdout);
     bash_set_exit_code(0);
@@ -111,7 +111,7 @@ extern "C" Item bash_builtin_printf(Item format, Item* args, int argc) {
                 if (arg_idx < argc) {
                     Item s = bash_to_string(args[arg_idx++]);
                     String* str = it2s(s);
-                    if (str) fwrite(str->chars, 1, str->len, stdout);
+                    if (str) bash_raw_write(str->chars, str->len);
                 }
                 i++;
                 break;
@@ -126,29 +126,31 @@ extern "C" Item bash_builtin_printf(Item format, Item* args, int argc) {
                         String* s = it2s(arg);
                         if (s) val = strtoll(s->chars, NULL, 10);
                     }
-                    printf("%lld", (long long)val);
+                    char buf[32];
+                    int n = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+                    bash_raw_write(buf, n);
                 }
                 i++;
                 break;
             }
             case '%':
-                fputc('%', stdout);
+                bash_raw_putc('%');
                 i++;
                 break;
             default:
-                fputc(fmt->chars[i], stdout);
+                bash_raw_putc(fmt->chars[i]);
                 break;
             }
         } else if (fmt->chars[i] == '\\' && i + 1 < (int)fmt->len) {
             // process escape sequences in format string
             switch (fmt->chars[i + 1]) {
-            case 'n': fputc('\n', stdout); i++; break;
-            case 't': fputc('\t', stdout); i++; break;
-            case '\\': fputc('\\', stdout); i++; break;
-            default: fputc(fmt->chars[i], stdout); break;
+            case 'n': bash_raw_putc('\n'); i++; break;
+            case 't': bash_raw_putc('\t'); i++; break;
+            case '\\': bash_raw_putc('\\'); i++; break;
+            default: bash_raw_putc(fmt->chars[i]); break;
             }
         } else {
-            fputc(fmt->chars[i], stdout);
+            bash_raw_putc(fmt->chars[i]);
         }
     }
     fflush(stdout);

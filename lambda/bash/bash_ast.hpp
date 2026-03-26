@@ -69,6 +69,8 @@ typedef enum BashAstNodeType {
     BASH_AST_NODE_ARRAY_LITERAL,        // (a b c)
     BASH_AST_NODE_ARRAY_ACCESS,         // ${arr[idx]}
     BASH_AST_NODE_ARRAY_ALL,            // ${arr[@]} / ${arr[*]}
+    BASH_AST_NODE_ARRAY_SLICE,          // ${arr[@]:off:len}
+    BASH_AST_NODE_ARRAY_LENGTH,         // ${#arr[@]}
 
     // assignments
     BASH_AST_NODE_ASSIGNMENT,           // var=value
@@ -349,6 +351,7 @@ typedef struct BashAssignmentNode {
     BashAstNode base;
     String* name;
     BashAstNode* value;             // right-hand side (word or expression)
+    BashAstNode* index;             // array index (for arr[idx]=val)
     bool is_local;                  // declared with `local`
     bool is_export;                 // declared with `export`
     bool is_append;                 // += compound assignment
@@ -458,6 +461,14 @@ typedef struct BashArithVariableNode {
     String* name;
 } BashArithVariableNode;
 
+// Arithmetic assignment/update: i=0, i+=1, i++, i--
+typedef struct BashArithAssignNode {
+    BashAstNode base;
+    String* name;                   // variable being assigned
+    BashOperator op;                // BASH_OP_ASSIGN, BASH_OP_INC, BASH_OP_DEC, etc.
+    BashAstNode* value;             // right-hand side (NULL for ++/--)
+} BashArithAssignNode;
+
 // Test command: [ expr ] or test expr
 typedef struct BashTestCommandNode {
     BashAstNode base;
@@ -499,6 +510,33 @@ typedef struct BashArrayLiteralNode {
     BashAstNode* elements;          // linked list of words
     int length;
 } BashArrayLiteralNode;
+
+// Array access: ${arr[idx]}
+typedef struct BashArrayAccessNode {
+    BashAstNode base;
+    String* name;                   // array variable name
+    BashAstNode* index;             // index expression
+} BashArrayAccessNode;
+
+// Array all: ${arr[@]} or ${arr[*]}
+typedef struct BashArrayAllNode {
+    BashAstNode base;
+    String* name;                   // array variable name
+} BashArrayAllNode;
+
+// Array slice: ${arr[@]:offset:length}
+typedef struct BashArraySliceNode {
+    BashAstNode base;
+    String* name;                   // array variable name
+    BashAstNode* offset;            // offset expression
+    BashAstNode* length;            // length expression (optional)
+} BashArraySliceNode;
+
+// Array length: ${#arr[@]}
+typedef struct BashArrayLengthNode {
+    BashAstNode base;
+    String* name;                   // array variable name
+} BashArrayLengthNode;
 
 // Redirect: > file, >> file, < file, 2>&1
 typedef struct BashRedirectNode {

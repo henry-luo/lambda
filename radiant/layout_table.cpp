@@ -224,19 +224,27 @@ static float get_cell_css_width(LayoutContext* lycon, ViewTableCell* tcell, floa
 
     if (cell_width <= 0) return 0.0f;
 
-    // Add padding (CSS width is content-box)
-    if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
-        cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
-    }
+    // Check box-sizing model
+    bool is_border_box = (tcell->blk && tcell->blk->box_sizing == CSS_VALUE_BORDER_BOX);
 
-    // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't contribute to column widths.
-    // The column widths are content+padding only. Half-borders are added at positioning stage.
-    if (!border_collapse && tcell->bound && tcell->bound->border) {
-        float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
-            ? tcell->bound->border->width.left : 0.0f;
-        float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
-            ? tcell->bound->border->width.right : 0.0f;
-        cell_width += border_left + border_right;
+    if (is_border_box) {
+        // CSS width already includes padding and border — cell_width is the border-box width
+        // No need to add anything
+    } else {
+        // Add padding (CSS width is content-box by default)
+        if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+            cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+        }
+
+        // CSS 2.1 §17.6.2: In border-collapse mode, cell borders don't contribute to column widths.
+        // The column widths are content+padding only. Half-borders are added at positioning stage.
+        if (!border_collapse && tcell->bound && tcell->bound->border) {
+            float border_left = (tcell->bound->border->left_style != CSS_VALUE_NONE)
+                ? tcell->bound->border->width.left : 0.0f;
+            float border_right = (tcell->bound->border->right_style != CSS_VALUE_NONE)
+                ? tcell->bound->border->width.right : 0.0f;
+            cell_width += border_left + border_right;
+        }
     }
 
     // CSS 2.1: Apply min-width/max-width constraints to cell border-box width
@@ -1191,6 +1199,7 @@ struct TableMetadata {
     float* col_original_widths;  // Original column widths before collapse zeroing (for row height calc)
     bool* row_has_percent_height;  // CSS 2.1 §17.5.3: Rows with percentage heights compute to auto
     float* col_edge_max_border;   // Max resolved border at each column edge across all rows (size: column_count + 1)
+    bool* col_has_explicit_width;    // Whether a column has an explicit CSS width (percentage or absolute)
 
     // Border-collapse: max winning border widths at table edges (CSS 2.1 §17.6.2)
     // These are the maximum resolved border widths at each outer edge,
@@ -1215,6 +1224,7 @@ struct TableMetadata {
         col_original_widths = (float*)mem_calloc(cols, sizeof(float), MEM_CAT_LAYOUT);
         row_has_percent_height = (bool*)mem_calloc(rows, sizeof(bool), MEM_CAT_LAYOUT);
         col_edge_max_border = (float*)mem_calloc(cols + 1, sizeof(float), MEM_CAT_LAYOUT);
+        col_has_explicit_width = (bool*)mem_calloc(cols, sizeof(bool), MEM_CAT_LAYOUT);
     }
 
     ~TableMetadata() {
@@ -1229,6 +1239,7 @@ struct TableMetadata {
         mem_free(col_original_widths);
         mem_free(row_has_percent_height);
         mem_free(col_edge_max_border);
+        mem_free(col_has_explicit_width);
     }
 
     // Grid accessor
@@ -5467,6 +5478,11 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
             float cell_width = get_cell_css_width(lycon, tcell, table_content_width, table->tb->border_collapse);
 
+            // Track columns with explicit CSS width for distribution
+            if (cell_width > 0 && tcell->td->col_span == 1 && col >= 0 && col < meta->column_count) {
+                meta->col_has_explicit_width[col] = true;
+            }
+
             // Calculate both minimum and preferred widths for CSS 2.1 table layout
             float min_width = 0.0f;   // MCW - Minimum Content Width
             float pref_width = 0.0f;  // PCW - Preferred Content Width
@@ -6200,32 +6216,63 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             col_widths[i] = meta->col_max_widths[i];
         }
     } else if (available_content_width > pref_table_content_width) {
-        // Case 2: Table wider than preferred - distribute extra space proportionally
+        // Case 2: Table wider than preferred - distribute extra space
+        // Columns with explicit CSS widths keep their preferred width;
+        // extra space is distributed only among auto-width columns.
         int extra_space = available_content_width - pref_table_content_width;
 
         log_debug("CSS 2.1 Case 2: Table wider than preferred - distributing %dpx extra", extra_space);
 
-        // Distribute proportionally based on preferred widths (CSS 2.1 behavior)
-        int total_distributed = 0;
+        // Calculate total preferred width of auto-width columns only
+        int auto_pref_total = 0;
+        int auto_col_count = 0;
         for (int i = 0; i < columns; i++) {
-            if (pref_table_content_width > 0) {
-                int extra_for_col = (extra_space * meta->col_max_widths[i]) / pref_table_content_width;
-                col_widths[i] = meta->col_max_widths[i] + extra_for_col;
-                total_distributed += extra_for_col;
-            } else {
-                // CSS 2.1: When all columns have zero preferred width, distribute
-                // available space equally among columns
-                int equal_share = extra_space / columns;
-                col_widths[i] = equal_share;
-                total_distributed += equal_share;
+            if (!meta->col_has_explicit_width[i]) {
+                auto_pref_total += meta->col_max_widths[i];
+                auto_col_count++;
             }
         }
 
-        // Distribute any remainder to maintain exact width
-        int remainder = extra_space - total_distributed;
-        for (int i = 0; i < columns && remainder > 0; i++) {
-            col_widths[i]++;
-            remainder--;
+        int total_distributed = 0;
+        if (auto_col_count > 0) {
+            // Distribute extra space only to auto-width columns
+            for (int i = 0; i < columns; i++) {
+                if (meta->col_has_explicit_width[i]) {
+                    col_widths[i] = meta->col_max_widths[i];
+                } else if (auto_pref_total > 0) {
+                    int extra_for_col = (extra_space * meta->col_max_widths[i]) / auto_pref_total;
+                    col_widths[i] = meta->col_max_widths[i] + extra_for_col;
+                    total_distributed += extra_for_col;
+                } else {
+                    int equal_share = extra_space / auto_col_count;
+                    col_widths[i] = equal_share;
+                    total_distributed += equal_share;
+                }
+            }
+            // Remainder to auto-width columns
+            int remainder = extra_space - total_distributed;
+            for (int i = 0; i < columns && remainder > 0; i++) {
+                if (!meta->col_has_explicit_width[i]) {
+                    col_widths[i]++;
+                    remainder--;
+                }
+            }
+        } else {
+            // All columns have explicit widths - distribute proportionally to all
+            for (int i = 0; i < columns; i++) {
+                if (pref_table_content_width > 0) {
+                    int extra_for_col = (extra_space * meta->col_max_widths[i]) / pref_table_content_width;
+                    col_widths[i] = meta->col_max_widths[i] + extra_for_col;
+                    total_distributed += extra_for_col;
+                } else {
+                    col_widths[i] = meta->col_max_widths[i];
+                }
+            }
+            int remainder = extra_space - total_distributed;
+            for (int i = 0; i < columns && remainder > 0; i++) {
+                col_widths[i]++;
+                remainder--;
+            }
         }
     } else {
         // Case 3: Table narrower than preferred - CSS 2.1 constrained distribution

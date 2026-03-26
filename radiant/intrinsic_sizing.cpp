@@ -8,6 +8,7 @@
 #include "intrinsic_sizing.hpp"
 #include "layout_flex.hpp"  // For FlexDirection enum
 #include "grid.hpp"         // For GridTrackList
+#include "form_control.hpp" // For FormDefaults
 #include "../lib/font/font.h"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
@@ -2526,6 +2527,35 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         return svg_height;
     }
 
+    // Form controls (input, select, textarea) — replaced elements with intrinsic height
+    // Return only the CONTENT height; the shared padding/border code at the bottom adds the rest
+    {
+        uintptr_t etag = element->tag();
+        if (etag == HTM_TAG_INPUT || etag == HTM_TAG_SELECT || etag == HTM_TAG_TEXTAREA) {
+            float font_size = 16.0f;
+            if (lycon->font.style && lycon->font.style->font_size > 0)
+                font_size = lycon->font.style->font_size;
+
+            if (etag == HTM_TAG_TEXTAREA) {
+                int rows = FormDefaults::TEXTAREA_ROWS;
+                height = rows * font_size * 1.2f + 2 * FormDefaults::TEXTAREA_PADDING;
+            } else if (etag == HTM_TAG_INPUT) {
+                const char* type_attr = element->get_attribute("type");
+                if (type_attr && (strcmp(type_attr, "checkbox") == 0 || strcmp(type_attr, "radio") == 0)) {
+                    return FormDefaults::CHECK_SIZE;  // fixed size, no CSS padding/border
+                }
+                height = font_size + 2 * FormDefaults::TEXT_PADDING_V;
+            } else {
+                // select
+                height = font_size + 2 * FormDefaults::TEXT_PADDING_V;
+            }
+
+            log_debug("calculate_max_content_height: form control %s content_height=%.1f",
+                      element->node_name(), height);
+            // Fall through to add padding + border at bottom of function
+        }
+    }
+
     // Check if this is a grid container - need to detect column count
     bool is_grid_container = false;
     int grid_column_count = 1;  // Default: single column = vertical stacking
@@ -2900,15 +2930,27 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
 
+        // Track previous margin-bottom for block-flow margin collapse
+        float prev_margin_bottom = 0;
+        bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
+
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
             float child_height = calculate_max_content_height(lycon, child, content_w);
 
-            // For grid/flex containers, child margins don't collapse —
-            // add child's margin-top/bottom (percentage resolves against containing block width)
-            if ((is_grid_container || is_flex_container) && child->is_element() && content_w > 0) {
+            // Resolve child's vertical margins for height estimation
+            if (child->is_element() && content_w > 0) {
                 DomElement* child_elem = child->as_element();
-                if (child_elem->specified_style) {
-                    float mt = 0, mb = 0;
+                float mt = 0, mb = 0;
+
+                // Try resolved bound->margin first (most reliable after CSS cascade)
+                ViewElement* child_ve = (ViewElement*)child_elem;
+                if (child_ve->bound) {
+                    mt = child_ve->bound->margin.top;
+                    mb = child_ve->bound->margin.bottom;
+                }
+
+                // Fall back to specified_style if bound not resolved
+                if (mt == 0 && mb == 0 && child_elem->specified_style) {
                     CssDeclaration* mt_decl = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_TOP);
                     if (mt_decl && mt_decl->value) {
                         if (mt_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE)
@@ -2935,7 +2977,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                             }
                         }
                     }
+                }
+
+                if (is_grid_container || is_flex_container) {
+                    // Flex/grid: margins don't collapse, add full margins
                     child_height += mt + mb;
+                } else if (is_block_flow &&
+                           (child_elem->display.outer != CSS_VALUE_INLINE ||
+                            child_ve->view_type == RDT_VIEW_INLINE_BLOCK)) {
+                    // Block flow: collapse margins between adjacent block siblings
+                    // CSS2 §8.3.1: adjoining margins collapse to max(mt, prev_mb)
+                    float collapsed = fmax(prev_margin_bottom, mt);
+                    height += collapsed;
+                    prev_margin_bottom = mb;
                 }
             }
 
