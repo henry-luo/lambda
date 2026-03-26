@@ -11,10 +11,11 @@ PDF.js is a 120+ file, zero-dependency JavaScript library that parses and render
 documents. Its core parsing engine (`src/core/`) can run without browser APIs by using
 a "fake worker" fallback path already built into the codebase.
 
-**Update (2025-07-20):** Phase 0 (primitives baseline, 33/33) and Phase 1
-(ArrayBuffer/DataView, 43/43) both complete. This closes 4 of the original 6 gaps
-(generators, fetch, microtasks, ArrayBuffer/DataView). The primary remaining gap is
-**async/await** (state machine transform). ES modules are bypassed via bundling.
+**Update (2025-07-20):** Phase 0 (primitives baseline, 33/33), Phase 1
+(ArrayBuffer/DataView, 43/43), and Phase 2 (private fields, 23/23) all complete.
+This closes 4 of the original 6 gaps (generators, fetch, microtasks,
+ArrayBuffer/DataView). The primary remaining gap is **async/await** (state machine
+transform). ES modules are bypassed via bundling.
 
 ### Feasibility Score (Updated)
 
@@ -337,7 +338,7 @@ Gap 5 (generators) was closed by v15 Phase 8.
 ```
 Phase 0: Bundle + Baseline          ─── Week 1
 Phase 1: ArrayBuffer/DataView       ─── ✅ DONE
-Phase 2: Private Fields Polish      ─── Week 3
+Phase 2: Private Fields Polish      ─── ✅ DONE
 Phase 3: Promise.withResolvers      ─── Week 3
 Phase 4: Generators (basic)         ─── ✅ DONE (v15)
 Phase 5: Async/Await (sync fast)    ─── Weeks 4-5
@@ -442,11 +443,28 @@ ArrayBuffer, DataView, and TypedArray in the `Map.type` field.
 
 **Goal:** All `#field` patterns in PDF.js work correctly.
 
-1. Audit the `#field` → `__private_` transform for completeness
-2. Handle class field initializers: `#map = new Map()` (evaluate in constructor)
-3. Handle static private fields: `static #cache = Object.create(null)`
-4. Handle private methods: `#validateRange()` → `__private_validateRange()`
-5. Handle `in` operator with private fields: `#field in obj`
+**Status: ✅ COMPLETE** (2025-07-21)
+
+**Approach taken:**
+1. AST-level transform: `#field` → `__private_field` (strip `#`, prepend `__private_`)
+   in `build_js_expression()` for `private_property_identifier` nodes
+2. Instance field collection in `jm_collect_functions`: non-static field definitions
+   stored as `JsInstanceFieldEntry` with name + initializer
+3. Instance field initialization at `new ClassName()` call site (before constructor),
+   walking inheritance chain base-first for correct initialization order
+4. Disabled A5/P3/P4 shaped slot optimization for classes with instance fields
+   (avoids shape/slot conflicts between dynamic field inits and P3 slot writes)
+5. Static private field increment/decrement: write-back via `js_set_module_var`
+   instead of `js_property_set` for `ClassName.#field++` patterns
+6. `#field in obj`: compile left-side `__private_*` identifier as string literal key
+
+**Results:** 23/23 private fields test cases pass. 689/689 baseline regression tests pass.
+
+1. ~~Audit the `#field` → `__private_` transform for completeness~~ ✅
+2. ~~Handle class field initializers: `#map = new Map()` (evaluate in constructor)~~ ✅
+3. ~~Handle static private fields: `static #cache = Object.create(null)`~~ ✅
+4. ~~Handle private methods: `#validateRange()` → `__private_validateRange()`~~ ✅
+5. ~~Handle `in` operator with private fields: `#field in obj`~~ ✅
 
 **Test:** `primitives_spec.js` (Dict uses `#map`), `document_spec.js`.
 
