@@ -264,6 +264,10 @@ Item js_json_parse(Item str_item);
 Item js_json_stringify(Item value);
 Item js_delete_property(Item obj, Item key);
 
+// v15: fetch() API
+Item js_fetch(Item url, Item options);
+void js_fetch_reset(void);
+
 // =============================================================================
 // Exception Handling (try/catch/throw)
 // =============================================================================
@@ -379,6 +383,17 @@ Item js_generator_return(Item generator, Item value);
  * Throw an error into the generator (at yield point).
  */
 Item js_generator_throw(Item generator, Item error);
+
+/**
+ * v15: Create a 2-element array [value, next_state] for generator state machine returns.
+ * Called from MIR-compiled generator state machine functions at each yield point.
+ */
+Item js_gen_yield_result(Item value, int64_t next_state);
+
+/**
+ * v15: Convert an iterable to an array. Drains generators, passes arrays through.
+ */
+Item js_iterable_to_array(Item iterable);
 
 // =============================================================================
 // v14: Promise Runtime

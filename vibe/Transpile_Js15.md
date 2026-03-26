@@ -1346,3 +1346,29 @@ semantics.
 - Build: **0 errors**, binary 13.4 MB
 - Lambda baseline: **679/679** pass (100%)
 - Radiant baseline: **3656/3671** pass (15 pre-existing failures, unchanged)
+
+### Phase 8: Generator State Machine — ✅ Completed (2025-07-14)
+
+- Implemented full generator function support (`function*`, `yield`, for-of protocol)
+- State machine transform in `transpile_js_mir.cpp`: yield prescan, env save/load,
+  state dispatch via EQS/BT chain, boxed wrapper
+- Runtime in `js_runtime.cpp`: `js_gen_yield_result`, `js_is_generator`,
+  `js_iterable_to_array`, generator method dispatch (`.next`, `.return`, `.throw`)
+- Bugs fixed: method dispatch via `js_map_method`, variable persistence across yields,
+  capture analysis for yield expressions
+- Tests: 8 test cases in `generator_basic.js`, all pass, 0 regressions on 64 JS tests
+
+### Phase 7: Microtask Scheduling Fix — ✅ Completed (2025-07-14)
+
+- Promise `.then()`/`.catch()`/`.finally()` handlers now scheduled as microtasks per spec
+- `js_promise_settle()` enqueues handlers via `js_microtask_enqueue` instead of direct calls
+- `js_promise_then()` on already-settled promises schedules handler as microtask
+- Added `next_promise[8]` and `is_finally[8]` to `JsPromise` struct for proper chaining
+- `js_promise_microtask_run`: calls handler(result), chains return value to next promise
+- `js_promise_finally_microtask_run`: calls handler(0 args), passes through original value
+- Fixed resolve/reject callbacks: bound to promise index via `js_bind_function` (no more
+  fragile global `js_resolving_promise`), supports async resolution (e.g. setTimeout → resolve)
+- Resolve callback handles thenable chaining (if resolve(promise), waits for inner promise)
+- Tests: `microtask_order.js` verifies: sync-before-micro, micro-before-macro,
+  then chaining, multiple then, catch→then chain, async resolve, finally handler
+- Regression: 64/64 JS tests pass, 684/684 Lambda baseline pass

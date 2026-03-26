@@ -1,18 +1,20 @@
 // network_thread_pool.h
 // Thread pool for asynchronous network resource downloads
-// Manages worker threads with priority queue for task scheduling
+// Backed by libuv's built-in threadpool via uv_queue_work()
 
 #ifndef NETWORK_THREAD_POOL_H
 #define NETWORK_THREAD_POOL_H
 
-#include <pthread.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Resource priority (lower value = higher priority)
+// Note: libuv's threadpool uses FIFO; priority is advisory.
+// Tasks should be submitted in priority order by the caller.
 typedef enum {
     PRIORITY_CRITICAL = 0,  // Main HTML document
     PRIORITY_HIGH     = 1,  // CSS, fonts (block rendering)
@@ -31,18 +33,13 @@ typedef struct DownloadTask {
     double enqueue_time;         // When task was queued
 } DownloadTask;
 
-// Thread pool structure
+// Thread pool structure (backed by libuv threadpool)
 typedef struct NetworkThreadPool {
-    int num_threads;             // Number of worker threads
-    pthread_t* threads;          // Worker thread handles
-    
-    void* task_queue;            // PriorityQueue of DownloadTask*
-    pthread_mutex_t queue_mutex; // Protects task queue
-    pthread_cond_t queue_cond;   // Signals new tasks
-    
+    int num_threads;             // Requested thread count (advisory)
     bool shutdown_flag;          // Shutdown requested
-    int active_count;            // Number of active workers
-    int queued_count;            // Number of queued tasks
+    atomic_int active_count;     // Number of active workers
+    atomic_int queued_count;     // Number of queued tasks
+    atomic_int pending_count;    // Total outstanding (queued + active)
 } NetworkThreadPool;
 
 // Create and destroy thread pool
