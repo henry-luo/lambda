@@ -18,7 +18,7 @@ v3:  OOP and module system                             (this doc, target ~15K LO
        Phase A: Class system (class, inheritance, super, dunders)   ✅ COMPLETE
        Phase B: with statement (context managers)                   ✅ COMPLETE
        Phase C: Decorators                                          ✅ COMPLETE
-       Phase D: **kwargs (complete calling convention)              ⏳ next
+       Phase D: **kwargs (complete calling convention)              ✅ done
        Phase E: Single-file imports                                 ⏳ pending
 ```
 
@@ -34,7 +34,7 @@ v3:  OOP and module system                             (this doc, target ~15K LO
 | Builtin exception classes as callables | ❌ string sentinels only | ✅ **DONE** — `ValueError(...)`, `RuntimeError(...)` etc. are real class instances |
 | `with` statement | ❌ AST parsed, no codegen | ✅ **DONE** — `__enter__`/`__exit__`, `as`-target, exception suppression |
 | Decorators | ❌ | ✅ **DONE** — function/class/method decorators, `@property`, decorator factories, stacked decorators |
-| `**kwargs` | ❌ DICT_SPLAT_PARAMETER skipped | ⏳ Phase D — next |
+| `**kwargs` | ✅ Implemented | ✅ Phase D — done |
 | `import` / `from … import` | No-op | ⏳ Phase E — pending |
 | Estimated new LOC (A+B actual) | — | ~3,200 added so far |
 
@@ -684,7 +684,7 @@ print(repr(p))    # <Point instance>
 
 ---
 
-## 5. Phase D: `**kwargs`  ⏳ NEXT
+## 5. Phase D: `**kwargs`  ✅ DONE
 
 **Goal:** Complete the function calling convention with `**kwargs` parameter packing and `**dict` argument unpacking.
 
@@ -915,14 +915,13 @@ A1–A3: py_class.cpp/h, runtime updates (py_getattr, py_call_function)  ✅ DON
             │
             └─→ C: Decorators (needs class system for class decorators)  ✅ DONE
 
-D: **kwargs — independent of A/B/C, can do in parallel               ⏳ NEXT
+D: **kwargs — independent of A/B/C, can do in parallel               ✅ DONE
 
 E: Import system — best after A so imported modules can define classes  ⏳ PENDING
 ```
 
 Remaining sequence:
-1. **D** (**kwargs) — next
-2. **E** (imports — last, as it exercises the full class + module pipeline)
+1. **E** (imports — last, as it exercises the full class + module pipeline)
 
 ---
 
@@ -939,12 +938,12 @@ Remaining sequence:
 | A8 | `py_class.cpp` | +80 | ✅ done | Built-in class hierarchy init |
 | B | `transpile_py_mir.cpp` + `py_runtime.cpp` + `build_py_ast.cpp` + `py_class.h` | +480 | ✅ done | with codegen, context_enter/exit, as_pattern fix, attr aug-assign fix, builtin exc lookup |
 | C | `transpile_py_mir.cpp` + `py_builtins.cpp` | +480 | ✅ done | Decorator application, `@property`, decorator factories, stacked decorators, multi-level closure capture fix |
-| D | `transpile_py_mir.cpp` + `py_runtime.cpp` | +420 | ⏳ next | **kwargs packing, ** call-site unpacking, py_dict_merge |
+| D | `transpile_py_mir.cpp` + `py_runtime.cpp` + `py_runtime.h` + `sys_func_registry.c` | +420 | ✅ done | **kwargs packing, ** call-site unpacking, py_dict_merge, py_set_kwargs_flag, py_call_function_kw |
 | E | `py_module.cpp` (new) + `py_module.h` (new) + `transpile_py_mir.cpp` | +680 | ⏳ pending | Module cache, import codegen |
-| Tests | `test/py/*.py` + `test/py/*.txt` | ~300 | partial | `test_py_classes.py` ✅, `test_py_with.py` ✅ |
-| **Total** | | **~4,320** | A+B done | |
+| Tests | `test/py/*.py` + `test/py/*.txt` | ~300 | partial | `test_py_classes.py` ✅, `test_py_with.py` ✅, `test_py_decorators.py` ✅, `test_py_kwargs.py` ✅ |
+| **Total** | | **~4,320** | A+B+C+D done | |
 
-**v3 total so far:** ~10,865 (v2) + ~3,120 (A+B+C actual) = **~13,985 LOC**  
+**v3 total so far:** ~10,865 (v2) + ~3,540 (A+B+C+D actual) = **~14,405 LOC**  
 **v3 total projection:** ~10,865 (v2) + ~4,520 (all phases) = **~15,385 LOC**
 
 ---
@@ -967,7 +966,7 @@ All existing test scripts in `test/py/` must continue to pass after each phase.
 | `test_py_with_file.py` | B | ⏳ not yet created | `with open(...)` (uses `py_context_exit` to close) |
 | `test_py_decorators.py` | C | ✅ passing | Function/class/method decorators, stacked, decorator factories, `@property`, identity decorator |
 | `test_py_property.py` | C3 | covered in `test_py_decorators.py` | `@property` getter |
-| `test_py_kwargs.py` | D | ⏳ not yet created | `**kwargs` in definitions, `**dict` at call sites |
+| `test_py_kwargs.py` | D | ✅ passing | `**kwargs` in definitions, `**dict` at call sites |
 | `test_py_import.py` | E | ⏳ not yet created | `from utils import x`, `import utils`, `utils.x` |
 
 ### Integration Test

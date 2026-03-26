@@ -95,6 +95,9 @@ struct PyFuncCollected {
     bool has_star_args;             // true if function has *args parameter
     char star_args_name[128];       // name of *args parameter (with _py_ prefix)
     int star_args_index;            // index of *args in param list (regular params before it)
+    // **kwargs variadic keyword parameter
+    bool has_kwargs;                // true if function has **kwargs parameter
+    char kwargs_name[128];          // name of **kwargs variable (with _py_ prefix)
     // class method info
     bool is_method;                 // true if this function is a class method
     char class_name[128];           // name of the class this method belongs to (without _py_ prefix)
@@ -613,9 +616,14 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
                     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, fptr),
                         MIR_new_ref_op(mt->ctx, found->func_item)));
-                    return pm_call_2(mt, "py_new_function", MIR_T_I64,
+                    MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, mt->func_entries[i].param_count));
+                    if (mt->func_entries[i].has_kwargs) {
+                        pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+                    }
+                    return fn_item_reg;
                 }
             }
         }
@@ -1504,8 +1512,8 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             char fn_name[140];
             snprintf(fn_name, sizeof(fn_name), "_%s", target_fc->name);
 
-            // determine total MIR params (regular + optional varargs pair)
-            int mir_total = total_params + (target_fc->has_star_args ? 2 : 0);
+            // determine total MIR params (regular + optional varargs pair + optional kwargs map)
+            int mir_total = total_params + (target_fc->has_star_args ? 2 : 0) + (target_fc->has_kwargs ? 1 : 0);
 
             // build proto for the call
             MIR_var_t pvars[20];
@@ -1536,6 +1544,57 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 new_entry.proto = proto;
                 new_entry.import = NULL;
                 hashmap_set(mt->import_cache, &new_entry);
+            }
+
+            // build kwargs map for **kwargs-accepting functions
+            MIR_reg_t kwargs_map_reg = 0;
+            if (target_fc->has_kwargs) {
+                kwargs_map_reg = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+                // third pass: collect leftover keyword args + **splat into kwargs map
+                PyAstNode* ka = call->arguments;
+                while (ka) {
+                    if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                        PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
+                        if (!kw->key) {
+                            // **expr splat — merge into kwargs map
+                            MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
+                            pm_call_2(mt, "py_dict_merge", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, kwargs_map_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, splat_val));
+                        } else {
+                            // named kwarg — add to map if it doesn't match any named param
+                            bool kw_matched = false;
+                            if (target_fc->node) {
+                                PyAstNode* pp = target_fc->node->params;
+                                int pi = 0;
+                                while (pp && pi < total_params) {
+                                    String* pname = NULL;
+                                    if (pp->node_type == PY_AST_NODE_PARAMETER ||
+                                        pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+                                        pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+                                        pname = ((PyParamNode*)pp)->name;
+                                    }
+                                    if (pname && pname->len == kw->key->len &&
+                                        strncmp(pname->chars, kw->key->chars, pname->len) == 0) {
+                                        kw_matched = true;
+                                        break;
+                                    }
+                                    pp = pp->next;
+                                    pi++;
+                                }
+                            }
+                            if (!kw_matched) {
+                                MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                                MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
+                                pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kwargs_map_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kname_reg),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, kval_reg));
+                            }
+                        }
+                    }
+                    ka = ka->next;
+                }
             }
 
             MIR_reg_t res = pm_new_reg(mt, "dcall", MIR_T_I64);
@@ -1579,7 +1638,7 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 }
 
                 int nops = 3 + mir_total;
-                MIR_op_t ops[23];
+                MIR_op_t ops[24];
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, target_fc->func_item);
                 ops[2] = MIR_new_reg_op(mt->ctx, res);
@@ -1588,15 +1647,21 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 }
                 ops[3 + total_params] = MIR_new_reg_op(mt->ctx, va_ptr);
                 ops[3 + total_params + 1] = MIR_new_int_op(mt->ctx, excess_count);
+                if (target_fc->has_kwargs) {
+                    ops[3 + total_params + 2] = MIR_new_reg_op(mt->ctx, kwargs_map_reg);
+                }
                 pm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             } else {
-                int nops = 3 + total_params;
-                MIR_op_t ops[19]; // proto + func_ref + result + up to 16 args
+                int nops = 3 + mir_total;
+                MIR_op_t ops[20]; // proto + func_ref + result + up to 16 args + optional kwargs map
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
                 ops[1] = MIR_new_ref_op(mt->ctx, target_fc->func_item);
                 ops[2] = MIR_new_reg_op(mt->ctx, res);
                 for (int i = 0; i < total_params && i < 16; i++) {
                     ops[3 + i] = MIR_new_reg_op(mt->ctx, ordered_args[i]);
+                }
+                if (target_fc->has_kwargs) {
+                    ops[3 + total_params] = MIR_new_reg_op(mt->ctx, kwargs_map_reg);
                 }
                 pm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             }
@@ -1637,6 +1702,47 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
         pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_reg_op(mt->ctx, args_ptr),
             MIR_new_int_op(mt->ctx, 0)));
+    }
+
+    // check for keyword arguments (**expr splats and named kwargs) in generic call path
+    {
+        bool has_any_kwarg = false;
+        PyAstNode* ka = call->arguments;
+        while (ka) {
+            if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) { has_any_kwarg = true; break; }
+            ka = ka->next;
+        }
+        if (has_any_kwarg) {
+            // build kwargs map from all named kwargs and **splat
+            MIR_reg_t kw_map = pm_call_0(mt, "py_dict_new", MIR_T_I64);
+            ka = call->arguments;
+            while (ka) {
+                if (ka->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                    PyKeywordArgNode* kw = (PyKeywordArgNode*)ka;
+                    if (!kw->key) {
+                        // **expr splat — merge into kwargs map
+                        MIR_reg_t splat_val = pm_transpile_expression(mt, kw->value);
+                        pm_call_2(mt, "py_dict_merge", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, splat_val));
+                    } else {
+                        // named kwarg — add to map
+                        MIR_reg_t kname_reg = pm_box_string_literal(mt, kw->key->chars, kw->key->len);
+                        MIR_reg_t kval_reg = pm_transpile_expression(mt, kw->value);
+                        pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kname_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, kval_reg));
+                    }
+                }
+                ka = ka->next;
+            }
+            return pm_call_4(mt, "py_call_function_kw", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, func),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, kw_map));
+        }
     }
 
     return pm_call_3(mt, "py_call_function", MIR_T_I64,
@@ -2665,6 +2771,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_reg_t fn_item = pm_call_2(mt, "py_new_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc_target->param_count));
+            if (fc_target->has_kwargs) {
+                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+            }
             MIR_reg_t dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
             // store as local var — shadows local_funcs lookup for subsequent references
             MIR_reg_t var_reg = pm_new_reg(mt, vname, MIR_T_I64);
@@ -2722,6 +2832,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->param_count));
+            if (fc->has_kwargs) {
+                pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+            }
             // Phase C: apply method decorators (e.g. @property)
             if (fc->node && fc->node->decorators) {
                 fn_item_reg = pm_apply_decorators(mt, fn_item_reg, fc->node->decorators);
@@ -3258,7 +3372,15 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
                 continue;
             }
             if (p->node_type == PY_AST_NODE_DICT_SPLAT_PARAMETER) {
-                // **kwargs — skip for now (not counted as regular param)
+                // **kwargs — record and skip (not counted as a regular param)
+                PyParamNode* kp = (PyParamNode*)p;
+                fc->has_kwargs = true;
+                if (kp->name) {
+                    snprintf(fc->kwargs_name, sizeof(fc->kwargs_name),
+                        "_py_%.*s", (int)kp->name->len, kp->name->chars);
+                } else {
+                    snprintf(fc->kwargs_name, sizeof(fc->kwargs_name), "_py_kwargs");
+                }
                 p = p->next;
                 continue;
             }
@@ -4134,7 +4256,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // build parameter list; closures get _py__env as hidden first param
     // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
-    int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0) + (fc->has_star_args ? 2 : 0);
+    int mir_param_count = fc->param_count + (fc->is_closure ? 1 : 0) + (fc->has_star_args ? 2 : 0) + (fc->has_kwargs ? 1 : 0);
     MIR_var_t params[20];
     char* param_name_bufs[20];
     int offset = 0;
@@ -4182,6 +4304,13 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         snprintf(param_name_bufs[varargs_param_offset + 1], 128, "_py__varargc");
         params[varargs_param_offset + 1] = {MIR_T_I64, param_name_bufs[varargs_param_offset + 1], 0};
     }
+    // add **kwargs map parameter after *args (if any)
+    int kwargs_param_offset = varargs_param_offset + (fc->has_star_args ? 2 : 0);
+    if (fc->has_kwargs) {
+        param_name_bufs[kwargs_param_offset] = (char*)alloca(128);
+        snprintf(param_name_bufs[kwargs_param_offset], 128, "_py__kwargs_map");
+        params[kwargs_param_offset] = {MIR_T_I64, param_name_bufs[kwargs_param_offset], 0};
+    }
 
     MIR_type_t res_type = MIR_T_I64;
     fc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type,
@@ -4225,6 +4354,16 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
             MIR_new_reg_op(mt->ctx, star_reg),
             MIR_new_reg_op(mt->ctx, star_list)));
         pm_set_var(mt, fc->star_args_name, star_reg);
+    }
+
+    // if function has **kwargs, bind the kwargs map param to the user's variable
+    if (fc->has_kwargs) {
+        MIR_reg_t kw_reg = MIR_reg(mt->ctx, "_py__kwargs_map", mt->current_func);
+        MIR_reg_t kw_var = pm_new_reg(mt, fc->kwargs_name, MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, kw_var),
+            MIR_new_reg_op(mt->ctx, kw_reg)));
+        pm_set_var(mt, fc->kwargs_name, kw_var);
     }
 
     // if this is a closure, load captured variables from env
