@@ -597,6 +597,9 @@ void line_break(LayoutContext* lycon) {
     // even if it's smaller than font metrics (allowing lines to overlap)
     float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     float css_line_height = lycon->block.line_height;
+    log_debug("line_break metrics: max_ascender=%.1f, max_descender=%.1f, font_lh=%.1f, css_lh=%.1f, has_replaced=%d, line_height_is_normal=%d",
+        lycon->line.max_ascender, lycon->line.max_descender, font_line_height, css_line_height,
+        lycon->line.has_replaced_content, lycon->block.line_height_is_normal);
 
     // Only fall back to font-based line height when line-height is unset/invalid
     // CSS 2.1: line-height: 0 is a valid explicit value (not a fallback case)
@@ -906,6 +909,12 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         }
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
+        log_debug("output_text: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",
+            ascender, descender, lycon->line.max_ascender, lycon->line.max_descender);
+        if (descender > 9) {
+            log_debug("output_text: LARGE descender=%.1f from font asc=%.1f desc=%.1f lh_normal=%d lh=%.1f",
+                descender, ascender, descender, lycon->block.line_height_is_normal, lycon->block.line_height);
+        }
         // Track each inline box's normal line-height for mixed-font lines
         if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
             float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
@@ -1276,6 +1285,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                     lycon->line.max_ascender = max(lycon->line.max_ascender, fb_asc);
                     lycon->line.max_descender = max(lycon->line.max_descender, fb_desc);
+                    if (fb_desc > 9) {
+                        log_debug("FALLBACK font: LARGE fb_desc=%.1f fb_asc=%.1f lh_normal=%d",
+                            fb_desc, fb_asc, lycon->block.line_height_is_normal);
+                    }
                     // Also track normal line-height from the fallback font for mixed-font lines
                     if (lycon->block.line_height_is_normal && glyph->font_normal_line_height > 0) {
                         lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height,

@@ -503,6 +503,19 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             if (dom_elem->styles_resolved && !layout_context_is_measuring(lycon)) {
                 log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
+                // Restore lycon->block dimensions from stored CSS values.
+                // layout_block resets lycon->block.given_width/height to -1 before
+                // calling us. When we skip resolution, these must be restored from
+                // the block properties that were populated in the first pass.
+                ViewBlock* block = (ViewBlock*)dom_elem;
+                if (block->blk) {
+                    if (block->blk->given_width >= 0) {
+                        lycon->block.given_width = block->blk->given_width;
+                    }
+                    if (block->blk->given_height >= 0) {
+                        lycon->block.given_height = block->blk->given_height;
+                    }
+                }
                 g_style_resolve_count++;
                 auto t_end = high_resolution_clock::now();
                 g_style_resolve_time += duration<double, std::milli>(t_end - t_start).count();
@@ -703,6 +716,13 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 void view_vertical_align(LayoutContext* lycon, View* view) {
     log_debug("view_vertical_align: view=%d", view->view_type);
     float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+    // CSS 2.1 §10.8.1: The strut is an invisible zero-width inline box with the
+    // block element's font and line-height. Its half-leading-adjusted ascender
+    // defines the minimum baseline position for the line. When only a smaller
+    // inline font is present, max_ascender may be less than the strut's baseline,
+    // but the baseline must still be at the strut's position.
+    float strut_baseline = lycon->block.init_ascender + lycon->block.lead_y;
+    float baseline_pos = max(lycon->line.max_ascender, strut_baseline);
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub use parent element's font.
     // parent_font_* fields in lycon->line are set by span_vertical_align before recursing.
     if (view->view_type == RDT_VIEW_TEXT) {
@@ -714,7 +734,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             log_debug("text view font: %p", text_view->font);
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
             float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
-                line_height, lycon->line.max_ascender, item_baseline, lycon->line.vertical_align_offset);
+                line_height, baseline_pos, item_baseline, lycon->line.vertical_align_offset);
             const unsigned char* td = text_view->text_data();
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 (int)rect->y, (int)lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
@@ -746,7 +766,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
         }
         float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
-            line_height, lycon->line.max_ascender, item_baseline, valign_offset);
+            line_height, baseline_pos, item_baseline, valign_offset);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         log_debug("vertical-adjusted-inline-block: y=%f, adv_y=%f, offset=%f, line=%f, blk=%f, max_asc=%f, max_desc=%f",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height, lycon->line.max_ascender, lycon->line.max_descender);
@@ -805,7 +825,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 float line_height = max(lycon->block.line_height,
                     lycon->line.max_ascender + lycon->line.max_descender);
                 float vertical_offset = calculate_vertical_align_offset(lycon, align,
-                    span_lh, line_height, lycon->line.max_ascender, item_baseline, valign_offset);
+                    span_lh, line_height, baseline_pos, item_baseline, valign_offset);
 
                 // Position the content area top: inline_box_top + half_leading
                 // The baseline is at inline_box_top + item_baseline

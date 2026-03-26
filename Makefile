@@ -350,7 +350,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    tree-sitter-libs \
 	    verify-windows verify-linux \
 	    generate-premake clean-premake build-test build-test-linux \
-	    capture-layout test-layout layout count-loc tidy-printf benchmark bench-compile \
+	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-c2mir type-chart
 
@@ -395,7 +395,8 @@ help:
 	@echo "  test-lambda-baseline - Run LAMBDA baseline test suite only"
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
-	@echo "  test-radiant-baseline - Run RADIANT layout baseline test suite only (alias for test-layout-baseline)"
+	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
+	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
 	@echo "  test-tex-dvi  - Run TeX DVI comparison tests against reference (all tests)"
@@ -877,6 +878,43 @@ test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
 	@echo "=============================================================="
 	@node test/layout/test_radiant_layout.js -c baseline
+	@if [ -f test/layout/snapshot/page.json ]; then \
+		echo ""; \
+		echo "Running page suite snapshot regression check..."; \
+		echo "=============================================================="; \
+		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+			| node test/layout/save_suite_snapshot.js --check page; \
+	fi
+
+# Save/check/diff layout suite snapshots for regression detection outside baseline
+layout-snapshot:
+	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	if [ -z "$$SUITE_VAR" ]; then \
+		echo "Usage: make layout-snapshot suite=<name>"; \
+		echo "  e.g. make layout-snapshot suite=page"; \
+		exit 1; \
+	fi; \
+	echo "Saving snapshot for suite: $$SUITE_VAR"; \
+	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+		| node test/layout/save_suite_snapshot.js --save $$SUITE_VAR
+
+layout-snapshot-check:
+	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	if [ -z "$$SUITE_VAR" ]; then \
+		echo "Usage: make layout-snapshot-check suite=<name>"; \
+		exit 1; \
+	fi; \
+	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+		| node test/layout/save_suite_snapshot.js --check $$SUITE_VAR
+
+layout-snapshot-diff:
+	@SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	if [ -z "$$SUITE_VAR" ]; then \
+		echo "Usage: make layout-snapshot-diff suite=<name>"; \
+		exit 1; \
+	fi; \
+	node test/layout/test_radiant_layout.js --engine lambda-css -c $$SUITE_VAR --json -j 5 2>/dev/null \
+		| node test/layout/save_suite_snapshot.js --diff $$SUITE_VAR
 
 # Math Testing targets (multi-layered semantic comparison framework)
 test-math: build

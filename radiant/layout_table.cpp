@@ -579,7 +579,7 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // or the first in-flow table-row in the cell, whichever comes first. If a cell has
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
-static float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y) {
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y) {
     for (View* child = ((ViewElement*)parent)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
 
