@@ -409,6 +409,23 @@ Item js_promise_all(Item iterable);              // Promise.all([...])
 Item js_promise_race(Item iterable);             // Promise.race([...])
 Item js_promise_any(Item iterable);              // Promise.any([...])
 Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
+Item js_promise_with_resolvers(void);            // Promise.withResolvers()
+
+// =============================================================================
+// TextEncoder / TextDecoder (UTF-8 only)
+// =============================================================================
+
+Item js_text_encoder_new(void);
+Item js_text_encoder_encode(Item encoder, Item str);
+Item js_text_decoder_new(void);
+Item js_text_decoder_decode(Item decoder, Item input);
+
+// =============================================================================
+// WeakMap / WeakSet stubs
+// =============================================================================
+
+Item js_weakmap_new(void);
+Item js_weakset_new(void);
 
 // =============================================================================
 // v14: Event Loop & Timers

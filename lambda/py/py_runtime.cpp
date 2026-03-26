@@ -5,6 +5,7 @@
  * All functions are callable from MIR JIT compiled code.
  */
 #include "py_runtime.h"
+#include "py_class.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -46,6 +47,7 @@ static bool py_stop_iteration_initialized = false;
 
 extern "C" void py_runtime_set_input(void* input) {
     py_input = (Input*)input;
+    py_init_builtin_classes();
 }
 
 // ============================================================================
@@ -160,6 +162,24 @@ extern "C" Item py_to_str(Item value) {
         return arr_result;
     }
     case LMD_TYPE_MAP: {
+        // class instance: call __str__ dunder if available
+        if (py_is_instance(value)) {
+            Item str_method = py_getattr(value,
+                (Item){.item = s2it(heap_create_name("__str__"))});
+            if (get_type_id(str_method) != LMD_TYPE_NULL)
+                return py_call_function(str_method, NULL, 0);
+        }
+        // class object: show <class 'Name'>
+        if (py_is_class(value)) {
+            Item cls_name = py_map_get_cstr(value, "__name__");
+            if (get_type_id(cls_name) == LMD_TYPE_STRING) {
+                String* n = it2s(cls_name);
+                char buf[256];
+                snprintf(buf, sizeof(buf), "<class '%.*s'>", (int)n->len, n->chars);
+                return (Item){.item = s2it(heap_create_name(buf))};
+            }
+        }
+        // plain map / dict: render as {k: v, ...} skipping __ fields
         Map* m = it2map(value);
         if (!m || !m->type) return (Item){.item = s2it(heap_create_name("{}"))};
         TypeMap* tm = (TypeMap*)m->type;
@@ -168,10 +188,14 @@ extern "C" Item py_to_str(Item value) {
         int idx = 0;
         ShapeEntry* field = tm->shape;
         while (field) {
-            if (idx > 0) strbuf_append_str(sb, ", ");
-            if (field->name) {
-                strbuf_append_str_n(sb, field->name->str, field->name->length);
+            if (field->name && field->name->length >= 2 &&
+                field->name->str[0] == '_' && field->name->str[1] == '_') {
+                field = field->next;
+                continue;
             }
+            if (idx > 0) strbuf_append_str(sb, ", ");
+            if (field->name)
+                strbuf_append_str_n(sb, field->name->str, field->name->length);
             strbuf_append_str(sb, ": ");
             Item val = _map_read_field(field, m->data);
             Item val_str = py_builtin_repr(val);
@@ -186,7 +210,8 @@ extern "C" Item py_to_str(Item value) {
         Item map_result = (Item){.item = s2it(heap_create_name(sb->str))};
         strbuf_free(sb);
         return map_result;
-    }    case LMD_TYPE_FUNC:
+    }
+    case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("<function>"))};
     default:
         return (Item){.item = s2it(heap_create_name("<object>"))};
@@ -220,9 +245,27 @@ extern "C" bool py_is_truthy(Item value) {
         return arr && arr->length > 0;
     }
     case LMD_TYPE_MAP: {
-        // empty dict is falsy
         Map* m = it2map(value);
-        return m && m->type && ((TypeMap*)m->type)->field_count > 0;
+        if (!m || !m->type) return false;
+        // class instances: try __bool__ then __len__
+        if (py_is_instance(value)) {
+            Item bool_m = py_getattr(value,
+                (Item){.item = s2it(heap_create_name("__bool__"))});
+            if (get_type_id(bool_m) != LMD_TYPE_NULL) {
+                Item r = py_call_function(bool_m, NULL, 0);
+                if (get_type_id(r) == LMD_TYPE_BOOL) return it2b(r);
+                if (get_type_id(r) == LMD_TYPE_INT)  return it2i(r) != 0;
+            }
+            Item len_m = py_getattr(value,
+                (Item){.item = s2it(heap_create_name("__len__"))});
+            if (get_type_id(len_m) != LMD_TYPE_NULL) {
+                Item r = py_call_function(len_m, NULL, 0);
+                if (get_type_id(r) == LMD_TYPE_INT) return it2i(r) != 0;
+            }
+            return true;  // instances are truthy by default
+        }
+        // plain dict: empty is falsy
+        return ((TypeMap*)m->type)->field_count > 0;
     }
     default:
         return value.item != 0;
@@ -277,6 +320,17 @@ extern "C" Item py_add(Item left, Item right) {
     }
 
     // numeric addition
+    // dunder __add__ / __radd__ fallback for instances
+    if (lt == LMD_TYPE_MAP && py_is_instance(left)) {
+        Item bm = py_getattr(left, (Item){.item = s2it(heap_create_name("__add__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL)
+            return py_call_function(bm, &right, 1);
+    }
+    if (rt == LMD_TYPE_MAP && py_is_instance(right)) {
+        Item bm = py_getattr(right, (Item){.item = s2it(heap_create_name("__radd__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL)
+            return py_call_function(bm, &left, 1);
+    }
     return fn_add(left, right);
 }
 
@@ -702,6 +756,19 @@ extern "C" Item py_eq(Item left, Item right) {
         return (Item){.item = b2it(it2b(left) == it2b(right))};
     }
 
+    // instance identity (default object __eq__)
+    if (lt == LMD_TYPE_MAP && rt == LMD_TYPE_MAP && left.item == right.item)
+        return (Item){.item = ITEM_TRUE};
+
+    // __eq__ dunder for instances
+    if (lt == LMD_TYPE_MAP && py_is_instance(left)) {
+        Item bm = py_getattr(left, (Item){.item = s2it(heap_create_name("__eq__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL) {
+            Item r = py_call_function(bm, &right, 1);
+            if (get_type_id(r) != LMD_TYPE_NULL) return r;
+        }
+    }
+
     // mixed types: Python returns False for most
     return (Item){.item = ITEM_FALSE};
 }
@@ -724,6 +791,15 @@ extern "C" Item py_lt(Item left, Item right) {
         int cmp = memcmp(a->chars, b->chars, a->len < b->len ? a->len : b->len);
         if (cmp == 0) return (Item){.item = b2it(a->len < b->len)};
         return (Item){.item = b2it(cmp < 0)};
+    }
+
+    // __lt__ dunder for instances
+    if (lt == LMD_TYPE_MAP && py_is_instance(left)) {
+        Item bm = py_getattr(left, (Item){.item = s2it(heap_create_name("__lt__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL) {
+            Item r = py_call_function(bm, &right, 1);
+            if (get_type_id(r) != LMD_TYPE_NULL) return r;
+        }
     }
 
     return (Item){.item = ITEM_FALSE};
@@ -794,6 +870,13 @@ extern "C" Item py_contains(Item container, Item value) {
         return (Item){.item = ITEM_FALSE};
     }
 
+    // __contains__ dunder for instances
+    if (ct == LMD_TYPE_MAP && py_is_instance(container)) {
+        Item bm = py_getattr(container, (Item){.item = s2it(heap_create_name("__contains__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL)
+            return py_call_function(bm, &value, 1);
+    }
+
     return (Item){.item = ITEM_FALSE};
 }
 
@@ -812,15 +895,94 @@ extern "C" Item py_new_object(void) {
 
 extern "C" Item py_getattr(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
 
-    TypeId ot = get_type_id(object);
-    if (ot == LMD_TYPE_MAP) {
-        Map* m = it2map(object);
-        if (!m || !m->type) return ItemNull;
-        String* key = it2s(name);
+    String* key = it2s(name);
+    if (!key) return ItemNull;
+    Map* m = it2map(object);
+    if (!m || !m->type) return ItemNull;
+
+    // 1. super proxy: delegate to the *next* class in the MRO
+    {
+        bool found_flag = false;
+        Item is_super = _map_get((TypeMap*)m->type, m->data, (char*)"__is_super__", &found_flag);
+        if (found_flag && get_type_id(is_super) == LMD_TYPE_BOOL && it2b(is_super)) {
+            bool f2 = false;
+            Item type_item = _map_get((TypeMap*)m->type, m->data, (char*)"__type__", &f2);
+            Item obj_item  = _map_get((TypeMap*)m->type, m->data, (char*)"__obj__",  &f2);
+            // find type in obj.__class__.__mro__, start lookup from the next entry
+            Item obj_cls = py_get_class(obj_item);
+            Item mro = (get_type_id(obj_cls) == LMD_TYPE_MAP)
+                       ? py_map_get_cstr(obj_cls, "__mro__")
+                       : ItemNull;
+            bool past = false;
+            if (get_type_id(mro) == LMD_TYPE_ARRAY) {
+                Array* mro_arr = it2arr(mro);
+                for (int i = 0; i < mro_arr->length; i++) {
+                    Item entry = mro_arr->items[i];
+                    if (!past) {
+                        if (entry.item == type_item.item) past = true;
+                        continue;
+                    }
+                    // look in this entry
+                    if (get_type_id(entry) != LMD_TYPE_MAP) continue;
+                    Map* em = it2map(entry);
+                    if (!em || !em->type) continue;
+                    bool found2 = false;
+                    Item res2 = _map_get((TypeMap*)em->type, em->data, key->chars, &found2);
+                    if (found2) {
+                        if (get_type_id(res2) == LMD_TYPE_FUNC)
+                            return py_bind_method(res2, obj_item);
+                        return res2;
+                    }
+                }
+            }
+            return ItemNull;
+        }
+    }
+
+    // 2. direct field on this Map (own attribute for both instances and classes)
+    {
         bool found = false;
         Item result = _map_get((TypeMap*)m->type, m->data, key->chars, &found);
-        return found ? result : ItemNull;
+        if (found) {
+            // if this is an instance and the field is a function, it was stored
+            // as an unbound method — bind it
+            if (py_is_instance(object) && get_type_id(result) == LMD_TYPE_FUNC)
+                return py_bind_method(result, object);
+            return result;
+        }
+    }
+
+    // 3. if this is an instance, walk __class__.__mro__
+    if (py_is_instance(object)) {
+        Item cls = py_get_class(object);
+        Item raw = py_mro_lookup(cls, name);
+        if (get_type_id(raw) != LMD_TYPE_NULL) {
+            if (get_type_id(raw) == LMD_TYPE_FUNC)
+                return py_bind_method(raw, object);
+            // property descriptor check
+            if (get_type_id(raw) == LMD_TYPE_MAP) {
+                bool f = false;
+                Item is_prop = _map_get((TypeMap*)it2map(raw)->type,
+                                        it2map(raw)->data, (char*)"__is_property__", &f);
+                if (f && get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                    bool f2 = false;
+                    Item getter = _map_get((TypeMap*)it2map(raw)->type,
+                                           it2map(raw)->data, (char*)"__get__", &f2);
+                    if (f2 && get_type_id(getter) == LMD_TYPE_FUNC)
+                        return py_call_function(py_bind_method(getter, object), NULL, 0);
+                }
+            }
+            return raw;
+        }
+        return ItemNull;
+    }
+
+    // 4. if this is a class, walk its own MRO (for class attribute access)
+    if (py_is_class(object)) {
+        Item raw = py_mro_lookup(object, name);
+        if (get_type_id(raw) != LMD_TYPE_NULL) return raw;
     }
 
     return ItemNull;
@@ -831,13 +993,18 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
     if (get_type_id(object) != LMD_TYPE_MAP) return object;
 
     Map* m = it2map(object);
-    if (!m) return object;
+    if (!m || !py_input) return object;
 
     String* key = it2s(name);
-    if (py_input) {
-        map_put(m, key, value, py_input);
-    }
+    // always write to this object's own dict (instance or class dict)
+    map_put(m, key, value, py_input);
     return value;
+}
+
+extern "C" Item py_hasattr(Item object, Item name) {
+    // return True if py_getattr returns a non-null value
+    Item result = py_getattr(object, name);
+    return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_NULL)};
 }
 
 // ============================================================================
@@ -1440,7 +1607,36 @@ extern "C" uint64_t* py_alloc_env(int size) {
 }
 
 extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
+    // bound method: prepend __self__ to args
+    if (py_is_bound_method(func)) {
+        Item fn_item = py_map_get_cstr(func, "__func__");
+        Item self    = py_map_get_cstr(func, "__self__");
+        // build new args array with self prepended (max 16+1=17)
+        Item new_args[17];
+        new_args[0] = self;
+        int na = arg_count > 16 ? 16 : arg_count;
+        for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
+        return py_call_function(fn_item, new_args, na + 1);
+    }
+
+    // class call (construction): allocate instance + call __init__
+    if (py_is_class(func)) {
+        Item inst = py_new_instance(func);
+        Item init_fn = py_mro_lookup(func,
+            (Item){.item = s2it(heap_create_name("__init__"))});
+        if (get_type_id(init_fn) != LMD_TYPE_NULL) {
+            // call __init__(inst, *args) — prepend inst
+            Item init_args[17];
+            init_args[0] = inst;
+            int na = arg_count > 16 ? 16 : arg_count;
+            for (int i = 0; i < na; i++) init_args[i + 1] = args ? args[i] : ItemNull;
+            py_call_function(init_fn, init_args, na + 1);
+        }
+        return inst;
+    }
+
     if (get_type_id(func) != LMD_TYPE_FUNC) {
+        // might be a built-in callable stored as a Map (e.g. property)
         log_error("py: TypeError: object is not callable");
         return ItemNull;
     }
