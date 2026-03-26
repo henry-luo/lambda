@@ -255,6 +255,7 @@ struct JsMirTranspiler {
 
     // v15: Generator state machine
     bool in_generator;               // currently emitting a generator state machine body
+    bool in_async;                   // currently emitting an async function body (Phase 5)
     MIR_reg_t gen_env_reg;           // register for env parameter (Item*)
     MIR_reg_t gen_input_reg;         // register for input parameter (Item)
     MIR_reg_t gen_state_reg;         // register for state parameter (int64_t)
@@ -8105,14 +8106,17 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         return val;
     }
     case JS_AST_NODE_AWAIT_EXPRESSION: {
-        // v14: await expr
-        // For synchronous promises, await unwraps the resolved value.
-        // For async integration, this will be expanded in the state machine transform.
+        // Phase 5: await expr — synchronous fast path
+        // Evaluates expr, then calls js_await_sync which:
+        // - non-promise → returns value as-is
+        // - fulfilled promise → returns resolved value
+        // - rejected promise → throws rejection reason
+        // - pending promise → returns undefined (Phase 6 handles full suspend/resume)
         JsAwaitNode* await_node = (JsAwaitNode*)expr;
         MIR_reg_t promise_val = jm_transpile_box_item(mt, await_node->argument);
-        // Call js_promise_then to get the resolved value synchronously
-        // For v14 initial pass, await on a resolved promise returns the value directly
-        return promise_val;
+        MIR_reg_t result = jm_call_1(mt, "js_await_sync", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val));
+        return result;
     }
     case JS_AST_NODE_CLASS_DECLARATION: {
         // Class expression: var X = class Y {}
@@ -9898,6 +9902,12 @@ static void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         return;
     }
 
+    // Phase 5: In async function, wrap return value in Promise.resolve()
+    if (mt->in_async) {
+        val = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    }
+
     // If inside a try block, delay the return and jump to finally/end
     if (mt->try_ctx_depth > 0) {
         JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
@@ -11101,21 +11111,115 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // Phase 5: Set in_async flag for async function bodies
+        bool saved_in_async = mt->in_async;
+        if (fn->is_async) {
+            mt->in_async = true;
+        }
+
+        // Phase 5: For async functions, wrap body in implicit try/catch
+        // so exceptions become Promise.reject(error) instead of propagating
+        MIR_label_t async_catch_label = 0;
+        MIR_label_t async_end_label = 0;
+        MIR_reg_t async_return_val_reg = 0;
+        MIR_reg_t async_has_return_reg = 0;
+        if (fn->is_async) {
+            async_catch_label = jm_new_label(mt);
+            async_end_label = jm_new_label(mt);
+            // Push try context so that exceptions in the body jump to catch
+            if (mt->try_ctx_depth < 16) {
+                JsTryContext* tc = &mt->try_ctx_stack[mt->try_ctx_depth++];
+                tc->catch_label = async_catch_label;
+                tc->finally_label = 0;
+                tc->end_label = async_end_label;
+                tc->return_val_reg = jm_new_reg(mt, "_async_ret", MIR_T_I64);
+                tc->has_return_reg = jm_new_reg(mt, "_async_has_ret", MIR_T_I64);
+                tc->has_catch = true;
+                tc->has_finally = false;
+                // Save register refs before try context could be popped
+                async_return_val_reg = tc->return_val_reg;
+                async_has_return_reg = tc->has_return_reg;
+                // Initialize return tracking
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->return_val_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, tc->has_return_reg),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+        }
+
         // Transpile body
         if (fn->body) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
                 JsBlockNode* blk = (JsBlockNode*)fn->body;
                 JsAstNode* s = blk->statements;
-                while (s) { jm_transpile_statement(mt, s); s = s->next; }
+                while (s) {
+                    jm_transpile_statement(mt, s);
+                    // Phase 5: After each statement in async body, check for exception
+                    if (fn->is_async && async_catch_label) {
+                        MIR_reg_t exc_check = jm_call_0(mt, "js_check_exception", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                            MIR_new_label_op(mt->ctx, async_catch_label),
+                            MIR_new_reg_op(mt->ctx, exc_check)));
+                    }
+                    s = s->next;
+                }
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
+                if (fn->is_async) {
+                    val = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
+                if (fn->is_async && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+                mt->in_async = saved_in_async;
                 goto finish_boxed;
             }
         }
 
-        // Implicit return ITEM_NULL
-        {
+        // Phase 5: Async implicit return → Promise.resolve(undefined)
+        if (fn->is_async) {
+            // Normal exit: jump past catch block
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, async_end_label)));
+
+            // Catch block: convert exception to Promise.reject(error)
+            jm_emit_label(mt, async_catch_label);
+            if (mt->try_ctx_depth > 0) mt->try_ctx_depth--;
+            {
+                MIR_reg_t error = jm_call_0(mt, "js_clear_exception", MIR_T_I64);
+                MIR_reg_t rejected = jm_call_1(mt, "js_promise_reject", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, rejected)));
+            }
+
+            // Normal end label: check if delayed return, otherwise return Promise.resolve(undefined)
+            jm_emit_label(mt, async_end_label);
+            {
+                // Check if a return statement was hit (stored in async_has_return_reg)
+                MIR_label_t async_no_return_label = jm_new_label(mt);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                    MIR_new_label_op(mt->ctx, async_no_return_label),
+                    MIR_new_reg_op(mt->ctx, async_has_return_reg)));
+                // Has return: value already wrapped in Promise.resolve by return handler
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_reg_op(mt->ctx, async_return_val_reg)));
+
+                // No explicit return: return Promise.resolve(undefined)
+                jm_emit_label(mt, async_no_return_label);
+                MIR_reg_t undef_val = jm_new_reg(mt, "_async_undef", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, undef_val),
+                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                MIR_reg_t resolved = jm_call_1(mt, "js_promise_resolve", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, resolved)));
+            }
+
+            mt->in_async = saved_in_async;
+        } else {
+            // Implicit return ITEM_NULL
             MIR_reg_t null_val = jm_emit_null(mt);
             jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, null_val)));
         }

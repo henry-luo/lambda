@@ -623,15 +623,15 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     func->is_arrow = is_arrow;
     func->is_generator = is_generator;
 
-    // Detect async: check for "async" anonymous child before "function" keyword
+    // Detect async: check for "async" anonymous child before "function" keyword or "=>"
     func->is_async = false;
-    if (!is_arrow) {
+    {
         uint32_t ccount = ts_node_child_count(func_node);
         for (uint32_t ci = 0; ci < ccount; ci++) {
             TSNode child = ts_node_child(func_node, ci);
             const char* ctype = ts_node_type(child);
             if (strcmp(ctype, "async") == 0) { func->is_async = true; break; }
-            if (strcmp(ctype, "function") == 0) break; // past the keyword
+            if (strcmp(ctype, "function") == 0 || strcmp(ctype, "=>") == 0) break;
         }
     }
 
