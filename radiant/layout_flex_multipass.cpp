@@ -1349,6 +1349,20 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
         DomNode* child = flex_item->first_child;
         if (child) {
+            // Reset styles_resolved on block children so UA default margins
+            // (modified by margin collapse in previous layout pass) get re-resolved.
+            // Flex items may be laid out multiple times, and margin collapse modifies
+            // margin values in-place. Without this reset, the second pass would
+            // collapse already-collapsed margins, resulting in incorrect zero margins.
+            DomNode* rst = flex_item->first_child;
+            do {
+                if (rst->is_element()) {
+                    DomElement* re = rst->as_element();
+                    re->styles_resolved = false;
+                }
+                rst = rst->next_sibling;
+            } while (rst);
+
             do {
                 log_debug("*** PASS3 TRACE: Layout child %s of flex item", child->node_name());
                 // Use standard layout flow - this handles all HTML content types
@@ -2147,16 +2161,22 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         fi->height = orig;
                     } else if (fi->height > orig + 0.5f) {
                         any_height_changed = true;
-                        // Update the line's cross_size if this item is now taller
+                        // Update the line's cross_size if this item's outer cross size is now larger.
+                        // line->cross_size includes cross-axis margins (from hypothetical_outer_cross_size),
+                        // so we must compare using the outer height (height + margins).
+                        float margin_cross = 0;
+                        if (fi->bound) {
+                            margin_cross = fi->bound->margin.top + fi->bound->margin.bottom;
+                        }
+                        int new_outer_cross = (int)(fi->height + margin_cross + 0.5f);
                         for (int li = 0; li < flex->line_count; li++) {
                             FlexLineInfo* line = &flex->lines[li];
                             for (int ii = 0; ii < line->item_count; ii++) {
                                 if (line->items[ii] == (View*)fi) {
-                                    int new_cross = (int)(fi->height + 0.5f);
-                                    if (new_cross > line->cross_size) {
+                                    if (new_outer_cross > line->cross_size) {
                                         log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %d -> %d (item %s grew)",
-                                                  li, line->cross_size, new_cross, fi->node_name());
-                                        line->cross_size = new_cross;
+                                                  li, line->cross_size, new_outer_cross, fi->node_name());
+                                        line->cross_size = new_outer_cross;
                                     }
                                 }
                             }

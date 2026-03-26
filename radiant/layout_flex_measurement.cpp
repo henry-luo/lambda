@@ -538,7 +538,41 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                                 li = li->next_sibling;
                             }
                         }
-                        elem_height = li_count * 18;  // ~18px per list item
+                        // Check if this list is a flex row container
+                        // In flex row, items are laid out horizontally so height = max(child heights)
+                        bool is_list_flex_row = false;
+                        if (elem) {
+                            ViewElement* list_view = (ViewElement*)elem;
+                            if (list_view->display.inner == CSS_VALUE_FLEX) {
+                                is_list_flex_row = true;  // default direction is row
+                            }
+                            if (!is_list_flex_row && elem->specified_style) {
+                                CssDeclaration* dd = style_tree_get_declaration(
+                                    elem->specified_style, CSS_PROPERTY_DISPLAY);
+                                if (dd && dd->value && dd->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                                    (dd->value->data.keyword == CSS_VALUE_FLEX ||
+                                     dd->value->data.keyword == CSS_VALUE_INLINE_FLEX)) {
+                                    is_list_flex_row = true;
+                                }
+                            }
+                            // Check if flex-direction is column (overrides row assumption)
+                            if (is_list_flex_row && elem->specified_style) {
+                                CssDeclaration* dir_decl = style_tree_get_declaration(
+                                    elem->specified_style, CSS_PROPERTY_FLEX_DIRECTION);
+                                if (dir_decl && dir_decl->value &&
+                                    dir_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    CssEnum d = dir_decl->value->data.keyword;
+                                    if (d == CSS_VALUE_COLUMN || d == CSS_VALUE_COLUMN_REVERSE) {
+                                        is_list_flex_row = false;
+                                    }
+                                }
+                            }
+                        }
+                        if (is_list_flex_row) {
+                            elem_height = li_count > 0 ? 18 : 0;  // row: max of children
+                        } else {
+                            elem_height = li_count * 18;  // column/block: sum of children
+                        }
                     }
                     else if (tag == HTM_TAG_DIV || tag == HTM_TAG_SECTION ||
                              tag == HTM_TAG_ARTICLE || tag == HTM_TAG_NAV ||

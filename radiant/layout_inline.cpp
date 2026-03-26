@@ -921,6 +921,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
             lycon->line.max_descender = max(lycon->line.max_descender, descender);
+            log_debug("empty_inline_strut: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",
+                ascender, descender, lycon->line.max_ascender, lycon->line.max_descender);
             if (lycon->block.line_height_is_normal) {
                 float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
                 lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
