@@ -5788,6 +5788,11 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_promise_all_settled", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+            // Phase 3: Promise.withResolvers()
+            if (obj->name && obj->name->len == 7 && strncmp(obj->name->chars, "Promise", 7) == 0 &&
+                prop->name && prop->name->len == 13 && strncmp(prop->name->chars, "withResolvers", 13) == 0) {
+                return jm_call_0(mt, "js_promise_with_resolvers", MIR_T_I64);
+            }
         }
     }
 
@@ -9158,6 +9163,22 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         MIR_reg_t executor_arg = first_arg ? first_arg : jm_emit_null(mt);
         return jm_call_1(mt, "js_promise_create", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, executor_arg));
+    }
+
+    // Phase 3: new TextEncoder() / new TextDecoder()
+    if (ctor_len == 11 && strncmp(ctor_name, "TextEncoder", 11) == 0) {
+        return jm_call_0(mt, "js_text_encoder_new", MIR_T_I64);
+    }
+    if (ctor_len == 11 && strncmp(ctor_name, "TextDecoder", 11) == 0) {
+        return jm_call_0(mt, "js_text_decoder_new", MIR_T_I64);
+    }
+
+    // Phase 3: new WeakMap() / new WeakSet()
+    if (ctor_len == 7 && strncmp(ctor_name, "WeakMap", 7) == 0) {
+        return jm_call_0(mt, "js_weakmap_new", MIR_T_I64);
+    }
+    if (ctor_len == 7 && strncmp(ctor_name, "WeakSet", 7) == 0) {
+        return jm_call_0(mt, "js_weakset_new", MIR_T_I64);
     }
 
     // User-defined class instantiation: new ClassName(args)

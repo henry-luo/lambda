@@ -2057,6 +2057,21 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
+    // TextEncoder/TextDecoder instance methods (.encode, .decode)
+    {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 6 && strncmp(method->chars, "encode", 6) == 0) {
+                Item str_arg = argc > 0 ? args[0] : ItemNull;
+                return js_text_encoder_encode(obj, str_arg);
+            }
+            if (method->len == 6 && strncmp(method->chars, "decode", 6) == 0) {
+                Item input_arg = argc > 0 ? args[0] : ItemNull;
+                return js_text_decoder_decode(obj, input_arg);
+            }
+        }
+    }
+
     // Fallback: property access + call
     Item fn = js_property_access(obj, method_name);
     return js_call_function(fn, obj, args, argc);
@@ -2276,6 +2291,84 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     // toString
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
         return str;
+    }
+
+    // match(regex) — delegates to regex exec
+    if (method->len == 5 && strncmp(method->chars, "match", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        // If arg is a regex object, use js_regex_exec
+        if (get_type_id(args[0]) == LMD_TYPE_MAP) {
+            JsRegexData* rd = js_get_regex_data(args[0]);
+            if (rd) {
+                if (!rd->global) {
+                    return js_regex_exec(args[0], str);
+                }
+                // Global: collect all matches into array
+                String* s = it2s(str);
+                if (!s) return ItemNull;
+                Item result = js_array_new(0);
+                int offset = 0;
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                if (num_groups > 16) num_groups = 16;
+                re2::StringPiece matches[16];
+                while (offset < (int)s->len) {
+                    bool matched = rd->re2->Match(
+                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                        re2::RE2::UNANCHORED, matches, num_groups);
+                    if (!matched) break;
+                    int mlen = (int)matches[0].size();
+                    Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[0].data(), mlen))};
+                    array_push(result.array, ms);
+                    int advance = (int)(matches[0].data() - s->chars) + mlen;
+                    if (advance <= offset) advance = offset + 1;
+                    offset = advance;
+                }
+                return result;
+            }
+        }
+        // If arg is a string, treat as literal pattern
+        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+    }
+    // matchAll(regex) — returns array of all match results
+    if (method->len == 8 && strncmp(method->chars, "matchAll", 8) == 0) {
+        if (argc < 1) return js_array_new(0);
+        if (get_type_id(args[0]) == LMD_TYPE_MAP) {
+            JsRegexData* rd = js_get_regex_data(args[0]);
+            if (rd) {
+                String* s = it2s(str);
+                if (!s) return js_array_new(0);
+                Item result = js_array_new(0);
+                int offset = 0;
+                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                if (num_groups > 16) num_groups = 16;
+                re2::StringPiece matches[16];
+                while (offset < (int)s->len) {
+                    bool matched = rd->re2->Match(
+                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                        re2::RE2::UNANCHORED, matches, num_groups);
+                    if (!matched) break;
+                    // Build match object like regex exec
+                    Item match_arr = js_array_new(num_groups + 1);
+                    for (int i = 0; i < num_groups; i++) {
+                        if (matches[i].data()) {
+                            Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
+                            Item idx = (Item){.item = i2it(i)};
+                            js_array_set(match_arr, idx, ms);
+                        }
+                    }
+                    int match_index = (int)(matches[0].data() - s->chars);
+                    Item idx_item = (Item){.item = i2it(num_groups)};
+                    Item idx_val = (Item){.item = i2it(match_index)};
+                    js_array_set(match_arr, idx_item, idx_val);
+                    array_push(result.array, match_arr);
+                    int advance = match_index + (int)matches[0].size();
+                    if (advance <= offset) advance = offset + 1;
+                    offset = advance;
+                }
+                return result;
+            }
+        }
+        return js_array_new(0);
     }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
@@ -2969,6 +3062,46 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
         float f = (float)js_get_number(js_to_number(args[0]));
         return js_make_number((double)f);
     }
+    // Math.sinh
+    if (method->len == 4 && strncmp(method->chars, "sinh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(sinh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.cosh
+    if (method->len == 4 && strncmp(method->chars, "cosh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(cosh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.tanh
+    if (method->len == 4 && strncmp(method->chars, "tanh", 4) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(tanh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.asinh
+    if (method->len == 5 && strncmp(method->chars, "asinh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(asinh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.acosh
+    if (method->len == 5 && strncmp(method->chars, "acosh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(acosh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.atanh
+    if (method->len == 5 && strncmp(method->chars, "atanh", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(atanh(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.expm1
+    if (method->len == 5 && strncmp(method->chars, "expm1", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(expm1(js_get_number(js_to_number(args[0]))));
+    }
+    // Math.log1p
+    if (method->len == 5 && strncmp(method->chars, "log1p", 5) == 0) {
+        if (argc < 1) return ItemNull;
+        return js_make_number(log1p(js_get_number(js_to_number(args[0]))));
+    }
 
     log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
@@ -3542,6 +3675,27 @@ extern "C" Item js_promise_reject(Item reason) {
     return js_promise_to_item(p);
 }
 
+extern "C" Item js_promise_with_resolvers(void) {
+    JsPromise* p = js_alloc_promise();
+    if (!p) return ItemNull;
+    int idx = (int)(p - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+    Item promise = js_promise_to_item(p);
+    // Build { promise, resolve, reject } object
+    Item result = js_new_object();
+    Item k_promise = (Item){.item = s2it(heap_create_name("promise"))};
+    Item k_resolve = (Item){.item = s2it(heap_create_name("resolve"))};
+    Item k_reject = (Item){.item = s2it(heap_create_name("reject"))};
+    js_property_set(result, k_promise, promise);
+    js_property_set(result, k_resolve, resolve_fn);
+    js_property_set(result, k_reject, reject_fn);
+    return result;
+}
+
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected) {
     JsPromise* p = js_get_promise(promise);
     if (!p) return ItemNull;
@@ -3796,4 +3950,90 @@ extern "C" Item js_module_get(Item specifier) {
 extern "C" Item js_module_namespace_create(Item exports_map) {
     // Module namespace is just a frozen map object
     return exports_map;
+}
+
+// =============================================================================
+// TextEncoder / TextDecoder (UTF-8 only)
+// =============================================================================
+
+extern "C" Item js_text_encoder_new(void) {
+    Item obj = js_new_object();
+    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
+    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
+    js_property_set(obj, k, v);
+    // Mark as TextEncoder for method dispatch
+    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    Item type_val = (Item){.item = s2it(heap_create_name("TextEncoder"))};
+    js_property_set(obj, type_key, type_val);
+    return obj;
+}
+
+extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
+    (void)encoder;
+    if (get_type_id(str) != LMD_TYPE_STRING) return js_array_new(0);
+    String* s = it2s(str);
+    if (!s || s->len == 0) return js_array_new(0);
+    // Create array of byte values
+    Item result = js_array_new(0);
+    for (int i = 0; i < (int)s->len; i++) {
+        array_push(result.array, (Item){.item = i2it((unsigned char)s->chars[i])});
+    }
+    return result;
+}
+
+extern "C" Item js_text_decoder_new(void) {
+    Item obj = js_new_object();
+    Item k = (Item){.item = s2it(heap_create_name("encoding"))};
+    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
+    js_property_set(obj, k, v);
+    // Mark as TextDecoder for method dispatch
+    Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    Item type_val = (Item){.item = s2it(heap_create_name("TextDecoder"))};
+    js_property_set(obj, type_key, type_val);
+    return obj;
+}
+
+extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
+    (void)decoder;
+    TypeId tid = get_type_id(input);
+    if (tid == LMD_TYPE_ARRAY) {
+        // Array of byte values → string
+        Array* arr = input.array;
+        if (!arr || arr->length == 0)
+            return (Item){.item = s2it(heap_create_name(""))};
+        char* buf = (char*)alloca(arr->length + 1);
+        for (int i = 0; i < arr->length; i++) {
+            buf[i] = (char)(unsigned char)js_get_number(arr->items[i]);
+        }
+        buf[arr->length] = '\0';
+        return (Item){.item = s2it(heap_strcpy(buf, arr->length))};
+    }
+    // Handle TypedArray (Uint8Array etc.)
+    if (tid == LMD_TYPE_MAP && js_is_typed_array(input)) {
+        Map* m = input.map;
+        JsTypedArray* ta = (JsTypedArray*)m->data;
+        if (!ta || ta->length == 0)
+            return (Item){.item = s2it(heap_create_name(""))};
+        char* buf = (char*)alloca(ta->length + 1);
+        uint8_t* bytes = (uint8_t*)ta->data;
+        for (int i = 0; i < ta->length; i++) {
+            buf[i] = (char)bytes[i];
+        }
+        buf[ta->length] = '\0';
+        return (Item){.item = s2it(heap_strcpy(buf, ta->length))};
+    }
+    if (tid == LMD_TYPE_STRING) return input;
+    return (Item){.item = s2it(heap_create_name(""))};
+}
+
+// =============================================================================
+// WeakMap / WeakSet stubs (aliased to Map/Set for PDF.js compat)
+// =============================================================================
+
+extern "C" Item js_weakmap_new(void) {
+    return js_map_collection_new();
+}
+
+extern "C" Item js_weakset_new(void) {
+    return js_set_collection_new();
 }
