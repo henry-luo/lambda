@@ -289,6 +289,14 @@ bool bash_get_option_xtrace(void);                   // -x: trace commands
 bool bash_get_option_pipefail(void);                 // -o pipefail
 
 // ========================================================================
+// Signal handling / trap (Phase 8)
+// ========================================================================
+void bash_trap_set(Item handler, Item signal_name);  // register trap handler string
+void bash_trap_run_exit(void);                       // run EXIT trap (idempotent)
+void bash_trap_check(void);                          // check and run pending signal traps
+Item bash_eval_string(Item code);                    // evaluate bash code string in current scope
+
+// ========================================================================
 // Runtime initialization
 // ========================================================================
 void bash_runtime_init(void);

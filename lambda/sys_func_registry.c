@@ -1534,6 +1534,11 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_option_nounset", FPTR(bash_get_option_nounset)},
     {"bash_get_option_xtrace", FPTR(bash_get_option_xtrace)},
     {"bash_get_option_pipefail", FPTR(bash_get_option_pipefail)},
+    // signal handling / trap (Phase 8)
+    {"bash_trap_set", FPTR(bash_trap_set)},
+    {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
+    {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

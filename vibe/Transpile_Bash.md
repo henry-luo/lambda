@@ -503,6 +503,8 @@ set -x          # trace execution
 
 **Goal:** Support `trap` and basic job control for scripts that need cleanup handlers.
 
+> **Status:** Implemented `trap` builtin, EXIT trap (runs at script end and on `exit N`), signal traps (INT/TERM/HUP/QUIT via `sigaction()`), `bash_eval_string()` for dynamic code execution, and `bash_trap_check()` called at each loop iteration. `exit N` now correctly terminates the script early (via `BASH_AST_NODE_EXIT` case in the transpiler). Tests: `test/bash/trap.sh`, `test/bash/exit_trap.sh`.
+
 ### 8.1 `trap` Builtin
 
 ```bash
@@ -580,7 +582,7 @@ This bridges Bash's procedural scripting with Lambda's functional data processin
 | **Phase 5: Expansions** | Medium | Medium — needed for real scripts | ✅ Done |
 | **Phase 6: Assoc Arrays** | Medium | Medium — used in complex scripts | **Next** |
 | **Phase 7: Source & Env** | Medium | High — script composition | Planned |
-| **Phase 8: Signals** | Medium | Low — specialized use | Planned |
+| **Phase 8: Signals** | Medium | Low — specialized use | ✅ Done |
 | **Phase 9: Lambda Builtins** | Medium | High — unique differentiator | Planned |
 
 ### Recommended Execution Order

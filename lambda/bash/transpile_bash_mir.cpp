@@ -615,6 +615,19 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             MIR_new_ret_insn(mt->ctx, 1, ret_val));
         break;
     }
+    case BASH_AST_NODE_EXIT: {
+        BashControlNode* ctrl = (BashControlNode*)node;
+        if (ctrl->value) {
+            MIR_op_t val = bm_transpile_node(mt, ctrl->value);
+            bm_emit_call_1(mt, "bash_return_with_code", val);
+        }
+        // run EXIT trap before terminating
+        bm_emit_call_void_0(mt, "bash_trap_run_exit");
+        MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+        break;
+    }
     case BASH_AST_NODE_BREAK: {
         if (mt->loop_break_label) {
             MIR_append_insn(mt->ctx, mt->current_func_item,
@@ -1301,6 +1314,24 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return bm_emit_int_literal(mt, 1);
     }
 
+    // trap — register signal/event handlers
+    if (cmd_len == 4 && memcmp(cmd_name, "trap", 4) == 0) {
+        if (cmd->args) {
+            MIR_op_t handler_val = bm_transpile_cmd_arg(mt, cmd->args);
+            BashAstNode* sig_arg = cmd->args->next;
+            if (!sig_arg) {
+                // trap with only handler (no signal) — treat as reset all or print; no-op
+            } else {
+                while (sig_arg) {
+                    MIR_op_t sig_val = bm_transpile_cmd_arg(mt, sig_arg);
+                    bm_emit_call_void_2(mt, "bash_trap_set", handler_val, sig_val);
+                    sig_arg = sig_arg->next;
+                }
+            }
+        }
+        return bm_emit_int_literal(mt, 0);
+    }
+
     // set — shell options
     if (cmd_len == 3 && memcmp(cmd_name, "set", 3) == 0) {
         BashAstNode* arg = cmd->args;
@@ -1904,6 +1935,9 @@ static void bm_transpile_while(BashMirTranspiler* mt, BashWhileNode* node) {
     // loop start
     MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
 
+    // check for pending signal traps at each iteration
+    bm_emit_call_void_0(mt, "bash_trap_check");
+
     // condition
     bm_transpile_statement(mt, node->condition);
 
@@ -2404,6 +2438,173 @@ extern "C" Item bash_source_file(Item filename) {
 }
 
 // ============================================================================
+// bash_eval_string — evaluate a bash code string in the current runtime scope
+// (runtime-callable from JIT; also called from bash_trap_run_exit / bash_trap_check)
+// ============================================================================
+
+static int bash_eval_counter = 0;
+
+extern "C" Item bash_eval_string(Item code) {
+    String* s = it2s(code);
+    if (!s || s->len == 0) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    if (!bash_source_runtime) {
+        log_error("bash: eval: no runtime context");
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    // make a null-terminated copy of the code
+    char* source_text = (char*)malloc(s->len + 1);
+    memcpy(source_text, s->chars, s->len);
+    source_text[s->len] = '\0';
+
+    log_debug("bash: eval: executing '%.*s'", s->len < 40 ? s->len : 40, s->chars);
+
+    BashTranspiler* tp = bash_transpiler_create(bash_source_runtime);
+    if (!tp) {
+        log_error("bash: eval: failed to create transpiler");
+        free(source_text);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    tp->source = source_text;
+    tp->source_length = (int)s->len;
+
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_bash());
+    TSTree* tree = ts_parser_parse_string(parser, NULL, source_text, (uint32_t)s->len);
+    if (!tree) {
+        log_error("bash: eval: parse failed");
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    TSNode root = ts_tree_root_node(tree);
+    BashAstNode* ast = build_bash_ast(tp, root);
+    if (!ast) {
+        log_error("bash: eval: AST build failed");
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    MIR_context_t ctx = jit_init(bash_source_runtime->optimize_level);
+    if (!ctx) {
+        log_error("bash: eval: MIR init failed");
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+        bash_transpiler_destroy(tp);
+        free(source_text);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    BashMirTranspiler* mt = (BashMirTranspiler*)malloc(sizeof(BashMirTranspiler));
+    memset(mt, 0, sizeof(BashMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->vars = hashmap_new(sizeof(BashMirVar), 32, 0, 0,
+                           bash_var_hash, bash_var_cmp, NULL, NULL);
+    mt->import_cache = hashmap_new(sizeof(BashMirImportEntry), 32, 0, 0,
+                                   bm_import_hash, bm_import_cmp, NULL, NULL);
+    mt->user_funcs = hashmap_new(sizeof(BashMirUserFunc), 8, 0, 0,
+                                 bm_user_func_hash, bm_user_func_cmp, NULL, NULL);
+    mt->var_count = 0;
+    mt->label_counter = 0;
+    mt->loop_depth = 0;
+
+    // give each eval module a unique name
+    char module_name[48];
+    snprintf(module_name, sizeof(module_name), "bash_eval_%d", bash_eval_counter++);
+    mt->module = MIR_new_module(ctx, module_name);
+
+    // Pass 1: function defs
+    BashProgramNode* program = (BashProgramNode*)ast;
+    BashAstNode* stmt = program->body;
+    while (stmt) {
+        if (stmt->node_type == BASH_AST_NODE_FUNCTION_DEF) {
+            bm_transpile_function_def(mt, (BashFunctionDefNode*)stmt);
+        }
+        stmt = stmt->next;
+    }
+
+    // Pass 2: main body
+    char func_name[48];
+    snprintf(func_name, sizeof(func_name), "bash_eval_entry_%d", bash_eval_counter - 1);
+    MIR_type_t ret_type = MIR_T_I64;
+    mt->current_func_item = MIR_new_func(ctx, func_name, 1, &ret_type, 0);
+    mt->current_func = mt->current_func_item->u.func;
+    mt->result_reg = bm_new_temp(mt);
+
+    stmt = program->body;
+    while (stmt) {
+        bm_transpile_statement(mt, stmt);
+        stmt = stmt->next;
+    }
+
+    MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
+    MIR_append_insn(mt->ctx, mt->current_func_item,
+        MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
+
+    MIR_finish_func(ctx);
+    MIR_finish_module(ctx);
+    MIR_load_module(ctx, mt->module);
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    typedef Item (*eval_entry_t)(void);
+    eval_entry_t entry = (eval_entry_t)find_func(ctx, func_name);
+
+    Item result = {.item = i2it(0)};
+    if (entry) {
+        result = entry();
+    } else {
+        log_error("bash: eval: failed to find entry function '%s'", func_name);
+    }
+
+    // register any user functions so they're callable from outer script
+    size_t iter = 0;
+    void* item_ptr;
+    while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
+        BashMirUserFunc* uf = (BashMirUserFunc*)item_ptr;
+        char full_name[160];
+        snprintf(full_name, sizeof(full_name), "bash_uf_%s", uf->name);
+        BashRtFuncPtr func_ptr = (BashRtFuncPtr)find_func(ctx, full_name);
+        if (func_ptr) {
+            bash_register_rt_func(uf->name, func_ptr);
+        }
+    }
+
+    // save ctx to keep function pointers valid
+    if (bash_source_ctx_count < BASH_SOURCE_CTX_MAX) {
+        bash_source_ctx_list[bash_source_ctx_count++] = ctx;
+    } else {
+        MIR_finish(ctx);
+    }
+
+    hashmap_free(mt->vars);
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->user_funcs);
+    free(mt);
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+    bash_transpiler_destroy(tp);
+    free(source_text);
+
+    return result;
+}
+
+// ============================================================================
 // Main entry point: transpile_bash_to_mir
 // ============================================================================
 
@@ -2522,6 +2723,9 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         bm_transpile_statement(mt, stmt);
         stmt = stmt->next;
     }
+
+    // run EXIT trap before returning from main script
+    bm_emit_call_void_0(mt, "bash_trap_run_exit");
 
     // return exit code
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
