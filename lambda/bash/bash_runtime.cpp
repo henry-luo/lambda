@@ -20,6 +20,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
+#include <cctype>
+#include <regex.h>
+#include <fnmatch.h>
 
 // ============================================================================
 // Runtime state
@@ -33,6 +36,11 @@ static int bash_loop_control_depth = 1;
 
 // Variable table (runtime)
 static struct hashmap* bash_var_table = NULL;
+
+// Subshell scope stack
+#define BASH_SUBSHELL_STACK_MAX 32
+static struct hashmap* bash_subshell_stack[BASH_SUBSHELL_STACK_MAX];
+static int bash_subshell_depth = 0;
 
 // helper to grow a list's capacity
 static void bash_grow_list(List* list) {
@@ -96,6 +104,21 @@ extern "C" Item bash_to_string(Item value) {
     }
     case LMD_TYPE_STRING:
         return value;
+    case LMD_TYPE_ARRAY: {
+        // array → space-separated elements
+        List* list = it2list(value);
+        if (!list || list->length == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+        StrBuf* sb = strbuf_new();
+        for (int i = 0; i < list->length; i++) {
+            if (i > 0) strbuf_append_char(sb, ' ');
+            Item elem_str = bash_to_string(list->items[i]);
+            String* s = it2s(elem_str);
+            if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+        }
+        String* result = heap_create_name(sb->str, sb->length);
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
     default: {
         return (Item){.item = s2it(heap_create_name("", 0))};
     }
@@ -270,27 +293,27 @@ extern "C" Item bash_rshift(Item left, Item right) {
 // ============================================================================
 
 extern "C" Item bash_arith_eq(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) == bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) == bash_coerce_int(right) ? 1 : 0)};
 }
 
 extern "C" Item bash_arith_ne(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) != bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) != bash_coerce_int(right) ? 1 : 0)};
 }
 
 extern "C" Item bash_arith_lt(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) < bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) < bash_coerce_int(right) ? 1 : 0)};
 }
 
 extern "C" Item bash_arith_le(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) <= bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) <= bash_coerce_int(right) ? 1 : 0)};
 }
 
 extern "C" Item bash_arith_gt(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) > bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) > bash_coerce_int(right) ? 1 : 0)};
 }
 
 extern "C" Item bash_arith_ge(Item left, Item right) {
-    return (Item){.item = b2it(bash_coerce_int(left) >= bash_coerce_int(right))};
+    return (Item){.item = i2it(bash_coerce_int(left) >= bash_coerce_int(right) ? 1 : 0)};
 }
 
 // ============================================================================
@@ -359,7 +382,9 @@ extern "C" Item bash_test_str_eq(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (strcmp(l, r) == 0);
+    // support glob patterns (*, ?, [) for [[ ]] extended tests
+    bool has_glob = (strchr(r, '*') || strchr(r, '?') || strchr(r, '['));
+    bool result = has_glob ? (fnmatch(r, l, 0) == 0) : (strcmp(l, r) == 0);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
@@ -391,6 +416,30 @@ extern "C" Item bash_test_str_gt(Item left, Item right) {
     return (Item){.item = b2it(result)};
 }
 
+extern "C" Item bash_test_regex(Item left, Item right) {
+    char buf_l[256], buf_r[256];
+    const char* text = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* pattern = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    regex_t regex;
+    int ret = regcomp(&regex, pattern, REG_EXTENDED | REG_NOSUB);
+    bool result = false;
+    if (ret == 0) {
+        result = (regexec(&regex, text, 0, NULL, 0) == 0);
+        regfree(&regex);
+    }
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_glob(Item left, Item right) {
+    char buf_l[256], buf_r[256];
+    const char* text = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* pattern = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (fnmatch(pattern, text, 0) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 // unary string tests
 extern "C" Item bash_test_z(Item value) {
     TypeId type = get_type_id(value);
@@ -416,15 +465,309 @@ extern "C" Item bash_test_n(Item value) {
     return (Item){.item = b2it(result)};
 }
 
-// regex match (=~) — simplified pattern match
-extern "C" Item bash_test_regex(Item string, Item pattern) {
-    // TODO: implement full regex matching with BASH_REMATCH
-    char buf_s[256], buf_p[256];
-    const char* s = bash_item_cstr(string, buf_s, sizeof(buf_s));
-    const char* p = bash_item_cstr(pattern, buf_p, sizeof(buf_p));
-    (void)s; (void)p;
-    log_debug("bash: regex match not yet implemented");
-    return (Item){.item = b2it(false)};
+// file test operators
+#include <sys/stat.h>
+#include <unistd.h>
+
+static const char* bash_item_to_cstr(Item value) {
+    Item str = bash_to_string(value);
+    String* s = it2s(str);
+    if (!s || s->len == 0) return "";
+    return s->chars;
+}
+
+extern "C" Item bash_test_f(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_d(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_e(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_r(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, R_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_w(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, W_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_x(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    bool result = (access(path, X_OK) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_s(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (stat(path, &st) == 0 && st.st_size > 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+extern "C" Item bash_test_l(Item value) {
+    const char* path = bash_item_to_cstr(value);
+    struct stat st;
+    bool result = (lstat(path, &st) == 0 && S_ISLNK(st.st_mode));
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+// ============================================================================
+// Parameter expansion functions
+// ============================================================================
+
+static bool bash_item_is_empty(Item val) {
+    TypeId type = get_type_id(val);
+    if (type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(val);
+        return (!s || s->len == 0);
+    }
+    return false;
+}
+
+static Item bash_make_string(const char* str, size_t len) {
+    return (Item){.item = s2it(heap_create_name(str, len))};
+}
+
+// ${var:-default} — return default if var is unset or empty
+extern "C" Item bash_expand_default(Item val, Item def) {
+    return bash_item_is_empty(val) ? def : val;
+}
+
+// ${var:=default} — assign default if var is unset or empty
+extern "C" Item bash_expand_assign_default(Item var_name, Item val, Item def) {
+    if (bash_item_is_empty(val)) {
+        bash_set_var(var_name, def);
+        return def;
+    }
+    return val;
+}
+
+// ${var:+alt} — return alt if var is set and non-empty
+extern "C" Item bash_expand_alt(Item val, Item alt) {
+    return bash_item_is_empty(val) ? (Item){.item = s2it(NULL)} : alt;
+}
+
+// ${var:?msg} — error if unset or empty
+extern "C" Item bash_expand_error(Item val, Item msg) {
+    if (bash_item_is_empty(val)) {
+        String* m = it2s(bash_to_string(msg));
+        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+    }
+    return val;
+}
+
+// ${var#pattern} — remove shortest prefix match
+extern "C" Item bash_expand_trim_prefix(Item val, Item pat) {
+    char buf_v[512], buf_p[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    size_t slen = strlen(str);
+    // try shortest prefix
+    for (size_t i = 0; i <= slen; i++) {
+        char tmp[512];
+        memcpy(tmp, str, i);
+        tmp[i] = '\0';
+        if (fnmatch(pattern, tmp, 0) == 0) {
+            return bash_make_string(str + i, slen - i);
+        }
+    }
+    return val;
+}
+
+// ${var##pattern} — remove longest prefix match
+extern "C" Item bash_expand_trim_prefix_long(Item val, Item pat) {
+    char buf_v[512], buf_p[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    size_t slen = strlen(str);
+    // try longest prefix first
+    for (size_t i = slen; i > 0; i--) {
+        char tmp[512];
+        memcpy(tmp, str, i);
+        tmp[i] = '\0';
+        if (fnmatch(pattern, tmp, 0) == 0) {
+            return bash_make_string(str + i, slen - i);
+        }
+    }
+    return val;
+}
+
+// ${var%pattern} — remove shortest suffix match
+extern "C" Item bash_expand_trim_suffix(Item val, Item pat) {
+    char buf_v[512], buf_p[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    size_t slen = strlen(str);
+    // try shortest suffix (from end)
+    for (size_t i = slen; i > 0; i--) {
+        if (fnmatch(pattern, str + i, 0) == 0) {
+            return bash_make_string(str, i);
+        }
+    }
+    return val;
+}
+
+// ${var%%pattern} — remove longest suffix match
+extern "C" Item bash_expand_trim_suffix_long(Item val, Item pat) {
+    char buf_v[512], buf_p[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    size_t slen = strlen(str);
+    // try longest suffix (from start)
+    for (size_t i = 0; i <= slen; i++) {
+        if (fnmatch(pattern, str + i, 0) == 0) {
+            return bash_make_string(str, i);
+        }
+    }
+    return val;
+}
+
+// ${var/pattern/replacement} — replace first occurrence
+extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    // simple substring match for non-glob patterns
+    const char* found = strstr(str, pattern);
+    if (!found) return val;
+    size_t plen = strlen(pattern);
+    size_t rlen = strlen(replacement);
+    size_t slen = strlen(str);
+    size_t new_len = slen - plen + rlen;
+    StrBuf* sb = strbuf_new_cap(new_len + 1);
+    size_t prefix = found - str;
+    strbuf_append_str_n(sb, str, prefix);
+    strbuf_append_str_n(sb, replacement, rlen);
+    strbuf_append_str_n(sb, found + plen, slen - prefix - plen);
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var//pattern/replacement} — replace all occurrences
+extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    size_t plen = strlen(pattern);
+    if (plen == 0) return val;
+    size_t rlen = strlen(replacement);
+    StrBuf* sb = strbuf_new_cap(strlen(str) + 64);
+    const char* p = str;
+    while (*p) {
+        const char* found = strstr(p, pattern);
+        if (!found) {
+            strbuf_append_str(sb, p);
+            break;
+        }
+        strbuf_append_str_n(sb, p, found - p);
+        strbuf_append_str_n(sb, replacement, rlen);
+        p = found + plen;
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var:offset:length} — substring extraction
+extern "C" Item bash_expand_substring(Item val, Item offset_item, Item len_item) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    int64_t offset = bash_coerce_int(offset_item);
+    int64_t length = bash_coerce_int(len_item);
+    if (offset < 0) offset = (int64_t)slen + offset;
+    if (offset < 0) offset = 0;
+    if ((size_t)offset >= slen) return bash_make_string("", 0);
+    size_t avail = slen - offset;
+    if (length < 0) length = (int64_t)avail;
+    if ((size_t)length > avail) length = avail;
+    return bash_make_string(str + offset, length);
+}
+
+// ${var^} — uppercase first char
+extern "C" Item bash_expand_upper_first(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    if (slen == 0) return val;
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    strbuf_append_char(sb, (char)toupper((unsigned char)str[0]));
+    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var^^} — uppercase all
+extern "C" Item bash_expand_upper_all(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    for (size_t i = 0; i < slen; i++) {
+        strbuf_append_char(sb, (char)toupper((unsigned char)str[i]));
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var,} — lowercase first char
+extern "C" Item bash_expand_lower_first(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    if (slen == 0) return val;
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    strbuf_append_char(sb, (char)tolower((unsigned char)str[0]));
+    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var,,} — lowercase all
+extern "C" Item bash_expand_lower_all(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    for (size_t i = 0; i < slen; i++) {
+        strbuf_append_char(sb, (char)tolower((unsigned char)str[i]));
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
 }
 
 // ============================================================================
@@ -635,60 +978,12 @@ extern "C" Item bash_string_lower(Item str, bool all) {
 }
 
 // ============================================================================
-// Parameter expansion
-// ============================================================================
-
-extern "C" Item bash_expand_default(Item value, Item default_val) {
-    // ${var:-default}: use default if var is unset or empty
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL) return default_val;
-    if (type == LMD_TYPE_STRING) {
-        String* str = it2s(value);
-        if (!str || str->len == 0) return default_val;
-    }
-    return value;
-}
-
-extern "C" Item bash_expand_assign_default(Item value, Item default_val) {
-    // ${var:=default}: same check as :-, returns default (caller handles assignment)
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL) return default_val;
-    if (type == LMD_TYPE_STRING) {
-        String* str = it2s(value);
-        if (!str || str->len == 0) return default_val;
-    }
-    return value;
-}
-
-extern "C" Item bash_expand_alt(Item value, Item alt_val) {
-    // ${var:+alt}: use alt if var IS set and non-empty
-    TypeId type = get_type_id(value);
-    if (type == LMD_TYPE_NULL) return (Item){.item = s2it(heap_create_name("", 0))};
-    if (type == LMD_TYPE_STRING) {
-        String* str = it2s(value);
-        if (!str || str->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
-    }
-    return alt_val;
-}
-
-extern "C" Item bash_expand_error(Item value, Item msg) {
-    // ${var:?msg}: error if unset or empty
-    TypeId type = get_type_id(value);
-    bool is_empty = (type == LMD_TYPE_NULL);
-    if (type == LMD_TYPE_STRING) {
-        String* str = it2s(value);
-        if (!str || str->len == 0) is_empty = true;
-    }
-    if (is_empty) {
-        String* m = it2s(bash_to_string(msg));
-        log_error("bash: %s", m ? m->chars : "parameter null or not set");
-    }
-    return value;
-}
-
-// ============================================================================
 // Array operations
 // ============================================================================
+
+extern "C" Item bash_int_to_item(int64_t n) {
+    return (Item){.item = i2it((int)n)};
+}
 
 extern "C" Item bash_array_new(void) {
     List* list = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
@@ -738,6 +1033,13 @@ extern "C" Item bash_array_length(Item arr) {
     return (Item){.item = i2it(list->length)};
 }
 
+// return raw int64 count (for internal iteration loops)
+extern "C" int64_t bash_array_count(Item arr) {
+    List* list = it2list(arr);
+    if (!list) return 0;
+    return list->length;
+}
+
 extern "C" Item bash_array_all(Item arr) {
     // return the array as-is (it's already a list)
     return arr;
@@ -748,8 +1050,11 @@ extern "C" Item bash_array_unset(Item arr, Item index) {
     if (!list) return arr;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0 || idx >= list->length) return arr;
-    // in Bash, unset arr[i] sets element to empty, preserving indices
-    list->items[idx] = (Item){.item = s2it(heap_create_name("", 0))};
+    // shift remaining elements down
+    for (int i = (int)idx; i < list->length - 1; i++) {
+        list->items[i] = list->items[i + 1];
+    }
+    list->length--;
     return arr;
 }
 
@@ -806,15 +1111,393 @@ extern "C" void bash_negate_exit_code(void) {
     bash_last_exit_code = (bash_last_exit_code == 0) ? 1 : 0;
 }
 
+extern "C" Item bash_return_with_code(Item val) {
+    int code = (int)bash_coerce_int(val);
+    bash_last_exit_code = code & 0xFF;
+    return (Item){.item = i2it(code)};
+}
+
+// ============================================================================
+// File redirect runtime
+// ============================================================================
+
+#include <fcntl.h>
+
+extern "C" Item bash_redirect_write(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // /dev/null: just discard
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for writing", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_append(Item filename, Item content) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    if (fn->len == 9 && memcmp(fn->chars, "/dev/null", 9) == 0) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(0)};
+    }
+
+    int fd = open(fn->chars, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for appending", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    Item c_str = bash_to_string(content);
+    String* c = it2s(c_str);
+    if (c && c->len > 0) {
+        write(fd, c->chars, c->len);
+    }
+    close(fd);
+    bash_last_exit_code = 0;
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" Item bash_redirect_read(Item filename) {
+    Item fn_str = bash_to_string(filename);
+    String* fn = it2s(fn_str);
+    if (!fn || fn->len == 0) {
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    int fd = open(fn->chars, O_RDONLY);
+    if (fd < 0) {
+        log_error("bash: cannot open '%s' for reading", fn->chars);
+        bash_last_exit_code = 1;
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(fd);
+
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
+    strbuf_free(buf);
+    bash_last_exit_code = 0;
+    return result;
+}
+
+// ============================================================================
+// External command execution (posix_spawn)
+// ============================================================================
+
+#include <spawn.h>
+#include <sys/wait.h>
+
+extern char** environ;
+
+// forward declarations (defined in capture section below)
+static Item bash_stdin_item;
+static bool bash_stdin_item_set;
+
+extern "C" Item bash_exec_external(Item* argv, int argc) {
+    if (argc < 1) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // convert Item argv to char* argv
+    const char** c_argv = (const char**)calloc(argc + 1, sizeof(char*));
+    if (!c_argv) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    for (int i = 0; i < argc; i++) {
+        c_argv[i] = bash_item_to_cstr(argv[i]);
+    }
+    c_argv[argc] = NULL;
+
+    const char* cmd_name = c_argv[0];
+
+    // resolve command path: if it contains '/', use directly; otherwise search PATH
+    char resolved_path[4096];
+    const char* exec_path = cmd_name;
+
+    if (!strchr(cmd_name, '/')) {
+        const char* path_env = getenv("PATH");
+        if (!path_env) path_env = "/usr/bin:/bin";
+
+        bool found = false;
+        const char* p = path_env;
+        while (*p) {
+            const char* colon = strchr(p, ':');
+            int dir_len = colon ? (int)(colon - p) : (int)strlen(p);
+            if (dir_len == 0) {
+                // empty component = current directory
+                snprintf(resolved_path, sizeof(resolved_path), "%s", cmd_name);
+            } else {
+                snprintf(resolved_path, sizeof(resolved_path), "%.*s/%s", dir_len, p, cmd_name);
+            }
+            if (access(resolved_path, X_OK) == 0) {
+                exec_path = resolved_path;
+                found = true;
+                break;
+            }
+            if (!colon) break;
+            p = colon + 1;
+        }
+        if (!found) {
+            log_debug("bash: %s: command not found", cmd_name);
+            // write error to stderr like real bash
+            fprintf(stderr, "%s: command not found\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    } else {
+        // absolute or relative path — check it exists
+        if (access(cmd_name, X_OK) != 0) {
+            log_debug("bash: %s: No such file or directory", cmd_name);
+            fprintf(stderr, "%s: No such file or directory\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    }
+
+    // set up stdout pipe to capture output
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) != 0) {
+        log_error("bash: pipe failed for command '%s'", cmd_name);
+        free(c_argv);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // set up stdin pipe if stdin_item is set
+    int stdin_pipe[2] = {-1, -1};
+    bool has_stdin = bash_stdin_item_set;
+    if (has_stdin) {
+        if (pipe(stdin_pipe) != 0) {
+            log_error("bash: stdin pipe failed for command '%s'", cmd_name);
+            close(stdout_pipe[0]);
+            close(stdout_pipe[1]);
+            free(c_argv);
+            bash_last_exit_code = 1;
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    // configure file actions for posix_spawn
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    // redirect child stdout to our pipe
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
+    posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+
+    // redirect child stdin from our pipe (if applicable)
+    if (has_stdin) {
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
+        posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO);
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]);
+    }
+
+    pid_t pid;
+    int spawn_err = posix_spawn(&pid, exec_path, &actions, NULL,
+                                 (char* const*)c_argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawn_err != 0) {
+        log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
+        free(c_argv);
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // close write end of stdout pipe in parent
+    close(stdout_pipe[1]);
+
+    // write stdin data to child if needed, then close
+    if (has_stdin) {
+        close(stdin_pipe[0]); // close read end in parent
+        Item stdin_val = bash_get_stdin_item();
+        String* s = it2s(bash_to_string(stdin_val));
+        if (s && s->len > 0) {
+            write(stdin_pipe[1], s->chars, s->len);
+        }
+        close(stdin_pipe[1]);
+    }
+
+    // read child's stdout
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(stdout_pipe[0]);
+
+    // wait for child
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    int exit_code = 0;
+    if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+    } else {
+        exit_code = 128;
+    }
+
+    // write captured output to bash stdout (capture-aware)
+    if (buf->length > 0) {
+        bash_raw_write(buf->str, (int)buf->length);
+    }
+
+    strbuf_free(buf);
+    free(c_argv);
+    bash_last_exit_code = exit_code;
+    return (Item){.item = i2it(exit_code)};
+}
+
+// ============================================================================
+// Output capture stack (for command substitution)
+// ============================================================================
+
+#define BASH_CAPTURE_STACK_MAX 32
+static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
+static int bash_capture_depth = 0;
+
+// stdin item for pipeline stage passing (declared above, before bash_exec_external)
+
+extern "C" void bash_begin_capture(void) {
+    if (bash_capture_depth < BASH_CAPTURE_STACK_MAX) {
+        bash_capture_bufs[bash_capture_depth] = strbuf_new();
+        bash_capture_depth++;
+    }
+}
+
+extern "C" Item bash_end_capture(void) {
+    if (bash_capture_depth <= 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    bash_capture_depth--;
+    StrBuf* buf = bash_capture_bufs[bash_capture_depth];
+    // strip trailing newlines (bash behavior for command substitution)
+    int len = (int)buf->length;
+    while (len > 0 && buf->str[len - 1] == '\n') len--;
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, len))};
+    strbuf_free(buf);
+    return result;
+}
+
+// end capture without stripping trailing newlines (for pipelines)
+extern "C" Item bash_end_capture_raw(void) {
+    if (bash_capture_depth <= 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    bash_capture_depth--;
+    StrBuf* buf = bash_capture_bufs[bash_capture_depth];
+    Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
+    strbuf_free(buf);
+    return result;
+}
+
+// write raw bytes to stdout or capture buffer
+extern "C" void bash_raw_write(const char* data, int len) {
+    if (bash_capture_depth > 0) {
+        strbuf_append_str_n(bash_capture_bufs[bash_capture_depth - 1], data, len);
+    } else {
+        fwrite(data, 1, len, stdout);
+    }
+}
+
+extern "C" void bash_raw_putc(char c) {
+    if (bash_capture_depth > 0) {
+        strbuf_append_char(bash_capture_bufs[bash_capture_depth - 1], c);
+    } else {
+        fputc(c, stdout);
+    }
+}
+
+// ============================================================================
+// Pipeline stdin item passing
+// ============================================================================
+
+extern "C" void bash_set_stdin_item(Item input) {
+    bash_stdin_item = input;
+    bash_stdin_item_set = true;
+}
+
+extern "C" Item bash_get_stdin_item(void) {
+    if (!bash_stdin_item_set) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return bash_stdin_item;
+}
+
+extern "C" void bash_clear_stdin_item(void) {
+    bash_stdin_item = (Item){0};
+    bash_stdin_item_set = false;
+}
+
 // ============================================================================
 // Output
 // ============================================================================
+
+extern "C" void bash_write_heredoc(Item content, int is_herestring) {
+    Item str = bash_to_string(content);
+    String* s = it2s(str);
+    if (s && s->len > 0) {
+        // heredoc body from tree-sitter may include trailing newline
+        int len = s->len;
+        // trim trailing newline for heredoc (tree-sitter includes it before the delimiter)
+        if (!is_herestring && len > 0 && s->chars[len - 1] == '\n') {
+            len--;
+        }
+        if (len > 0) {
+            bash_raw_write(s->chars, len);
+        }
+    }
+    bash_raw_putc('\n');
+}
 
 extern "C" void bash_write_stdout(Item value) {
     Item str = bash_to_string(value);
     String* s = it2s(str);
     if (s && s->len > 0) {
-        fwrite(s->chars, 1, s->len, stdout);
+        bash_raw_write(s->chars, s->len);
     }
 }
 
@@ -937,6 +1620,29 @@ static Item* bash_positional_args = NULL;
 static int bash_positional_count = 0;
 static const char* bash_script_name = "";
 
+// stack for saving/restoring positional params during function calls
+#define BASH_POS_STACK_MAX 64
+static struct { Item* args; int count; } bash_pos_stack[BASH_POS_STACK_MAX];
+static int bash_pos_stack_depth = 0;
+
+extern "C" void bash_push_positional(Item* args, int count) {
+    if (bash_pos_stack_depth < BASH_POS_STACK_MAX) {
+        bash_pos_stack[bash_pos_stack_depth].args = bash_positional_args;
+        bash_pos_stack[bash_pos_stack_depth].count = bash_positional_count;
+        bash_pos_stack_depth++;
+    }
+    bash_positional_args = args;
+    bash_positional_count = count;
+}
+
+extern "C" void bash_pop_positional(void) {
+    if (bash_pos_stack_depth > 0) {
+        bash_pos_stack_depth--;
+        bash_positional_args = bash_pos_stack[bash_pos_stack_depth].args;
+        bash_positional_count = bash_pos_stack[bash_pos_stack_depth].count;
+    }
+}
+
 extern "C" void bash_set_positional(Item* args, int count) {
     bash_positional_args = args;
     bash_positional_count = count;
@@ -960,6 +1666,23 @@ extern "C" Item bash_get_all_args(void) {
         bash_array_append(arr, bash_positional_args[i]);
     }
     return arr;
+}
+
+extern "C" Item bash_get_all_args_string(void) {
+    // return all positional args joined with spaces
+    if (bash_positional_count == 0) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    StrBuf* sb = strbuf_new();
+    for (int i = 0; i < bash_positional_count; i++) {
+        if (i > 0) strbuf_append_char(sb, ' ');
+        Item str_val = bash_to_string(bash_positional_args[i]);
+        String* s = it2s(str_val);
+        if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, s->len);
+    }
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
 }
 
 extern "C" Item bash_shift_args(int n) {
@@ -988,10 +1711,28 @@ extern "C" void bash_scope_pop(void) {
 }
 
 extern "C" void bash_scope_push_subshell(void) {
-    // Phase 1: snapshot vars (simplified — just log for now)
-    log_debug("bash: runtime subshell scope push");
+    // save the current var table and create a copy for the subshell
+    bash_ensure_var_table();
+    struct hashmap* copy = hashmap_new(sizeof(BashRtVar), 64, 0, 0,
+                                       bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(bash_var_table, &iter, &item)) {
+        hashmap_set(copy, item);
+    }
+    // push the original onto the stack, use the copy as current
+    if (bash_subshell_depth < BASH_SUBSHELL_STACK_MAX) {
+        bash_subshell_stack[bash_subshell_depth] = bash_var_table;
+        bash_subshell_depth++;
+    }
+    bash_var_table = copy;
 }
 
 extern "C" void bash_scope_pop_subshell(void) {
-    log_debug("bash: runtime subshell scope pop");
+    // restore the saved var table, discard subshell copy
+    if (bash_subshell_depth > 0) {
+        bash_subshell_depth--;
+        hashmap_free(bash_var_table);
+        bash_var_table = bash_subshell_stack[bash_subshell_depth];
+    }
 }

@@ -1037,10 +1037,10 @@ Rationale:
 - Phase 1 (libuv layer) unlocks everything else — ✅ completed
 - Phase 3 (JS event loop) is the most impactful for JS development — ✅ completed
 - Phase 2 (server) is a separate subsystem — ✅ completed (ahead of original plan)
-- Phase 8 (generators) is standalone and completes a v14 gap
-- Phase 7 (microtask fix) is small and improves correctness
-- Phases 4–6 (fs/fetch/child) are incremental additions
-- Phase 9 (thread pool) is low priority, Radiant-only
+- Phase 8 (generators) is standalone and completes a v14 gap — ✅ completed
+- Phase 7 (microtask fix) is small and improves correctness — ✅ completed
+- Phases 4–6 (fs/fetch/child) are incremental additions — ✅ all completed
+- Phase 9 (thread pool) is low priority, Radiant-only — ✅ completed
 
 ### Phased Delivery
 
@@ -1049,13 +1049,13 @@ Rationale:
 | 1 | libuv integration layer | ~80 | None | P0 | ✅ Done |
 | 2 | HTTP server migration + TLS | ~1,300 | Phase 1 | P1 | ✅ Done |
 | 3 | JS event loop migration | ~150 | Phase 1 | P0 | ✅ Done |
-| 4 | Async file I/O (`fs`) | ~600 | Phase 3 | P1 | Not started |
-| 5 | Async HTTP (`fetch`) | ~700 | Phase 3 | P1 | Not started |
-| 6 | Child processes | ~500 | Phase 3 | P2 | Not started |
-| 7 | True microtask scheduling | ~100 | Phase 3 | P1 | Not started |
-| 8 | Generator state machine | ~1,000 | None | P0 | Not started |
-| 9 | Network thread pool migration | ~100 | Phase 1 | P3 | Not started |
-| — | **Total** | **~4,530** | | |
+| 4 | Async file I/O (`fs`) | ~420 | Phase 3 | P1 | ✅ Done |
+| 5 | Async HTTP (`fetch`) | ~310 | Phase 3 | P1 | ✅ Done |
+| 6 | Child processes | ~310 | Phase 3 | P2 | ✅ Done |
+| 7 | True microtask scheduling | ~100 | Phase 3 | P1 | ✅ Done |
+| 8 | Generator state machine | ~1,000 | None | P0 | ✅ Done |
+| 9 | Network thread pool migration | ~160 | Phase 1 | P3 | ✅ Done |
+| — | **Total** | **~3,830** | | | **All Complete** |
 
 ---
 
@@ -1346,3 +1346,110 @@ semantics.
 - Build: **0 errors**, binary 13.4 MB
 - Lambda baseline: **679/679** pass (100%)
 - Radiant baseline: **3656/3671** pass (15 pre-existing failures, unchanged)
+
+### Phase 8: Generator State Machine — ✅ Completed (2025-07-14)
+
+- Implemented full generator function support (`function*`, `yield`, for-of protocol)
+- State machine transform in `transpile_js_mir.cpp`: yield prescan, env save/load,
+  state dispatch via EQS/BT chain, boxed wrapper
+- Runtime in `js_runtime.cpp`: `js_gen_yield_result`, `js_is_generator`,
+  `js_iterable_to_array`, generator method dispatch (`.next`, `.return`, `.throw`)
+- Bugs fixed: method dispatch via `js_map_method`, variable persistence across yields,
+  capture analysis for yield expressions
+- Tests: 8 test cases in `generator_basic.js`, all pass, 0 regressions on 64 JS tests
+
+### Phase 7: Microtask Scheduling Fix — ✅ Completed (2025-07-14)
+
+- Promise `.then()`/`.catch()`/`.finally()` handlers now scheduled as microtasks per spec
+- `js_promise_settle()` enqueues handlers via `js_microtask_enqueue` instead of direct calls
+- `js_promise_then()` on already-settled promises schedules handler as microtask
+- Added `next_promise[8]` and `is_finally[8]` to `JsPromise` struct for proper chaining
+- `js_promise_microtask_run`: calls handler(result), chains return value to next promise
+- `js_promise_finally_microtask_run`: calls handler(0 args), passes through original value
+- Fixed resolve/reject callbacks: bound to promise index via `js_bind_function` (no more
+  fragile global `js_resolving_promise`), supports async resolution (e.g. setTimeout → resolve)
+- Resolve callback handles thenable chaining (if resolve(promise), waits for inner promise)
+- Tests: `microtask_order.js` verifies: sync-before-micro, micro-before-macro,
+  then chaining, multiple then, catch→then chain, async resolve, finally handler
+- Regression: 64/64 JS tests pass, 684/684 Lambda baseline pass
+
+### Phase 4: Async File I/O (`fs`) — ✅ Completed (2025-07-15)
+
+- Implemented full `fs` module in `lambda/js/js_fs.cpp` (~420 LOC)
+- Sync methods: `readFileSync`, `writeFileSync`, `existsSync`, `mkdirSync`,
+  `readdirSync`, `statSync`, `unlinkSync`, `renameSync`, `appendFileSync`
+- Async methods: `readFile`, `writeFile` — via `uv_queue_work` on libuv thread pool
+- `fs.promises` namespace: `readFile`, `writeFile` — return Promises
+- Module resolution: bare specifier `'fs'` → built-in namespace via `js_module_get()`
+- Transpiler: `fs.readFileSync/writeFileSync` mapped to direct FPTR calls for performance
+- Tests: `fs_basic.js` (15 test cases — sync read/write, async callbacks, promises,
+  stat, mkdir, readdir, unlink, rename, appendFile, error handling)
+
+### Phase 5: Async HTTP (`fetch`) — ✅ Completed (2025-07-15)
+
+- Implemented `fetch()` global function in `lambda/js/js_fetch.cpp` (~310 LOC)
+- Returns a Promise; HTTP request executed on libuv thread pool via `uv_queue_work`
+- Uses libcurl (`curl_easy_perform`) for the actual HTTP request
+- Response object with `.ok`, `.status`, `.statusText`, `.url` properties
+- Response methods: `.text()` → Promise\<string\>, `.json()` → Promise\<object\>
+- Supports GET/POST/PUT/DELETE via `options.method`, custom headers via `options.headers`
+- Request body support via `options.body` (string)
+- Error handling: network errors reject the Promise with descriptive message
+- Transpiler: `fetch(url)` and `fetch(url, options)` mapped to `js_fetch` FPTR
+- Tests: `fetch_basic.js` (5 tests — GET text, GET JSON, POST, error handling, options),
+  `fetch_errors.js` (2 tests — network error, invalid URL)
+
+### Phase 6: Child Processes — ✅ Completed (2025-07-15)
+
+- Implemented `child_process` module in `lambda/js/js_child_process.cpp` (~310 LOC)
+- `execSync(command)`: synchronous execution via `popen()`, returns stdout as string
+- `exec(command, callback)`: async via `uv_spawn` + `uv_pipe_t` for stdout/stderr capture
+  - Callback receives `(error, stdout, stderr)` per Node.js convention
+  - Proper UV handle lifecycle: `child_handle_close_cb` tracks 3 handle closes
+    (process + 2 pipes), only frees struct when all handles fully closed
+  - `callback_fired` flag prevents double-invocation
+- Module resolution: `'child_process'` / `'node:child_process'` → built-in namespace
+- Bug fixed: transpiler unconditionally mapped `.exec()` → `js_regex_exec`, intercepting
+  all `.exec()` calls. Removed shortcut; added runtime regex detection in `js_map_method()`
+- Tests: `child_process_basic.js` (5 tests — execSync echo/pipe/pwd, async exec, async error)
+- Regression: 69/69 JS tests pass
+
+### Phase 9: Network Thread Pool Migration — ✅ Completed (2025-07-15)
+
+- Rewrote `lambda/network/network_thread_pool.h/cpp` (~160 LOC total)
+- Replaced custom pthreads + priority queue with libuv `uv_queue_work`
+- `WorkRequest` wraps `uv_work_t` with task metadata (pool, function, resource, priority)
+- `thread_pool_enqueue` → `uv_queue_work(loop, req, work_cb, after_work_cb)`
+- `thread_pool_wait_all` → loops `uv_run(loop, UV_RUN_ONCE)` until `pending_count == 0`
+- `thread_pool_create` → allocates struct + `lambda_uv_init()`, sets `UV_THREADPOOL_SIZE`
+- Removed dependency on `priority_queue.h` and pthreads
+- API unchanged: `thread_pool_create/destroy/enqueue/wait_all/shutdown`
+
+### v15 Complete — Build Verification (2025-07-15)
+
+- All 9 phases implemented and verified
+- Build: 0 errors
+- JS tests: **69/69** pass (10/10 consecutive runs)
+- Lambda baseline: **689 total**, 688+ pass (1 transient timing issue in baseline runner,
+  direct gtest execution always passes 69/69)
+- Total new/modified files: ~15 source files, ~10 test files
+- Key dependencies: libuv 1.52.1 (static), libcurl 8.10.1 (static), mbedTLS (static)
+
+---
+
+### PDF.js Phase 0: Primitives Test — ✅ Completed (2025-07-19)
+
+While running PDF.js primitives tests under LambdaJS, several JS runtime bugs were discovered
+and fixed in the transpiler (`transpile_js_mir.cpp`) and AST builder (`build_js_ast.cpp`):
+
+**Bugs fixed:**
+1. **Class expression alias** (`var X = class _Y {}`) — `jm_find_class` now checks `alias_name`
+2. **Anonymous class naming** (`var X = class {}`) — propagates variable name to class entry
+3. **`void 0` returns undefined** — `JS_OP_VOID` → `ITEM_JS_UNDEFINED` (was null)
+4. **Missing argument default** — 3 code paths fixed: inline, native, and direct call now
+   default unset parameters to `undefined` instead of `null`
+5. **Getter/setter parsing** — `build_js_method_definition()` detects get/set keywords;
+   getter methods installed with `__get_<name>` key prefix
+6. **Class expression instanceof** — class expression creates object with `__class_name__`
+
+**Result:** 33/33 PDF.js primitives tests pass. All 689 Lambda baseline tests pass (no regressions).

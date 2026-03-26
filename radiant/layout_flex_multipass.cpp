@@ -1415,6 +1415,49 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             }
         }
     }
+    // Row flex: cross axis is height. After content layout, if the actual content
+    // height exceeds the hypothetical cross size, update the item height.
+    // Per CSS Flexbox §9.4: the cross size should reflect the result of "performing
+    // layout with the used main size". The initial estimate may be inaccurate for
+    // block-level items with complex content (margins, text wrapping, etc.).
+    if (parent_flex && is_main_axis_horizontal(parent_flex)) {
+        bool has_explicit_height = (flex_item->blk && flex_item->blk->given_height >= 0);
+        bool is_replaced = (flex_item->display.inner == RDT_DISPLAY_REPLACED);
+        bool has_aspect_ratio = (flex_item->fi && flex_item->fi->aspect_ratio > 0.0f);
+        // Only for block-level items (not nested flex/grid which handle their own sizing)
+        bool is_inner_flex_or_grid = (flex_item->display.inner == CSS_VALUE_FLEX ||
+                                      flex_item->display.inner == CSS_VALUE_GRID);
+        // For stretched items: only skip update when parent has DEFINITE cross size.
+        // With definite cross size, stretch is authoritative (content overflows).
+        // With auto cross size, stretch was based on inaccurate hypothetical cross,
+        // so the actual content height should take precedence.
+        bool skip_for_stretch = false;
+        if (flex_item->fi && !has_explicit_height) {
+            int align = flex_item->fi->align_self;
+            if (align == ALIGN_AUTO) align = parent_flex->align_items;
+            if (align == ALIGN_STRETCH && parent_flex->has_definite_cross_size) {
+                skip_for_stretch = true;
+            }
+        }
+        if (!has_explicit_height && !is_replaced && !has_aspect_ratio && !is_inner_flex_or_grid &&
+            !skip_for_stretch && flex_item->content_height > 0) {
+            float padding_top = 0, padding_bottom = 0, border_top = 0, border_bottom = 0;
+            if (flex_item->bound) {
+                padding_top = flex_item->bound->padding.top;
+                padding_bottom = flex_item->bound->padding.bottom;
+                if (flex_item->bound->border) {
+                    border_top = flex_item->bound->border->width.top;
+                    border_bottom = flex_item->bound->border->width.bottom;
+                }
+            }
+            float total_height = flex_item->content_height + padding_top + padding_bottom + border_top + border_bottom;
+            if (total_height > flex_item->height + 0.5f) {
+                log_debug("ROW FLEX CROSS FIX: item %s height %.1f -> %.1f (content=%.1f)",
+                          flex_item->node_name(), flex_item->height, total_height, flex_item->content_height);
+                flex_item->height = total_height;
+            }
+        }
+    }
 
     // Restore parent context
     *lycon = saved_context;
@@ -2066,6 +2109,85 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                 }
             }
             restore_item = restore_item->next();
+        }
+    }
+
+    // ROW FLEX CROSS REALIGN: After content layout, items may have grown taller
+    // than their hypothetical cross size. Re-run cross-axis alignment for affected
+    // lines so y-positions reflect the actual item heights.
+    // Per CSS Flexbox §9.4: the cross size should be determined by performing layout
+    // with the used main size. When the initial estimate was inaccurate, the post-
+    // layout height is the authoritative value.
+    // For stretched items in definite-height containers: restore to original (stretch is authoritative).
+    // For stretched items in auto-height containers: allow growth (stretch was based on wrong estimate).
+    if (flex && is_main_axis_horizontal(flex) && flex->lines && flex->line_count > 0) {
+        bool any_height_changed = false;
+        int check_idx = 0;
+        View* check_item = flex_container->first_child;
+        while (check_item && check_idx < 256) {
+            if (check_item->view_type == RDT_VIEW_BLOCK || check_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                check_item->view_type == RDT_VIEW_LIST_ITEM) {
+                ViewElement* fi = (ViewElement*)check_item;
+                if (fi->fi || (fi->item_prop_type == DomElement::ITEM_PROP_FORM && fi->form)) {
+                    float orig = original_heights[check_idx];
+
+                    // Check if item is stretched in a definite-height container
+                    bool has_explicit_height = (fi->blk && fi->blk->given_height >= 0);
+                    bool is_definite_stretched = false;
+                    if (fi->fi && !has_explicit_height && flex->has_definite_cross_size) {
+                        int align = fi->fi->align_self;
+                        if (align == ALIGN_AUTO) align = flex->align_items;
+                        is_definite_stretched = (align == ALIGN_STRETCH);
+                    }
+
+                    // For definite-stretched items, restore to original height
+                    if (is_definite_stretched && fi->height != orig && orig > 0.5f) {
+                        log_debug("ROW FLEX CROSS REALIGN: restoring stretched item %s height %.1f -> %.1f",
+                                  fi->node_name(), fi->height, orig);
+                        fi->height = orig;
+                    } else if (fi->height > orig + 0.5f) {
+                        any_height_changed = true;
+                        // Update the line's cross_size if this item is now taller
+                        for (int li = 0; li < flex->line_count; li++) {
+                            FlexLineInfo* line = &flex->lines[li];
+                            for (int ii = 0; ii < line->item_count; ii++) {
+                                if (line->items[ii] == (View*)fi) {
+                                    int new_cross = (int)(fi->height + 0.5f);
+                                    if (new_cross > line->cross_size) {
+                                        log_debug("ROW FLEX CROSS REALIGN: line %d cross_size %d -> %d (item %s grew)",
+                                                  li, line->cross_size, new_cross, fi->node_name());
+                                        line->cross_size = new_cross;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    check_idx++;
+                }
+            }
+            check_item = check_item->next();
+        }
+        if (any_height_changed) {
+            // For auto-height containers, update cross_axis_size to reflect
+            // the new max line cross size. align_items_cross_axis uses
+            // cross_axis_size (not line cross_size) for nowrap containers.
+            bool has_explicit_cross = (flex_container->blk && flex_container->blk->given_height >= 0);
+            if (!has_explicit_cross) {
+                float max_line_cross = 0;
+                for (int i = 0; i < flex->line_count; i++) {
+                    if (flex->lines[i].cross_size > max_line_cross)
+                        max_line_cross = flex->lines[i].cross_size;
+                }
+                if (max_line_cross > flex->cross_axis_size + 0.5f) {
+                    log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f",
+                              flex->cross_axis_size, max_line_cross);
+                    flex->cross_axis_size = max_line_cross;
+                }
+            }
+            log_debug("ROW FLEX CROSS REALIGN: re-running cross alignment for %d lines", flex->line_count);
+            for (int i = 0; i < flex->line_count; i++) {
+                align_items_cross_axis(flex, &flex->lines[i]);
+            }
         }
     }
 

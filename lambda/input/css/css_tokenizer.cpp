@@ -199,6 +199,47 @@ char* css_decode_unicode_escapes(const char* input, Pool* pool) {
     return result;
 }
 
+// check if input[pos] starts a valid CSS escape sequence
+// a valid escape is \ followed by any char that is NOT a newline
+static inline bool css_starts_escape(const char* input, size_t length, size_t pos) {
+    return pos + 1 < length && input[pos] == '\\' &&
+           input[pos + 1] != '\n' && input[pos + 1] != '\r' && input[pos + 1] != '\f';
+}
+
+// consume a CSS escape sequence starting at input[*pos], advancing *pos
+// caller must verify css_starts_escape() first
+static inline void css_consume_escape_seq(const char* input, size_t length, size_t* pos) {
+    (*pos)++; // skip backslash
+    if (*pos < length && css_is_hex_digit(input[*pos])) {
+        int count = 0;
+        while (*pos < length && css_is_hex_digit(input[*pos]) && count < 6) {
+            (*pos)++;
+            count++;
+        }
+        // skip optional whitespace after hex escape
+        if (*pos < length && (input[*pos] == ' ' || input[*pos] == '\t' ||
+            input[*pos] == '\n' || input[*pos] == '\r')) {
+            (*pos)++;
+        }
+    } else if (*pos < length) {
+        (*pos)++; // simple escape - skip one char
+    }
+}
+
+// consume CSS name characters (letters, digits, -, _, escapes)
+// advances *pos through contiguous name code points
+static inline void css_consume_name(const char* input, size_t length, size_t* pos) {
+    while (*pos < length) {
+        if (isalnum(input[*pos]) || input[*pos] == '-' || input[*pos] == '_') {
+            (*pos)++;
+        } else if (css_starts_escape(input, length, *pos)) {
+            css_consume_escape_seq(input, length, pos);
+        } else {
+            break;
+        }
+    }
+}
+
 // CSS3+ function information database
 static CssFunctionInfo css_function_database[] = {
     // Mathematical functions
@@ -705,6 +746,17 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
         }
     }
 
+    // For IDENT, HASH, AT_KEYWORD, CUSTOM_PROPERTY, FUNCTION tokens,
+    // unescape CSS escape sequences if the token contains a backslash
+    if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_HASH ||
+        token->type == CSS_TOKEN_AT_KEYWORD || token->type == CSS_TOKEN_CUSTOM_PROPERTY ||
+        token->type == CSS_TOKEN_FUNCTION) {
+        if (memchr(token->start, '\\', token->length)) {
+            token->value = css_unescape_string(token->start, token->length, pool);
+            return;
+        }
+    }
+
     // Default: copy entire token value
     char* value = (char*)pool_alloc(pool, token->length + 1);
     if (value) {
@@ -819,9 +871,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 // Hash token
                 size_t start = pos;
                 pos++; // Skip #
-                while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
-                    pos++;
-                }
+                css_consume_name(input, length, &pos);
                 token->type = CSS_TOKEN_HASH;
                 token->length = pos - start;
                 token->data.hash_type = CSS_HASH_ID; // Default to ID type
@@ -831,9 +881,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 // At-keyword
                 size_t start = pos;
                 pos++; // Skip @
-                while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
-                    pos++;
-                }
+                css_consume_name(input, length, &pos);
                 token->type = CSS_TOKEN_AT_KEYWORD;
                 token->length = pos - start;
                 break;
@@ -934,9 +982,7 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     pos += 2; // Skip --
 
                     // Parse the rest of the name (can include letters, digits, hyphens, underscores)
-                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
-                        pos++;
-                    }
+                    css_consume_name(input, length, &pos);
 
                     token->type = CSS_TOKEN_CUSTOM_PROPERTY;
                     token->length = pos - start;
@@ -951,12 +997,11 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
                 }
                 // Check for custom property (--foo) or identifier starting with - (e.g., -webkit-transform)
-                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-')) {
+                else if (pos + 1 < length && (isalpha(input[pos + 1]) || input[pos + 1] == '_' || input[pos + 1] == '-'
+                          || css_starts_escape(input, length, pos + 1))) {
                     // Identifier starting with - or -- (custom property)
                     size_t start = pos;
-                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
-                        pos++;
-                    }
+                    css_consume_name(input, length, &pos);
 
                     // Check for function
                     if (pos < length && input[pos] == '(') {
@@ -982,12 +1027,11 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                     size_t start = pos;
                     pos++; // Skip the '.'
                     tokenize_number(input, length, start, &pos, token, tokenizer->pool);
-                } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {
-                    // Identifier or function - check for ASCII start
+                } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))
+                           || css_starts_escape(input, length, pos)) {
+                    // Identifier or function
                     size_t start = pos;
-                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
-                        pos++;
-                    }
+                    css_consume_name(input, length, &pos);
 
                     // Check for function
                     if (pos < length && input[pos] == '(') {
@@ -1009,6 +1053,8 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         while (pos < length) {
                             if (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_') {
                                 pos++;
+                            } else if (css_starts_escape(input, length, pos)) {
+                                css_consume_escape_seq(input, length, &pos);
                             } else if ((unsigned char)input[pos] >= 0x80) {
                                 UnicodeChar next = css_parse_unicode_char(input + pos, length - pos);
                                 if (next.byte_length > 0 && css_is_name_char_unicode(next.codepoint)) {

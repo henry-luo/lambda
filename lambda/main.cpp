@@ -35,6 +35,7 @@
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "py/py_transpiler.hpp"      // Python transpiler
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
+#include "bash/bash_runtime.h"       // bash_exit_code()
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1149,9 +1150,10 @@ int main(int argc, char *argv[]) {
             free(bash_source);
         }
 
+        int bash_exit = bash_exit_code(bash_get_exit_code());
         runtime_cleanup(&runtime);
         log_finish();
-        return 0;
+        return bash_exit;
     }
 
     // Handle convert command
