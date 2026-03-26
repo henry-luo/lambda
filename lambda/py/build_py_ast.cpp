@@ -1511,6 +1511,9 @@ static PyAstNode* build_py_import_from(PyTranspiler* tp, TSNode import_node) {
         const char* child_type = ts_node_type(child);
 
         if (strcmp(child_type, "dotted_name") == 0 || strcmp(child_type, "aliased_import") == 0) {
+            // skip the module_name node itself (it appears as a dotted_name child too)
+            if (!ts_node_is_null(module_node) && ts_node_eq(child, module_node)) continue;
+
             PyImportNode* name_imp = (PyImportNode*)alloc_py_ast_node(tp, PY_AST_NODE_IMPORT, child, sizeof(PyImportNode));
 
             if (strcmp(child_type, "aliased_import") == 0) {
@@ -1536,6 +1539,17 @@ static PyAstNode* build_py_import_from(PyTranspiler* tp, TSNode import_node) {
                 prev->next = (PyAstNode*)name_imp;
             }
             prev = (PyAstNode*)name_imp;
+        } else if (strcmp(child_type, "wildcard_import") == 0) {
+            // from module import *
+            PyImportNode* star_imp = (PyImportNode*)alloc_py_ast_node(tp, PY_AST_NODE_IMPORT, child, sizeof(PyImportNode));
+            star_imp->module_name = name_pool_create_len(tp->name_pool, "*", 1);
+            star_imp->base.type = &TYPE_ANY;
+            if (!prev) {
+                imp->names = (PyAstNode*)star_imp;
+            } else {
+                prev->next = (PyAstNode*)star_imp;
+            }
+            prev = (PyAstNode*)star_imp;
         }
     }
 

@@ -1,0 +1,10 @@
+localhost:8080
+  debug=True
+  timeout=30
+example.com:443
+  ssl=True
+server:8080
+  debug=False
+  timeout=60
+server2:9000
+  verbose=True

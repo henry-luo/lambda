@@ -497,6 +497,7 @@ typedef void* (*fn_ptr)();
 
 // Function flags (stored in Function.flags field)
 #define FN_FLAG_BOXED_RET  0x01  // bit 0: fn->ptr returns RetItem instead of Item
+#define FN_FLAG_HAS_KWARGS 0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
 
 // Function as first-class value
 // Supports both direct function references and closures

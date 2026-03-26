@@ -1,0 +1,6 @@
+HOME is set
+USER is set
+PATH is set
+exported: hello
+re-read: hello
+ANOTHER_VAR: world

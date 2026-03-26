@@ -771,6 +771,36 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             // Stretch to fill track area (unless item has explicit width or aspect-ratio)
             if (!has_explicit_width && aspect_ratio <= 0) {
                 item->width = available_width;
+                // CSS Grid §8.1: stretch is clamped by max-width/min-width
+                // Convert max-width to border-box coordinates for comparison with item->width
+                if (max_width > 0) {
+                    float bb_max = max_width;
+                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    if (!is_border_box && item->bound) {
+                        bb_max += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            bb_max += item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                    // In border-box mode, width can't be less than padding+border
+                    if (is_border_box && item->bound) {
+                        float pad_border = item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            pad_border += item->bound->border->width.left + item->bound->border->width.right;
+                        if (bb_max < pad_border) bb_max = pad_border;
+                    }
+                    if (item->width > bb_max) item->width = bb_max;
+                }
+                float min_w = (item->blk && item->blk->given_min_width > 0) ? item->blk->given_min_width : 0;
+                if (min_w > 0) {
+                    float bb_min = min_w;
+                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    if (!is_border_box && item->bound) {
+                        bb_min += item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border)
+                            bb_min += item->bound->border->width.left + item->bound->border->width.right;
+                    }
+                    if (item->width < bb_min) item->width = bb_min;
+                }
             }
         }
     }
@@ -802,6 +832,36 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             // Stretch to fill track area (unless item has explicit height or aspect-ratio)
             if (!has_explicit_height && aspect_ratio <= 0) {
                 item->height = available_height;
+                // CSS Grid §8.1: stretch is clamped by max-height/min-height
+                // Convert max-height to border-box coordinates for comparison with item->height
+                if (max_height > 0) {
+                    float bb_max = max_height;
+                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    if (!is_border_box && item->bound) {
+                        bb_max += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            bb_max += item->bound->border->width.top + item->bound->border->width.bottom;
+                    }
+                    // In border-box mode, height can't be less than padding+border
+                    if (is_border_box && item->bound) {
+                        float pad_border = item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
+                        if (bb_max < pad_border) bb_max = pad_border;
+                    }
+                    if (item->height > bb_max) item->height = bb_max;
+                }
+                float min_h = (item->blk && item->blk->given_min_height > 0) ? item->blk->given_min_height : 0;
+                if (min_h > 0) {
+                    float bb_min = min_h;
+                    bool is_border_box = (item->blk && item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    if (!is_border_box && item->bound) {
+                        bb_min += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            bb_min += item->bound->border->width.top + item->bound->border->width.bottom;
+                    }
+                    if (item->height < bb_min) item->height = bb_min;
+                }
             }
         }
     }

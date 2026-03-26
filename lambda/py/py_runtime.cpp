@@ -893,6 +893,8 @@ extern "C" Item py_new_object(void) {
     return (Item){.map = m};
 }
 
+extern "C" Item js_property_get(Item object, Item key);
+
 extern "C" Item py_getattr(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
@@ -900,7 +902,12 @@ extern "C" Item py_getattr(Item object, Item name) {
     String* key = it2s(name);
     if (!key) return ItemNull;
     Map* m = it2map(object);
-    if (!m || !m->type) return ItemNull;
+    if (!m) return ItemNull;
+    // JS-backed HashMap object (type == NULL): delegate to js_property_get
+    // This handles imported module namespaces created via js_new_object()
+    if (!m->type) {
+        return js_property_get(object, name);
+    }
 
     // 1. super proxy: delegate to the *next* class in the MRO
     {
@@ -1614,6 +1621,118 @@ extern "C" Item py_new_closure(void* func_ptr, int param_count, uint64_t* env, i
 extern "C" uint64_t* py_alloc_env(int size) {
     if (!py_input) return NULL;
     return (uint64_t*)pool_calloc(py_input->pool, size * sizeof(uint64_t));
+}
+
+// set FN_FLAG_HAS_KWARGS on a function item (called at definition site for **kwargs functions)
+extern "C" Item py_set_kwargs_flag(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return fn_item;
+    Function* fn = fn_item.function;
+    if (fn) fn->flags |= FN_FLAG_HAS_KWARGS;
+    return fn_item;
+}
+
+// merge all entries from src dict into dst dict (used for **dict splat at call sites)
+extern "C" Item py_dict_merge(Item dst, Item src) {
+    if (get_type_id(dst) != LMD_TYPE_MAP) return dst;
+    if (get_type_id(src) != LMD_TYPE_MAP) return dst;
+    Map* src_map = it2map(src);
+    if (!src_map || !src_map->type) return dst;
+    Map* dst_map = it2map(dst);
+    if (!dst_map) return dst;
+    TypeMap* stm = (TypeMap*)src_map->type;
+    ShapeEntry* field = stm->shape;
+    while (field) {
+        Item val = _map_read_field(field, src_map->data);
+        if (field->name && py_input) {
+            String* key_name = heap_create_name(field->name->str);
+            map_put(dst_map, key_name, val, py_input);
+        }
+        field = field->next;
+    }
+    return dst;
+}
+
+// call a function that may accept **kwargs: if FN_FLAG_HAS_KWARGS, append kwargs_map as last arg
+extern "C" Item py_call_function_kw(Item func, Item* args, int arg_count, Item kwargs_map) {
+    // bound method: prepend __self__ to args
+    if (py_is_bound_method(func)) {
+        Item fn_item = py_map_get_cstr(func, "__func__");
+        Item self    = py_map_get_cstr(func, "__self__");
+        Item new_args[17];
+        new_args[0] = self;
+        int na = arg_count > 16 ? 16 : arg_count;
+        for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
+        return py_call_function_kw(fn_item, new_args, na + 1, kwargs_map);
+    }
+
+    // class construction — kwargs not forwarded to __init__ for now
+    if (py_is_class(func)) {
+        return py_call_function(func, args, arg_count);
+    }
+
+    if (get_type_id(func) != LMD_TYPE_FUNC) {
+        log_error("py: TypeError: object is not callable (py_call_function_kw)");
+        return ItemNull;
+    }
+    Function* fn = func.function;
+    if (!fn || !fn->ptr) return ItemNull;
+
+    // if the function doesn't take **kwargs, fall back to regular dispatch
+    if (!(fn->flags & FN_FLAG_HAS_KWARGS)) {
+        return py_call_function(func, args, arg_count);
+    }
+
+    int arity = fn->arity;
+    bool is_closure = (fn->closure_field_count > 0 && fn->closure_env != NULL);
+
+    // typedefs: regular params + kwargs map as last param (non-closure)
+    typedef Item (*PyFuncKw0)(Item);
+    typedef Item (*PyFuncKw1)(Item, Item);
+    typedef Item (*PyFuncKw2)(Item, Item, Item);
+    typedef Item (*PyFuncKw3)(Item, Item, Item, Item);
+    typedef Item (*PyFuncKw4)(Item, Item, Item, Item, Item);
+    typedef Item (*PyFuncKw5)(Item, Item, Item, Item, Item, Item);
+    typedef Item (*PyFuncKw6)(Item, Item, Item, Item, Item, Item, Item);
+
+    // typedefs: env + regular params + kwargs map (closure)
+    typedef Item (*PyClosureKw1)(uint64_t*, Item);
+    typedef Item (*PyClosureKw2)(uint64_t*, Item, Item);
+    typedef Item (*PyClosureKw3)(uint64_t*, Item, Item, Item);
+    typedef Item (*PyClosureKw4)(uint64_t*, Item, Item, Item, Item);
+    typedef Item (*PyClosureKw5)(uint64_t*, Item, Item, Item, Item, Item);
+    typedef Item (*PyClosureKw6)(uint64_t*, Item, Item, Item, Item, Item, Item);
+    typedef Item (*PyClosureKw7)(uint64_t*, Item, Item, Item, Item, Item, Item, Item);
+
+    // pad regular args with ItemNull
+    Item padded[16];
+    for (int i = 0; i < arity && i < 16; i++) {
+        padded[i] = (i < arg_count && args) ? args[i] : ItemNull;
+    }
+
+    if (is_closure) {
+        uint64_t* env = (uint64_t*)fn->closure_env;
+        switch (arity) {
+        case 0: return ((PyClosureKw1)fn->ptr)(env, kwargs_map);
+        case 1: return ((PyClosureKw2)fn->ptr)(env, padded[0], kwargs_map);
+        case 2: return ((PyClosureKw3)fn->ptr)(env, padded[0], padded[1], kwargs_map);
+        case 3: return ((PyClosureKw4)fn->ptr)(env, padded[0], padded[1], padded[2], kwargs_map);
+        case 4: return ((PyClosureKw5)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], kwargs_map);
+        case 5: return ((PyClosureKw6)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], kwargs_map);
+        case 6: return ((PyClosureKw7)fn->ptr)(env, padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], kwargs_map);
+        default: return ItemNull;
+        }
+    }
+
+    switch (arity) {
+    case 0: return ((PyFuncKw0)fn->ptr)(kwargs_map);
+    case 1: return ((PyFuncKw1)fn->ptr)(padded[0], kwargs_map);
+    case 2: return ((PyFuncKw2)fn->ptr)(padded[0], padded[1], kwargs_map);
+    case 3: return ((PyFuncKw3)fn->ptr)(padded[0], padded[1], padded[2], kwargs_map);
+    case 4: return ((PyFuncKw4)fn->ptr)(padded[0], padded[1], padded[2], padded[3], kwargs_map);
+    case 5: return ((PyFuncKw5)fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], kwargs_map);
+    case 6: return ((PyFuncKw6)fn->ptr)(padded[0], padded[1], padded[2], padded[3], padded[4], padded[5], kwargs_map);
+    default: return ItemNull;
+    }
 }
 
 extern "C" Item py_call_function(Item func, Item* args, int arg_count) {

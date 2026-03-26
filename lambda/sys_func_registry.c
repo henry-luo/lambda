@@ -1278,7 +1278,10 @@ JitImport jit_runtime_imports[] = {
     {"py_new_function", FPTR(py_new_function)},
     {"py_new_closure", FPTR(py_new_closure)},
     {"py_alloc_env", FPTR(py_alloc_env)},
+    {"py_set_kwargs_flag", FPTR(py_set_kwargs_flag)},
+    {"py_dict_merge", FPTR(py_dict_merge)},
     {"py_call_function", FPTR(py_call_function)},
+    {"py_call_function_kw", FPTR(py_call_function_kw)},
     // exception handling
     {"py_raise", FPTR(py_raise)},
     {"py_check_exception", FPTR(py_check_exception)},
@@ -1332,6 +1335,7 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_divmod", FPTR(py_builtin_divmod)},
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
+    {"py_builtin_property", FPTR(py_builtin_property)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers
@@ -1519,6 +1523,26 @@ JitImport jit_runtime_imports[] = {
     // runtime init/cleanup
     {"bash_runtime_init", FPTR(bash_runtime_init)},
     {"bash_runtime_cleanup", FPTR(bash_runtime_cleanup)},
+    // environment variable integration
+    {"bash_env_import", FPTR(bash_env_import)},
+    {"bash_env_sync_export", FPTR(bash_env_sync_export)},
+    // script sourcing
+    {"bash_source_file", FPTR(bash_source_file)},
+    // runtime function registry
+    {"bash_register_rt_func", FPTR(bash_register_rt_func)},
+    {"bash_call_rt_func", FPTR(bash_call_rt_func)},
+    {"bash_lookup_rt_func", FPTR(bash_lookup_rt_func)},
+    // shell options
+    {"bash_set_option", FPTR(bash_set_option)},
+    {"bash_get_option_errexit", FPTR(bash_get_option_errexit)},
+    {"bash_get_option_nounset", FPTR(bash_get_option_nounset)},
+    {"bash_get_option_xtrace", FPTR(bash_get_option_xtrace)},
+    {"bash_get_option_pipefail", FPTR(bash_get_option_pipefail)},
+    // signal handling / trap (Phase 8)
+    {"bash_trap_set", FPTR(bash_trap_set)},
+    {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
+    {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

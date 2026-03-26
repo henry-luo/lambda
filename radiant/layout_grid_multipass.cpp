@@ -191,6 +191,23 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
                 int re = item->gi->computed_grid_row_end - 1;
                 if (rs != r || re != r + 1) continue; // only single-row-span items
                 float h = item->content_height;
+                // CSS Grid: if item has max-height, its contribution to the row is capped
+                if (item->blk && item->blk->given_max_height >= 0) {
+                    float bb_max = item->blk->given_max_height;
+                    bool is_border_box = (item->blk->box_sizing == CSS_VALUE_BORDER_BOX);
+                    if (!is_border_box && item->bound) {
+                        bb_max += item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            bb_max += item->bound->border->width.top + item->bound->border->width.bottom;
+                    }
+                    if (is_border_box && item->bound) {
+                        float pad_border = item->bound->padding.top + item->bound->padding.bottom;
+                        if (item->bound->border)
+                            pad_border += item->bound->border->width.top + item->bound->border->width.bottom;
+                        if (bb_max < pad_border) bb_max = pad_border;
+                    }
+                    if (h > bb_max) h = bb_max;
+                }
                 if (h > max_content_h) max_content_h = h;
             }
             if (max_content_h > gl->computed_rows[r].computed_size) {

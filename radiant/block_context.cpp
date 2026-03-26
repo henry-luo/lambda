@@ -187,6 +187,17 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
+    // 10. Flex items and Grid items establish independent formatting contexts
+    // CSS Flexbox §4.2: "a flex item establishes an independent formatting context"
+    // CSS Grid §6.1: "a grid item establishes an independent formatting context"
+    if (block->parent && block->parent->is_block()) {
+        ViewBlock* parent_block = (ViewBlock*)block->parent;
+        if (parent_block->display.inner == CSS_VALUE_FLEX ||
+            parent_block->display.inner == CSS_VALUE_GRID) {
+            return true;
+        }
+    }
+
     return false;
 }
 
