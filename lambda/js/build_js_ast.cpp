@@ -980,6 +980,9 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
     } else if (strcmp(node_type, "function_expression") == 0 || strcmp(node_type, "arrow_function") == 0 ||
                strcmp(node_type, "generator_function") == 0) {
         return build_js_function(tp, expr_node);
+    } else if (strcmp(node_type, "class") == 0) {
+        // class expression: var X = class _X { ... }
+        return build_js_class_declaration(tp, expr_node);
     } else if (strcmp(node_type, "yield_expression") == 0) {
         // yield / yield expr / yield* expr
         JsYieldNode* yield_node = (JsYieldNode*)alloc_js_ast_node(tp, JS_AST_NODE_YIELD_EXPRESSION, expr_node, sizeof(JsYieldNode));
@@ -2073,15 +2076,19 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     // Initialize method properties
     method->computed = false;
     method->static_method = false;
+    method->kind = JsMethodDefinitionNode::JS_METHOD_METHOD;
 
-    // Check for 'static' keyword — it appears as a child node of method_definition
+    // Check for 'static', 'get', 'set' keywords
     uint32_t child_count = ts_node_child_count(method_node);
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_child(method_node, i);
         const char* child_type = ts_node_type(child);
         if (strcmp(child_type, "static") == 0) {
             method->static_method = true;
-            break;
+        } else if (strcmp(child_type, "get") == 0) {
+            method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
+        } else if (strcmp(child_type, "set") == 0) {
+            method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
         }
     }
 
