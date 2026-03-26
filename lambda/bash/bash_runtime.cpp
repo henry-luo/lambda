@@ -1214,6 +1214,184 @@ extern "C" Item bash_redirect_read(Item filename) {
 }
 
 // ============================================================================
+// External command execution (posix_spawn)
+// ============================================================================
+
+#include <spawn.h>
+#include <sys/wait.h>
+
+extern char** environ;
+
+// forward declarations (defined in capture section below)
+static Item bash_stdin_item;
+static bool bash_stdin_item_set;
+
+extern "C" Item bash_exec_external(Item* argv, int argc) {
+    if (argc < 1) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // convert Item argv to char* argv
+    const char** c_argv = (const char**)calloc(argc + 1, sizeof(char*));
+    if (!c_argv) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    for (int i = 0; i < argc; i++) {
+        c_argv[i] = bash_item_to_cstr(argv[i]);
+    }
+    c_argv[argc] = NULL;
+
+    const char* cmd_name = c_argv[0];
+
+    // resolve command path: if it contains '/', use directly; otherwise search PATH
+    char resolved_path[4096];
+    const char* exec_path = cmd_name;
+
+    if (!strchr(cmd_name, '/')) {
+        const char* path_env = getenv("PATH");
+        if (!path_env) path_env = "/usr/bin:/bin";
+
+        bool found = false;
+        const char* p = path_env;
+        while (*p) {
+            const char* colon = strchr(p, ':');
+            int dir_len = colon ? (int)(colon - p) : (int)strlen(p);
+            if (dir_len == 0) {
+                // empty component = current directory
+                snprintf(resolved_path, sizeof(resolved_path), "%s", cmd_name);
+            } else {
+                snprintf(resolved_path, sizeof(resolved_path), "%.*s/%s", dir_len, p, cmd_name);
+            }
+            if (access(resolved_path, X_OK) == 0) {
+                exec_path = resolved_path;
+                found = true;
+                break;
+            }
+            if (!colon) break;
+            p = colon + 1;
+        }
+        if (!found) {
+            log_debug("bash: %s: command not found", cmd_name);
+            // write error to stderr like real bash
+            fprintf(stderr, "%s: command not found\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    } else {
+        // absolute or relative path — check it exists
+        if (access(cmd_name, X_OK) != 0) {
+            log_debug("bash: %s: No such file or directory", cmd_name);
+            fprintf(stderr, "%s: No such file or directory\n", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 127;
+            return (Item){.item = i2it(127)};
+        }
+    }
+
+    // set up stdout pipe to capture output
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) != 0) {
+        log_error("bash: pipe failed for command '%s'", cmd_name);
+        free(c_argv);
+        bash_last_exit_code = 1;
+        return (Item){.item = i2it(1)};
+    }
+
+    // set up stdin pipe if stdin_item is set
+    int stdin_pipe[2] = {-1, -1};
+    bool has_stdin = bash_stdin_item_set;
+    if (has_stdin) {
+        if (pipe(stdin_pipe) != 0) {
+            log_error("bash: stdin pipe failed for command '%s'", cmd_name);
+            close(stdout_pipe[0]);
+            close(stdout_pipe[1]);
+            free(c_argv);
+            bash_last_exit_code = 1;
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    // configure file actions for posix_spawn
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    // redirect child stdout to our pipe
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
+    posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+
+    // redirect child stdin from our pipe (if applicable)
+    if (has_stdin) {
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[1]);
+        posix_spawn_file_actions_adddup2(&actions, stdin_pipe[0], STDIN_FILENO);
+        posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]);
+    }
+
+    pid_t pid;
+    int spawn_err = posix_spawn(&pid, exec_path, &actions, NULL,
+                                 (char* const*)c_argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+
+    if (spawn_err != 0) {
+        log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
+        free(c_argv);
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // close write end of stdout pipe in parent
+    close(stdout_pipe[1]);
+
+    // write stdin data to child if needed, then close
+    if (has_stdin) {
+        close(stdin_pipe[0]); // close read end in parent
+        Item stdin_val = bash_get_stdin_item();
+        String* s = it2s(bash_to_string(stdin_val));
+        if (s && s->len > 0) {
+            write(stdin_pipe[1], s->chars, s->len);
+        }
+        close(stdin_pipe[1]);
+    }
+
+    // read child's stdout
+    StrBuf* buf = strbuf_new();
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
+        strbuf_append_str_n(buf, tmp, (size_t)n);
+    }
+    close(stdout_pipe[0]);
+
+    // wait for child
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    int exit_code = 0;
+    if (WIFEXITED(status)) {
+        exit_code = WEXITSTATUS(status);
+    } else {
+        exit_code = 128;
+    }
+
+    // write captured output to bash stdout (capture-aware)
+    if (buf->length > 0) {
+        bash_raw_write(buf->str, (int)buf->length);
+    }
+
+    strbuf_free(buf);
+    free(c_argv);
+    bash_last_exit_code = exit_code;
+    return (Item){.item = i2it(exit_code)};
+}
+
+// ============================================================================
 // Output capture stack (for command substitution)
 // ============================================================================
 
@@ -1221,9 +1399,7 @@ extern "C" Item bash_redirect_read(Item filename) {
 static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
 static int bash_capture_depth = 0;
 
-// stdin item for pipeline stage passing
-static Item bash_stdin_item = {0};
-static bool bash_stdin_item_set = false;
+// stdin item for pipeline stage passing (declared above, before bash_exec_external)
 
 extern "C" void bash_begin_capture(void) {
     if (bash_capture_depth < BASH_CAPTURE_STACK_MAX) {

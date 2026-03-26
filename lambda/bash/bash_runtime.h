@@ -220,6 +220,11 @@ Item bash_redirect_append(Item filename, Item content);  // >> file
 Item bash_redirect_read(Item filename);                  // < file
 
 // ========================================================================
+// External command execution
+// ========================================================================
+Item bash_exec_external(Item* argv, int argc);           // run system binary via posix_spawn
+
+// ========================================================================
 // Output
 // ========================================================================
 void bash_write_heredoc(Item content, int is_herestring); // write heredoc/herestring

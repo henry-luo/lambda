@@ -1245,9 +1245,41 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return MIR_new_reg_op(mt->ctx, result);
     }
 
-    // fallback: unrecognized command — log and return exit code 127
-    log_debug("bash-mir: unrecognized command '%s'", cmd_name);
-    return bm_emit_int_literal(mt, 127);
+    // fallback: external command execution via posix_spawn
+    // build argv[] with command name as argv[0] + all arguments
+    {
+        int total_argc = 1 + cmd->arg_count;
+        MIR_reg_t ext_args_ptr = bm_new_temp(mt);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, ext_args_ptr),
+                         MIR_new_int_op(mt->ctx, total_argc * (int)sizeof(Item))));
+
+        // argv[0] = command name
+        MIR_op_t name_val = bm_emit_string_literal(mt, cmd_name, cmd_len);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ext_args_ptr, 0, 1),
+                name_val));
+
+        // argv[1..] = arguments
+        int i = 1;
+        BashAstNode* arg = cmd->args;
+        while (arg && i < total_argc) {
+            MIR_op_t arg_val = bm_transpile_node(mt, arg);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                   ext_args_ptr, 0, 1),
+                    arg_val));
+            arg = arg->next;
+            i++;
+        }
+
+        MIR_reg_t ext_result = bm_emit_call_2(mt, "bash_exec_external",
+            MIR_new_reg_op(mt->ctx, ext_args_ptr),
+            MIR_new_int_op(mt->ctx, total_argc));
+        return MIR_new_reg_op(mt->ctx, ext_result);
+    }
 }
 
 // ============================================================================

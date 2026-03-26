@@ -1426,6 +1426,8 @@ JitImport jit_runtime_imports[] = {
     {"bash_redirect_write", FPTR(bash_redirect_write)},
     {"bash_redirect_append", FPTR(bash_redirect_append)},
     {"bash_redirect_read", FPTR(bash_redirect_read)},
+    // external command execution
+    {"bash_exec_external", FPTR(bash_exec_external)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
