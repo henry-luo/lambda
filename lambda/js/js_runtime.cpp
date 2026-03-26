@@ -1767,9 +1767,17 @@ static JsCollectionData* js_get_collection_data(Item obj) {
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_item = js_property_get(obj, cd_key);
     TypeId tid = get_type_id(cd_item);
-    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) return NULL;
+    if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) {
+        log_error("js_get_collection_data: cd_item tid=%d (not INT/INT64), cd_item.item=0x%llx", (int)tid, (unsigned long long)cd_item.item);
+        return NULL;
+    }
     int64_t ptr_val = it2i(cd_item);
     if (ptr_val == 0) return NULL;
+    // Guard against corrupt/small pointer values that would cause SIGSEGV
+    if (ptr_val < 4096) {
+        log_error("js_get_collection_data: suspicious pointer value %lld, rejecting", (long long)ptr_val);
+        return NULL;
+    }
     return (JsCollectionData*)(uintptr_t)ptr_val;
 }
 
@@ -1782,6 +1790,7 @@ static Item js_collection_create(int type) {
     Item obj = js_new_object();
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
+    log_error("js_collection_create: cd=%p addr=%lld cd_val.item=0x%llx cd_val_tid=%d", cd, (long long)(uintptr_t)cd, (unsigned long long)cd_val.item, (int)get_type_id(cd_val));
     js_property_set(obj, cd_key, cd_val);
     // set initial size property
     Item size_key = (Item){.item = s2it(heap_create_name("size"))};

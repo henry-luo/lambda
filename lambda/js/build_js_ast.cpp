@@ -651,7 +651,23 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
         for (uint32_t i = 0; i < param_count; i++) {
             TSNode param_node = ts_node_named_child(params_node, i);
-            JsAstNode* param = build_js_identifier(tp, param_node);
+            const char* ptype = ts_node_type(param_node);
+            JsAstNode* param = NULL;
+            if (strcmp(ptype, "identifier") == 0) {
+                param = build_js_identifier(tp, param_node);
+            } else if (strcmp(ptype, "rest_pattern") == 0) {
+                // ...args rest parameter — build as REST_ELEMENT wrapping inner identifier
+                JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_REST_ELEMENT, param_node, sizeof(JsSpreadElementNode));
+                if (ts_node_named_child_count(param_node) > 0) {
+                    TSNode inner = ts_node_named_child(param_node, 0);
+                    rest->argument = build_js_expression(tp, inner);
+                }
+                rest->base.type = &TYPE_ARRAY;
+                param = (JsAstNode*)rest;
+            } else {
+                param = build_js_expression(tp, param_node);
+            }
 
             if (param) {
                 if (!prev_param) {
@@ -666,7 +682,12 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         // Check for single parameter (arrow function without parens: x => x * 2)
         TSNode param_node = ts_node_child_by_field_name(func_node, "parameter", strlen("parameter"));
         if (!ts_node_is_null(param_node)) {
-            func->params = build_js_identifier(tp, param_node);
+            const char* ptype = ts_node_type(param_node);
+            if (strcmp(ptype, "identifier") == 0) {
+                func->params = build_js_identifier(tp, param_node);
+            } else {
+                func->params = build_js_expression(tp, param_node);
+            }
         }
     }
 
@@ -880,18 +901,27 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
                 declarator->id = NULL;
             }
 
-            // Get initializer (child 2, if it exists)
+            // Get initializer: look past any comment nodes for the '=' sign and value.
+            // For `var x = /* @__PURE__ */ expr`, child 2 may be a comment node.
             TSNode init_node;
             bool has_initializer = false;
-            if (declarator_child_count >= 3) {
-                init_node = ts_node_child(declarator_node, 2);
-                has_initializer = !ts_node_is_null(init_node);
-            } else {
-                has_initializer = false;
+            for (uint32_t ci = 2; ci < declarator_child_count; ci++) {
+                TSNode cand = ts_node_child(declarator_node, ci);
+                if (ts_node_is_null(cand)) break;
+                const char* cand_type = ts_node_type(cand);
+                if (strcmp(cand_type, "comment") == 0) continue; // skip /* @__PURE__ */ etc.
+                if (strcmp(cand_type, "=") == 0) continue;       // skip the '=' operator
+                init_node = cand;
+                has_initializer = true;
+                break;
             }
             if (has_initializer) {
                 declarator->init = build_js_expression(tp, init_node);
-                declarator->base.type = declarator->init->type;
+                if (declarator->init) {
+                    declarator->base.type = declarator->init->type;
+                } else {
+                    declarator->base.type = &TYPE_ANY;
+                }
             } else {
                 declarator->init = NULL;
                 declarator->base.type = &TYPE_NULL; // undefined
@@ -1073,6 +1103,18 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         }
         seq->base.type = &TYPE_ANY;
         return (JsAstNode*)seq;
+    } else if (strcmp(node_type, "computed_property_name") == 0) {
+        // [expr] — computed key in class/object. Unwrap the inner expression.
+        // The inner expression is the first named child.
+        if (ts_node_named_child_count(expr_node) > 0) {
+            TSNode inner = ts_node_named_child(expr_node, 0);
+            return build_js_expression(tp, inner);
+        }
+        // Empty computed property — return null identifier
+        JsIdentifierNode* id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        id->name = name_pool_create_len(tp->name_pool, "__computed__", 12);
+        id->base.type = &TYPE_ANY;
+        return (JsAstNode*)id;
     } else if (strcmp(node_type, "ternary_expression") == 0) {
         JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
         log_debug("ternary: building conditional expression");
@@ -1147,6 +1189,16 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         }
         spread->base.type = &TYPE_ARRAY;
         return (JsAstNode*)spread;
+    } else if (strcmp(node_type, "assignment_pattern") == 0) {
+        // function parameter with default: (x = defaultVal)
+        JsAssignmentPatternNode* assign_pat = (JsAssignmentPatternNode*)alloc_js_ast_node(
+            tp, JS_AST_NODE_ASSIGNMENT_PATTERN, expr_node, sizeof(JsAssignmentPatternNode));
+        TSNode left = ts_node_child_by_field_name(expr_node, "left", 4);
+        TSNode right = ts_node_child_by_field_name(expr_node, "right", 5);
+        if (!ts_node_is_null(left)) assign_pat->left = build_js_expression(tp, left);
+        if (!ts_node_is_null(right)) assign_pat->right = build_js_expression(tp, right);
+        assign_pat->base.type = &TYPE_ANY;
+        return (JsAstNode*)assign_pat;
     } else if (strcmp(node_type, "array_pattern") == 0) {
         // destructuring pattern: [a, b, ...rest]
         JsArrayPatternNode* pattern = (JsArrayPatternNode*)alloc_js_ast_node(
