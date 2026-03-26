@@ -508,6 +508,24 @@ static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node) {
 }
 
 static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
+    // check if the entire concatenation is a brace expansion pattern like {a,b,c} or {a..e}
+    StrView src = bash_node_source(tp, node);
+    if (src.length >= 3 && src.str[0] == '{' && src.str[src.length - 1] == '}') {
+        bool is_brace = false;
+        for (size_t i = 1; i < src.length - 1; i++) {
+            if (src.str[i] == ',') { is_brace = true; break; }
+            if (src.str[i] == '.' && i + 1 < src.length - 1 && src.str[i + 1] == '.') {
+                is_brace = true; break;
+            }
+        }
+        if (is_brace) {
+            BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
+            word->text = name_pool_create_len(tp->name_pool, src.str, (int)src.length);
+            return (BashAstNode*)word;
+        }
+    }
+
     BashConcatNode* concat = (BashConcatNode*)alloc_bash_ast_node(
         tp, BASH_AST_NODE_CONCATENATION, node, sizeof(BashConcatNode));
 

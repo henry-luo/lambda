@@ -1448,6 +1448,10 @@ JitImport jit_runtime_imports[] = {
     {"bash_redirect_read", FPTR(bash_redirect_read)},
     // external command execution
     {"bash_exec_external", FPTR(bash_exec_external)},
+    // expansions (tilde, glob, brace)
+    {"bash_expand_tilde", FPTR(bash_expand_tilde)},
+    {"bash_glob_expand", FPTR(bash_glob_expand)},
+    {"bash_expand_brace", FPTR(bash_expand_brace)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
