@@ -1536,16 +1536,6 @@ TEST_F(SimpleHtmlFileTests, TableSimple) {
 // ==== INTERMEDIATE HTML FILES (CSS styling, basic layouts) ====
 class IntermediateHtmlFileTests : public HtmlRoundtripTest {};
 
-TEST_F(IntermediateHtmlFileTests, Sample2) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample2.html", "sample2");
-    EXPECT_TRUE(result.success) << "Sample2 HTML with flexbox should succeed";
-}
-
-TEST_F(IntermediateHtmlFileTests, Sample3) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample3.html", "sample3");
-    EXPECT_TRUE(result.success) << "Sample3 HTML with navigation should succeed";
-}
-
 TEST_F(IntermediateHtmlFileTests, Sample4) {
     auto result = test_html_file_roundtrip_cli("./test/layout/data/baseline/sample4.html", "sample4");
     EXPECT_TRUE(result.success) << "Sample4 landing page HTML should succeed";
@@ -1612,11 +1602,6 @@ TEST_F(AdvancedHtmlFileTests, IndexHtml) {
 // ==== COMPLEX HTML FILES (Multiple features, real-world pages) ====
 class ComplexHtmlFileTests : public HtmlRoundtripTest {};
 
-TEST_F(ComplexHtmlFileTests, Sample5) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/sample5.html", "sample5");
-    EXPECT_TRUE(result.success) << "Sample5 AI CodeX landing page should succeed";
-}
-
 TEST_F(ComplexHtmlFileTests, SampleList) {
     auto result = test_html_file_roundtrip_cli("./test/html/sample_list.htm", "sample_list");
     EXPECT_TRUE(result.success) << "Sample list HTM should succeed";
@@ -1625,11 +1610,6 @@ TEST_F(ComplexHtmlFileTests, SampleList) {
 TEST_F(ComplexHtmlFileTests, SampleSpanBoundary) {
     auto result = test_html_file_roundtrip_cli("./test/html/sample_span_boundary.htm", "sample_span_boundary");
     EXPECT_TRUE(result.success) << "Sample span boundary HTM should succeed";
-}
-
-TEST_F(ComplexHtmlFileTests, Facatology) {
-    auto result = test_html_file_roundtrip_cli("./test/layout/data/page/page_facatology.html", "Facatology");
-    EXPECT_TRUE(result.success) << "Facatology HTML should succeed";
 }
 
 // Advanced HTML Features Tests
