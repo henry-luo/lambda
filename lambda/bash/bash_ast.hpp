@@ -71,6 +71,7 @@ typedef enum BashAstNodeType {
     BASH_AST_NODE_ARRAY_ALL,            // ${arr[@]} / ${arr[*]}
     BASH_AST_NODE_ARRAY_SLICE,          // ${arr[@]:off:len}
     BASH_AST_NODE_ARRAY_LENGTH,         // ${#arr[@]}
+    BASH_AST_NODE_ARRAY_KEYS,           // ${!arr[@]} (keys of assoc array)
 
     // assignments
     BASH_AST_NODE_ASSIGNMENT,           // var=value
@@ -346,6 +347,19 @@ typedef struct BashFunctionDefNode {
     BashAstNode* body;              // function body (compound statement)
 } BashFunctionDefNode;
 
+// variable attribute flags for declare/typeset
+typedef enum BashVarAttrFlags {
+    BASH_ATTR_NONE         = 0,
+    BASH_ATTR_READONLY     = 1 << 0,   // -r
+    BASH_ATTR_INTEGER      = 1 << 1,   // -i
+    BASH_ATTR_LOWERCASE    = 1 << 2,   // -l
+    BASH_ATTR_UPPERCASE    = 1 << 3,   // -u
+    BASH_ATTR_INDEXED_ARRAY = 1 << 4,  // -a
+    BASH_ATTR_ASSOC_ARRAY  = 1 << 5,   // -A
+    BASH_ATTR_EXPORT       = 1 << 6,   // -x
+    BASH_ATTR_PRINT        = 1 << 7,   // -p
+} BashVarAttrFlags;
+
 // Variable assignment: name=value
 typedef struct BashAssignmentNode {
     BashAstNode base;
@@ -355,6 +369,7 @@ typedef struct BashAssignmentNode {
     bool is_local;                  // declared with `local`
     bool is_export;                 // declared with `export`
     bool is_append;                 // += compound assignment
+    int declare_flags;              // BashVarAttrFlags from declare/typeset
 } BashAssignmentNode;
 
 // Word: plain text literal
@@ -523,6 +538,12 @@ typedef struct BashArrayAllNode {
     BashAstNode base;
     String* name;                   // array variable name
 } BashArrayAllNode;
+
+// Array keys: ${!arr[@]}
+typedef struct BashArrayKeysNode {
+    BashAstNode base;
+    String* name;                   // array variable name
+} BashArrayKeysNode;
 
 // Array slice: ${arr[@]:offset:length}
 typedef struct BashArraySliceNode {

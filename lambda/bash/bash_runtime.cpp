@@ -11,6 +11,7 @@
  * - Unset variables expand to empty string
  */
 #include "bash_runtime.h"
+#include "bash_ast.hpp"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -1774,6 +1775,7 @@ typedef struct BashRtVar {
     size_t name_len;
     Item value;
     bool is_export;
+    int attributes;     // BashVarAttrFlags
 } BashRtVar;
 
 static uint64_t bash_rt_var_hash(const void *item, uint64_t seed0, uint64_t seed1) {
@@ -1800,10 +1802,33 @@ extern "C" void bash_set_var(Item name, Item value) {
     bash_ensure_var_table();
     String* s = it2s(name);
     if (!s) return;
-    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len, .value = value, .is_export = false};
-    // check if exists and preserve export flag
-    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &entry);
-    if (existing) entry.is_export = existing->is_export;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+
+    // check readonly
+    if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
+        log_error("bash: %.*s: readonly variable", s->len, s->chars);
+        return;
+    }
+
+    int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
+    bool was_export = existing ? existing->is_export : false;
+
+    // apply attribute transformations
+    Item final_value = value;
+    if (attrs & BASH_ATTR_INTEGER) {
+        final_value = bash_to_int(value);
+    }
+    if (attrs & BASH_ATTR_LOWERCASE) {
+        final_value = bash_string_lower(bash_to_string(final_value), true);
+    }
+    if (attrs & BASH_ATTR_UPPERCASE) {
+        final_value = bash_string_upper(bash_to_string(final_value), true);
+    }
+
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = final_value, .is_export = was_export,
+                       .attributes = attrs};
     hashmap_set(bash_var_table, &entry);
 }
 
@@ -1835,7 +1860,7 @@ extern "C" void bash_export_var(Item name) {
     } else {
         BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                            .value = (Item){.item = s2it(heap_create_name("", 0))},
-                           .is_export = true};
+                           .is_export = true, .attributes = BASH_ATTR_NONE};
         hashmap_set(bash_var_table, &entry);
     }
 }
@@ -1846,6 +1871,159 @@ extern "C" void bash_unset_var(Item name) {
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
     hashmap_delete(bash_var_table, &key);
+}
+
+// ============================================================================
+// Variable attributes (declare/typeset)
+// ============================================================================
+
+extern "C" void bash_declare_var(Item name, int flags) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+
+    BashRtVar entry;
+    if (existing) {
+        entry = *existing;
+        entry.attributes |= flags;
+    } else {
+        entry = {.name = s->chars, .name_len = (size_t)s->len,
+                 .value = (Item){.item = s2it(heap_create_name("", 0))},
+                 .is_export = false, .attributes = flags};
+    }
+    if (flags & BASH_ATTR_EXPORT) entry.is_export = true;
+    hashmap_set(bash_var_table, &entry);
+}
+
+extern "C" int bash_get_var_attrs(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return BASH_ATTR_NONE;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (found) return found->attributes;
+    return BASH_ATTR_NONE;
+}
+
+extern "C" bool bash_is_assoc(Item name) {
+    return (bash_get_var_attrs(name) & BASH_ATTR_ASSOC_ARRAY) != 0;
+}
+
+// ============================================================================
+// Associative arrays (string-keyed hashmaps)
+// ============================================================================
+
+typedef struct BashAssocEntry {
+    const char* key;
+    size_t key_len;
+    Item value;
+} BashAssocEntry;
+
+// wrapper struct stored as an Item (pointer)
+typedef struct BashAssocArray {
+    TypeId type_id;     // LMD_TYPE_MAP to distinguish from List (LMD_TYPE_ARRAY)
+    uint8_t flags;
+    struct hashmap* map;
+} BashAssocArray;
+
+static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const BashAssocEntry* e = (const BashAssocEntry*)item;
+    return hashmap_sip(e->key, e->key_len, seed0, seed1);
+}
+
+static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
+    const BashAssocEntry* ea = (const BashAssocEntry*)a;
+    const BashAssocEntry* eb = (const BashAssocEntry*)b;
+    (void)udata;
+    if (ea->key_len != eb->key_len) return 1;
+    return memcmp(ea->key, eb->key, ea->key_len);
+}
+
+static BashAssocArray* bash_item_to_assoc(Item map) {
+    BashAssocArray* aa = (BashAssocArray*)(uintptr_t)map.item;
+    if (!aa || aa->type_id != LMD_TYPE_MAP) return NULL;
+    return aa;
+}
+
+extern "C" Item bash_assoc_new(void) {
+    BashAssocArray* aa = (BashAssocArray*)heap_calloc(sizeof(BashAssocArray), LMD_TYPE_RAW_POINTER);
+    aa->type_id = LMD_TYPE_MAP;
+    aa->flags = 0;
+    aa->map = hashmap_new(sizeof(BashAssocEntry), 16, 0, 0,
+                          bash_assoc_entry_hash, bash_assoc_entry_cmp, NULL, NULL);
+    return (Item){.item = (uint64_t)(uintptr_t)aa};
+}
+
+extern "C" Item bash_assoc_set(Item map, Item key, Item value) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return map;
+    String* k = it2s(bash_to_string(key));
+    if (!k) return map;
+    BashAssocEntry entry = {.key = k->chars, .key_len = (size_t)k->len, .value = value};
+    hashmap_set(aa->map, &entry);
+    return map;
+}
+
+extern "C" Item bash_assoc_get(Item map, Item key) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return (Item){.item = s2it(heap_create_name("", 0))};
+    String* k = it2s(bash_to_string(key));
+    if (!k) return (Item){.item = s2it(heap_create_name("", 0))};
+    BashAssocEntry lookup = {.key = k->chars, .key_len = (size_t)k->len};
+    const BashAssocEntry* found = (const BashAssocEntry*)hashmap_get(aa->map, &lookup);
+    if (found) return found->value;
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_assoc_keys(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return bash_array_new();
+    Item arr = bash_array_new();
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(aa->map, &iter, &item)) {
+        const BashAssocEntry* e = (const BashAssocEntry*)item;
+        Item key_item = (Item){.item = s2it(heap_create_name(e->key, (int)e->key_len))};
+        bash_array_append(arr, key_item);
+    }
+    return arr;
+}
+
+extern "C" Item bash_assoc_values(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return bash_array_new();
+    Item arr = bash_array_new();
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(aa->map, &iter, &item)) {
+        const BashAssocEntry* e = (const BashAssocEntry*)item;
+        bash_array_append(arr, e->value);
+    }
+    return arr;
+}
+
+extern "C" Item bash_assoc_unset(Item map, Item key) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return map;
+    String* k = it2s(bash_to_string(key));
+    if (!k) return map;
+    BashAssocEntry lookup = {.key = k->chars, .key_len = (size_t)k->len};
+    hashmap_delete(aa->map, &lookup);
+    return map;
+}
+
+extern "C" Item bash_assoc_length(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return (Item){.item = i2it(0)};
+    return (Item){.item = i2it((int)hashmap_count(aa->map))};
+}
+
+extern "C" int64_t bash_assoc_count(Item map) {
+    BashAssocArray* aa = bash_item_to_assoc(map);
+    if (!aa) return 0;
+    return (int64_t)hashmap_count(aa->map);
 }
 
 // ============================================================================

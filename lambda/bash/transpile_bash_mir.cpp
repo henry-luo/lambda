@@ -149,6 +149,25 @@ static MIR_op_t bm_transpile_concat(BashMirTranspiler* mt, BashConcatNode* node)
 // Helpers
 // ============================================================================
 
+// check if a variable was declared as an associative array (compile-time)
+static bool bm_is_assoc_var(BashMirTranspiler* mt, const char* name) {
+    String key;
+    key.len = (uint32_t)strlen(name);
+    key.is_ascii = 1;
+    // stack-allocate a String-like object for lookup (point to same chars)
+    // we need to do a scope lookup — create a temp String
+    String* lookup = name_pool_create_len(mt->tp->name_pool, name, key.len);
+    NameEntry* entry = bash_scope_lookup(mt->tp, lookup);
+    if (entry && entry->node) {
+        BashAstNode* ast = (BashAstNode*)entry->node;
+        if (ast->node_type == BASH_AST_NODE_ASSIGNMENT) {
+            BashAssignmentNode* assign = (BashAssignmentNode*)ast;
+            return (assign->declare_flags & BASH_ATTR_ASSOC_ARRAY) != 0;
+        }
+    }
+    return false;
+}
+
 static MIR_reg_t bm_new_temp(BashMirTranspiler* mt) {
     char name[32];
     snprintf(name, sizeof(name), "_bt%d", mt->tp->temp_var_counter++);
@@ -802,19 +821,31 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         BashArrayAccessNode* access = (BashArrayAccessNode*)node;
         MIR_op_t arr_val = bm_emit_get_var(mt, access->name->chars);
         MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-        MIR_reg_t result = bm_emit_call_2(mt, "bash_array_get", arr_val, idx_val);
+        const char* fn = bm_is_assoc_var(mt, access->name->chars)
+                         ? "bash_assoc_get" : "bash_array_get";
+        MIR_reg_t result = bm_emit_call_2(mt, fn, arr_val, idx_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_AST_NODE_ARRAY_ALL: {
         BashArrayAllNode* all_node = (BashArrayAllNode*)node;
         MIR_op_t arr_val = bm_emit_get_var(mt, all_node->name->chars);
-        MIR_reg_t result = bm_emit_call_1(mt, "bash_array_all", arr_val);
+        const char* fn = bm_is_assoc_var(mt, all_node->name->chars)
+                         ? "bash_assoc_values" : "bash_array_all";
+        MIR_reg_t result = bm_emit_call_1(mt, fn, arr_val);
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+    case BASH_AST_NODE_ARRAY_KEYS: {
+        BashArrayKeysNode* keys_node = (BashArrayKeysNode*)node;
+        MIR_op_t arr_val = bm_emit_get_var(mt, keys_node->name->chars);
+        MIR_reg_t result = bm_emit_call_1(mt, "bash_assoc_keys", arr_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_AST_NODE_ARRAY_LENGTH: {
         BashArrayLengthNode* len_node = (BashArrayLengthNode*)node;
         MIR_op_t arr_val = bm_emit_get_var(mt, len_node->name->chars);
-        MIR_reg_t result = bm_emit_call_1(mt, "bash_array_length", arr_val);
+        const char* fn = bm_is_assoc_var(mt, len_node->name->chars)
+                         ? "bash_assoc_length" : "bash_array_length";
+        MIR_reg_t result = bm_emit_call_1(mt, fn, arr_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_AST_NODE_ARRAY_SLICE: {
@@ -1215,7 +1246,14 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                     while (idx_end > idx_start && *(idx_end - 1) == ']') idx_end--;
                     int idx_len = (int)(idx_end - idx_start);
                     MIR_op_t idx_val = bm_emit_string_literal(mt, idx_start, idx_len);
-                    bm_emit_call_2(mt, "bash_array_unset", arr_val, idx_val);
+                    // check name for compile-time assoc type
+                    char name_buf[128];
+                    int copy_len = name_len < 127 ? name_len : 127;
+                    memcpy(name_buf, text, copy_len);
+                    name_buf[copy_len] = '\0';
+                    const char* fn = bm_is_assoc_var(mt, name_buf)
+                                     ? "bash_assoc_unset" : "bash_array_unset";
+                    bm_emit_call_2(mt, fn, arr_val, idx_val);
                 } else {
                     // unset plain variable
                     bm_emit_set_var(mt, text, bm_emit_string_literal(mt, "", 0));
@@ -1354,6 +1392,46 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
 static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* node) {
     if (!node->name) return;
 
+    // handle declare flags: declare -A creates assoc array, declare -i/-r/-l/-u sets attrs
+    if (node->declare_flags) {
+        MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+
+        // for declare-with-value, set non-readonly attrs first (for -i/-l/-u coercions),
+        // then assign value, then add readonly after (so initial assignment isn't blocked)
+        bool has_value = (node->value != NULL) || (node->index != NULL);
+        bool has_readonly = (node->declare_flags & BASH_ATTR_READONLY) != 0;
+
+        if (has_value) {
+            int attrs_first = node->declare_flags & ~BASH_ATTR_READONLY;
+            if (attrs_first) {
+                bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+                    MIR_new_int_op(mt->ctx, attrs_first));
+            }
+            // readonly will be added after value assignment (see below)
+        } else {
+            // no value: set all attrs including readonly
+            bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+                MIR_new_int_op(mt->ctx, node->declare_flags));
+        }
+
+        // declare -A map → create assoc array if no value assigned
+        if ((node->declare_flags & BASH_ATTR_ASSOC_ARRAY) && !node->value) {
+            MIR_reg_t assoc_reg = bm_emit_call_0(mt, "bash_assoc_new");
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, assoc_reg));
+            return;
+        }
+        // declare -a arr → create indexed array if no value assigned
+        if ((node->declare_flags & BASH_ATTR_INDEXED_ARRAY) && !node->value) {
+            MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
+            bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, arr_reg));
+            return;
+        }
+        // declare without value and non-array flags: just set attrs, done
+        if (!node->value && !node->index) return;
+
+        // fall through to value assignment, then add readonly after
+    }
+
     MIR_op_t value;
     if (node->value) {
         value = bm_transpile_node(mt, node->value);
@@ -1362,10 +1440,12 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     }
 
     if (node->index) {
-        // arr[idx]=val → bash_array_set(arr, idx, val)
+        // arr[idx]=val or map[key]=val
         MIR_op_t arr_val = bm_emit_get_var(mt, node->name->chars);
         MIR_op_t idx_val = bm_transpile_node(mt, node->index);
-        bm_emit_call_3(mt, "bash_array_set", arr_val, idx_val, value);
+        const char* fn = bm_is_assoc_var(mt, node->name->chars)
+                         ? "bash_assoc_set" : "bash_array_set";
+        bm_emit_call_3(mt, fn, arr_val, idx_val, value);
     } else if (node->is_append && node->value &&
                node->value->node_type == BASH_AST_NODE_ARRAY_LITERAL) {
         // arr+=(elem1 elem2 ...) → bash_array_append for each element
@@ -1384,6 +1464,13 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         bm_emit_set_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
     } else {
         bm_emit_set_var(mt, node->name->chars, value);
+    }
+
+    // add readonly AFTER value assignment (so initial declare -r var=val works)
+    if (node->declare_flags && (node->declare_flags & BASH_ATTR_READONLY)) {
+        MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+        bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+            MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
     }
 }
 
@@ -1474,24 +1561,58 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
     mt->loop_continue_label = loop_continue;
     mt->loop_depth++;
 
-    // check if iterating over an array: single word that is ARRAY_ALL or string wrapping ARRAY_ALL
+    // check if iterating over an array: single word that is ARRAY_ALL, ARRAY_KEYS, or string wrapping them
     BashAstNode* word = node->words;
     String* array_name = NULL;
+    bool is_keys_iter = false;
+    bool is_assoc_iter = false;
     if (word && !word->next) {
         if (word->node_type == BASH_AST_NODE_ARRAY_ALL) {
             array_name = ((BashArrayAllNode*)word)->name;
+            is_assoc_iter = bm_is_assoc_var(mt, array_name->chars);
+        } else if (word->node_type == BASH_AST_NODE_ARRAY_KEYS) {
+            array_name = ((BashArrayKeysNode*)word)->name;
+            is_keys_iter = true;
         } else if (word->node_type == BASH_AST_NODE_STRING) {
             BashStringNode* str = (BashStringNode*)word;
-            if (str->parts && !str->parts->next &&
-                str->parts->node_type == BASH_AST_NODE_ARRAY_ALL) {
-                array_name = ((BashArrayAllNode*)str->parts)->name;
+            if (str->parts && !str->parts->next) {
+                if (str->parts->node_type == BASH_AST_NODE_ARRAY_ALL) {
+                    array_name = ((BashArrayAllNode*)str->parts)->name;
+                    is_assoc_iter = bm_is_assoc_var(mt, array_name->chars);
+                } else if (str->parts->node_type == BASH_AST_NODE_ARRAY_KEYS) {
+                    array_name = ((BashArrayKeysNode*)str->parts)->name;
+                    is_keys_iter = true;
+                }
             }
         }
     }
 
     if (array_name) {
+        // for assoc arrays, first materialize values/keys as an indexed array
+        MIR_op_t arr_val;
+        if (is_keys_iter) {
+            MIR_op_t map_val = bm_emit_get_var(mt, array_name->chars);
+            MIR_reg_t keys_reg = bm_emit_call_1(mt, "bash_assoc_keys", map_val);
+            arr_val = MIR_new_reg_op(mt->ctx, keys_reg);
+        } else if (is_assoc_iter) {
+            MIR_op_t map_val = bm_emit_get_var(mt, array_name->chars);
+            MIR_reg_t vals_reg = bm_emit_call_1(mt, "bash_assoc_values", map_val);
+            arr_val = MIR_new_reg_op(mt->ctx, vals_reg);
+        } else {
+            arr_val = bm_emit_get_var(mt, array_name->chars);
+        }
+
+        // for assoc/keys, store materialized array in temp var to avoid re-materializing
+        const char* iter_arr_name = NULL;
+        char temp_name[64];
+        if (is_keys_iter || is_assoc_iter) {
+            snprintf(temp_name, sizeof(temp_name), "__iter_arr_%d", mt->label_counter++);
+            iter_arr_name = temp_name;
+            bm_emit_set_var(mt, iter_arr_name, arr_val);
+            arr_val = bm_emit_get_var(mt, iter_arr_name);
+        }
+
         // runtime array iteration: for var in "${arr[@]}"
-        MIR_op_t arr_val = bm_emit_get_var(mt, array_name->chars);
 
         // get raw count (int64, not Item)
         char count_proto_name[64];
@@ -1528,7 +1649,8 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         MIR_reg_t idx_item_reg = bm_emit_call_1(mt, "bash_int_to_item",
             MIR_new_reg_op(mt->ctx, idx_reg));
         // re-fetch arr each iteration (in case it changes)
-        MIR_op_t arr_val2 = bm_emit_get_var(mt, array_name->chars);
+        const char* refetch_name = iter_arr_name ? iter_arr_name : array_name->chars;
+        MIR_op_t arr_val2 = bm_emit_get_var(mt, refetch_name);
         MIR_reg_t elem_reg = bm_emit_call_2(mt, "bash_array_get",
             arr_val2, MIR_new_reg_op(mt->ctx, idx_item_reg));
         bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->ctx, elem_reg));
