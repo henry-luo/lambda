@@ -241,6 +241,21 @@ struct JsMirTranspiler {
     bool is_module;                  // true when compiling an ES module (not main script)
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
+
+    // v15: Generator state machine
+    bool in_generator;               // currently emitting a generator state machine body
+    MIR_reg_t gen_env_reg;           // register for env parameter (Item*)
+    MIR_reg_t gen_input_reg;         // register for input parameter (Item)
+    MIR_reg_t gen_state_reg;         // register for state parameter (int64_t)
+    int gen_yield_index;             // counter for next yield state assignment
+    int gen_yield_count;             // total yield count (from pre-scan)
+    MIR_label_t gen_state_labels[64];  // labels for each resume state (1..yield_count)
+    MIR_label_t gen_done_label;      // label for done state (function end)
+    // Generator variable-to-env-slot mapping
+    int gen_local_slot_count;        // total env slots (captures + params + locals)
+    int gen_capture_offset;          // start of captures in env
+    int gen_param_offset;            // start of params in env
+    int gen_local_offset;            // start of locals in env
 };
 
 // ============================================================================
@@ -386,6 +401,8 @@ static void jm_pop_scope(JsMirTranspiler* mt) {
     mt->scope_depth--;
 }
 
+static JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
+
 static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY) {
     JsVarScopeEntry entry;
@@ -395,6 +412,17 @@ static void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.typed_array_type = -1;  // P9: not a typed array by default
+
+    // v15: In generators, preserve env slot info from hoisted variables
+    if (mt->in_generator) {
+        JsMirVarEntry* existing = jm_find_var(mt, name);
+        if (existing && existing->from_env) {
+            entry.var.from_env = true;
+            entry.var.env_slot = existing->env_slot;
+            entry.var.env_reg = existing->env_reg;
+        }
+    }
+
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
@@ -445,6 +473,162 @@ static bool jm_name_set_has(struct hashmap* set, const char* name) {
 // Forward declare
 static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 static void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals);
+
+// v15: Count yield points in a generator function body (not recursing into nested functions)
+static int jm_count_yields(JsAstNode* node) {
+    if (!node) return 0;
+    switch (node->node_type) {
+    case JS_AST_NODE_YIELD_EXPRESSION: {
+        JsYieldNode* y = (JsYieldNode*)node;
+        return 1 + jm_count_yields(y->argument);
+    }
+    // Don't count yields inside nested functions
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        return 0;
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        int count = 0;
+        JsAstNode* s = blk->statements;
+        while (s) { count += jm_count_yields(s); s = s->next; }
+        return count;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        return jm_count_yields(es->expression);
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
+        int count = 0;
+        JsAstNode* d = v->declarations;
+        while (d) { count += jm_count_yields(d); d = d->next; }
+        return count;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
+        return jm_count_yields(d->init);
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* r = (JsReturnNode*)node;
+        return jm_count_yields(r->argument);
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        return jm_count_yields(ifn->test) + jm_count_yields(ifn->consequent) + jm_count_yields(ifn->alternate);
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        return jm_count_yields(w->test) + jm_count_yields(w->body);
+    }
+    case JS_AST_NODE_DO_WHILE_STATEMENT: {
+        JsDoWhileNode* dw = (JsDoWhileNode*)node;
+        return jm_count_yields(dw->body) + jm_count_yields(dw->test);
+    }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        return jm_count_yields(f->init) + jm_count_yields(f->test) + jm_count_yields(f->update) + jm_count_yields(f->body);
+    }
+    case JS_AST_NODE_FOR_OF_STATEMENT:
+    case JS_AST_NODE_FOR_IN_STATEMENT: {
+        JsForOfNode* fo = (JsForOfNode*)node;
+        return jm_count_yields(fo->right) + jm_count_yields(fo->body);
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        int count = jm_count_yields(sw->discriminant);
+        JsAstNode* c = sw->cases;
+        while (c) { count += jm_count_yields(c); c = c->next; }
+        return count;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        int count = jm_count_yields(sc->test);
+        JsAstNode* s = sc->consequent;
+        while (s) { count += jm_count_yields(s); s = s->next; }
+        return count;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        return jm_count_yields(t->block) + jm_count_yields(t->handler) + jm_count_yields(t->finalizer);
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        return jm_count_yields(cc->body);
+    }
+    // Binary/unary/call expressions: recurse into their sub-expressions
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        return jm_count_yields(bin->left) + jm_count_yields(bin->right);
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        return jm_count_yields(un->operand);
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* a = (JsAssignmentNode*)node;
+        return jm_count_yields(a->left) + jm_count_yields(a->right);
+    }
+    case JS_AST_NODE_CALL_EXPRESSION:
+    case JS_AST_NODE_NEW_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        int count = jm_count_yields(call->callee);
+        JsAstNode* arg = call->arguments;
+        while (arg) { count += jm_count_yields(arg); arg = arg->next; }
+        return count;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* c = (JsConditionalNode*)node;
+        return jm_count_yields(c->test) + jm_count_yields(c->consequent) + jm_count_yields(c->alternate);
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* m = (JsMemberNode*)node;
+        return jm_count_yields(m->object) + jm_count_yields(m->property);
+    }
+    case JS_AST_NODE_TEMPLATE_LITERAL: {
+        JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
+        int count = 0;
+        JsAstNode* e = tl->expressions;
+        while (e) { count += jm_count_yields(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* ae = (JsArrayNode*)node;
+        int count = 0;
+        JsAstNode* e = ae->elements;
+        while (e) { count += jm_count_yields(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        JsObjectNode* oe = (JsObjectNode*)node;
+        int count = 0;
+        JsAstNode* p = oe->properties;
+        while (p) { count += jm_count_yields(p); p = p->next; }
+        return count;
+    }
+    case JS_AST_NODE_PROPERTY: {
+        JsPropertyNode* prop = (JsPropertyNode*)node;
+        return jm_count_yields(prop->value);
+    }
+    case JS_AST_NODE_SPREAD_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        return jm_count_yields(sp->argument);
+    }
+    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
+        JsSequenceNode* seq = (JsSequenceNode*)node;
+        int count = 0;
+        JsAstNode* e = seq->expressions;
+        while (e) { count += jm_count_yields(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_LABELED_STATEMENT: {
+        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+        return jm_count_yields(ls->body);
+    }
+    default:
+        return 0;
+    }
+}
 
 // Collect assignment target identifiers within a single function body.
 // Does NOT recurse into nested function bodies — only collects assignments
@@ -763,6 +947,16 @@ static void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
     case JS_AST_NODE_SPREAD_ELEMENT: {
         JsSpreadElementNode* spread = (JsSpreadElementNode*)node;
         jm_collect_body_refs(spread->argument, refs);
+        break;
+    }
+    case JS_AST_NODE_YIELD_EXPRESSION: {
+        JsYieldNode* yield_node = (JsYieldNode*)node;
+        jm_collect_body_refs(yield_node->argument, refs);
+        break;
+    }
+    case JS_AST_NODE_AWAIT_EXPRESSION: {
+        JsAwaitNode* await_node = (JsAwaitNode*)node;
+        jm_collect_body_refs(await_node->argument, refs);
         break;
     }
     case JS_AST_NODE_SEQUENCE_EXPRESSION: {
@@ -5553,14 +5747,9 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str_arg));
             }
 
-            // v11: regex.exec(str)
-            if (prop->name->len == 4 && strncmp(prop->name->chars, "exec", 4) == 0) {
-                MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
-                MIR_reg_t str_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_2(mt, "js_regex_exec", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, str_arg));
-            }
+            // v11: regex.exec(str) — handled at runtime via js_map_method cascade
+            // (removed: unconditional shortcut to js_regex_exec conflicted with
+            //  child_process.exec and other objects using .exec() method name)
 
             // v11: Date instance methods → js_date_method(obj, method_id)
             {
@@ -5975,6 +6164,16 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 jm_call_void_1(mt, "js_clearInterval",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, id_val));
                 return jm_emit_null(mt);
+            }
+            // v15: fetch(url [, options])
+            if (nl == 5 && strncmp(n, "fetch", 5) == 0) {
+                MIR_reg_t url_arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                MIR_reg_t opts_arg = (call->arguments && call->arguments->next)
+                    ? jm_transpile_box_item(mt, call->arguments->next)
+                    : jm_emit_null(mt);
+                return jm_call_2(mt, "js_fetch", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, url_arg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, opts_arg));
             }
         }
 
@@ -7683,11 +7882,6 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, re->flags_len));
     }
     case JS_AST_NODE_YIELD_EXPRESSION: {
-        // v14: yield [expr] or yield* expr
-        // In non-state-machine mode: yield is treated as a function call to
-        // a runtime helper that suspends and returns the value.
-        // The generator state machine transform handles this at a higher level;
-        // here we just emit the value computation for collection by the state machine.
         JsYieldNode* yield_node = (JsYieldNode*)expr;
         MIR_reg_t val;
         if (yield_node->argument) {
@@ -7695,8 +7889,55 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         } else {
             val = jm_emit_null(mt);
         }
-        // In flat mode, yield just returns its argument value
-        // The generator wrapper will handle the actual suspend/resume
+
+        if (mt->in_generator) {
+            // v15: Generator state machine — emit save/return/resume/load
+            int next_state = ++mt->gen_yield_index;
+
+            // Save all generator locals to env before yielding
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter = 0; void* item;
+                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                            MIR_new_reg_op(mt->ctx, e->var.reg)));
+                    }
+                }
+            }
+
+            // Return [yield_val, next_state] array
+            MIR_reg_t result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, result)));
+
+            // Emit resume label for this state
+            jm_emit_label(mt, mt->gen_state_labels[next_state]);
+
+            // Load all generator locals from env after resuming
+            for (int sd = 1; sd <= mt->scope_depth; sd++) {
+                if (!mt->var_scopes[sd]) continue;
+                size_t iter = 0; void* item;
+                while (hashmap_iter(mt->var_scopes[sd], &iter, &item)) {
+                    JsVarScopeEntry* e = (JsVarScopeEntry*)item;
+                    if (e->var.env_slot >= 0 && e->var.from_env) {
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, e->var.reg),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                e->var.env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                    }
+                }
+            }
+
+            // The yield expression evaluates to the 'input' parameter (sent value)
+            return mt->gen_input_reg;
+        }
+
+        // Non-generator: flat mode, yield just returns its argument value
         return val;
     }
     case JS_AST_NODE_AWAIT_EXPRESSION: {
@@ -7780,6 +8021,11 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);
                     TypeId orig_type = init_type;
+
+                    // v15: In generators, force boxed types for consistent env save/load
+                    if (mt->in_generator) {
+                        init_type = LMD_TYPE_ANY;
+                    }
 
                     // P9: Widen INT to FLOAT if pre-scan detected float usage
                     if (init_type == LMD_TYPE_INT && jm_should_widen_to_float(mt, vname)) {
@@ -9130,11 +9376,15 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Evaluate right-hand side (the iterable)
     MIR_reg_t iterable = jm_transpile_box_item(mt, fo->right);
 
-    // For for-in: get keys array first
+    // For for-in: get keys array first; for for-of: drain iterables to array
     bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
     MIR_reg_t collection = iterable;
     if (is_for_in) {
         collection = jm_call_1(mt, "js_object_keys", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+    } else {
+        // for-of: convert generators/iterables to array
+        collection = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
     }
 
@@ -9327,6 +9577,15 @@ static void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
         val = jm_transpile_box_item(mt, ret->argument);
     } else {
         val = jm_emit_null(mt);
+    }
+
+    // v15: In generator state machine, return [value, -1] to signal done
+    if (mt->in_generator) {
+        MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+        return;
     }
 
     // If inside a try block, delay the return and jump to finally/end
@@ -10001,6 +10260,230 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             fc->is_tco_eligible ? ", TCO" : "");
     }
 
+    // --- v15: Generate generator state machine function if is_generator ---
+    MIR_item_t gen_sm_func_item = NULL;
+    int gen_env_total_slots = 0;
+
+    if (fn->is_generator) {
+        // Count yield points to determine number of states
+        int yield_count = jm_count_yields(fn->body);
+        if (yield_count > 63) yield_count = 63;  // safety cap matching gen_state_labels size
+
+        // Collect local variable names for env slot assignment
+        struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
+            jm_name_hash, jm_name_cmp, NULL, NULL);
+        if (fn->body) jm_collect_body_locals(fn->body, gen_locals);
+
+        // Count distinct locals
+        int local_count = 0;
+        {
+            size_t iter = 0; void* item;
+            while (hashmap_iter(gen_locals, &iter, &item)) local_count++;
+        }
+
+        // Env layout: [captures... | params... | locals...]
+        int cap_offset = 0;
+        int param_offset = fc->capture_count;
+        int local_offset = fc->capture_count + param_count;
+        gen_env_total_slots = local_offset + local_count;
+
+        // Create state machine function: gen_sm_<name>(Item* env, Item input, int64_t state) -> Item
+        char sm_name[160];
+        snprintf(sm_name, sizeof(sm_name), "gen_sm_%s_%d", fc->name, mt->label_counter++);
+
+        MIR_var_t sm_params[3] = {
+            {MIR_T_I64, "gen_env", 0},   // Item* env (passed as i64)
+            {MIR_T_I64, "gen_input", 0},  // Item sent_value
+            {MIR_T_I64, "gen_state", 0}   // int64_t state
+        };
+        MIR_type_t sm_ret = MIR_T_I64;
+        gen_sm_func_item = MIR_new_func_arr(mt->ctx, sm_name, 1, &sm_ret, 3, sm_params);
+        MIR_func_t sm_func = MIR_get_item_func(mt->ctx, gen_sm_func_item);
+        jm_register_local_func(mt, sm_name, gen_sm_func_item);
+
+        // Save transpiler state
+        MIR_item_t saved_item_sm = mt->current_func_item;
+        MIR_func_t saved_func_sm = mt->current_func;
+        int saved_scope_depth_sm = mt->scope_depth;
+        int saved_loop_depth_sm = mt->loop_depth;
+        bool saved_in_native_sm = mt->in_native_func;
+        JsFuncCollected* saved_fc_sm = mt->current_fc;
+        JsClassEntry* saved_class_sm = mt->current_class;
+        MIR_reg_t saved_scope_env_reg_sm = mt->scope_env_reg;
+        int saved_scope_env_slot_sm = mt->scope_env_slot_count;
+        int saved_func_index_sm = mt->current_func_index;
+        bool saved_in_generator = mt->in_generator;
+
+        mt->current_func_item = gen_sm_func_item;
+        mt->current_func = sm_func;
+        mt->loop_depth = 0;
+        mt->pending_label_name = NULL;
+        mt->pending_label_len = 0;
+        mt->in_native_func = false;
+        mt->current_fc = fc;
+        mt->current_class = NULL;
+        mt->scope_env_reg = 0;
+        mt->scope_env_slot_count = 0;
+        mt->current_func_index = (int)(fc - mt->func_entries);
+
+        // Set up generator state
+        mt->in_generator = true;
+        mt->gen_yield_index = 0;
+        mt->gen_yield_count = yield_count;
+        mt->gen_capture_offset = cap_offset;
+        mt->gen_param_offset = param_offset;
+        mt->gen_local_offset = local_offset;
+        mt->gen_local_slot_count = gen_env_total_slots;
+
+        jm_push_scope(mt);
+
+        // Get parameters from function signature
+        mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
+        mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
+        mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
+
+        // Create state labels
+        for (int si = 0; si <= yield_count; si++) {
+            mt->gen_state_labels[si] = jm_new_label(mt);
+        }
+        mt->gen_done_label = jm_new_label(mt);
+
+        // Emit state dispatch: switch on state
+        for (int si = 0; si <= yield_count; si++) {
+            MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQS, MIR_new_reg_op(mt->ctx, cmp),
+                MIR_new_reg_op(mt->ctx, mt->gen_state_reg),
+                MIR_new_int_op(mt->ctx, (int64_t)si)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
+                MIR_new_reg_op(mt->ctx, cmp)));
+        }
+        // Unknown state → done
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, mt->gen_done_label)));
+
+        // State 0 label (initial entry)
+        jm_emit_label(mt, mt->gen_state_labels[0]);
+
+        // Load parameters from env (stored there during generator creation)
+        JsAstNode* sm_param_node = fn->params;
+        for (int i = 0; i < param_count; i++) {
+            if (sm_param_node && sm_param_node->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)sm_param_node;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+                MIR_reg_t preg = jm_new_reg(mt, vname, MIR_T_I64);
+                // Load from env[param_offset + i]
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, preg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        (param_offset + i) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+                JsVarScopeEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                snprintf(entry.name, sizeof(entry.name), "%s", vname);
+                entry.var.reg = preg;
+                entry.var.from_env = true;
+                entry.var.env_slot = param_offset + i;
+                entry.var.env_reg = mt->gen_env_reg;
+                entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+            }
+            sm_param_node = sm_param_node ? sm_param_node->next : NULL;
+        }
+
+        // Load captured variables from env
+        for (int ci = 0; ci < fc->capture_count; ci++) {
+            MIR_reg_t cap_reg = jm_new_reg(mt, fc->captures[ci].name, MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, cap_reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    (cap_offset + ci) * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1)));
+            JsVarScopeEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            snprintf(entry.name, sizeof(entry.name), "%s", fc->captures[ci].name);
+            entry.var.reg = cap_reg;
+            entry.var.from_env = true;
+            entry.var.env_slot = cap_offset + ci;
+            entry.var.env_reg = mt->gen_env_reg;
+            entry.var.typed_array_type = -1;
+            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+        }
+
+        // Hoist var declarations with env slots
+        if (fn->body && fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+            int li = 0;
+            size_t liter = 0; void* litem;
+            while (hashmap_iter(gen_locals, &liter, &litem)) {
+                JsNameSetEntry* ns = (JsNameSetEntry*)litem;
+                if (!jm_find_var(mt, ns->name)) {
+                    MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, vr),
+                        MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+                    JsVarScopeEntry entry;
+                    memset(&entry, 0, sizeof(entry));
+                    snprintf(entry.name, sizeof(entry.name), "%s", ns->name);
+                    entry.var.reg = vr;
+                    entry.var.from_env = true;
+                    entry.var.env_slot = local_offset + li;
+                    entry.var.env_reg = mt->gen_env_reg;
+                    entry.var.typed_array_type = -1;
+                    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+                    li++;
+                }
+            }
+        }
+
+        // Transpile generator body
+        if (fn->body) {
+            if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                JsBlockNode* blk = (JsBlockNode*)fn->body;
+                JsAstNode* s = blk->statements;
+                while (s) { jm_transpile_statement(mt, s); s = s->next; }
+            } else {
+                MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
+                // Arrow-body generator (unusual, but handle it)
+                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+                goto gen_sm_finish;
+            }
+        }
+
+        // Implicit return at end of generator → done
+        jm_emit_label(mt, mt->gen_done_label);
+        {
+            MIR_reg_t undef_val = jm_emit_null(mt);
+            MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, done_result)));
+        }
+
+    gen_sm_finish:
+        jm_pop_scope(mt);
+        MIR_finish_func(mt->ctx);
+
+        // Restore transpiler state
+        mt->current_func_item = saved_item_sm;
+        mt->current_func = saved_func_sm;
+        mt->scope_depth = saved_scope_depth_sm;
+        mt->loop_depth = saved_loop_depth_sm;
+        mt->in_native_func = saved_in_native_sm;
+        mt->current_fc = saved_fc_sm;
+        mt->current_class = saved_class_sm;
+        mt->scope_env_reg = saved_scope_env_reg_sm;
+        mt->scope_env_slot_count = saved_scope_env_slot_sm;
+        mt->current_func_index = saved_func_index_sm;
+        mt->in_generator = saved_in_generator;
+
+        hashmap_free(gen_locals);
+
+        log_debug("js-mir: generated generator state machine %s (yields: %d, env slots: %d)",
+            sm_name, yield_count, gen_env_total_slots);
+    }
+
     // --- Generate boxed version (original or wrapper) ---
     int total_params = param_count + (has_captures ? 1 : 0);
     MIR_var_t* params = (MIR_var_t*)alloca(total_params * sizeof(MIR_var_t));
@@ -10124,6 +10607,59 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t boxed_result = jm_box_native(mt, native_result, fc->return_type);
         jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, boxed_result)));
 
+        goto finish_boxed;
+    }
+
+    // --- v15: Generator wrapper (creates generator object instead of running body) ---
+    if (fn->is_generator && gen_sm_func_item) {
+        // Allocate env array for the generator's state machine
+        MIR_reg_t gen_env = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+
+        // Store captured variables into env[0..capture_count-1]
+        if (has_captures) {
+            MIR_reg_t outer_env = MIR_reg(mt->ctx, "_js_env", func);
+            for (int ci = 0; ci < fc->capture_count; ci++) {
+                int src_slot = fc->captures[ci].scope_env_slot >= 0 ? fc->captures[ci].scope_env_slot : ci;
+                MIR_reg_t cap_val = jm_new_reg(mt, "gcap", MIR_T_I64);
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, cap_val),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, src_slot * (int)sizeof(uint64_t), outer_env, 0, 1)));
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * (int)sizeof(uint64_t), gen_env, 0, 1),
+                    MIR_new_reg_op(mt->ctx, cap_val)));
+            }
+        }
+
+        // Store parameters into env[capture_count..capture_count+param_count-1]
+        JsAstNode* gp_node = fn->params;
+        for (int i = 0; i < param_count; i++) {
+            char vname[128] = "_js_p";
+            if (gp_node && gp_node->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* pid = (JsIdentifierNode*)gp_node;
+                snprintf(vname, sizeof(vname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
+            } else {
+                snprintf(vname, sizeof(vname), "_js_p%d", i);
+            }
+            MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
+            int env_slot = fc->capture_count + i;
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, env_slot * (int)sizeof(uint64_t), gen_env, 0, 1),
+                MIR_new_reg_op(mt->ctx, preg)));
+            gp_node = gp_node ? gp_node->next : NULL;
+        }
+
+        // Call js_generator_create(state_machine_fn_ptr, env, env_size)
+        MIR_reg_t sm_fn_ptr = jm_new_reg(mt, "smfn", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, sm_fn_ptr),
+            MIR_new_ref_op(mt->ctx, gen_sm_func_item)));
+        MIR_reg_t gen_obj = jm_call_3(mt, "js_generator_create", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, sm_fn_ptr),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, gen_env),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, gen_env_total_slots));
+
+        jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, gen_obj)));
         goto finish_boxed;
     }
 

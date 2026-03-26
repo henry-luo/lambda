@@ -1131,6 +1131,9 @@ JitImport jit_runtime_imports[] = {
     {"js_generator_next", FPTR(js_generator_next)},
     {"js_generator_return", FPTR(js_generator_return)},
     {"js_generator_throw", FPTR(js_generator_throw)},
+    // v15: Generator state machine helper
+    {"js_gen_yield_result", FPTR(js_gen_yield_result)},
+    {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v14: Promise runtime
     {"js_promise_create", FPTR(js_promise_create)},
     {"js_promise_resolve", FPTR(js_promise_resolve)},
@@ -1154,6 +1157,8 @@ JitImport jit_runtime_imports[] = {
     {"js_module_register", FPTR(js_module_register)},
     {"js_module_get", FPTR(js_module_get)},
     {"js_module_namespace_create", FPTR(js_module_namespace_create)},
+    // v15: fetch API
+    {"js_fetch", FPTR(js_fetch)},
 
     // ========================================================================
     // Python runtime functions

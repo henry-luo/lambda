@@ -1861,6 +1861,10 @@ static JsPromise* js_get_promise(Item promise_obj);
 extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejected);
 extern "C" Item js_promise_catch(Item promise, Item on_rejected);
 extern "C" Item js_promise_finally(Item promise, Item on_finally);
+extern "C" bool js_is_generator(Item obj);
+extern "C" Item js_generator_next(Item generator, Item input);
+extern "C" Item js_generator_return(Item generator, Item value);
+extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
@@ -1913,6 +1917,43 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
             if (method->len == 7 && strncmp(method->chars, "finally", 7) == 0) {
                 Item on_finally = argc > 0 ? args[0] : ItemNull;
                 return js_promise_finally(obj, on_finally);
+            }
+        }
+    }
+
+    // v15: Generator instance methods (.next, .return, .throw)
+    if (js_is_generator(obj)) {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 4 && strncmp(method->chars, "next", 4) == 0) {
+                Item input = argc > 0 ? args[0] : make_js_undefined();
+                return js_generator_next(obj, input);
+            }
+            if (method->len == 6 && strncmp(method->chars, "return", 6) == 0) {
+                Item value = argc > 0 ? args[0] : make_js_undefined();
+                return js_generator_return(obj, value);
+            }
+            if (method->len == 5 && strncmp(method->chars, "throw", 5) == 0) {
+                Item error = argc > 0 ? args[0] : make_js_undefined();
+                return js_generator_throw(obj, error);
+            }
+        }
+    }
+
+    // v15: Regex instance methods (.exec, .test)
+    {
+        JsRegexData* rd = js_get_regex_data(obj);
+        if (rd) {
+            String* method = it2s(method_name);
+            if (method) {
+                if (method->len == 4 && strncmp(method->chars, "exec", 4) == 0) {
+                    Item str = argc > 0 ? args[0] : ItemNull;
+                    return js_regex_exec(obj, str);
+                }
+                if (method->len == 4 && strncmp(method->chars, "test", 4) == 0) {
+                    Item str = argc > 0 ? args[0] : ItemNull;
+                    return js_regex_test(obj, str);
+                }
             }
         }
     }
@@ -2972,16 +3013,16 @@ extern "C" Item js_object_rest(Item src, Item* exclude_keys, int exclude_count) 
 }
 
 // =============================================================================
-// v14: Generator Runtime
+// v15: Generator Runtime
 // =============================================================================
 
 // Generator state: the MIR-compiled state machine function takes
-// (Item* env, Item input, int64_t state) and returns {value, done, next_state}
-// packed as a 3-element array.
+// (Item* env, Item input, int64_t state) and returns a 2-element array
+// [value, next_state] where next_state == -1 means done.
 struct JsGenerator {
     TypeId type_id;           // LMD_TYPE_MAP (treated as object)
     void*  state_fn;          // compiled state machine function pointer
-    Item*  env;               // captured closure variables
+    Item*  env;               // captured closure variables (params + locals)
     int    env_size;
     int64_t state;            // current state index (0=initial, -1=done)
     bool   done;
@@ -2999,6 +3040,14 @@ static Item js_make_iter_result(Item value, bool done) {
     js_property_set(result, (Item){.item = s2it(val_key)}, value);
     js_property_set(result, (Item){.item = s2it(done_key)}, (Item){.item = b2it(done)});
     return result;
+}
+
+// v15: Create a 2-element array [value, next_state] for state machine returns
+extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
+    Item arr = js_array_new(2);
+    arr.array->items[0] = value;
+    arr.array->items[1] = (Item){.item = i2it(next_state)};
+    return arr;
 }
 
 extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
@@ -3096,6 +3145,39 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
     return js_make_iter_result(ItemNull, true);
 }
 
+// v15: Check if an object is a generator (has __gen_idx property)
+extern "C" bool js_is_generator(Item obj) {
+    if (get_type_id(obj) != LMD_TYPE_MAP) return false;
+    String* gen_key = heap_create_name("__gen_idx", 9);
+    Item idx_item = js_property_get(obj, (Item){.item = s2it(gen_key)});
+    return get_type_id(idx_item) == LMD_TYPE_INT;
+}
+
+// v15: Convert an iterable to an array. If it's a generator, drain it.
+// If it's already an array, return it as-is.
+extern "C" Item js_iterable_to_array(Item iterable) {
+    if (get_type_id(iterable) == LMD_TYPE_ARRAY) return iterable;
+
+    // Check if it's a generator object
+    if (js_is_generator(iterable)) {
+        Item arr = js_array_new(0);
+        for (int safety = 0; safety < 100000; safety++) {
+            Item result = js_generator_next(iterable, make_js_undefined());
+            // Extract .done and .value from result
+            String* done_key = heap_create_name("done", 4);
+            Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+            if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
+            String* val_key = heap_create_name("value", 5);
+            Item value = js_property_get(result, (Item){.item = s2it(val_key)});
+            array_push(arr.array, value);
+        }
+        return arr;
+    }
+
+    // Fallback: return as-is (might be a map treated as iterable)
+    return iterable;
+}
+
 // =============================================================================
 // v14: Promise Runtime
 // =============================================================================
@@ -3112,6 +3194,8 @@ struct JsPromise {
     Item result;                   // fulfilled value or rejection reason
     Item on_fulfilled[8];          // then() callbacks (max chain depth)
     Item on_rejected[8];
+    Item next_promise[8];          // chained promise for each then() handler
+    bool is_finally[8];            // true if handler[i] is a finally handler
     int  then_count;
 };
 
@@ -3134,6 +3218,8 @@ static JsPromise* js_alloc_promise() {
     p->then_count = 0;
     memset(p->on_fulfilled, 0, sizeof(p->on_fulfilled));
     memset(p->on_rejected, 0, sizeof(p->on_rejected));
+    memset(p->next_promise, 0, sizeof(p->next_promise));
+    memset(p->is_finally, 0, sizeof(p->is_finally));
     return p;
 }
 
@@ -3156,44 +3242,165 @@ static JsPromise* js_get_promise(Item promise_obj) {
     return &js_promises[idx];
 }
 
+// Forward declaration — js_promise_settle is called recursively from microtask runner
+static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result);
+
+// Forward declarations for promise microtask helpers
+static Item js_promise_microtask_resolve(Item next_promise_item, Item value);
+static Item js_promise_microtask_reject(Item next_promise_item, Item reason);
+
+// Microtask runner for promise then() handlers.
+// Called with 3 bound args: handler, result, next_promise_item.
+// Calls handler(result), then settles next_promise with the return value.
+static Item js_promise_microtask_run(Item handler, Item result, Item next_promise_item) {
+    Item args[1] = {result};
+    Item handler_result = js_call_function(handler, ItemNull, args, 1);
+
+    JsPromise* next = js_get_promise(next_promise_item);
+    if (next) {
+        JsPromise* returned_p = js_get_promise(handler_result);
+        if (returned_p) {
+            // handler returned a promise — chain resolution
+            if (returned_p->state != JS_PROMISE_PENDING) {
+                js_promise_settle(next, returned_p->state, returned_p->result);
+            } else {
+                // pending: register then handler to settle next when returned resolves
+                Item next_item = next_promise_item;
+                if (returned_p->then_count < 8) {
+                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
+                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
+                    returned_p->on_fulfilled[returned_p->then_count] = js_bind_function(resolve_fn, ItemNull, &next_item, 1);
+                    returned_p->on_rejected[returned_p->then_count] = js_bind_function(reject_fn, ItemNull, &next_item, 1);
+                    returned_p->next_promise[returned_p->then_count] = ItemNull; // these are direct settlers, no further chain
+                    returned_p->then_count++;
+                }
+            }
+        } else {
+            js_promise_settle(next, JS_PROMISE_FULFILLED, handler_result);
+        }
+    }
+    return ItemNull;
+}
+
+// Microtask runner for finally() handlers.
+// Called with 4 bound args: handler, next_promise_item, state_item, original_result.
+static Item js_promise_finally_microtask_run(Item handler, Item next_promise_item, Item state_item, Item original_result) {
+    js_call_function(handler, ItemNull, NULL, 0);
+    JsPromise* next = js_get_promise(next_promise_item);
+    if (next) {
+        JsPromiseState orig_state = (JsPromiseState)it2i(state_item);
+        js_promise_settle(next, orig_state, original_result);
+    }
+    return ItemNull;
+}
+
+// Bound resolve/reject settle functions for promise chaining.
+// When a then() handler returns a pending promise, these are registered as then
+// handlers on that returned promise. When it settles, they settle the next promise.
+static Item js_promise_microtask_resolve(Item next_promise_item, Item value) {
+    JsPromise* next = js_get_promise(next_promise_item);
+    if (next) js_promise_settle(next, JS_PROMISE_FULFILLED, value);
+    return ItemNull;
+}
+
+static Item js_promise_microtask_reject(Item next_promise_item, Item reason) {
+    JsPromise* next = js_get_promise(next_promise_item);
+    if (next) js_promise_settle(next, JS_PROMISE_REJECTED, reason);
+    return ItemNull;
+}
+
+// Enqueue a promise handler as a microtask with proper chaining.
+// Creates a bound thunk: js_promise_microtask_run(handler, result, next_promise_item)
+static void js_promise_enqueue_handler(Item handler, Item result, Item next_promise_item) {
+    Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
+    Item bound_args[3] = {handler, result, next_promise_item};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+    js_microtask_enqueue(thunk);
+}
+
+// Enqueue a finally handler as a microtask.
+static void js_promise_enqueue_finally(Item handler, Item next_promise_item, JsPromiseState state, Item result) {
+    Item runner_fn = js_new_function((void*)js_promise_finally_microtask_run, 4);
+    Item bound_args[4] = {handler, next_promise_item, (Item){.item = i2it((int64_t)state)}, result};
+    Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 4);
+    js_microtask_enqueue(thunk);
+}
+
 static void js_promise_settle(JsPromise* p, JsPromiseState state, Item result) {
     if (p->state != JS_PROMISE_PENDING) return; // already settled
 
     p->state = state;
     p->result = result;
 
-    // Schedule handlers as microtasks
+    // Schedule handlers as microtasks (per ECMAScript spec)
     for (int i = 0; i < p->then_count; i++) {
         Item handler = (state == JS_PROMISE_FULFILLED) ? p->on_fulfilled[i] : p->on_rejected[i];
-        if (get_type_id(handler) == LMD_TYPE_FUNC) {
-            // Create a thunk that calls handler(result)
-            // For simplicity, we directly call here since we're in microtask context anyway
-            Item args[1] = {result};
-            Item handler_result = js_call_function(handler, ItemNull, args, 1);
+        Item next_item = p->next_promise[i];
 
-            // If handler returns a thenable, chain it
-            // (simplified: just check for promise)
-            JsPromise* next_p = js_get_promise(handler_result);
-            if (next_p) {
-                // chain resolution — not implemented in v14 initial pass
+        if (p->is_finally[i]) {
+            // finally handler: called with 0 args, passes through original result
+            if (get_type_id(handler) == LMD_TYPE_FUNC) {
+                js_promise_enqueue_finally(handler, next_item, state, result);
+            } else {
+                JsPromise* next = js_get_promise(next_item);
+                if (next) js_promise_settle(next, state, result);
+            }
+        } else if (get_type_id(handler) == LMD_TYPE_FUNC) {
+            if (get_type_id(next_item) == LMD_TYPE_MAP) {
+                // has a chained next promise — enqueue with chaining
+                js_promise_enqueue_handler(handler, result, next_item);
+            } else {
+                // direct handler (e.g. from chaining resolution), no next promise
+                Item runner_fn = js_new_function((void*)js_promise_microtask_run, 3);
+                Item bound_args[3] = {handler, result, ItemNull};
+                Item thunk = js_bind_function(runner_fn, ItemNull, bound_args, 3);
+                js_microtask_enqueue(thunk);
+            }
+        } else {
+            // no handler for this state — propagate to next promise directly
+            JsPromise* next = js_get_promise(next_item);
+            if (next) {
+                js_promise_settle(next, state, result);
             }
         }
     }
 }
 
-// Resolve/reject callbacks passed to the executor
-static JsPromise* js_resolving_promise = NULL;
-
-static Item js_resolve_callback(Item value) {
-    if (js_resolving_promise) {
-        js_promise_settle(js_resolving_promise, JS_PROMISE_FULFILLED, value);
+// Resolve/reject callbacks for promise executors.
+// Each callback is bound (via js_bind_function) to its promise index,
+// so these work even when called asynchronously (e.g. in setTimeout).
+static Item js_resolve_callback(Item promise_idx_item, Item value) {
+    int64_t idx = it2i(promise_idx_item);
+    if (idx >= 0 && idx < js_promise_count) {
+        JsPromise* p = &js_promises[idx];
+        // if value is a promise, chain resolution
+        JsPromise* thenable = js_get_promise(value);
+        if (thenable) {
+            if (thenable->state != JS_PROMISE_PENDING) {
+                js_promise_settle(p, thenable->state, thenable->result);
+            } else {
+                // register then on thenable to forward settlement
+                Item p_item = js_promise_to_item(p);
+                if (thenable->then_count < 8) {
+                    Item resolve_fn = js_new_function((void*)js_promise_microtask_resolve, 2);
+                    Item reject_fn = js_new_function((void*)js_promise_microtask_reject, 2);
+                    thenable->on_fulfilled[thenable->then_count] = js_bind_function(resolve_fn, ItemNull, &p_item, 1);
+                    thenable->on_rejected[thenable->then_count] = js_bind_function(reject_fn, ItemNull, &p_item, 1);
+                    thenable->next_promise[thenable->then_count] = ItemNull;
+                    thenable->then_count++;
+                }
+            }
+        } else {
+            js_promise_settle(p, JS_PROMISE_FULFILLED, value);
+        }
     }
     return ItemNull;
 }
 
-static Item js_reject_callback(Item reason) {
-    if (js_resolving_promise) {
-        js_promise_settle(js_resolving_promise, JS_PROMISE_REJECTED, reason);
+static Item js_reject_callback(Item promise_idx_item, Item reason) {
+    int64_t idx = it2i(promise_idx_item);
+    if (idx >= 0 && idx < js_promise_count) {
+        js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
     }
     return ItemNull;
 }
@@ -3203,14 +3410,16 @@ extern "C" Item js_promise_create(Item executor) {
     if (!p) return ItemNull;
 
     if (get_type_id(executor) == LMD_TYPE_FUNC) {
-        // Create resolve/reject function items
-        Item resolve_fn = js_new_function((void*)js_resolve_callback, 1);
-        Item reject_fn = js_new_function((void*)js_reject_callback, 1);
+        // Create resolve/reject functions bound to this promise's index
+        int idx = (int)(p - js_promises);
+        Item idx_item = (Item){.item = i2it(idx)};
+        Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+        Item reject_base = js_new_function((void*)js_reject_callback, 2);
+        Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+        Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
 
-        js_resolving_promise = p;
         Item args[2] = {resolve_fn, reject_fn};
         js_call_function(executor, ItemNull, args, 2);
-        js_resolving_promise = NULL;
     }
 
     return js_promise_to_item(p);
@@ -3241,33 +3450,33 @@ extern "C" Item js_promise_then(Item promise, Item on_fulfilled, Item on_rejecte
     // Create a new promise for the then chain
     JsPromise* next = js_alloc_promise();
     if (!next) return ItemNull;
+    Item next_item = js_promise_to_item(next);
 
     if (p->state == JS_PROMISE_PENDING) {
-        // Register callbacks
+        // Register callbacks with chained next promise
         if (p->then_count < 8) {
             p->on_fulfilled[p->then_count] = on_fulfilled;
             p->on_rejected[p->then_count] = on_rejected;
+            p->next_promise[p->then_count] = next_item;
             p->then_count++;
         }
     } else if (p->state == JS_PROMISE_FULFILLED) {
         if (get_type_id(on_fulfilled) == LMD_TYPE_FUNC) {
-            Item args[1] = {p->result};
-            Item result = js_call_function(on_fulfilled, ItemNull, args, 1);
-            js_promise_settle(next, JS_PROMISE_FULFILLED, result);
+            // per spec: schedule as microtask even if already resolved
+            js_promise_enqueue_handler(on_fulfilled, p->result, next_item);
         } else {
+            // no handler — pass through value
             js_promise_settle(next, JS_PROMISE_FULFILLED, p->result);
         }
     } else {
         if (get_type_id(on_rejected) == LMD_TYPE_FUNC) {
-            Item args[1] = {p->result};
-            Item result = js_call_function(on_rejected, ItemNull, args, 1);
-            js_promise_settle(next, JS_PROMISE_FULFILLED, result);
+            js_promise_enqueue_handler(on_rejected, p->result, next_item);
         } else {
             js_promise_settle(next, JS_PROMISE_REJECTED, p->result);
         }
     }
 
-    return js_promise_to_item(next);
+    return next_item;
 }
 
 extern "C" Item js_promise_catch(Item promise, Item on_rejected) {
@@ -3281,21 +3490,27 @@ extern "C" Item js_promise_finally(Item promise, Item on_finally) {
 
     JsPromise* next = js_alloc_promise();
     if (!next) return ItemNull;
+    Item next_item = js_promise_to_item(next);
 
     if (p->state != JS_PROMISE_PENDING) {
         if (get_type_id(on_finally) == LMD_TYPE_FUNC) {
-            js_call_function(on_finally, ItemNull, NULL, 0);
+            // per spec: schedule as microtask even if already settled
+            js_promise_enqueue_finally(on_finally, next_item, p->state, p->result);
+        } else {
+            js_promise_settle(next, p->state, p->result);
         }
-        js_promise_settle(next, p->state, p->result);
     } else {
+        // pending: store both fulfilled/rejected handlers as the same finally callback
         if (p->then_count < 8) {
             p->on_fulfilled[p->then_count] = on_finally;
             p->on_rejected[p->then_count] = on_finally;
+            p->next_promise[p->then_count] = next_item;
+            p->is_finally[p->then_count] = true;
             p->then_count++;
         }
     }
 
-    return js_promise_to_item(next);
+    return next_item;
 }
 
 extern "C" Item js_promise_all(Item iterable) {
@@ -3455,6 +3670,20 @@ extern "C" void js_module_register(Item specifier, Item namespace_obj) {
 extern "C" Item js_module_get(Item specifier) {
     if (get_type_id(specifier) != LMD_TYPE_STRING) return ItemNull;
     String* spec = it2s(specifier);
+
+    // check for built-in modules (bare specifier or with .js suffix from resolver)
+    if ((spec->len == 2 && memcmp(spec->chars, "fs", 2) == 0) ||
+        (spec->len == 5 && memcmp(spec->chars, "fs.js", 5) == 0) ||
+        (spec->len == 7 && memcmp(spec->chars, "node:fs", 7) == 0)) {
+        extern Item js_get_fs_namespace(void);
+        return js_get_fs_namespace();
+    }
+    if ((spec->len == 13 && memcmp(spec->chars, "child_process", 13) == 0) ||
+        (spec->len == 16 && memcmp(spec->chars, "child_process.js", 16) == 0) ||
+        (spec->len == 18 && memcmp(spec->chars, "node:child_process", 18) == 0)) {
+        extern Item js_get_child_process_namespace(void);
+        return js_get_child_process_namespace();
+    }
 
     for (int i = 0; i < js_module_count_v14; i++) {
         if (js_modules[i].specifier->len == spec->len &&

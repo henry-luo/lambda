@@ -1,0 +1,9 @@
+t1: 1 2 3 true
+t2: 10 false 20 true
+t3: 10 15 20
+t4: 0 1 2 3 true
+t5: abc
+t6: 0,2,4
+t7: 1 1 2 2
+t8: 10 20 30
+null
