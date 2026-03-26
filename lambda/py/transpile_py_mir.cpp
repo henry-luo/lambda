@@ -1206,6 +1206,13 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
         }
 
+        // property(fget) — creates a property descriptor {__is_property__: True, __get__: fget}
+        if (name_len == 8 && strncmp(name, "property", 8) == 0 && call->arg_count >= 1) {
+            MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
+            return pm_call_1(mt, "py_builtin_property", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
         // isinstance()
         if (name_len == 10 && strncmp(name, "isinstance", 10) == 0 && call->arg_count >= 2) {
             MIR_reg_t obj = pm_transpile_expression(mt, call->arguments);
@@ -1426,6 +1433,17 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 strncmp(fn_id->name->chars, mt->func_entries[i].name, fn_id->name->len) == 0) {
                 target_fc = &mt->func_entries[i];
                 break;
+            }
+        }
+        // Phase C: if this function was decorated, its name is now bound to the
+        // decorator's return value (stored as a local var).  Use the generic
+        // py_call_function path so the decorator takes effect.
+        if (target_fc && target_fc->node && target_fc->node->decorators) {
+            char vcheck[128];
+            snprintf(vcheck, sizeof(vcheck), "_py_%.*s",
+                (int)fn_id->name->len, fn_id->name->chars);
+            if (pm_find_var(mt, vcheck)) {
+                target_fc = NULL;  // force fall-through to generic py_call_function
             }
         }
         if (target_fc && target_fc->func_item) {
@@ -2472,6 +2490,59 @@ static void pm_transpile_block(PyMirTranspiler* mt, PyAstNode* body) {
 }
 
 // ============================================================================
+// Decorator application
+// ============================================================================
+
+// Apply a decorator list (bottom-to-top) to a value and return the final result.
+// Decorators are linked via ->next in source order; bottom-to-top means the last
+// decorator in the list wraps first (inner-most) and the first wraps last (outer).
+static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAstNode* decorators) {
+    if (!decorators) return value;
+
+    // collect into small fixed array so we can iterate in reverse
+    const int MAX_DECS = 16;
+    PyAstNode* dec_list[MAX_DECS];
+    int dec_count = 0;
+    PyAstNode* d = decorators;
+    while (d && dec_count < MAX_DECS) {
+        dec_list[dec_count++] = d;
+        d = d->next;
+    }
+
+    // apply bottom-to-top: last decorator in source order wraps the function first
+    for (int i = dec_count - 1; i >= 0; i--) {
+        PyDecoratorNode* dn = (PyDecoratorNode*)dec_list[i];
+
+        // Special case: @property — call py_builtin_property(value) directly,
+        // because 'property' as a bare identifier has no runtime binding.
+        if (dn->expression && dn->expression->node_type == PY_AST_NODE_IDENTIFIER) {
+            PyIdentifierNode* id = (PyIdentifierNode*)dn->expression;
+            if (id->name->len == 8 && strncmp(id->name->chars, "property", 8) == 0) {
+                value = pm_call_1(mt, "py_builtin_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+                continue;
+            }
+        }
+
+        MIR_reg_t dec_val = pm_transpile_expression(mt, dn->expression);
+
+        // call dec_val(value) with exactly one positional argument
+        MIR_reg_t args_ptr = pm_new_reg(mt, "decargs", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+            MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_new_int_op(mt->ctx, 8)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, args_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, value)));
+        value = pm_call_3(mt, "py_call_function", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, dec_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
+    }
+    return value;
+}
+
+// ============================================================================
 // Statement dispatcher
 // ============================================================================
 
@@ -2573,8 +2644,43 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             char vname[128];
             snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
             pm_set_var(mt, vname, closure);
+            // Phase C: apply decorators to the closure (bottom-to-top)
+            if (fdef->decorators) {
+                MIR_reg_t dec_result = pm_apply_decorators(mt, closure, fdef->decorators);
+                PyMirVarEntry* ventry = pm_find_var(mt, vname);
+                if (ventry && !ventry->from_env) {
+                    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, ventry->reg),
+                        MIR_new_reg_op(mt->ctx, dec_result)));
+                }
+            }
+        } else if (fc_target && !fc_target->is_closure && fc_target->func_item && fdef->decorators) {
+            // non-closure function with decorators: build function item, apply decorators, store as var
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_py_%s", fc_target->name);
+            MIR_reg_t fptr = pm_new_reg(mt, "dfp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, fptr),
+                MIR_new_ref_op(mt->ctx, fc_target->func_item)));
+            MIR_reg_t fn_item = pm_call_2(mt, "py_new_function", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc_target->param_count));
+            MIR_reg_t dec_result = pm_apply_decorators(mt, fn_item, fdef->decorators);
+            // store as local var — shadows local_funcs lookup for subsequent references
+            MIR_reg_t var_reg = pm_new_reg(mt, vname, MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_reg_op(mt->ctx, dec_result)));
+            pm_set_var(mt, vname, var_reg);
+            // if there's a module-level slot for this name, also store there
+            int midx = pm_get_global_var_index(mt, vname);
+            if (midx >= 0) {
+                pm_call_void_2(mt, "py_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, midx),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+            }
         }
-        // non-closures are already registered in local_funcs by pm_compile_function
+        // non-closures without decorators are already registered in local_funcs by pm_compile_function
         break;
     }
     case PY_AST_NODE_CLASS_DEF: {
@@ -2616,6 +2722,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_reg_t fn_item_reg = pm_call_2(mt, "py_new_function", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fptr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->param_count));
+            // Phase C: apply method decorators (e.g. @property)
+            if (fc->node && fc->node->decorators) {
+                fn_item_reg = pm_apply_decorators(mt, fn_item_reg, fc->node->decorators);
+            }
             MIR_reg_t mname_reg = pm_box_string_literal(mt,
                 fc->name, strlen(fc->name));
             pm_call_3(mt, "py_dict_set", MIR_T_I64,
@@ -2639,6 +2749,13 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_new_reg_op(mt->ctx, reg),
             MIR_new_reg_op(mt->ctx, class_reg)));
         pm_set_var(mt, class_var_name, reg);
+        // Phase C: apply class decorators (bottom-to-top)
+        if (cls->decorators) {
+            MIR_reg_t dec_result = pm_apply_decorators(mt, reg, cls->decorators);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, reg),
+                MIR_new_reg_op(mt->ctx, dec_result)));
+        }
         // also store in module var so methods can retrieve it
         {
             int midx = pm_get_global_var_index(mt, class_var_name);
@@ -3458,6 +3575,48 @@ static void pm_collect_local_defs(PyFunctionDefNode* fn, char locals[][128], int
 }
 
 // analyze captures for all collected functions
+// Helper: check if a variable is directly defined (param or local) in a function's scope
+static bool pm_var_in_func_scope(PyMirTranspiler* mt, PyFuncCollected* fc, const char* varname) {
+    // check params
+    PyAstNode* pp = fc->node->params;
+    while (pp) {
+        String* pn = NULL;
+        if (pp->node_type == PY_AST_NODE_PARAMETER ||
+            pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+            pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+            pn = ((PyParamNode*)pp)->name;
+        }
+        if (pn) {
+            char pname[128];
+            snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
+            if (strcmp(varname, pname) == 0) return true;
+        }
+        pp = pp->next;
+    }
+    // check locals
+    char locs[64][128];
+    int lcount = 0;
+    pm_collect_local_defs(fc->node, locs, &lcount, 64);
+    for (int i = 0; i < lcount; i++) {
+        if (strcmp(varname, locs[i]) == 0) return true;
+    }
+    return false;
+}
+
+// Helper: add a capture to a function if not already present; returns true if added
+static bool pm_add_capture_entry(PyFuncCollected* fc, const char* varname) {
+    for (int ci = 0; ci < fc->capture_count; ci++) {
+        if (strcmp(fc->captures[ci], varname) == 0) return false; // already present
+    }
+    if (fc->capture_count < 32) {
+        snprintf(fc->captures[fc->capture_count], 128, "%s", varname);
+        fc->capture_count++;
+        fc->is_closure = true;
+        return true;
+    }
+    return false;
+}
+
 static void pm_analyze_captures(PyMirTranspiler* mt) {
     for (int fi = 0; fi < mt->func_count; fi++) {
         PyFuncCollected* fc = &mt->func_entries[fi];
@@ -3473,16 +3632,15 @@ static void pm_analyze_captures(PyMirTranspiler* mt) {
         int local_count = 0;
         pm_collect_local_defs(fc->node, locals, &local_count, 64);
 
-        // also exclude names of known functions (they are resolved separately)
-        // check which referenced names are NOT local
         for (int ri = 0; ri < ref_count; ri++) {
+            // skip if locally defined
             bool is_local = false;
             for (int li = 0; li < local_count; li++) {
                 if (strcmp(refs[ri], locals[li]) == 0) { is_local = true; break; }
             }
             if (is_local) continue;
 
-            // check if it's a known function name
+            // skip known function names (resolved separately via local_funcs)
             bool is_func = false;
             for (int fi2 = 0; fi2 < mt->func_count; fi2++) {
                 char fname[140];
@@ -3491,48 +3649,52 @@ static void pm_analyze_captures(PyMirTranspiler* mt) {
             }
             if (is_func) continue;
 
-            // check if this variable exists in the parent function's scope
-            PyFuncCollected* parent = &mt->func_entries[fc->parent_index];
-            // check parent params
-            bool in_parent = false;
-            PyAstNode* pp = parent->node->params;
-            while (pp) {
-                String* pn = NULL;
-                if (pp->node_type == PY_AST_NODE_PARAMETER ||
-                    pp->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
-                    pp->node_type == PY_AST_NODE_TYPED_PARAMETER) {
-                    pn = ((PyParamNode*)pp)->name;
-                }
-                if (pn) {
-                    char pname[128];
-                    snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
-                    if (strcmp(refs[ri], pname) == 0) { in_parent = true; break; }
-                }
-                pp = pp->next;
-            }
-            // also check parent's local assignments
-            if (!in_parent) {
-                char plocs[64][128];
-                int ploc_count = 0;
-                pm_collect_local_defs(parent->node, plocs, &ploc_count, 64);
-                for (int pli = 0; pli < ploc_count; pli++) {
-                    if (strcmp(refs[ri], plocs[pli]) == 0) { in_parent = true; break; }
-                }
-            }
-            if (!in_parent) continue;
+            // Walk up the ancestor chain to find where this variable is defined.
+            // Collect the chain of intermediate ancestors (parent, grandparent, ...)
+            // so that we can propagate the capture upward if needed.
+            int chain[16];     // ancestor indices, from parent (chain[0]) up
+            int chain_len = 0;
+            int anc_idx = fc->parent_index;
+            bool found = false;
 
-            // this is a captured variable
-            if (fc->capture_count < 32) {
-                snprintf(fc->captures[fc->capture_count], 128, "%s", refs[ri]);
-                fc->capture_count++;
-                fc->is_closure = true;
-                log_debug("py-mir: function '%s' captures '%s' from parent '%s'",
-                    fc->name, refs[ri], parent->name);
+            while (anc_idx >= 0 && chain_len < 16) {
+                PyFuncCollected* anc = &mt->func_entries[anc_idx];
+                chain[chain_len++] = anc_idx;
+
+                // variable is directly defined (param or local) in this ancestor
+                if (pm_var_in_func_scope(mt, anc, refs[ri])) {
+                    found = true;
+                    break;
+                }
+                // ancestor already captures it (from its own parent)
+                for (int ci = 0; ci < anc->capture_count; ci++) {
+                    if (strcmp(anc->captures[ci], refs[ri]) == 0) { found = true; break; }
+                }
+                if (found) break;
+
+                anc_idx = anc->parent_index;
+            }
+
+            if (!found) continue;
+
+            // Add capture to fc itself
+            pm_add_capture_entry(fc, refs[ri]);
+            log_debug("py-mir: function '%s' captures '%s' (found at depth %d)",
+                fc->name, refs[ri], chain_len);
+
+            // Propagate through all intermediate ancestors:
+            // chain[0]=direct parent, ..., chain[chain_len-1]=where V was found.
+            // The last entry in chain already has V (directly or via its own capture),
+            // so only add to chain[0] .. chain[chain_len-2].
+            for (int ci = 0; ci < chain_len - 1; ci++) {
+                if (pm_add_capture_entry(&mt->func_entries[chain[ci]], refs[ri])) {
+                    log_debug("py-mir: propagated capture '%s' to intermediate function '%s'",
+                        refs[ri], mt->func_entries[chain[ci]].name);
+                }
             }
         }
     }
 }
-
 // analyze captures for lambdas — similar to functions
 static void pm_analyze_lambda_captures(PyMirTranspiler* mt) {
     for (int li = 0; li < mt->lambda_count; li++) {
@@ -4260,9 +4422,13 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     PyAstNode* s = program->body;
     while (s) {
         if (s->node_type == PY_AST_NODE_FUNCTION_DEF) {
-            // skip — already compiled
-            s = s->next;
-            continue;
+            PyFunctionDefNode* fdef_chk = (PyFunctionDefNode*)s;
+            if (!fdef_chk->decorators) {
+                // no decorators: skip — already compiled and accessible via local_funcs
+                s = s->next;
+                continue;
+            }
+            // has decorators: fall through to pm_transpile_statement to apply them
         }
         if (s->node_type == PY_AST_NODE_CLASS_DEF) {
             // class objects are created at runtime via pm_transpile_statement
