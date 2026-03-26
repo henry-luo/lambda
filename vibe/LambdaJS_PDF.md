@@ -5,17 +5,17 @@
 **Goal:** Run Mozilla's PDF.js library under the LambdaJS runtime to enable native PDF
 parsing and rendering in Lambda, without embedding a separate JS engine.
 
-**Verdict: Feasible with focused effort. 2 remaining gaps (down from 6).**
+**Verdict: Feasible with focused effort. 1 remaining gap (down from 6).**
 
 PDF.js is a 120+ file, zero-dependency JavaScript library that parses and renders PDF
 documents. Its core parsing engine (`src/core/`) can run without browser APIs by using
 a "fake worker" fallback path already built into the codebase.
 
-**Update (2025-07-20):** Phase 0 (primitives baseline, 33/33), Phase 1
-(ArrayBuffer/DataView, 43/43), and Phase 2 (private fields, 23/23) all complete.
-This closes 4 of the original 6 gaps (generators, fetch, microtasks,
-ArrayBuffer/DataView). The primary remaining gap is **async/await** (state machine
-transform). ES modules are bypassed via bundling.
+**Update (2025-07-21):** Phases 0–2 all complete: primitives baseline (33/33),
+ArrayBuffer/DataView (43/43), private fields (23/23). This closes 5 of the original
+6 gaps (generators, fetch, microtasks, ArrayBuffer/DataView, private fields). The
+primary remaining gap is **async/await** (state machine transform). ES modules are
+bypassed via bundling. Phase 3 (minor polyfills) is next.
 
 ### Feasibility Score (Updated)
 
@@ -24,7 +24,7 @@ transform). ES modules are bypassed via bundling.
 | **Core parsing (no rendering)** | 8/10 | v15 closes most gaps; async/await is main blocker |
 | **Full library (parse + render)** | 5/10 | Canvas/Worker dependencies still add layers |
 | **Test pass rate potential** | 9/10 | CLI tests (57 specs) are the right target |
-| **Implementation effort** | Medium | ~2 remaining features (was 6) |
+| **Implementation effort** | Medium | ~1 remaining feature (was 6) |
 
 ---
 
@@ -152,40 +152,22 @@ spec is well-defined.
 
 ---
 
-#### Gap 3: Private Class Fields — `#field` (🟡 MEDIUM)
+#### Gap 3: Private Class Fields — `#field` — ✅ CLOSED (Phase 2)
 
 **PDF.js usage:** 100+ private fields across core files. Pervasive in data structures.
 
-```javascript
-// src/core/primitives.js
-class Dict {
-  #map = new Map();
-  #xref;
-  #suppressEncryption;
-}
+**LambdaJS status:** ✅ **Fully implemented** (2025-07-21). AST-level `#field` →
+`__private_field` transform, instance field initialization with inheritance chain walk,
+static private fields via module variables, `#field in obj` operator support.
+23/23 test cases pass.
 
-// src/core/document.js — 20+ private fields
-class Page {
-  #areAnnotationsCached = false;
-  #pagePromises = new Map();
-  #version = null;
-}
-```
-
-**LambdaJS status:** Handled implicitly via `__private_FieldName` naming convention
-in property access. The Tree-sitter grammar parses `#field` syntax.
-
-**Required work:**
-- Verify the `#field` → `__private_` transform works for all PDF.js patterns
-- Handle `#field` in class initializers (field declarations with default values)
-- Handle `static #field` (static private fields)
-- Ensure WeakMap-like semantics (private fields not enumerable)
-
-**Estimated complexity:** LOW-MEDIUM — The naming convention approach should work for
-most cases. The main risk is edge cases around static private fields and private
-methods.
-
-**Strategy:** Test-driven: run PDF.js primitives_spec.js first, fix failures.
+**What was implemented:**
+- AST transform: `#field` → `__private_field` in `build_js_expression()`
+- Instance field collection and initialization at `new ClassName()` call site
+- Inheritance chain walk (base-first) for correct field init order
+- Disabled A5/P3/P4 shaped slot optimization for classes with instance fields
+- Static `#field++`/`--` write-back via `js_set_module_var`
+- `#field in obj` compiled as string literal key lookup
 
 ---
 
@@ -301,7 +283,7 @@ Item js_promise_with_resolvers() {
 | Promise (basic) | ✅ | ✅ | ✅ | Ready |
 | **async/await** | ⚠️ | ✅ | ✅ | **Gap 1** (main blocker) |
 | **ES modules** | ❌ | ✅ | ✅ | **Gap 2** (bypassed by bundling) |
-| **Private fields (#)** | ⚠️ | ✅ | ✅ | **Gap 3** (needs polish) |
+| **Private fields (#)** | ✅ | ✅ | ✅ | ~~Gap 3~~ ✅ CLOSED (Phase 2) |
 | **ArrayBuffer/DataView** | ✅ | ✅ | ✅ | ~~Gap 4~~ ✅ CLOSED (Phase 1) |
 | **Generators/yield** | ✅ | ✅ | — | ~~Gap 5~~ ✅ CLOSED (v15) |
 | **Promise.withResolvers** | ❌ | ✅ | ✅ | **Gap 6** (trivial) |
