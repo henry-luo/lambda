@@ -838,8 +838,11 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
         if (entry) {
             return _map_read_field(entry, m->data);
         }
-        // Not found in hash table — check for spread/nested maps (rare)
+        // Not found in hash table — may have overflowed (capacity=32).
+        // Walk all named fields linearly to catch overflow entries, and also
+        // check unnamed (nested/spread) entries.
         ShapeEntry* field = map_type->shape;
+        Item overflow_result = ItemNull;
         while (field) {
             if (!field->name) {
                 Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
@@ -848,10 +851,14 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
                     Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
                     if (nested_found) return nested_result;
                 }
+            } else if (field->name->str == key_str ||  // A6: interned pointer match
+                       (field->name->length == (size_t)key_len &&
+                        memcmp(field->name->str, key_str, key_len) == 0)) {
+                overflow_result = _map_read_field(field, m->data);
             }
             field = field->next;
         }
-        return ItemNull;
+        return overflow_result;
     }
 
     // Fallback: linear scan for objects without hash table

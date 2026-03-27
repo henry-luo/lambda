@@ -4,6 +4,8 @@
 #include "../lib/arena.h"
 #include "../lib/hashmap.h"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/template_state.h"
+#include "../lambda/render_map.h"
 #include "../lambda/input/css/dom_node.hpp"
 
 /**
@@ -179,6 +181,14 @@ typedef struct RadiantState {
     
     // State storage
     HashMap* state_map;            // map from StateKey -> StateEntry
+    
+    // Template reactive state (unified with Lambda template state store)
+    // Keyed by (model_item, template_ref, state_name) — see template_state.h
+    struct hashmap* template_state_map;
+    
+    // Render map (observer-based reconciliation — see render_map.h)
+    // Keyed by (source_item, template_ref) → result nodes + dirty flag
+    struct hashmap* render_map;
     
     // Update mode and versioning
     StateUpdateMode mode;

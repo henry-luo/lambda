@@ -112,6 +112,13 @@ extern "C" {
 #define SYM_COMMENT sym_comment
 #define SYM_NAMED_ARGUMENT sym_named_argument
 
+// View/Edit template symbols
+#define SYM_VIEW_STAM sym_view_stam
+#define SYM_VIEW_PATTERN sym_view_pattern
+#define SYM_STATE_DECL sym_state_decl
+#define SYM_STATE_ENTRY sym_state_entry
+#define SYM_EVENT_HANDLER sym_event_handler
+
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
 #define FIELD_ELSE field_else
@@ -165,6 +172,10 @@ extern "C" {
 #define FIELD_QUERY field_query
 #define FIELD_START field_start
 #define FIELD_END field_end
+// View/Edit template fields
+#define FIELD_STATE field_state
+#define FIELD_HANDLER field_handler
+#define FIELD_EVENT field_event
 
 // Symbols for for-expression clauses
 #define SYM_FOR_LET_CLAUSE sym_for_let_clause
@@ -278,6 +289,10 @@ typedef enum AstNodeType {
     AST_NODE_PATTERN_RANGE,     // "a" to "z"
     AST_NODE_PATTERN_CHAR_CLASS, // \d, \w, \s, \a, .
     AST_NODE_PATTERN_SEQ,       // sequence of patterns (concatenation)
+    // View/Edit reactive template nodes
+    AST_NODE_VIEW,              // view/edit template declaration
+    AST_NODE_STATE_ENTRY,       // state name: value entry
+    AST_NODE_EVENT_HANDLER,     // on event(param) { body } handler
     AST_SCRIPT,
 } AstNodeType;
 
@@ -550,6 +565,35 @@ typedef struct AstPatternCharClassNode : AstNode {
 typedef struct AstPatternSeqNode : AstNode {
     AstNode* first;     // first pattern in sequence (linked list via 'next')
 } AstPatternSeqNode;
+
+// View/Edit template node
+// view [name:] pattern [(params)] [return_type] [state k:v, ...] { body } [on event() { ... }]*
+typedef struct AstViewNode : AstNode {
+    String* name;               // optional template name (NULL for anonymous)
+    bool is_edit;               // true for 'edit', false for 'view'
+    AstNode* pattern;           // model pattern (type expression)
+    AstNamedNode* param;        // optional parameters (linked list)
+    AstNode* body;              // functional body
+    struct AstStateEntry* state; // optional state declarations (linked list)
+    struct AstEventHandler* handler; // optional event handlers (linked list)
+    NameScope* vars;            // scope for params and state
+} AstViewNode;
+
+// State entry: name: initial_value
+typedef struct AstStateEntry : AstNode {
+    String* name;               // state variable name
+    AstNode* value;             // initial value expression
+    struct AstStateEntry* next_state; // next state entry in list
+} AstStateEntry;
+
+// Event handler: on event_name(param) { body }
+typedef struct AstEventHandler : AstNode {
+    String* event;              // event name (e.g., "click", "init")
+    AstNamedNode* param;        // optional event parameter
+    AstNode* body;              // procedural body
+    NameScope* vars;            // handler scope
+    struct AstEventHandler* next_handler; // next handler in list
+} AstEventHandler;
 
 // Forward declare for capture list
 struct CaptureInfo;

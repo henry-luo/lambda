@@ -87,6 +87,9 @@ typedef enum PyAstNodeType {
     PY_AST_NODE_CASE,                   // case pattern [if guard]: body
     PY_AST_NODE_PATTERN,                // discriminated by PyPatternKind
 
+    PY_AST_NODE_YIELD,                  // yield expr / yield from expr
+    PY_AST_NODE_AWAIT,                  // await expr (Phase D: async/await)
+
     PY_AST_NODE_COUNT
 } PyAstNodeType;
 
@@ -175,6 +178,8 @@ typedef struct PyLiteralNode {
         String* string_value;
         bool boolean_value;
     } value;
+    bool is_bigint_literal;         // true when the literal exceeds int64 range
+    const char* bigint_literal_str; // heap-allocated decimal string for large literals
 } PyLiteralNode;
 
 // Python binary operation node
@@ -232,6 +237,7 @@ typedef struct PyFunctionDefNode {
     PyAstNode* body;                // function body (block of statements)
     PyAstNode* decorators;          // decorator list (linked list)
     PyAstNode* return_annotation;   // return type annotation (ignored at runtime)
+    bool is_async;                  // true for async def (Phase D)
 } PyFunctionDefNode;
 
 // Python call expression node
@@ -465,6 +471,19 @@ typedef struct PyImportNode {
     String* alias;                  // as alias (optional)
     PyAstNode* names;               // linked list of imported names (for from...import)
 } PyImportNode;
+
+// Python yield / yield from expression node (Phase A: generators)
+typedef struct PyYieldNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_YIELD
+    PyAstNode* value;       // yielded value (NULL for bare yield)
+    bool is_from;           // true for 'yield from'
+} PyYieldNode;
+
+// Python await expression node (Phase D: async/await)
+typedef struct PyAwaitNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_AWAIT
+    PyAstNode* value;       // the awaited expression
+} PyAwaitNode;
 
 // ============================================================================
 // Phase B: match/case pattern matching

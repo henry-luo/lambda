@@ -12,6 +12,7 @@
 #include "lambda-error.h"
 #include "module_registry.h"
 #include "js/js_runtime.h"
+#include "template_registry.h"
 #include "../lib/file_utils.h"
 
 extern "C" Item js_property_get(Item object, Item key);
@@ -1185,6 +1186,11 @@ void runner_setup_context(Runner* runner) {
     input_context = context = &runner->context;
     heap_init();
     context->pool = context->heap->pool;
+
+    // Initialize template registry for view/edit template dispatch
+    if (!g_template_registry) {
+        g_template_registry = template_registry_new();
+    }
 }
 
 void runner_cleanup(Runner* runner) {

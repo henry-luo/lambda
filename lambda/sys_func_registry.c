@@ -35,6 +35,25 @@ extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
 extern Item fn_split(Item str, Item sep); // JIT name: fn_split2
 extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_replace3
 
+// view/edit template apply
+extern Item fn_apply1(Item target);
+extern Item fn_apply2(Item target, Item options);
+
+// template state store (reactive UI Phase 2)
+extern Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name);
+extern void tmpl_state_set(Item model_item, const char* template_ref,
+                           const char* state_name, Item value);
+extern Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
+                                   const char* state_name, Item default_value);
+
+// render map (reactive UI Phase 3 — observer-based reconciliation)
+extern void render_map_record(Item source_item, const char* template_ref,
+                              Item result_node, Item parent_result, int child_index);
+extern void render_map_mark_dirty(Item source_item, const char* template_ref);
+extern bool render_map_has_dirty(void);
+extern int render_map_retransform(void);
+extern Item render_map_get_result(Item source_item, const char* template_ref);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -42,6 +61,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
 #include "py/py_class.h"
+#include "py/py_bigint.h"
+#include "py/py_async.h"
+#include "py/py_stdlib.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -586,6 +608,15 @@ SysFuncInfo sys_func_defs[] = {
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
     // {SYSPROC_REPLACE_FILE4, "replace", 4, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
+
+    // ========================================================================
+    // View/edit template apply
+    // ========================================================================
+    {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply1", FPTR(fn_apply1), NULL, NULL, false, 0},
+
+    {SYSFUNC_APPLY2, "apply", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -1227,6 +1258,8 @@ JitImport jit_runtime_imports[] = {
     {"py_bit_xor", FPTR(py_bit_xor)},
     {"py_lshift", FPTR(py_lshift)},
     {"py_rshift", FPTR(py_rshift)},
+    // bigint
+    {"py_bigint_from_cstr", FPTR(py_bigint_from_cstr)},
     // comparison
     {"py_eq", FPTR(py_eq)},
     {"py_ne", FPTR(py_ne)},
@@ -1357,6 +1390,19 @@ JitImport jit_runtime_imports[] = {
     // stop iteration
     {"py_stop_iteration", FPTR(py_stop_iteration)},
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
+    // generator protocol
+    {"py_gen_create", FPTR(py_gen_create)},
+    {"py_gen_get_frame_c", FPTR(py_gen_get_frame_c)},
+    {"py_gen_next", FPTR(py_gen_next)},
+    {"py_gen_send", FPTR(py_gen_send)},
+    // coroutine protocol (Phase D)
+    {"py_coro_create", FPTR(py_coro_create)},
+    {"py_coro_set_return", FPTR(py_coro_set_return)},
+    {"py_coro_get_return", FPTR(py_coro_get_return)},
+    {"py_coro_drive", FPTR(py_coro_drive)},
+    {"py_asyncio_run", FPTR(py_asyncio_run)},
+    {"py_asyncio_sleep", FPTR(py_asyncio_sleep)},
+    {"py_asyncio_gather", FPTR(py_asyncio_gather)},
 
     // ========================================================================
     // Bash runtime functions
@@ -1590,6 +1636,22 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
     {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
     {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
+
+    // ========================================================================
+    // Template state store (reactive UI Phase 2)
+    // ========================================================================
+    {"tmpl_state_get", FPTR(tmpl_state_get)},
+    {"tmpl_state_set", FPTR(tmpl_state_set)},
+    {"tmpl_state_get_or_init", FPTR(tmpl_state_get_or_init)},
+
+    // ========================================================================
+    // Render map (reactive UI Phase 3 — observer-based reconciliation)
+    // ========================================================================
+    {"render_map_record", FPTR(render_map_record)},
+    {"render_map_mark_dirty", FPTR(render_map_mark_dirty)},
+    {"render_map_has_dirty", FPTR(render_map_has_dirty)},
+    {"render_map_retransform", FPTR(render_map_retransform)},
+    {"render_map_get_result", FPTR(render_map_get_result)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

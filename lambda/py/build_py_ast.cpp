@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
+#include <cerrno>
 
 // External Tree-sitter Python parser
 extern "C" {
@@ -113,6 +114,8 @@ PyOperator py_augmented_operator_from_string(const char* op_str, size_t len) {
 static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
     PyLiteralNode* literal = (PyLiteralNode*)alloc_py_ast_node(tp, PY_AST_NODE_LITERAL, int_node, sizeof(PyLiteralNode));
     literal->literal_type = PY_LITERAL_INT;
+    literal->is_bigint_literal = false;
+    literal->bigint_literal_str = NULL;
 
     StrView source = py_node_source(tp, int_node);
     char* temp_str = (char*)malloc(source.length + 1);
@@ -120,7 +123,10 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
         memcpy(temp_str, source.str, source.length);
         temp_str[source.length] = '\0';
 
-        // handle hex, octal, binary prefixes
+        // handle hex, octal, binary prefixes — strtoll handles these correctly but
+        // does not detect overflow for non-decimal bases; for bigint literals those
+        // prefixes are unusual, so we only guard the base-10 path via errno.
+        errno = 0;
         if (source.length > 2 && temp_str[0] == '0') {
             char prefix = temp_str[1];
             if (prefix == 'x' || prefix == 'X') {
@@ -133,7 +139,15 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
                 literal->value.int_value = strtoll(temp_str, NULL, 10);
             }
         } else {
+            errno = 0;
             literal->value.int_value = strtoll(temp_str, NULL, 10);
+            if (errno == ERANGE) {
+                // literal exceeds int64 range — record as bigint
+                literal->is_bigint_literal = true;
+                literal->bigint_literal_str = strdup(temp_str);
+                literal->value.int_value = 0;
+                log_debug("py-ast: bigint literal '%s'", temp_str);
+            }
         }
         free(temp_str);
     }
@@ -1593,6 +1607,13 @@ PyAstNode* build_py_decorated_definition(PyTranspiler* tp, TSNode dec_node) {
                 ((PyFunctionDefNode*)func)->decorators = decorators;
             }
             return func;
+        } else if (strcmp(def_type, "async_function_definition") == 0) {
+            PyAstNode* func = build_py_function_def(tp, def_node);
+            if (func) {
+                ((PyFunctionDefNode*)func)->decorators = decorators;
+                ((PyFunctionDefNode*)func)->is_async = true;
+            }
+            return func;
         } else if (strcmp(def_type, "class_definition") == 0) {
             PyAstNode* cls = build_py_class_def(tp, def_node);
             if (cls) {
@@ -1748,21 +1769,34 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         return (PyAstNode*)assign;
     }
 
-    // await expression
+    // await expression (Phase D): build a PyAwaitNode
     if (strcmp(node_type, "await") == 0) {
+        PyAwaitNode* an = (PyAwaitNode*)alloc_py_ast_node(tp, PY_AST_NODE_AWAIT, expr_node, sizeof(PyAwaitNode));
         if (ts_node_named_child_count(expr_node) > 0) {
-            return build_py_expression(tp, ts_node_named_child(expr_node, 0));
+            an->value = build_py_expression(tp, ts_node_named_child(expr_node, 0));
         }
-        return NULL;
+        return (PyAstNode*)an;
     }
 
-    // yield expression
+    // yield / yield from expression
     if (strcmp(node_type, "yield") == 0) {
-        // build the yielded value
-        if (ts_node_named_child_count(expr_node) > 0) {
-            return build_py_expression(tp, ts_node_named_child(expr_node, 0));
+        PyYieldNode* yn = (PyYieldNode*)alloc_py_ast_node(tp, PY_AST_NODE_YIELD, expr_node, sizeof(PyYieldNode));
+        yn->is_from = false;
+        yn->value = NULL;
+        // detect 'yield from' by scanning for the anonymous 'from' keyword child
+        int total = ts_node_child_count(expr_node);
+        for (int ci = 0; ci < total; ci++) {
+            TSNode child = ts_node_child(expr_node, ci);
+            if (strcmp(ts_node_type(child), "from") == 0) {
+                yn->is_from = true;
+                break;
+            }
         }
-        return build_py_none(tp, expr_node);
+        // the value is the first named child (if any)
+        if (ts_node_named_child_count(expr_node) > 0) {
+            yn->value = build_py_expression(tp, ts_node_named_child(expr_node, 0));
+        }
+        return (PyAstNode*)yn;
     }
 
     // type node (in annotations) — just return the inner expression
@@ -2248,6 +2282,11 @@ PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
     }
     if (strcmp(node_type, "function_definition") == 0) {
         return build_py_function_def(tp, stmt_node);
+    }
+    if (strcmp(node_type, "async_function_definition") == 0) {
+        PyAstNode* fn = build_py_function_def(tp, stmt_node);
+        if (fn) ((PyFunctionDefNode*)fn)->is_async = true;
+        return fn;
     }
     if (strcmp(node_type, "class_definition") == 0) {
         return build_py_class_def(tp, stmt_node);

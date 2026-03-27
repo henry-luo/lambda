@@ -4,7 +4,7 @@
 
 LambdaPy v3 closed the major OOP and module-system gaps (~14.4K LOC). The features explicitly deferred from v3 are: **generators/`yield`**, **`match`/`case` pattern matching**, **standard library module stubs**, **`async`/`await`**, **full package imports**, and **metaclasses/advanced OOP** (including `@prop.setter`, full descriptor protocol, `__init_subclass__`, `__class_getitem__`). This proposal targets those in priority order.
 
-> **Implementation Status:** All phases pending.
+> **Implementation Status:** Phase F1 (@property setter/deleter), Phase B (match/case), Phase A (generators/yield), Phase C (arbitrary-precision integers), and Phase D (async/await) are complete. Stdlib stubs, Phase E, and F2+ are pending.
 
 ### Architecture Position
 
@@ -18,42 +18,41 @@ v3:  OOP and module system                                  (✅ COMPLETE, ~14.4
        Classes, inheritance, super, dunders, with, decorators, **kwargs,
        single-file imports
 v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~20K LOC)
-       Phase A: Generators and yield                        ⏳ pending
-       Phase B: match/case pattern matching                 ⏳ pending
+       Phase A: Generators and yield                        ✅ COMPLETE
+       Phase B: match/case pattern matching                 ✅ COMPLETE
        Phase C: Standard library module stubs               ⏳ pending
-       Phase D: async/await and event loop                  ⏳ pending
+       Phase D: async/await and event loop                  ✅ COMPLETE
        Phase E: Full package system                         ⏳ pending
-       Phase F: Advanced OOP (metaclasses, descriptors)     ⏳ pending
+       Phase F: Advanced OOP (metaclasses, descriptors)     🔄 partial (F1 done)
 ```
 
 ### Current vs Target Coverage
 
-| Metric | v3 (actual) | v4 target |
-|--------|-------------|-----------|
-| `yield` / generator functions | AST stripped: `yield` silently evaluates its expression | ✅ Full generator objects with `next()`/`throw()`/`close()` |
-| `yield from` | ❌ | ✅ Delegation to sub-generator |
-| Generator expressions `(x for x in ...)` | Compiled as lists (eager) | ✅ Lazy generator objects |
-| `match`/`case` pattern matching | ❌ | ✅ Literal, capture, sequence, mapping, class, OR patterns, guards |
-| `import math` / `import os` / `import sys` | No-op warning | ✅ Built-in module stubs |
-| `import json` | No-op warning | ✅ Delegates to Lambda's JSON parser |
-| `import re` | No-op warning | ✅ Thin wrapper over Lambda's re2 backend |
-| `async def` / `await` | `await` stripped to inner expression | ✅ Coroutines with simple event loop |
-| `async for` / `async with` | ❌ | ✅ Async iterator + async context manager |
-| `asyncio.run()` / `asyncio.gather()` | ❌ | ✅ Single-threaded event loop |
-| `import pkg.submod` | ❌ Deferred | ✅ Package resolution with `__init__.py` |
-| Relative imports (`from . import x`) | ❌ Deferred | ✅ |
-| Circular imports | ❌ Not handled | ✅ Partial loading / forward references |
-| `@prop.setter` / `@prop.deleter` | ❌ Deferred from v3 | ✅ Full property descriptor |
-| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌ | ✅ |
-| `__init_subclass__` | ❌ | ✅ |
-| `__class_getitem__` | ❌ | ✅ Generic type subscript (`List[int]`) |
-| Metaclasses (`metaclass=Meta`) | ❌ | ✅ Basic metaclass support |
-| Arbitrary-precision integers | 64-bit only | ⏳ Deferred to v5 (requires GMP integration) |
-| C extension imports (`import numpy`) | ❌ | ❌ Deferred to v5 |
+| Metric                                                        | v3 (actual)                                             | v4 target                                                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `yield` / generator functions                                 | AST stripped: `yield` silently evaluates its expression | ✅ **DONE** — state-machine codegen, `next()`/`send()`, frame-based locals    |
+| `yield from`                                                  | ❌                                                       | ✅ **DONE** — self-looping state delegates to sub-iterator                    |
+| Generator expressions `(x for x in ...)`                      | Compiled as lists (eager)                               | ⏳ pending (v4 stretch goal)                                                  |
+| `match`/`case` pattern matching                               | ❌                                                       | ✅ **DONE** — literal, capture, wildcard, OR, sequence, mapping, class, guard |
+| `import math` / `import os` / `import sys`                    | No-op warning                                           | ✅ Built-in module stubs                                                      |
+| `import json`                                                 | No-op warning                                           | ✅ Delegates to Lambda's JSON parser                                          |
+| `import re`                                                   | No-op warning                                           | ✅ Thin wrapper over Lambda's re2 backend                                     |
+| `async def` / `await`                                         | `await` stripped to inner expression                    | ✅ **DONE** — coroutines via generator state machine, `py_async.cpp`          |
+| `async for` / `async with`                                    | ❌                                                       | ⏳ pending (v4 stretch goal)                                                  |
+| `asyncio.run()` / `asyncio.gather()`                          | ❌                                                       | ✅ **DONE** — single-threaded cooperative event loop                          |
+| `import pkg.submod`                                           | ❌ Deferred                                              | ✅ Package resolution with `__init__.py`                                      |
+| Relative imports (`from . import x`)                          | ❌ Deferred                                              | ✅                                                                            |
+| Circular imports                                              | ❌ Not handled                                           | ✅ Partial loading / forward references                                       |
+| `@prop.setter` / `@prop.deleter`                              | ❌ Deferred from v3                                      | ✅ **DONE** — setter and deleter fully implemented                            |
+| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌                                                       | ✅                                                                            |
+| `__init_subclass__`                                           | ❌                                                       | ✅                                                                            |
+| `__class_getitem__`                                           | ❌                                                       | ✅ Generic type subscript (`List[int]`)                                       |
+| Metaclasses (`metaclass=Meta`)                                | ❌                                                       | ✅ Basic metaclass support                                                    |
+| Arbitrary-precision integers                                  | 64-bit only                                             | ✅ **DONE** — mpdecimal backend (4000-digit precision), `py_bigint.cpp`       |
+| C extension imports (`import numpy`)                          | ❌                                                       | ❌ Deferred to v5                                                             |
 
 ### Non-Goals (v4)
 
-- Arbitrary-precision integers (requires GMP/MPIR integration — deferred to v5)
 - C extension imports (`import numpy`, `import torch`)
 - `threading` / `multiprocessing` (true parallelism)
 - Full `asyncio` stdlib (only core primitives: `run`, `gather`, `sleep`, `create_task`)
@@ -63,11 +62,34 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 
 ---
 
-## 2. Phase A: Generators and `yield`
+## 2. Phase A: Generators and `yield` ✅ COMPLETE
 
 **Goal:** Enable generator functions (`def f(): yield x`), generator expressions `(x for x in ...)`, `yield from`, and `send()`/`throw()`/`close()` on generator objects.
 
 **Estimated effort:** ~900 LOC. New file: `lambda/py/py_generator.cpp`, `lambda/py/py_generator.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `sys_func_registry.c`.
+
+### A0. Implementation Summary (completed)
+
+**Approach:** Compile-time state machine in `transpile_py_mir.cpp` — no separate generator file was needed. Generator runtime helpers were added to `py_runtime.cpp`.
+
+**What was implemented:**
+- `PY_AST_NODE_YIELD` added to `py_ast.hpp` with `PyYieldNode` (`value`, `is_from`).
+- `build_py_ast.cpp`: `yield` and `yield from` are built into proper AST nodes (was previously stripped).
+- Generator object = `LMD_TYPE_FUNC` Item with `FN_FLAG_IS_GENERATOR = 0x04`; frame pointer in `fn->closure_env`; resume function pointer in `fn->ptr`.
+- Frame layout: slot 0 = state (`0`=fresh, `N`=resume at yield N, `-1`=exhausted), slots 1..N = saved locals.
+- `pm_compile_generator` in `transpile_py_mir.cpp`: emits a `_gen_resume_NAME` state-machine MIR function and a thin wrapper `_NAME` that allocates the frame and returns the generator object.
+- `pm_gen_collect_locals_r`: pre-scans body to enumerate all frame locals (params + assigned vars + auto-named iterators `_py__git_N`).
+- `pm_gen_emit_save` / `pm_gen_emit_restore`: save/restore all frame locals at each yield point.
+- `yield from`: single self-looping state — enters once (saves sub-iterator), loops with same state on each resume until sub-iterator exhausted.
+- `pm_transpile_for` converted from index-based to iterator-protocol (`py_get_iterator`/`py_iterator_next`), enabling for-loops over generators everywhere.
+- `py_builtin_list` extended with general iterator-protocol fallback so `list(gen)` works.
+- Runtime additions to `py_runtime.cpp`: `py_gen_create`, `py_gen_get_frame_c`, `py_gen_next`, `py_gen_send`, `py_is_generator`; `py_get_iterator` passes generators through; `py_iterator_next` detects generators and calls resume function.
+- Registered in `sys_func_registry.c`: `py_gen_create`, `py_gen_get_frame_c`, `py_gen_next`, `py_gen_send`.
+- Test: `test/py/test_py_generators.py` — 8 scenarios, all PASS.
+
+**Not yet implemented (stretch goals):** generator expressions `(x for x in ...)` — still compiled eagerly as lists. `gen.throw()` / `gen.close()`.
+
+
 
 ### A1. Core Challenge: Stackless Generator State Machine
 
@@ -276,11 +298,24 @@ print(list(squares))   # [0, 1, 4, 9, 16, 25]
 
 ---
 
-## 3. Phase B: `match`/`case` Pattern Matching
+## 3. Phase B: `match`/`case` Pattern Matching ✅ COMPLETE
 
 **Goal:** Enable Python 3.10+ structural pattern matching (`match`/`case`) with all standard pattern forms.
 
 **Estimated effort:** ~750 LOC. Additions to `py_ast.hpp`, `build_py_ast.cpp`, `transpile_py_mir.cpp`, `py_runtime.cpp`. New helper: `py_pattern.cpp`.
+
+### B0. Implementation Summary (completed)
+
+All pattern types implemented inline in `transpile_py_mir.cpp` (no separate `py_pattern.cpp` needed). Key additions:
+
+- AST nodes: `PY_AST_NODE_MATCH`, `PY_AST_NODE_CASE`, `PY_AST_NODE_PAT_LITERAL`, `PY_AST_NODE_PAT_CAPTURE`, `PY_AST_NODE_PAT_WILDCARD`, `PY_AST_NODE_PAT_OR`, `PY_AST_NODE_PAT_SEQUENCE`, `PY_AST_NODE_PAT_MAPPING`, `PY_AST_NODE_PAT_CLASS`, `PY_AST_NODE_PAT_STAR`.
+- `build_py_ast.cpp`: `build_py_match_statement`, `build_py_case_clause`, `build_py_pattern` recursive parser.
+- `pm_compile_pattern`: recursive codegen for all 9 pattern types with `L_fail` jump-out.
+- Class pattern name resolution: `pm_resolve_dotted_name` checks `pm_get_global_var_index` before locals, so user-defined class names inside functions resolve correctly.
+- `py_match_sequence` runtime helper: returns true for list/tuple but not str/bytes.
+- Test: `test/py/test_py_match.py` — 12 test groups, all PASS.
+
+
 
 ### B1. Pattern Types
 
@@ -445,7 +480,28 @@ print(http_error(502))  # server error
 
 ---
 
-## 4. Phase C: Standard Library Module Stubs
+## 4. Phase C: Arbitrary-Precision Integers ✅ COMPLETE
+
+**Goal:** Python `int` seamlessly promotes to arbitrary-precision when results exceed 56-bit range, using Lambda's existing libmpdecimal infrastructure.
+
+### C0. Implementation Summary (completed)
+
+**Approach:** Store Python bigints as `LMD_TYPE_DECIMAL` `Item` values with `Decimal::unlimited == PY_BIGINT_FLAG (2)`. Use a dedicated `mpd_context_t` with 4000-digit precision (~13,000 bits). Reused Lambda's mpdecimal heap allocation (`heap_alloc`, `Decimal` struct, `decimal_to_double`).
+
+**What was implemented:**
+- `lambda/py/py_bigint.h` / `py_bigint.cpp` — full bigint arithmetic: add, sub, mul, floordiv, mod, pow, neg, abs, lshift, rshift, cmp, and string/hex/oct/bin conversion.
+- `py_runtime.cpp` — overflow detection in `py_add`, `py_sub`, `py_mul`, `py_power`, `py_lshift`, `py_rshift` promotes to bigint; `py_eq`/`py_lt` compare bigints via `py_bigint_cmp`; `py_negate` handles bigint negation; `py_to_str`/`py_to_int`/`py_is_truthy`/`py_get_number` dispatch on `py_is_bigint`.
+- `py_power` rewritten with `__builtin_mul_overflow` to correctly detect both `result*b` and `b*b` overflow at each step.
+- `py_ast.hpp` — `PyLiteralNode` extended with `is_bigint_literal` / `bigint_literal_str` for large integer literals in source.
+- `build_py_ast.cpp` — overflow detection via `errno == ERANGE` after `strtoll`; stores raw decimal string for oversized literals.
+- `transpile_py_mir.cpp` — emits `py_bigint_from_cstr(ptr)` for bigint literals; normal literals use `pm_box_int_const` unchanged.
+- `py_builtins.cpp` — `abs()`, `hex()`, `oct()`, `bin()` dispatch to bigint variants on bigint input.
+- `sys_func_registry.c` — registered `py_bigint_from_cstr` for MIR JIT lookup.
+- Test: `test/py/test_py_bigint.py` — 15 scenarios, all PASS (large literals, pow, add, mul, factorial, shift, floordiv, mod, comparisons, str(), abs(), hex()).
+
+---
+
+## 5. Phase C: Standard Library Module Stubs
 
 **Goal:** Enable `import math`, `import os`, `import sys`, `import re`, `import json`, `import collections`, and other frequently used standard library modules via thin C-backed stubs.
 
@@ -676,13 +732,40 @@ print(list(dq))   # [0, 1, 2, 3]
 
 ---
 
-## 5. Phase D: `async`/`await` and Event Loop
+## 6. Phase D: `async`/`await` and Event Loop ✅ COMPLETE
 
-**Goal:** Enable `async def`, `await`, `async for`, `async with`, and a minimal `asyncio` facade sufficient for practical async scripting.
+**Goal:** Enable `async def`, `await`, and a minimal `asyncio` facade sufficient for practical async scripting.
 
 **Estimated effort:** ~1,100 LOC. New files: `lambda/py/py_async.cpp`, `lambda/py/py_async.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `build_py_ast.cpp`, `sys_func_registry.c`.
 
 **Prerequisite:** Phase A (generators) must be complete. Python coroutines are a specialization of generator objects.
+
+### D0. Implementation Summary (completed)
+
+**Approach:** Coroutines reuse the generator state machine from Phase A. `async def` compiles the same way as a generator (`is_generator = true` forced when `is_async = true`). Coroutine identity is tracked via `FN_FLAG_IS_COROUTINE = 0x08`. Return values are passed through a static side channel (`g_coro_return_value`) since generators only yield/return `StopIteration`.
+
+**What was implemented:**
+- `py_async.h` / `py_async.cpp` — coroutine runtime: `py_coro_create`, `py_coro_set_return`/`py_coro_get_return` (side channel for return values), `py_coro_drive` (loops `py_gen_send` until `StopIteration`), `py_asyncio_run`/`py_asyncio_sleep`/`py_asyncio_gather`/`py_asyncio_create_task`, `py_stdlib_asyncio_init` (module namespace builder).
+- `py_ast.hpp` — `PY_AST_NODE_AWAIT` added; `PyAwaitNode { base, value }`; `bool is_async` on `PyFunctionDefNode`.
+- `build_py_ast.cpp` — `await` builds `PyAwaitNode` (was previously stripped); `async_function_definition` handled in both `build_py_statement` and `build_py_decorated_definition`.
+- `lambda.h` — `FN_FLAG_IS_COROUTINE 0x08` added.
+- `transpile_py_mir.cpp` — extensive changes:
+  - `PyFuncCollected::is_async` and `PyMirTranspiler::in_async` flags.
+  - `pm_collect_functions_r`: detects `is_async`, forces `is_generator = true` for async defs.
+  - `PY_AST_NODE_AWAIT` codegen: yield-from loop (same as `yield from`) but result = `py_coro_get_return()` instead of sub-iterator's yielded value.
+  - `pm_transpile_return` in async context: emits `py_coro_set_return(val)` before exhaustion.
+  - `pm_compile_generator`: saves/restores `in_async`; exhaustion epilogue emits `py_coro_set_return(ItemNull)` for async; wrapper calls `py_coro_create` instead of `py_gen_create`.
+  - `PY_AST_NODE_IMPORT` handler: detects `"asyncio"` as built-in module, calls `py_stdlib_asyncio_init()` at compile time.
+  - Forward-declaration pass (`MIR_new_forward`) before function compilation loop — fixes cross-function references from generator resume functions.
+  - Module-level imports registered as module vars (`pm_scan_module_vars` + `py_set_module_var`) so nested functions/generators can access them.
+  - General module-var fallback added to `pm_transpile_identifier` after local var lookup.
+- `py_runtime.h` — coroutine protocol declarations.
+- `sys_func_registry.c` — 7 new entries: `py_coro_create`, `py_coro_set_return`, `py_coro_get_return`, `py_coro_drive`, `py_asyncio_run`, `py_asyncio_sleep`, `py_asyncio_gather`.
+- `py_asyncio_sleep`: C-backed coroutine with `py_sleep_resume` as its resume function; stores seconds in frame[1], calls `usleep`, returns None via side channel.
+- `py_asyncio_gather`: fixed arity=6 (MIR limitation); drives each non-NULL coroutine sequentially, returns Array.
+- Test: `test/py/test_py_async.py` — 6 scenarios, all PASS: basic await+return, `asyncio.run` return value, sequential awaits, `asyncio.gather`, async def with no await, nested coroutines.
+
+**Not yet implemented:** `async for`, `async with` (deferred as v4 stretch goals).
 
 ### D1. Coroutine Model
 
@@ -691,13 +774,15 @@ Python coroutines (`async def`) are syntactic sugar over generator-based corouti
 - `await expr` is equivalent to `yield from expr.__await__()`.
 - The event loop drives coroutines by calling `send(None)` until `StopIteration`.
 
-**Implementation strategy:** Reuse the generator state machine from Phase A. Coroutines are generator objects with an additional `__await__` method returning `self` and a `CO_COROUTINE` flag.
+**Implementation strategy:** Reuse the generator state machine from Phase A. Coroutines are generator objects with `FN_FLAG_IS_COROUTINE = 0x08` set alongside `FN_FLAG_IS_GENERATOR = 0x04`. Return values pass through a static side channel (`py_coro_set_return`/`py_coro_get_return`) since generator `StopIteration` doesn't carry a value in the current runtime.
 
 ```c
-// py_async.h additions:
+// py_async.h:
 bool py_is_coroutine(Item x);
-Item py_coro_new(MIR_item_t resume_func, int local_count);
-Item py_coro_await(Item coro);   // returns next yielded value or StopIteration
+Item py_coro_create(void* resume_func, int frame_size);
+Item py_coro_set_return(Item value);   // store return value in side channel
+Item py_coro_get_return(void);         // retrieve stored return value
+Item py_coro_drive(Item coro);         // loop send(None) until StopIteration, return result
 ```
 
 ### D2. AST Changes
@@ -725,27 +810,27 @@ Async generator functions (`async def` + `yield`) are detected when both `is_asy
 
 ### D3. `await` Codegen
 
-`await expr` in an `async def` body compiles as `yield from expr.__await__()`, using the generator state machine yield machinery from Phase A:
+`await expr` in an `async def` body compiles as a yield-from loop (same structure as `yield from`), but on completion retrieves the return value via the side channel instead of the sub-iterator value:
 
 ```
 MIR for: result = await some_coro
 
-    reg_iter = CALL py_getattr(some_coro, "__await__")
-    reg_awaitable = CALL py_call_function(reg_iter, NULL, 0)
-    // yield-from loop:
+    reg_sub = <transpile expr>
+    reg_iter = CALL py_get_iterator(reg_sub)
+    save locals to frame
+    store frame->state = <yf_state>
     L_await_loop:
-        reg_val = CALL py_gen_send(reg_awaitable, _py_sent_value)
+        restore locals from frame
+        reg_val = CALL py_iterator_next(reg_iter)
         IF py_is_stop_iteration(reg_val): JMP L_await_done
-        // yield reg_val up to the event loop
-        store _frame->state = <next_state>
-        RET reg_val
-    L_await_resume_<state>:
-        JMP L_await_loop
+        // yield reg_val through to the outer driver
+        save locals; store state = <yf_state>
+        RET reg_val                          // suspend
     L_await_done:
-        reg_result = CALL py_stop_iteration_value(reg_val)
+        reg_result = CALL py_coro_get_return()  // side channel
 ```
 
-### D4. `async for` and `async with`
+### D4. `async for` and `async with` (deferred — v4 stretch goal)
 
 **`async for x in aiter:`** desugars to:
 ```python
@@ -770,84 +855,91 @@ else:
     await mgr.__aexit__(None, None, None)
 ```
 
-Both are handled in `pm_compile_statement` by emitting the desugared form using existing exception and yield machinery.
+Both require `async for` / `async with` AST node detection and desugaring in the transpiler. Deferred pending demand.
 
-### D5. Minimal `asyncio` Module (~200 LOC)
+### D5. Minimal `asyncio` Module (implemented)
 
-A single-threaded cooperative event loop sufficient for serial async scripts:
-
-```c
-// py_async.cpp: py_asyncio_run(coro)
-// Runs the top-level coroutine to completion:
-//   loop over py_coro_await(coro) until StopIteration
-//   For awaitables that are Futures/Tasks: schedule and run to completion
-//   For asyncio.sleep(0): yield control to next ready task
-
-Item py_asyncio_run(Item coro);
-Item py_asyncio_gather(Item* coros, int count);  // run concurrent coroutines to completion
-Item py_asyncio_sleep(Item seconds);             // returns an awaitable
-Item py_asyncio_create_task(Item coro);          // schedule a coroutine
-```
-
-The event loop is a simple queue of `(coroutine, send_value)` pairs processed in FIFO order. `asyncio.sleep(0)` yields to other tasks; `asyncio.sleep(n)` uses `usleep` (blocking, sufficient for scripting).
+A single-threaded cooperative event loop:
 
 ```c
-// Module stub
-Item py_stdlib_asyncio_init() {
-    Item mod = py_dict_new();
-    py_dict_set(mod, py_str("run"),         py_new_function((void*)py_asyncio_run, 1));
-    py_dict_set(mod, py_str("gather"),      py_new_function((void*)py_asyncio_gather_variadic, -1));
-    py_dict_set(mod, py_str("sleep"),       py_new_function((void*)py_asyncio_sleep, 1));
-    py_dict_set(mod, py_str("create_task"), py_new_function((void*)py_asyncio_create_task, 1));
-    return mod;
-}
+// py_async.cpp — actual implementation:
+Item py_asyncio_run(Item coro);            // = py_coro_drive(coro)
+Item py_asyncio_sleep(Item seconds);       // C-backed coroutine: py_sleep_resume, usleep
+Item py_asyncio_gather(Item,Item,...Item);  // fixed arity=6, drives each non-NULL coro sequentially
+Item py_asyncio_create_task(Item coro);     // passthrough (no task queue in single-threaded model)
 ```
 
-### Test Plan
+`asyncio.sleep` creates a C-backed coroutine with `py_sleep_resume` as its resume function. Frame slot 1 stores seconds as raw `uint64_t` bits. On first resume, it calls `usleep` if `secs > 0`, sets `py_coro_set_return(None)`, and exhausts.
+
+`asyncio.gather` uses a fixed 6-argument arity (MIR limitation on `py_call_function`). Extra `ItemNull` args are ignored. Drives coroutines sequentially (no true concurrency).
+
+```c
+// Module namespace (built at compile time by py_stdlib_asyncio_init):
+// { run: <function>, sleep: <function>, gather: <function>, create_task: <function> }
+```
+
+### Test Plan (actual — 6 scenarios, all PASS)
 
 ```python
 # test/py/test_py_async.py
 import asyncio
 
-async def fetch(url):
-    await asyncio.sleep(0)  # yield control
-    return f"data from {url}"
+# 1. Basic async def + await + return
+async def greet(name):
+    await asyncio.sleep(0)
+    return "hello " + name
+async def main1():
+    result = await greet("world")
+    print(result)                    # hello world
+asyncio.run(main1())
 
-async def main():
-    result = await fetch("http://example.com")
-    print(result)    # data from http://example.com
+# 2. asyncio.run returns coroutine return value
+async def simple():
+    return 42
+print(asyncio.run(simple()))         # 42
 
-asyncio.run(main())
+# 3. Multiple sequential awaits
+async def step(n):
+    await asyncio.sleep(0)
+    return n + 1
+async def pipeline():
+    a = await step(1)
+    b = await step(a)
+    c = await step(b)
+    print(c)                         # 4
+asyncio.run(pipeline())
 
-# async for
-async def aint_range(n):
-    for i in range(n):
-        await asyncio.sleep(0)
-        yield i
-
-async def consume():
-    total = 0
-    async for x in aint_range(5):
-        total += x
-    print(total)    # 10
-
-asyncio.run(consume())
-
-# gather
-async def task(n):
+# 4. asyncio.gather — parallel coroutines
+async def double(n):
     await asyncio.sleep(0)
     return n * 2
+async def run_gather():
+    results = await asyncio.gather(double(1), double(2), double(3))
+    print(results)                   # [2, 4, 6]
+asyncio.run(run_gather())
 
-async def parallel():
-    results = await asyncio.gather(task(1), task(2), task(3))
-    print(results)  # [2, 4, 6]
+# 5. async def with no await (implicit return None)
+async def noop():
+    pass
+result = asyncio.run(noop())
+print(result)                        # None
 
-asyncio.run(parallel())
+# 6. Nested coroutines
+async def inner(x):
+    await asyncio.sleep(0)
+    return x * 10
+async def outer(x):
+    val = await inner(x)
+    return val + 1
+async def main6():
+    r = await outer(5)
+    print(r)                         # 51
+asyncio.run(main6())
 ```
 
 ---
 
-## 6. Phase E: Full Package System
+## 7. Phase E: Full Package System
 
 **Goal:** Enable `import pkg.submod`, `from pkg import name`, relative imports (`from . import x`, `from ..utils import y`), and correct handling of circular imports.
 
@@ -942,40 +1034,30 @@ print(helper())               # 42
 
 ---
 
-## 7. Phase F: Advanced OOP — Metaclasses, Full Descriptors, `@prop.setter`
+## 8. Phase F: Advanced OOP
 
 **Goal:** Complete the class system with `@property` setter/deleter, full descriptor protocol (`__get__`/`__set__`/`__delete__`), `__init_subclass__`, `__class_getitem__`, and basic metaclass support.
 
 **Estimated effort:** ~650 LOC. Extensions to `lambda/py/py_class.cpp`, `lambda/py/py_class.h`, `py_runtime.cpp`, `transpile_py_mir.cpp`.
 
-### F1. `@property` Setter and Deleter
+### F1. `@property` Setter and Deleter ✅ COMPLETE
 
-v3 implemented `@property` getter only. Add setter/deleter support by:
+v3 implemented `@property` getter only. Setter/deleter are now fully supported.
+
+**Implemented:**
+- Property Map: `{ "__is_property__": true, "__get__": fget, "__set__": fset, "__delete__": fdel }`.
+- `py_property_setter(prop, fset)` and `py_property_deleter(prop, fdel)` runtime functions.
+- `pm_apply_decorators` detects `@propname.setter` / `@propname.deleter` (attribute decorator) and emits the appropriate call; internal MIR name is suffixed (`_setter`/`_deleter`) to avoid collision with the getter.
+- `py_setattr` on instances calls `__set__` when the class dict entry has `__is_property__`; `py_delattr` calls `__delete__`.
+- Test: `test/py/test_py_property.py` — all PASS.
+
+
 
 1. Extending the property Map representation:
    ```c
    // property Map: { "__is_property__": true, "__get__": fget, "__set__": fset,
    //                 "__delete__": fdel, "__doc__": doc }
    ```
-
-2. Adding `py_property_setter(prop, fset)` and `py_property_deleter(prop, fdel)` runtime functions.
-
-3. In `pm_apply_decorators`, detecting `@prop.setter` (an attribute access, not a bare identifier):
-   ```python
-   @some_prop.setter
-   def some_prop(self, value): ...
-   ```
-   This is a method decorator where the decorator expression is `Attribute(name="setter", object=Identifier("some_prop"))`. The transpiler emits:
-   ```
-   reg_prop = CALL py_property_setter(_py_some_prop, pyf_ClassName__some_prop_setter)
-   // update the class dict entry
-   ```
-
-4. `py_setattr` on an instance: detect `__is_property__` in the class dict; if `__set__` is present, call it instead of setting the instance field directly.
-
-5. `py_getattr` on an instance: already detects `__is_property__` in v3. Ensure deletion path calls `__delete__`.
-
-**Files:** `py_class.cpp` additions (~150 LOC), `transpile_py_mir.cpp` additions (~80 LOC) for `@prop.setter`/`@prop.deleter` decorator detection.
 
 ### F2. Full Descriptor Protocol
 
@@ -1158,22 +1240,23 @@ print(PluginBase._registry)  # ['PluginA', 'PluginB']
 
 ---
 
-## 8. Implementation Order and Dependencies
+## 9. Implementation Order and Dependencies
 
 ```
-Phase A: Generators/yield     — independent of B–F; prerequisite for D and C(itertools)
+Phase A: Generators/yield  ✅  — independent of B–F; prerequisite for D and C(itertools)
     │
-    ├── Phase B: match/case   — independent of all others
+    ├── Phase B: match/case  ✅  — independent of all others
     │
     ├── Phase C: stdlib       — independent; itertools needs A
     │       │
     │       └── Phase E: Packages  — extends C's module registry; needs v3 Phase E base
     │
-    └── Phase D: async/await  — depends on A (coroutines = generators)
+    └── Phase D: async/await  ✅  — depends on A (coroutines = generators)
             │
             └── Phase C: asyncio — part of C's stdlib stubs, needs D
                 
 Phase F: Advanced OOP         — independent; extends v3 class system
+    └── F1: @property setter/deleter  ✅
 ```
 
 Recommended implementation sequence:
@@ -1188,7 +1271,7 @@ Recommended implementation sequence:
 
 ---
 
-## 9. LOC Estimate Summary
+## 10. LOC Estimate Summary
 
 | Phase | File(s) | Estimated LOC | Status | Notes |
 |-------|---------|--------------|--------|-------|
@@ -1232,7 +1315,7 @@ Recommended implementation sequence:
 
 ---
 
-## 10. Testing Strategy
+## 11. Testing Strategy
 
 ### Regression
 
@@ -1246,7 +1329,8 @@ All existing tests in `test/py/` must continue to pass after each phase. Run `ma
 | `test_py_generators_advanced.py` | A | `throw()`, `close()`, nested generators, infinite sequences |
 | `test_py_match.py` | B | All 7 pattern kinds, guard, OR pattern |
 | `test_py_match_class.py` | B | Class patterns, `__match_args__` |
-| `test_py_stdlib_math.py` | C | All math module functions |
+| `test_py_bigint.py` | C (bigint) | Large literals, pow, add, mul, factorial, shift, floordiv, mod, cmp, str, abs, hex |
+| `test_py_stdlib_math.py` | C (stdlib) | All math module functions |
 | `test_py_stdlib_os.py` | C | os, os.path functions |
 | `test_py_stdlib_re.py` | C | re.match, re.search, re.findall, re.sub, re.split |
 | `test_py_stdlib_json.py` | C | json.loads, json.dumps, nested structures |
