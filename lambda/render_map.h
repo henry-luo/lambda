@@ -60,6 +60,25 @@ struct hashmap* render_map_get_map(void);
 // Inject an external hashmap (e.g., from RadiantState). Caller owns the map.
 void render_map_set_map(struct hashmap* map);
 
+// ============================================================================
+// Reverse lookup: result_node → (source_item, template_ref)
+// Used by event dispatch to find which template produced a clicked element.
+// ============================================================================
+
+// Result of a reverse lookup
+typedef struct RenderMapLookup {
+    Item source_item;              // the model item that was matched
+    const char* template_ref;      // template reference (interned pointer)
+} RenderMapLookup;
+
+// Reverse lookup: given a result_node Item, find the source_item and template_ref.
+// Returns true if found, false otherwise. Writes to *out on success.
+bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out);
+
+// Set the document root element so retransform can fix parent references.
+// Call this after producing the top-level element tree in load_lambda_script_doc.
+void render_map_set_doc_root(Item root);
+
 #ifdef __cplusplus
 }
 #endif

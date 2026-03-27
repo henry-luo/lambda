@@ -53,6 +53,7 @@ extern "C" {
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
 #include "../radiant/script_runner.h"
+#include "../lambda/render_map.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -81,6 +82,7 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -3899,6 +3901,10 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
 
+    // Register doc root for render map parent fixup during retransform
+    Item html_item_root = {.element = html_elem};
+    render_map_set_doc_root(html_item_root);
+
     // Note: Don't cleanup runtime yet - the script_output and its pool are still in use
     // The pool will be cleaned up when dom_doc is freed
 
@@ -3908,6 +3914,76 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     log_notice("[Lambda Script] Script document loaded and styled");
     return dom_doc;
+}
+
+// ============================================================================
+// Reactive UI: rebuild DOM after template handler modifies state
+// ============================================================================
+
+/**
+ * Rebuild the DOM tree from the Lambda html_root element after a template
+ * handler has modified state and render_map_retransform() has updated the
+ * Lambda element tree. Rebuilds DOM, re-applies CSS, and triggers relayout.
+ */
+void rebuild_lambda_doc(UiContext* uicon) {
+    if (!uicon || !uicon->document) {
+        log_error("rebuild_lambda_doc: no document");
+        return;
+    }
+
+    DomDocument* doc = uicon->document;
+    Element* html_elem = doc->html_root;
+    if (!html_elem) {
+        log_error("rebuild_lambda_doc: no html_root in document");
+        return;
+    }
+
+    log_info("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
+
+    // ensure CSS property system is initialized
+    css_property_system_init(doc->pool);
+
+    // rebuild DOM tree from Lambda elements
+    DomElement* new_root = build_dom_tree_from_element(html_elem, doc, nullptr);
+    if (!new_root) {
+        log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
+        return;
+    }
+
+    // replace old DOM root
+    doc->root = new_root;
+
+    // re-extract and apply inline <style> elements
+    CssEngine* css_engine = css_engine_create(doc->pool);
+    if (css_engine) {
+        int inline_count = 0;
+        CssStylesheet** inline_sheets = extract_and_collect_css(
+            html_elem, css_engine, nullptr, doc->pool, &inline_count);
+
+        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        if (inline_sheets && inline_count > 0) {
+            for (int i = 0; i < inline_count; i++) {
+                if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
+                    apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
+                                                      matcher, doc->pool, css_engine);
+                }
+            }
+        }
+    }
+
+    // apply inline style attributes
+    apply_inline_styles_to_tree(new_root, html_elem, doc->pool);
+
+    // mark view tree dirty for full relayout
+    doc->view_tree = nullptr;  // force full layout rebuild
+
+    // trigger relayout + repaint
+    layout_html_doc(uicon, doc, false);
+    if (doc->view_tree) {
+        render_html_doc(uicon, doc->view_tree, NULL);
+    }
+
+    log_info("rebuild_lambda_doc: DOM rebuild and relayout complete");
 }
 
 /**
