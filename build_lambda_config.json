@@ -2562,6 +2562,17 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🧪"
+                    },
+                    {
+                        "source": "test/test_py_gtest.cpp",
+                        "name": "Python Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_py_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🐍"
                     }
                 ],
                 "type": "lambda",

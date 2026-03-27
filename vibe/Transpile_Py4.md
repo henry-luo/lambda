@@ -4,7 +4,7 @@
 
 LambdaPy v3 closed the major OOP and module-system gaps (~14.4K LOC). The features explicitly deferred from v3 are: **generators/`yield`**, **`match`/`case` pattern matching**, **standard library module stubs**, **`async`/`await`**, **full package imports**, and **metaclasses/advanced OOP** (including `@prop.setter`, full descriptor protocol, `__init_subclass__`, `__class_getitem__`). This proposal targets those in priority order.
 
-> **Implementation Status:** Phase F1 (@property setter/deleter), Phase B (match/case), Phase A (generators/yield), Phase C (arbitrary-precision integers), and Phase D (async/await) are complete. Stdlib stubs, Phase E, and F2+ are pending.
+> **Implementation Status:** Phase F1 (@property setter/deleter), Phase B (match/case), Phase A (generators/yield), Phase C (arbitrary-precision integers), Phase D (async/await), and Phase C (standard library module stubs) are complete. Phase E (full package system) and F2+ are pending.
 
 ### Architecture Position
 
@@ -20,7 +20,8 @@ v3:  OOP and module system                                  (✅ COMPLETE, ~14.4
 v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~20K LOC)
        Phase A: Generators and yield                        ✅ COMPLETE
        Phase B: match/case pattern matching                 ✅ COMPLETE
-       Phase C: Standard library module stubs               ⏳ pending
+       Phase C: Standard library module stubs               ✅ COMPLETE
+       Phase C: Arbitrary-precision integers                ✅ COMPLETE
        Phase D: async/await and event loop                  ✅ COMPLETE
        Phase E: Full package system                         ⏳ pending
        Phase F: Advanced OOP (metaclasses, descriptors)     🔄 partial (F1 done)
@@ -34,9 +35,9 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 | `yield from`                                                  | ❌                                                       | ✅ **DONE** — self-looping state delegates to sub-iterator                    |
 | Generator expressions `(x for x in ...)`                      | Compiled as lists (eager)                               | ⏳ pending (v4 stretch goal)                                                  |
 | `match`/`case` pattern matching                               | ❌                                                       | ✅ **DONE** — literal, capture, wildcard, OR, sequence, mapping, class, guard |
-| `import math` / `import os` / `import sys`                    | No-op warning                                           | ✅ Built-in module stubs                                                      |
-| `import json`                                                 | No-op warning                                           | ✅ Delegates to Lambda's JSON parser                                          |
-| `import re`                                                   | No-op warning                                           | ✅ Thin wrapper over Lambda's re2 backend                                     |
+| `import math` / `import os` / `import sys`                    | No-op warning                                           | ✅ **DONE** — built-in module stubs via `py_stdlib.cpp`                       |
+| `import json`                                                 | No-op warning                                           | ✅ **DONE** — delegates to Lambda's JSON parser/formatter                     |
+| `import re`                                                   | No-op warning                                           | ✅ **DONE** — thin wrapper over Lambda's re2 backend                          |
 | `async def` / `await`                                         | `await` stripped to inner expression                    | ✅ **DONE** — coroutines via generator state machine, `py_async.cpp`          |
 | `async for` / `async with`                                    | ❌                                                       | ⏳ pending (v4 stretch goal)                                                  |
 | `asyncio.run()` / `asyncio.gather()`                          | ❌                                                       | ✅ **DONE** — single-threaded cooperative event loop                          |
@@ -501,11 +502,57 @@ print(http_error(502))  # server error
 
 ---
 
-## 5. Phase C: Standard Library Module Stubs
+## 5. Phase C: Standard Library Module Stubs ✅ COMPLETE
 
 **Goal:** Enable `import math`, `import os`, `import sys`, `import re`, `import json`, `import collections`, and other frequently used standard library modules via thin C-backed stubs.
 
-**Estimated effort:** ~1,300 LOC. New files: `lambda/py/py_stdlib/py_mod_math.cpp`, `py_mod_os.cpp`, `py_mod_sys.cpp`, `py_mod_re.cpp`, `py_mod_json.cpp`, `py_mod_collections.cpp`, `py_mod_itertools.cpp`, `py_mod_functools.cpp`. Additions to `py_module.cpp` (from Phase E of v3).
+**Estimated effort:** ~1,300 LOC. Implemented in single file `lambda/py/py_stdlib.cpp` + `py_stdlib.h`.
+
+### C0. Implementation Summary (completed)
+
+**Approach:** Single `py_stdlib.cpp` (~1,250 LOC) with one init function per module. Each returns a Lambda Map (`py_dict_new()`) populated with constants and callable function wrappers. Module lookup wired into `transpile_py_mir.cpp` — both `import X` and `from X import Y` syntax supported. Built-in module table checked before filesystem resolution.
+
+**Bug fixed during implementation:** `js_map_get_fast` (in `lambda/js/js_runtime.cpp`) failed to fall back to a linear scan for named fields when the TypeMap hash table (capacity=32) missed — silently dropping any named property added beyond the 32nd slot. Fixed by adding a named-field linear scan in the hash-miss path, with last-writer-wins semantics. No regressions (691/691 baseline tests pass).
+
+**What was implemented:**
+- `lambda/py/py_stdlib.h` — declares 12 module init functions, `py_stdlib_find_builtin()`, and `PyBuiltinModuleInitFn` typedef.
+- `lambda/py/py_stdlib.cpp` — all modules in one file:
+  - **math**: 24 functions directly reuse `fn_math_*` Lambda builtins; `floor/ceil/trunc/fsum/prod` reuse `fn_floor/fn_ceil/fn_trunc/fn_sum/fn_math_prod`; new: `factorial` (iterative), `gcd`/`lcm` (Euclidean), `isnan/isinf/isfinite/fabs/copysign/fmod/degrees/radians` (POSIX `<cmath>`). Constants: `pi`, `e`, `tau`, `inf`, `nan`.
+  - **os**: POSIX `getcwd/opendir/readdir/getenv`; `os.path` submodule (join, exists, isfile, isdir, basename, dirname, abspath, splitext via POSIX `stat/realpath/strrchr`). Builtins: `sep="/"`, `linesep="\n"`, `name="posix"`.
+  - **sys**: `exit` (`exit()`), `argv`, `version="3.12.0 (Lambda Python)"`, `platform="darwin"`, `maxsize=INT56_MAX`, `path`.
+  - **re**: `match` (ANCHOR_START), `search` (UNANCHORED), `findall` (3-case group handling), `sub` (StrBuf-based), `split`. Match objects as dicts with `py_bind_method`-bound `group/groups/start/end/span` methods.
+  - **json**: `loads` wraps `fn_parse2_mir(s, "json")`; `dumps` wraps `format_json(pool, obj)` — pure passthrough, no custom parsing.
+  - **time**: `time` (CLOCK_REALTIME), `monotonic` (CLOCK_MONOTONIC), `sleep` (usleep), `perf_counter` (Lambda `pn_clock`).
+  - **random**: SplitMix64 PRNG (`_py_rand_state`). `random`, `randint`, `choice`, `shuffle` (Fisher-Yates), `seed`.
+  - **functools**: `reduce` wraps `fn_reduce` (arg reorder); `partial` stored as tagged dict with `__is_partial__`.
+  - **collections**: `OrderedDict` (`py_dict_new`), `defaultdict` (dict + `__default_factory__`), `Counter` (list/string counting), `deque` (list-backed).
+  - **io**: Minimal `StringIO()` returning dict with `__buffer__`/`__pos__`.
+  - **copy**: `py_copy_copy` (shallow: iterates list/dict fields); `py_copy_deepcopy` (recursive).
+  - **asyncio**: already handled separately in `py_async.cpp`.
+- `transpile_py_mir.cpp` — `import X` handler calls `py_stdlib_find_builtin()`; `from X import Y` handler also calls it, then uses `js_property_get(ns, key)` for each imported name.
+- `sys_func_registry.c` — `#include "py/py_stdlib.h"` added.
+- Tests: 11 test files, all PASS:
+  - `test/py/test_py_stdlib_math.py` ✅
+  - `test/py/test_py_stdlib_os.py` ✅
+  - `test/py/test_py_stdlib_json.py` ✅
+  - `test/py/test_py_stdlib_sys.py` ✅
+  - `test/py/test_py_stdlib_time.py` ✅
+  - `test/py/test_py_stdlib_random.py` ✅
+  - `test/py/test_py_stdlib_re.py` ✅
+  - `test/py/test_py_stdlib_functools.py` ✅
+  - `test/py/test_py_stdlib_collections.py` ✅
+  - `test/py/test_py_stdlib_copy.py` ✅ (use `from copy import copy` — `copy.copy()` intercepted as dict method)
+  - `test/py/test_py_stdlib_from_import.py` ✅ (`from math import factorial, sqrt, gcd`, `from os.path import join`, `from functools import reduce`, `from json import loads`)
+
+**Known limitations:**
+- `copy.copy(obj)` via attribute access (`copy` module as dict) is intercepted by `py_dict_method` as `dict.copy()`. Workaround: `from copy import copy`.
+- `defaultdict` auto-default on missing key requires runtime `py_subscript_get` support (not yet added).
+- `itertools` module not yet implemented (deferred; requires generator protocol).
+- `functools.lru_cache` / `functools.wraps` not yet implemented.
+
+---
+
+**Original design notes (retained for reference):**
 
 ### C1. Module Registry Extension
 
