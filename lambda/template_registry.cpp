@@ -1,6 +1,7 @@
 // template_registry.cpp — Implementation of view/edit template registry and apply() dispatch
 #include "lambda-data.hpp"
 #include "template_registry.h"
+#include "render_map.h"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include <stdlib.h>
@@ -56,6 +57,21 @@ void template_registry_add(TemplateRegistry* registry,
     log_debug("template_registry_add: name=%s is_edit=%d spec=%d type=%d tag=%.*s order=%d",
               name ? name : "(anon)", is_edit, specificity, match_type_id,
               match_tag_len, match_tag ? match_tag : "", entry->definition_order);
+}
+
+void template_entry_add_handler(TemplateEntry* entry,
+                                const char* event_name,
+                                fn_ptr handler_func) {
+    if (!entry || !event_name || !handler_func) return;
+
+    TemplateHandlerEntry* h = (TemplateHandlerEntry*)calloc(1, sizeof(TemplateHandlerEntry));
+    h->event_name = event_name;
+    h->handler_func = handler_func;
+    h->next = entry->handlers;
+    entry->handlers = h;  // prepend
+
+    log_debug("template_entry_add_handler: tmpl=%s event=%s",
+              entry->name ? entry->name : "(anon)", event_name);
 }
 
 // ============================================================================
@@ -187,7 +203,14 @@ Item fn_apply1(Item target) {
         return target;  // pass through if no template matches
     }
 
-    return invoke_template(tmpl, target);
+    Item result = invoke_template(tmpl, target);
+
+    // record source→result mapping in the render map for observer-based reconciliation
+    if (tmpl->template_ref) {
+        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+    }
+
+    return result;
 }
 
 Item fn_apply2(Item target, Item options) {
@@ -233,5 +256,12 @@ Item fn_apply2(Item target, Item options) {
         return target;  // pass through
     }
 
-    return invoke_template(tmpl, target);
+    Item result = invoke_template(tmpl, target);
+
+    // record source→result mapping in the render map for observer-based reconciliation
+    if (tmpl->template_ref) {
+        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+    }
+
+    return result;
 }

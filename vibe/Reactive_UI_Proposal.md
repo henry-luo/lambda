@@ -456,33 +456,83 @@ User Event ──→ Radiant Event ──→ Hit Test ──→ Find Target Elem
 5. Any state or model mutations are recorded.
 6. A re-transform is scheduled (batched — multiple events in the same frame produce a single re-transform).
 
-### 5.3 Re-transformation and Patch
+### 5.3 Observer-Based Re-transformation
+
+Instead of React-style virtual DOM diffing, Lambda uses an **observer-based** reconciliation model. The key insight is that we already know *which* source items changed (via the DAG document model), so we can skip the expensive tree diff entirely.
+
+#### Source-to-Result Mapping
+
+The framework maintains a **render map** — a bidirectional mapping from source items to the result nodes they produced:
 
 ```
-                              ┌─────────────┐
-Mutated State/Model ──→ Re-apply template ──→ New View Tree
-                                                     │
-                                                     ▼
-                                              Diff(old, new)
-                                                     │
-                                                     ▼
-                                              Patch operations
-                                                     │
-                                                     ▼
-                                              Incremental Radiant reflow
-                                                     │
-                                                     ▼
-                                              Repaint dirty regions
+RenderMap = HashMap<(source_item, template_ref) → ResultEntry>
+
+ResultEntry {
+    result_nodes: Item[]       // the result node(s) produced by this template invocation
+    parent_result: Item        // the parent node in the result tree that contains these nodes
+    child_index: int           // insertion position within the parent's children
+    dirty: bool                // whether this entry needs re-transformation
+}
 ```
 
-1. The template body is re-executed with updated state and/or model.
-2. The new output is diffed against the previous output (element tree comparison).
-3. A minimal set of patch operations is generated (insert, remove, update attributes, reorder children).
-4. Patches are applied to the live Radiant DOM/view tree.
-5. Radiant's existing `ReflowScheduler` queues layout recalculations at appropriate scope (`REFLOW_SELF_ONLY`, `REFLOW_SUBTREE`, etc.).
-6. `DirtyTracker` marks affected screen regions for repaint.
+During the initial `apply()` call, as each template produces output, the framework records:
+- Which `(source_item, template_ref)` pair produced which result node(s)
+- Where those result nodes sit in the result tree (parent + position)
 
-**Diff strategy:** Keyed reconciliation (like React's `key` prop). Elements with a `key` attribute are matched by key; unkeyed elements are matched by position and tag name.
+#### Two-Phase Update
+
+When a handler mutates state or model, the update proceeds in two phases:
+
+```
+Phase 1: Mark Dirty                    Phase 2: Re-transform
+┌─────────────────────┐                ┌─────────────────────────────────┐
+│ State changed for   │                │ Walk result tree from root      │
+│ (item, tmpl, state) │                │                                 │
+│         │           │                │ For each dirty node:            │
+│         ▼           │                │   1. Re-execute template body   │
+│ Look up RenderMap   │                │   2. Replace old result nodes   │
+│ for (item, tmpl)    │                │      with new result nodes      │
+│         │           │                │   3. Update RenderMap entry     │
+│         ▼           │                │   4. Schedule Radiant reflow    │
+│ Mark entry dirty    │                │      for affected subtree       │
+└─────────────────────┘                └─────────────────────────────────┘
+```
+
+**Phase 1 — Mark Dirty:**
+
+1. After a handler executes, identify which `(source_item, template_ref)` pairs are affected:
+   - **State mutation:** The handler's own `(model_item, template_ref)` is affected.
+   - **Model mutation (edit):** The modified source node *and* any source nodes whose subtree contains the modified node may be affected. The DAG version change identifies exactly which nodes have new versions.
+2. Look up each affected pair in the `RenderMap` and set `dirty = true`.
+
+**Phase 2 — Re-transform:**
+
+1. Walk the result tree top-down starting from the root.
+2. For each node that corresponds to a dirty `RenderMap` entry:
+   a. Re-execute the template body with the current state and model.
+   b. Replace the old result node(s) at `(parent_result, child_index)` with the new result node(s).
+   c. Update the `RenderMap` entry with the new result nodes.
+   d. Feed the replacement scope to Radiant's `DirtyTracker` and `ReflowScheduler`.
+3. Non-dirty subtrees are skipped entirely — no traversal, no comparison, no re-execution.
+
+#### Why Top-Down Walk?
+
+The top-down walk in Phase 2 ensures correct ordering when a parent and child are both dirty. The parent is re-transformed first, which may produce entirely new children — making the child's dirty mark irrelevant (it was replaced). This avoids wasted work and ensures consistency.
+
+#### Advantages over Tree Diff
+
+| Aspect | Tree Diff (React-style) | Observer-Based |
+|--------|------------------------|----------------|
+| Work per update | O(result tree size) | O(dirty nodes only) |
+| Unchanged subtrees | Visited and compared | Skipped entirely |
+| Knowledge of *what* changed | None — must discover via diff | Known from state/model mutation |
+| Allocation | New virtual tree every render | Only dirty subtrees re-created |
+| Complexity | Heuristic matching algorithms | Direct lookup + replace |
+
+#### State-Only vs Model Changes
+
+- **State-only change** (most common): Exactly one `RenderMap` entry is dirty — the template instance whose state was mutated. Re-transform is O(1) template executions.
+- **Model change** (edit mode): The DAG version diff identifies which source nodes changed. Each changed source node's `RenderMap` entries are marked dirty. Typically a small fraction of the full tree.
 
 ---
 
@@ -658,18 +708,18 @@ Currently Radiant dispatches events via `script_runner.h` (`execute_document_scr
 1. Radiant performs hit testing and produces an `RdtEvent`.
 2. The reactive runtime walks the view tree upward from the hit target to find the owning template instance.
 3. The `on` handler for the matching event type is invoked.
-4. After handler execution, the reconciler diffs and patches.
+4. After handler execution, the observer marks affected entries dirty and schedules re-transformation.
 
 **Event propagation:** Events bubble from target to root (like DOM event bubbling). A handler can call `stop()` on the event object to prevent further propagation.
 
 ### 7.3 Incremental Repaint
 
-The reconciler integrates with Radiant's existing `DirtyTracker` and `ReflowScheduler`:
+The observer-based reconciler integrates with Radiant's existing `DirtyTracker` and `ReflowScheduler`:
 
-- **Attribute-only changes** (e.g., text content, CSS class) → `REFLOW_SELF_ONLY`
-- **Child insertions/removals** → `REFLOW_CHILDREN` or `REFLOW_SUBTREE`
-- **Structural changes** (tag change, deep restructure) → `REFLOW_SUBTREE`
-- Each patch operation adds appropriate `DirtyRect` entries.
+- **State-only re-transform** (same structure, updated content) → `REFLOW_SELF_ONLY` or `REFLOW_CHILDREN`
+- **Child count changed** (template produces more/fewer result nodes) → `REFLOW_CHILDREN` or `REFLOW_SUBTREE`
+- **Structural changes** (template now matches a different pattern, or model node type changed) → `REFLOW_SUBTREE`
+- Each result node replacement adds appropriate `DirtyRect` entries for the affected region.
 
 ---
 
@@ -1049,15 +1099,18 @@ on mouseout() {
 | Re-transform trigger | After handler completes, schedule re-execution of template body |
 | MIR codegen (handlers) | Transpile `on` handler bodies to MIR |
 
-### Phase 3: Reconciliation & Patching
+### Phase 3: Observer-Based Reconciliation
 
 | Task | Description |
 |------|-------------|
-| Tree differ | Element tree diff algorithm (keyed, positional) |
-| Patch generator | Produce minimal insert/remove/update/reorder operations |
-| Radiant integration | Apply patches to live DOM/view tree |
-| Dirty tracking | Feed patch scope to `DirtyTracker` and `ReflowScheduler` |
-| Batching | Coalesce multiple state changes within a single frame |
+| Render map | Implement `RenderMap` — `HashMap<(source_item, template_ref) → ResultEntry>` tracking result nodes, parent, and child index |
+| Map population | During `apply()`, record source→result mappings as templates produce output |
+| Dirty marking | After handler execution, look up affected `(source_item, template_ref)` entries and mark dirty |
+| Top-down re-transform | Walk result tree from root; for each dirty entry, re-execute template body and replace result nodes in-place |
+| Radiant integration | Feed replacement scope to `DirtyTracker` and `ReflowScheduler` for incremental reflow |
+| Batching | Coalesce multiple state/model changes within a single frame into one dirty-mark + re-transform pass |
+| State-triggered dirty | State mutation marks the single affected `RenderMap` entry dirty |
+| Model-triggered dirty | DAG version diff identifies changed source nodes; mark all their `RenderMap` entries dirty |
 
 ### Phase 4: MarkEditor Integration for DAG Document Model
 
@@ -1144,11 +1197,12 @@ on mouseout() {
 
 8. **Server-side rendering (SSR)** — The functional body produces a pure element tree with no dependency on the event system. This means `apply()` can run without Radiant for static rendering (HTML, SVG, PDF output), and the same templates can be used for both interactive and static output.
 
-9. **Keyed diffing hint** — Provide a `key` attribute convention for efficient list reconciliation:
+9. **Keyed list reconciliation** — For list re-ordering, the observer model can use a `key` attribute to match old and new children by identity rather than position, minimizing DOM moves:
    ```lambda
    for item in ~.items do
        <li key: item.id; apply(item)>
    ```
+   With the observer model, each `<li>` has its own `RenderMap` entry keyed by the source `item`. When the list order changes, the framework can reorder existing result nodes rather than re-transforming them.
 
 10. **Model change notifications** — For `edit` templates, consider providing an `on_model_change` callback or event so that the application can persist changes, sync with a server, or update other dependent views:
     ```lambda
