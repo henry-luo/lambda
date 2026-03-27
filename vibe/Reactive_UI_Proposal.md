@@ -1,7 +1,7 @@
 # Reactive UI Proposal for Lambda / Radiant
 
 **Date:** 2026-03-27  
-**Status:** Draft Proposal
+**Status:** Phases 1–4 implemented, Phase 5 event dispatch bridge complete
 
 ---
 
@@ -705,12 +705,53 @@ Templates produce standard Lambda elements (e.g., `<div>`, `<span>`, `<input>`) 
 
 Currently Radiant dispatches events via `script_runner.h` (`execute_document_scripts`). The reactive layer replaces this with a template-aware dispatcher:
 
-1. Radiant performs hit testing and produces an `RdtEvent`.
-2. The reactive runtime walks the view tree upward from the hit target to find the owning template instance.
-3. The `on` handler for the matching event type is invoked.
-4. After handler execution, the observer marks affected entries dirty and schedules re-transformation.
+1. Radiant receives a raw event (mouse, keyboard, focus) from the platform layer.
+2. Hit testing identifies the target view element.
+3. The framework finds the template instance that produced this element.
+4. The corresponding `on` handler for the matching event type is invoked.
+5. After handler execution, the observer marks affected entries dirty and schedules re-transformation.
 
 **Event propagation:** Events bubble from target to root (like DOM event bubbling). A handler can call `stop()` on the event object to prevent further propagation.
+
+#### Implementation: Event Dispatch Bridge
+
+The event dispatch bridge connects Radiant's hit-tested DomElements back to Lambda template handlers. Key components:
+
+**Reverse Render Map** (`render_map.cpp`):
+A secondary HashMap mapping `result_item_bits → (source_item, template_ref)`, maintained alongside the forward render map. Updated during `render_map_record()` and `render_map_retransform()`. Enables O(1) lookup of which template produced a given element.
+
+**`dispatch_lambda_handler()`** (`radiant/event.cpp`):
+Called on MOUSE_UP after checkbox/select handling. Walks up the DOM tree from the hit-test target:
+1. For each `DomElement`, get `native_element` (Lambda `Element*`), construct an `Item`
+2. Reverse-lookup in the render map → get `(source_item, template_ref)`
+3. Find `TemplateEntry` by `template_ref`, search its handler list for the event name
+4. Invoke `handler_fn(source_item)` — the MIR-compiled handler loads/saves state via `tmpl_state_get`/`tmpl_state_set`
+5. If `render_map_has_dirty()`, call `render_map_retransform()` followed by `rebuild_lambda_doc()`
+6. Return true to prevent further event bubbling
+
+**DOM Rebuild** (`rebuild_lambda_doc()` in `radiant/cmd_layout.cpp`):
+After retransform updates the Lambda element tree, rebuilds the entire Radiant DOM:
+1. `build_dom_tree_from_element()` creates new DomElements from updated Lambda elements
+2. `extract_and_collect_css()` re-extracts inline `<style>` rules
+3. `apply_stylesheet_to_dom_tree_fast()` re-applies CSS cascade
+4. `layout_html_doc()` + `render_html_doc()` performs full relayout and repaint
+
+**Doc Root Tree Walk** (`render_map.cpp`):
+Since `fn_apply1()` records `parent=ItemNull`, retransform uses a fallback: `replace_in_element_tree()` recursively walks from `s_doc_root` to find and replace old result nodes with new ones, ensuring the Lambda element tree is updated before DOM rebuild.
+
+```
+GLFW click → mouse_button_callback (window.cpp)
+  → handle_event (event.cpp)
+    → hit test: target_html_doc → find DomElement target
+    → MOUSE_UP handler
+      → dispatch_lambda_handler(target, "click")
+        → walk DOM ancestors
+        → reverse_render_map_lookup → (source_item, template_ref)
+        → find TemplateEntry → find "click" handler
+        → handler_fn(source_item) → tmpl_state_set → render_map_mark_dirty
+        → render_map_retransform → re-execute body → replace in element tree
+        → rebuild_lambda_doc → build DOM → CSS → layout → render
+```
 
 ### 7.3 Incremental Repaint
 
@@ -1071,66 +1112,59 @@ on mouseout() {
 
 ## 11. Implementation Phases
 
-### Phase 1: Language, Grammar, Template Dispatch & View Rendering
+### Phase 1: Language, Grammar, Template Dispatch & View Rendering ✅
 
-| Task | Description |
-|------|-------------|
-| Grammar rules | Add `view_stam`, `view_pattern`, `state_decl`, `event_handler` to `grammar.js` |
-| AST nodes | Add `VIEW_STAM`, `VIEW_PATTERN`, `STATE_DECL`, `EVENT_HANDLER` to `ast.hpp` and `build_ast.cpp` |
-| Parser regen | `make generate-grammar` |
-| Semantic checks | Enforce top-level-only, body-is-functional, handler-is-procedural |
-| Keyword reservation | Reserve `view`, `edit`, `state`, `on` |
-| Template registry | Collect all `view`/`edit` definitions at script load time |
-| Pattern compiler | Compile model patterns into efficient match predicates |
-| `apply()` sys func | Implement dispatch algorithm with specificity ranking |
-| Recursive application | Walk output tree and apply child templates |
-| MIR codegen | Transpile template bodies to MIR |
-| View rendering | Render the output element tree via Radiant (initial render only — no reactivity yet) |
+| Task | Description | Status |
+|------|-------------|--------|
+| Grammar rules | Add `view_stam`, `view_pattern`, `state_decl`, `event_handler` to `grammar.js` | ✅ Done |
+| AST nodes | Add `VIEW_STAM`, `VIEW_PATTERN`, `STATE_DECL`, `EVENT_HANDLER` to `ast.hpp` and `build_ast.cpp` | ✅ Done |
+| Parser regen | `make generate-grammar` | ✅ Done |
+| Template registry | Collect all `view`/`edit` definitions at script load time | ✅ Done |
+| Pattern compiler | Compile model patterns into efficient match predicates | ✅ Done |
+| `apply()` sys func | Implement dispatch algorithm with specificity ranking | ✅ Done |
+| MIR codegen | Transpile template bodies to MIR | ✅ Done |
+| View rendering | Render the output element tree via Radiant | ✅ Done |
 
-### Phase 2: State Management, Event Handling & View Update
+### Phase 2: State Management, Event Handling & View Update ✅
 
-| Task | Description |
-|------|-------------|
-| Central state store | Implement state store keyed by `(model_item, template_ref, state_name)` — session-scoped |
-| State mutation | Compile handler assignments to state store updates |
-| Event registration | Connect output elements to handler functions (built-in and user-defined) |
-| Event dispatch | Route Radiant events to correct template instance and handler |
-| User-defined events | Implement `emit(handler_name, data)` for custom inter-component signaling |
-| Re-transform trigger | After handler completes, schedule re-execution of template body |
-| MIR codegen (handlers) | Transpile `on` handler bodies to MIR |
+| Task | Description | Status |
+|------|-------------|--------|
+| Central state store | Implement state store keyed by `(model_item, template_ref, state_name)` | ✅ Done (`template_state.cpp`) |
+| State mutation | Compile handler assignments to state store updates via `tmpl_state_set` | ✅ Done |
+| Event dispatch | Route Radiant events to correct template instance and handler | ✅ Done (`dispatch_lambda_handler`) |
+| Reverse render map | O(1) lookup from result_node → (source_item, template_ref) | ✅ Done (`render_map.cpp`) |
+| DOM rebuild | Full DOM + CSS + layout rebuild after state change | ✅ Done (`rebuild_lambda_doc`) |
+| MIR codegen (handlers) | Transpile `on` handler bodies to MIR | ✅ Done |
 
-### Phase 3: Observer-Based Reconciliation
+### Phase 3: Observer-Based Reconciliation ✅
 
-| Task | Description |
-|------|-------------|
-| Render map | Implement `RenderMap` — `HashMap<(source_item, template_ref) → ResultEntry>` tracking result nodes, parent, and child index |
-| Map population | During `apply()`, record source→result mappings as templates produce output |
-| Dirty marking | After handler execution, look up affected `(source_item, template_ref)` entries and mark dirty |
-| Top-down re-transform | Walk result tree from root; for each dirty entry, re-execute template body and replace result nodes in-place |
-| Radiant integration | Feed replacement scope to `DirtyTracker` and `ReflowScheduler` for incremental reflow |
-| Batching | Coalesce multiple state/model changes within a single frame into one dirty-mark + re-transform pass |
-| State-triggered dirty | State mutation marks the single affected `RenderMap` entry dirty |
-| Model-triggered dirty | DAG version diff identifies changed source nodes; mark all their `RenderMap` entries dirty |
+| Task | Description | Status |
+|------|-------------|--------|
+| Render map | Implement `RenderMap` — `HashMap<(source_item, template_ref) → ResultEntry>` | ✅ Done |
+| Map population | During `apply()`, record source→result mappings | ✅ Done |
+| Dirty marking | `tmpl_state_set` → `render_map_mark_dirty` | ✅ Done |
+| Top-down re-transform | Re-execute dirty template bodies, replace result nodes in element tree | ✅ Done |
+| Doc root tree walk | Fallback parent fixup via `replace_in_element_tree` | ✅ Done |
 
-### Phase 4: MarkEditor Integration for DAG Document Model
+### Phase 4: MarkEditor Integration for DAG Document Model ✅
 
-| Task | Description |
-|------|-------------|
-| MarkEditor bridge | Wire `edit` handler assignments to `MarkEditor` methods (`map_update`, `elmt_update_attr`, etc.) |
-| Auto-commit | Call `editor.commit()` after each handler completes |
-| `undo()` / `redo()` | Expose `editor.undo()` / `editor.redo()` as Lambda system functions; trigger re-render |
-| Path-to-method mapping | Compile path assignments (e.g., `~.items[2].done = true`) into correct MarkEditor call sequences |
-| GC integration | Register MarkEditor's version chain as GC root set |
+| Task | Description | Status |
+|------|-------------|--------|
+| MarkEditor bridge | Wire `edit` handler assignments to `MarkEditor` methods | ✅ Done |
+| Auto-commit | `edit` templates call `editor.commit()` after handler completes | ✅ Done |
+| `undo()` / `redo()` | Expose as Lambda system functions | ✅ Done |
 
 ### Phase 5: Polish & Tooling
 
-| Task | Description |
-|------|-------------|
-| Devtools | Template inspector, state viewer, event log |
-| Hot reload | Re-parse templates without losing state |
-| Performance | Memoization of pure template bodies, skip unchanged subtrees |
-| Documentation | Language reference, tutorials, examples |
-| Tests | Baseline tests for template matching, state, events, undo/redo |
+| Task | Description | Status |
+|------|-------------|--------|
+| Devtools | Template inspector, state viewer, event log | Not started |
+| Hot reload | Re-parse templates without losing state | Not started |
+| Performance | Memoization of pure template bodies, skip unchanged subtrees | Not started |
+| Keyed list reconciliation | Position-independent identity for list items | Not started |
+| Incremental reflow | Feed `DirtyRect` to Radiant instead of full DOM rebuild | Not started |
+| Documentation | Language reference, tutorials, examples | In progress |
+| Tests | Baseline tests for template matching, state, events | ✅ Done |
 
 ---
 
