@@ -35,6 +35,10 @@ extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
 extern Item fn_split(Item str, Item sep); // JIT name: fn_split2
 extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_replace3
 
+// view/edit template apply
+extern Item fn_apply1(Item target);
+extern Item fn_apply2(Item target, Item options);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -587,6 +591,15 @@ SysFuncInfo sys_func_defs[] = {
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
     // {SYSPROC_REPLACE_FILE4, "replace", 4, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
+
+    // ========================================================================
+    // View/edit template apply
+    // ========================================================================
+    {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply1", FPTR(fn_apply1), NULL, NULL, false, 0},
+
+    {SYSFUNC_APPLY2, "apply", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header

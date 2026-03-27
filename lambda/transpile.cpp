@@ -709,6 +709,17 @@ void pre_define_closure_envs(Transpiler* tp, AstNode* node) {
     case AST_NODE_PARENT_EXPR:
         pre_define_closure_envs(tp, ((AstParentNode*)node)->object);
         break;
+    case AST_NODE_VIEW: {
+        AstViewNode* view_node = (AstViewNode*)node;
+        pre_define_closure_envs(tp, view_node->body);
+        // check handlers for closures
+        AstEventHandler* handler = view_node->handler;
+        while (handler) {
+            pre_define_closure_envs(tp, handler->body);
+            handler = handler->next_handler;
+        }
+        break;
+    }
     default:
         break;
     }
@@ -1069,7 +1080,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             if (scan->node_type == AST_NODE_LET_STAM || scan->node_type == AST_NODE_PUB_STAM ||
                 scan->node_type == AST_NODE_TYPE_STAM || scan->node_type == AST_NODE_OBJECT_TYPE || scan->node_type == AST_NODE_FUNC ||
                 scan->node_type == AST_NODE_FUNC_EXPR || scan->node_type == AST_NODE_PROC ||
-                scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN) {
+                scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN ||
+                scan->node_type == AST_NODE_VIEW) {
                 decl_count++;
             } else {
                 value_count++;
@@ -1229,7 +1241,8 @@ void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
         // skip let declaration and pattern definitions
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
             item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
-            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN ||
+            item->node_type == AST_NODE_VIEW) {
             item = item->next;  continue;
         }
         // use list_push_spread to automatically spread spreadable arrays from for-expressions
@@ -4382,7 +4395,8 @@ void transpile_items(Transpiler* tp, AstNode *item) {
         // skip let declaration and pattern definitions
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
             item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
-            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN ||
+            item->node_type == AST_NODE_VIEW) {
             item = item->next;  continue;
         }
         if (is_first) { is_first = false; }
@@ -4554,7 +4568,8 @@ void transpile_proc_statements(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
                  item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
                  item->node_type == AST_NODE_PROC ||
-                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN ||
+                 item->node_type == AST_NODE_VIEW) {
             // skip - already handled globally or pattern definitions
         }
         else if (item->node_type == AST_NODE_WHILE_STAM) {
@@ -4625,7 +4640,8 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
             scan->node_type != AST_NODE_TYPE_STAM && scan->node_type != AST_NODE_OBJECT_TYPE && scan->node_type != AST_NODE_FUNC &&
             scan->node_type != AST_NODE_FUNC_EXPR && scan->node_type != AST_NODE_PROC &&
             scan->node_type != AST_NODE_VAR_STAM &&
-            scan->node_type != AST_NODE_STRING_PATTERN && scan->node_type != AST_NODE_SYMBOL_PATTERN) {
+            scan->node_type != AST_NODE_STRING_PATTERN && scan->node_type != AST_NODE_SYMBOL_PATTERN &&
+            scan->node_type != AST_NODE_VIEW) {
             last_item = scan;
         }
         scan = scan->next;
@@ -4661,7 +4677,8 @@ void transpile_proc_content(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
                  item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR ||
                  item->node_type == AST_NODE_PROC ||
-                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+                 item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN ||
+                 item->node_type == AST_NODE_VIEW) {
             // skip - already handled globally or pattern definitions
         }
         else if (item->node_type == AST_NODE_WHILE_STAM) {
@@ -4795,7 +4812,8 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_glob
     while (scan) {
         if (scan->node_type == AST_NODE_LET_STAM || scan->node_type == AST_NODE_PUB_STAM || scan->node_type == AST_NODE_TYPE_STAM || scan->node_type == AST_NODE_OBJECT_TYPE ||
             scan->node_type == AST_NODE_FUNC || scan->node_type == AST_NODE_FUNC_EXPR || scan->node_type == AST_NODE_PROC ||
-            scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN) {
+            scan->node_type == AST_NODE_STRING_PATTERN || scan->node_type == AST_NODE_SYMBOL_PATTERN ||
+            scan->node_type == AST_NODE_VIEW) {
             // declaration, not a value item
         } else {
             last_value_item = scan;
@@ -6968,6 +6986,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:  case AST_NODE_OBJECT_TYPE:
     case AST_NODE_FUNC:  case AST_NODE_PROC:
     case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
+    case AST_NODE_VIEW:  case AST_NODE_STATE_ENTRY:  case AST_NODE_EVENT_HANDLER:
         // already transpiled or pattern definitions (handled at compile time)
         break;
     case AST_NODE_FUNC_EXPR:
@@ -7791,6 +7810,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
             break;
         case AST_NODE_IMPORT:  case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
         case AST_NODE_STRING_PATTERN:  case AST_NODE_SYMBOL_PATTERN:
+        case AST_NODE_VIEW:
             break;  // skip global definition nodes
         case AST_NODE_CONTENT:
             transpile_content_expr(tp, (AstListNode*)child, true);

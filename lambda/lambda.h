@@ -304,6 +304,9 @@ typedef enum SysFunc {
     // file-based find/replace (procedural)
     SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
     SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
+    // view/edit template apply
+    SYSFUNC_APPLY1,          // apply(target) - apply view templates to target
+    SYSFUNC_APPLY2,          // apply(target, options) - apply with options map
 } SysFunc;
 
 typedef struct Type {
@@ -1183,6 +1186,10 @@ typedef struct Context {
     Item fn_error(Item message);  // raise a user-defined error
     Symbol* fn_symbol1(Item item);  // convert to symbol
     Item fn_symbol2(Item name, Item url);  // create namespaced symbol
+
+    // view/edit template apply
+    Item fn_apply1(Item target);
+    Item fn_apply2(Item target, Item options);
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 
