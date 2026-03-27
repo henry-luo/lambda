@@ -2,6 +2,7 @@
 #include "lambda-data.hpp"
 #include "template_registry.h"
 #include "render_map.h"
+#include "edit_bridge.h"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include <stdlib.h>
@@ -229,7 +230,8 @@ Item fn_apply2(Item target, Item options) {
     if (opt_type == LMD_TYPE_MAP) {
         // check for 'mode' key
         Item mode_item = item_attr(options, "mode");
-        if (get_type_id(mode_item) == LMD_TYPE_SYMBOL) {
+        TypeId mode_tid = get_type_id(mode_item);
+        if (mode_tid == LMD_TYPE_SYMBOL || mode_tid == LMD_TYPE_STRING) {
             String* mode_str = mode_item.get_string();
             if (mode_str && mode_str->chars &&
                 strncmp(mode_str->chars, "edit", 4) == 0) {
@@ -254,6 +256,12 @@ Item fn_apply2(Item target, Item options) {
                   get_type_id(target), edit_mode,
                   template_name ? template_name : "(none)");
         return target;  // pass through
+    }
+
+    // initialize edit bridge when applying in edit mode
+    if (edit_mode && !edit_bridge_active()) {
+        edit_bridge_init(NULL);  // NULL input — standalone edit mode
+        log_debug("apply: edit bridge initialized for edit-mode apply");
     }
 
     Item result = invoke_template(tmpl, target);

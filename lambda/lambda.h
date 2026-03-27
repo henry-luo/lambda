@@ -307,6 +307,11 @@ typedef enum SysFunc {
     // view/edit template apply
     SYSFUNC_APPLY1,          // apply(target) - apply view templates to target
     SYSFUNC_APPLY2,          // apply(target, options) - apply with options map
+    // edit bridge — MarkEditor operations (Phase 4)
+    SYSFUNC_EDIT_UNDO,       // undo() - undo last edit commit
+    SYSFUNC_EDIT_REDO,       // redo() - redo last undone commit
+    SYSFUNC_EDIT_COMMIT,     // commit() - commit current edits as version
+    SYSFUNC_EDIT_COMMIT1,    // commit(description) - commit with description
 } SysFunc;
 
 typedef struct Type {
