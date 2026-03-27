@@ -496,8 +496,9 @@ Item item_spread(Item item);
 typedef void* (*fn_ptr)();
 
 // Function flags (stored in Function.flags field)
-#define FN_FLAG_BOXED_RET  0x01  // bit 0: fn->ptr returns RetItem instead of Item
-#define FN_FLAG_HAS_KWARGS 0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
+#define FN_FLAG_BOXED_RET     0x01  // bit 0: fn->ptr returns RetItem instead of Item
+#define FN_FLAG_HAS_KWARGS    0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
+#define FN_FLAG_IS_GENERATOR  0x04  // bit 2: function is a Python generator (resume fn, frame in closure_env)
 
 // Function as first-class value
 // Supports both direct function references and closures

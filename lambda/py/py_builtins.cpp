@@ -777,7 +777,17 @@ extern "C" Item py_builtin_list(Item iterable) {
         }
         return (Item){.array = result};
     }
-    return py_list_new(0);
+    // general case: use iterator protocol (handles generators, ranges, maps, etc.)
+    {
+        Item iter = py_get_iterator(iterable);
+        Array* result = array();
+        for (;;) {
+            Item item = py_iterator_next(iter);
+            if (py_is_stop_iteration(item)) break;
+            array_push(result, item);
+        }
+        return (Item){.array = result};
+    }
 }
 
 extern "C" Item py_builtin_dict(Item* args, int argc) {

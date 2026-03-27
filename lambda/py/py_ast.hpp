@@ -87,6 +87,8 @@ typedef enum PyAstNodeType {
     PY_AST_NODE_CASE,                   // case pattern [if guard]: body
     PY_AST_NODE_PATTERN,                // discriminated by PyPatternKind
 
+    PY_AST_NODE_YIELD,                  // yield expr / yield from expr
+
     PY_AST_NODE_COUNT
 } PyAstNodeType;
 
@@ -465,6 +467,13 @@ typedef struct PyImportNode {
     String* alias;                  // as alias (optional)
     PyAstNode* names;               // linked list of imported names (for from...import)
 } PyImportNode;
+
+// Python yield / yield from expression node (Phase A: generators)
+typedef struct PyYieldNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_YIELD
+    PyAstNode* value;       // yielded value (NULL for bare yield)
+    bool is_from;           // true for 'yield from'
+} PyYieldNode;
 
 // ============================================================================
 // Phase B: match/case pattern matching
