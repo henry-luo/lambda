@@ -6,6 +6,7 @@
  */
 #include "py_runtime.h"
 #include "py_class.h"
+#include "py_bigint.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -77,6 +78,11 @@ extern "C" Item py_to_int(Item value) {
         if (endptr == str->chars) return (Item){.item = i2it(0)};
         return (Item){.item = i2it((int64_t)v)};
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            return py_bigint_normalize(value);
+        }
+        return (Item){.item = i2it(0)};
     default:
         return (Item){.item = i2it(0)};
     }
@@ -211,6 +217,11 @@ extern "C" Item py_to_str(Item value) {
         strbuf_free(sb);
         return map_result;
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            return py_bigint_to_str_item(value);
+        }
+        return (Item){.item = s2it(heap_create_name("<decimal>"))};
     case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("<function>"))};
     default:
@@ -244,6 +255,12 @@ extern "C" bool py_is_truthy(Item value) {
         Array* arr = it2arr(value);
         return arr && arr->length > 0;
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            // non-zero bigint is truthy: compare against zero int56
+            return py_bigint_cmp(value, (Item){.item = i2it(0)}) != 0;
+        }
+        return false;
     case LMD_TYPE_MAP: {
         Map* m = it2map(value);
         if (!m || !m->type) return false;
@@ -291,6 +308,9 @@ double py_get_number(Item value) {
     case LMD_TYPE_INT: return (double)it2i(value);
     case LMD_TYPE_FLOAT: return it2d(value);
     case LMD_TYPE_BOOL: return it2b(value) ? 1.0 : 0.0;
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) return py_bigint_to_double(value);
+        return 0.0;
     default: return 0.0;
     }
 }
@@ -308,15 +328,22 @@ extern "C" Item py_add(Item left, Item right) {
         return fn_join(left, right);
     }
 
-    // int + int → int (unless overflow)
+    // int + int → int (unless overflow → bigint)
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         int64_t r = a + b;
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        // overflow → float
-        return py_make_number((double)a + (double)b);
+        // overflow → bigint
+        return py_bigint_add(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_add(left, right);
+        }
     }
 
     // numeric addition
@@ -344,7 +371,15 @@ extern "C" Item py_subtract(Item left, Item right) {
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        return py_make_number((double)a - (double)b);
+        // overflow → bigint
+        return py_bigint_sub(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_sub(left, right);
+        }
     }
 
     return fn_sub(left, right);
@@ -399,13 +434,21 @@ extern "C" Item py_multiply(Item left, Item right) {
         int64_t a = it2i(left), b = it2i(right);
         // check overflow
         if (b != 0 && (a > INT56_MAX / (b > 0 ? b : -b) || a < INT56_MIN / (b > 0 ? b : -b))) {
-            return py_make_number((double)a * (double)b);
+            // overflow → bigint
+            return py_bigint_mul(left, right);
         }
         int64_t r = a * b;
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        return py_make_number((double)a * (double)b);
+        return py_bigint_mul(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_mul(left, right);
+        }
     }
 
     return fn_mul(left, right);
@@ -429,6 +472,13 @@ extern "C" Item py_divide(Item left, Item right) {
 extern "C" Item py_floor_divide(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
+
+    // bigint floor division
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_floordiv(left, right);
+        }
+    }
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
@@ -618,6 +668,13 @@ extern "C" Item py_modulo(Item left, Item right) {
         return py_string_format_percent(left, right);
     }
 
+    // bigint modulo
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_mod(left, right);
+        }
+    }
+
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         if (b == 0) {
@@ -655,25 +712,42 @@ extern "C" Item py_power(Item left, Item right) {
             *ptr = pow((double)base, (double)exp);
             return (Item){.item = d2it(ptr)};
         }
-        // positive integer exponent: compute by squaring
+        if (exp == 0) return (Item){.item = i2it(1)};
+        if (base == 0) return (Item){.item = i2it(0)};
+        if (base == 1) return (Item){.item = i2it(1)};
+        if (base == -1) return (Item){.item = i2it((exp & 1) ? -1 : 1)};
+        // positive integer exponent: compute by squaring with overflow detection.
+        // use __builtin_mul_overflow to catch both result*b and b*b overflow.
         int64_t result = 1;
         int64_t b = base;
         int64_t e = exp;
         while (e > 0) {
             if (e & 1) {
-                // overflow check
-                if (result > INT56_MAX / (b > 0 ? b : -b > 0 ? -b : 1)) {
-                    return py_make_number(pow((double)base, (double)exp));
+                int64_t tmp;
+                if (__builtin_mul_overflow(result, b, &tmp) ||
+                    tmp < INT56_MIN || tmp > INT56_MAX) {
+                    return py_bigint_pow(left, right);
                 }
-                result *= b;
+                result = tmp;
             }
             e >>= 1;
-            if (e > 0) b *= b;
+            if (e > 0) {
+                int64_t tmp;
+                if (__builtin_mul_overflow(b, b, &tmp)) {
+                    // b*b overflows — any further multiplication will also overflow
+                    return py_bigint_pow(left, right);
+                }
+                b = tmp;
+            }
         }
-        if (result >= INT56_MIN && result <= INT56_MAX) {
-            return (Item){.item = i2it(result)};
+        return (Item){.item = i2it(result)};
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_pow(left, right);
         }
-        return py_make_number(pow((double)base, (double)exp));
     }
 
     return fn_pow(left, right);
@@ -684,6 +758,9 @@ extern "C" Item py_negate(Item operand) {
     if (type == LMD_TYPE_INT) {
         int64_t v = -it2i(operand);
         return (Item){.item = i2it(v)};
+    }
+    if (type == LMD_TYPE_DECIMAL && py_is_bigint(operand)) {
+        return py_bigint_neg(operand);
     }
     return fn_neg(operand);
 }
@@ -721,10 +798,39 @@ extern "C" Item py_bit_xor(Item left, Item right) {
 }
 
 extern "C" Item py_lshift(Item left, Item right) {
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+    // bigint shift OR shift >= 62 bits (to avoid UB and produce correct bigint result)
+    if (lt == LMD_TYPE_DECIMAL || py_is_bigint(left)) {
+        return py_bigint_lshift(left, right);
+    }
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        int64_t shift = it2i(right);
+        if (shift < 0) { log_error("py: ValueError: negative shift count"); return ItemNull; }
+        if (shift >= 56) {
+            // result won't fit in int56 — promote to bigint
+            return py_bigint_lshift(left, right);
+        }
+        int64_t a = it2i(left);
+        int64_t r = a << shift;
+        if (r >= INT56_MIN && r <= INT56_MAX) return (Item){.item = i2it(r)};
+        return py_bigint_lshift(left, right);
+    }
     return (Item){.item = i2it((int64_t)py_get_number(left) << (int64_t)py_get_number(right))};
 }
 
 extern "C" Item py_rshift(Item left, Item right) {
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+    if (lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) {
+        return py_bigint_rshift(left, right);
+    }
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        int64_t shift = it2i(right);
+        if (shift < 0) { log_error("py: ValueError: negative shift count"); return ItemNull; }
+        if (shift >= 56) return (Item){.item = i2it(it2i(left) >= 0 ? 0 : -1)};
+        return (Item){.item = i2it(it2i(left) >> shift)};
+    }
     return (Item){.item = i2it((int64_t)py_get_number(left) >> (int64_t)py_get_number(right))};
 }
 
@@ -741,6 +847,10 @@ extern "C" Item py_eq(Item left, Item right) {
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         return (Item){.item = b2it(it2i(left) == it2i(right))};
+    }
+    // bigint comparison
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) == 0)};
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
         return (Item){.item = b2it(py_get_number(left) == py_get_number(right))};
@@ -784,6 +894,10 @@ extern "C" Item py_lt(Item left, Item right) {
 
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
         return (Item){.item = b2it(py_get_number(left) < py_get_number(right))};
+    }
+    // bigint comparison
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) < 0)};
     }
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
         String* a = it2s(left);

@@ -6,6 +6,7 @@
 
 #include "py_transpiler.hpp"
 #include "py_runtime.h"
+#include "py_bigint.h"
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
@@ -572,6 +573,16 @@ static int pm_get_global_var_index(PyMirTranspiler* mt, const char* vname);
 static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     switch (lit->literal_type) {
     case PY_LITERAL_INT:
+        if (lit->is_bigint_literal && lit->bigint_literal_str) {
+            // large integer literal: call py_bigint_from_cstr at runtime
+            String* interned = name_pool_create_len(mt->tp->name_pool,
+                lit->bigint_literal_str, (int)strlen(lit->bigint_literal_str));
+            MIR_reg_t ptr = pm_new_reg(mt, "biglit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ptr),
+                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)interned->chars)));
+            return pm_call_1(mt, "py_bigint_from_cstr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ptr));
+        }
         return pm_box_int_const(mt, lit->value.int_value);
     case PY_LITERAL_FLOAT: {
         MIR_reg_t d = pm_new_reg(mt, "dbl", MIR_T_D);

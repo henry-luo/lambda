@@ -177,6 +177,8 @@ typedef struct PyLiteralNode {
         String* string_value;
         bool boolean_value;
     } value;
+    bool is_bigint_literal;         // true when the literal exceeds int64 range
+    const char* bigint_literal_str; // heap-allocated decimal string for large literals
 } PyLiteralNode;
 
 // Python binary operation node

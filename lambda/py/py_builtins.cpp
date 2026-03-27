@@ -6,6 +6,7 @@
  */
 #include "py_runtime.h"
 #include "py_class.h"
+#include "py_bigint.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -217,6 +218,9 @@ extern "C" Item py_builtin_abs(Item value) {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = fabs(d);
         return (Item){.item = d2it(ptr)};
+    }
+    if (type == LMD_TYPE_DECIMAL && py_is_bigint(value)) {
+        return py_bigint_abs(value);
     }
     return value;
 }
@@ -512,6 +516,7 @@ extern "C" Item py_builtin_any(Item iterable) {
 // ============================================================================
 
 extern "C" Item py_builtin_bin(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_bin_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[68];
     int pos = 0;
@@ -531,6 +536,7 @@ extern "C" Item py_builtin_bin(Item n) {
 }
 
 extern "C" Item py_builtin_oct(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_oct_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[32];
     int len;
@@ -543,6 +549,7 @@ extern "C" Item py_builtin_oct(Item n) {
 }
 
 extern "C" Item py_builtin_hex(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_hex_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[32];
     int len;

@@ -42,6 +42,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
 #include "py/py_class.h"
+#include "py/py_bigint.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -1227,6 +1228,8 @@ JitImport jit_runtime_imports[] = {
     {"py_bit_xor", FPTR(py_bit_xor)},
     {"py_lshift", FPTR(py_lshift)},
     {"py_rshift", FPTR(py_rshift)},
+    // bigint
+    {"py_bigint_from_cstr", FPTR(py_bigint_from_cstr)},
     // comparison
     {"py_eq", FPTR(py_eq)},
     {"py_ne", FPTR(py_ne)},

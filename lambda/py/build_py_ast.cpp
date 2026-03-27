@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
+#include <cerrno>
 
 // External Tree-sitter Python parser
 extern "C" {
@@ -113,6 +114,8 @@ PyOperator py_augmented_operator_from_string(const char* op_str, size_t len) {
 static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
     PyLiteralNode* literal = (PyLiteralNode*)alloc_py_ast_node(tp, PY_AST_NODE_LITERAL, int_node, sizeof(PyLiteralNode));
     literal->literal_type = PY_LITERAL_INT;
+    literal->is_bigint_literal = false;
+    literal->bigint_literal_str = NULL;
 
     StrView source = py_node_source(tp, int_node);
     char* temp_str = (char*)malloc(source.length + 1);
@@ -120,7 +123,10 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
         memcpy(temp_str, source.str, source.length);
         temp_str[source.length] = '\0';
 
-        // handle hex, octal, binary prefixes
+        // handle hex, octal, binary prefixes — strtoll handles these correctly but
+        // does not detect overflow for non-decimal bases; for bigint literals those
+        // prefixes are unusual, so we only guard the base-10 path via errno.
+        errno = 0;
         if (source.length > 2 && temp_str[0] == '0') {
             char prefix = temp_str[1];
             if (prefix == 'x' || prefix == 'X') {
@@ -133,7 +139,15 @@ static PyAstNode* build_py_integer(PyTranspiler* tp, TSNode int_node) {
                 literal->value.int_value = strtoll(temp_str, NULL, 10);
             }
         } else {
+            errno = 0;
             literal->value.int_value = strtoll(temp_str, NULL, 10);
+            if (errno == ERANGE) {
+                // literal exceeds int64 range — record as bigint
+                literal->is_bigint_literal = true;
+                literal->bigint_literal_str = strdup(temp_str);
+                literal->value.int_value = 0;
+                log_debug("py-ast: bigint literal '%s'", temp_str);
+            }
         }
         free(temp_str);
     }
