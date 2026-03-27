@@ -2189,21 +2189,58 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
         if (any_height_changed) {
             // For auto-height containers, update cross_axis_size to reflect
-            // the new max line cross size. align_items_cross_axis uses
-            // cross_axis_size (not line cross_size) for nowrap containers.
+            // the new line cross sizes after content layout.
             bool has_explicit_cross = (flex_container->blk && flex_container->blk->given_height >= 0);
             if (!has_explicit_cross) {
-                float max_line_cross = 0;
-                for (int i = 0; i < flex->line_count; i++) {
-                    if (flex->lines[i].cross_size > max_line_cross)
-                        max_line_cross = flex->lines[i].cross_size;
-                }
-                if (max_line_cross > flex->cross_axis_size + 0.5f) {
-                    log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f",
-                              flex->cross_axis_size, max_line_cross);
-                    flex->cross_axis_size = max_line_cross;
+                bool is_wrapping = (flex->wrap != WRAP_NOWRAP) && (flex->line_count > 1);
+                if (is_wrapping) {
+                    // CSS Flexbox §9.4: For wrapping containers, cross_axis_size is
+                    // the sum of all line cross sizes plus gaps between lines.
+                    float total_line_cross = 0;
+                    for (int i = 0; i < flex->line_count; i++) {
+                        total_line_cross += flex->lines[i].cross_size;
+                    }
+                    if (flex->line_count > 1) {
+                        total_line_cross += flex->row_gap * (flex->line_count - 1);
+                    }
+                    if (fabsf(total_line_cross - flex->cross_axis_size) > 0.5f) {
+                        log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f (wrapping sum)",
+                                  flex->cross_axis_size, total_line_cross);
+                        flex->cross_axis_size = total_line_cross;
+                    }
+                    // Update container height for auto-height wrapping containers
+                    float padding_height = 0, border_height = 0;
+                    if (flex_container->bound) {
+                        padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                        if (flex_container->bound->border) {
+                            border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                        }
+                    }
+                    float new_height = total_line_cross + padding_height + border_height;
+                    if (new_height > flex_container->height + 0.5f) {
+                        log_debug("ROW FLEX CROSS REALIGN: wrapping container height %.1f -> %.1f",
+                                  flex_container->height, new_height);
+                        flex_container->height = new_height;
+                    }
+                } else {
+                    // Nowrap: cross_axis_size is the max line cross size (single line)
+                    float max_line_cross = 0;
+                    for (int i = 0; i < flex->line_count; i++) {
+                        if (flex->lines[i].cross_size > max_line_cross)
+                            max_line_cross = flex->lines[i].cross_size;
+                    }
+                    if (max_line_cross > flex->cross_axis_size + 0.5f) {
+                        log_debug("ROW FLEX CROSS REALIGN: updating cross_axis_size %.1f -> %.1f",
+                                  flex->cross_axis_size, max_line_cross);
+                        flex->cross_axis_size = max_line_cross;
+                    }
                 }
             }
+            // Recalculate line cross_positions via align_content.
+            // After line cross sizes changed, the cumulative cross-axis offsets
+            // for each line must be recomputed so subsequent lines are positioned
+            // correctly (not overlapping).
+            align_content(flex);
             log_debug("ROW FLEX CROSS REALIGN: re-running cross alignment for %d lines", flex->line_count);
             for (int i = 0; i < flex->line_count; i++) {
                 align_items_cross_axis(flex, &flex->lines[i]);
@@ -2266,92 +2303,121 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
 
         if (!has_explicit_height) {
-            // Find the maximum height among all flex items
-            float max_item_height = 0;
-            View* item = flex_container->first_child;
-            while (item) {
-                if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                    item->view_type == RDT_VIEW_LIST_ITEM) {
-                    ViewElement* flex_item = (ViewElement*)item;
-                    // Include margins in the outer height
-                    float item_outer_height = flex_item->height;
-                    if (flex_item->bound) {
-                        item_outer_height += flex_item->bound->margin.top + flex_item->bound->margin.bottom;
-                    }
-                    if (item_outer_height > max_item_height) {
-                        max_item_height = item_outer_height;
-                        log_debug("ROW FLEX HEIGHT FIX: item %s height=%.1f (outer=%.1f), max=%.1f",
-                                  flex_item->node_name(), flex_item->height, item_outer_height, max_item_height);
-                    }
+            // For wrapping containers with multiple lines, height is the sum of
+            // line cross sizes (not max item height). Per-line stretch is handled
+            // by align_items_cross_axis which uses line->cross_size.
+            bool is_wrapping = flex && flex->wrap != WRAP_NOWRAP && flex->line_count > 1;
+            if (is_wrapping) {
+                float total_line_cross = 0;
+                for (int i = 0; i < flex->line_count; i++) {
+                    total_line_cross += flex->lines[i].cross_size;
                 }
-                item = item->next();
-            }
-
-            // Calculate new container height with padding
-            if (max_item_height > 0) {
-                float padding_height = 0;
+                if (flex->line_count > 1) {
+                    total_line_cross += flex->row_gap * (flex->line_count - 1);
+                }
+                float padding_height = 0, border_height = 0;
                 if (flex_container->bound) {
                     padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                    if (flex_container->bound->border) {
+                        border_height = flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
+                    }
                 }
-                float new_height = max_item_height + padding_height;
-
-                // CSS §10.7: Respect max-height constraint on the container.
-                // Phase 7c already clamped container->height to max-height,
-                // so we must not expand beyond it.
+                float new_height = total_line_cross + padding_height + border_height;
+                // CSS §10.7: Respect max-height constraint
                 if (flex_container->blk && flex_container->blk->given_max_height > 0) {
                     float max_box = flex_container->blk->given_max_height;
-                    // For content-box, max-height is content-only; add padding+border for outer comparison
                     if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
                         max_box += padding_height;
                         if (flex_container->bound && flex_container->bound->border) {
                             max_box += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
                         }
                     }
-                    if (new_height > max_box) {
-                        log_debug("ROW FLEX HEIGHT FIX: clamping new_height %.1f to max-height %.1f",
-                                  new_height, max_box);
-                        new_height = max_box;
+                    if (new_height > max_box) new_height = max_box;
+                }
+                if (new_height > flex_container->height + 0.5f) {
+                    log_debug("ROW FLEX HEIGHT FIX: wrapping container %s height: %.1f -> %.1f (lines=%.1f + pad=%.1f + bdr=%.1f)",
+                              flex_container->node_name(), flex_container->height, new_height,
+                              total_line_cross, padding_height, border_height);
+                    flex_container->height = new_height;
+                    flex->cross_axis_size = total_line_cross;
+                }
+            } else {
+                // Nowrap / single-line: use max item height
+                float max_item_height = 0;
+                View* item = flex_container->first_child;
+                while (item) {
+                    if (item->view_type == RDT_VIEW_BLOCK || item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                        item->view_type == RDT_VIEW_LIST_ITEM) {
+                        ViewElement* flex_item = (ViewElement*)item;
+                        float item_outer_height = flex_item->height;
+                        if (flex_item->bound) {
+                            item_outer_height += flex_item->bound->margin.top + flex_item->bound->margin.bottom;
+                        }
+                        if (item_outer_height > max_item_height) {
+                            max_item_height = item_outer_height;
+                            log_debug("ROW FLEX HEIGHT FIX: item %s height=%.1f (outer=%.1f), max=%.1f",
+                                      flex_item->node_name(), flex_item->height, item_outer_height, max_item_height);
+                        }
                     }
+                    item = item->next();
                 }
 
-                if (new_height > flex_container->height + 0.5f) {
-                    log_debug("ROW FLEX HEIGHT FIX: container %s height: %.1f -> %.1f (max_item=%.1f + padding=%.1f)",
-                              flex_container->node_name(), flex_container->height, new_height,
-                              max_item_height, padding_height);
-                    flex_container->height = new_height;
+                if (max_item_height > 0) {
+                    float padding_height = 0;
+                    if (flex_container->bound) {
+                        padding_height = flex_container->bound->padding.top + flex_container->bound->padding.bottom;
+                    }
+                    float new_height = max_item_height + padding_height;
 
-                    // Update flex_layout cross_axis_size for stretch alignment
-                    flex->cross_axis_size = max_item_height;
-
-                    // Apply align-items: stretch to items that should stretch
-                    // Items with auto cross size and align-self: stretch (or inherit) should expand
-                    View* stretch_item = flex_container->first_child;
-                    while (stretch_item) {
-                        if (stretch_item->view_type == RDT_VIEW_BLOCK ||
-                            stretch_item->view_type == RDT_VIEW_INLINE_BLOCK ||
-                            stretch_item->view_type == RDT_VIEW_LIST_ITEM) {
-                            ViewElement* fi = (ViewElement*)stretch_item;
-
-                            // Check if item should stretch (no explicit height and align-self: stretch)
-                            bool has_item_explicit_height = (fi->blk && fi->blk->given_height >= 0);
-                            // Inline check for stretch alignment (align-self or inherited align-items)
-                            int align_type = (fi->fi && fi->fi->align_self != ALIGN_AUTO) ?
-                                             fi->fi->align_self : flex->align_items;
-                            bool will_stretch = (align_type == ALIGN_STRETCH);
-                            if (!has_item_explicit_height && will_stretch) {
-                                float old_height = fi->height;
-                                // CSS Flexbox: stretched item's margin box equals line cross size
-                                // So content height = max_item_height - this item's cross-axis margins
-                                float item_margin_top = fi->bound ? fi->bound->margin.top : 0;
-                                float item_margin_bottom = fi->bound ? fi->bound->margin.bottom : 0;
-                                float stretched_height = max_item_height - item_margin_top - item_margin_bottom;
-                                if (stretched_height < 0) stretched_height = 0;
-                                fi->height = stretched_height;
-                                log_debug("ROW FLEX STRETCH: item %s height: %.1f -> %.1f (max=%.1f - margins=%.1f+%.1f)",
-                                          fi->node_name(), old_height, fi->height, max_item_height, item_margin_top, item_margin_bottom);
+                    // CSS §10.7: Respect max-height constraint on the container.
+                    if (flex_container->blk && flex_container->blk->given_max_height > 0) {
+                        float max_box = flex_container->blk->given_max_height;
+                        if (!flex_container->blk || flex_container->blk->box_sizing != CSS_VALUE_BORDER_BOX) {
+                            max_box += padding_height;
+                            if (flex_container->bound && flex_container->bound->border) {
+                                max_box += flex_container->bound->border->width.top + flex_container->bound->border->width.bottom;
                             }
                         }
-                        stretch_item = stretch_item->next();
+                        if (new_height > max_box) {
+                            log_debug("ROW FLEX HEIGHT FIX: clamping new_height %.1f to max-height %.1f",
+                                      new_height, max_box);
+                            new_height = max_box;
+                        }
+                    }
+
+                    if (new_height > flex_container->height + 0.5f) {
+                        log_debug("ROW FLEX HEIGHT FIX: container %s height: %.1f -> %.1f (max_item=%.1f + padding=%.1f)",
+                                  flex_container->node_name(), flex_container->height, new_height,
+                                  max_item_height, padding_height);
+                        flex_container->height = new_height;
+
+                        flex->cross_axis_size = max_item_height;
+
+                        // Apply align-items: stretch to items that should stretch
+                        View* stretch_item = flex_container->first_child;
+                        while (stretch_item) {
+                            if (stretch_item->view_type == RDT_VIEW_BLOCK ||
+                                stretch_item->view_type == RDT_VIEW_INLINE_BLOCK ||
+                                stretch_item->view_type == RDT_VIEW_LIST_ITEM) {
+                                ViewElement* fi = (ViewElement*)stretch_item;
+
+                                bool has_item_explicit_height = (fi->blk && fi->blk->given_height >= 0);
+                                int align_type = (fi->fi && fi->fi->align_self != ALIGN_AUTO) ?
+                                                 fi->fi->align_self : flex->align_items;
+                                bool will_stretch = (align_type == ALIGN_STRETCH);
+                                if (!has_item_explicit_height && will_stretch) {
+                                    float old_height = fi->height;
+                                    float item_margin_top = fi->bound ? fi->bound->margin.top : 0;
+                                    float item_margin_bottom = fi->bound ? fi->bound->margin.bottom : 0;
+                                    float stretched_height = max_item_height - item_margin_top - item_margin_bottom;
+                                    if (stretched_height < 0) stretched_height = 0;
+                                    fi->height = stretched_height;
+                                    log_debug("ROW FLEX STRETCH: item %s height: %.1f -> %.1f (max=%.1f - margins=%.1f+%.1f)",
+                                              fi->node_name(), old_height, fi->height, max_item_height, item_margin_top, item_margin_bottom);
+                                }
+                            }
+                            stretch_item = stretch_item->next();
+                        }
                     }
                 }
             }

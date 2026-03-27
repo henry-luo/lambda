@@ -933,8 +933,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         // Extract argument as string
         char* pseudo_arg = NULL;
+        int arg_end = *pos; // position of ')' or end
         if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
-            int arg_end = *pos;
+            arg_end = *pos;
             // Build argument string from tokens
             size_t arg_len = 0;
             for (int i = arg_start; i < arg_end; i++) {
@@ -977,6 +978,19 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         selector->value = func_name;
         selector->argument = pseudo_arg;
+
+        // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+        if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+            selector->type == CSS_SELECTOR_PSEUDO_IS ||
+            selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+            selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+            int sub_pos = arg_start;
+            CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+            if (sub_group && sub_group->selector_count > 0) {
+                selector->function_selectors = sub_group->selectors;
+                selector->function_selector_count = sub_group->selector_count;
+            }
+        }
 
         log_debug(" Functional pseudo-class: '%s(%s)'",
                func_name, pseudo_arg ? pseudo_arg : "");
@@ -1203,8 +1217,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 // Extract argument as string
                 char* pseudo_arg = NULL;
+                int arg_end = *pos; // position of ')' or end
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
-                    int arg_end = *pos;
+                    arg_end = *pos;
                     // Build argument string from tokens
                     size_t arg_len = 0;
                     for (int i = arg_start; i < arg_end; i++) {
@@ -1247,6 +1262,19 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 selector->value = func_name;
                 selector->argument = pseudo_arg;
+
+                // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+                if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+                    selector->type == CSS_SELECTOR_PSEUDO_IS ||
+                    selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+                    selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+                    int sub_pos = arg_start;
+                    CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+                    if (sub_group && sub_group->selector_count > 0) {
+                        selector->function_selectors = sub_group->selectors;
+                        selector->function_selector_count = sub_group->selector_count;
+                    }
+                }
 
                 log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
                        func_name, pseudo_arg ? pseudo_arg : "");

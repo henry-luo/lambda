@@ -2985,8 +2985,29 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     }
                 }
 
-                if (has_css_width) {
-                    // §4.5: specified_size_suggestion = computed main size, clamped by max
+                // CSS Flexbox §4.5: The specified size suggestion is:
+                //   1. If flex-basis is definite AND width is also set → use flex base size
+                //      (flex-basis overrides width for the specified size suggestion)
+                //   2. Else if width is definite → use width
+                //   3. Otherwise → undefined (use content size only)
+                // Note: When only flex-basis is set without width, there's no "specified size"
+                // for auto-minimum purposes — the content minimum prevails.
+                bool has_definite_flex_basis = item->fi && item->fi->flex_basis >= 0;
+                if (has_definite_flex_basis && has_css_width) {
+                    int specified_suggestion;
+                    if (item->fi->flex_basis_is_percent) {
+                        specified_suggestion = (int)(item->fi->flex_basis * flex_layout->main_axis_size / 100.0f);
+                    } else {
+                        specified_suggestion = (int)item->fi->flex_basis;
+                    }
+                    if (max_width > 0 && max_width < INT_MAX && specified_suggestion > max_width) {
+                        specified_suggestion = max_width;
+                    }
+                    // content-based minimum = min(content_suggestion, specified_suggestion)
+                    min_width = (content_suggestion < specified_suggestion) ? content_suggestion : specified_suggestion;
+                    log_debug("resolve_flex_item_constraints: auto min-width = min(content=%d, flex_basis=%d) = %d",
+                              content_suggestion, specified_suggestion, min_width);
+                } else if (has_css_width) {
                     int specified_suggestion = (int)item->blk->given_width;
                     if (max_width > 0 && max_width < INT_MAX && specified_suggestion > max_width) {
                         specified_suggestion = max_width;
@@ -3036,8 +3057,26 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     }
                 }
 
-                if (has_css_height) {
-                    // §4.5: specified_size_suggestion = computed main size, clamped by max
+                // CSS Flexbox §4.5: The specified size suggestion:
+                //   1. If flex-basis is definite AND height is also set → use flex base size
+                //   2. Else if height is definite → use height
+                //   3. Otherwise → undefined (use content size only)
+                bool has_definite_flex_basis_h = item->fi && item->fi->flex_basis >= 0;
+                if (has_definite_flex_basis_h && has_css_height) {
+                    int specified_suggestion;
+                    if (item->fi->flex_basis_is_percent) {
+                        specified_suggestion = (int)(item->fi->flex_basis * flex_layout->main_axis_size / 100.0f);
+                    } else {
+                        specified_suggestion = (int)item->fi->flex_basis;
+                    }
+                    if (max_height > 0 && max_height < INT_MAX && specified_suggestion > max_height) {
+                        specified_suggestion = max_height;
+                    }
+                    // content-based minimum = min(content_suggestion, specified_suggestion)
+                    min_height = (content_suggestion < specified_suggestion) ? content_suggestion : specified_suggestion;
+                    log_debug("resolve_flex_item_constraints: auto min-height = min(content=%d, flex_basis=%d) = %d",
+                              content_suggestion, specified_suggestion, min_height);
+                } else if (has_css_height) {
                     int specified_suggestion = (int)item->blk->given_height;
                     if (max_height > 0 && max_height < INT_MAX && specified_suggestion > max_height) {
                         specified_suggestion = max_height;
