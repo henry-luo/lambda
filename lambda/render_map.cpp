@@ -7,6 +7,7 @@
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include <string.h>
+#include <stdio.h>
 
 // ============================================================================
 // Global render map
@@ -142,8 +143,10 @@ void render_map_record(Item source_item, const char* template_ref,
         hashmap_set(rmap, &rentry);
     }
 
-    log_debug("render_map_record: tmpl=%s child_idx=%d",
-              template_ref ? template_ref : "(anon)", child_index);
+    log_info("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
+              template_ref ? template_ref : "(anon)",
+              (unsigned long long)result_node.item,
+              s_reverse_map ? hashmap_count(s_reverse_map) : 0);
 }
 
 void render_map_mark_dirty(Item source_item, const char* template_ref) {

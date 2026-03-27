@@ -1259,6 +1259,44 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
         }
 
+        // getattr(obj, name) / getattr(obj, name, default)
+        if (name_len == 7 && strncmp(name, "getattr", 7) == 0 && call->arg_count >= 2) {
+            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
+            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_2(mt, "py_getattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+        }
+
+        // setattr(obj, name, value)
+        if (name_len == 7 && strncmp(name, "setattr", 7) == 0 && call->arg_count >= 3) {
+            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
+            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
+            MIR_reg_t val_r = pm_transpile_expression(mt, call->arguments->next->next);
+            return pm_call_3(mt, "py_setattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_r));
+        }
+
+        // hasattr(obj, name)
+        if (name_len == 7 && strncmp(name, "hasattr", 7) == 0 && call->arg_count >= 2) {
+            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
+            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_2(mt, "py_hasattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+        }
+
+        // delattr(obj, name)
+        if (name_len == 7 && strncmp(name, "delattr", 7) == 0 && call->arg_count >= 2) {
+            MIR_reg_t obj_r = pm_transpile_expression(mt, call->arguments);
+            MIR_reg_t key_r = pm_transpile_expression(mt, call->arguments->next);
+            return pm_call_2(mt, "py_delattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+        }
+
         // property(fget) — creates a property descriptor {__is_property__: True, __get__: fget}
         if (name_len == 8 && strncmp(name, "property", 8) == 0 && call->arg_count >= 1) {
             MIR_reg_t arg = pm_transpile_expression(mt, call->arguments);
@@ -3469,11 +3507,69 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
         }
 
-        // 4. call py_class_new(name, bases, methods)
-        MIR_reg_t class_reg = pm_call_3(mt, "py_class_new", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg));
+        // 3b. execute class body non-method statements: assignments to simple names
+        // are stored in the methods dict as class attributes (e.g. _registry = [], x = 42).
+        {
+            PyAstNode* body_stmt = NULL;
+            if (cls->body && cls->body->node_type == PY_AST_NODE_BLOCK) {
+                body_stmt = ((PyBlockNode*)cls->body)->statements;
+            } else {
+                body_stmt = cls->body;
+            }
+            while (body_stmt) {
+                if (body_stmt->node_type == PY_AST_NODE_ASSIGNMENT) {
+                    PyAssignmentNode* asgn = (PyAssignmentNode*)body_stmt;
+                    // only handle simple name assignments (skip dunder methods handled above)
+                    if (asgn->targets &&
+                        asgn->targets->node_type == PY_AST_NODE_IDENTIFIER &&
+                        asgn->value) {
+                        PyIdentifierNode* id_node = (PyIdentifierNode*)asgn->targets;
+                        // skip assignments to special names that are handled as methods
+                        bool is_method = false;
+                        for (int fi = 0; fi < mt->func_count && !is_method; fi++) {
+                            if (mt->func_entries[fi].is_method &&
+                                strcmp(mt->func_entries[fi].class_name, cls->name->chars) == 0 &&
+                                (int)strlen(mt->func_entries[fi].name) == id_node->name->len &&
+                                strncmp(mt->func_entries[fi].name, id_node->name->chars, id_node->name->len) == 0) {
+                                is_method = true;
+                            }
+                        }
+                        if (!is_method) {
+                            MIR_reg_t val_reg = pm_transpile_expression(mt, asgn->value);
+                            MIR_reg_t aname_reg = pm_box_string_literal(mt,
+                                id_node->name->chars, id_node->name->len);
+                            pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, aname_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                        }
+                    }
+                }
+                // skip function defs (already handled), expression-only stmts, pass, etc.
+                body_stmt = body_stmt->next;
+            }
+        }
+
+        // 4. call py_class_new(name, bases, methods) — or metaclass(name, bases, methods)
+        MIR_reg_t class_reg;
+        if (cls->metaclass) {
+            // Phase F5: metaclass specified — call metaclass(name, bases, methods) directly
+            MIR_reg_t meta_reg = pm_transpile_expression(mt, cls->metaclass);
+            Item args_arr[3];
+            (void)args_arr;
+            // use py_call_function via a temporary args array: build it on the stack
+            // emit: call py_class_new_meta(meta, name, bases, methods)
+            class_reg = pm_call_4(mt, "py_class_new_meta", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, meta_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg));
+        } else {
+            class_reg = pm_call_3(mt, "py_class_new", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, bases_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg));
+        }
 
         // 5. store class as a local scope variable AND as a module var (for super() in methods)
         char class_var_name[132];
@@ -3538,9 +3634,25 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
     case PY_AST_NODE_NONLOCAL:
         // handled in scope analysis
         break;
-    case PY_AST_NODE_DEL:
-        // simplified: no-op
+    case PY_AST_NODE_DEL: {
+        PyDelNode* dn = (PyDelNode*)stmt;
+        PyAstNode* target = dn->targets;
+        while (target) {
+            if (target->node_type == PY_AST_NODE_ATTRIBUTE) {
+                // del obj.attr — invoke py_delattr(obj, "attr")
+                PyAttributeNode* attr_node = (PyAttributeNode*)target;
+                MIR_reg_t obj_reg = pm_transpile_expression(mt, attr_node->object);
+                MIR_reg_t attr_name_reg = pm_box_string_literal(mt,
+                    attr_node->attribute->chars, attr_node->attribute->len);
+                pm_call_2(mt, "py_delattr", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_name_reg));
+            }
+            // del var / del obj[key] — simplified no-op for now
+            target = target->next;
+        }
         break;
+    }
     case PY_AST_NODE_RAISE: {
         PyRaiseNode* rn = (PyRaiseNode*)stmt;
         if (rn->exception) {

@@ -1243,12 +1243,30 @@ PyAstNode* build_py_class_def(PyTranspiler* tp, TSNode class_node) {
         py_scope_define(tp, cls->name, (PyAstNode*)cls, PY_VAR_LOCAL);
     }
 
-    // base classes
+    // base classes (and metaclass= keyword)
     if (!ts_node_is_null(bases_node)) {
         uint32_t base_count = ts_node_named_child_count(bases_node);
         PyAstNode* prev = NULL;
         for (uint32_t i = 0; i < base_count; i++) {
-            PyAstNode* base = build_py_expression(tp, ts_node_named_child(bases_node, i));
+            TSNode child = ts_node_named_child(bases_node, i);
+            const char* child_type = ts_node_type(child);
+            // Phase F5: detect metaclass=X keyword
+            if (strcmp(child_type, "keyword_argument") == 0) {
+                TSNode kw_name = ts_node_child_by_field_name(child, "name", 4);
+                if (!ts_node_is_null(kw_name)) {
+                    StrView kw_src = py_node_source(tp, kw_name);
+                    if (kw_src.length == 9 && strncmp(kw_src.str, "metaclass", 9) == 0) {
+                        TSNode kw_val = ts_node_child_by_field_name(child, "value", 5);
+                        if (!ts_node_is_null(kw_val)) {
+                            cls->metaclass = build_py_expression(tp, kw_val);
+                        }
+                        continue;  // do not add to bases list
+                    }
+                }
+                // other keyword args in class header — skip (ignored)
+                continue;
+            }
+            PyAstNode* base = build_py_expression(tp, child);
             if (base) {
                 if (!prev) {
                     cls->bases = base;
@@ -1298,10 +1316,23 @@ PyAstNode* build_py_try_statement(PyTranspiler* tp, TSNode try_node) {
             uint32_t exc_named = ts_node_named_child_count(child);
             for (uint32_t j = 0; j < exc_named; j++) {
                 TSNode exc_child = ts_node_named_child(child, j);
-                const char* exc_type = ts_node_type(exc_child);
-                if (strcmp(exc_type, "block") == 0) {
+                const char* exc_type_str = ts_node_type(exc_child);
+                if (strcmp(exc_type_str, "block") == 0) {
                     handler->body = build_py_block(tp, exc_child);
-                } else if (strcmp(exc_type, "identifier") == 0 || strcmp(exc_type, "attribute") == 0) {
+                } else if (strcmp(exc_type_str, "as_pattern") == 0) {
+                    // "except ValueError as e:" — as_pattern has named children: type node, alias node
+                    uint32_t ap_named = ts_node_named_child_count(exc_child);
+                    // first named child = exception type, last named child = alias
+                    if (ap_named >= 1 && !handler->type) {
+                        TSNode type_node = ts_node_named_child(exc_child, 0);
+                        handler->type = build_py_expression(tp, type_node);
+                    }
+                    if (ap_named >= 2) {
+                        TSNode alias_node = ts_node_named_child(exc_child, ap_named - 1);
+                        StrView alias_src = py_node_source(tp, alias_node);
+                        handler->name = name_pool_create_len(tp->name_pool, alias_src.str, alias_src.length);
+                    }
+                } else if (strcmp(exc_type_str, "identifier") == 0 || strcmp(exc_type_str, "attribute") == 0) {
                     // could be exception type or alias
                     TSNode alias_node = ts_node_child_by_field_name(child, "alias", 5);
                     if (!ts_node_is_null(alias_node) && ts_node_start_byte(alias_node) == ts_node_start_byte(exc_child)) {

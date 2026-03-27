@@ -1,4 +1,4 @@
-# MIR JIT Known Issues
+# C2MIR JIT Known Issues
 
 ## Issue: Incorrect Results with Three-Way Swap Pattern in Loops
 

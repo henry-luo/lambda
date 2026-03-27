@@ -313,10 +313,16 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
  * @return true if a handler was found and invoked
  */
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name) {
-    if (!g_template_registry || g_template_registry->count == 0) return false;
+    if (!g_template_registry || g_template_registry->count == 0) {
+        return false;
+    }
+
+    log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
+             event_name, g_template_registry->count);
 
     // walk up from target through DomNode ancestry
     DomNode* node = (DomNode*)target;
+    int depth = 0;
     while (node) {
         if (node->node_type == DOM_NODE_ELEMENT) {
             DomElement* dom_elem = (DomElement*)node;
@@ -328,6 +334,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                 // reverse lookup: which template produced this element?
                 RenderMapLookup lookup;
                 if (render_map_reverse_lookup(result_item, &lookup)) {
+                    log_debug("dispatch_lambda_handler: reverse lookup hit at depth=%d, tmpl_ref=%s",
+                             depth, lookup.template_ref ? lookup.template_ref : "(null)");
                     // find the TemplateEntry by template_ref
                     TemplateEntry* tmpl = NULL;
                     for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
@@ -361,13 +369,16 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 return true;
                             }
                         }
+                        log_debug("dispatch_lambda_handler: tmpl found but no '%s' handler", event_name);
                     }
                 }
             }
         }
         node = node->parent;
+        depth++;
     }
 
+    log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
     return false;
 }
 

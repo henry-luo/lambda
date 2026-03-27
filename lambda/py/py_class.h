@@ -21,6 +21,16 @@ extern "C" {
 // methods (dict Item — copied into the class map).
 Item py_class_new(Item name, Item bases, Item methods);
 
+// Phase F5: create a class using an explicit metaclass callable.
+// Calls metaclass(name, bases, methods) and returns the result.
+Item py_class_new_meta(Item metaclass, Item name, Item bases, Item methods);
+
+// type.__new__(mcs, name, bases, namespace) — creates a class, used by metaclasses.
+Item py_type_new(Item mcs, Item name, Item bases, Item namespace_dict);
+
+// Global 'type' class object (built-in metaclass).
+extern Item py_type_class;
+
 // Compute and return the MRO list (C3 linearization) as a py list.
 Item py_compute_mro(Item cls);
 

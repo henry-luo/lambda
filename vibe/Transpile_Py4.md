@@ -4,7 +4,7 @@
 
 LambdaPy v3 closed the major OOP and module-system gaps (~14.4K LOC). The features explicitly deferred from v3 are: **generators/`yield`**, **`match`/`case` pattern matching**, **standard library module stubs**, **`async`/`await`**, **full package imports**, and **metaclasses/advanced OOP** (including `@prop.setter`, full descriptor protocol, `__init_subclass__`, `__class_getitem__`). This proposal targets those in priority order.
 
-> **Implementation Status:** Phase F1 (@property setter/deleter), Phase B (match/case), Phase A (generators/yield), Phase C (arbitrary-precision integers), Phase D (async/await), and Phase C (standard library module stubs) are complete. Phase E (full package system) and F2+ are pending.
+> **Implementation Status:** Phase A (generators/yield), Phase B (match/case), Phase C (arbitrary-precision integers), Phase C (standard library module stubs), Phase D (async/await), and Phase F (advanced OOP — descriptors, `__init_subclass__`, `__class_getitem__`, metaclasses) are complete. Phase E (full package system) is pending.
 
 ### Architecture Position
 
@@ -24,7 +24,7 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
        Phase C: Arbitrary-precision integers                ✅ COMPLETE
        Phase D: async/await and event loop                  ✅ COMPLETE
        Phase E: Full package system                         ⏳ pending
-       Phase F: Advanced OOP (metaclasses, descriptors)     🔄 partial (F1 done)
+       Phase F: Advanced OOP (metaclasses, descriptors)     ✅ COMPLETE
 ```
 
 ### Current vs Target Coverage
@@ -45,10 +45,10 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 | Relative imports (`from . import x`)                          | ❌ Deferred                                              | ✅                                                                            |
 | Circular imports                                              | ❌ Not handled                                           | ✅ Partial loading / forward references                                       |
 | `@prop.setter` / `@prop.deleter`                              | ❌ Deferred from v3                                      | ✅ **DONE** — setter and deleter fully implemented                            |
-| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌                                                       | ✅                                                                            |
-| `__init_subclass__`                                           | ❌                                                       | ✅                                                                            |
-| `__class_getitem__`                                           | ❌                                                       | ✅ Generic type subscript (`List[int]`)                                       |
-| Metaclasses (`metaclass=Meta`)                                | ❌                                                       | ✅ Basic metaclass support                                                    |
+| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌                                                       | ✅ **DONE** — data/non-data descriptor dispatch in `py_getattr`/`py_setattr`  |
+| `__init_subclass__`                                           | ❌                                                       | ✅ **DONE** — called on bases during `py_class_new`, supports `**kwargs`      |
+| `__class_getitem__`                                           | ❌                                                       | ✅ **DONE** — class subscript via `py_subscript_get`, primitive type classes   |
+| Metaclasses (`metaclass=Meta`)                                | ❌                                                       | ✅ **DONE** — metaclass inheritance, `type.__new__`, `py_class_new_core`      |
 | Arbitrary-precision integers                                  | 64-bit only                                             | ✅ **DONE** — mpdecimal backend (4000-digit precision), `py_bigint.cpp`       |
 | C extension imports (`import numpy`)                          | ❌                                                       | ❌ Deferred to v5                                                             |
 
@@ -1081,7 +1081,7 @@ print(helper())               # 42
 
 ---
 
-## 8. Phase F: Advanced OOP
+## 8. Phase F: Advanced OOP ✅ COMPLETE
 
 **Goal:** Complete the class system with `@property` setter/deleter, full descriptor protocol (`__get__`/`__set__`/`__delete__`), `__init_subclass__`, `__class_getitem__`, and basic metaclass support.
 
@@ -1106,127 +1106,48 @@ v3 implemented `@property` getter only. Setter/deleter are now fully supported.
    //                 "__delete__": fdel, "__doc__": doc }
    ```
 
-### F2. Full Descriptor Protocol
+### F2. Full Descriptor Protocol ✅ COMPLETE
 
 The descriptor protocol (`__get__`, `__set__`, `__delete__`) generalizes `@property` to arbitrary descriptor objects (used by `classmethod`, `staticmethod`, and user-defined descriptors).
 
-**Data descriptors** (have both `__get__` and `__set__`) take priority over instance `__dict__`.  
-**Non-data descriptors** (have only `__get__`) yield to instance `__dict__`.
+**Implemented:**
+- Data descriptors (have both `__get__` and `__set__`) take priority over instance `__dict__`; non-data descriptors (have only `__get__`) yield to instance `__dict__`.
+- `py_getattr` and `py_setattr` in `py_runtime.cpp` follow the full descriptor lookup order.
+- User-defined descriptors with `__get__`/`__set__`/`__delete__` work correctly.
+- Test: `test/py/test_py_descriptors.py` — validates `UpperCaseDescriptor.__set_name__`/`__set__`/`__get__`, property with validation and `ValueError` in except handler, and `__delete__`.
 
-Extend `py_getattr` and `py_setattr` in `py_runtime.cpp`:
+### F3. `__init_subclass__` ✅ COMPLETE
 
-```
-py_getattr(obj, name):
-    1. Look in obj.__class__.__mro__ for a data descriptor (has __get__ AND __set__)
-       → if found: call descriptor.__get__(obj, type(obj))  [highest priority]
-    2. Look in obj's instance dict
-       → if found: return value
-    3. Look in obj.__class__.__mro__ for a non-data descriptor (has __get__ only)
-       → if found: call descriptor.__get__(obj, type(obj))
-    4. Return instance dict value (if any)
-    5. AttributeError
-```
+Called on a class's bases whenever the class is subclassed.
 
-**`classmethod` and `staticmethod`** are implemented as descriptor objects:
+**Implemented:**
+- In `py_class_new_core` (in `py_class.cpp`), after computing the MRO, walks base classes and calls `__init_subclass__` on each base that defines it.
+- Supports `**kwargs` from class definition keyword arguments.
+- Test: `test/py/test_py_advanced_oop.py` — `PluginBase` with `__init_subclass__` tracks `AudioPlugin`, `VideoPlugin`, `NetworkPlugin` in `_registry`.
 
-```c
-// py_class.cpp additions:
-Item py_builtin_classmethod(Item func);  // descriptor that passes cls instead of self
-Item py_builtin_staticmethod(Item func); // descriptor that returns raw function
-```
+### F4. `__class_getitem__` ✅ COMPLETE
 
-Both are registered in `sys_func_registry.c` and in `py_init_builtins_classes()`.
+Allows classes to support `ClassName[T]` syntax (used by type annotations like `list[int]`, `dict[str, int]`).
 
-**Files:** `py_class.cpp` additions (~150 LOC for descriptor dispatch, `classmethod`, `staticmethod`), `py_runtime.cpp` changes (~80 LOC in `py_getattr`/`py_setattr`).
+**Implemented:**
+- In `py_subscript_get` (`py_runtime.cpp`): when the object is a class (has `__is_class__`), looks up `__class_getitem__` in the class dict and calls it with `(cls, key)` as arguments.
+- 10 primitive type classes (int, str, float, bool, list, dict, tuple, set, bytes, NoneType) registered as builtin class objects with `__name__`, `__bases__`, `__mro__` in `py_init_builtin_classes` — enables `int.__name__`, etc.
+- Test: `test/py/test_py_advanced_oop.py` — `TypedList[int]` and `TypedList[str]` produce correct generic alias strings.
 
-### F3. `__init_subclass__`
+### F5. Basic Metaclass Support ✅ COMPLETE
 
-Called on a class's bases whenever the class is subclassed:
+Metaclasses intercept class creation.
 
-```python
-class Plugin:
-    def __init_subclass__(cls, /, **kwargs):
-        super().__init_subclass__(**kwargs)
-        Plugin.registry.append(cls)
-    registry = []
+**Implemented:**
+- `metaclass=Meta` detected in class definition keyword arguments; transpiler emits `py_class_new_meta(Meta, name, bases, methods)` instead of `py_class_new`.
+- `py_class_new_meta` delegates to the metaclass callable (typically its `__new__`).
+- `type.__new__` registered as `py_type_new` — calls `py_class_new_core` (the refactored non-metaclass-checking core) and stores `__metaclass__` on the created class.
+- Metaclass inheritance: `py_class_new` checks base classes for `__metaclass__` attribute and auto-delegates to the inherited metaclass, avoiding infinite recursion via the `py_class_new_core` / `py_class_new` split.
+- `Exception` base class has `__init__` (stores `self.message` + `self.args`) and `__str__` (returns `self.message`) as builtin methods.
+- `except ValueError as e:` correctly handled via `as_pattern` Tree-sitter node parsing in `build_py_ast.cpp`.
+- Test: `test/py/test_py_advanced_oop.py` — `RegistryMeta` metaclass tracks subclasses, `isinstance` checks work correctly.
 
-class MyPlugin(Plugin):    # triggers Plugin.__init_subclass__
-    pass
-```
-
-In `py_class_new` (in `py_class.cpp`), after computing the MRO, walk the base classes and call `__init_subclass__` on each base that defines it:
-
-```c
-Item py_class_new(Item name, Item bases, Item methods) {
-    // ... existing class creation ...
-    // after creation:
-    for each base in bases:
-        Item fn = py_mro_lookup(base, "__init_subclass__");
-        if (!is_item_null(fn)):
-            // call base.__init_subclass__(new_class) with any kwargs from class keyword args
-            py_call_function(fn, &new_class, 1);
-    return new_class;
-}
-```
-
-**Transpiler change**: the `CLASS_DEF` node in Tree-sitter can carry keyword arguments (e.g. `class Foo(Base, metaclass=Meta)`). Extract these and pass as `**kwargs` to `__init_subclass__`.
-
-**Files:** `py_class.cpp` additions (~80 LOC), `transpile_py_mir.cpp` additions (~50 LOC for keyword base extraction).
-
-### F4. `__class_getitem__`
-
-Allows classes to support `ClassName[T]` syntax (used by type annotations like `list[int]`, `dict[str, int]`):
-
-```python
-class MyGeneric:
-    def __class_getitem__(cls, item):
-        return f"MyGeneric[{item}]"
-
-print(MyGeneric[int])  # MyGeneric[<class 'int'>]
-```
-
-In `py_subscript_get` (`py_runtime.cpp`): when the object is a class (has `__is_class__`), look up `__class_getitem__` in the class dict and call it:
-
-```c
-Item py_subscript_get(Item object, Item key) {
-    // existing list/dict/string/tuple paths...
-    // new: class subscript
-    if (py_is_class(object)) {
-        Item fn = py_mro_lookup(object, "__class_getitem__");
-        if (!is_item_null(fn)) {
-            Item args[2] = { object, key };
-            return py_call_function(fn, args, 2);
-        }
-    }
-    // ...
-}
-```
-
-For built-in types (`list[int]`, `dict[str, int]`), return a generic alias Map `{ "__origin__": cls, "__args__": [T] }` — sufficient for isinstance checks with the standard library's typing module stubs.
-
-**Files:** `py_runtime.cpp` additions (~60 LOC), `py_class.cpp` additions (~40 LOC for `_GenericAlias` construction).
-
-### F5. Basic Metaclass Support
-
-Metaclasses intercept class creation:
-
-```python
-class Meta(type):
-    def __new__(mcs, name, bases, namespace):
-        cls = super().__new__(mcs, name, bases, namespace)
-        return cls
-```
-
-Full metaclass support (descriptor inheritance, `type.__prepare__`, `__instancecheck__`) is complex. v4 targets the 80% case:
-
-1. Detect `metaclass=Meta` in class definition keyword arguments.
-2. If present, instead of calling `py_class_new` directly, call `Meta.__new__(Meta, name, bases, methods)`.
-3. `type.__new__` is the default — delegates to `py_class_new`.
-4. Custom metaclasses can override `__new__` and/or `__init__` to modify the class.
-
-**Limitation:** `__prepare__` (class namespace customization before body execution) requires significant transpiler changes (the body must be compiled into a user-supplied dict, not a fresh Map). Deferred to v5.
-
-**Files:** `py_class.cpp` additions (~100 LOC), `transpile_py_mir.cpp` additions (~70 LOC for keyword base arg extraction and metaclass dispatch).
+**Limitation:** `__prepare__` (class namespace customization before body execution) deferred to v5.
 
 ### Test Plan
 
@@ -1302,8 +1223,8 @@ Phase A: Generators/yield  ✅  — independent of B–F; prerequisite for D and
             │
             └── Phase C: asyncio — part of C's stdlib stubs, needs D
                 
-Phase F: Advanced OOP         — independent; extends v3 class system
-    └── F1: @property setter/deleter  ✅
+Phase F: Advanced OOP  ✅     — independent; extends v3 class system
+    └── F1–F5: property, descriptors, __init_subclass__, __class_getitem__, metaclasses  ✅
 ```
 
 Recommended implementation sequence:
@@ -1314,7 +1235,7 @@ Recommended implementation sequence:
 5. **D** (async/await) — requires A
 6. **C** (itertools/asyncio stubs) — requires A and D
 7. **E** (packages) — builds on C's module infrastructure
-8. **F2–F5** (descriptors, `__init_subclass__`, metaclasses) — complete OOP
+8. **F2–F5** (descriptors, `__init_subclass__`, metaclasses) — ✅ COMPLETE
 
 ---
 

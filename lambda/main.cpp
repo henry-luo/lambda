@@ -139,9 +139,6 @@ extern "C" {
 #include <fcntl.h>
 #endif
 
-// Forward declare MIR transpiler function
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main);
-
 // Forward declare function with run_main support
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
@@ -2159,6 +2156,8 @@ int main(int argc, char *argv[]) {
                 }
                 runtime.scripts->length = 0;
             }
+            // Reset heap/nursery/name_pool so the next test starts clean
+            runtime_reset_heap(&runtime);
         }
 
         runtime_cleanup(&runtime);
