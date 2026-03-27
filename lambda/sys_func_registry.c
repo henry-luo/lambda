@@ -47,6 +47,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "py/py_runtime.h"
 #include "py/py_class.h"
 #include "py/py_bigint.h"
+#include "py/py_async.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -1378,6 +1379,14 @@ JitImport jit_runtime_imports[] = {
     {"py_gen_get_frame_c", FPTR(py_gen_get_frame_c)},
     {"py_gen_next", FPTR(py_gen_next)},
     {"py_gen_send", FPTR(py_gen_send)},
+    // coroutine protocol (Phase D)
+    {"py_coro_create", FPTR(py_coro_create)},
+    {"py_coro_set_return", FPTR(py_coro_set_return)},
+    {"py_coro_get_return", FPTR(py_coro_get_return)},
+    {"py_coro_drive", FPTR(py_coro_drive)},
+    {"py_asyncio_run", FPTR(py_asyncio_run)},
+    {"py_asyncio_sleep", FPTR(py_asyncio_sleep)},
+    {"py_asyncio_gather", FPTR(py_asyncio_gather)},
 
     // ========================================================================
     // Bash runtime functions

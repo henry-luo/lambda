@@ -234,6 +234,15 @@ Item    py_gen_next(Item gen);
 Item    py_gen_send(Item gen, Item value);
 bool    py_is_generator(Item x);
 
+// ========================================================================
+// Coroutine protocol (Phase D)
+// ========================================================================
+Item    py_coro_create(void* resume_fn_ptr, int frame_size);
+bool    py_is_coroutine(Item x);
+Item    py_coro_set_return(Item value);
+Item    py_coro_get_return(void);
+Item    py_coro_drive(Item coro);
+
 #ifdef __cplusplus
 }
 #endif

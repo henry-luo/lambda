@@ -1607,6 +1607,13 @@ PyAstNode* build_py_decorated_definition(PyTranspiler* tp, TSNode dec_node) {
                 ((PyFunctionDefNode*)func)->decorators = decorators;
             }
             return func;
+        } else if (strcmp(def_type, "async_function_definition") == 0) {
+            PyAstNode* func = build_py_function_def(tp, def_node);
+            if (func) {
+                ((PyFunctionDefNode*)func)->decorators = decorators;
+                ((PyFunctionDefNode*)func)->is_async = true;
+            }
+            return func;
         } else if (strcmp(def_type, "class_definition") == 0) {
             PyAstNode* cls = build_py_class_def(tp, def_node);
             if (cls) {
@@ -1762,12 +1769,13 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         return (PyAstNode*)assign;
     }
 
-    // await expression
+    // await expression (Phase D): build a PyAwaitNode
     if (strcmp(node_type, "await") == 0) {
+        PyAwaitNode* an = (PyAwaitNode*)alloc_py_ast_node(tp, PY_AST_NODE_AWAIT, expr_node, sizeof(PyAwaitNode));
         if (ts_node_named_child_count(expr_node) > 0) {
-            return build_py_expression(tp, ts_node_named_child(expr_node, 0));
+            an->value = build_py_expression(tp, ts_node_named_child(expr_node, 0));
         }
-        return NULL;
+        return (PyAstNode*)an;
     }
 
     // yield / yield from expression
@@ -2274,6 +2282,11 @@ PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
     }
     if (strcmp(node_type, "function_definition") == 0) {
         return build_py_function_def(tp, stmt_node);
+    }
+    if (strcmp(node_type, "async_function_definition") == 0) {
+        PyAstNode* fn = build_py_function_def(tp, stmt_node);
+        if (fn) ((PyFunctionDefNode*)fn)->is_async = true;
+        return fn;
     }
     if (strcmp(node_type, "class_definition") == 0) {
         return build_py_class_def(tp, stmt_node);

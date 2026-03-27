@@ -88,6 +88,7 @@ typedef enum PyAstNodeType {
     PY_AST_NODE_PATTERN,                // discriminated by PyPatternKind
 
     PY_AST_NODE_YIELD,                  // yield expr / yield from expr
+    PY_AST_NODE_AWAIT,                  // await expr (Phase D: async/await)
 
     PY_AST_NODE_COUNT
 } PyAstNodeType;
@@ -236,6 +237,7 @@ typedef struct PyFunctionDefNode {
     PyAstNode* body;                // function body (block of statements)
     PyAstNode* decorators;          // decorator list (linked list)
     PyAstNode* return_annotation;   // return type annotation (ignored at runtime)
+    bool is_async;                  // true for async def (Phase D)
 } PyFunctionDefNode;
 
 // Python call expression node
@@ -476,6 +478,12 @@ typedef struct PyYieldNode {
     PyAstNode* value;       // yielded value (NULL for bare yield)
     bool is_from;           // true for 'yield from'
 } PyYieldNode;
+
+// Python await expression node (Phase D: async/await)
+typedef struct PyAwaitNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_AWAIT
+    PyAstNode* value;       // the awaited expression
+} PyAwaitNode;
 
 // ============================================================================
 // Phase B: match/case pattern matching
