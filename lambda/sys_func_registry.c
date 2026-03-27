@@ -1006,6 +1006,7 @@ JitImport jit_runtime_imports[] = {
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_bind_function", FPTR(js_bind_function)},
     {"js_create_regex", FPTR(js_create_regex)},
+    {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_regex_test", FPTR(js_regex_test)},
     {"js_regex_exec", FPTR(js_regex_exec)},
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},
@@ -1195,6 +1196,10 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
     {"js_weakset_new", FPTR(js_weakset_new)},
+    // prototype chain
+    {"js_get_prototype", FPTR(js_get_prototype)},
+    {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_prototype_lookup", FPTR(js_prototype_lookup)},
 
     // ========================================================================
     // Python runtime functions

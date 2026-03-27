@@ -1113,6 +1113,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (js_is_dom_node(object)) {
             return js_dom_set_property(object, key, value);
         }
+        // Setter property dispatch: check for __set_<propName> on object or prototype
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key && str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+                char setter_key[256];
+                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
+                Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
+                Item setter = map_get(m, sk);
+                if (setter.item == ItemNull.item) {
+                    setter = js_prototype_lookup(object, sk);
+                }
+                if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item args[1] = { value };
+                    js_call_function(setter, object, args, 1);
+                    return value;
+                }
+            }
+        }
         // JS object / Lambda map: try fn_map_set first (update existing field),
         // fall back to map_put for new keys
         TypeMap* map_type = (TypeMap*)m->type;
@@ -1643,6 +1661,23 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     return regex_obj;
 }
 
+// new RegExp(pattern, flags) — construct regex from string arguments at runtime
+extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
+    const char* pattern = "";
+    int pattern_len = 0;
+    const char* flags = "";
+    int flags_len = 0;
+    if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
+        String* ps = it2s(pattern_item);
+        if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+    }
+    if (get_type_id(flags_item) == LMD_TYPE_STRING) {
+        String* fs = it2s(flags_item);
+        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+    }
+    return js_create_regex(pattern, pattern_len, flags, flags_len);
+}
+
 static JsRegexData* js_get_regex_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
@@ -2103,6 +2138,132 @@ static Item js_arg_to_int(Item arg) {
 }
 
 // =============================================================================
+// String replace/replaceAll implementation with regex + callback support
+// =============================================================================
+
+static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
+    String* s = it2s(str);
+    if (!s || s->len == 0) return str;
+    bool replacement_is_func = (get_type_id(args[1]) == LMD_TYPE_FUNC);
+    JsRegexData* rd = js_get_regex_data(args[0]);
+
+    if (rd) {
+        // regex-based replace
+        re2::StringPiece input(s->chars, s->len);
+        int ngroups = rd->re2->NumberOfCapturingGroups() + 1;
+        if (ngroups > 16) ngroups = 16;
+        re2::StringPiece matches[16];
+        StrBuf* buf = strbuf_new();
+        int pos = 0;
+        bool found_match = false;
+        while (pos <= (int)s->len) {
+            bool matched = rd->re2->Match(input, pos, (int)s->len,
+                re2::RE2::UNANCHORED, matches, ngroups);
+            if (!matched) break;
+            found_match = true;
+            int match_start = (int)(matches[0].data() - s->chars);
+            int match_len = (int)matches[0].size();
+            // append text before match
+            if (match_start > pos)
+                strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
+            if (replacement_is_func) {
+                // call function(match, g1, g2, ..., offset, originalString)
+                int fn_argc = ngroups + 2;
+                Item* fn_args = (Item*)alloca(fn_argc * sizeof(Item));
+                for (int i = 0; i < ngroups; i++) {
+                    if (matches[i].data()) {
+                        fn_args[i] = (Item){.item = s2it(heap_strcpy(
+                            (char*)matches[i].data(), (int)matches[i].size()))};
+                    } else {
+                        fn_args[i] = ItemNull;
+                    }
+                }
+                fn_args[ngroups] = (Item){.item = i2it(match_start)};
+                fn_args[ngroups + 1] = str;
+                Item result = js_call_function(args[1], ItemNull, fn_args, fn_argc);
+                Item result_str = js_to_string(result);
+                String* rs = it2s(result_str);
+                if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+            } else {
+                // string replacement
+                Item repl_str = js_to_string(args[1]);
+                String* rs = it2s(repl_str);
+                if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+            }
+            pos = match_start + match_len;
+            if (match_len == 0) pos++; // avoid infinite loop on zero-length match
+            if (!is_replace_all && !(rd->global)) break;
+        }
+        if (found_match) {
+            // append remaining text
+            if (pos < (int)s->len)
+                strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
+            String* result = heap_strcpy(buf->str, buf->length);
+            strbuf_free(buf);
+            return (Item){.item = s2it(result)};
+        }
+        strbuf_free(buf);
+        return str;
+    }
+
+    // string-based replace
+    String* search = it2s(js_to_string(args[0]));
+    if (!search || search->len == 0) {
+        if (!replacement_is_func) return fn_replace(str, args[0], args[1]);
+        return str;
+    }
+    if (!replacement_is_func) {
+        if (is_replace_all) {
+            // simple string replaceAll via loop
+            Item result = str;
+            int max_iter = 10000;
+            while (max_iter-- > 0) {
+                Item replaced = fn_replace(result, args[0], args[1]);
+                String* r = it2s(replaced);
+                String* prev_s = it2s(result);
+                if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0)
+                    break;
+                result = replaced;
+            }
+            return result;
+        }
+        return fn_replace(str, args[0], args[1]);
+    }
+    // string search with function callback
+    StrBuf* buf = strbuf_new();
+    int pos = 0;
+    bool found_any = false;
+    while (pos <= (int)s->len - (int)search->len) {
+        const char* found = (const char*)memmem(s->chars + pos, s->len - pos, search->chars, search->len);
+        if (!found) break;
+        found_any = true;
+        int match_start = (int)(found - s->chars);
+        if (match_start > pos)
+            strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
+        // call function(match, offset, originalString)
+        Item fn_args[3];
+        fn_args[0] = args[0]; // the matched string == search string
+        fn_args[1] = (Item){.item = i2it(match_start)};
+        fn_args[2] = str;
+        Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+        Item result_str = js_to_string(result);
+        String* rs = it2s(result_str);
+        if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+        pos = match_start + (int)search->len;
+        if (!is_replace_all) break;
+    }
+    if (found_any) {
+        if (pos < (int)s->len)
+            strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+    strbuf_free(buf);
+    return str;
+}
+
+// =============================================================================
 // String Method Dispatcher
 // =============================================================================
 
@@ -2180,7 +2341,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 7 && strncmp(method->chars, "replace", 7) == 0) {
         if (argc < 2) return str;
-        return fn_replace(str, args[0], args[1]);
+        return js_string_replace_impl(str, args, argc, false);
     }
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
@@ -2190,11 +2351,66 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return ItemNull;
         String* s = it2s(str);
         if (!s || s->len == 0) return ItemNull;
-        int idx = (int)js_get_number(args[0]);
-        if (idx < 0 || idx >= (int)s->len) return ItemNull;
-        // return the char code (byte value for ASCII/Latin1, first byte for UTF-8)
-        unsigned char ch = (unsigned char)s->chars[idx];
-        return (Item){.item = i2it((int64_t)ch)};
+        int target_idx = (int)js_get_number(args[0]);
+        if (target_idx < 0) return ItemNull;
+        // walk UTF-8 bytes, counting UTF-16 code units
+        int utf16_idx = 0;
+        int byte_pos = 0;
+        while (byte_pos < (int)s->len) {
+            unsigned char b = (unsigned char)s->chars[byte_pos];
+            uint32_t cp = 0;
+            int bytes = 1;
+            if (b < 0x80) { cp = b; bytes = 1; }
+            else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+            else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+            else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+            for (int i = 1; i < bytes && byte_pos + i < (int)s->len; i++)
+                cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
+            if (cp >= 0x10000) {
+                // surrogate pair: 2 UTF-16 code units
+                if (utf16_idx == target_idx) {
+                    uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
+                    return (Item){.item = i2it((int64_t)hi)};
+                }
+                if (utf16_idx + 1 == target_idx) {
+                    uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+                    return (Item){.item = i2it((int64_t)lo)};
+                }
+                utf16_idx += 2;
+            } else {
+                if (utf16_idx == target_idx)
+                    return (Item){.item = i2it((int64_t)cp)};
+                utf16_idx++;
+            }
+            byte_pos += bytes;
+        }
+        return ItemNull;
+    }
+    if (method->len == 11 && strncmp(method->chars, "codePointAt", 11) == 0) {
+        if (argc < 1) return ItemNull;
+        String* s = it2s(str);
+        if (!s || s->len == 0) return ItemNull;
+        int target_idx = (int)js_get_number(args[0]);
+        if (target_idx < 0) return ItemNull;
+        // walk UTF-8, counting UTF-16 code units to find the right position
+        int utf16_idx = 0;
+        int byte_pos = 0;
+        while (byte_pos < (int)s->len) {
+            unsigned char b = (unsigned char)s->chars[byte_pos];
+            uint32_t cp = 0;
+            int bytes = 1;
+            if (b < 0x80) { cp = b; bytes = 1; }
+            else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+            else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+            else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+            for (int i = 1; i < bytes && byte_pos + i < (int)s->len; i++)
+                cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
+            if (utf16_idx == target_idx)
+                return (Item){.item = i2it((int64_t)cp)};
+            utf16_idx += (cp >= 0x10000) ? 2 : 1;
+            byte_pos += bytes;
+        }
+        return ItemNull;
     }
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         Item result = str;
@@ -2218,25 +2434,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
     }
-    // replaceAll — replace all occurrences
+    // replaceAll — redirect to unified replace handler
     if (method->len == 10 && strncmp(method->chars, "replaceAll", 10) == 0) {
         if (argc < 2) return str;
-        // repeatedly replace until no more occurrences
-        Item result = str;
-        String* search_str = it2s(js_to_string(args[0]));
-        if (!search_str || search_str->len == 0) return str;
-        int max_iter = 10000; // safety limit
-        while (max_iter-- > 0) {
-            Item replaced = fn_replace(result, args[0], args[1]);
-            // if nothing changed, we're done
-            String* r = it2s(replaced);
-            String* prev_s = it2s(result);
-            if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0) {
-                break;
-            }
-            result = replaced;
-        }
-        return result;
+        return js_string_replace_impl(str, args, argc, true);
     }
     // padStart(targetLength, padString?)
     if (method->len == 8 && strncmp(method->chars, "padStart", 8) == 0) {

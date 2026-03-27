@@ -3495,9 +3495,14 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
                 is_substantial = true;
             } else {
                 // BR, inline-block, image, etc. — always substantial
-                // Outside markers don't count (they're outside the principal box)
                 if (child->view_type == RDT_VIEW_MARKER) {
-                    is_substantial = false;
+                    // CSS 2.2 §12.5 + §8.3.1: An outside marker with visible content
+                    // (i.e., not list-style:none) prevents margin collapse-through.
+                    // The marker pseudo-element generates content that, per browser behavior,
+                    // makes the list-item non-self-collapsing even though the marker is
+                    // positioned outside the principal box.
+                    MarkerProp* mp = child->is_element() ? (MarkerProp*)((DomElement*)child)->blk : nullptr;
+                    is_substantial = (mp != nullptr);  // marker exists = has content
                 } else {
                     is_substantial = true;
                 }
@@ -5375,6 +5380,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 Section 12.5: List markers use implicit "list-item" counter
         if (display.outer == CSS_VALUE_LIST_ITEM || display.list_item) {
             process_list_item(lycon, block, elmt, dom_elem, display);
+
+            // CSS 2.1 §8.3.1: Ensure list items have BoundaryProp allocated so
+            // they participate correctly in margin collapsing. Without bound,
+            // the retroactive sibling collapse path (designed for anonymous
+            // wrappers) fires incorrectly, and parent-child collapse cannot
+            // store the propagated margin-top from child elements.
+            if (!block->bound) {
+                block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                memset(block->bound, 0, sizeof(BoundaryProp));
+            }
         }
     }
 
@@ -5694,7 +5709,27 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     ViewBlock* gp = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                     if (gp) {
                         View* first = gp->first_placed_child();
-                        while (first && first->is_block()) {
+                        // Find the first block child that participates in margin
+                        // collapse. Skip markers (CSS Lists 3 §4), floats, and
+                        // non-substantial inline/text content (whitespace between
+                        // block elements) that doesn't create separating line boxes.
+                        while (first) {
+                            if (first->view_type == RDT_VIEW_MARKER) {
+                                first = (View*)first->next_sibling;
+                                while (first && !first->view_type) first = (View*)first->next_sibling;
+                                continue;
+                            }
+                            if (!first->is_block()) {
+                                // Substantial inline/text content creates line boxes
+                                // that separate margins — stop searching.
+                                if (first->height > 0) break;
+                                if (first->view_type == RDT_VIEW_INLINE &&
+                                    is_inline_substantial((ViewElement*)first)) break;
+                                // Non-substantial (zero-height whitespace, empty inline)
+                                first = (View*)first->next_sibling;
+                                while (first && !first->view_type) first = (View*)first->next_sibling;
+                                continue;
+                            }
                             ViewBlock* fvb = (ViewBlock*)first;
                             if (fvb->position && element_has_float(fvb)) {
                                 first = (View*)first->next_sibling;
