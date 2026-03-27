@@ -221,6 +221,7 @@ struct MirTranspiler {
     // View/edit handler context: set when transpiling view body or handler
     bool in_view_context;          // true in view body or handler
     bool in_view_handler;          // true specifically in event handler
+    bool view_is_edit;             // true when the view/edit template is 'edit' (Phase 4)
     MIR_reg_t view_model_reg;      // register holding model Item for state ops
     const char* view_template_ref; // template ref string for state store keying
     int view_handler_counter;      // counter for generating handler function names
@@ -7546,6 +7547,41 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_INDEX_ASSIGN_STAM: {
         // arr[i] = val → inline store for ArrayInt, or fn_array_set fallback
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+
+        // ==================================================================
+        // Phase 4: Edit bridge — route through MarkEditor in edit handlers
+        // arr[i] = val → edit_array_set(arr, index, val) or
+        // element[i] = val → edit_elmt_replace_child(element, index, val)
+        // ==================================================================
+        if (mt->in_view_handler && mt->view_is_edit) {
+            MIR_reg_t obj = transpile_box_item(mt, ca->object);
+            MIR_reg_t idx = transpile_expr(mt, ca->key);
+            TypeId idx_tid = get_effective_type(mt, ca->key);
+            MIR_reg_t idx_int;
+            if (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) {
+                idx_int = idx;
+            } else {
+                idx_int = emit_unbox(mt, idx, LMD_TYPE_INT);
+            }
+            MIR_reg_t val_boxed = transpile_box_item(mt, ca->value);
+
+            TypeId obj_tid = get_effective_type(mt, ca->object);
+            const char* bridge_fn;
+            if (obj_tid == LMD_TYPE_ELEMENT) {
+                bridge_fn = "edit_elmt_replace_child";
+            } else {
+                bridge_fn = "edit_array_set";
+            }
+            // call bridge: Item edit_xxx(Item obj, int64_t index, Item value)
+            MIR_reg_t result = emit_call_3(mt, bridge_fn,
+                MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_boxed));
+            log_debug("mir: edit bridge index assign via %s", bridge_fn);
+            return result;
+        }
+
         MIR_reg_t obj = transpile_expr(mt, ca->object);
         TypeId obj_tid = get_effective_type(mt, ca->object);
         // Object must be a pointer (Array*), unbox if boxed
@@ -7807,6 +7843,39 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         // obj.field = val → fn_map_set(boxed_obj, boxed_key, boxed_val)
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+
+        // ==================================================================
+        // Phase 4: Edit bridge — route through MarkEditor in edit handlers
+        // When in an edit handler (is_edit=true), member assignments on the
+        // model are routed through edit_map_update / edit_elmt_update_attr
+        // instead of direct in-place mutation.
+        // ==================================================================
+        if (mt->in_view_handler && mt->view_is_edit &&
+            ca->key->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)ca->key;
+            MIR_reg_t obj = transpile_box_item(mt, ca->object);
+            MIR_reg_t val_boxed = transpile_box_item(mt, ca->value);
+            // load key string pointer
+            MIR_reg_t key_ptr = emit_load_string_literal(mt, ident->name->chars);
+
+            // determine whether object is element or map and call appropriate bridge
+            TypeId obj_tid = get_effective_type(mt, ca->object);
+            const char* bridge_fn;
+            if (obj_tid == LMD_TYPE_ELEMENT) {
+                bridge_fn = "edit_elmt_update_attr";
+            } else {
+                bridge_fn = "edit_map_update";
+            }
+            // call bridge: Item edit_xxx(Item obj, const char* key, Item value)
+            MIR_reg_t result = emit_call_3(mt, bridge_fn,
+                MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_ptr),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_boxed));
+            log_debug("mir: edit bridge member assign via %s for '%.*s'",
+                      bridge_fn, (int)ident->name->len, ident->name->chars);
+            return result;
+        }
 
         // ==================================================================
         // Phase 3: Direct field write optimization for typed maps/objects
@@ -10467,11 +10536,13 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     // save outer view context
     bool saved_in_view_context = mt->in_view_context;
     bool saved_in_view_handler = mt->in_view_handler;
+    bool saved_view_is_edit = mt->view_is_edit;
     MIR_reg_t saved_view_model_reg = mt->view_model_reg;
     const char* saved_view_template_ref = mt->view_template_ref;
 
     mt->in_view_context = true;
     mt->in_view_handler = false;
+    mt->view_is_edit = view->is_edit;
     mt->view_template_ref = tmpl_ref;
 
     // set up parameter scope: bind the model parameter as 'it'
@@ -10526,6 +10597,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     // restore outer view context
     mt->in_view_context = saved_in_view_context;
     mt->in_view_handler = saved_in_view_handler;
+    mt->view_is_edit = saved_view_is_edit;
     mt->view_model_reg = saved_view_model_reg;
     mt->view_template_ref = saved_view_template_ref;
 
@@ -10569,6 +10641,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     bool saved_block_returned = mt->block_returned;
     bool saved_in_view_context = mt->in_view_context;
     bool saved_in_view_handler = mt->in_view_handler;
+    bool saved_view_is_edit = mt->view_is_edit;
     MIR_reg_t saved_view_model_reg = mt->view_model_reg;
     const char* saved_view_template_ref = mt->view_template_ref;
 
@@ -10629,6 +10702,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
 
     mt->in_view_context = true;
     mt->in_view_handler = true;
+    mt->view_is_edit = view->is_edit;
     mt->view_template_ref = tmpl_ref;
 
     // set up handler scope: bind model parameter
@@ -10657,6 +10731,14 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         transpile_expr(mt, handler->body);
     }
 
+    // Phase 4: auto-commit after edit handler body completes
+    if (view->is_edit) {
+        // call edit_commit(NULL) to commit the changes as a version
+        emit_call_1(mt, "edit_commit", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        log_debug("mir: edit handler auto-commit for '%s'", handler_name);
+    }
+
     // emit return ItemNull (handlers are void-like)
     MIR_reg_t null_r = new_reg(mt, "null_ret", MIR_T_I64);
     uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -10671,6 +10753,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     // restore all saved context
     mt->in_view_context = saved_in_view_context;
     mt->in_view_handler = saved_in_view_handler;
+    mt->view_is_edit = saved_view_is_edit;
     mt->view_model_reg = saved_view_model_reg;
     mt->view_template_ref = saved_view_template_ref;
     mt->current_func_item = saved_func_item;

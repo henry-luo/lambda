@@ -397,7 +397,10 @@ class LayoutDevTool {
 
       renderProcess.on('close', async (code) => {
         console.log('Render process exited with code:', code);
-        if (code === 0) {
+        // code === null means the process was killed by a signal (e.g. SIGABRT from a
+        // crash in cleanup code after the PNG was already written). In that case we
+        // still try to use the output file if it exists.
+        if (code === 0 || code === null) {
           // Check if output file exists
           try {
             await fs.access(outputPath);
@@ -408,8 +411,12 @@ class LayoutDevTool {
               pixelRatio: pixelRatio
             });
           } catch (e) {
-            console.error('Output file not found:', outputPath);
-            reject(new Error('Render output file not created'));
+            if (code === null) {
+              reject(new Error(`Render process killed by signal: ${stderr}`));
+            } else {
+              console.error('Output file not found:', outputPath);
+              reject(new Error('Render output file not created'));
+            }
           }
         } else {
           reject(new Error(`Render failed with exit code ${code}: ${stderr}`));

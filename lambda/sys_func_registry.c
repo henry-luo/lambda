@@ -54,6 +54,32 @@ extern bool render_map_has_dirty(void);
 extern int render_map_retransform(void);
 extern Item render_map_get_result(Item source_item, const char* template_ref);
 
+// edit bridge (reactive UI Phase 4 — MarkEditor integration)
+extern int edit_bridge_init(void* input_ptr);
+extern void edit_bridge_destroy(void);
+extern bool edit_bridge_active(void);
+extern Item edit_map_update(Item map, const char* key, Item value);
+extern Item edit_map_delete(Item map, const char* key);
+extern Item edit_elmt_update_attr(Item element, const char* attr_name, Item value);
+extern Item edit_elmt_delete_attr(Item element, const char* attr_name);
+extern Item edit_elmt_insert_child(Item element, int index, Item child);
+extern Item edit_elmt_delete_child(Item element, int index);
+extern Item edit_elmt_replace_child(Item element, int index, Item new_child);
+extern Item edit_array_set(Item array, int64_t index, Item value);
+extern Item edit_array_insert(Item array, int64_t index, Item value);
+extern Item edit_array_delete(Item array, int64_t index);
+extern Item edit_array_append(Item array, Item value);
+extern int edit_commit(const char* description);
+extern bool edit_undo(void);
+extern bool edit_redo(void);
+extern Item edit_current(void);
+
+// edit bridge sys func wrappers
+extern Item fn_undo(void);
+extern Item fn_redo(void);
+extern Item fn_commit0(void);
+extern Item fn_commit1(Item description);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -617,6 +643,21 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_APPLY2, "apply", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
+
+    // ========================================================================
+    // Edit bridge version control (reactive UI Phase 4)
+    // ========================================================================
+    {SYSFUNC_EDIT_UNDO, "undo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_undo", FPTR(fn_undo), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_COMMIT, "commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -1652,6 +1693,28 @@ JitImport jit_runtime_imports[] = {
     {"render_map_has_dirty", FPTR(render_map_has_dirty)},
     {"render_map_retransform", FPTR(render_map_retransform)},
     {"render_map_get_result", FPTR(render_map_get_result)},
+
+    // ========================================================================
+    // Edit bridge (reactive UI Phase 4 — MarkEditor integration)
+    // ========================================================================
+    {"edit_bridge_init", FPTR(edit_bridge_init)},
+    {"edit_bridge_destroy", FPTR(edit_bridge_destroy)},
+    {"edit_bridge_active", FPTR(edit_bridge_active)},
+    {"edit_map_update", FPTR(edit_map_update)},
+    {"edit_map_delete", FPTR(edit_map_delete)},
+    {"edit_elmt_update_attr", FPTR(edit_elmt_update_attr)},
+    {"edit_elmt_delete_attr", FPTR(edit_elmt_delete_attr)},
+    {"edit_elmt_insert_child", FPTR(edit_elmt_insert_child)},
+    {"edit_elmt_delete_child", FPTR(edit_elmt_delete_child)},
+    {"edit_elmt_replace_child", FPTR(edit_elmt_replace_child)},
+    {"edit_array_set", FPTR(edit_array_set)},
+    {"edit_array_insert", FPTR(edit_array_insert)},
+    {"edit_array_delete", FPTR(edit_array_delete)},
+    {"edit_array_append", FPTR(edit_array_append)},
+    {"edit_commit", FPTR(edit_commit)},
+    {"edit_undo", FPTR(edit_undo)},
+    {"edit_redo", FPTR(edit_redo)},
+    {"edit_current", FPTR(edit_current)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);
