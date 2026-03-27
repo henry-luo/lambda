@@ -635,6 +635,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         int css_height = (int)(height / ui_context.pixel_ratio);
 
         // Load document based on file extension
+        log_notice("view: loading document...");
         DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
@@ -643,6 +644,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
             ui_context_cleanup(&ui_context);
             return -1;
         }
+        log_notice("view: document loaded, starting layout...");
 
         // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
         // For HTML documents, this updates the default; for PDF/SVG/Image, this was already set in loader
@@ -669,12 +671,14 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         if (doc->root) {
             layout_html_doc(&ui_context, doc, false);
         }
+        log_notice("view: layout complete, rendering...");
         // PDF scaling now happens inside pdf_page_to_view_tree
 
         // Render document
         if (doc && doc->view_tree) {
             render_html_doc(&ui_context, doc->view_tree, NULL);
         }
+        log_notice("view: render complete");
 
         url_destroy(cwd);
 

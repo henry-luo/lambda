@@ -86,6 +86,8 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
  * Recursively walk the Element* tree, collecting <script> source text
  * and the body onload handler in document order.
  */
+static int skipped_external_scripts = 0;
+
 static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf* onload_buf) {
     if (!elem) return;
 
@@ -139,6 +141,7 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         const char* src_attr = extract_element_attribute(elem, "src", nullptr);
         if (src_attr && src_attr[0]) {
             log_debug("script_runner: skipping external <script src='%s'>", src_attr);
+            skipped_external_scripts++;
             return;
         }
         // extract inline script source
@@ -167,6 +170,9 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         return;
     }
 
+    // reset external script counter
+    skipped_external_scripts = 0;
+
     // collect all scripts and onload handlers
     StrBuf* script_buf = strbuf_new_cap(4096);
     StrBuf* onload_buf = strbuf_new_cap(256);
@@ -188,6 +194,12 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         return;
     }
 
+    // log skipped external scripts
+    if (skipped_external_scripts > 0) {
+        log_notice("script_runner: skipped %d external <script src=...> (not supported), inline scripts may have missing dependencies",
+            skipped_external_scripts);
+    }
+
     // Wrap script code with window object support:
     // 1. Prepend: var window = {};  (provides window.onload, window.setTimeout etc.)
     // 2. Append: auto-call window.onload() if set by scripts
@@ -197,6 +209,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         "var window = {};\n"
         "function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }\n"
         "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); }\n"
+        "window.setTimeout = setTimeout;\n"
+        "window.setInterval = setInterval;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
     strbuf_append_str(wrapped_buf, "\nif (window.onload) { window.onload(); }\n");

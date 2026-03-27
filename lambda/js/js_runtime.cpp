@@ -838,8 +838,11 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
         if (entry) {
             return _map_read_field(entry, m->data);
         }
-        // Not found in hash table — check for spread/nested maps (rare)
+        // Not found in hash table — may have overflowed (capacity=32).
+        // Walk all named fields linearly to catch overflow entries, and also
+        // check unnamed (nested/spread) entries.
         ShapeEntry* field = map_type->shape;
+        Item overflow_result = ItemNull;
         while (field) {
             if (!field->name) {
                 Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
@@ -848,10 +851,14 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
                     Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
                     if (nested_found) return nested_result;
                 }
+            } else if (field->name->str == key_str ||  // A6: interned pointer match
+                       (field->name->length == (size_t)key_len &&
+                        memcmp(field->name->str, key_str, key_len) == 0)) {
+                overflow_result = _map_read_field(field, m->data);
             }
             field = field->next;
         }
-        return ItemNull;
+        return overflow_result;
     }
 
     // Fallback: linear scan for objects without hash table
@@ -1501,7 +1508,7 @@ static int js_call_count = 0;
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_error("js_debug_check_callee: NULL callee at site_id=%lld (type=%d, call_count=%d)",
+        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d, call_count=%d)",
             (long long)site_id, get_type_id(callee), js_call_count);
     }
     return ItemNull;
@@ -1511,7 +1518,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     js_call_count++;
 
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
+        log_debug("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
             js_call_count, get_type_id(func_item), (unsigned long long)func_item.item, arg_count,
             get_type_id(this_val));
         return ItemNull;

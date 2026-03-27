@@ -89,6 +89,7 @@ extern bool target_equal(Target* a, Target* b);
 #include "py/py_class.h"
 #include "py/py_bigint.h"
 #include "py/py_async.h"
+#include "py/py_stdlib.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"

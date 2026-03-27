@@ -14483,10 +14483,12 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     log_notice("js-mir: executing JIT compiled code");
     js_reset_module_vars();
     Item result = js_main((Context*)context);
+    log_notice("js-mir: JIT execution returned (type=%d)", get_type_id(result));
 
     // v14: drain the event loop while JIT module is still alive
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
+    log_notice("js-mir: event loop drained");
 
     // Handle result (same logic as js_transpiler_compile)
     Item final_result;
