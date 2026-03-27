@@ -1,0 +1,31 @@
+{
+  "title": "My Todo List",
+  "lists": [
+    {
+      "name": "Work",
+      "open": true,
+      "items": [
+        {"id": 1, "text": "Review pull requests", "done": false},
+        {"id": 2, "text": "Update documentation", "done": true},
+        {"id": 3, "text": "Fix CI pipeline", "done": false}
+      ]
+    },
+    {
+      "name": "Personal",
+      "open": true,
+      "items": [
+        {"id": 4, "text": "Buy groceries", "done": false},
+        {"id": 5, "text": "Go for a run", "done": true},
+        {"id": 6, "text": "Read a book", "done": false}
+      ]
+    },
+    {
+      "name": "Learning",
+      "open": false,
+      "items": [
+        {"id": 7, "text": "Study Lambda Script", "done": false},
+        {"id": 8, "text": "Practice CSS Grid", "done": true}
+      ]
+    }
+  ]
+}

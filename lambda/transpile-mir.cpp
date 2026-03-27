@@ -63,7 +63,6 @@ extern Url* get_current_dir();
 // Forward declare Runner helper functions from runner.cpp
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
-void runner_cleanup(Runner* runner);
 void clear_persistent_last_error();
 extern __thread LambdaError* persistent_last_error;
 extern __thread EvalContext* context;
@@ -11742,30 +11741,16 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
-        MarkBuilder builder(output);
-        output->root = builder.deep_copy(result);
 
-        // Preserve runtime error before cleanup
-        if (context && context->last_error) {
-            clear_persistent_last_error();
-            persistent_last_error = context->last_error;
-            context->last_error = NULL;
-        }
-
-        runner_cleanup(&runner);
-
-        // Prevent double-cleanup: runtime_cleanup() iterates scripts and calls jit_cleanup
-        runner.script->jit_context = NULL;
-        jit_cleanup(ctx);
+        // Return result directly on the GC heap — no deep_copy needed.
+        // With GC-managed memory the heap is retained across the session;
+        // the caller is responsible for calling runtime_cleanup() when done.
+        output->root = result;
         return output;
     }
 
     // Execute (no imports — use standard path)
     Input* output = execute_script_and_create_output(&runner, run_main);
-
-    // Prevent double-cleanup
-    runner.script->jit_context = NULL;
-    jit_cleanup(ctx);
 
     return output;
 }
