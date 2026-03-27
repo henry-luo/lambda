@@ -8,6 +8,7 @@
 #include "py_runtime.h"
 #include "py_bigint.h"
 #include "py_async.h"
+#include "py_stdlib.h"
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
@@ -3741,9 +3742,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
 
         Item ns = ItemNull;
 
-        // --- check built-in modules first (Phase D+) ---
-        if ((int)strlen("asyncio") == mod_len && strncmp(mod_name, "asyncio", mod_len) == 0) {
-            ns = py_stdlib_asyncio_init();
+        // --- check built-in modules first (Phase C/D) ---
+        PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
+        if (builtin_init) {
+            ns = builtin_init();
         }
 
         if (ns.item == ItemNull.item) {
@@ -3957,10 +3959,18 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         const char* base_path = path_buf->str;
         int base_len = (int)path_buf->length;
 
+        // --- check built-in modules first (Phase C) ---
+        PyBuiltinModuleInitFn builtin_init_from = py_stdlib_find_builtin(mod_name, mod_len);
+        if (builtin_init_from) {
+            ns = builtin_init_from();
+        }
+
         // try .py first
         StrBuf* try_buf = strbuf_new();
+        if (ns.item == ItemNull.item) {
         strbuf_append_format(try_buf, "%s.py", base_path);
         ns = load_py_module(mt->runtime, try_buf->str);
+        }
 
         if (ns.item == ItemNull.item) {
             // try .js
