@@ -2627,6 +2627,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     DomElement* dom_elem = dom_element_create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
 
+    // Extract source line number if tracked during HTML5 parsing
+    ConstItem sl_attr = elem->get_attr("__source_line");
+    if (((Item*)&sl_attr)->_type_id == LMD_TYPE_INT) {
+        dom_elem->source_line = (int)((Item*)&sl_attr)->int_val;
+    }
+
     // Cache id attribute from native element (if present)
     const char* id_value = extract_element_attribute(elem, "id", doc->arena);
     if (id_value) {

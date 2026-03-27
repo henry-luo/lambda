@@ -1214,7 +1214,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    log_debug("layout node %s, advance_y: %f", node->node_name(), lycon->block.advance_y);
+    log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
 
     // Log for IMG elements
     uintptr_t node_tag = node->tag();
@@ -1303,7 +1303,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
-        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
+        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->source_loc(), display.outer, display.inner);
 
         // Log IMG display resolution
         if (node_tag == HTM_TAG_IMG) {
@@ -1555,7 +1555,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_info("[TIMING] layout: context init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
 
     // resolve CSS style
-    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
+    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->source_loc());
     dom_node_resolve_style(elmt, lycon);
     log_debug("DEBUG: After resolve style");
 

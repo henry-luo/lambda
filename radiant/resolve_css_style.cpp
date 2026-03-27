@@ -571,7 +571,7 @@ DisplayValue resolve_display_value(void* child) {
         DomElement* dom_elem = node->as_element();
         uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
 
-        log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
+        log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->source_loc());
 
         // CSS 2.1 §9.7: Check for float and position - floated or absolutely positioned elements get blockified
         CssEnum float_value = get_float_value_from_style(dom_elem);

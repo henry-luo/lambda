@@ -222,7 +222,17 @@ typedef struct Html5Parser {
 
     // Error collection
     Html5ErrorList errors;
+
+    // Source line tracking (optional, enabled via Html5ParseOptions)
+    bool track_source_lines;    // whether to record source line numbers on elements
+    int current_line;           // running line counter (1-based)
+    size_t line_scan_pos;       // byte position up to which lines have been counted
 } Html5Parser;
+
+// Parse options for html5_parse_ex
+typedef struct Html5ParseOptions {
+    bool track_source_lines;    // store __source_line attribute on elements
+} Html5ParseOptions;
 
 // Parser lifecycle
 Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input);
@@ -230,6 +240,9 @@ void html5_parser_destroy(Html5Parser* parser);
 
 // Main parsing function
 Element* html5_parse(Input* input, const char* html);
+
+// Extended parsing function with options
+Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 
 // Fragment parsing (for markdown HTML blocks/inline)
 // Creates a parser in body mode for parsing HTML fragments

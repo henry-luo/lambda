@@ -532,8 +532,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_info("=== layout_flex_container ENTRY ===");
     FlexContainerLayout* flex_layout = lycon->flex_container;
 
-    log_info("FLEX START - container: %dx%d at (%d,%d)",
-           container->width, container->height, container->x, container->y);
+    log_info("FLEX START %s - container: %dx%d at (%d,%d)",
+           container->source_loc(), container->width, container->height, container->x, container->y);
     log_debug("FLEX PROPERTIES - direction=%d, align_items=%d, justify=%d, wrap=%d",
            flex_layout->direction, flex_layout->align_items, flex_layout->justify, flex_layout->wrap);
     // DEBUG: Gap settings applied
@@ -2240,11 +2240,11 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // (correct container_content_width) after CSS has been re-resolved above.
         // Without this, the cached measured_height (computed with wrong % parent) is reused.
         invalidate_measurement_cache_for_node(child);
-        log_debug("Step 1: Creating View for %s", child->node_name());
+        log_debug("Step 1: Creating View for %s", child->source_loc());
         init_flex_item_view(lycon, child);
 
         // Step 2: Measure content (uses resolved styles)
-        log_debug("Step 2: Measuring content for %s", child->node_name());
+        log_debug("Step 2: Measuring content for %s", child->source_loc());
         measure_flex_child_content(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup

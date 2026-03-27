@@ -2954,9 +2954,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_FLEX) {
                 auto t_flex_start = high_resolution_clock::now();
-                log_debug("Setting up flex container for %s", block->node_name());
+                log_debug("Setting up flex container for %s", block->source_loc());
                 layout_flex_content(lycon, block);
-                log_debug("Finished flex container layout for %s", block->node_name());
+                log_debug("Finished flex container layout for %s", block->source_loc());
                 g_flex_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_flex_start).count();
 
                 // After flex layout, update content_height/advance_y from container height
@@ -2976,10 +2976,10 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
             else if (block->display.inner == CSS_VALUE_GRID) {
                 auto t_grid_start = high_resolution_clock::now();
-                log_debug("Setting up grid container for %s (multipass)", block->node_name());
+                log_debug("Setting up grid container for %s (multipass)", block->source_loc());
                 // Use multipass grid layout (similar to flex layout pattern)
                 layout_grid_content(lycon, block);
-                log_debug("Finished grid container layout for %s", block->node_name());
+                log_debug("Finished grid container layout for %s", block->source_loc());
                 g_grid_layout_time += duration<double, std::milli>(high_resolution_clock::now() - t_grid_start).count();
 
                 // After grid layout, update content_height/advance_y from container height
@@ -3933,7 +3933,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         lycon->block.establishing_element = block;
         // Reset float lists for new BFC (children won't see parent's floats)
         block_context_reset_floats(&lycon->block);
-        log_debug("[BlockContext] Block %s establishes new BFC", block->node_name());
+        log_debug("[BlockContext] Block %s establishes new BFC", block->source_loc());
     } else {
         // Clear is_bfc_root so we don't inherit it from parent
         // This ensures block_context_find_bfc walks up to the actual BFC root
@@ -3988,7 +3988,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
 
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
-        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->node_name());
+        log_debug("[IMG LAYOUT] Processing IMG element: %s", block->source_loc());
         const char *value;
         value = block->get_attribute("src");
         log_debug("[IMG LAYOUT] src attribute: %s", value ? value : "NULL");
@@ -5182,13 +5182,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     uintptr_t tag = elmt->tag();
     if (tag == HTM_TAG_IMG) {
-        log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->node_name());
+        log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->source_loc());
     }
     auto t_block_start = high_resolution_clock::now();
 
     log_enter();
     // display: CSS_VALUE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_LIST_ITEM
-    log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->node_name(), display.outer, display.inner);
+    log_debug("layout block %s (display: outer=%d, inner=%d)", elmt->source_loc(), display.outer, display.inner);
 
     // check for display math elements (class="math display")
     if (elmt->is_element()) {
@@ -5262,7 +5262,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
     lycon->block.parent = &pa_block;  lycon->elmt = elmt;
-    log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->node_name());
+    log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->source_loc());
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
@@ -5317,7 +5317,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             return;
         }
         g_layout_cache_misses++;
-        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->node_name(), (int)lycon->run_mode);
+        log_debug("BLOCK CACHE MISS: element=%s, mode=%d", elmt->source_loc(), (int)lycon->run_mode);
     }
 
     // Early bailout for ComputeSize mode when both dimensions are known

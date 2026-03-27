@@ -37,6 +37,53 @@ After the `word-spacing-003` experience (browser captured a wrong reference beca
 
 The `log.txt` file has detailed trace output from layout, but there's no easy way to correlate a line in `log.txt` with a specific element in the test output. Adding the element's CSS selector path (e.g., `body > div.ws > span:nth-child(2)`) to key log lines would make `grep` much more useful.
 
+### G. HTML Source Line Tracking (IMPLEMENTED)
+
+**Problem**: Layout debug logs identify elements by tag name alone (`div`, `span`, `img`), making it hard to correlate log messages with specific elements in the source HTML when the document contains many elements of the same type.
+
+**Solution**: Track the source line number of each HTML element from parsing through to layout logging, so log messages display `tag:line` (e.g., `div:42`, `img:105`, `p:300`) instead of just the tag name.
+
+**Architecture**:
+
+1. **Parse-time line counting** (`html5_tokenizer.cpp`): An incremental scanner `html5_update_line_count()` counts `\n` characters as the tokenizer advances. When a start-tag token is created (in `HTML5_TOK_TAG_OPEN` state), the current line number is stamped on the token's `source_line` field. Total work is O(n) across the document.
+
+2. **Element attribute storage** (`html5_parser.cpp`): When `track_source_lines` is enabled, `html5_create_element_for_token()` stores `__source_line` as an integer attribute on the Lambda `Element` via `ElementBuilder::attr()`.
+
+3. **DOM propagation** (`dom_element.cpp`): `build_dom_tree_from_element()` reads the `__source_line` attribute from each Element and copies it to `DomNode::source_line`.
+
+4. **Log formatting** (`dom_node.cpp`): `DomNode::source_loc()` returns `"tag:line"` if `source_line > 0`, else falls back to `node_name()`. Uses a ring of 4 static buffers so multiple `source_loc()` calls work in a single log statement.
+
+5. **Layout integration**: Key `log_debug` calls in `layout_block.cpp`, `layout_flex.cpp`, `layout_table.cpp`, `layout_inline.cpp`, `layout.cpp`, and `resolve_css_style.cpp` use `source_loc()` instead of `node_name()`.
+
+**API**:
+
+```c
+// New parse options struct
+typedef struct Html5ParseOptions {
+    bool track_source_lines;  // default: false
+} Html5ParseOptions;
+
+// Extended parse function
+Element* html5_parse_ex(Input* input, const char* source, Html5ParseOptions* opts);
+
+// DomNode additions
+struct DomNode {
+    int source_line;                  // 0 = not tracked
+    const char* source_loc() const;   // returns "tag:line" or node_name()
+};
+```
+
+**Activation**: Source line tracking is enabled automatically when `--debug` is passed to `lambda layout` (single-test mode). The flag flows through `layout_single_file()` → `load_lambda_html_doc()` → `html5_parse_ex()`.
+
+**Example log output** (with `--debug`):
+```
+layout block div:12
+layout block div:25
+layout inline span:30
+FLEX START div:42 ...
+layout block img:105
+```
+
 ---
 
 ## 2. Code Organization Assessment
