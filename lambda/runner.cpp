@@ -1142,6 +1142,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
 void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
+    runner->runtime = runtime;
 }
 
 #include "../lib/url.h"
@@ -1160,15 +1161,8 @@ void runner_setup_context(Runner* runner) {
     runner->context.pool = runner->script->pool;
     runner->context.type_list = runner->script->type_list;
 
-    // Initialize name_pool for runtime-generated names (separate from script's name_pool)
-    runner->context.name_pool = name_pool_create(runner->context.pool, nullptr);
-    if (!runner->context.name_pool) {
-        log_error("Failed to create runtime name_pool");
-    }
-
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
-    runner->context.nursery = gc_nursery_create(0);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
@@ -1184,64 +1178,38 @@ void runner_setup_context(Runner* runner) {
     runner->context.last_error = NULL;
 
     input_context = context = &runner->context;
-    heap_init();
-    context->pool = context->heap->pool;
+
+    // Reuse or create the GC heap, nursery, and name_pool from the Runtime.
+    // These persist across multiple evaluations on the same Runtime.
+    Runtime* rt = runner->runtime;
+    if (rt && rt->heap) {
+        // Reuse retained heap, nursery, name_pool from a previous evaluation
+        log_debug("runner_setup_context: reusing retained heap from Runtime");
+        context->heap = rt->heap;
+        context->nursery = rt->nursery;
+        context->name_pool = rt->name_pool;
+        context->pool = context->heap->pool;
+    } else {
+        // First evaluation on this Runtime — create fresh resources
+        context->nursery = gc_nursery_create(0);
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        if (!context->name_pool) {
+            log_error("Failed to create runtime name_pool");
+        }
+        heap_init();
+        context->pool = context->heap->pool;
+        // Store on Runtime for reuse
+        if (rt) {
+            rt->heap = context->heap;
+            rt->nursery = context->nursery;
+            rt->name_pool = context->name_pool;
+        }
+    }
 
     // Initialize template registry for view/edit template dispatch
     if (!g_template_registry) {
         g_template_registry = template_registry_new();
     }
-}
-
-void runner_cleanup(Runner* runner) {
-    log_debug("runner cleanup start");
-    if (!runner) {
-        log_debug("runner is NULL, skipping cleanup");
-        return;
-    }
-
-    // heap cleanup is handled by gc_finalize_all_objects + pool_destroy
-    if (runner->context.heap) {
-        log_debug("heap cleanup starting");
-    }
-
-    // free final result
-    if (runner->context.heap) {
-        log_debug("cleaning up heap");
-        print_heap_entries();
-        log_debug("freeing final result -----------------");
-        if (runner->context.result.item) free_item(runner->context.result, true);
-        // check memory leaks
-        check_memory_leak();
-        heap_destroy();
-        if (runner->context.nursery) gc_nursery_destroy(runner->context.nursery);
-    }
-    // decimal context is now shared global - don't free it
-    runner->context.decimal_ctx = NULL;
-    // free runtime name_pool (hashmap is malloc-allocated, must be explicitly freed)
-    if (runner->context.name_pool) {
-        name_pool_release(runner->context.name_pool);
-        runner->context.name_pool = NULL;
-    }
-    // free AST validator
-    if (runner->context.validator) {
-        log_debug("freeing validator");
-        schema_validator_destroy(runner->context.validator);
-        runner->context.validator = NULL;
-    }
-    // free last runtime error
-    if (runner->context.last_error) {
-        log_debug("freeing last error");
-        err_free(runner->context.last_error);
-        runner->context.last_error = NULL;
-    }
-
-    // Clear thread-local context pointers to prevent stale access
-    // between consecutive script executions (batch mode)
-    context = NULL;
-    input_context = NULL;
-
-    log_debug("runner cleanup end");
 }
 
 // Helper function to recursively resolve all sys:// paths in an Item tree
@@ -1272,24 +1240,18 @@ void resolve_sys_paths_recursive(Item item) {
 }
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
-// This handles the execution, result wrapping, and cleanup logic shared between run_script and run_script_with_run_main
-// Made non-static so it can be used by MIR execution path in transpile-mir.cpp
-// When retain_context=true, skip deep_copy and runner_cleanup, return result directly
-// on the GC heap so pointers remain valid for reactive event handlers.
-Input* execute_script_and_create_output(Runner* runner, bool run_main, bool retain_context) {
+// The GC heap is retained on the Runtime — caller calls runtime_cleanup() when done.
+Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
-        // Return Input with error item instead of nullptr
         Pool* error_pool = pool_create();
         Input* output = Input::create(error_pool, nullptr);
         if (!output) {
             log_error("Failed to create error output Input");
             if (error_pool) pool_destroy(error_pool);
-            runner_cleanup(runner);
             return nullptr;
         }
         output->root = ItemError;
-        runner_cleanup(runner);
         return output;
     }
 
@@ -1344,30 +1306,16 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main, bool reta
     if (!output) {
         log_error("Failed to create output Input");
         if (output_pool) pool_destroy(output_pool);
-        runner_cleanup(runner);
         return nullptr;
     }
 
-    // Resolve all sys:// paths in result before deep copy (while context is still valid)
+    // Resolve all sys:// paths in result (while context is still valid)
     resolve_sys_paths_recursive(result);
 
-    if (retain_context) {
-        // Skip deep_copy: return result directly on the GC heap.
-        // Caller is responsible for keeping the runtime alive.
-        output->root = result;
-        log_info("retain_context: returning result directly (no deep_copy), root type_id: %d", get_type_id(result));
-    } else {
-        // Use MarkBuilder to deep copy result to output's arena
-        // This ensures all data is copied to the output's memory space
-        log_debug("Deep copying result using MarkBuilder, result.item=%016lx", result.item);
-        MarkBuilder builder(output);
-        output->root = builder.deep_copy(result);
-        log_debug("Deep copy completed, root type_id: %d", get_type_id(output->root));
-
-        // Now we can safely clean up the execution heap since output has its own copy
-        log_debug("Cleaning up execution context");
-        runner_cleanup(runner);
-    }
+    // Return result directly on the GC heap — no deep_copy needed.
+    // With GC-managed memory the heap is retained across the session;
+    // the caller is responsible for calling runtime_cleanup() when done.
+    output->root = result;
 
     log_debug("Script execution completed, returning output Input");
     return output;
@@ -1392,7 +1340,7 @@ Input* run_script(Runtime *runtime, const char* source, char* script_path, bool 
     }
 
     // Use common execution function with run_main=false
-    return execute_script_and_create_output(&runner, false, false);
+    return execute_script_and_create_output(&runner, false);
 }
 
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
@@ -1420,7 +1368,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
     }
 
     // Use common execution function with specified run_main flag
-    return execute_script_and_create_output(&runner, run_main, false);
+    return execute_script_and_create_output(&runner, run_main);
 }
 
 void runtime_init(Runtime* runtime) {
@@ -1434,11 +1382,60 @@ void runtime_init(Runtime* runtime) {
     module_registry_init();
 }
 
+// Reset the retained heap, nursery, and name_pool on a Runtime.
+// Used between independent evaluations (e.g. test-batch) so that each
+// script starts with a clean GC heap.  The next runner_setup_context()
+// call will create fresh heap/nursery/name_pool and store them back.
+void runtime_reset_heap(Runtime* runtime) {
+    if (runtime->heap) {
+        EvalContext tmp_ctx;
+        memset(&tmp_ctx, 0, sizeof(tmp_ctx));
+        tmp_ctx.heap = runtime->heap;
+        tmp_ctx.nursery = runtime->nursery;
+        tmp_ctx.result = ItemNull;
+        context = &tmp_ctx;
+
+        heap_destroy();
+        if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
+        runtime->heap = NULL;
+        runtime->nursery = NULL;
+        context = NULL;
+    }
+    if (runtime->name_pool) {
+        name_pool_release(runtime->name_pool);
+        runtime->name_pool = NULL;
+    }
+}
+
 void runtime_cleanup(Runtime* runtime) {
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
 
     module_registry_cleanup();
+
+    // Destroy retained execution state (heap, nursery, name_pool)
+    if (runtime->heap) {
+        // Set the thread-local context so heap_destroy can access context->heap
+        // (heap_destroy uses the context global)
+        EvalContext tmp_ctx;
+        memset(&tmp_ctx, 0, sizeof(tmp_ctx));
+        tmp_ctx.heap = runtime->heap;
+        tmp_ctx.nursery = runtime->nursery;
+        tmp_ctx.result = ItemNull;
+        context = &tmp_ctx;
+
+        print_heap_entries();
+        check_memory_leak();
+        heap_destroy();
+        if (runtime->nursery) gc_nursery_destroy(runtime->nursery);
+        runtime->heap = NULL;
+        runtime->nursery = NULL;
+        context = NULL;
+    }
+    if (runtime->name_pool) {
+        name_pool_release(runtime->name_pool);
+        runtime->name_pool = NULL;
+    }
 
     if (runtime->parser) ts_parser_delete(runtime->parser);
     if (runtime->scripts) {

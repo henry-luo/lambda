@@ -40,6 +40,7 @@ extern "C" {
 }
 
 typedef struct Runner {
+    Runtime* runtime;    // back-pointer to owning Runtime (for heap reuse)
     Script* script;
     EvalContext context;  // execution context
 } Runner;
@@ -55,6 +56,14 @@ struct Runtime {
     void* dom_doc;       // DomDocument* for JS DOM API (NULL when no document loaded)
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // if true, all modules (main + imports) compiled via MIR Direct instead of C2MIR
+
+    // Retained execution state (persistent across script evaluations).
+    // The GC heap, nursery, and name_pool are created on first evaluation
+    // and reused for subsequent evaluations / event handler invocations.
+    // Destroyed by runtime_cleanup().
+    Heap* heap;
+    gc_nursery_t* nursery;
+    NamePool* name_pool;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
@@ -114,7 +123,7 @@ void clear_dynamic_imports(void);
 }
 
 // MIR transpiler functions
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false, bool retain_context = false);
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,
@@ -123,14 +132,14 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
-void runner_cleanup(Runner* runner);
-Input* execute_script_and_create_output(Runner* runner, bool run_main, bool retain_context = false);
+Input* execute_script_and_create_output(Runner* runner, bool run_main);
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
+void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
 
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);

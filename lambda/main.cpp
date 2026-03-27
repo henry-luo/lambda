@@ -2156,6 +2156,8 @@ int main(int argc, char *argv[]) {
                 }
                 runtime.scripts->length = 0;
             }
+            // Reset heap/nursery/name_pool so the next test starts clean
+            runtime_reset_heap(&runtime);
         }
 
         runtime_cleanup(&runtime);

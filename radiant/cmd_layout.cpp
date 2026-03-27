@@ -3641,8 +3641,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     log_debug("[Lambda Script] Evaluating script...");
     // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
-    // retain_context=true: skip deep_copy, keep heap + JIT alive for reactive UI event handlers
-    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false, true);
+    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
