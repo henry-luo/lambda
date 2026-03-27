@@ -2,6 +2,7 @@
 // Provides reactive state keyed by (model_item, template_ref, state_name).
 #include "lambda-data.hpp"
 #include "template_state.h"
+#include "render_map.h"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include <string.h>
@@ -97,7 +98,11 @@ void tmpl_state_set(Item model_item, const char* template_ref,
     entry.key.state_name = state_name;
     entry.value = value;
     hashmap_set(map, &entry);
-    log_debug("tmpl_state_set: tmpl=%s state=%s",
+
+    // mark the render map entry dirty for observer-based reconciliation
+    render_map_mark_dirty(model_item, template_ref);
+
+    log_debug("tmpl_state_set: tmpl=%s state=%s (render map marked dirty)",
               template_ref ? template_ref : "(anon)", state_name);
 }
 

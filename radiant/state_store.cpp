@@ -159,6 +159,10 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     tmpl_state_init();
     state->template_state_map = tmpl_state_get_map();
 
+    // Initialize render map for observer-based reconciliation (Phase 3)
+    render_map_init();
+    state->render_map = render_map_get_map();
+
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }
@@ -170,6 +174,12 @@ void radiant_state_destroy(RadiantState* state) {
     if (state->template_state_map) {
         tmpl_state_set_map(NULL);
         state->template_state_map = NULL;
+    }
+
+    // Detach render map from global store before destroying
+    if (state->render_map) {
+        render_map_set_map(NULL);
+        state->render_map = NULL;
     }
 
     if (state->state_map) {
@@ -231,6 +241,9 @@ void radiant_state_reset(RadiantState* state) {
 
     // Clear template reactive state
     tmpl_state_reset();
+
+    // Clear render map
+    render_map_reset();
 
     state->version++;
 

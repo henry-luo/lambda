@@ -1,6 +1,7 @@
 // template_registry.cpp — Implementation of view/edit template registry and apply() dispatch
 #include "lambda-data.hpp"
 #include "template_registry.h"
+#include "render_map.h"
 #include "../lib/log.h"
 #include "../lib/mempool.h"
 #include <stdlib.h>
@@ -202,7 +203,14 @@ Item fn_apply1(Item target) {
         return target;  // pass through if no template matches
     }
 
-    return invoke_template(tmpl, target);
+    Item result = invoke_template(tmpl, target);
+
+    // record source→result mapping in the render map for observer-based reconciliation
+    if (tmpl->template_ref) {
+        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+    }
+
+    return result;
 }
 
 Item fn_apply2(Item target, Item options) {
@@ -248,5 +256,12 @@ Item fn_apply2(Item target, Item options) {
         return target;  // pass through
     }
 
-    return invoke_template(tmpl, target);
+    Item result = invoke_template(tmpl, target);
+
+    // record source→result mapping in the render map for observer-based reconciliation
+    if (tmpl->template_ref) {
+        render_map_record(target, tmpl->template_ref, result, ItemNull, -1);
+    }
+
+    return result;
 }
