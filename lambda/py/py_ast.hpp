@@ -328,6 +328,7 @@ typedef struct PyClassDefNode {
     PyAstNode* bases;               // base classes (linked list)
     PyAstNode* body;                // class body
     PyAstNode* decorators;
+    PyAstNode* metaclass;           // metaclass= keyword argument value (Phase F5)
 } PyClassDefNode;
 
 // Python try statement node

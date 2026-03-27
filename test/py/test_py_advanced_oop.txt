@@ -1,0 +1,6 @@
+['AudioPlugin', 'VideoPlugin', 'NetworkPlugin']
+TypedList[int]
+TypedList[str]
+True
+True
+['Alpha', 'Beta']

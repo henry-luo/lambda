@@ -1318,9 +1318,12 @@ JitImport jit_runtime_imports[] = {
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
     {"py_hasattr", FPTR(py_hasattr)},
+    {"py_delattr", FPTR(py_delattr)},
     {"py_new_object", FPTR(py_new_object)},
     // class system
     {"py_class_new", FPTR(py_class_new)},
+    {"py_class_new_meta", FPTR(py_class_new_meta)},
+    {"py_type_new", FPTR(py_type_new)},
     {"py_new_instance", FPTR(py_new_instance)},
     {"py_bind_method", FPTR(py_bind_method)},
     {"py_is_bound_method", FPTR(py_is_bound_method)},
