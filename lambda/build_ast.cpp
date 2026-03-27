@@ -42,6 +42,9 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node);
 // Forward declaration for function building (used by object type methods)
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global);
 
+// Forward declaration for view/edit template building
+AstNode* build_view_stam(Transpiler* tp, TSNode view_node);
+
 // Forward declaration for object type building (used by pub type)
 AstNode* build_object_type(Transpiler* tp, TSNode type_node);
 
@@ -1526,11 +1529,20 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         // Traditional function call lookup
         // If in pipe context without ~ reference, lookup with extra arg
         int lookup_arg_count = arg_count + tp->pipe_inject_args;
-        sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
-        if (sys_func_info && tp->pipe_inject_args > 0) {
-            log_debug("pipe inject: lookup %.*s with %d args (was %d)",
-                (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
-            ast_node->pipe_inject = true;
+
+        // Check if the function name resolves in user scope first;
+        // user-defined functions shadow system functions with the same name
+        NameEntry* user_name = lookup_name(tp, func_name);
+        bool user_shadows = (user_name != NULL && user_name->node != NULL &&
+            user_name->node->node_type == AST_NODE_FUNC);
+
+        if (!user_shadows) {
+            sys_func_info = get_sys_func_info(&func_name, lookup_arg_count);
+            if (sys_func_info && tp->pipe_inject_args > 0) {
+                log_debug("pipe inject: lookup %.*s with %d args (was %d)",
+                    (int)func_name.length, func_name.str, lookup_arg_count, arg_count);
+                ast_node->pipe_inject = true;
+            }
         }
         // Global import fallback: if `import math;` or `import io;` was used,
         // try prefixing the function name with the module name (e.g., sqrt -> math_sqrt)
@@ -6163,10 +6175,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 
         // check if name conflicts with a system function (only for global scope)
         if (is_global && is_sys_func_name(name.str, name.length)) {
-            record_semantic_error(tp, func_node, ERR_DUPLICATE_DEFINITION,
-                "cannot override system function '%.*s'",
+            log_debug("user function '%.*s' shadows system function with same name",
                 (int)name.length, name.str);
-            // continue anyway to allow further error checking
         }
 
         ast_node->name = name_pool_create_strview(tp->name_pool, name);
@@ -6342,6 +6352,194 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     return (AstNode*)ast_node;
 }
 
+// Build a view/edit template declaration
+AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
+    log_debug("build view/edit template");
+
+    AstViewNode* ast_node = (AstViewNode*)alloc_ast_node(tp,
+        AST_NODE_VIEW, view_node, sizeof(AstViewNode));
+    ast_node->type = &TYPE_ANY;
+
+    // determine view vs edit
+    TSNode kind = ts_node_child_by_field_id(view_node, FIELD_KIND);
+    if (!ts_node_is_null(kind)) {
+        StrView kind_str = ts_node_source(tp, kind);
+        ast_node->is_edit = strview_equal(&kind_str, "edit");
+    }
+    log_debug("is edit: %d", ast_node->is_edit);
+
+    // optional name (identifier followed by ':')
+    TSNode name_node = ts_node_child_by_field_id(view_node, FIELD_NAME);
+    if (!ts_node_is_null(name_node)) {
+        StrView name = node_name_text(tp, name_node);
+        ast_node->name = name_pool_create_strview(tp->name_pool, name);
+        log_debug("view template name: %.*s", (int)name.length, name.str);
+    }
+
+    // model pattern (required)
+    TSNode pattern_node = ts_node_child_by_field_id(view_node, FIELD_PATTERN);
+    if (!ts_node_is_null(pattern_node)) {
+        // view_pattern is a wrapper node — unwrap to get the actual type expression
+        TSSymbol pat_sym = ts_node_symbol(pattern_node);
+        if (pat_sym == SYM_VIEW_PATTERN) {
+            TSNode inner = ts_node_named_child(pattern_node, 0);
+            if (!ts_node_is_null(inner)) {
+                pattern_node = inner;
+            }
+        }
+        ast_node->pattern = build_expr(tp, pattern_node);
+    } else {
+        log_error("view/edit template missing required pattern");
+    }
+
+    // create scope for params, state, and body
+    ast_node->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = false; // body is functional
+    tp->current_scope = ast_node->vars;
+
+    // add ~ (current item) to scope — it refers to the matched model item
+    // (this is inherent to view/edit — ~ is always available)
+
+    // build parameters (optional)
+    AstNamedNode* prev_param = NULL;
+    TSTreeCursor cursor = ts_tree_cursor_new(view_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode* param = build_param_expr(tp, child, false);
+            if (param != NULL) {
+                if (prev_param == NULL) {
+                    ast_node->param = param;
+                } else {
+                    prev_param->next = (AstNode*)param;
+                }
+                prev_param = param;
+            }
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // build state declarations (optional)
+    TSNode state_node = ts_node_child_by_field_id(view_node, FIELD_STATE);
+    if (!ts_node_is_null(state_node)) {
+        AstStateEntry* prev_state = NULL;
+        TSNode child = ts_node_named_child(state_node, 0);
+        while (!ts_node_is_null(child)) {
+            TSSymbol sym = ts_node_symbol(child);
+            if (sym == SYM_STATE_ENTRY) {
+                AstStateEntry* entry = (AstStateEntry*)alloc_ast_node(tp,
+                    AST_NODE_STATE_ENTRY, child, sizeof(AstStateEntry));
+                entry->type = &TYPE_ANY;
+
+                TSNode name = ts_node_child_by_field_id(child, FIELD_NAME);
+                StrView name_str = node_name_text(tp, name);
+                entry->name = name_pool_create_strview(tp->name_pool, name_str);
+
+                TSNode value = ts_node_child_by_field_id(child, FIELD_VALUE);
+                if (!ts_node_is_null(value)) {
+                    entry->value = build_expr(tp, value);
+                }
+
+                log_debug("state entry: %.*s", (int)name_str.length, name_str.str);
+
+                // add state variable to scope (accessible in body and handlers)
+                AstNamedNode* state_named = (AstNamedNode*)alloc_ast_node(tp,
+                    AST_NODE_PARAM, child, sizeof(AstNamedNode));
+                state_named->name = entry->name;
+                state_named->type = entry->value ? entry->value->type : &TYPE_ANY;
+                push_name(tp, state_named, NULL);
+
+                if (prev_state == NULL) {
+                    ast_node->state = entry;
+                } else {
+                    prev_state->next_state = entry;
+                }
+                prev_state = entry;
+            }
+            child = ts_node_next_named_sibling(child);
+        }
+    }
+
+    // build body (functional — fn semantics)
+    TSNode body_node = ts_node_child_by_field_id(view_node, FIELD_BODY);
+    if (!ts_node_is_null(body_node)) {
+        ast_node->body = build_expr(tp, body_node);
+    }
+
+    // build event handlers (procedural — pn semantics)
+    AstEventHandler* prev_handler = NULL;
+    cursor = ts_tree_cursor_new(view_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_HANDLER) {
+            TSNode handler_node = ts_tree_cursor_current_node(&cursor);
+
+            AstEventHandler* handler = (AstEventHandler*)alloc_ast_node(tp,
+                AST_NODE_EVENT_HANDLER, handler_node, sizeof(AstEventHandler));
+            handler->type = &TYPE_ANY;
+
+            // event name
+            TSNode event_node = ts_node_child_by_field_id(handler_node, FIELD_EVENT);
+            if (!ts_node_is_null(event_node)) {
+                StrView event_str = node_name_text(tp, event_node);
+                handler->event = name_pool_create_strview(tp->name_pool, event_str);
+                log_debug("event handler: %.*s", (int)event_str.length, event_str.str);
+            }
+
+            // handler scope (procedural)
+            handler->vars = (NameScope*)pool_calloc(tp->pool, sizeof(NameScope));
+            handler->vars->parent = ast_node->vars; // inherits template scope (state vars, params)
+            handler->vars->is_proc = true; // handlers are procedural
+            tp->current_scope = handler->vars;
+
+            // optional event parameter
+            TSNode param_node = ts_node_child_by_field_id(handler_node, FIELD_DECLARE);
+            if (!ts_node_is_null(param_node)) {
+                handler->param = build_param_expr(tp, param_node, false);
+                // mark param as mutable in proc scope
+                if (handler->param) {
+                    NameEntry* entry = lookup_name_in_current_scope(tp, handler->param->name);
+                    if (entry) entry->is_mutable = true;
+                }
+            }
+
+            // handler body
+            TSNode handler_body = ts_node_child_by_field_id(handler_node, FIELD_BODY);
+            if (!ts_node_is_null(handler_body)) {
+                handler->body = build_expr(tp, handler_body);
+            }
+
+            // restore scope to template scope
+            tp->current_scope = ast_node->vars;
+
+            if (prev_handler == NULL) {
+                ast_node->handler = handler;
+            } else {
+                prev_handler->next_handler = handler;
+            }
+            prev_handler = handler;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // restore parent scope
+    tp->current_scope = ast_node->vars->parent;
+
+    // register named template in scope
+    if (ast_node->name) {
+        push_name(tp, (AstNamedNode*)ast_node, NULL);
+    }
+
+    log_debug("end building view/edit template");
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     log_debug("build content, is_global=%d", is_global);
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
@@ -6415,6 +6613,27 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
                 log_debug("pass 1: registering object type placeholder '%.*s'",
                     (int)obj_name.length, obj_name.str);
                 push_name(tp, (AstNamedNode*)obj_node, NULL);
+            }
+            else if (symbol == SYM_VIEW_STAM) {
+                // pre-register named view/edit templates for forward references
+                TSNode tmpl_name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+                if (!ts_node_is_null(tmpl_name_node)) {
+                    StrView tmpl_name = node_name_text(tp, tmpl_name_node);
+                    AstViewNode* view_node = (AstViewNode*)alloc_ast_node(tp,
+                        AST_NODE_VIEW, child, sizeof(AstViewNode));
+                    view_node->name = name_pool_create_strview(tp->name_pool, tmpl_name);
+                    view_node->type = &TYPE_ANY;
+                    view_node->pattern = NULL;
+                    view_node->param = NULL;
+                    view_node->body = NULL;
+                    view_node->state = NULL;
+                    view_node->handler = NULL;
+                    view_node->vars = NULL;
+
+                    log_debug("pass 1: registering view template placeholder '%.*s'",
+                        (int)tmpl_name.length, tmpl_name.str);
+                    push_name(tp, (AstNamedNode*)view_node, NULL);
+                }
             }
             child = ts_node_next_named_sibling(child);
         }
@@ -6888,6 +7107,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_func(tp, expr_node, true, false);
     case SYM_FUNC_EXPR:  // anonymous function
         return build_func(tp, expr_node, false, false);
+    case SYM_VIEW_STAM:
+        return build_view_stam(tp, expr_node);
     case SYM_STRING:  case SYM_SYMBOL:  case SYM_BINARY:
         return build_lit_node(tp, expr_node, true, symbol);
     case SYM_DATETIME: {

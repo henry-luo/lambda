@@ -277,6 +277,7 @@ module.exports = grammar({
       $.for_stam,
       $.while_stam,
       $.fn_stam,
+      $.view_stam,
       $.break_stam,
       $.continue_stam,
       $.return_stam,
@@ -519,6 +520,73 @@ module.exports = grammar({
       optional(field('type', $.return_type)),
       '{', field('body', $.content), '}',
     ),
+
+    // view/edit template declaration
+    // Syntax: view [name:] pattern [(params)] [return_type] [state k:v, ...] { body } [on event() { ... }]*
+    // Pattern is required; () optional unless return type present; name: optional
+    view_stam: $ => seq(
+      field('kind', choice('view', 'edit')),
+      // optional name: (colon disambiguates name from pattern)
+      optional(seq(field('name', $.identifier), ':')),
+      // model pattern — element, map, type name, or union with |
+      // Uses view_pattern (restricted _type_expr) to avoid {map_type}/{body} ambiguity
+      field('pattern', $.view_pattern),
+      // optional params and return type — () required if return type present
+      optional(seq(
+        '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
+        optional(field('type', $.return_type)),
+      )),
+      // optional state declarations
+      optional(field('state', $.state_decl)),
+      // body — functional (fn) semantics
+      '{', field('body', $.content), '}',
+      // zero or more event handlers
+      repeat(field('handler', $.event_handler)),
+    ),
+
+    // View pattern: like _type_expr but map_type is always followed by another pattern form
+    // to avoid ambiguity with the body {}.
+    // Atom: element_type | map_type | identifier | base_type (with optional occurrence)
+    // Union: atom | atom | ...
+    _view_pattern_atom: $ => choice(
+      $.element_type,
+      $.map_type,
+      $.identifier,
+      $.base_type,
+    ),
+
+    view_pattern: $ => choice(
+      $._view_pattern_atom,
+      alias($.view_pattern_union, $.binary_type),
+    ),
+
+    view_pattern_union: $ => prec.left('set_union', seq(
+      field('left', $._view_pattern_atom),
+      field('operator', '|'),
+      field('right', choice($._view_pattern_atom, alias($.view_pattern_union, $.binary_type))),
+    )),
+
+    // State declarations: state name: val, name: val, ...
+    state_decl: $ => seq(
+      'state',
+      $.state_entry, repeat(seq(',', $.state_entry)),
+    ),
+
+    state_entry: $ => seq(
+      field('name', $.identifier), ':', field('value', $._expr),
+    ),
+
+    // Event handler: on event_name(param) { body }
+    // Handler body uses procedural (pn) semantics
+    event_handler: $ => seq(
+      'on', field('event', $.identifier),
+      '(', optional(field('declare', $.parameter)), ')',
+      '{', field('body', $.content), '}',
+    ),
+
+    // Note: apply; (bare apply statement) is handled as a regular identifier expression
+    // followed by ';' — detected during semantic analysis, not in the grammar.
+    // This keeps 'apply' as a normal identifier usable as a function call: apply(item)
 
     // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(

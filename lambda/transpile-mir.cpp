@@ -3,6 +3,7 @@
 #include "mark_builder.hpp"
 #include "safety_analyzer.hpp"
 #include "module_registry.h"
+#include "template_registry.h"
 #include "js/js_runtime.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
@@ -211,6 +212,9 @@ struct MirTranspiler {
 
     // Infer cache: AstFuncNode* -> InferCacheEntry (cached param type inference results)
     struct hashmap* infer_cache;
+
+    // View/edit template counter for generating unique function names
+    int view_counter;
 };
 
 // ============================================================================
@@ -3777,7 +3781,8 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
             item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_OBJECT_TYPE ||
             item->node_type == AST_NODE_FUNC ||
             item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC ||
-            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN) {
+            item->node_type == AST_NODE_STRING_PATTERN || item->node_type == AST_NODE_SYMBOL_PATTERN ||
+            item->node_type == AST_NODE_VIEW) {
             item = item->next;
             continue;
         }
@@ -3800,6 +3805,7 @@ static bool is_declaration_node(int node_type) {
     case AST_NODE_OBJECT_TYPE:
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
     case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
+    case AST_NODE_VIEW:
         return true;
     default:
         return false;
@@ -8334,6 +8340,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     }
     case AST_NODE_STRING_PATTERN:
     case AST_NODE_SYMBOL_PATTERN:
+    case AST_NODE_VIEW:
     case AST_NODE_IMPORT: {
         // Definitions handled in root pass - return null as placeholder
         MIR_reg_t r = new_reg(mt, "defp", MIR_T_I64);
@@ -10160,6 +10167,16 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             if (elmt->content) prepass_forward_declare(mt, elmt->content);
             break;
         }
+        case AST_NODE_VIEW: {
+            AstViewNode* view = (AstViewNode*)node;
+            if (view->body) prepass_forward_declare(mt, view->body);
+            AstEventHandler* handler = view->handler;
+            while (handler) {
+                if (handler->body) prepass_forward_declare(mt, handler->body);
+                handler = handler->next_handler;
+            }
+            break;
+        }
         default:
             break;
         }
@@ -10320,6 +10337,104 @@ static void prepass_compile_patterns(MirTranspiler* mt, AstNode* node) {
         }
         node = node->next;
     }
+}
+
+// ============================================================================
+// View/Edit template body compilation
+// Compiles a view/edit body as a MIR function: Item _view_N(Item model) -> Item
+// ============================================================================
+
+static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
+    // generate unique function name
+    char name_buf[64];
+    snprintf(name_buf, sizeof(name_buf), "_view_%d", mt->view_counter++);
+
+    log_debug("mir: transpile_view_def '%s' (is_edit=%d)", name_buf, view->is_edit);
+
+    // save outer function context
+    MIR_item_t saved_func_item = mt->current_func_item;
+    MIR_func_t saved_func = mt->current_func;
+    MIR_reg_t saved_consts_reg = mt->consts_reg;
+    MIR_reg_t saved_gc_reg = mt->gc_reg;
+    MIR_reg_t saved_tl_reg = mt->type_list_reg;
+    bool saved_in_user_func = mt->in_user_func;
+    AstNode* saved_func_body = mt->func_body;
+    bool saved_block_returned = mt->block_returned;
+
+    mt->in_user_func = true;
+    mt->block_returned = false;
+    mt->func_body = view->body;
+
+    // create MIR function: Item _view_N(Item _model) -> Item (i64)
+    MIR_type_t ret_type = MIR_T_I64;
+    MIR_var_t params[1] = {{MIR_T_I64, strdup("_model"), 0}};
+    char* param_name_copy = (char*)params[0].name;
+
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, name_buf, 1, &ret_type, 1, params);
+    MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
+    mt->current_func_item = func_item;
+    mt->current_func = func;
+    free(param_name_copy);
+
+    // load runtime context from _lambda_rt
+    MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
+    MIR_reg_t rt_addr = new_reg(mt, "rt_addr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, rt_addr),
+        MIR_new_ref_op(mt->ctx, rt_import)));
+    MIR_reg_t runtime_reg = new_reg(mt, "runtime", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, runtime_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, rt_addr, 0, 1)));
+
+    // load consts from per-module BSS
+    MIR_reg_t mod_consts_bss_addr = new_reg(mt, "mod_consts_bss", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_consts_bss_addr),
+        MIR_new_ref_op(mt->ctx, mt->consts_bss)));
+    mt->consts_reg = new_reg(mt, "consts", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->consts_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_consts_bss_addr, 0, 1)));
+
+    // load type_list from per-module BSS
+    MIR_reg_t mod_tl_bss_addr = new_reg(mt, "mod_tl_bss", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mod_tl_bss_addr),
+        MIR_new_ref_op(mt->ctx, mt->type_list_bss)));
+    mt->type_list_reg = new_reg(mt, "type_list", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->type_list_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
+
+    // load gc heap pointer
+    MIR_reg_t heap_reg = new_reg(mt, "heap_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));
+    mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg, 0, 1)));
+
+    // register as local function
+    register_local_func(mt, name_buf, func_item);
+
+    // set up parameter scope: bind the model parameter as 'it'
+    push_scope(mt);
+    MIR_reg_t model_reg = MIR_reg(mt->ctx, "_model", func);
+    set_var(mt, "it", model_reg, MIR_T_I64, LMD_TYPE_ANY);
+
+    // transpile the body expression
+    MIR_reg_t body_result = transpile_box_item(mt, view->body);
+
+    // emit return
+    emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, body_result)));
+
+    pop_scope(mt);
+    MIR_finish_func(mt->ctx);
+
+    // restore outer function context
+    mt->current_func_item = saved_func_item;
+    mt->current_func = saved_func;
+    mt->consts_reg = saved_consts_reg;
+    mt->gc_reg = saved_gc_reg;
+    mt->type_list_reg = saved_tl_reg;
+    mt->in_user_func = saved_in_user_func;
+    mt->func_body = saved_func_body;
+    mt->block_returned = saved_block_returned;
 }
 
 // ============================================================================
@@ -10497,6 +10612,14 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             if (elmt->content) prepass_define_functions(mt, elmt->content);
             break;
         }
+        case AST_NODE_VIEW: {
+            AstViewNode* view = (AstViewNode*)node;
+            // compile any nested functions inside the view body first
+            if (view->body) prepass_define_functions(mt, view->body);
+            // compile the view body as a MIR function
+            transpile_view_def(mt, view);
+            break;
+        }
         default:
             break;
         }
@@ -10649,6 +10772,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         case AST_NODE_PROC:
         case AST_NODE_STRING_PATTERN:
         case AST_NODE_SYMBOL_PATTERN:
+        case AST_NODE_VIEW:
             // Skip - handled in pre-pass
             break;
         default: {
@@ -10919,6 +11043,11 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    double* out_mir_gen_ms) {
     log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
 
+    // Ensure template registry exists for post-JIT template registration
+    if (!g_template_registry) {
+        g_template_registry = template_registry_new();
+    }
+
     bool timing = out_jit_init_ms || out_transpile_ms || out_mir_gen_ms;
 
     // Clear the dynamic-import table and populate it with this module's direct imports only.
@@ -10998,6 +11127,72 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     } else {
         log_error("MIR Direct: _mod_type_list_ptr BSS not found or no addr for '%s'",
                   script_path ? script_path : "<unknown>");
+    }
+
+    // Register view/edit templates: walk AST, look up compiled body functions,
+    // and add them to the global template registry.
+    if (g_template_registry && tp->main_func) {
+        // Walk through content block to find view/edit nodes
+        AstNode* first_child = ast_root->child;
+        AstNode* tmpl_child = first_child;
+        // If the first child is a content block, walk its items
+        if (tmpl_child && tmpl_child->node_type == AST_NODE_CONTENT) {
+            tmpl_child = ((AstListNode*)tmpl_child)->item;
+        }
+        int view_idx = 0;
+        while (tmpl_child) {
+            if (tmpl_child->node_type == AST_NODE_VIEW) {
+                AstViewNode* view = (AstViewNode*)tmpl_child;
+
+                // build the function name used during transpilation
+                char func_name[64];
+                snprintf(func_name, sizeof(func_name), "_view_%d", view_idx++);
+
+                void* func_ptr = find_func(ctx, func_name);
+                if (func_ptr) {
+                    // determine specificity from the pattern
+                    TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
+                    TypeId match_type = LMD_TYPE_ANY;
+                    const char* match_tag = NULL;
+                    int match_tag_len = 0;
+
+                    if (view->pattern) {
+                        AstNode* pat = view->pattern;
+                        if (pat->type) {
+                            TypeId tid = pat->type->type_id;
+                            if (tid == LMD_TYPE_TYPE) {
+                                // unwrap TypeType to get the actual matched type
+                                TypeType* tt = (TypeType*)pat->type;
+                                if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
+                                    match_type = tt->type->type_id;
+                                    spec = TMPL_SPEC_SIMPLE_TYPE;
+                                }
+                            } else if (tid != LMD_TYPE_ANY) {
+                                match_type = tid;
+                                spec = TMPL_SPEC_SIMPLE_TYPE;
+                            }
+                        }
+                    }
+
+                    // named templates have highest specificity
+                    if (view->name) spec = TMPL_SPEC_NAMED;
+
+                    const char* tmpl_name = view->name ? view->name->chars : NULL;
+                    template_registry_add(g_template_registry,
+                        tmpl_name, view->is_edit,
+                        (fn_ptr)func_ptr, spec,
+                        match_type, match_tag, match_tag_len,
+                        0, 0);
+
+                    log_debug("registered template '%s' func=%s spec=%d type=%d",
+                        tmpl_name ? tmpl_name : "(anonymous)", func_name,
+                        (int)spec, (int)match_type);
+                } else {
+                    log_error("MIR Direct: view function '%s' not found after JIT", func_name);
+                }
+            }
+            tmpl_child = tmpl_child->next;
+        }
     }
 
     if (!tp->main_func) {
