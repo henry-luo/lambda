@@ -1680,3 +1680,25 @@ extern "C" Item py_builtin_property(Item fget) {
     py_dict_set(prop, key_get,  fget);
     return prop;
 }
+
+// Adds/replaces the __set__ function on an existing property descriptor.
+// Returns the same property Map (mutated in place) for convenience.
+extern "C" Item py_property_setter(Item prop, Item fset) {
+    if (get_type_id(prop) != LMD_TYPE_MAP) {
+        // not a property yet — wrap in one
+        prop = py_builtin_property(ItemNull);
+    }
+    Item key_set = (Item){.item = s2it(heap_strcpy((char*)"__set__", 7))};
+    py_dict_set(prop, key_set, fset);
+    return prop;
+}
+
+// Adds/replaces the __delete__ function on an existing property descriptor.
+extern "C" Item py_property_deleter(Item prop, Item fdel) {
+    if (get_type_id(prop) != LMD_TYPE_MAP) {
+        prop = py_builtin_property(ItemNull);
+    }
+    Item key_del = (Item){.item = s2it(heap_strcpy((char*)"__delete__", 10))};
+    py_dict_set(prop, key_del, fdel);
+    return prop;
+}

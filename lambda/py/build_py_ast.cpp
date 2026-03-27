@@ -1793,6 +1793,395 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
     return NULL;
 }
 
+// ============================================================================
+// Phase B: match/case pattern matching builders
+// ============================================================================
+
+// Allocate a PyPatternNode with the given kind
+static PyPatternNode* alloc_pattern_node(PyTranspiler* tp, PyPatternKind kind, TSNode node) {
+    PyPatternNode* p = (PyPatternNode*)alloc_py_ast_node(tp, PY_AST_NODE_PATTERN, node, sizeof(PyPatternNode));
+    p->kind = kind;
+    p->rest_pos = -1;  // -1 = no star in sequence
+    return p;
+}
+
+// Forward declaration
+static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node);
+
+// Return the concrete type inside a case_pattern wrapper.
+// If node is already a concrete type, returns node unchanged.
+static TSNode py_case_pattern_unwrap(TSNode node) {
+    if (!ts_node_is_null(node) && strcmp(ts_node_type(node), "case_pattern") == 0) {
+        if (ts_node_named_child_count(node) > 0)
+            return ts_node_named_child(node, 0);
+    }
+    return node;
+}
+
+// Check if a case_pattern node contains a keyword_pattern (for class pattern keyword args)
+static bool py_case_pattern_is_keyword(TSNode case_pat_node) {
+    if (ts_node_named_child_count(case_pat_node) == 0) return false;
+    TSNode inner = ts_node_named_child(case_pat_node, 0);
+    return strcmp(ts_node_type(inner), "keyword_pattern") == 0;
+}
+
+// Build a literal PyAstNode (expression) from a pattern literal node
+static PyAstNode* build_literal_from_node(PyTranspiler* tp, TSNode node) {
+    const char* nt = ts_node_type(node);
+    if (strcmp(nt, "integer") == 0)     return build_py_expression(tp, node);
+    if (strcmp(nt, "float") == 0)       return build_py_expression(tp, node);
+    if (strcmp(nt, "string") == 0)      return build_py_expression(tp, node);
+    if (strcmp(nt, "concatenated_string") == 0) return build_py_expression(tp, node);
+    if (strcmp(nt, "true") == 0)        return build_py_expression(tp, node);
+    if (strcmp(nt, "false") == 0)       return build_py_expression(tp, node);
+    if (strcmp(nt, "none") == 0)        return build_py_expression(tp, node);
+    return build_py_expression(tp, node);
+}
+
+// Recursively build a pattern node from any pattern-related TSNode
+static PyAstNode* build_py_pattern(PyTranspiler* tp, TSNode node) {
+    if (ts_node_is_null(node)) return NULL;
+    const char* nt = ts_node_type(node);
+
+    // unwrap case_pattern outer wrapper
+    if (strcmp(nt, "case_pattern") == 0) {
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc == 0) {
+            // Either wildcard '_' or empty case (treat as wildcard)
+            return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
+        }
+        // Check for anonymous '-' sign before named child (negative number literal)
+        bool has_neg = false;
+        uint32_t all = ts_node_child_count(node);
+        for (uint32_t i = 0; i < all; i++) {
+            TSNode c = ts_node_child(node, i);
+            if (!ts_node_is_named(c) && strcmp(ts_node_type(c), "-") == 0) {
+                has_neg = true;
+                break;
+            }
+        }
+        PyAstNode* pat = build_py_pattern(tp, ts_node_named_child(node, 0));
+        if (pat && has_neg && ((PyPatternNode*)pat)->kind == PY_PAT_LITERAL) {
+            ((PyPatternNode*)pat)->literal_neg = true;
+        }
+        return pat;
+    }
+
+    // as_pattern: <inner_pattern> 'as' <identifier>
+    if (strcmp(nt, "as_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_AS, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc >= 1) {
+            p->literal = build_py_pattern(tp, ts_node_named_child(node, 0));
+        }
+        if (nc >= 2) {
+            TSNode alias_node = ts_node_named_child(node, nc - 1);
+            StrView sv = py_node_source(tp, alias_node);
+            char* tmp = (char*)malloc(sv.length + 1);
+            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+        }
+        return (PyAstNode*)p;
+    }
+
+    // keyword_pattern: <identifier> '=' <simple_pattern> (inside class_pattern)
+    // Represented as PAT_CAPTURE with name=attr, literal=sub-pattern
+    if (strcmp(nt, "keyword_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc >= 1) {
+            TSNode attr = ts_node_named_child(node, 0);
+            StrView sv = py_node_source(tp, attr);
+            char* tmp = (char*)malloc(sv.length + 1);
+            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+        }
+        if (nc >= 2) {
+            p->literal = build_py_pattern(tp, ts_node_named_child(node, 1));
+        }
+        return (PyAstNode*)p;
+    }
+
+    // union_pattern: p1 | p2 | ... (flat linked list stored in elements)
+    if (strcmp(nt, "union_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_OR, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        PyAstNode* prev = NULL;
+        for (uint32_t i = 0; i < nc; i++) {
+            PyAstNode* alt = build_py_pattern(tp, ts_node_named_child(node, i));
+            if (!alt) continue;
+            if (!p->elements) p->elements = alt;
+            else prev->next = alt;
+            prev = alt;
+        }
+        return (PyAstNode*)p;
+    }
+
+    // list_pattern or tuple_pattern: [p1, p2, *rest]
+    if (strcmp(nt, "list_pattern") == 0 || strcmp(nt, "tuple_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_SEQUENCE, node);
+        p->rest_pos = -1;
+        int elem_idx = 0;
+        uint32_t nc = ts_node_named_child_count(node);
+        PyAstNode* prev = NULL;
+        for (uint32_t i = 0; i < nc; i++) {
+            TSNode child = ts_node_named_child(node, i);
+            PyAstNode* sub = build_py_pattern(tp, child);
+            if (!sub) continue;
+            if (((PyPatternNode*)sub)->kind == PY_PAT_STAR) {
+                p->rest_name = ((PyPatternNode*)sub)->name; // may be NULL for *_
+                p->rest_pos = elem_idx; // mark where star is
+                continue; // star is a marker, not added to elements
+            }
+            if (!p->elements) p->elements = sub;
+            else prev->next = sub;
+            prev = sub;
+            elem_idx++;
+        }
+        return (PyAstNode*)p;
+    }
+
+    // splat_pattern: *name or **name or *_
+    if (strcmp(nt, "splat_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_STAR, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc >= 1) {
+            TSNode child = ts_node_named_child(node, 0);
+            // identifier node (could be "_" text)
+            StrView sv = py_node_source(tp, child);
+            if (!(sv.length == 1 && sv.str[0] == '_')) {
+                char* tmp = (char*)malloc(sv.length + 1);
+                if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                    p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+            }
+        } else {
+            // anonymous '_' child (not a named identifier)
+            p->name = NULL;
+        }
+        return (PyAstNode*)p;
+    }
+
+    // dict_pattern: {key: val, **rest}
+    // _key_value_pattern is transparent: its 'key' and 'value' fields are elevated to dict_pattern.
+    // named children alternate: key0, val0, key1, val1, ..., (optional splat_pattern)
+    if (strcmp(nt, "dict_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_MAPPING, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        PyAstNode* prev_kv = NULL;
+        uint32_t ki = 0; // index among non-splat children
+        for (uint32_t i = 0; i < nc; i++) {
+            TSNode child = ts_node_named_child(node, i);
+            const char* ct = ts_node_type(child);
+            if (strcmp(ct, "splat_pattern") == 0) {
+                // **rest — extract rest name
+                uint32_t sn = ts_node_named_child_count(child);
+                if (sn >= 1) {
+                    TSNode id = ts_node_named_child(child, 0);
+                    StrView sv = py_node_source(tp, id);
+                    if (!(sv.length == 1 && sv.str[0] == '_')) {
+                        char* tmp = (char*)malloc(sv.length + 1);
+                        if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                            p->rest_name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+                    }
+                }
+                continue;
+            }
+            if (ki % 2 == 0) {
+                // even index = key pattern; build KV node at next iteration
+                // stash as a temporary; we'll create the pair on the value iteration
+                // store key in a temporary PyPatternKVNode allocated from pool
+                PyPatternKVNode* kv = (PyPatternKVNode*)alloc_py_ast_node(tp, PY_AST_NODE_PATTERN, child, sizeof(PyPatternKVNode));
+                kv->kind = PY_PAT_LITERAL;
+                kv->key_pat = build_py_pattern(tp, child);
+                // link into kv_pairs now; val_pat will be set next iteration
+                if (!p->kv_pairs) p->kv_pairs = (PyAstNode*)kv;
+                else prev_kv->next = (PyAstNode*)kv;
+                prev_kv = (PyAstNode*)kv;
+            } else {
+                // odd index = value pattern
+                if (prev_kv) {
+                    ((PyPatternKVNode*)prev_kv)->val_pat = build_py_pattern(tp, child);
+                }
+            }
+            ki++;
+        }
+        return (PyAstNode*)p;
+    }
+
+    // class_pattern: ClassName(positional_pats..., attr=pat...)
+    if (strcmp(nt, "class_pattern") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CLASS, node);
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc >= 1) {
+            TSNode cls_name_node = ts_node_named_child(node, 0);
+            StrView sv = py_node_source(tp, cls_name_node);
+            char* tmp = (char*)malloc(sv.length + 1);
+            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+        }
+        PyAstNode* prev_pos = NULL;
+        PyAstNode* prev_kw = NULL;
+        for (uint32_t i = 1; i < nc; i++) {
+            TSNode child = ts_node_named_child(node, i); // each is a case_pattern
+            if (py_case_pattern_is_keyword(child)) {
+                // keyword pattern: attr=sub_pattern
+                TSNode kw_inner = ts_node_named_child(child, 0); // keyword_pattern node
+                PyAstNode* kw_pat = build_py_pattern(tp, kw_inner);
+                if (!kw_pat) continue;
+                // keyword_pattern built as PAT_CAPTURE: name=attr, literal=sub
+                if (!p->kv_pairs) p->kv_pairs = kw_pat;
+                else prev_kw->next = kw_pat;
+                prev_kw = kw_pat;
+            } else {
+                PyAstNode* sub = build_py_pattern(tp, child);
+                if (!sub) continue;
+                if (!p->elements) p->elements = sub;
+                else prev_pos->next = sub;
+                prev_pos = sub;
+            }
+        }
+        return (PyAstNode*)p;
+    }
+
+    // literal patterns
+    if (strcmp(nt, "integer") == 0 || strcmp(nt, "float") == 0 ||
+        strcmp(nt, "string") == 0 || strcmp(nt, "concatenated_string") == 0 ||
+        strcmp(nt, "true") == 0 || strcmp(nt, "false") == 0 || strcmp(nt, "none") == 0) {
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_LITERAL, node);
+        p->literal = build_literal_from_node(tp, node);
+        return (PyAstNode*)p;
+    }
+
+    // negative number at top level (e.g., inside union_pattern that strips case_pattern wrapper)
+    // seq(optional('-'), integer/float) appears as children of the parent, handled by check above.
+    // But if this node IS an integer/float directly, already handled above.
+
+    // dotted_name: single identifier → CAPTURE or WILDCARD; multi-part → VALUE
+    if (strcmp(nt, "dotted_name") == 0) {
+        uint32_t nc = ts_node_named_child_count(node);
+        if (nc == 1) {
+            TSNode id_node = ts_node_named_child(node, 0);
+            StrView sv = py_node_source(tp, id_node);
+            if (sv.length == 1 && sv.str[0] == '_') {
+                return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
+            }
+            PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
+            char* tmp = (char*)malloc(sv.length + 1);
+            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+            return (PyAstNode*)p;
+        } else {
+            // dotted name like Status.OK → VALUE pattern
+            PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_VALUE, node);
+            StrView sv = py_node_source(tp, node); // full dotted text "Status.OK"
+            char* tmp = (char*)malloc(sv.length + 1);
+            if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+                p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+            return (PyAstNode*)p;
+        }
+    }
+
+    // plain identifier (shouldn't normally appear at pattern level, but guard against it)
+    if (strcmp(nt, "identifier") == 0) {
+        StrView sv = py_node_source(tp, node);
+        if (sv.length == 1 && sv.str[0] == '_') {
+            return (PyAstNode*)alloc_pattern_node(tp, PY_PAT_WILDCARD, node);
+        }
+        PyPatternNode* p = alloc_pattern_node(tp, PY_PAT_CAPTURE, node);
+        char* tmp = (char*)malloc(sv.length + 1);
+        if (tmp) { memcpy(tmp, sv.str, sv.length); tmp[sv.length] = '\0';
+            p->name = name_pool_create_len(tp->name_pool, tmp, sv.length); free(tmp); }
+        return (PyAstNode*)p;
+    }
+
+    log_debug("py: unhandled pattern node type: %s", nt);
+    return NULL;
+}
+
+// Build a case_clause node from tree-sitter node
+static PyAstNode* build_py_case_clause(PyTranspiler* tp, TSNode clause_node) {
+    PyCaseNode* c = (PyCaseNode*)alloc_py_ast_node(tp, PY_AST_NODE_CASE, clause_node, sizeof(PyCaseNode));
+
+    // Collect case_pattern children (typically one, sometimes comma-separated tuple)
+    uint32_t nc = ts_node_named_child_count(clause_node);
+    PyAstNode* first_pattern = NULL;
+    PyAstNode* prev_pattern = NULL;
+
+    for (uint32_t i = 0; i < nc; i++) {
+        TSNode child = ts_node_named_child(clause_node, i);
+        const char* ct = ts_node_type(child);
+        if (strcmp(ct, "case_pattern") == 0) {
+            PyAstNode* pat = build_py_pattern(tp, child);
+            if (!pat) continue;
+            if (!first_pattern) first_pattern = pat;
+            else prev_pattern->next = pat;
+            prev_pattern = pat;
+        }
+    }
+
+    // If multiple patterns (comma-separated e.g. case a, b:), wrap in SEQUENCE
+    if (first_pattern && first_pattern->next) {
+        PyPatternNode* tuple_pat = alloc_pattern_node(tp, PY_PAT_SEQUENCE, clause_node);
+        tuple_pat->elements = first_pattern;
+        c->pattern = (PyAstNode*)tuple_pat;
+    } else {
+        c->pattern = first_pattern;
+    }
+
+    // guard: optional if_clause
+    TSNode guard_node = ts_node_child_by_field_name(clause_node, "guard", 5);
+    if (!ts_node_is_null(guard_node)) {
+        // if_clause: seq('if', expression) — first named child is the condition
+        uint32_t gn = ts_node_named_child_count(guard_node);
+        if (gn >= 1) {
+            c->guard = build_py_expression(tp, ts_node_named_child(guard_node, 0));
+        }
+    }
+
+    // consequence: the body block
+    TSNode body_node = ts_node_child_by_field_name(clause_node, "consequence", 11);
+    if (!ts_node_is_null(body_node)) {
+        c->body = build_py_block(tp, body_node);
+    }
+
+    c->base.type = &TYPE_ANY;
+    return (PyAstNode*)c;
+}
+
+// Build a match statement node
+static PyAstNode* build_py_match_statement(PyTranspiler* tp, TSNode match_node) {
+    PyMatchNode* m = (PyMatchNode*)alloc_py_ast_node(tp, PY_AST_NODE_MATCH, match_node, sizeof(PyMatchNode));
+
+    // subject: commaSep1(expression) — may have multiple subject fields
+    // Use the first subject field (tuple subject is rare)
+    TSNode subject_node = ts_node_child_by_field_name(match_node, "subject", 7);
+    if (!ts_node_is_null(subject_node)) {
+        m->subject = build_py_expression(tp, subject_node);
+    }
+
+    // body: block containing case_clause children
+    TSNode body_node = ts_node_child_by_field_name(match_node, "body", 4);
+    if (!ts_node_is_null(body_node)) {
+        uint32_t nc = ts_node_named_child_count(body_node);
+        PyAstNode* prev = NULL;
+        for (uint32_t i = 0; i < nc; i++) {
+            TSNode child = ts_node_named_child(body_node, i);
+            if (strcmp(ts_node_type(child), "case_clause") == 0) {
+                PyAstNode* clause = build_py_case_clause(tp, child);
+                if (!clause) continue;
+                if (!m->cases) m->cases = clause;
+                else prev->next = clause;
+                prev = clause;
+            }
+        }
+    }
+
+    m->base.type = &TYPE_ANY;
+    return (PyAstNode*)m;
+}
+
+// ============================================================================
+
 PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
     if (ts_node_is_null(stmt_node)) return NULL;
 
@@ -1854,6 +2243,9 @@ PyAstNode* build_py_statement(PyTranspiler* tp, TSNode stmt_node) {
     }
     if (strcmp(node_type, "with_statement") == 0) {
         return build_py_with_statement(tp, stmt_node);
+    }
+    if (strcmp(node_type, "match_statement") == 0) {
+        return build_py_match_statement(tp, stmt_node);
     }
     if (strcmp(node_type, "decorated_definition") == 0) {
         return build_py_decorated_definition(tp, stmt_node);

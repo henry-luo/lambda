@@ -2649,6 +2649,416 @@ static MIR_reg_t pm_apply_decorators(PyMirTranspiler* mt, MIR_reg_t value, PyAst
 }
 
 // ============================================================================
+// Phase B: match/case codegen
+// ============================================================================
+
+// Forward declaration
+static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
+                                PyPatternNode* pat, MIR_label_t l_fail);
+
+// Emit code to resolve a dotted value name (e.g., "Status.OK") and return its reg.
+// Split on '.' and chain py_getattr calls.
+static MIR_reg_t pm_resolve_dotted_name(PyMirTranspiler* mt, const char* dotted, int len) {
+    // find first dot
+    int dot = -1;
+    for (int i = 0; i < len; i++) {
+        if (dotted[i] == '.') { dot = i; break; }
+    }
+    if (dot < 0) {
+        // single name: look up as variable
+        char vname[130]; snprintf(vname, sizeof(vname), "_py_%.*s", len, dotted);
+        // check local/closure scope first
+        PyMirVarEntry* v = pm_find_var(mt, vname);
+        if (v && !v->from_env) return v->reg;
+        if (v && v->from_env) return pm_load_env_slot(mt, v->env_reg, v->env_slot);
+        // check module-level vars (includes classes scanned in pm_scan_module_vars)
+        int midx = pm_get_global_var_index(mt, vname);
+        if (midx >= 0) {
+            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, midx));
+        }
+        // fallback: builtin class lookup by name
+        return pm_call_1(mt, "py_resolve_name_item", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, pm_box_string_literal(mt, dotted, len)));
+    }
+    MIR_reg_t obj = pm_resolve_dotted_name(mt, dotted, dot);
+    const char* rest = dotted + dot + 1;
+    int rlen = len - dot - 1;
+    MIR_reg_t attr_r = pm_box_string_literal(mt, rest, rlen);
+    return pm_call_2(mt, "py_getattr", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_r));
+}
+
+// Count elements in a linked list
+static int pm_count_nodes(PyAstNode* head) {
+    int n = 0;
+    for (PyAstNode* s = head; s; s = s->next) n++;
+    return n;
+}
+
+// Bind a capture variable in the current scope
+static void pm_bind_capture(PyMirTranspiler* mt, String* name, MIR_reg_t val_reg) {
+    char vname[130];
+    snprintf(vname, sizeof(vname), "_py_%.*s", (int)name->len, name->chars);
+    MIR_reg_t r = pm_new_reg(mt, vname, MIR_T_I64);
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, r),
+        MIR_new_reg_op(mt->ctx, val_reg)));
+    pm_set_var(mt, vname, r);
+}
+
+// Emit code to match subject against a sequence pattern.
+// l_fail: jumped to on mismatch.
+static void pm_compile_sequence_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
+                                         PyPatternNode* pat, MIR_label_t l_fail) {
+    // 1. Check it's a list/tuple (not string)
+    MIR_reg_t seq_ok = pm_call_1(mt, "py_match_is_sequence", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, subj));
+    MIR_reg_t seq_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, seq_ok));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+        MIR_new_label_op(mt->ctx, l_fail),
+        MIR_new_reg_op(mt->ctx, seq_t)));
+
+    // Count elements
+    int n_elem = pm_count_nodes(pat->elements);
+    bool has_star = (pat->rest_name != NULL || pat->rest_pos >= 0);
+    int star_pos  = pat->rest_pos;  // -1 = no star; >= 0 = star after index star_pos
+    if (!has_star) star_pos = -1;
+    int n_before = (star_pos >= 0) ? star_pos : n_elem;
+    int n_after  = (star_pos >= 0) ? (n_elem - n_before) : 0;
+
+    // 2. Get length
+    MIR_reg_t len_reg = pm_call_1(mt, "py_builtin_len", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, subj));
+
+    if (!has_star) {
+        // exact length check
+        MIR_reg_t exp_len = pm_box_int_const(mt, n_elem);
+        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, exp_len));
+        MIR_reg_t eq_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq_r));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, eq_t)));
+    } else {
+        // len >= n_before + n_after
+        MIR_reg_t min_len = pm_box_int_const(mt, n_before + n_after);
+        MIR_reg_t ge_r = pm_call_2(mt, "py_ge", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, min_len));
+        MIR_reg_t ge_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, ge_r));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, ge_t)));
+    }
+
+    // 3. Match each element
+    int i = 0;
+    for (PyAstNode* e = pat->elements; e; e = e->next, i++) {
+        MIR_reg_t idx_r;
+        if (star_pos >= 0 && i >= n_before) {
+            // after star: index from end
+            int offset = n_after - (i - n_before);
+            MIR_reg_t off_r = pm_box_int_const(mt, offset);
+            idx_r = pm_call_2(mt, "py_subtract", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, len_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, off_r));
+        } else {
+            idx_r = pm_box_int_const(mt, i);
+        }
+        MIR_reg_t elem_r = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_r));
+        pm_compile_pattern(mt, elem_r, (PyPatternNode*)e, l_fail);
+    }
+
+    // 4. Bind *rest if named
+    if (has_star && pat->rest_name) {
+        MIR_reg_t start_r = pm_box_int_const(mt, n_before);
+        MIR_reg_t off_r   = pm_box_int_const(mt, n_after);
+        MIR_reg_t end_r   = pm_call_2(mt, "py_subtract", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, len_reg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, off_r));
+        MIR_reg_t none_r  = pm_emit_null(mt);
+        MIR_reg_t rest_r  = pm_call_4(mt, "py_slice_get", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, start_r),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, end_r),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, none_r));
+        pm_bind_capture(mt, pat->rest_name, rest_r);
+    }
+}
+
+// Compile a single pattern against subject register.
+// Emits code that falls through on match, jumps to l_fail on mismatch.
+// Capture variables are bound as local MIR registers.
+static void pm_compile_pattern(PyMirTranspiler* mt, MIR_reg_t subj,
+                                PyPatternNode* pat, MIR_label_t l_fail) {
+    if (!pat) return;
+
+    switch (pat->kind) {
+
+    case PY_PAT_WILDCARD:
+        // always matches, no binding
+        break;
+
+    case PY_PAT_CAPTURE:
+        // always matches; bind subject to name
+        if (pat->name) {
+            pm_bind_capture(mt, pat->name, subj);
+        }
+        break;
+
+    case PY_PAT_LITERAL: {
+        MIR_reg_t lit_r;
+        if (pat->literal) {
+            lit_r = pm_transpile_expression(mt, pat->literal);
+        } else {
+            lit_r = pm_emit_null(mt);
+        }
+        if (pat->literal_neg) {
+            lit_r = pm_call_1(mt, "py_negate", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lit_r));
+        }
+        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, lit_r));
+        MIR_reg_t ok_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq_r));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, ok_t)));
+        break;
+    }
+
+    case PY_PAT_VALUE: {
+        // Resolve dotted name as constant value and compare
+        if (!pat->name) break;
+        MIR_reg_t val_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
+        MIR_reg_t eq_r = pm_call_2(mt, "py_eq", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, val_r));
+        MIR_reg_t ok_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq_r));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, ok_t)));
+        break;
+    }
+
+    case PY_PAT_OR: {
+        // Try each alternative; jump to l_match_end on first success
+        MIR_label_t l_end = pm_new_label(mt);
+        PyAstNode* alt = pat->elements;
+        while (alt) {
+            PyAstNode* next = alt->next;
+            if (next) {
+                // not the last: if this alternative fails, try next
+                MIR_label_t l_next = pm_new_label(mt);
+                pm_compile_pattern(mt, subj, (PyPatternNode*)alt, l_next);
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, l_end)));
+                pm_emit_label(mt, l_next);
+            } else {
+                // last alternative: fail goes to l_fail
+                pm_compile_pattern(mt, subj, (PyPatternNode*)alt, l_fail);
+            }
+            alt = next;
+        }
+        pm_emit_label(mt, l_end);
+        break;
+    }
+
+    case PY_PAT_AS: {
+        // Match inner pattern, then bind alias
+        if (pat->literal) {
+            pm_compile_pattern(mt, subj, (PyPatternNode*)pat->literal, l_fail);
+        }
+        if (pat->name) {
+            pm_bind_capture(mt, pat->name, subj);
+        }
+        break;
+    }
+
+    case PY_PAT_SEQUENCE: {
+        pm_compile_sequence_pattern(mt, subj, pat, l_fail);
+        break;
+    }
+
+    case PY_PAT_MAPPING: {
+        // 1. Check subject is a mapping
+        MIR_reg_t map_ok = pm_call_1(mt, "py_match_is_mapping", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj));
+        MIR_reg_t map_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, map_ok));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, map_t)));
+
+        // 2. For each KV pair: check key exists, get value, match sub-pattern
+        MIR_reg_t keys_list = pm_call_1(mt, "py_list_new", MIR_T_I64,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+        for (PyAstNode* kv = pat->kv_pairs; kv; kv = kv->next) {
+            PyPatternKVNode* kvn = (PyPatternKVNode*)kv;
+            // key is a literal or value pattern — emit its expression
+            MIR_reg_t key_r;
+            if (kvn->key_pat) {
+                PyPatternNode* kp = (PyPatternNode*)kvn->key_pat;
+                if (kp->kind == PY_PAT_LITERAL && kp->literal) {
+                    key_r = pm_transpile_expression(mt, kp->literal);
+                } else if (kp->kind == PY_PAT_VALUE && kp->name) {
+                    key_r = pm_resolve_dotted_name(mt, kp->name->chars, (int)kp->name->len);
+                } else if (kp->kind == PY_PAT_CAPTURE && kp->name) {
+                    key_r = pm_box_string_literal(mt, kp->name->chars, (int)kp->name->len);
+                } else {
+                    key_r = pm_emit_null(mt);
+                }
+            } else {
+                key_r = pm_emit_null(mt);
+            }
+            // check key exists: py_contains(subject, key)
+            MIR_reg_t has_r = pm_call_2(mt, "py_contains", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+            MIR_reg_t has_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, has_r));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, l_fail),
+                MIR_new_reg_op(mt->ctx, has_t)));
+            // get value and match sub-pattern
+            MIR_reg_t val_r = pm_call_2(mt, "py_dict_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+            if (kvn->val_pat) {
+                pm_compile_pattern(mt, val_r, (PyPatternNode*)kvn->val_pat, l_fail);
+            }
+            // track key for **rest
+            pm_call_2(mt, "py_list_append", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_list),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, key_r));
+        }
+        // 3. Bind **rest if present
+        if (pat->rest_name) {
+            MIR_reg_t rest_r = pm_call_2(mt, "py_match_mapping_rest", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, keys_list));
+            pm_bind_capture(mt, pat->rest_name, rest_r);
+        }
+        break;
+    }
+
+    case PY_PAT_CLASS: {
+        // 1. Resolve class name and check isinstance
+        if (!pat->name) break;
+        MIR_reg_t cls_r = pm_resolve_dotted_name(mt, pat->name->chars, (int)pat->name->len);
+        MIR_reg_t inst_r = pm_call_2(mt, "py_builtin_isinstance", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_r));
+        MIR_reg_t inst_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, inst_r));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_fail),
+            MIR_new_reg_op(mt->ctx, inst_t)));
+
+        // 2. Positional patterns: use __match_args__ to get attribute names
+        int pos = 0;
+        for (PyAstNode* e = pat->elements; e; e = e->next, pos++) {
+            // get __match_args__[pos] to find the attribute name
+            MIR_reg_t match_args_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, pm_box_string_literal(mt, "__match_args__", 14)));
+            MIR_reg_t pos_r = pm_box_int_const(mt, pos);
+            MIR_reg_t attr_name_r = pm_call_2(mt, "py_subscript_get", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, match_args_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, pos_r));
+            MIR_reg_t attr_val_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_name_r));
+            pm_compile_pattern(mt, attr_val_r, (PyPatternNode*)e, l_fail);
+        }
+
+        // 3. Keyword patterns: each is PAT_CAPTURE with name=attr and literal=sub-pattern
+        for (PyAstNode* kw = pat->kv_pairs; kw; kw = kw->next) {
+            PyPatternNode* kwp = (PyPatternNode*)kw;
+            if (!kwp->name) continue;
+            MIR_reg_t attr_r = pm_box_string_literal(mt, kwp->name->chars, (int)kwp->name->len);
+            MIR_reg_t val_r = pm_call_2(mt, "py_getattr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, subj),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, attr_r));
+            if (kwp->literal) {
+                pm_compile_pattern(mt, val_r, (PyPatternNode*)kwp->literal, l_fail);
+            } else {
+                // bare keyword pattern: case Cls(attr=capture_name) — bind the attribute value
+                if (kwp->name) pm_bind_capture(mt, kwp->name, val_r);  // captures attr value
+                // Actually for class keyword patterns: the name IS the attribute to read,
+                // and for a bare pattern (no sub-pattern), it's a capture. But PyPatternNode
+                // stores capture name in `name` and sub-pattern in `literal`. So if literal ==
+                // NULL, we just read the attribute to verify it doesn't throw but don't bind.
+                // A real capture in class pattern would be: case C(x=y): where y is bound.
+                // Actually, the sub-pattern is mandatory in keyword_pattern grammar: name = sub_pat.
+                // So literal should always be present here.
+            }
+        }
+        break;
+    }
+
+    case PY_PAT_STAR:
+        // Should not appear at top level; handled inside SEQUENCE
+        break;
+    }
+}
+
+// Transpile a match statement
+static void pm_transpile_match(PyMirTranspiler* mt, PyMatchNode* mn) {
+    // evaluate subject
+    MIR_reg_t subj = pm_transpile_expression(mt, mn->subject);
+
+    MIR_label_t l_match_end = pm_new_label(mt);
+
+    for (PyAstNode* c = mn->cases; c; c = c->next) {
+        PyCaseNode* cn = (PyCaseNode*)c;
+        if (!cn->pattern) continue;
+
+        MIR_label_t l_case_fail = pm_new_label(mt);
+
+        // push scope for captures within this case
+        pm_push_scope(mt);
+
+        // compile pattern — jumps to l_case_fail on mismatch
+        pm_compile_pattern(mt, subj, (PyPatternNode*)cn->pattern, l_case_fail);
+
+        // compile guard if present
+        if (cn->guard) {
+            MIR_reg_t g_r = pm_transpile_expression(mt, cn->guard);
+            MIR_reg_t g_t = pm_call_1(mt, "py_is_truthy", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, g_r));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
+                MIR_new_label_op(mt->ctx, l_case_fail),
+                MIR_new_reg_op(mt->ctx, g_t)));
+        }
+
+        // compile body
+        pm_transpile_block(mt, cn->body);
+
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_match_end)));
+
+        // fail path: pattern or guard did not match
+        pm_emit_label(mt, l_case_fail);
+
+        // single pop covers both success and fail paths (scope pushed once per case)
+        pm_pop_scope(mt);
+    }
+
+    pm_emit_label(mt, l_match_end);
+}
+
+// ============================================================================
 // Statement dispatcher
 // ============================================================================
 
@@ -2836,6 +3246,51 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                 pm_call_1(mt, "py_set_kwargs_flag", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
             }
+
+            // Phase F1: detect @prop.setter / @prop.deleter decorator patterns.
+            // When the first decorator expression is an attribute access like `celsius.setter`,
+            // augment the existing property in the methods dict instead of creating a new entry.
+            bool handled_as_prop_accessor = false;
+            if (fc->node && fc->node->decorators) {
+                PyDecoratorNode* first_dec = (PyDecoratorNode*)fc->node->decorators;
+                if (first_dec->expression &&
+                    first_dec->expression->node_type == PY_AST_NODE_ATTRIBUTE) {
+                    PyAttributeNode* attr_dec = (PyAttributeNode*)first_dec->expression;
+                    if (attr_dec->object &&
+                        attr_dec->object->node_type == PY_AST_NODE_IDENTIFIER &&
+                        attr_dec->attribute) {
+                        const char* attr_kind = attr_dec->attribute->chars;
+                        bool is_setter  = (strncmp(attr_kind, "setter",  6) == 0 && attr_dec->attribute->len == 6);
+                        bool is_deleter = (strncmp(attr_kind, "deleter", 7) == 0 && attr_dec->attribute->len == 7);
+                        if (is_setter || is_deleter) {
+                            PyIdentifierNode* prop_id = (PyIdentifierNode*)attr_dec->object;
+                            MIR_reg_t pname_reg = pm_box_string_literal(mt,
+                                prop_id->name->chars, prop_id->name->len);
+                            // get the existing property descriptor from the methods dict
+                            MIR_reg_t existing_prop = pm_call_2(mt, "py_dict_get", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pname_reg));
+                            MIR_reg_t updated_prop;
+                            if (is_setter) {
+                                updated_prop = pm_call_2(mt, "py_property_setter", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, existing_prop),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+                            } else {
+                                updated_prop = pm_call_2(mt, "py_property_deleter", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, existing_prop),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item_reg));
+                            }
+                            pm_call_3(mt, "py_dict_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, methods_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, pname_reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, updated_prop));
+                            handled_as_prop_accessor = true;
+                        }
+                    }
+                }
+            }
+            if (handled_as_prop_accessor) continue;
+
             // Phase C: apply method decorators (e.g. @property)
             if (fc->node && fc->node->decorators) {
                 fn_item_reg = pm_apply_decorators(mt, fn_item_reg, fc->node->decorators);
@@ -3203,6 +3658,10 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         pm_emit_label(mt, l_with_end);
         break;
     }
+    case PY_AST_NODE_MATCH: {
+        pm_transpile_match(mt, (PyMatchNode*)stmt);
+        break;
+    }
     case PY_AST_NODE_IMPORT_FROM: {
         // from ./module import name1, name2
         PyImportNode* imp = (PyImportNode*)stmt;
@@ -3351,6 +3810,27 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
         fc->node = fn;
         fc->parent_index = parent_index;
         snprintf(fc->name, sizeof(fc->name), "%.*s", (int)fn->name->len, fn->name->chars);
+
+        // If the first decorator is @propname.setter or @propname.deleter, suffix the
+        // internal name to avoid MIR function name collisions with the getter.
+        if (fn->decorators) {
+            PyDecoratorNode* first_dec = (PyDecoratorNode*)fn->decorators;
+            if (first_dec->expression &&
+                first_dec->expression->node_type == PY_AST_NODE_ATTRIBUTE) {
+                PyAttributeNode* attr_dec = (PyAttributeNode*)first_dec->expression;
+                if (attr_dec->attribute) {
+                    if (attr_dec->attribute->len == 6 &&
+                        strncmp(attr_dec->attribute->chars, "setter", 6) == 0) {
+                        strncat(fc->name, "__setter",
+                            sizeof(fc->name) - strlen(fc->name) - 1);
+                    } else if (attr_dec->attribute->len == 7 &&
+                               strncmp(attr_dec->attribute->chars, "deleter", 7) == 0) {
+                        strncat(fc->name, "__deleter",
+                            sizeof(fc->name) - strlen(fc->name) - 1);
+                    }
+                }
+            }
+        }
 
         // count params, detect *args
         int pc = 0;
