@@ -58,6 +58,21 @@ void template_registry_add(TemplateRegistry* registry,
               match_tag_len, match_tag ? match_tag : "", entry->definition_order);
 }
 
+void template_entry_add_handler(TemplateEntry* entry,
+                                const char* event_name,
+                                fn_ptr handler_func) {
+    if (!entry || !event_name || !handler_func) return;
+
+    TemplateHandlerEntry* h = (TemplateHandlerEntry*)calloc(1, sizeof(TemplateHandlerEntry));
+    h->event_name = event_name;
+    h->handler_func = handler_func;
+    h->next = entry->handlers;
+    entry->handlers = h;  // prepend
+
+    log_debug("template_entry_add_handler: tmpl=%s event=%s",
+              entry->name ? entry->name : "(anon)", event_name);
+}
+
 // ============================================================================
 // Pattern matching
 // ============================================================================

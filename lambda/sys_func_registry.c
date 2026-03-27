@@ -39,6 +39,13 @@ extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_re
 extern Item fn_apply1(Item target);
 extern Item fn_apply2(Item target, Item options);
 
+// template state store (reactive UI Phase 2)
+extern Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name);
+extern void tmpl_state_set(Item model_item, const char* template_ref,
+                           const char* state_name, Item value);
+extern Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
+                                   const char* state_name, Item default_value);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -1608,6 +1615,13 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
     {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
     {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
+
+    // ========================================================================
+    // Template state store (reactive UI Phase 2)
+    // ========================================================================
+    {"tmpl_state_get", FPTR(tmpl_state_get)},
+    {"tmpl_state_set", FPTR(tmpl_state_set)},
+    {"tmpl_state_get_or_init", FPTR(tmpl_state_get_or_init)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

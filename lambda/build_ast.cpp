@@ -6452,6 +6452,9 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
                 state_named->name = entry->name;
                 state_named->type = entry->value ? entry->value->type : &TYPE_ANY;
                 push_name(tp, state_named, NULL);
+                // mark state vars mutable so handlers can assign to them
+                NameEntry* state_entry = lookup_name_in_current_scope(tp, entry->name);
+                if (state_entry) state_entry->is_mutable = true;
 
                 if (prev_state == NULL) {
                     ast_node->state = entry;
@@ -6531,9 +6534,15 @@ AstNode* build_view_stam(Transpiler* tp, TSNode view_node) {
     // restore parent scope
     tp->current_scope = ast_node->vars->parent;
 
-    // register named template in scope
+    // register named template in scope (update pre-registered placeholder if exists)
     if (ast_node->name) {
-        push_name(tp, (AstNamedNode*)ast_node, NULL);
+        NameEntry* existing = lookup_name_in_current_scope(tp, ast_node->name);
+        if (existing && existing->node && existing->node->node_type == AST_NODE_VIEW) {
+            // update pre-registered placeholder from pass 1
+            existing->node = (AstNode*)ast_node;
+        } else {
+            push_name(tp, (AstNamedNode*)ast_node, NULL);
+        }
     }
 
     log_debug("end building view/edit template");
@@ -7096,6 +7105,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_object_type(tp, expr_node);
     case SYM_ELEMENT:
         return build_elmt(tp, expr_node);
+    case SYM_ELEMENT_TYPE:
+        return build_element_type(tp, expr_node);
     case SYM_CONTENT:
         return build_content(tp, expr_node, true, false);
     // SYM_LIST removed — list syntax no longer exists

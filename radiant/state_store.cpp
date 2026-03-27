@@ -154,12 +154,23 @@ RadiantState* radiant_state_create(Pool* pool, StateUpdateMode mode) {
     // Initialize reflow scheduler arena
     state->reflow_scheduler.arena = arena_create_default(pool);
 
+    // Initialize template reactive state: create the map and inject it into
+    // the global template state store so Lambda views use the same map.
+    tmpl_state_init();
+    state->template_state_map = tmpl_state_get_map();
+
     log_debug("radiant_state_create: created state store with mode %d", mode);
     return state;
 }
 
 void radiant_state_destroy(RadiantState* state) {
     if (!state) return;
+
+    // Detach template state map from global store before destroying
+    if (state->template_state_map) {
+        tmpl_state_set_map(NULL);
+        state->template_state_map = NULL;
+    }
 
     if (state->state_map) {
         hashmap_free(state->state_map);
@@ -217,6 +228,9 @@ void radiant_state_reset(RadiantState* state) {
     state->needs_repaint = false;
     dirty_clear(&state->dirty_tracker);
     reflow_clear(state);
+
+    // Clear template reactive state
+    tmpl_state_reset();
 
     state->version++;
 

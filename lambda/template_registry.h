@@ -20,6 +20,13 @@ typedef enum TemplateSpecificity {
     TMPL_SPEC_CATCHALL    = 6,  // catch-all (any)
 } TemplateSpecificity;
 
+// Event handler entry — linked list of (event_name -> handler_func) pairs
+typedef struct TemplateHandlerEntry {
+    const char* event_name;     // event name (e.g., "click", "init") — interned pointer
+    fn_ptr handler_func;        // compiled handler: Item handler(Item model)
+    struct TemplateHandlerEntry* next;
+} TemplateHandlerEntry;
+
 // A compiled template entry in the registry
 typedef struct TemplateEntry {
     const char* name;           // template name (NULL for anonymous)
@@ -34,6 +41,17 @@ typedef struct TemplateEntry {
     int match_attr_count;       // number of attribute constraints (0 = tag-only)
     int match_field_count;      // number of map field constraints (for map patterns)
     int definition_order;       // order of definition in script (for tie-breaking)
+
+    // Template reference for state store keying (interned pointer)
+    const char* template_ref;   // name or generated "_view_N" ref
+
+    // State declarations: count + parallel arrays of names and defaults
+    int state_count;            // number of state declarations
+    const char** state_names;   // state variable names (interned pointers)
+    Item* state_defaults;       // default values for each state var
+
+    // Event handlers
+    TemplateHandlerEntry* handlers;  // linked list of compiled event handlers
 
     struct TemplateEntry* next; // linked list
 } TemplateEntry;
@@ -63,6 +81,11 @@ void template_registry_add(TemplateRegistry* registry,
 TemplateEntry* template_registry_match(TemplateRegistry* registry,
                                        Item target, bool edit_mode,
                                        const char* template_name);
+
+// Add an event handler to an existing template entry
+void template_entry_add_handler(TemplateEntry* entry,
+                                const char* event_name,
+                                fn_ptr handler_func);
 
 // Global template registry (set by the runtime before execution)
 extern TemplateRegistry* g_template_registry;
