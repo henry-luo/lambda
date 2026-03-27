@@ -964,6 +964,8 @@ extern "C" Item py_new_object(void) {
     return (Item){.map = m};
 }
 
+extern "C" Item js_property_get(Item object, Item key);
+
 extern "C" Item py_getattr(Item object, Item name) {
     if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
@@ -971,7 +973,12 @@ extern "C" Item py_getattr(Item object, Item name) {
     String* key = it2s(name);
     if (!key) return ItemNull;
     Map* m = it2map(object);
-    if (!m || !m->type) return ItemNull;
+    if (!m) return ItemNull;
+    // JS-backed HashMap object (type == NULL): delegate to js_property_get
+    // This handles imported module namespaces created via js_new_object()
+    if (!m->type) {
+        return js_property_get(object, name);
+    }
 
     // 1. super proxy: delegate to the *next* class in the MRO
     {

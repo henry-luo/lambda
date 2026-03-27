@@ -656,10 +656,53 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
 
+        // Check for font-weight change (bold text is wider than regular)
+        CssDeclaration* font_weight_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT_WEIGHT);
+        if (font_weight_decl && font_weight_decl->value) {
+            CssEnum mapped_weight = CSS_VALUE_NORMAL;
+            int16_t numeric_weight = 0;
+            const CssValue* fw_val = font_weight_decl->value;
+            if (fw_val->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = fw_val->data.keyword;
+                if (kw == CSS_VALUE_BOLD) { mapped_weight = CSS_VALUE_BOLD; numeric_weight = 700; }
+                else if (kw == CSS_VALUE_BOLDER) { mapped_weight = CSS_VALUE_BOLDER; }
+                else if (kw == CSS_VALUE_LIGHTER) { mapped_weight = CSS_VALUE_LIGHTER; }
+                else { mapped_weight = CSS_VALUE_NORMAL; numeric_weight = 400; }
+            } else if (fw_val->type == CSS_VALUE_TYPE_NUMBER) {
+                int w = (int)fw_val->data.number.value;
+                numeric_weight = (w >= 100 && w <= 900) ? (int16_t)w : 0;
+                mapped_weight = (w > 500) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+            }
+            CssEnum parent_weight = lycon->font.style ? lycon->font.style->font_weight : CSS_VALUE_NORMAL;
+            if (mapped_weight != parent_weight) {
+                temp_font_prop->font_weight = mapped_weight;
+                temp_font_prop->font_weight_numeric = numeric_weight;
+                need_font_setup = true;
+            }
+        }
+
+        // Check for font-style change (italic text has different metrics)
+        CssDeclaration* font_style_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT_STYLE);
+        if (font_style_decl && font_style_decl->value &&
+            font_style_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            CssEnum css_font_style = font_style_decl->value->data.keyword;
+            CssEnum parent_style = lycon->font.style ? lycon->font.style->font_style : CSS_VALUE_NORMAL;
+            if (css_font_style != parent_style) {
+                temp_font_prop->font_style = css_font_style;
+                need_font_setup = true;
+            }
+        }
+
         if (need_font_setup) {
             // Ensure font-family is set (use parent's if not changed)
             if (!temp_font_prop->family && lycon->font.style) {
                 temp_font_prop->family = lycon->font.style->family;
+            }
+            // Carry over font-size if not changed (needed for correct font loading)
+            if (temp_font_prop->font_size <= 0 && lycon->font.style) {
+                temp_font_prop->font_size = lycon->font.style->font_size;
             }
             setup_font(lycon->ui_context, &lycon->font, temp_font_prop);
             font_changed = true;
@@ -2265,6 +2308,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
                     float lh_px = (float)lh->data.length.value;
                     if (lh_px > 0) line_height = lh_px;
+                } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    line_height = font_size * (float)(lh->data.percentage.value / 100.0);
                 }
                 break;
             }
@@ -2277,6 +2322,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
                         if (lh_px > 0) line_height = lh_px;
+                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        line_height = font_size * (float)(lh_decl->value->data.percentage.value / 100.0);
                     }
                     break;
                 }

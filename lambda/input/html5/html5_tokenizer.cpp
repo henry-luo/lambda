@@ -9,6 +9,22 @@
 #include <ctype.h>
 
 // ============================================================================
+// SOURCE LINE TRACKING
+// Incrementally counts newlines from line_scan_pos to current parser->pos.
+// Called before creating start tag tokens so that source_line is accurate.
+// ============================================================================
+static void html5_update_line_count(Html5Parser* parser) {
+    const char* html = parser->html;
+    size_t end = parser->pos;
+    for (size_t i = parser->line_scan_pos; i < end; i++) {
+        if (html[i] == '\n') {
+            parser->current_line++;
+        }
+    }
+    parser->line_scan_pos = end;
+}
+
+// ============================================================================
 // FAST TEXT SCANNING - Batch ASCII Processing
 // ============================================================================
 
@@ -1070,6 +1086,11 @@ Html5Token* html5_tokenize_next(Html5Parser* parser) {
                     html5_switch_tokenizer_state(parser, HTML5_TOK_END_TAG_OPEN);
                 } else if (isalpha(c)) {
                     parser->current_token = html5_token_create_start_tag(parser->pool, parser->arena, nullptr);
+                    // track the line of the opening '<' for this start tag
+                    if (parser->track_source_lines) {
+                        html5_update_line_count(parser);
+                        parser->current_token->source_line = parser->current_line;
+                    }
                     html5_clear_temp_buffer(parser);
                     html5_reconsume(parser);
                     html5_switch_tokenizer_state(parser, HTML5_TOK_TAG_NAME);

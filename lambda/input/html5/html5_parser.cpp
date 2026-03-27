@@ -224,6 +224,11 @@ Html5Parser* html5_parser_create(Pool* pool, Arena* arena, Input* input) {
     // error collection
     html5_error_list_init(&parser->errors, arena);
 
+    // source line tracking (disabled by default)
+    parser->track_source_lines = false;
+    parser->current_line = 1;
+    parser->line_scan_pos = 0;
+
     return parser;
 }
 
@@ -1064,6 +1069,11 @@ Element* html5_create_element_for_token(Html5Parser* parser, Html5Token* token) 
                 }
             }
         }
+    }
+
+    // Store source line number as internal attribute when tracking is enabled
+    if (parser->track_source_lines && token->source_line > 0) {
+        eb.attr("__source_line", (int64_t)token->source_line);
     }
 
     Element* elem = eb.final().element;

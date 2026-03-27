@@ -27,6 +27,10 @@ void parse_css(Input* input, const char* css_string);
 // ── Document parsers (C++ linkage) ─────────────────────────────────
 
 Element* html5_parse(Input* input, const char* html);
+
+struct Html5ParseOptions;
+Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
+
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string, size_t pdf_length);
 void parse_mark(Input* input, const char* mark_string);

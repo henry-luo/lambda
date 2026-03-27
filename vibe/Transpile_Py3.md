@@ -4,7 +4,7 @@
 
 LambdaPy v2 closed all core language gaps for single-file procedural and functional Python (~10.9K LOC). The five features deferred from v1/v2 that remain missing are: **class definitions**, **`with` statement**, **decorators**, **`**kwargs`**, and a **basic import system**. This proposal targets those in priority order.
 
-> **Implementation Status:** Phases A, B, and C complete. Phases D–E in progress.
+> **Implementation Status:** All Phases A–E complete. v3 is fully implemented.
 
 ### Architecture Position
 
@@ -18,8 +18,8 @@ v3:  OOP and module system                             (this doc, target ~15K LO
        Phase A: Class system (class, inheritance, super, dunders)   ✅ COMPLETE
        Phase B: with statement (context managers)                   ✅ COMPLETE
        Phase C: Decorators                                          ✅ COMPLETE
-       Phase D: **kwargs (complete calling convention)              ✅ done
-       Phase E: Single-file imports                                 ⏳ pending
+       Phase D: **kwargs (complete calling convention)              ✅ COMPLETE
+       Phase E: Single-file imports                                 ✅ COMPLETE
 ```
 
 ### Current vs Target Coverage
@@ -35,8 +35,8 @@ v3:  OOP and module system                             (this doc, target ~15K LO
 | `with` statement | ❌ AST parsed, no codegen | ✅ **DONE** — `__enter__`/`__exit__`, `as`-target, exception suppression |
 | Decorators | ❌ | ✅ **DONE** — function/class/method decorators, `@property`, decorator factories, stacked decorators |
 | `**kwargs` | ✅ Implemented | ✅ Phase D — done |
-| `import` / `from … import` | No-op | ⏳ Phase E — pending |
-| Estimated new LOC (A+B actual) | — | ~3,200 added so far |
+| `import` / `from … import` | No-op | ✅ **DONE** — `import mod`, `from mod import name/alias`, `from mod import *`, relative-to-script path resolution |
+| Estimated new LOC (all phases) | — | ~4,200 added |
 
 ### Non-Goals (v3)
 
@@ -796,11 +796,18 @@ configure("server", **defaults, **overrides)
 
 ---
 
-## 6. Phase E: Single-File Imports  ⏳ PENDING
+## 6. Phase E: Single-File Imports  ✅ COMPLETE
 
 **Goal:** Enable `import module` and `from module import name` for single-file `.py` scripts in the same directory.
 
-**Estimated effort:** ~680 LOC (new `py_module.cpp` + `py_module.h`).
+**Actual effort:** ~480 LOC across `build_py_ast.cpp`, `transpile_py_mir.cpp`, `py_runtime.cpp`. No new files needed — import execution is done at JIT compile time via the existing `load_py_module` / `load_js_module` / `load_script` infrastructure. Module-level namespace is built as a JS-backed HashMap and cached in the existing `module_registry`. Test: `test/py/test_py_import.py` ✅ matches CPython output (7 lines).
+
+**Bugs fixed during implementation:**
+- `build_py_ast.cpp`: `build_py_import_from` included the `module_name` dotted_name node in `imp->names` (tree-sitter exposes it as a named child too). Fixed with `ts_node_eq` skip.
+- `transpile_py_mir.cpp`: `IMPORT_FROM` with absolute module names resolved relative to CWD instead of the importing script's directory. Fixed to extract script dir from `mt->filename`.
+- `transpile_py_mir.cpp`: `load_py_module` used `js_new_function` which creates a `JsFunction` struct (wrong field layout); `py_call_function` reads `Function` struct offsets. Switched to `py_new_function`.
+- `transpile_py_mir.cpp`: `pm_scan_module_vars` only registered class names as module vars; top-level assignments like `PI = 3.14159` were stored as MIR locals and lost after `py_main` returned. Fixed to also scan `PY_AST_NODE_ASSIGNMENT` targets.
+- `py_runtime.cpp`: `py_getattr` returned `ItemNull` for JS-backed namespace maps (`type == NULL` sentinel). Fixed to delegate to `js_property_get`, enabling `utils.add(...)` attribute access.
 
 ### E1. Design
 
@@ -867,7 +874,7 @@ _py_process = CALL py_module_get(reg_mod, "process")
 
 **`import json` (stdlib stub) →** Currently no-op. Emit a warning to `log.txt` and assign `ItemNull`.
 
-**Files:** `py_module.cpp` (~450 LOC), `py_module.h` (~60 LOC), `transpile_py_mir.cpp` additions (~150 LOC), `sys_func_registry.c` (2 entries), `build_lambda_config.json` (add `py_module.cpp`).
+**Files:** `build_py_ast.cpp` (wildcard_import + module_name skip), `transpile_py_mir.cpp` (path resolution, bare import, star import, `load_py_module` fixes), `py_runtime.cpp` (`py_getattr` JS-map delegation).
 
 ### Test Plan
 
@@ -883,15 +890,31 @@ PI = 3.14159
 ```
 
 ```python
-# test/py/test_py_import.py
-from utils import add, multiply, PI
+# test/py/utils.py
+def add(a, b): return a + b
+def multiply(a, b): return a * b
+def greet(name): return "Hello, " + name
+PI = 3.14159
+VERSION = "1.0"
+MAX_VALUE = 100
+```
 
-print(add(2, 3))          # 5
-print(multiply(4, 5))     # 20
-print(PI)                 # 3.14159
+```python
+# test/py/test_py_import.py  ✅ passes
+from utils import add, multiply, PI
+print(add(2, 3))               # 5
+print(multiply(4, 5))          # 20
+print(PI)                      # 3.14159
+
+from utils import greet as say_hello
+print(say_hello("World"))      # Hello, World
 
 import utils
-print(utils.add(10, 20))  # 30
+print(utils.add(10, 20))       # 30
+print(utils.VERSION)           # 1.0
+
+from utils import *
+print(MAX_VALUE)               # 100
 ```
 
 ---
@@ -917,11 +940,10 @@ A1–A3: py_class.cpp/h, runtime updates (py_getattr, py_call_function)  ✅ DON
 
 D: **kwargs — independent of A/B/C, can do in parallel               ✅ DONE
 
-E: Import system — best after A so imported modules can define classes  ⏳ PENDING
+E: Import system — best after A so imported modules can define classes  ✅ DONE
 ```
 
-Remaining sequence:
-1. **E** (imports — last, as it exercises the full class + module pipeline)
+**All phases complete.** v3 is fully implemented.
 
 ---
 
@@ -939,12 +961,11 @@ Remaining sequence:
 | B | `transpile_py_mir.cpp` + `py_runtime.cpp` + `build_py_ast.cpp` + `py_class.h` | +480 | ✅ done | with codegen, context_enter/exit, as_pattern fix, attr aug-assign fix, builtin exc lookup |
 | C | `transpile_py_mir.cpp` + `py_builtins.cpp` | +480 | ✅ done | Decorator application, `@property`, decorator factories, stacked decorators, multi-level closure capture fix |
 | D | `transpile_py_mir.cpp` + `py_runtime.cpp` + `py_runtime.h` + `sys_func_registry.c` | +420 | ✅ done | **kwargs packing, ** call-site unpacking, py_dict_merge, py_set_kwargs_flag, py_call_function_kw |
-| E | `py_module.cpp` (new) + `py_module.h` (new) + `transpile_py_mir.cpp` | +680 | ⏳ pending | Module cache, import codegen |
-| Tests | `test/py/*.py` + `test/py/*.txt` | ~300 | partial | `test_py_classes.py` ✅, `test_py_with.py` ✅, `test_py_decorators.py` ✅, `test_py_kwargs.py` ✅ |
-| **Total** | | **~4,320** | A+B+C+D done | |
+| E | `build_py_ast.cpp` + `transpile_py_mir.cpp` + `py_runtime.cpp` | +480 | ✅ done | Module path resolution, bare import, star import, `load_py_module` fix, `py_getattr` JS-map delegation |
+| Tests | `test/py/*.py` + `test/py/*.txt` | ~350 | ✅ all passing | `test_py_classes.py` ✅, `test_py_with.py` ✅, `test_py_decorators.py` ✅, `test_py_kwargs.py` ✅, `test_py_import.py` ✅ |
+| **Total** | | **~4,800** | A+B+C+D+E done | |
 
-**v3 total so far:** ~10,865 (v2) + ~3,540 (A+B+C+D actual) = **~14,405 LOC**  
-**v3 total projection:** ~10,865 (v2) + ~4,520 (all phases) = **~15,385 LOC**
+**v3 total actual:** ~10,865 (v2) + ~4,020 (all phases actual) = **~14,885 LOC**
 
 ---
 
@@ -967,7 +988,7 @@ All existing test scripts in `test/py/` must continue to pass after each phase.
 | `test_py_decorators.py` | C | ✅ passing | Function/class/method decorators, stacked, decorator factories, `@property`, identity decorator |
 | `test_py_property.py` | C3 | covered in `test_py_decorators.py` | `@property` getter |
 | `test_py_kwargs.py` | D | ✅ passing | `**kwargs` in definitions, `**dict` at call sites |
-| `test_py_import.py` | E | ⏳ not yet created | `from utils import x`, `import utils`, `utils.x` |
+| `test_py_import.py` | E | ✅ passing | `from utils import x/alias`, `import utils`, `utils.x`, `from utils import *`, module-level vars (PI, VERSION, MAX_VALUE) |
 
 ### Integration Test
 

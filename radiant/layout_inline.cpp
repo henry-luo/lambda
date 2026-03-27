@@ -272,7 +272,7 @@ static void layout_math_span(LayoutContext* lycon, DomElement* elem, bool is_dis
  */
 void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_elem,
                                         ViewSpan* span, DomNode* first_child) {
-    log_debug("block-in-inline: splitting inline box for %s", inline_elem->node_name());
+    log_debug("block-in-inline: splitting inline box for %s", inline_elem->source_loc());
 
     // Save inline formatting context state
     Linebox saved_line = lycon->line;
@@ -413,7 +413,7 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
 }
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
-    log_debug("layout inline %s", elmt->node_name());
+    log_debug("layout inline %s", elmt->source_loc());
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
@@ -921,6 +921,8 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
             lycon->line.max_descender = max(lycon->line.max_descender, descender);
+            log_debug("empty_inline_strut: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",
+                ascender, descender, lycon->line.max_ascender, lycon->line.max_descender);
             if (lycon->block.line_height_is_normal) {
                 float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
                 lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);

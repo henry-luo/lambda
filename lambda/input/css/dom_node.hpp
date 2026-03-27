@@ -84,9 +84,16 @@ struct DomNode {
     // view always has x, y, wd, hg;  otherwise, it is a property group
     float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
 
+    // source line number in the original HTML file (0 = not tracked)
+    int source_line;
+
     // node_name() is for all nodes, including text and comment nodes
     // whereas tag_name is only for element nodes
     const char* node_name() const;
+
+    // returns "tag:line" string for log messages (e.g., "div:42", "img:105")
+    // uses a static buffer; not thread-safe. returns node_name() if source_line == 0.
+    const char* source_loc() const;
 
     // type checking helpers
     inline bool is_element() const { return node_type == DOM_NODE_ELEMENT; }
@@ -164,7 +171,7 @@ protected:
     // Constructor (only callable by derived classes)
     DomNode(DomNodeType type) : node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
-        x(0), y(0), width(0), height(0) {}
+        x(0), y(0), width(0), height(0), source_line(0) {}
 };
 
 // ============================================================================
