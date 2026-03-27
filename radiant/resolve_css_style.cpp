@@ -571,7 +571,7 @@ DisplayValue resolve_display_value(void* child) {
         DomElement* dom_elem = node->as_element();
         uintptr_t tag_id = dom_elem ? dom_elem->tag_id : HTM_TAG__UNDEF;
 
-        log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->node_name());
+        log_debug("[CSS] resolve_display_value for node=%p, tag_name=%s", node, node->source_loc());
 
         // CSS 2.1 §9.7: Check for float and position - floated or absolutely positioned elements get blockified
         CssEnum float_value = get_float_value_from_style(dom_elem);
@@ -1162,13 +1162,26 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * lycon->font.current_font_size * x_height_ratio;
             break;
         }
-        case CSS_UNIT_CH:
-            // relative to width of "0" character (approximate as 0.5em)
+        case CSS_UNIT_CH: {
+            // CSS Values 4 §6.1.1: equal to the advance width of the "0" (zero) glyph
             if (lycon->font.current_font_size < 0) {
                 resolve_font_size(lycon, NULL);
             }
-            result = num * lycon->font.current_font_size * 0.5;
+            if (lycon->font.font_handle) {
+                GlyphInfo zero_glyph = font_get_glyph(lycon->font.font_handle, '0');
+                if (zero_glyph.id != 0) {
+                    // advance_x is at the handle's loaded size; scale to current_font_size
+                    float handle_size = font_handle_get_size_px(lycon->font.font_handle);
+                    float ch_ratio = (handle_size > 0) ? zero_glyph.advance_x / handle_size : 0.5f;
+                    result = num * lycon->font.current_font_size * ch_ratio;
+                } else {
+                    result = num * lycon->font.current_font_size * 0.5f;
+                }
+            } else {
+                result = num * lycon->font.current_font_size * 0.5f;
+            }
             break;
+        }
 
         default:
             result = num;  // fallback: assume pixels for unknown units

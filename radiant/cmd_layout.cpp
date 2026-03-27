@@ -44,6 +44,7 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/transpiler.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -1629,7 +1630,8 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr) {
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
+    bool track_source_lines = false) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -1675,7 +1677,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     type_str->len = 4;
     str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
-    Input* input = input_from_source(html_content, html_url, type_str, nullptr);
+    Input* input = nullptr;
+    if (track_source_lines) {
+        // Use extended parser to record source line numbers on elements
+        input = Input::create(pool, html_url);
+        if (input) {
+            Html5ParseOptions parse_opts = { .track_source_lines = true };
+            Element* doc = html5_parse_ex(input, html_content, &parse_opts);
+            if (doc) {
+                input->root = (Item){.element = doc};
+            }
+        }
+    } else {
+        input = input_from_source(html_content, html_url, type_str, nullptr);
+    }
     if (html_content_owned) free(html_content);  // only free what we allocated
 
     auto t_parse = high_resolution_clock::now();
@@ -4042,7 +4057,8 @@ static bool layout_single_file(
     int viewport_width,
     int viewport_height,
     UiContext* ui_context,
-    Url* cwd
+    Url* cwd,
+    bool track_source_lines = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
 
@@ -4124,7 +4140,8 @@ static bool layout_single_file(
         log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
         doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
     } else {
-        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool);
+        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool,
+                                   nullptr, track_source_lines);
     }
 
     if (!doc) {
@@ -4306,7 +4323,8 @@ int cmd_layout(int argc, char** argv) {
             opts.viewport_width,
             opts.viewport_height,
             &ui_context,
-            cwd
+            cwd,
+            opts.debug
         );
 
         if (success) {

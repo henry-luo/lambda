@@ -881,6 +881,77 @@ extern "C" Item py_contains(Item container, Item value) {
 }
 
 // ============================================================================
+// match/case pattern matching helpers (Phase B)
+// ============================================================================
+
+// Returns true Item if obj is a sequence (list/array) but not a string or mapping.
+// Strings and bytes do not match sequence patterns per Python semantics.
+extern "C" Item py_match_is_sequence(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t == LMD_TYPE_ARRAY) return (Item){.item = ITEM_TRUE};
+    // tuples are also arrays in Lambda
+    return (Item){.item = ITEM_FALSE};
+}
+
+// Returns true Item if obj is a mapping (dict/map, but not a class instance).
+extern "C" Item py_match_is_mapping(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
+    // exclude class instances (they have __class__ key set) — only pure dicts match
+    Map* m = it2map(obj);
+    if (!m) return (Item){.item = ITEM_FALSE};
+    bool found = false;
+    _map_get((TypeMap*)m->type, m->data, "__class__", &found);
+    if (found) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = ITEM_TRUE};
+}
+
+// Returns a new dict containing all key-value pairs from obj whose keys are NOT
+// in the excluded_keys list (used for **rest in mapping patterns).
+extern "C" Item py_match_mapping_rest(Item obj, Item excluded_keys) {
+    Item result = py_dict_new();
+    if (get_type_id(obj) != LMD_TYPE_MAP) return result;
+    Map* m = it2map(obj);
+    if (!m || !m->type || !m->data) return result;
+
+    TypeMap* tm = (TypeMap*)m->type;
+    uint64_t* data = (uint64_t*)m->data;
+
+    // Walk shape linked list to iterate all fields
+    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+        if (!e->name || !e->name->str) continue;
+        // skip dunder keys (internal metadata)
+        if (e->name->length >= 2 && e->name->str[0] == '_' && e->name->str[1] == '_') continue;
+
+        // check if key should be excluded
+        bool excluded = false;
+        if (get_type_id(excluded_keys) == LMD_TYPE_ARRAY) {
+            Array* keys = it2arr(excluded_keys);
+            for (int j = 0; j < keys->length; j++) {
+                Item k = keys->items[j];
+                if (get_type_id(k) == LMD_TYPE_STRING) {
+                    String* ks = it2s(k);
+                    if (ks && ks->len == (int)e->name->length &&
+                        memcmp(ks->chars, e->name->str, e->name->length) == 0) {
+                        excluded = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!excluded) {
+            // key item
+            Item key_item = (Item){.item = s2it(heap_strcpy((char*)e->name->str, (int64_t)e->name->length))};
+            // value item: read from data at byte_offset
+            int slot = (int)(e->byte_offset / 8);
+            Item val = {.item = data[slot]};
+            py_dict_set(result, key_item, val);
+        }
+    }
+    return result;
+}
+
+// ============================================================================
 // Object/attribute operations
 // ============================================================================
 
@@ -1001,6 +1072,27 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
 
     Map* m = it2map(object);
     if (!m || !py_input) return object;
+
+    // property descriptor: if instance's class has a data descriptor (__set__), invoke it
+    if (py_is_instance(object)) {
+        Item cls = py_get_class(object);
+        Item raw = py_mro_lookup(cls, name);
+        if (get_type_id(raw) == LMD_TYPE_MAP) {
+            Item is_prop = py_map_get_cstr(raw, "__is_property__");
+            if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                Item setter = py_map_get_cstr(raw, "__set__");
+                if (get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item bound_setter = py_bind_method(setter, object);
+                    Item args[1] = { value };
+                    py_call_function(bound_setter, args, 1);
+                    return value;
+                }
+                // read-only property — ignore write silently (matches CPython AttributeError)
+                // for now just return without writing
+                return value;
+            }
+        }
+    }
 
     String* key = it2s(name);
     // always write to this object's own dict (instance or class dict)

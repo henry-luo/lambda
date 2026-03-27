@@ -976,7 +976,7 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
     cell->width = cell_width;
 
     // Layout cell content now that width is set
-    log_debug("[PROCESS_TABLE_CELL] About to call layout_table_cell_content for cell: %s", cell->node_name());
+    log_debug("[PROCESS_TABLE_CELL] About to call layout_table_cell_content for cell: %s", cell->source_loc());
     layout_table_cell_content(lycon, cell, table);
     log_debug("[PROCESS_TABLE_CELL] Returned from layout_table_cell_content");
 
@@ -3569,7 +3569,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
 
     // If floated, treat as a regular block element and skip table-specific handling
     if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
-        log_debug("[TABLE] Floated element %s inside table - treating as block, not table internal", node->node_name());
+        log_debug("[TABLE] Floated element %s inside table - treating as block, not table internal", node->source_loc());
 
         // CSS 2.1 §9.7: Floated elements become block-level
         // Layout this element as a float, not as a table internal element
@@ -3593,7 +3593,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     // CSS 2.1 §9.7: Absolutely positioned/fixed elements become block-level
     // and are taken out of flow. Handle them via normal flow code path.
     if (is_abspos_or_fixed(elem)) {
-        log_debug("[TABLE] Abspos/fixed element %s inside table - treating as block, not table internal", node->node_name());
+        log_debug("[TABLE] Abspos/fixed element %s inside table - treating as block, not table internal", node->source_loc());
 
         // Save and restore view context
         View* saved_view = lycon->view;

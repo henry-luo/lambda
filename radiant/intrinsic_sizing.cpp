@@ -2308,6 +2308,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
                     float lh_px = (float)lh->data.length.value;
                     if (lh_px > 0) line_height = lh_px;
+                } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    line_height = font_size * (float)(lh->data.percentage.value / 100.0);
                 }
                 break;
             }
@@ -2320,6 +2322,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
                         if (lh_px > 0) line_height = lh_px;
+                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        line_height = font_size * (float)(lh_decl->value->data.percentage.value / 100.0);
                     }
                     break;
                 }

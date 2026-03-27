@@ -1237,6 +1237,9 @@ JitImport jit_runtime_imports[] = {
     {"py_is", FPTR(py_is)},
     {"py_is_not", FPTR(py_is_not)},
     {"py_contains", FPTR(py_contains)},
+    {"py_match_is_sequence", FPTR(py_match_is_sequence)},
+    {"py_match_is_mapping", FPTR(py_match_is_mapping)},
+    {"py_match_mapping_rest", FPTR(py_match_mapping_rest)},
     // object/attr
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
@@ -1341,6 +1344,8 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
     {"py_builtin_property", FPTR(py_builtin_property)},
+    {"py_property_setter", FPTR(py_property_setter)},
+    {"py_property_deleter", FPTR(py_property_deleter)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers

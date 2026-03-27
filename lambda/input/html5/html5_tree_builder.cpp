@@ -262,6 +262,61 @@ Element* html5_parse(Input* input, const char* html) {
     return parser->document;
 }
 
+Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts) {
+    if (!html) {
+        return nullptr;
+    }
+
+    Pool* pool = input->pool;
+    Arena* arena = input->arena;
+
+    Html5Parser* parser = html5_parser_create(pool, arena, input);
+    parser->html = html;
+    parser->length = strlen(html);
+    parser->pos = 0;
+    parser->tokenizer_state = HTML5_TOK_DATA;
+
+    // apply options
+    if (opts) {
+        parser->track_source_lines = opts->track_source_lines;
+    }
+    // also sync line_scan_pos with pos (in case BOM is skipped below)
+    parser->line_scan_pos = 0;
+
+    // HTML5 §13.2.3.1: Skip leading UTF-8 BOM (U+FEFF = EF BB BF)
+    if (parser->length >= 3 &&
+        (unsigned char)html[0] == 0xEF &&
+        (unsigned char)html[1] == 0xBB &&
+        (unsigned char)html[2] == 0xBF) {
+        parser->pos = 3;
+        parser->line_scan_pos = 3;
+    }
+
+    // create document root
+    MarkBuilder builder(input);
+    parser->document = builder.element("#document").final().element;
+
+    log_debug("html5: starting parse_ex of %zu bytes (track_source_lines=%d)",
+              parser->length, parser->track_source_lines);
+
+    // tokenize and process
+    while (true) {
+        Html5Token* token = html5_tokenize_next(parser);
+        html5_process_token(parser, token);
+        if (token->type == HTML5_TOKEN_EOF) {
+            break;
+        }
+    }
+
+    html5_flush_pending_text(parser);
+    html5_flush_foster_text(parser);
+
+    log_debug("html5: parse_ex complete, mode=%d, open_elements=%zu",
+              parser->mode, parser->open_elements->length);
+
+    return parser->document;
+}
+
 // ============================================================================
 // FRAGMENT PARSING
 // For parsing HTML fragments in body context (used by markdown parser)
