@@ -333,6 +333,36 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_toFixed(num, digits);
     }
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+        if (argc > 0) {
+            Item radix_item = js_to_number(args[0]);
+            int radix = 10;
+            TypeId rt = get_type_id(radix_item);
+            if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
+            else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
+            if (radix >= 2 && radix <= 36 && radix != 10) {
+                // convert number to string with given radix
+                int64_t n = 0;
+                TypeId nt = get_type_id(num);
+                if (nt == LMD_TYPE_INT) n = it2i(num);
+                else if (nt == LMD_TYPE_FLOAT) n = (int64_t)it2d(num);
+                bool negative = n < 0;
+                uint64_t val = negative ? (uint64_t)(-(int64_t)n) : (uint64_t)n;
+                char buf[68]; // max 64 binary digits + sign + null
+                int pos = 66;
+                buf[67] = '\0';
+                if (val == 0) {
+                    buf[--pos] = '0';
+                } else {
+                    const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+                    while (val > 0) {
+                        buf[--pos] = digits[val % radix];
+                        val /= radix;
+                    }
+                }
+                if (negative) buf[--pos] = '-';
+                return (Item){.item = s2it(heap_create_name(&buf[pos], 67 - pos))};
+            }
+        }
         return js_to_string(num);
     }
 
@@ -376,21 +406,23 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     }
 
     char buf[5]; // max 4 bytes for UTF-8 + null
+    int len = 0;
     if (code < 128) {
         buf[0] = (char)code;
-        buf[1] = '\0';
+        len = 1;
     } else if (code < 0x800) {
         buf[0] = (char)(0xC0 | (code >> 6));
         buf[1] = (char)(0x80 | (code & 0x3F));
-        buf[2] = '\0';
+        len = 2;
     } else {
         buf[0] = (char)(0xE0 | (code >> 12));
         buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
         buf[2] = (char)(0x80 | (code & 0x3F));
-        buf[3] = '\0';
+        len = 3;
     }
+    buf[len] = '\0';
 
-    return (Item){.item = s2it(heap_create_name(buf))};
+    return (Item){.item = s2it(heap_strcpy(buf, len))};
 }
 
 // =============================================================================
