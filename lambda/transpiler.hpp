@@ -114,7 +114,7 @@ void clear_dynamic_imports(void);
 }
 
 // MIR transpiler functions
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false);
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false, bool retain_context = false);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,
@@ -124,7 +124,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
-Input* execute_script_and_create_output(Runner* runner, bool run_main);
+Input* execute_script_and_create_output(Runner* runner, bool run_main, bool retain_context = false);
 Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
 Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);

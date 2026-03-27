@@ -37,6 +37,7 @@ typedef RadiantState StateStore;  // For backward compatibility
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
+typedef struct Runtime Runtime;  // From lambda/lambda.h
 
 // Forward declaration for TexNode (unified TeX pipeline)
 namespace tex { struct TexNode; }
@@ -91,6 +92,9 @@ struct DomDocument {
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
+    // Reactive UI: retained Lambda runtime for event handler execution
+    Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -100,7 +104,8 @@ struct DomDocument {
                     viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
                     viewport_width(0), viewport_height(0),
                     body_transform_scale(1.0f),
-                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true) {}
+                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
+                    lambda_runtime(nullptr) {}
 };
 
 typedef struct {

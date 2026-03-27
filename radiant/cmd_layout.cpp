@@ -54,6 +54,7 @@ extern "C" {
 #include "../radiant/pdf/pdf_to_view.hpp"
 #include "../radiant/script_runner.h"
 #include "../lambda/render_map.h"
+#include "../lambda/template_state.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -3635,16 +3636,18 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = std::chrono::high_resolution_clock::now();
 
-    Runtime runtime;
-    runtime_init(&runtime);
+    Runtime* runtime = (Runtime*)calloc(1, sizeof(Runtime));
+    runtime_init(runtime);
 
     log_debug("[Lambda Script] Evaluating script...");
     // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
-    Input* script_output = run_script_mir(&runtime, nullptr, script_filepath, false);
+    // retain_context=true: skip deep_copy, keep heap + JIT alive for reactive UI event handlers
+    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false, true);
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3659,7 +3662,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3676,7 +3680,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -3693,7 +3698,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                 return write_svg_wrapped_html(svg_str->chars);
             }
             log_error("[Lambda Script] Failed to format SVG element");
-            runtime_cleanup(&runtime);
+            runtime_cleanup(runtime);
+            free(runtime);
             return nullptr;
         }
     } else if (result_type == LMD_TYPE_STRING) {
@@ -3708,7 +3714,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                 (strncmp(result_str->chars, "<html", 5) == 0 ||
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
-            runtime_cleanup(&runtime);
+            runtime_cleanup(runtime);
+            free(runtime);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
@@ -3795,7 +3802,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     DomDocument* dom_doc = dom_document_create(script_output);
     if (!dom_doc) {
         log_error("[Lambda Script] Failed to create DomDocument");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3807,7 +3815,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!dom_root) {
         log_error("[Lambda Script] Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3820,7 +3829,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("[Lambda Script] Failed to create CSS engine");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -3905,8 +3915,11 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     Item html_item_root = {.element = html_elem};
     render_map_set_doc_root(html_item_root);
 
-    // Note: Don't cleanup runtime yet - the script_output and its pool are still in use
-    // The pool will be cleaned up when dom_doc is freed
+    // Store the retained runtime on the document for event handler execution.
+    // The GC heap, JIT code, and name pool remain live for the session.
+    dom_doc->lambda_runtime = runtime;
+
+    // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",

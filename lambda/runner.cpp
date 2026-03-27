@@ -1274,7 +1274,9 @@ void resolve_sys_paths_recursive(Item item) {
 // Common helper function to execute a compiled script and wrap the result in an Input*
 // This handles the execution, result wrapping, and cleanup logic shared between run_script and run_script_with_run_main
 // Made non-static so it can be used by MIR execution path in transpile-mir.cpp
-Input* execute_script_and_create_output(Runner* runner, bool run_main) {
+// When retain_context=true, skip deep_copy and runner_cleanup, return result directly
+// on the GC heap so pointers remain valid for reactive event handlers.
+Input* execute_script_and_create_output(Runner* runner, bool run_main, bool retain_context) {
     if (!runner->script || !runner->script->main_func) {
         log_error("Error: Failed to compile the function.");
         // Return Input with error item instead of nullptr
@@ -1349,16 +1351,23 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     // Resolve all sys:// paths in result before deep copy (while context is still valid)
     resolve_sys_paths_recursive(result);
 
-    // Use MarkBuilder to deep copy result to output's arena
-    // This ensures all data is copied to the output's memory space
-    log_debug("Deep copying result using MarkBuilder, result.item=%016lx", result.item);
-    MarkBuilder builder(output);
-    output->root = builder.deep_copy(result);
-    log_debug("Deep copy completed, root type_id: %d", get_type_id(output->root));
+    if (retain_context) {
+        // Skip deep_copy: return result directly on the GC heap.
+        // Caller is responsible for keeping the runtime alive.
+        output->root = result;
+        log_info("retain_context: returning result directly (no deep_copy), root type_id: %d", get_type_id(result));
+    } else {
+        // Use MarkBuilder to deep copy result to output's arena
+        // This ensures all data is copied to the output's memory space
+        log_debug("Deep copying result using MarkBuilder, result.item=%016lx", result.item);
+        MarkBuilder builder(output);
+        output->root = builder.deep_copy(result);
+        log_debug("Deep copy completed, root type_id: %d", get_type_id(output->root));
 
-    // Now we can safely clean up the execution heap since output has its own copy
-    log_debug("Cleaning up execution context");
-    runner_cleanup(runner);
+        // Now we can safely clean up the execution heap since output has its own copy
+        log_debug("Cleaning up execution context");
+        runner_cleanup(runner);
+    }
 
     log_debug("Script execution completed, returning output Input");
     return output;
@@ -1383,7 +1392,7 @@ Input* run_script(Runtime *runtime, const char* source, char* script_path, bool 
     }
 
     // Use common execution function with run_main=false
-    return execute_script_and_create_output(&runner, false);
+    return execute_script_and_create_output(&runner, false, false);
 }
 
 Input* run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
@@ -1411,7 +1420,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
     }
 
     // Use common execution function with specified run_main flag
-    return execute_script_and_create_output(&runner, run_main);
+    return execute_script_and_create_output(&runner, run_main, false);
 }
 
 void runtime_init(Runtime* runtime) {

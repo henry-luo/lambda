@@ -427,6 +427,18 @@ Source Model ──→ apply() ──→ Template Matching ──→ View Tree �
 5. Event handlers from `on` blocks are registered on the corresponding output elements.
 6. The complete view tree is passed to Radiant for CSS resolution, layout, and rendering.
 
+#### Retained Runtime Context
+
+When rendering a reactive Lambda script via `lambda view`, the runtime context (GC heap, JIT-compiled code, name pool, script pools) is **retained** across the session rather than being destroyed after the initial evaluation. This is a key design decision:
+
+- **No deep-copy**: The result element tree returned by `run_script_mir()` references objects directly on the GC heap. Previously, a `deep_copy` was used to copy all data to a separate output pool so the runtime could be torn down. With GC-managed memory and retained sessions, this copy is unnecessary and harmful — it would invalidate the render map's `Element*` pointers.
+
+- **Pointer stability**: The render map stores `(source_item, template_ref) → result_node` entries where `result_node` is an `Element*` on the GC heap. DomElements hold `native_element` pointers to these same Elements. Because the runtime is retained, both the render map and the DOM tree reference the same live objects — enabling reverse lookup during event dispatch.
+
+- **Session lifetime**: The `Runtime*` is heap-allocated and stored on `DomDocument::lambda_runtime`. It lives for the duration of the view window. Event handlers execute in the same GC heap and JIT context as the initial evaluation, so they can allocate new objects, call JIT-compiled template functions, and mutate state without reinitializing the runtime.
+
+- **`retain_context` flag**: `run_script_mir(..., retain_context=true)` signals the execution pipeline to skip `deep_copy`, `runner_cleanup`, and `jit_cleanup`. The caller is responsible for eventual cleanup via `runtime_cleanup()` when the document is closed.
+
 ### 5.2 Event Dispatch
 
 ```

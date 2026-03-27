@@ -11617,7 +11617,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 // Main entry point for MIR compilation
 // ============================================================================
 
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main, bool retain_context) {
     log_notice("Running script with MIR JIT compilation (direct)");
 
     // Initialize runner
@@ -11742,30 +11742,40 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
             return nullptr;
         }
         resolve_sys_paths_recursive(result);
-        MarkBuilder builder(output);
-        output->root = builder.deep_copy(result);
 
-        // Preserve runtime error before cleanup
-        if (context && context->last_error) {
-            clear_persistent_last_error();
-            persistent_last_error = context->last_error;
-            context->last_error = NULL;
+        if (retain_context) {
+            // Skip deep_copy: return result directly on the GC heap.
+            // Caller keeps runtime, heap, and JIT context alive for event handlers.
+            output->root = result;
+            log_info("retain_context: returning result directly (no deep_copy, no cleanup)");
+        } else {
+            MarkBuilder builder(output);
+            output->root = builder.deep_copy(result);
+
+            // Preserve runtime error before cleanup
+            if (context && context->last_error) {
+                clear_persistent_last_error();
+                persistent_last_error = context->last_error;
+                context->last_error = NULL;
+            }
+
+            runner_cleanup(&runner);
+
+            // Prevent double-cleanup: runtime_cleanup() iterates scripts and calls jit_cleanup
+            runner.script->jit_context = NULL;
+            jit_cleanup(ctx);
         }
-
-        runner_cleanup(&runner);
-
-        // Prevent double-cleanup: runtime_cleanup() iterates scripts and calls jit_cleanup
-        runner.script->jit_context = NULL;
-        jit_cleanup(ctx);
         return output;
     }
 
     // Execute (no imports — use standard path)
-    Input* output = execute_script_and_create_output(&runner, run_main);
+    Input* output = execute_script_and_create_output(&runner, run_main, retain_context);
 
-    // Prevent double-cleanup
-    runner.script->jit_context = NULL;
-    jit_cleanup(ctx);
+    if (!retain_context) {
+        // Prevent double-cleanup
+        runner.script->jit_context = NULL;
+        jit_cleanup(ctx);
+    }
 
     return output;
 }

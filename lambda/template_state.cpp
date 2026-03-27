@@ -6,6 +6,7 @@
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include <string.h>
+#include <stdio.h>
 
 // ============================================================================
 // Global state map
@@ -124,6 +125,7 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     entry.key.state_name = state_name;
     entry.value = default_value;
     hashmap_set(map, &entry);
+
     log_debug("tmpl_state_get_or_init: initialized tmpl=%s state=%s",
               template_ref ? template_ref : "(anon)", state_name);
     return default_value;
