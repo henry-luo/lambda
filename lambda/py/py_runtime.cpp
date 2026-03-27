@@ -1620,6 +1620,11 @@ extern "C" Item py_builtin_open(Item path_item, Item mode_item) {
 // ============================================================================
 
 extern "C" Item py_get_iterator(Item iterable) {
+    // generator objects are already iterators — pass through unchanged
+    if (get_type_id(iterable) == LMD_TYPE_FUNC) {
+        Function* fn = iterable.function;
+        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) return iterable;
+    }
     // create a stateful iterator object: {__data__: iterable, __idx__: 0, __len__: len}
     Item len_item = py_builtin_len(iterable);
     int64_t len = (get_type_id(len_item) == LMD_TYPE_INT) ? it2i(len_item) : 0;
@@ -1632,6 +1637,18 @@ extern "C" Item py_get_iterator(Item iterable) {
 }
 
 extern "C" Item py_iterator_next(Item iterator) {
+    // generator objects: call resume function
+    if (get_type_id(iterator) == LMD_TYPE_FUNC) {
+        Function* fn = iterator.function;
+        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) {
+            uint64_t* frame = (uint64_t*)fn->closure_env;
+            if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+            typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+            resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+            uint64_t result = resume(frame, ItemNull.item);
+            return (Item){.item = result};
+        }
+    }
     // advance iterator: read __data__/__idx__/__len__, return next item or StopIteration
     if (get_type_id(iterator) != LMD_TYPE_MAP) {
         return py_stop_iteration();
@@ -2038,4 +2055,67 @@ extern "C" Item py_stop_iteration(void) {
 extern "C" bool py_is_stop_iteration(Item value) {
     if (!py_stop_iteration_initialized) return false;
     return value.item == py_stop_iteration_sentinel.item;
+}
+
+// ============================================================================
+// Phase A: Python generator protocol
+// ============================================================================
+
+// Create a generator object from a MIR resume function and a pre-allocated frame.
+// Frame layout: slot 0 = state (0=fresh, N=resume point, -1=exhausted),
+//               slots 1..N = local variables (params first).
+extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
+    if (!py_input || frame_size <= 0 || frame_size > 256) return ItemNull;
+    Function* fn = (Function*)pool_calloc(py_input->pool, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->flags = FN_FLAG_IS_GENERATOR;
+    fn->arity = 0;
+    fn->ptr = (fn_ptr)resume_fn_ptr;
+    uint64_t* frame = (uint64_t*)pool_calloc(py_input->pool, frame_size * sizeof(uint64_t));
+    fn->closure_env = frame;
+    fn->closure_field_count = (uint8_t)(frame_size < 255 ? frame_size : 255);
+    // frame[0] = 0: fresh (not started)
+    return (Item){.function = fn};
+}
+
+// Return the frame array pointer of a generator as an i64 (for MIR store ops).
+extern "C" int64_t py_gen_get_frame_c(Item gen) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return 0;
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return 0;
+    return (int64_t)(uintptr_t)fn->closure_env;
+}
+
+// Advance a generator by sending ItemNull (used by next()).
+// Also callable from py_iterator_next above.
+extern "C" Item py_gen_next(Item gen) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    uint64_t* frame = (uint64_t*)fn->closure_env;
+    if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+    uint64_t result = resume(frame, ItemNull.item);
+    return (Item){.item = result};
+}
+
+// Send a value into a generator (used by gen.send(val)).
+extern "C" Item py_gen_send(Item gen, Item value) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    uint64_t* frame = (uint64_t*)fn->closure_env;
+    if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+    uint64_t result = resume(frame, value.item);
+    return (Item){.item = result};
+}
+
+// Check if an Item is a generator object.
+extern "C" bool py_is_generator(Item x) {
+    if (get_type_id(x) != LMD_TYPE_FUNC) return false;
+    Function* fn = x.function;
+    return fn && (fn->flags & FN_FLAG_IS_GENERATOR) != 0;
 }

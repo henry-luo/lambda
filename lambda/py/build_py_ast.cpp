@@ -1756,13 +1756,25 @@ PyAstNode* build_py_expression(PyTranspiler* tp, TSNode expr_node) {
         return NULL;
     }
 
-    // yield expression
+    // yield / yield from expression
     if (strcmp(node_type, "yield") == 0) {
-        // build the yielded value
-        if (ts_node_named_child_count(expr_node) > 0) {
-            return build_py_expression(tp, ts_node_named_child(expr_node, 0));
+        PyYieldNode* yn = (PyYieldNode*)alloc_py_ast_node(tp, PY_AST_NODE_YIELD, expr_node, sizeof(PyYieldNode));
+        yn->is_from = false;
+        yn->value = NULL;
+        // detect 'yield from' by scanning for the anonymous 'from' keyword child
+        int total = ts_node_child_count(expr_node);
+        for (int ci = 0; ci < total; ci++) {
+            TSNode child = ts_node_child(expr_node, ci);
+            if (strcmp(ts_node_type(child), "from") == 0) {
+                yn->is_from = true;
+                break;
+            }
         }
-        return build_py_none(tp, expr_node);
+        // the value is the first named child (if any)
+        if (ts_node_named_child_count(expr_node) > 0) {
+            yn->value = build_py_expression(tp, ts_node_named_child(expr_node, 0));
+        }
+        return (PyAstNode*)yn;
     }
 
     // type node (in annotations) — just return the inner expression

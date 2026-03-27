@@ -225,6 +225,15 @@ void py_runtime_set_input(void* input);
 Item py_stop_iteration(void);
 bool py_is_stop_iteration(Item value);
 
+// ========================================================================
+// Generator protocol (Phase A)
+// ========================================================================
+Item    py_gen_create(void* resume_fn_ptr, int frame_size);
+int64_t py_gen_get_frame_c(Item gen);
+Item    py_gen_next(Item gen);
+Item    py_gen_send(Item gen, Item value);
+bool    py_is_generator(Item x);
+
 #ifdef __cplusplus
 }
 #endif

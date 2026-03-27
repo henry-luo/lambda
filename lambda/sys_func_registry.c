@@ -1370,6 +1370,11 @@ JitImport jit_runtime_imports[] = {
     // stop iteration
     {"py_stop_iteration", FPTR(py_stop_iteration)},
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
+    // generator protocol
+    {"py_gen_create", FPTR(py_gen_create)},
+    {"py_gen_get_frame_c", FPTR(py_gen_get_frame_c)},
+    {"py_gen_next", FPTR(py_gen_next)},
+    {"py_gen_send", FPTR(py_gen_send)},
 
     // ========================================================================
     // Bash runtime functions
