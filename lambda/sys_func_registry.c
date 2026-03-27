@@ -1006,6 +1006,7 @@ JitImport jit_runtime_imports[] = {
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_bind_function", FPTR(js_bind_function)},
     {"js_create_regex", FPTR(js_create_regex)},
+    {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_regex_test", FPTR(js_regex_test)},
     {"js_regex_exec", FPTR(js_regex_exec)},
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},
@@ -1195,6 +1196,10 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
     {"js_weakset_new", FPTR(js_weakset_new)},
+    // prototype chain
+    {"js_get_prototype", FPTR(js_get_prototype)},
+    {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_prototype_lookup", FPTR(js_prototype_lookup)},
 
     // ========================================================================
     // Python runtime functions
@@ -1232,6 +1237,9 @@ JitImport jit_runtime_imports[] = {
     {"py_is", FPTR(py_is)},
     {"py_is_not", FPTR(py_is_not)},
     {"py_contains", FPTR(py_contains)},
+    {"py_match_is_sequence", FPTR(py_match_is_sequence)},
+    {"py_match_is_mapping", FPTR(py_match_is_mapping)},
+    {"py_match_mapping_rest", FPTR(py_match_mapping_rest)},
     // object/attr
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
@@ -1336,6 +1344,8 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
     {"py_builtin_property", FPTR(py_builtin_property)},
+    {"py_property_setter", FPTR(py_property_setter)},
+    {"py_property_deleter", FPTR(py_property_deleter)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers

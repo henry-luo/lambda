@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <stdint.h>
 
+// forward declarations
+static char js_decode_escape_char(char c);
+
 // External Tree-sitter JavaScript parser
 extern "C" {
     const TSLanguage *tree_sitter_javascript(void);
@@ -180,13 +183,53 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
         literal->literal_type = JS_LITERAL_STRING;
         // Remove quotes and handle escape sequences
         if (source.length >= 2) {
-            // Create null-terminated string without quotes
             size_t content_len = source.length - 2;
+            const char* src = source.str + 1;
+            // Process escape sequences in-place
             char* temp_str = (char*)malloc(content_len + 1);
             if (temp_str) {
-                memcpy(temp_str, source.str + 1, content_len);
-                temp_str[content_len] = '\0';
-                literal->value.string_value = name_pool_create_len(tp->name_pool, temp_str, content_len);
+                size_t out = 0;
+                for (size_t i = 0; i < content_len; i++) {
+                    if (src[i] == '\\' && i + 1 < content_len) {
+                        char next = src[i + 1];
+                        if (next == 'u') {
+                            // Unicode escape: \uXXXX
+                            if (i + 5 < content_len && src[i + 2] != '{') {
+                                char hex[5] = {src[i+2], src[i+3], src[i+4], src[i+5], 0};
+                                uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
+                                if (cp < 0x80) {
+                                    temp_str[out++] = (char)cp;
+                                } else if (cp < 0x800) {
+                                    temp_str[out++] = (char)(0xC0 | (cp >> 6));
+                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                } else {
+                                    temp_str[out++] = (char)(0xE0 | (cp >> 12));
+                                    temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                }
+                                i += 5; // skip \uXXXX
+                            } else {
+                                temp_str[out++] = src[i]; // keep as-is
+                            }
+                        } else if (next == 'x') {
+                            // Hex escape: \xHH
+                            if (i + 3 < content_len) {
+                                char hex[3] = {src[i+2], src[i+3], 0};
+                                temp_str[out++] = (char)strtoul(hex, NULL, 16);
+                                i += 3;
+                            } else {
+                                temp_str[out++] = src[i];
+                            }
+                        } else {
+                            temp_str[out++] = js_decode_escape_char(next);
+                            i++; // skip the escaped char
+                        }
+                    } else {
+                        temp_str[out++] = src[i];
+                    }
+                }
+                temp_str[out] = '\0';
+                literal->value.string_value = name_pool_create_len(tp->name_pool, temp_str, out);
                 free(temp_str);
             } else {
                 literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
@@ -710,8 +753,10 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 
     func->base.type = &TYPE_FUNC;
 
-    // Add function to scope if it has a name
-    if (func->name) {
+    // Add function to scope if it has a name — but NOT for class method definitions,
+    // which should not pollute the enclosing scope with their method names.
+    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
+    if (func->name && !is_method_def) {
         js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 

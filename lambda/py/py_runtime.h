@@ -53,6 +53,9 @@ Item py_ge(Item left, Item right);
 Item py_is(Item left, Item right);
 Item py_is_not(Item left, Item right);
 Item py_contains(Item container, Item value);  // `in` operator
+Item py_match_is_sequence(Item obj);
+Item py_match_is_mapping(Item obj);
+Item py_match_mapping_rest(Item obj, Item excluded_keys);
 
 // ========================================================================
 // Object/attribute operations
@@ -186,6 +189,8 @@ Item py_builtin_divmod(Item a, Item b);
 Item py_builtin_pow(Item base, Item exp, Item mod);
 Item py_builtin_callable(Item obj);
 Item py_builtin_property(Item fget);
+Item py_property_setter(Item prop, Item fset);
+Item py_property_deleter(Item prop, Item fdel);
 Item py_builtin_sorted_ex(Item iterable, Item key_func, Item reverse_flag);
 Item py_list_sort_ex(Item list, Item key_func, Item reverse_flag);
 
