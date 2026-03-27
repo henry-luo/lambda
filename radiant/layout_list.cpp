@@ -433,8 +433,8 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
                                          CssEnum marker_style, float font_size,
                                          bool is_bullet_marker, bool is_outside,
                                          bool is_string_marker, const char* string_marker,
-                                         const char* marker_css_content) {
-    float fixed_marker_width = font_size * 1.375f;  // ~22px at 16px font
+                                         const char* marker_css_content,
+                                         FontHandle* font_handle) {
     float bullet_size = font_size * 0.35f;  // ~5-6px at 16px font
 
     DomElement* marker_elem = dom_element_create(parent_elem->doc, "::marker", nullptr);
@@ -445,7 +445,6 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     MarkerProp* marker_prop = (MarkerProp*)alloc_prop(lycon, sizeof(MarkerProp));
     memset(marker_prop, 0, sizeof(MarkerProp));
     marker_prop->marker_type = marker_style;
-    marker_prop->width = fixed_marker_width;
     marker_prop->bullet_size = bullet_size;
     marker_prop->is_outside = is_outside;
 
@@ -483,12 +482,27 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         }
     }
 
+    // CSS Lists 3 §4.2: compute marker width from content
+    // For text markers, measure actual text width; for bullets, use fixed bullet size + padding
+    if (marker_prop->text_content && font_handle) {
+        TextExtents extents = font_measure_text(font_handle, marker_prop->text_content,
+                                                 (int)strlen(marker_prop->text_content));
+        marker_prop->width = extents.width;
+    } else if (is_bullet_marker) {
+        // bullet: disc/circle/square - use bullet_size + some padding
+        marker_prop->width = bullet_size + font_size * 0.5f;
+    } else {
+        // fallback: use em-based estimate
+        marker_prop->width = font_size * 1.375f;
+    }
+
     marker_elem->view_type = RDT_VIEW_MARKER;
     marker_elem->blk = (BlockProp*)marker_prop;
 
-    log_debug("    [List] Created %s::marker width=%.1f, bullet_size=%.1f, type=%s",
-             is_outside ? "outside " : "", fixed_marker_width, bullet_size,
-             is_bullet_marker ? "bullet" : "text");
+    log_debug("    [List] Created %s::marker width=%.1f, bullet_size=%.1f, type=%s, text='%s'",
+             is_outside ? "outside " : "", marker_prop->width, bullet_size,
+             is_bullet_marker ? "bullet" : "text",
+             marker_prop->text_content ? marker_prop->text_content : "");
 
     return marker_elem;
 }
@@ -598,7 +612,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         log_debug("    [List] Generating string marker: \"%s\"", string_marker);
     }
 
-    bool is_bullet_marker = !is_string_marker &&
+    bool is_bullet_marker = !is_string_marker && !marker_css_content &&
                             (marker_style == CSS_VALUE_DISC ||
                             marker_style == CSS_VALUE_CIRCLE ||
                             marker_style == CSS_VALUE_SQUARE);
@@ -618,7 +632,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         DomElement* marker_elem = create_marker_element(
             lycon, parent_elem, marker_style, font_size,
             is_bullet_marker, is_outside_position,
-            is_string_marker, string_marker, marker_css_content);
+            is_string_marker, string_marker, marker_css_content,
+            lycon->font.font_handle);
 
         if (marker_elem) {
             block->pseudo->marker = marker_elem;
