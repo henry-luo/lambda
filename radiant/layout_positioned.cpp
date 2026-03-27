@@ -971,6 +971,8 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             cb->position->last_abs_child->position->next_abs_sibling = block;
             cb->position->last_abs_child = block;
         }
+        // Ensure the newly appended block is the list tail (no dangling next pointer)
+        block->position->next_abs_sibling = nullptr;
     } else {
         log_error("Containing block has no position property");
     }

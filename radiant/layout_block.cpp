@@ -18,6 +18,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/font/font.h"
 #include "../lambda/input/input.hpp"
+
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <utf8proc.h>
@@ -2799,6 +2800,23 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     log_debug("layout block inner content");
 
+    // Reset abs-child linked list so multiple layout passes (e.g., flex measurement
+    // + flex final) don't accumulate duplicates and create a cycle in
+    // re_resolve_abs_children_vertical. Absolute children re-register themselves
+    // via layout_abs_block during this layout pass.
+    if (block->position) {
+        // Walk existing list and clear next_abs_sibling on all entries so stale
+        // pointers can't form a cycle if this block re-enters layout.
+        ViewBlock* abs_walker = block->position->first_abs_child;
+        while (abs_walker) {
+            ViewBlock* abs_next = abs_walker->position ? abs_walker->position->next_abs_sibling : nullptr;
+            if (abs_walker->position) abs_walker->position->next_abs_sibling = nullptr;
+            abs_walker = abs_next;
+        }
+        block->position->first_abs_child = nullptr;
+        block->position->last_abs_child = nullptr;
+    }
+
     // Allocate pseudo-element content if ::before or ::after is present
     if (block->is_element()) {
         block->pseudo = alloc_pseudo_content_prop(lycon, block);
@@ -3516,8 +3534,15 @@ static bool is_block_self_collapsing(ViewBlock* vb) {
     return true;
 }
 
+static int layout_block_content_count = 0;
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block, Linebox *pa_line) {
+    layout_block_content_count++;
+    if (layout_block_content_count % 5000 == 0) {
+        log_notice("layout_block_content: count=%d", layout_block_content_count);
+    }
+
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
     // CSS 2.2 9.5.1: Float positioning relative to preceding content
@@ -5184,12 +5209,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // Restore parent BFC if we created a new one - handled by block.parent in calling code
 }
 
+static int layout_block_count = 0;
+
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    layout_block_count++;
+    auto t_block_start = high_resolution_clock::now();
     uintptr_t tag = elmt->tag();
     if (tag == HTM_TAG_IMG) {
         log_debug("[LAYOUT_BLOCK IMG] layout_block ENTRY for IMG element: %s", elmt->source_loc());
     }
-    auto t_block_start = high_resolution_clock::now();
 
     log_enter();
     // display: CSS_VALUE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_LIST_ITEM
@@ -6300,6 +6328,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_leave();
 
     auto t_block_end = high_resolution_clock::now();
-    g_block_layout_time += duration<double, std::milli>(t_block_end - t_block_start).count();
+    double block_ms = duration<double, std::milli>(t_block_end - t_block_start).count();
+    g_block_layout_time += block_ms;
     g_block_layout_count++;
+    if (block_ms > 50.0) {
+        log_warn("SLOW BLOCK: %s took %.0fms (count=%d)", elmt->source_loc(), block_ms, layout_block_count);
+    }
 }

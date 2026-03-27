@@ -15,6 +15,7 @@
 // str.h included via view.hpp
 #include <cmath>
 #include <cstring>
+#include <chrono>
 
 // ============================================================================
 // Helper: Read border width from CSS specified style
@@ -577,6 +578,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
+
+    // check intrinsic sizing cache to avoid redundant subtree traversals
+    if (!content_only && element->has_cached_intrinsic_widths) {
+        return {element->cached_min_content_width, element->cached_max_content_width};
+    }
+
+    // re-entrancy guard: if we're already measuring this element, break the cycle
+    if (element->measuring_intrinsic_width) {
+        log_debug("measure_element_intrinsic_widths: cycle detected for %s, returning {0,0}", element->node_name());
+        return {0, 0};
+    }
+    element->measuring_intrinsic_width = true;
+    // RAII guard to clear measuring flag on all return paths
+    struct MeasureGuard {
+        DomElement* e;
+        MeasureGuard(DomElement* e) : e(e) {}
+        ~MeasureGuard() { e->measuring_intrinsic_width = false; }
+    } measure_guard(element);
+
+    auto t_measure_start = std::chrono::high_resolution_clock::now();
 
     // CRITICAL FIX: Set up font context for this element BEFORE measuring text children
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
@@ -2198,6 +2219,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->font = saved_font;
     }
 
+    // store result in intrinsic sizing cache
+    if (!content_only) {
+        element->cached_min_content_width = sizes.min_content;
+        element->cached_max_content_width = sizes.max_content;
+        element->has_cached_intrinsic_widths = true;
+    }
+
+    auto t_measure_end = std::chrono::high_resolution_clock::now();
+    double measure_ms = std::chrono::duration<double, std::milli>(t_measure_end - t_measure_start).count();
+    if (measure_ms > 100.0) {
+        log_warn("SLOW MEASURE: %s took %.0fms", element->source_loc(), measure_ms);
+    }
+
     return sizes;
 }
 
@@ -3114,8 +3148,22 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 }
 
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width) {
-    float min_content = calculate_min_content_width(lycon, node);
-    float max_content = calculate_max_content_width(lycon, node);
+    // measure both min and max content in a single call to avoid redundant subtree traversals
+    float min_content, max_content;
+    if (node && node->is_element()) {
+        DomElement* element = node->as_element();
+        if (element) {
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element);
+            min_content = sizes.min_content;
+            max_content = sizes.max_content;
+        } else {
+            min_content = calculate_min_content_width(lycon, node);
+            max_content = calculate_max_content_width(lycon, node);
+        }
+    } else {
+        min_content = calculate_min_content_width(lycon, node);
+        max_content = calculate_max_content_width(lycon, node);
+    }
 
     // fit-content = clamp(min-content, available, max-content)
     // = min(max-content, max(min-content, available))
@@ -3141,8 +3189,21 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
 
     // Step 1: Measure width intrinsic sizes
     // Width measurement doesn't depend on available width
-    result.min_content_width = calculate_min_content_width(lycon, node);
-    result.max_content_width = calculate_max_content_width(lycon, node);
+    // measure both min and max content widths in a single call
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        if (elem) {
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, elem);
+            result.min_content_width = sizes.min_content;
+            result.max_content_width = sizes.max_content;
+        } else {
+            result.min_content_width = calculate_min_content_width(lycon, node);
+            result.max_content_width = calculate_max_content_width(lycon, node);
+        }
+    } else {
+        result.min_content_width = calculate_min_content_width(lycon, node);
+        result.max_content_width = calculate_max_content_width(lycon, node);
+    }
 
     // Step 2: Determine the width to use for height measurement
     // Height depends on width due to text wrapping

@@ -1501,7 +1501,7 @@ static int js_call_count = 0;
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_error("js_debug_check_callee: NULL callee at site_id=%lld (type=%d, call_count=%d)",
+        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d, call_count=%d)",
             (long long)site_id, get_type_id(callee), js_call_count);
     }
     return ItemNull;
@@ -1511,7 +1511,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     js_call_count++;
 
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
+        log_debug("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
             js_call_count, get_type_id(func_item), (unsigned long long)func_item.item, arg_count,
             get_type_id(this_val));
         return ItemNull;

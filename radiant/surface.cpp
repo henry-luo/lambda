@@ -78,8 +78,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             return NULL;
         }
         log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
-        // Use URL as cache key
-        file_path = (char*)url_str;
+        // strdup to take ownership: entry->path must always be a malloc'd string
+        // (url_get_href returns a pointer into the Url struct, not a separate allocation)
+        file_path = strdup(url_str);
     } else {
         file_path = url_to_local_path(abs_url);
         if (!file_path) {
@@ -99,6 +100,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &search_key);
     if (entry) {
         log_debug("Image loaded from cache: %s", file_path);
+        free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
         url_destroy(abs_url);
         return entry->image;
     }
@@ -235,7 +237,7 @@ Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface) {
 
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
-    free((char*)entry->path);  // path is from url_to_local_path() which uses stdlib malloc
+    free((char*)entry->path);  // always malloc-owned: strdup for HTTP paths, url_to_local_path for local paths
     if (entry->image->url) url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;

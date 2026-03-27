@@ -232,6 +232,12 @@ struct DomElement : DomNode {
     // The TexNode tree IS the view tree - no conversion needed
     tex::TexNode* tex_root;
 
+    // Intrinsic sizing cache for avoiding redundant measurement during layout
+    float cached_min_content_width;
+    float cached_max_content_width;
+    bool has_cached_intrinsic_widths;
+    bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
+
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
@@ -244,7 +250,9 @@ struct DomElement : DomNode {
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), multicol(nullptr), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr) {}
+        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr),
+        cached_min_content_width(0), cached_max_content_width(0),
+        has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };
 
 // Pseudo-class state flags
