@@ -611,10 +611,6 @@
             "named": true
           },
           {
-            "type": "map_type",
-            "named": true
-          },
-          {
             "type": "unary_type",
             "named": true
           }
@@ -668,10 +664,6 @@
           },
           {
             "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "map_type",
             "named": true
           },
           {
@@ -3939,10 +3931,6 @@
         },
         {
           "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "map_type",
           "named": true
         }
       ]

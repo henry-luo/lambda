@@ -4700,10 +4700,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "map_type"
-        },
-        {
-          "type": "SYMBOL",
           "name": "identifier"
         },
         {

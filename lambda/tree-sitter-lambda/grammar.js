@@ -544,13 +544,12 @@ module.exports = grammar({
       repeat(field('handler', $.event_handler)),
     ),
 
-    // View pattern: like _type_expr but map_type is always followed by another pattern form
-    // to avoid ambiguity with the body {}.
-    // Atom: element_type | map_type | identifier | base_type (with optional occurrence)
+    // View pattern: element or type name (identifier / base_type).
+    // map_type is intentionally excluded to avoid ambiguity with the body {}.
+    // Atom: element_type | identifier | base_type (with optional occurrence)
     // Union: atom | atom | ...
     _view_pattern_atom: $ => choice(
       $.element_type,
-      $.map_type,
       $.identifier,
       $.base_type,
     ),
