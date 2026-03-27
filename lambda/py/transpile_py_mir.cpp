@@ -6,6 +6,8 @@
 
 #include "py_transpiler.hpp"
 #include "py_runtime.h"
+#include "py_bigint.h"
+#include "py_async.h"
 #include "../lambda-data.hpp"
 #include "../module_registry.h"
 #include "../../lib/log.h"
@@ -107,6 +109,7 @@ struct PyFuncCollected {
     int class_depth;                // nesting depth of class within which method is defined (top=0)
     // generator flag
     bool is_generator;              // true if body contains any yield / yield from
+    bool is_async;                  // true if declared as async def (Phase D)
 };
 
 struct PyLambdaCollected {
@@ -183,6 +186,7 @@ struct PyMirTranspiler {
 
     // ---- Generator compilation state (valid during pm_compile_generator) ----
     bool in_generator;              // true while compiling a generator resume function
+    bool in_async;                  // true while compiling an async def (Phase D)
     MIR_reg_t gen_frame_reg;        // MIR reg holding the _gen_frame pointer parameter
     MIR_reg_t gen_sent_reg;         // MIR reg holding the _gen_sent parameter
     int gen_yield_count;            // yield points emitted so far (0-based)
@@ -572,6 +576,16 @@ static int pm_get_global_var_index(PyMirTranspiler* mt, const char* vname);
 static MIR_reg_t pm_transpile_literal(PyMirTranspiler* mt, PyLiteralNode* lit) {
     switch (lit->literal_type) {
     case PY_LITERAL_INT:
+        if (lit->is_bigint_literal && lit->bigint_literal_str) {
+            // large integer literal: call py_bigint_from_cstr at runtime
+            String* interned = name_pool_create_len(mt->tp->name_pool,
+                lit->bigint_literal_str, (int)strlen(lit->bigint_literal_str));
+            MIR_reg_t ptr = pm_new_reg(mt, "biglit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, ptr),
+                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)interned->chars)));
+            return pm_call_1(mt, "py_bigint_from_cstr", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ptr));
+        }
         return pm_box_int_const(mt, lit->value.int_value);
     case PY_LITERAL_FLOAT: {
         MIR_reg_t d = pm_new_reg(mt, "dbl", MIR_T_D);
@@ -620,6 +634,15 @@ static MIR_reg_t pm_transpile_identifier(PyMirTranspiler* mt, PyIdentifierNode* 
     if (var) {
         if (var->from_env) return pm_load_env_slot(mt, var->env_reg, var->env_slot);
         return var->reg;
+    }
+
+    // fallback: check module-level vars (imports, classes, top-level assignments)
+    {
+        int midx = pm_get_global_var_index(mt, vname);
+        if (midx >= 0) {
+            return pm_call_1(mt, "py_get_module_var", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, midx));
+        }
     }
 
     // Check local functions
@@ -2269,6 +2292,52 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
             MIR_new_reg_op(mt->ctx, mt->gen_sent_reg)));
         return sent_result;
     }
+    case PY_AST_NODE_AWAIT: {
+        // await expr (Phase D): drive sub-coroutine via yield-from loop, then get return value
+        PyAwaitNode* aw = (PyAwaitNode*)expr;
+        if (!mt->in_generator) {
+            // await outside async context: drive the coroutine directly
+            MIR_reg_t coro = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
+            return pm_call_1(mt, "py_coro_drive", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, coro));
+        }
+        // inside async def: same as yield from but result = py_coro_get_return()
+        char iter_vname[128];
+        snprintf(iter_vname, sizeof(iter_vname), "_py__git_%d", mt->gen_iter_count++);
+        MIR_reg_t sub_expr = aw->value ? pm_transpile_expression(mt, aw->value) : pm_emit_null(mt);
+        MIR_reg_t sub_iter = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, sub_expr));
+        PyMirVarEntry* sub_iter_var = pm_find_var(mt, iter_vname);
+        if (sub_iter_var && !sub_iter_var->from_env) {
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, sub_iter_var->reg),
+                MIR_new_reg_op(mt->ctx, sub_iter)));
+        }
+        pm_gen_emit_save(mt);
+        int yf_state = mt->gen_yield_count + 1;
+        pm_gen_store_state(mt, yf_state);
+        MIR_label_t l_yf_loop = mt->gen_yield_labels[mt->gen_yield_count];
+        MIR_label_t l_yf_done = pm_new_label(mt);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_yf_loop)));
+        // === loop label: both initial entry and resume landing ===
+        pm_emit_label(mt, l_yf_loop);
+        mt->gen_yield_count++;
+        pm_gen_emit_restore(mt);
+        MIR_reg_t cur_iter = (sub_iter_var && !sub_iter_var->from_env) ? sub_iter_var->reg : sub_iter;
+        MIR_reg_t sub_item = pm_call_1(mt, "py_iterator_next", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, cur_iter));
+        MIR_reg_t is_stop = pm_call_1(mt, "py_is_stop_iteration", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, sub_item));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+            MIR_new_label_op(mt->ctx, l_yf_done),
+            MIR_new_reg_op(mt->ctx, is_stop)));
+        pm_gen_emit_save(mt);
+        pm_gen_store_state(mt, yf_state);
+        pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, sub_item)));
+        pm_emit_label(mt, l_yf_done);
+        // retrieve the return value stored by the sub-coroutine
+        return pm_call_0(mt, "py_coro_get_return", MIR_T_I64);
+    }
     default:
         log_error("py-mir: unsupported expression type %d", expr->node_type);
         return pm_emit_null(mt);
@@ -2659,7 +2728,13 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
 
 static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
     if (mt->in_generator) {
-        // return inside a generator: mark exhausted and return stop_iteration
+        // return inside a generator/coroutine: mark exhausted and return stop_iteration
+        if (mt->in_async && ret->value) {
+            // async def return X: store return value via side-channel before exhaustion
+            MIR_reg_t rval = pm_transpile_expression(mt, ret->value);
+            pm_call_1(mt, "py_coro_set_return", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rval));
+        }
         pm_gen_store_state(mt, -1);
         MIR_reg_t si = pm_call_0(mt, "py_stop_iteration", MIR_T_I64);
         pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, si)));
@@ -3665,6 +3740,13 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         }
 
         Item ns = ItemNull;
+
+        // --- check built-in modules first (Phase D+) ---
+        if ((int)strlen("asyncio") == mod_len && strncmp(mod_name, "asyncio", mod_len) == 0) {
+            ns = py_stdlib_asyncio_init();
+        }
+
+        if (ns.item == ItemNull.item) {
         StrBuf* try_buf = strbuf_new();
 
         strbuf_append_format(try_buf, "%s.py", path_buf->str);
@@ -3686,6 +3768,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         }
 
         strbuf_free(try_buf);
+        } // end built-in check
         strbuf_free(path_buf);
 
         if (ns.item == ItemNull.item) {
@@ -3701,6 +3784,15 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             MIR_new_reg_op(mt->ctx, val_reg),
             MIR_new_int_op(mt->ctx, (int64_t)ns.item)));
         pm_set_var(mt, vname, val_reg);
+
+        // also store as module var so nested functions (generators/coroutines) can access it
+        int midx = pm_get_global_var_index(mt, vname);
+        if (midx >= 0) {
+            pm_call_void_2(mt, "py_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, midx),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+        }
+
         log_debug("py-mir: import '%.*s' → '%s'", mod_len, mod_name, vname);
         break;
     }
@@ -4382,6 +4474,8 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
 
         // detect generator functions (body contains any yield / yield from)
         fc->is_generator = pm_has_yield_r(fn->body);
+        fc->is_async     = fn->is_async;
+        if (fc->is_async) fc->is_generator = true;  // async def always compiles as generator
 
         mt->func_count++;
 
@@ -5229,6 +5323,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     MIR_reg_t  old_env_reg        = mt->scope_env_reg;
     int        old_env_slot_count = mt->scope_env_slot_count;
     bool       old_in_generator   = mt->in_generator;
+    bool       old_in_async       = mt->in_async;
     MIR_reg_t  old_gen_frame_reg  = mt->gen_frame_reg;
     MIR_reg_t  old_gen_sent_reg   = mt->gen_sent_reg;
     int        old_gen_ycount     = mt->gen_yield_count;
@@ -5253,6 +5348,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     mt->scope_env_reg      = 0;
     mt->scope_env_slot_count = 0;
     mt->in_generator       = true;
+    mt->in_async           = fc->is_async;
     mt->gen_frame_reg      = MIR_reg(mt->ctx, "_gen_frame", mt->current_func);
     mt->gen_sent_reg       = MIR_reg(mt->ctx, "_gen_sent",  mt->current_func);
     mt->gen_yield_count    = 0;
@@ -5311,6 +5407,12 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     // --- exhaustion epilogue ---
     pm_emit_label(mt, l_exhausted);
     pm_gen_store_state(mt, -1);
+    if (fc->is_async) {
+        // async def with no explicit return: store None as the coroutine return value
+        MIR_reg_t none_r = pm_emit_null(mt);
+        pm_call_1(mt, "py_coro_set_return", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, none_r));
+    }
     MIR_reg_t si_reg = pm_call_0(mt, "py_stop_iteration", MIR_T_I64);
     pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, si_reg)));
 
@@ -5319,6 +5421,7 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
 
     // restore transpiler state (but keep gen_local_names for wrapper compilation)
     mt->in_generator      = old_in_generator;
+    mt->in_async          = old_in_async;
     mt->gen_frame_reg     = old_gen_frame_reg;
     mt->gen_sent_reg      = old_gen_sent_reg;
     mt->gen_yield_count   = old_gen_ycount;
@@ -5341,8 +5444,9 @@ static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
         MIR_new_reg_op(mt->ctx, rptr),
         MIR_new_ref_op(mt->ctx, resume_func_item)));
 
-    // gen = py_gen_create(rptr, frame_size)
-    MIR_reg_t gen_obj = pm_call_2(mt, "py_gen_create", MIR_T_I64,
+    // gen = py_gen_create(rptr, frame_size) or py_coro_create(rptr, frame_size) for async
+    const char* create_fn = fc->is_async ? "py_coro_create" : "py_gen_create";
+    MIR_reg_t gen_obj = pm_call_2(mt, create_fn, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, rptr),
         MIR_T_I64, MIR_new_int_op(mt->ctx, frame_size));
 
@@ -5751,6 +5855,34 @@ static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
                 }
                 target = target->next;
             }
+        } else if (s->node_type == PY_AST_NODE_IMPORT && mt->global_var_count < 64) {
+            // register top-level imports as module vars so they are accessible
+            // from nested functions (generators, coroutines, closures)
+            PyImportNode* imp = (PyImportNode*)s;
+            if (imp->module_name) {
+                const char* local_name = imp->module_name->chars;
+                int local_len = (int)imp->module_name->len;
+                if (imp->alias) {
+                    local_name = imp->alias->chars;
+                    local_len = (int)imp->alias->len;
+                } else {
+                    const char* dot = (const char*)memchr(local_name, '.', local_len);
+                    if (dot) local_len = (int)(dot - local_name);
+                }
+                char var_name[132];
+                snprintf(var_name, sizeof(var_name), "_py_%.*s", local_len, local_name);
+                bool already = false;
+                for (int i = 0; i < mt->global_var_count; i++) {
+                    if (strcmp(mt->global_var_names[i], var_name) == 0) { already = true; break; }
+                }
+                if (!already) {
+                    int idx = mt->module_var_count++;
+                    snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", var_name);
+                    mt->global_var_indices[mt->global_var_count] = idx;
+                    mt->global_var_count++;
+                    log_debug("py-mir: import var '%s' → module_var[%d]", var_name, idx);
+                }
+            }
         }
         s = s->next;
     }
@@ -5792,6 +5924,22 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
     // Phase 3a: compile all lambdas first (functions reference lambda func_items)
     for (int i = 0; i < mt->lambda_count; i++) {
         pm_compile_lambda(mt, &mt->lambda_entries[i]);
+    }
+
+    // Phase 3a2: forward-declare all module-level functions so that generators/
+    // coroutines compiled in reverse order can reference not-yet-compiled functions.
+    for (int i = 0; i < mt->func_count; i++) {
+        PyFuncCollected* fc = &mt->func_entries[i];
+        if (fc->is_method) continue;  // methods are accessed via py_getattr
+        char fn_name[260];
+        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+        MIR_item_t fwd = MIR_new_forward(mt->ctx, fn_name);
+        fc->func_item = fwd;  // direct-call path uses this; overwritten by real func later
+        PyLocalFuncEntry lfe;
+        memset(&lfe, 0, sizeof(lfe));
+        snprintf(lfe.name, sizeof(lfe.name), "_py_%s", fc->name);
+        lfe.func_item = fwd;
+        hashmap_set(mt->local_funcs, &lfe);
     }
 
     // Phase 3b: compile all functions (reverse order so nested functions compile first)

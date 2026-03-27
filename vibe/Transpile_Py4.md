@@ -4,7 +4,7 @@
 
 LambdaPy v3 closed the major OOP and module-system gaps (~14.4K LOC). The features explicitly deferred from v3 are: **generators/`yield`**, **`match`/`case` pattern matching**, **standard library module stubs**, **`async`/`await`**, **full package imports**, and **metaclasses/advanced OOP** (including `@prop.setter`, full descriptor protocol, `__init_subclass__`, `__class_getitem__`). This proposal targets those in priority order.
 
-> **Implementation Status:** All phases pending.
+> **Implementation Status:** Phase F1 (@property setter/deleter), Phase B (match/case), Phase A (generators/yield), and Phase C (arbitrary-precision integers) are complete. Stdlib stubs, Phase D, E, and F2+ are pending.
 
 ### Architecture Position
 
@@ -18,42 +18,41 @@ v3:  OOP and module system                                  (✅ COMPLETE, ~14.4
        Classes, inheritance, super, dunders, with, decorators, **kwargs,
        single-file imports
 v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~20K LOC)
-       Phase A: Generators and yield                        ⏳ pending
-       Phase B: match/case pattern matching                 ⏳ pending
+       Phase A: Generators and yield                        ✅ COMPLETE
+       Phase B: match/case pattern matching                 ✅ COMPLETE
        Phase C: Standard library module stubs               ⏳ pending
        Phase D: async/await and event loop                  ⏳ pending
        Phase E: Full package system                         ⏳ pending
-       Phase F: Advanced OOP (metaclasses, descriptors)     ⏳ pending
+       Phase F: Advanced OOP (metaclasses, descriptors)     🔄 partial (F1 done)
 ```
 
 ### Current vs Target Coverage
 
-| Metric | v3 (actual) | v4 target |
-|--------|-------------|-----------|
-| `yield` / generator functions | AST stripped: `yield` silently evaluates its expression | ✅ Full generator objects with `next()`/`throw()`/`close()` |
-| `yield from` | ❌ | ✅ Delegation to sub-generator |
-| Generator expressions `(x for x in ...)` | Compiled as lists (eager) | ✅ Lazy generator objects |
-| `match`/`case` pattern matching | ❌ | ✅ Literal, capture, sequence, mapping, class, OR patterns, guards |
-| `import math` / `import os` / `import sys` | No-op warning | ✅ Built-in module stubs |
-| `import json` | No-op warning | ✅ Delegates to Lambda's JSON parser |
-| `import re` | No-op warning | ✅ Thin wrapper over Lambda's re2 backend |
-| `async def` / `await` | `await` stripped to inner expression | ✅ Coroutines with simple event loop |
-| `async for` / `async with` | ❌ | ✅ Async iterator + async context manager |
-| `asyncio.run()` / `asyncio.gather()` | ❌ | ✅ Single-threaded event loop |
-| `import pkg.submod` | ❌ Deferred | ✅ Package resolution with `__init__.py` |
-| Relative imports (`from . import x`) | ❌ Deferred | ✅ |
-| Circular imports | ❌ Not handled | ✅ Partial loading / forward references |
-| `@prop.setter` / `@prop.deleter` | ❌ Deferred from v3 | ✅ Full property descriptor |
-| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌ | ✅ |
-| `__init_subclass__` | ❌ | ✅ |
-| `__class_getitem__` | ❌ | ✅ Generic type subscript (`List[int]`) |
-| Metaclasses (`metaclass=Meta`) | ❌ | ✅ Basic metaclass support |
-| Arbitrary-precision integers | 64-bit only | ⏳ Deferred to v5 (requires GMP integration) |
-| C extension imports (`import numpy`) | ❌ | ❌ Deferred to v5 |
+| Metric                                                        | v3 (actual)                                             | v4 target                                                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `yield` / generator functions                                 | AST stripped: `yield` silently evaluates its expression | ✅ **DONE** — state-machine codegen, `next()`/`send()`, frame-based locals    |
+| `yield from`                                                  | ❌                                                       | ✅ **DONE** — self-looping state delegates to sub-iterator                    |
+| Generator expressions `(x for x in ...)`                      | Compiled as lists (eager)                               | ⏳ pending (v4 stretch goal)                                                  |
+| `match`/`case` pattern matching                               | ❌                                                       | ✅ **DONE** — literal, capture, wildcard, OR, sequence, mapping, class, guard |
+| `import math` / `import os` / `import sys`                    | No-op warning                                           | ✅ Built-in module stubs                                                      |
+| `import json`                                                 | No-op warning                                           | ✅ Delegates to Lambda's JSON parser                                          |
+| `import re`                                                   | No-op warning                                           | ✅ Thin wrapper over Lambda's re2 backend                                     |
+| `async def` / `await`                                         | `await` stripped to inner expression                    | ✅ Coroutines with simple event loop                                          |
+| `async for` / `async with`                                    | ❌                                                       | ✅ Async iterator + async context manager                                     |
+| `asyncio.run()` / `asyncio.gather()`                          | ❌                                                       | ✅ Single-threaded event loop                                                 |
+| `import pkg.submod`                                           | ❌ Deferred                                              | ✅ Package resolution with `__init__.py`                                      |
+| Relative imports (`from . import x`)                          | ❌ Deferred                                              | ✅                                                                            |
+| Circular imports                                              | ❌ Not handled                                           | ✅ Partial loading / forward references                                       |
+| `@prop.setter` / `@prop.deleter`                              | ❌ Deferred from v3                                      | ✅ **DONE** — setter and deleter fully implemented                            |
+| Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌                                                       | ✅                                                                            |
+| `__init_subclass__`                                           | ❌                                                       | ✅                                                                            |
+| `__class_getitem__`                                           | ❌                                                       | ✅ Generic type subscript (`List[int]`)                                       |
+| Metaclasses (`metaclass=Meta`)                                | ❌                                                       | ✅ Basic metaclass support                                                    |
+| Arbitrary-precision integers                                  | 64-bit only                                             | ✅ **DONE** — mpdecimal backend (4000-digit precision), `py_bigint.cpp`       |
+| C extension imports (`import numpy`)                          | ❌                                                       | ❌ Deferred to v5                                                             |
 
 ### Non-Goals (v4)
 
-- Arbitrary-precision integers (requires GMP/MPIR integration — deferred to v5)
 - C extension imports (`import numpy`, `import torch`)
 - `threading` / `multiprocessing` (true parallelism)
 - Full `asyncio` stdlib (only core primitives: `run`, `gather`, `sleep`, `create_task`)
@@ -63,11 +62,34 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 
 ---
 
-## 2. Phase A: Generators and `yield`
+## 2. Phase A: Generators and `yield` ✅ COMPLETE
 
 **Goal:** Enable generator functions (`def f(): yield x`), generator expressions `(x for x in ...)`, `yield from`, and `send()`/`throw()`/`close()` on generator objects.
 
 **Estimated effort:** ~900 LOC. New file: `lambda/py/py_generator.cpp`, `lambda/py/py_generator.h`. Additions to `transpile_py_mir.cpp`, `py_runtime.cpp`, `py_ast.hpp`, `sys_func_registry.c`.
+
+### A0. Implementation Summary (completed)
+
+**Approach:** Compile-time state machine in `transpile_py_mir.cpp` — no separate generator file was needed. Generator runtime helpers were added to `py_runtime.cpp`.
+
+**What was implemented:**
+- `PY_AST_NODE_YIELD` added to `py_ast.hpp` with `PyYieldNode` (`value`, `is_from`).
+- `build_py_ast.cpp`: `yield` and `yield from` are built into proper AST nodes (was previously stripped).
+- Generator object = `LMD_TYPE_FUNC` Item with `FN_FLAG_IS_GENERATOR = 0x04`; frame pointer in `fn->closure_env`; resume function pointer in `fn->ptr`.
+- Frame layout: slot 0 = state (`0`=fresh, `N`=resume at yield N, `-1`=exhausted), slots 1..N = saved locals.
+- `pm_compile_generator` in `transpile_py_mir.cpp`: emits a `_gen_resume_NAME` state-machine MIR function and a thin wrapper `_NAME` that allocates the frame and returns the generator object.
+- `pm_gen_collect_locals_r`: pre-scans body to enumerate all frame locals (params + assigned vars + auto-named iterators `_py__git_N`).
+- `pm_gen_emit_save` / `pm_gen_emit_restore`: save/restore all frame locals at each yield point.
+- `yield from`: single self-looping state — enters once (saves sub-iterator), loops with same state on each resume until sub-iterator exhausted.
+- `pm_transpile_for` converted from index-based to iterator-protocol (`py_get_iterator`/`py_iterator_next`), enabling for-loops over generators everywhere.
+- `py_builtin_list` extended with general iterator-protocol fallback so `list(gen)` works.
+- Runtime additions to `py_runtime.cpp`: `py_gen_create`, `py_gen_get_frame_c`, `py_gen_next`, `py_gen_send`, `py_is_generator`; `py_get_iterator` passes generators through; `py_iterator_next` detects generators and calls resume function.
+- Registered in `sys_func_registry.c`: `py_gen_create`, `py_gen_get_frame_c`, `py_gen_next`, `py_gen_send`.
+- Test: `test/py/test_py_generators.py` — 8 scenarios, all PASS.
+
+**Not yet implemented (stretch goals):** generator expressions `(x for x in ...)` — still compiled eagerly as lists. `gen.throw()` / `gen.close()`.
+
+
 
 ### A1. Core Challenge: Stackless Generator State Machine
 
@@ -276,11 +298,24 @@ print(list(squares))   # [0, 1, 4, 9, 16, 25]
 
 ---
 
-## 3. Phase B: `match`/`case` Pattern Matching
+## 3. Phase B: `match`/`case` Pattern Matching ✅ COMPLETE
 
 **Goal:** Enable Python 3.10+ structural pattern matching (`match`/`case`) with all standard pattern forms.
 
 **Estimated effort:** ~750 LOC. Additions to `py_ast.hpp`, `build_py_ast.cpp`, `transpile_py_mir.cpp`, `py_runtime.cpp`. New helper: `py_pattern.cpp`.
+
+### B0. Implementation Summary (completed)
+
+All pattern types implemented inline in `transpile_py_mir.cpp` (no separate `py_pattern.cpp` needed). Key additions:
+
+- AST nodes: `PY_AST_NODE_MATCH`, `PY_AST_NODE_CASE`, `PY_AST_NODE_PAT_LITERAL`, `PY_AST_NODE_PAT_CAPTURE`, `PY_AST_NODE_PAT_WILDCARD`, `PY_AST_NODE_PAT_OR`, `PY_AST_NODE_PAT_SEQUENCE`, `PY_AST_NODE_PAT_MAPPING`, `PY_AST_NODE_PAT_CLASS`, `PY_AST_NODE_PAT_STAR`.
+- `build_py_ast.cpp`: `build_py_match_statement`, `build_py_case_clause`, `build_py_pattern` recursive parser.
+- `pm_compile_pattern`: recursive codegen for all 9 pattern types with `L_fail` jump-out.
+- Class pattern name resolution: `pm_resolve_dotted_name` checks `pm_get_global_var_index` before locals, so user-defined class names inside functions resolve correctly.
+- `py_match_sequence` runtime helper: returns true for list/tuple but not str/bytes.
+- Test: `test/py/test_py_match.py` — 12 test groups, all PASS.
+
+
 
 ### B1. Pattern Types
 
@@ -445,7 +480,28 @@ print(http_error(502))  # server error
 
 ---
 
-## 4. Phase C: Standard Library Module Stubs
+## 4. Phase C: Arbitrary-Precision Integers ✅ COMPLETE
+
+**Goal:** Python `int` seamlessly promotes to arbitrary-precision when results exceed 56-bit range, using Lambda's existing libmpdecimal infrastructure.
+
+### C0. Implementation Summary (completed)
+
+**Approach:** Store Python bigints as `LMD_TYPE_DECIMAL` `Item` values with `Decimal::unlimited == PY_BIGINT_FLAG (2)`. Use a dedicated `mpd_context_t` with 4000-digit precision (~13,000 bits). Reused Lambda's mpdecimal heap allocation (`heap_alloc`, `Decimal` struct, `decimal_to_double`).
+
+**What was implemented:**
+- `lambda/py/py_bigint.h` / `py_bigint.cpp` — full bigint arithmetic: add, sub, mul, floordiv, mod, pow, neg, abs, lshift, rshift, cmp, and string/hex/oct/bin conversion.
+- `py_runtime.cpp` — overflow detection in `py_add`, `py_sub`, `py_mul`, `py_power`, `py_lshift`, `py_rshift` promotes to bigint; `py_eq`/`py_lt` compare bigints via `py_bigint_cmp`; `py_negate` handles bigint negation; `py_to_str`/`py_to_int`/`py_is_truthy`/`py_get_number` dispatch on `py_is_bigint`.
+- `py_power` rewritten with `__builtin_mul_overflow` to correctly detect both `result*b` and `b*b` overflow at each step.
+- `py_ast.hpp` — `PyLiteralNode` extended with `is_bigint_literal` / `bigint_literal_str` for large integer literals in source.
+- `build_py_ast.cpp` — overflow detection via `errno == ERANGE` after `strtoll`; stores raw decimal string for oversized literals.
+- `transpile_py_mir.cpp` — emits `py_bigint_from_cstr(ptr)` for bigint literals; normal literals use `pm_box_int_const` unchanged.
+- `py_builtins.cpp` — `abs()`, `hex()`, `oct()`, `bin()` dispatch to bigint variants on bigint input.
+- `sys_func_registry.c` — registered `py_bigint_from_cstr` for MIR JIT lookup.
+- Test: `test/py/test_py_bigint.py` — 15 scenarios, all PASS (large literals, pow, add, mul, factorial, shift, floordiv, mod, comparisons, str(), abs(), hex()).
+
+---
+
+## 5. Phase C: Standard Library Module Stubs
 
 **Goal:** Enable `import math`, `import os`, `import sys`, `import re`, `import json`, `import collections`, and other frequently used standard library modules via thin C-backed stubs.
 
@@ -676,7 +732,7 @@ print(list(dq))   # [0, 1, 2, 3]
 
 ---
 
-## 5. Phase D: `async`/`await` and Event Loop
+## 6. Phase D: `async`/`await` and Event Loop
 
 **Goal:** Enable `async def`, `await`, `async for`, `async with`, and a minimal `asyncio` facade sufficient for practical async scripting.
 
@@ -847,7 +903,7 @@ asyncio.run(parallel())
 
 ---
 
-## 6. Phase E: Full Package System
+## 7. Phase E: Full Package System
 
 **Goal:** Enable `import pkg.submod`, `from pkg import name`, relative imports (`from . import x`, `from ..utils import y`), and correct handling of circular imports.
 
@@ -942,40 +998,30 @@ print(helper())               # 42
 
 ---
 
-## 7. Phase F: Advanced OOP — Metaclasses, Full Descriptors, `@prop.setter`
+## 8. Phase F: Advanced OOP
 
 **Goal:** Complete the class system with `@property` setter/deleter, full descriptor protocol (`__get__`/`__set__`/`__delete__`), `__init_subclass__`, `__class_getitem__`, and basic metaclass support.
 
 **Estimated effort:** ~650 LOC. Extensions to `lambda/py/py_class.cpp`, `lambda/py/py_class.h`, `py_runtime.cpp`, `transpile_py_mir.cpp`.
 
-### F1. `@property` Setter and Deleter
+### F1. `@property` Setter and Deleter ✅ COMPLETE
 
-v3 implemented `@property` getter only. Add setter/deleter support by:
+v3 implemented `@property` getter only. Setter/deleter are now fully supported.
+
+**Implemented:**
+- Property Map: `{ "__is_property__": true, "__get__": fget, "__set__": fset, "__delete__": fdel }`.
+- `py_property_setter(prop, fset)` and `py_property_deleter(prop, fdel)` runtime functions.
+- `pm_apply_decorators` detects `@propname.setter` / `@propname.deleter` (attribute decorator) and emits the appropriate call; internal MIR name is suffixed (`_setter`/`_deleter`) to avoid collision with the getter.
+- `py_setattr` on instances calls `__set__` when the class dict entry has `__is_property__`; `py_delattr` calls `__delete__`.
+- Test: `test/py/test_py_property.py` — all PASS.
+
+
 
 1. Extending the property Map representation:
    ```c
    // property Map: { "__is_property__": true, "__get__": fget, "__set__": fset,
    //                 "__delete__": fdel, "__doc__": doc }
    ```
-
-2. Adding `py_property_setter(prop, fset)` and `py_property_deleter(prop, fdel)` runtime functions.
-
-3. In `pm_apply_decorators`, detecting `@prop.setter` (an attribute access, not a bare identifier):
-   ```python
-   @some_prop.setter
-   def some_prop(self, value): ...
-   ```
-   This is a method decorator where the decorator expression is `Attribute(name="setter", object=Identifier("some_prop"))`. The transpiler emits:
-   ```
-   reg_prop = CALL py_property_setter(_py_some_prop, pyf_ClassName__some_prop_setter)
-   // update the class dict entry
-   ```
-
-4. `py_setattr` on an instance: detect `__is_property__` in the class dict; if `__set__` is present, call it instead of setting the instance field directly.
-
-5. `py_getattr` on an instance: already detects `__is_property__` in v3. Ensure deletion path calls `__delete__`.
-
-**Files:** `py_class.cpp` additions (~150 LOC), `transpile_py_mir.cpp` additions (~80 LOC) for `@prop.setter`/`@prop.deleter` decorator detection.
 
 ### F2. Full Descriptor Protocol
 
@@ -1158,7 +1204,7 @@ print(PluginBase._registry)  # ['PluginA', 'PluginB']
 
 ---
 
-## 8. Implementation Order and Dependencies
+## 9. Implementation Order and Dependencies
 
 ```
 Phase A: Generators/yield     — independent of B–F; prerequisite for D and C(itertools)
@@ -1188,7 +1234,7 @@ Recommended implementation sequence:
 
 ---
 
-## 9. LOC Estimate Summary
+## 10. LOC Estimate Summary
 
 | Phase | File(s) | Estimated LOC | Status | Notes |
 |-------|---------|--------------|--------|-------|
@@ -1232,7 +1278,7 @@ Recommended implementation sequence:
 
 ---
 
-## 10. Testing Strategy
+## 11. Testing Strategy
 
 ### Regression
 
@@ -1246,7 +1292,8 @@ All existing tests in `test/py/` must continue to pass after each phase. Run `ma
 | `test_py_generators_advanced.py` | A | `throw()`, `close()`, nested generators, infinite sequences |
 | `test_py_match.py` | B | All 7 pattern kinds, guard, OR pattern |
 | `test_py_match_class.py` | B | Class patterns, `__match_args__` |
-| `test_py_stdlib_math.py` | C | All math module functions |
+| `test_py_bigint.py` | C (bigint) | Large literals, pow, add, mul, factorial, shift, floordiv, mod, cmp, str, abs, hex |
+| `test_py_stdlib_math.py` | C (stdlib) | All math module functions |
 | `test_py_stdlib_os.py` | C | os, os.path functions |
 | `test_py_stdlib_re.py` | C | re.match, re.search, re.findall, re.sub, re.split |
 | `test_py_stdlib_json.py` | C | json.loads, json.dumps, nested structures |
