@@ -3637,8 +3637,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     runtime_init(&runtime);
 
     log_debug("[Lambda Script] Evaluating script...");
-    // Use C2MIR JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
-    Input* script_output = run_script(&runtime, nullptr, script_filepath, false);
+    // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
+    Input* script_output = run_script_mir(&runtime, nullptr, script_filepath, false);
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
