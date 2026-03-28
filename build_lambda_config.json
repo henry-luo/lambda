@@ -2673,6 +2673,17 @@
                             "gtest_main"
                         ],
                         "icon": "🐑"
+                    },
+                    {
+                        "source": "test/test_bash_official_gtest.cpp",
+                        "name": "Bash Official Test Suite",
+                        "dependencies": [],
+                        "binary": "test_bash_official_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🐚"
                     }
                 ],
                 "type": "extended",
