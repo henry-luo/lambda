@@ -185,6 +185,7 @@ Item js_number_method(Item num, Item method_name, Item* args, int argc);
 
 Item js_string_charCodeAt(Item str_item, Item index_item);
 Item js_string_fromCharCode(Item code_item);
+Item js_string_fromCharCode_array(Item arr_item);
 
 // =============================================================================
 // v5: Array fill (regular + typed)
@@ -228,7 +229,9 @@ Item js_date_now(void);
 Item js_date_new(void);
 Item js_date_method(Item date_obj, int method_id);
 Item js_map_collection_new(void);
+Item js_map_collection_new_from(Item iterable);
 Item js_set_collection_new(void);
+Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
 Item js_map_method(Item obj, Item method_name, Item* args, int argc);
 Item js_alert(Item msg);
@@ -354,6 +357,12 @@ Item js_decodeURIComponent(Item str_item);
 
 // globalThis
 Item js_get_global_this(void);
+
+// URL constructor
+Item js_url_construct(Item input);
+Item js_url_construct_with_base(Item input, Item base);
+Item js_url_parse(Item input, Item base);
+Item js_url_can_parse(Item input);
 
 // Symbol API
 Item js_symbol_create(Item description);
