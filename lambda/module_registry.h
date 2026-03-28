@@ -20,6 +20,7 @@ typedef struct ModuleDescriptor {
     Item namespace_obj;         // namespace Item (map of exported symbols)
     void* mir_ctx;              // compiled MIR context (opaque, for function lookup)
     bool initialized;           // true after module code has executed
+    bool loading;               // true while module is being loaded (circular import detection)
 } ModuleDescriptor;
 
 // Initialize the module registry (call once at startup)
@@ -36,6 +37,14 @@ ModuleDescriptor* module_get(const char* path);
 
 // Check if a module is already loaded
 bool module_is_loaded(const char* path);
+
+// Mark a module as currently loading (for circular import detection).
+// Creates a partial entry with loading=true, initialized=false, empty namespace.
+// Returns the descriptor so the caller can set namespace_obj after execution.
+ModuleDescriptor* module_register_loading(const char* path, const char* lang);
+
+// Check if a module is currently being loaded (circular import in progress)
+bool module_is_loading(const char* path);
 
 // Build a namespace Item (map) from a compiled Lambda module's public API.
 // Walks the AST for pub functions and variables, wrapping compiled function

@@ -700,14 +700,22 @@ struct JsFunction {
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
+    // Try JsFunction layout first (func_ptr at offset 8)
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    return jsfn->func_ptr;
+    if (jsfn->func_ptr) return jsfn->func_ptr;
+    // Fall back to Function layout (ptr at offset 16)
+    Function* fn = fn_item.function;
+    return (void*)fn->ptr;
 }
 
 extern "C" int js_function_get_arity(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return 0;
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    return jsfn->param_count;
+    // If func_ptr (offset 8) is set, it's JsFunction layout
+    if (jsfn->func_ptr) return jsfn->param_count;
+    // Otherwise it's Function layout — arity at offset 1
+    Function* fn = fn_item.function;
+    return fn->arity;
 }
 
 // P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.

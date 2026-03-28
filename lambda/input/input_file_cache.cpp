@@ -4,12 +4,10 @@
 
 #include "input.hpp"
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <time.h>
+#include "../../lib/file.h"
 
 // Compute SHA-256 hash for cache key
 typedef struct FileCacheEntry {

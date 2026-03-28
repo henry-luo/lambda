@@ -18,7 +18,6 @@
 #include "../../../lib/str.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 // helper: map a functional pseudo-class name to its selector type
 static CssSelectorType css_functional_pseudo_type(const char* func_name) {
@@ -1868,10 +1867,43 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             }
 
             // Extract value
-            if (pos > value_start && tokens[value_start].value) {
+            if (pos > value_start) {
                 if (rule->type == CSS_RULE_IMPORT) {
-                    rule->data.import_rule.url = tokens[value_start].value;
-                } else {
+                    // @import URL extraction: handle url('...'), url(...), '...', "..."
+                    const char* import_url = nullptr;
+                    for (int ti = value_start; ti < pos; ti++) {
+                        if (tokens[ti].type == CSS_TOKEN_WHITESPACE) continue;
+                        if (tokens[ti].type == CSS_TOKEN_STRING) {
+                            // @import 'file.css' or @import "file.css"
+                            import_url = tokens[ti].value;
+                            break;
+                        }
+                        if (tokens[ti].type == CSS_TOKEN_URL) {
+                            // @import url(file.css) — unquoted URL token
+                            import_url = tokens[ti].value;
+                            break;
+                        }
+                        if (tokens[ti].type == CSS_TOKEN_FUNCTION && tokens[ti].value &&
+                            strcmp(tokens[ti].value, "url(") == 0) {
+                            // @import url('file.css') — FUNCTION + STRING + RIGHT_PAREN
+                            for (int tj = ti + 1; tj < pos; tj++) {
+                                if (tokens[tj].type == CSS_TOKEN_WHITESPACE) continue;
+                                if (tokens[tj].type == CSS_TOKEN_STRING ||
+                                    tokens[tj].type == CSS_TOKEN_IDENT) {
+                                    import_url = tokens[tj].value;
+                                    break;
+                                }
+                                break;
+                            }
+                            break;
+                        }
+                        break; // unknown token pattern
+                    }
+                    rule->data.import_rule.url = import_url;
+                    if (import_url) {
+                        log_debug(" @import URL extracted: '%s'", import_url);
+                    }
+                } else if (tokens[value_start].value) {
                     rule->data.charset_rule.charset = tokens[value_start].value;
                 }
             }

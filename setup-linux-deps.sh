@@ -1427,6 +1427,20 @@ echo "- zlib: $(dpkg -l | grep -q zlib1g-dev && echo "✓ Available" || echo "�
 echo "- bzip2: $(dpkg -l | grep -q libbz2-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- OpenGL: $(dpkg -l | grep -q libgl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- EGL: $(dpkg -l | grep -q libegl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
+# Clone GNU Bash test suite (optional, for bash transpiler conformance tests)
+if [ ! -d "ref/bash" ]; then
+    echo ""
+    echo "Cloning GNU Bash test suite..."
+    mkdir -p ref
+    if git clone --depth 1 https://git.savannah.gnu.org/git/bash.git ref/bash 2>/dev/null; then
+        echo "✅ GNU Bash test suite cloned to ref/bash"
+    else
+        echo "⚠️  Could not clone GNU Bash repo (optional, needed for bash conformance tests)"
+    fi
+else
+    echo "✅ GNU Bash test suite already present at ref/bash"
+fi
+echo "- Bash tests: $([ -d "ref/bash/tests" ] && echo \"✓ Available\" || echo \"✗ Missing\")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make build           # Build Lambda main project"

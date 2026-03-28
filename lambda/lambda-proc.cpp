@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/file.h"
+#include "../lib/shell.h"
 #include "utf_string.h"
 #include "format/format.h"
 
@@ -10,24 +11,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
-#include <direct.h>  // for _mkdir
-#include <io.h>      // for _access
-#include <sys/stat.h>  // for struct stat, stat()
-#include <sys/timeb.h>  // for struct timespec
-#include <pthread_time.h>  // for clock_gettime
-// Windows doesn't have these macros, provide simple equivalents
-#define WIFEXITED(status) (1)
-#define WEXITSTATUS(status) (status)
-#ifndef S_ISDIR
-#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
-#endif
-#else
-#include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
-#include <sys/stat.h>  // for mkdir, chmod
-#include <unistd.h>    // for symlink, rmdir, access
-#include <dirent.h>    // for opendir, readdir
-#include <utime.h>     // for utime (touch)
-#include <ftw.h>       // for nftw (recursive delete)
 #endif
 #include <string.h>  // for strlen
 #include "input/input.hpp"
@@ -162,87 +145,26 @@ static void win_path_buf(char* buf, size_t bufsz, const char* path) {
 
 // Helper: Create parent directories recursively for a file path
 static int create_parent_dirs(const char* file_path) {
-    char* path_copy = strdup(file_path);
-    if (!path_copy) return -1;
-
-    // Find last path separator to get directory portion
-    char* last_sep = strrchr(path_copy, '/');
-#ifdef _WIN32
-    char* last_sep_win = strrchr(path_copy, '\\');
-    if (last_sep_win > last_sep) last_sep = last_sep_win;
-#endif
-
-    if (!last_sep || last_sep == path_copy) {
-        // no directory component or just root
-        free(path_copy);
-        return 0;
-    }
-
-    *last_sep = '\0';  // truncate to get directory path
-
-#ifdef _WIN32
-    char cmd[4096];
-    char win_dir[4096];
-    win_path_buf(win_dir, sizeof(win_dir), path_copy);
-    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", win_dir);
-    int result = system(cmd);
-    if (result != 0) {
-        DWORD attr = GetFileAttributesA(path_copy);
-        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-            result = 0;
-        }
-    }
-#else
-    char* p = path_copy;
-    int result = 0;
-
-    if (*p == '/') p++;
-
-    while (*p) {
-        while (*p && *p != '/') p++;
-        char saved = *p;
-        *p = '\0';
-
-        if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
-            result = -1;
-            break;
-        }
-
-        *p = saved;
-        if (saved) p++;
-    }
-#endif
-
-    free(path_copy);
-    return result;
+    char* dir = file_path_dirname(file_path);
+    if (!dir) return 0;
+    bool ok = create_dir(dir);
+    free(dir);
+    return ok ? 0 : -1;
 }
 
 // Helper: Generate a unique temp file path for atomic writes
 static void generate_temp_path(const char* file_path, StrBuf* temp_buf) {
+    static int counter = 0;
     strbuf_append_str(temp_buf, file_path);
     strbuf_append_str(temp_buf, ".tmp.");
-    // append pid and timestamp for uniqueness
-#ifdef _WIN32
-    strbuf_append_int(temp_buf, (int)_getpid());
-#else
-    strbuf_append_int(temp_buf, (int)getpid());
-#endif
+    strbuf_append_int(temp_buf, ++counter);
     strbuf_append_char(temp_buf, '.');
     strbuf_append_int(temp_buf, (int)time(NULL));
 }
 
 // Helper: Perform atomic rename (temp file to final file)
 static int atomic_rename(const char* temp_path, const char* final_path) {
-#ifdef _WIN32
-    // Windows: MoveFileEx with MOVEFILE_REPLACE_EXISTING
-    if (!MoveFileExA(temp_path, final_path, MOVEFILE_REPLACE_EXISTING)) {
-        return -1;
-    }
-    return 0;
-#else
-    // POSIX: rename() is atomic on the same filesystem
-    return rename(temp_path, final_path);
-#endif
+    return file_rename(temp_path, final_path);
 }
 
 // Unified output implementation
@@ -347,7 +269,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
         if (written != (size_t)str->len) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) remove(write_path);  // clean up temp file on error
+            if (atomic) file_delete(write_path);  // clean up temp file on error
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -356,8 +278,8 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         // atomic: rename temp file to final path
         if (atomic) {
             if (atomic_rename(write_path, file_path) != 0) {
-                log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
-                remove(write_path);  // clean up temp file
+                log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
+                file_delete(write_path);  // clean up temp file
                 strbuf_free(temp_path_buf);
                 strbuf_free(path_buf);
                 return item_to_ri(ItemError);
@@ -401,7 +323,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
         if (written != (size_t)bin->len) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) remove(write_path);  // clean up temp file on error
+            if (atomic) file_delete(write_path);  // clean up temp file on error
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
             return item_to_ri(ItemError);
@@ -410,8 +332,8 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
         // atomic: rename temp file to final path
         if (atomic) {
             if (atomic_rename(write_path, file_path) != 0) {
-                log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
-                remove(write_path);  // clean up temp file
+                log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
+                file_delete(write_path);  // clean up temp file
                 strbuf_free(temp_path_buf);
                 strbuf_free(path_buf);
                 return item_to_ri(ItemError);
@@ -519,7 +441,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
         if (written != content_buf->length) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) remove(write_path);  // clean up temp file on error
+            if (atomic) file_delete(write_path);  // clean up temp file on error
             strbuf_free(content_buf);
             pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
@@ -544,7 +466,7 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
 
         if (written != strlen(formatted->chars)) {
             log_error("pn_output_internal: failed to write to file %s", write_path);
-            if (atomic) remove(write_path);  // clean up temp file on error
+            if (atomic) file_delete(write_path);  // clean up temp file on error
             pool_destroy(temp_pool);
             if (temp_path_buf) strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
@@ -557,8 +479,8 @@ static RetItem pn_output_internal(Item source, Item target_item, const char* for
     // atomic: rename temp file to final path
     if (atomic) {
         if (atomic_rename(write_path, file_path) != 0) {
-            log_error("pn_output_internal: atomic rename failed: %s -> %s: %s", write_path, file_path, strerror(errno));
-            remove(write_path);  // clean up temp file
+            log_error("pn_output_internal: atomic rename failed: %s -> %s", write_path, file_path);
+            file_delete(write_path);  // clean up temp file
             pool_destroy(temp_pool);
             strbuf_free(temp_path_buf);
             strbuf_free(path_buf);
@@ -950,46 +872,22 @@ RetItem pn_cmd2(Item cmd, Item args) {
 
     log_debug("pn_cmd: executing command: %s", full_cmd->chars);
 
-    // Use popen to capture stdout
-    FILE* pipe = popen(full_cmd->chars, "r");
-    if (!pipe) {
-        log_error("pn_cmd: failed to execute command: %s (errno: %d)", full_cmd->chars, errno);
-        return item_to_ri(ItemError);
-    }
+    // Use shell_exec_line to capture stdout
+    ShellResult sr = shell_exec_line(full_cmd->chars, NULL);
 
-    // Read output into a string buffer
-    StrBuf* output_buf = strbuf_new();
-    char buffer[4096];
-    size_t bytes_read;
-
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), pipe)) > 0) {
-        strbuf_append_str_n(output_buf, buffer, bytes_read);
-    }
-
-    // Get the exit status
-    int exit_status = pclose(pipe);
-
-    // Check for command execution errors
-    if (exit_status == -1) {
-        log_error("pn_cmd: pclose failed (errno: %d)", errno);
-        strbuf_free(output_buf);
-        return item_to_ri(ItemError);
-    }
-
-    // Extract actual exit code (pclose returns status in wait() format)
-    int actual_exit_code = WIFEXITED(exit_status) ? WEXITSTATUS(exit_status) : -1;
+    int actual_exit_code = sr.exit_code;
     log_debug("pn_cmd: command completed with exit code: %d", actual_exit_code);
 
     // Create result string from captured output
     String* result_str = NULL;
     Item result;
-    if (output_buf->length > 0) {
+    if (sr.stdout_buf && sr.stdout_len > 0) {
         // trim trailing newline from command output
-        size_t len = output_buf->length;
-        while (len > 0 && (output_buf->str[len - 1] == '\n' || output_buf->str[len - 1] == '\r')) {
+        size_t len = sr.stdout_len;
+        while (len > 0 && (sr.stdout_buf[len - 1] == '\n' || sr.stdout_buf[len - 1] == '\r')) {
             len--;
         }
-        result_str = heap_strcpy(output_buf->str, len);
+        result_str = heap_strcpy(sr.stdout_buf, len);
         result = {.item = s2it(result_str)};
     } else {
         // return empty string for no output
@@ -997,7 +895,7 @@ RetItem pn_cmd2(Item cmd, Item args) {
         result = {.item = s2it(result_str)};
     }
 
-    strbuf_free(output_buf);
+    shell_result_free(&sr);
 
     // non-zero exit code means the command failed — return error
     if (actual_exit_code != 0) {
@@ -1036,23 +934,6 @@ static StrBuf* get_local_path_from_item(Item item) {
     target_free(target);
     return path_buf;
 }
-
-#ifndef _WIN32
-// Callback for nftw to remove files/directories recursively
-static int remove_callback(const char* path, const struct stat* sb, int typeflag, struct FTW* ftwbuf) {
-    (void)sb; (void)ftwbuf;
-    int rv;
-    if (typeflag == FTW_D || typeflag == FTW_DP) {
-        rv = rmdir(path);
-    } else {
-        rv = remove(path);
-    }
-    if (rv != 0) {
-        log_error("io.delete: failed to remove %s: %s", path, strerror(errno));
-    }
-    return rv;
-}
-#endif
 
 // io.copy(src, dst) - Copy file or directory
 // src can be local path or remote URL (http/https)
@@ -1107,26 +988,27 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
 
         // Write the fetched data to destination
         TypeId result_type = get_type_id(fetch_result);
-        FILE* f = fopen(dst_path, "wb");
-        if (!f) {
-            log_error("io.copy: failed to open destination file %s: %s", dst_path, strerror(errno));
-            strbuf_free(dst_buf);
-            return item_to_ri(ItemError);
-        }
-
+        int wr = -1;
         size_t written = 0;
         if (result_type == LMD_TYPE_STRING) {
             String* str = it2s(fetch_result);
             if (str && str->chars) {
-                written = fwrite(str->chars, 1, str->len, f);
+                wr = write_binary_file(dst_path, str->chars, str->len);
+                if (wr == 0) written = str->len;
             }
         } else if (result_type == LMD_TYPE_BINARY) {
             Binary* bin = (Binary*)it2s(fetch_result);
             if (bin && bin->chars) {
-                written = fwrite(bin->chars, 1, bin->len, f);
+                wr = write_binary_file(dst_path, bin->chars, bin->len);
+                if (wr == 0) written = bin->len;
             }
         }
-        fclose(f);
+
+        if (wr != 0) {
+            log_error("io.copy: failed to write to destination file %s", dst_path);
+            strbuf_free(dst_buf);
+            return item_to_ri(ItemError);
+        }
 
         log_debug("io.copy: wrote %zu bytes from remote source to %s", written, dst_path);
         strbuf_free(dst_buf);
@@ -1160,7 +1042,9 @@ RetItem pn_io_copy(Item src_item, Item dst_item) {
     snprintf(cmd, sizeof(cmd), "cp -r '%s' '%s'", src_path, dst_path);
 #endif
 
-    int result = system(cmd);
+    ShellResult sr = shell_exec_line(cmd, NULL);
+    int result = sr.exit_code;
+    shell_result_free(&sr);
 
     if (result != 0) {
         log_error("io.copy: failed to copy %s to %s", src_path, dst_path);
@@ -1190,7 +1074,7 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
 
     log_debug("io.move: %s -> %s", src_path, dst_path);
 
-    int result = rename(src_path, dst_path);
+    int result = file_rename(src_path, dst_path);
 
     // If rename fails (cross-device), fall back to copy+delete
     if (result != 0 && errno == EXDEV) {
@@ -1202,23 +1086,11 @@ RetItem pn_io_move(Item src_item, Item dst_item) {
             return item_to_ri(ItemError);
         }
         // Delete source after successful copy
-#ifdef _WIN32
-        result = _unlink(src_path);
-        if (result != 0) {
-            // Try as directory
-            result = _rmdir(src_path);
-        }
-#else
-        result = remove(src_path);
-        if (result != 0) {
-            // Try as directory with recursive delete
-            result = nftw(src_path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
-        }
-#endif
+        result = file_delete_recursive(src_path);
     }
 
     if (result != 0) {
-        log_error("io.move: failed to move %s to %s: %s", src_path, dst_path, strerror(errno));
+        log_error("io.move: failed to move %s to %s", src_path, dst_path);
     }
 
     strbuf_free(src_buf);
@@ -1241,32 +1113,16 @@ RetItem pn_io_delete(Item path_item) {
 
     log_debug("io.delete: %s", path);
 
-    struct stat st;
-    if (stat(path, &st) != 0) {
+    if (!file_exists(path)) {
         log_error("io.delete: path does not exist: %s", path);
         strbuf_free(path_buf);
         return item_to_ri(ItemError);
     }
 
-    int result;
-    if (S_ISDIR(st.st_mode)) {
-        // Directory - use recursive delete
-#ifdef _WIN32
-        char cmd[4096];
-        char win_p[4096];
-        win_path_buf(win_p, sizeof(win_p), path);
-        snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", win_p);
-        result = system(cmd);
-#else
-        result = nftw(path, remove_callback, 64, FTW_DEPTH | FTW_PHYS);
-#endif
-    } else {
-        // File - simple remove
-        result = remove(path);
-    }
+    int result = file_delete_recursive(path);
 
     if (result != 0) {
-        log_error("io.delete: failed to delete %s: %s", path, strerror(errno));
+        log_error("io.delete: failed to delete %s", path);
     }
 
     strbuf_free(path_buf);
@@ -1288,52 +1144,15 @@ RetItem pn_io_mkdir(Item path_item) {
 
     log_debug("fs.mkdir: %s", path);
 
-    // Use platform command for recursive mkdir
-#ifdef _WIN32
-    char cmd[4096];
-    char win_p[4096];
-    win_path_buf(win_p, sizeof(win_p), path);
-    snprintf(cmd, sizeof(cmd), "mkdir \"%s\" 2>nul", win_p);
-    int result = system(cmd);
-    // Windows mkdir returns error if dir exists, ignore it
-    if (result != 0) {
-        DWORD attr = GetFileAttributesA(path);
-        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-            result = 0;  // Directory exists, not an error
-        }
-    }
-#else
-    // Create directory recursively
-    char* path_copy = strdup(path);
-    char* p = path_copy;
-    int result = 0;
+    bool ok = create_dir(path);
 
-    // Skip leading slash
-    if (*p == '/') p++;
-
-    while (*p) {
-        while (*p && *p != '/') p++;
-        char saved = *p;
-        *p = '\0';
-
-        if (mkdir(path_copy, 0755) != 0 && errno != EEXIST) {
-            result = -1;
-            break;
-        }
-
-        *p = saved;
-        if (saved) p++;
-    }
-    free(path_copy);
-#endif
-
-    if (result != 0) {
-        log_error("io.mkdir: failed to create directory %s: %s", path, strerror(errno));
+    if (!ok) {
+        log_error("io.mkdir: failed to create directory %s", path);
     }
 
     strbuf_free(path_buf);
 
-    return (result != 0) ? item_to_ri(ItemError) : ri_ok(ItemNull);
+    return ok ? ri_ok(ItemNull) : item_to_ri(ItemError);
 }
 
 // io.touch(path) - Create file or update modification time
@@ -1350,33 +1169,11 @@ RetItem pn_io_touch(Item path_item) {
 
     log_debug("fs.touch: %s", path);
 
-    // Check if file exists
-    struct stat st;
-    if (stat(path, &st) == 0) {
-        // File exists - update modification time
-#ifdef _WIN32
-        HANDLE hFile = CreateFileA(path, FILE_WRITE_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            FILETIME ft;
-            GetSystemTimeAsFileTime(&ft);
-            SetFileTime(hFile, NULL, NULL, &ft);
-            CloseHandle(hFile);
-        }
-#else
-        utime(path, NULL);  // NULL = current time
-#endif
-    } else {
-        // File doesn't exist - create empty file
-        FILE* f = fopen(path, "w");
-        if (f) {
-            fclose(f);
-        } else {
-            log_error("io.touch: failed to create file %s: %s", path, strerror(errno));
-            strbuf_free(path_buf);
-            return item_to_ri(ItemError);
-        }
+    int result = file_touch(path);
+    if (result != 0) {
+        log_error("io.touch: failed to touch %s", path);
+        strbuf_free(path_buf);
+        return item_to_ri(ItemError);
     }
 
     strbuf_free(path_buf);
@@ -1401,27 +1198,11 @@ RetItem pn_io_symlink(Item target_item, Item link_item) {
 
     log_debug("fs.symlink: %s -> %s", link_path, target_path);
 
-#ifdef _WIN32
-    // Windows requires admin privileges for symlinks
-    // Use mklink command
-    char cmd[4096];
-    struct stat st;
-    const char* type_flag = "";
-    if (stat(target_path, &st) == 0 && S_ISDIR(st.st_mode)) {
-        type_flag = "/D ";
-    }
-    char win_link[4096], win_target[4096];
-    win_path_buf(win_link, sizeof(win_link), link_path);
-    win_path_buf(win_target, sizeof(win_target), target_path);
-    snprintf(cmd, sizeof(cmd), "mklink %s\"%s\" \"%s\"", type_flag, win_link, win_target);
-    int result = system(cmd);
-#else
-    int result = symlink(target_path, link_path);
-#endif
+    int result = file_symlink(target_path, link_path);
 
     if (result != 0) {
-        log_error("io.symlink: failed to create symlink %s -> %s: %s",
-                  link_path, target_path, strerror(errno));
+        log_error("io.symlink: failed to create symlink %s -> %s",
+                  link_path, target_path);
     }
 
     strbuf_free(target_buf);
@@ -1462,16 +1243,10 @@ RetItem pn_io_chmod(Item path_item, Item mode_item) {
 
     log_debug("io.chmod: %s mode=%o", path, mode);
 
-#ifdef _WIN32
-    // Windows doesn't have chmod in the same way
-    // Can only toggle read-only flag
-    int result = _chmod(path, mode);
-#else
-    int result = chmod(path, mode);
-#endif
+    int result = file_chmod(path, (uint16_t)mode);
 
     if (result != 0) {
-        log_error("io.chmod: failed to change mode of %s: %s", path, strerror(errno));
+        log_error("io.chmod: failed to change mode of %s", path);
     }
 
     strbuf_free(path_buf);
@@ -1497,10 +1272,10 @@ RetItem pn_io_rename(Item old_item, Item new_item) {
 
     log_debug("io.rename: %s -> %s", old_path, new_path);
 
-    int result = rename(old_path, new_path);
+    int result = file_rename(old_path, new_path);
 
     if (result != 0) {
-        log_error("io.rename: failed to rename %s to %s: %s", old_path, new_path, strerror(errno));
+        log_error("io.rename: failed to rename %s to %s", old_path, new_path);
     }
 
     strbuf_free(old_buf);

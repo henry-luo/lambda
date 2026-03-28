@@ -271,10 +271,14 @@ static int parse_src_entries(const char* src_value, CssFontFaceSrc* entries, int
 char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
     if (!url) return nullptr;
 
-    // Skip remote URLs - we don't support downloading fonts from http/https URLs
+    // Preserve remote URLs - they will be downloaded to cache by the layout engine
     if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0) {
-        log_debug("[CSS FontFace] Skipping remote font URL: %s", url);
-        return nullptr;  // Return nullptr to indicate font can't be loaded
+        log_debug("[CSS FontFace] Preserving remote font URL: %s", url);
+        if (pool) {
+            return pool_strdup(pool, url);
+        } else {
+            return mem_strdup(url, MEM_CAT_INPUT_CSS);
+        }
     }
 
     // Data URIs are self-contained - preserve them as-is

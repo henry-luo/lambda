@@ -15,19 +15,16 @@
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
-#include <sys/stat.h>
 
 #include "lambda-data.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
+#include "../lib/file.h"
 
 #ifdef _WIN32
-#include <direct.h>
-#define getcwd _getcwd
-#else
-#include <unistd.h>
+// (no special includes needed)
 #endif
 
 // item_type_id - needed for item_to_target()
@@ -48,9 +45,9 @@ extern "C" {
  * Caller must free the returned Url.
  */
 static Url* get_cwd_url(void) {
-    char cwd_buf[4096];
-    if (!getcwd(cwd_buf, sizeof(cwd_buf))) {
-        log_error("target: failed to get cwd: %s", strerror(errno));
+    char* cwd_buf = file_getcwd();
+    if (!cwd_buf) {
+        log_error("target: failed to get cwd");
         return NULL;
     }
 
@@ -73,6 +70,8 @@ static Url* get_cwd_url(void) {
             strbuf_append_char(url_buf, *p);
         }
     }
+
+    free(cwd_buf);
 
     // Ensure trailing slash for directory
     if (url_buf->length > 0 && url_buf->str[url_buf->length - 1] != '/') {
@@ -427,8 +426,6 @@ bool target_is_dir(Target* target) {
     // Only check local targets
     if (!target_is_local(target)) return false;
 
-    struct stat st;
-
     if (target->type == TARGET_TYPE_URL && target->url) {
         const char* pathname = url_get_pathname(target->url);
         if (!pathname) return false;
@@ -443,14 +440,14 @@ bool target_is_dir(Target* target) {
         }
 #endif
 
-        if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (file_is_dir(pathname)) {
             return true;
         }
     }
     else if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
         path_to_os_path(target->path, path_buf);
-        bool is_dir = (stat(path_buf->str, &st) == 0 && S_ISDIR(st.st_mode));
+        bool is_dir = file_is_dir(path_buf->str);
         strbuf_free(path_buf);
         return is_dir;
     }
@@ -460,7 +457,7 @@ bool target_is_dir(Target* target) {
 
 /**
  * Check if target exists (file or directory).
- * For local targets: uses stat()
+ * For local targets: uses file_exists()
  * For remote URLs: returns false (would need HTTP HEAD request)
  */
 bool target_exists(Target* target) {
@@ -472,8 +469,6 @@ bool target_exists(Target* target) {
         return false;
     }
 
-    struct stat st;
-
     if (target->type == TARGET_TYPE_URL && target->url) {
         const char* pathname = url_get_pathname(target->url);
         if (!pathname) return false;
@@ -488,12 +483,12 @@ bool target_exists(Target* target) {
         }
 #endif
 
-        return (stat(pathname, &st) == 0);
+        return file_exists(pathname);
     }
     else if (target->type == TARGET_TYPE_PATH && target->path) {
         StrBuf* path_buf = strbuf_new();
         path_to_os_path(target->path, path_buf);
-        bool exists = (stat(path_buf->str, &st) == 0);
+        bool exists = file_exists(path_buf->str);
         strbuf_free(path_buf);
         return exists;
     }

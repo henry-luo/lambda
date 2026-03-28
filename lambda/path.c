@@ -623,12 +623,9 @@ static const char* path_get_segment_display(Path* path) {
 
 #ifndef PATH_NO_ITERATION
 
-#include <sys/stat.h>
-#include <dirent.h>
-#include <errno.h>
-#ifndef _WIN32
-#include <unistd.h>
-#endif
+#include "../lib/file.h"
+#include "../lib/file_utils.h"
+#include "../lib/arraylist.h"
 
 // Extern declaration for datetime_from_unix (defined in datetime.c)
 // In C, DateTime is uint64_t (packed bit field), so we declare return type as uint64_t*
@@ -665,21 +662,16 @@ void path_load_metadata(Path* path) {
     StrBuf* path_buf = strbuf_new();
     path_to_os_path(path, path_buf);
     
-    struct stat st;
-    if (stat(path_buf->str, &st) == 0) {
+    FileStat fs = file_stat(path_buf->str);
+    if (fs.exists) {
         PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
         if (meta) {
-            meta->size = st.st_size;
-            meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+            meta->size = fs.size;
+            meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
             meta->flags = 0;
-            if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
-#ifndef _WIN32
-            struct stat lst;
-            if (lstat(path_buf->str, &lst) == 0 && S_ISLNK(lst.st_mode)) {
-                meta->flags |= PATH_META_IS_LINK;
-            }
-#endif
-            meta->mode = (st.st_mode >> 6) & 0x07;  // owner permissions only
+            if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
+            if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
+            meta->mode = (fs.mode >> 6) & 0x07;  // owner permissions only
             path->meta = meta;
         }
     }
@@ -759,23 +751,15 @@ Item path_resolve_for_iteration(Path* path) {
     const char* os_path = path_buf->str;
     
     // Check if directory or file
-    struct stat st;
-    if (stat(os_path, &st) != 0) {
-        int err = errno;
+    FileStat fs = file_stat(os_path);
+    if (!fs.exists) {
         strbuf_free(path_buf);
-        
-        // Distinguish between "doesn't exist" and "access error"
-        if (err == ENOENT || err == ENOTDIR) {
-            log_debug("path_resolve_for_iteration: path does not exist: %s", os_path);
-            return ITEM_NULL;
-        } else {
-            log_error("path_resolve_for_iteration: access error for %s: %s", os_path, strerror(err));
-            return ITEM_ERROR;
-        }
+        log_debug("path_resolve_for_iteration: path does not exist: %s", os_path);
+        return ITEM_NULL;
     }
     
     Item result;
-    if (S_ISDIR(st.st_mode)) {
+    if (fs.is_dir) {
         // Directory: list children as Path items
         result = resolve_directory_children(path, os_path);
     } else {
@@ -797,27 +781,23 @@ Item path_resolve_for_iteration(Path* path) {
  * Returns empty list [] for empty directories.
  */
 static Item resolve_directory_children(Path* parent_path, const char* dir_path) {
-    DIR* dir = opendir(dir_path);
-    if (!dir) {
-        int err = errno;
-        if (err == ENOENT || err == ENOTDIR) {
-            log_debug("resolve_directory_children: directory does not exist: %s", dir_path);
-            return ITEM_NULL;
-        } else {
-            log_error("resolve_directory_children: access error for %s: %s", dir_path, strerror(err));
-            return ITEM_ERROR;
-        }
+    ArrayList* entries = dir_list(dir_path);
+    if (!entries) {
+        log_debug("resolve_directory_children: directory does not exist or not accessible: %s", dir_path);
+        return ITEM_NULL;
     }
     
     if (!context) {
-        closedir(dir);
+        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
+        arraylist_free(entries);
         log_error("resolve_directory_children: no context");
         return ITEM_ERROR;
     }
     
     Pool* pool = eval_context_get_pool(context);
     if (!pool) {
-        closedir(dir);
+        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
+        arraylist_free(entries);
         log_error("resolve_directory_children: no pool");
         return ITEM_ERROR;
     }
@@ -826,36 +806,30 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
     List* children = (List*)heap_calloc(sizeof(List), LMD_TYPE_ARRAY);
     children->type_id = LMD_TYPE_ARRAY;
     
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        // Skip . and ..
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+    for (int i = 0; i < entries->length; i++) {
+        DirEntry* entry = (DirEntry*)entries->data[i];
+        
+        // Create child path extending parent
+        Path* child_path = path_extend(pool, parent_path, entry->name);
+        if (!child_path) {
+            dir_entry_free(entry);
             continue;
         }
         
-        // Create child path extending parent
-        Path* child_path = path_extend(pool, parent_path, entry->d_name);
-        if (!child_path) continue;
-        
         // Load metadata for the child (but NOT content)
         char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->name);
         
-        struct stat st;
-        if (stat(full_path, &st) == 0) {
+        FileStat fs = file_stat(full_path);
+        if (fs.exists) {
             PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
             if (meta) {
-                meta->size = st.st_size;
-                meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+                meta->size = fs.size;
+                meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
                 meta->flags = 0;
-                if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
-#ifndef _WIN32
-                struct stat lst;
-                if (lstat(full_path, &lst) == 0 && S_ISLNK(lst.st_mode)) {
-                    meta->flags |= PATH_META_IS_LINK;
-                }
-#endif
-                meta->mode = (st.st_mode >> 6) & 0x07;
+                if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
+                if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
+                meta->mode = (fs.mode >> 6) & 0x07;
                 child_path->meta = meta;
                 child_path->flags |= PATH_FLAG_META_LOADED;
             }
@@ -863,9 +837,10 @@ static Item resolve_directory_children(Path* parent_path, const char* dir_path) 
         
         // Add child path to list (cast Path* to uint64_t since Item is uint64_t in C)
         list_push(children, (Item)(uint64_t)child_path);
+        dir_entry_free(entry);
     }
     
-    closedir(dir);
+    arraylist_free(entries);
     return (Item)(uint64_t)children;
 }
 
@@ -921,45 +896,44 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
                                        int depth, int max_depth) {
     if (depth > max_depth) return;
     
-    DIR* dir = opendir(dir_path);
-    if (!dir) return;
+    ArrayList* entries = dir_list(dir_path);
+    if (!entries) return;
     
     Pool* pool = eval_context_get_pool(context);
     if (!pool) {
-        closedir(dir);
+        for (int i = 0; i < entries->length; i++) dir_entry_free((DirEntry*)entries->data[i]);
+        arraylist_free(entries);
         return;
     }
     
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+    for (int i = 0; i < entries->length; i++) {
+        DirEntry* entry = (DirEntry*)entries->data[i];
+        
+        char full_path[4096];
+        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->name);
+        
+        FileStat fs = file_stat(full_path);
+        if (!fs.exists) {
+            dir_entry_free(entry);
             continue;
         }
         
-        char full_path[4096];
-        snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-        
-        struct stat st;
-        if (stat(full_path, &st) != 0) continue;
-        
         // Create child path
-        Path* child = path_extend(pool, base, entry->d_name);
-        if (!child) continue;
+        Path* child = path_extend(pool, base, entry->name);
+        if (!child) {
+            dir_entry_free(entry);
+            continue;
+        }
         
         // Load metadata
         PathMeta* meta = (PathMeta*)pool_calloc(pool, sizeof(PathMeta));
         if (meta) {
-            meta->size = st.st_size;
-            meta->modified = *datetime_from_unix(pool, (int64_t)st.st_mtime);
+            meta->size = fs.size;
+            meta->modified = *datetime_from_unix(pool, (int64_t)fs.modified);
             meta->flags = 0;
-            if (S_ISDIR(st.st_mode)) meta->flags |= PATH_META_IS_DIR;
-#ifndef _WIN32
-            struct stat lst;
-            if (lstat(full_path, &lst) == 0 && S_ISLNK(lst.st_mode)) {
-                meta->flags |= PATH_META_IS_LINK;
-            }
-#endif
-            meta->mode = (st.st_mode >> 6) & 0x07;
+            if (fs.is_dir) meta->flags |= PATH_META_IS_DIR;
+            if (fs.is_symlink) meta->flags |= PATH_META_IS_LINK;
+            meta->mode = (fs.mode >> 6) & 0x07;
             child->meta = meta;
             child->flags |= PATH_FLAG_META_LOADED;
         }
@@ -968,12 +942,14 @@ static void expand_wildcard_recursive(Path* base, const char* dir_path,
         list_push(matches, (Item)(uint64_t)child);
         
         // Recurse into subdirectories for **
-        if (recursive && S_ISDIR(st.st_mode)) {
+        if (recursive && fs.is_dir) {
             expand_wildcard_recursive(child, full_path, true, matches, depth + 1, max_depth);
         }
+
+        dir_entry_free(entry);
     }
     
-    closedir(dir);
+    arraylist_free(entries);
 }
 
 // ============================================================================

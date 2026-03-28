@@ -26,6 +26,7 @@
 #else
 #include <alloca.h>
 #endif
+#include <sys/stat.h>
 
 // External reference to Lambda runtime context
 extern "C" Context* _lambda_rt;
@@ -74,6 +75,7 @@ struct PyMirVarEntry {
     bool from_env;
     int env_slot;
     MIR_reg_t env_reg;
+    TypeId type_hint;  // LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_NULL (unknown)
 };
 
 struct PyLoopLabels {
@@ -188,6 +190,13 @@ struct PyMirTranspiler {
 
     // Runtime pointer for cross-language module loading
     Runtime* runtime;
+
+    // ---- TCO (Tail Call Optimization) state ----
+    PyFuncCollected* tco_func;      // current function being TCO'd (NULL if not TCO)
+    MIR_label_t tco_label;          // jump target at top of function body
+    MIR_reg_t tco_count_reg;        // iteration counter for overflow guard
+    bool in_tail_position;          // true when current expression is in tail position
+    bool block_returned;            // set when TCO jump replaces a return
 
     // ---- Generator compilation state (valid during pm_compile_generator) ----
     bool in_generator;              // true while compiling a generator resume function
@@ -451,6 +460,16 @@ static void pm_set_var(PyMirTranspiler* mt, const char* name, MIR_reg_t reg) {
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
+static void pm_set_var_with_type(PyMirTranspiler* mt, const char* name, MIR_reg_t reg, TypeId type_hint) {
+    PyVarScopeEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.var.reg = reg;
+    entry.var.mir_type = MIR_T_I64;
+    entry.var.type_hint = type_hint;
+    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+}
+
 static void pm_set_env_var(PyMirTranspiler* mt, const char* name, MIR_reg_t env_reg, int slot) {
     PyVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
@@ -563,6 +582,255 @@ static MIR_reg_t pm_emit_bool(PyMirTranspiler* mt, bool value) {
     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)bval)));
     return r;
+}
+
+// ============================================================================
+// Native type inference and inline arithmetic (Phase 1-3 optimizations)
+// ============================================================================
+
+// forward declaration
+static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
+
+// infer the effective type of an AST expression without emitting code
+static TypeId pm_get_effective_type(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) return LMD_TYPE_NULL;
+
+    switch (expr->node_type) {
+    case PY_AST_NODE_LITERAL: {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) return LMD_TYPE_INT;
+        if (lit->literal_type == PY_LITERAL_FLOAT) return LMD_TYPE_FLOAT;
+        if (lit->literal_type == PY_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_IDENTIFIER: {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint) return var->type_hint;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_BINARY_OP: {
+        PyBinaryNode* bin = (PyBinaryNode*)expr;
+        TypeId lt = pm_get_effective_type(mt, bin->left);
+        TypeId rt = pm_get_effective_type(mt, bin->right);
+        if (bin->op == PY_OP_DIV) return LMD_TYPE_FLOAT; // true division always yields float
+        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_UNARY_OP: {
+        PyUnaryNode* un = (PyUnaryNode*)expr;
+        if (un->op == PY_OP_NEGATE || un->op == PY_OP_POSITIVE || un->op == PY_OP_BIT_NOT)
+            return pm_get_effective_type(mt, un->operand);
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_CALL: {
+        // len() returns int
+        PyCallNode* call = (PyCallNode*)expr;
+        if (call->function && call->function->node_type == PY_AST_NODE_IDENTIFIER) {
+            PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "len", 3) == 0)
+                return LMD_TYPE_INT;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "int", 3) == 0)
+                return LMD_TYPE_INT;
+            if (fn_id->name->len == 5 && strncmp(fn_id->name->chars, "float", 5) == 0)
+                return LMD_TYPE_FLOAT;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "abs", 3) == 0)
+                return pm_get_effective_type(mt, call->arguments);
+        }
+        return LMD_TYPE_NULL;
+    }
+    default:
+        return LMD_TYPE_NULL;
+    }
+}
+
+// emit MIR code to produce an unboxed int64 from a boxed Item register
+static MIR_reg_t pm_emit_unbox_int(PyMirTranspiler* mt, MIR_reg_t item) {
+    MIR_reg_t result = pm_new_reg(mt, "ubi", MIR_T_I64);
+    // shift left 8 to discard tag, arithmetic shift right 8 for sign extension
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, item), MIR_new_int_op(mt->ctx, 8)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 8)));
+    return result;
+}
+
+// box an unboxed int64 register back to a tagged Item, with INT56 range check
+static MIR_reg_t pm_box_int_reg(PyMirTranspiler* mt, MIR_reg_t val) {
+    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+
+    MIR_reg_t result = pm_new_reg(mt, "bxi", MIR_T_I64);
+    MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+    MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+    MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+    MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+    MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+        MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+        MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+
+    MIR_label_t l_ok = pm_new_label(mt);
+    MIR_label_t l_end = pm_new_label(mt);
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+        MIR_new_reg_op(mt->ctx, in_range)));
+    // out of INT56 range → call py_add runtime for bigint promotion
+    uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    pm_emit_label(mt, l_ok);
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, tagged)));
+    pm_emit_label(mt, l_end);
+    return result;
+}
+
+// emit code to produce an unboxed int64 from an expression (literal → direct, var → unbox)
+static MIR_reg_t pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) {
+        MIR_reg_t z = pm_new_reg(mt, "zero", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, z),
+            MIR_new_int_op(mt->ctx, 0)));
+        return z;
+    }
+    // integer literal → emit constant directly
+    if (expr->node_type == PY_AST_NODE_LITERAL) {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
+            MIR_reg_t r = pm_new_reg(mt, "ilit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, lit->value.int_value)));
+            return r;
+        }
+        if (lit->literal_type == PY_LITERAL_BOOLEAN) {
+            MIR_reg_t r = pm_new_reg(mt, "blit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, lit->value.boolean_value ? 1 : 0)));
+            return r;
+        }
+    }
+    // identifier with known INT type → unbox from register
+    if (expr->node_type == PY_AST_NODE_IDENTIFIER) {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint == LMD_TYPE_INT) {
+            return pm_emit_unbox_int(mt, var->reg);
+        }
+    }
+    // binary expression of int op int → recurse natively
+    if (expr->node_type == PY_AST_NODE_BINARY_OP) {
+        PyBinaryNode* bin = (PyBinaryNode*)expr;
+        TypeId lt = pm_get_effective_type(mt, bin->left);
+        TypeId rt = pm_get_effective_type(mt, bin->right);
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            MIR_reg_t l = pm_transpile_as_native_int(mt, bin->left);
+            MIR_reg_t r = pm_transpile_as_native_int(mt, bin->right);
+            MIR_insn_code_t op;
+            switch (bin->op) {
+            case PY_OP_ADD: op = MIR_ADD; break;
+            case PY_OP_SUB: op = MIR_SUB; break;
+            case PY_OP_MUL: op = MIR_MUL; break;
+            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+            case PY_OP_MOD: op = MIR_MOD; break;
+            case PY_OP_LSHIFT: op = MIR_LSH; break;
+            case PY_OP_RSHIFT: op = MIR_RSH; break;
+            case PY_OP_BIT_AND: op = MIR_AND; break;
+            case PY_OP_BIT_OR: op = MIR_OR; break;
+            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            default: goto fallback;
+            }
+            MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, op,
+                MIR_new_reg_op(mt->ctx, res),
+                MIR_new_reg_op(mt->ctx, l),
+                MIR_new_reg_op(mt->ctx, r)));
+            return res;
+        }
+    }
+    // unary negate on int
+    if (expr->node_type == PY_AST_NODE_UNARY_OP) {
+        PyUnaryNode* un = (PyUnaryNode*)expr;
+        TypeId ot = pm_get_effective_type(mt, un->operand);
+        if (ot == LMD_TYPE_INT && un->op == PY_OP_NEGATE) {
+            MIR_reg_t inner = pm_transpile_as_native_int(mt, un->operand);
+            MIR_reg_t res = pm_new_reg(mt, "neg", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
+                MIR_new_reg_op(mt->ctx, res),
+                MIR_new_reg_op(mt->ctx, inner)));
+            return res;
+        }
+    }
+fallback:;
+    // fallback: transpile as boxed then unbox
+    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
+    return pm_emit_unbox_int(mt, boxed);
+}
+
+// emit code to produce an unboxed double from an expression
+static MIR_reg_t pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) {
+        MIR_reg_t z = pm_new_reg(mt, "fzero", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, z),
+            MIR_new_double_op(mt->ctx, 0.0)));
+        return z;
+    }
+    // float literal → emit constant directly
+    if (expr->node_type == PY_AST_NODE_LITERAL) {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_FLOAT) {
+            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, lit->value.float_value)));
+            return r;
+        }
+        // int literal → convert to double
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
+            MIR_reg_t i = pm_new_reg(mt, "i2f", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, i),
+                MIR_new_int_op(mt->ctx, lit->value.int_value)));
+            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_reg_op(mt->ctx, i)));
+            return r;
+        }
+    }
+    // identifier with known FLOAT type → unbox
+    if (expr->node_type == PY_AST_NODE_IDENTIFIER) {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint == LMD_TYPE_FLOAT) {
+            return pm_call_1(mt, "it2d", MIR_T_D,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+        }
+        // int var used in float context → unbox int then convert
+        if (var && var->type_hint == LMD_TYPE_INT) {
+            MIR_reg_t i = pm_emit_unbox_int(mt, var->reg);
+            MIR_reg_t d = pm_new_reg(mt, "i2d", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, d),
+                MIR_new_reg_op(mt->ctx, i)));
+            return d;
+        }
+    }
+    // fallback: transpile as boxed then call it2d
+    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
+    return pm_call_1(mt, "it2d", MIR_T_D,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
 
 // ============================================================================
@@ -721,6 +989,152 @@ static const char* pm_compare_op_func(PyOperator op) {
 }
 
 static MIR_reg_t pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode* bin) {
+    // Phase 1: native integer arithmetic when both operands are provably INT
+    TypeId lt = pm_get_effective_type(mt, bin->left);
+    TypeId rt = pm_get_effective_type(mt, bin->right);
+
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op != PY_OP_DIV && bin->op != PY_OP_POW) {
+        MIR_insn_code_t op;
+        bool can_overflow = false;
+        switch (bin->op) {
+        case PY_OP_ADD: op = MIR_ADD; can_overflow = true; break;
+        case PY_OP_SUB: op = MIR_SUB; can_overflow = true; break;
+        case PY_OP_MUL: op = MIR_MUL; can_overflow = true; break;
+        case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+        case PY_OP_MOD: op = MIR_MOD; break;
+        case PY_OP_LSHIFT: op = MIR_LSH; can_overflow = true; break;
+        case PY_OP_RSHIFT: op = MIR_RSH; break;
+        case PY_OP_BIT_AND: op = MIR_AND; break;
+        case PY_OP_BIT_OR: op = MIR_OR; break;
+        case PY_OP_BIT_XOR: op = MIR_XOR; break;
+        default: goto boxed_path;
+        }
+        const char* fn = pm_binary_op_func(bin->op);
+
+        // transpile both as boxed Items first (needed for runtime fallback)
+        MIR_reg_t lhs_boxed = pm_transpile_expression(mt, bin->left);
+        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, bin->right);
+
+        MIR_reg_t final_result = pm_new_reg(mt, "bxr", MIR_T_I64);
+        MIR_label_t l_boxed_call = pm_new_label(mt);
+        MIR_label_t l_end = pm_new_label(mt);
+
+        // runtime type guard: verify both operands are actually INT at runtime
+        MIR_reg_t l_tag = pm_new_reg(mt, "lt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, l_tag),
+            MIR_new_reg_op(mt->ctx, lhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_call),
+            MIR_new_reg_op(mt->ctx, l_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+        MIR_reg_t r_tag = pm_new_reg(mt, "rt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, r_tag),
+            MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_call),
+            MIR_new_reg_op(mt->ctx, r_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+        // native path: unbox and compute
+        MIR_reg_t l = pm_emit_unbox_int(mt, lhs_boxed);
+        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
+
+        // for LSHIFT: CPU masks shift to 6 bits, so shift >= 64 gives wrong results
+        if (bin->op == PY_OP_LSHIFT) {
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BGE, MIR_new_label_op(mt->ctx, l_boxed_call),
+                MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, 63)));
+        }
+
+        MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+
+        if (can_overflow) {
+            // range check: if result outside INT56, fall back to boxed runtime call
+            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+                MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+            MIR_label_t l_ok = pm_new_label(mt);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+                MIR_new_reg_op(mt->ctx, in_range)));
+            // overflow → runtime call with boxed operands (handles bigint promotion)
+            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, ov_result)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            // fast path: inline box the native result
+            pm_emit_label(mt, l_ok);
+            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, tagged)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        } else {
+            MIR_reg_t boxed = pm_box_int_reg(mt, res);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, boxed)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        }
+
+        // boxed fallback: runtime call (wrong type at runtime or overflow)
+        pm_emit_label(mt, l_boxed_call);
+        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+            MIR_new_reg_op(mt->ctx, boxed_res)));
+        pm_emit_label(mt, l_end);
+        return final_result;
+    }
+
+    // native float arithmetic when both operands are numeric and at least one is float
+    if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
+        (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+        MIR_insn_code_t op;
+        switch (bin->op) {
+        case PY_OP_ADD: op = MIR_DADD; break;
+        case PY_OP_SUB: op = MIR_DSUB; break;
+        case PY_OP_MUL: op = MIR_DMUL; break;
+        case PY_OP_DIV: op = MIR_DDIV; break;
+        default: goto boxed_path;
+        }
+        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
+        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
+        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+        return pm_box_float(mt, res);
+    }
+
+    // true division on int/int yields float
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op == PY_OP_DIV) {
+        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
+        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
+        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+        return pm_box_float(mt, res);
+    }
+
+boxed_path:;
+    // fallback: boxed runtime call
     MIR_reg_t left = pm_transpile_expression(mt, bin->left);
     MIR_reg_t right = pm_transpile_expression(mt, bin->right);
     const char* fn = pm_binary_op_func(bin->op);
@@ -798,12 +1212,122 @@ static MIR_reg_t pm_transpile_boolean(PyMirTranspiler* mt, PyBooleanNode* bop) {
     return result;
 }
 
+// check if a comparison operator can be done natively on integers
+static bool pm_is_native_int_compare_op(PyOperator op) {
+    return op == PY_OP_LT || op == PY_OP_LE || op == PY_OP_GT || op == PY_OP_GE ||
+           op == PY_OP_EQ || op == PY_OP_NE;
+}
+
+static MIR_insn_code_t pm_native_int_compare_insn(PyOperator op) {
+    switch (op) {
+    case PY_OP_LT: return MIR_LT;
+    case PY_OP_LE: return MIR_LE;
+    case PY_OP_GT: return MIR_GT;
+    case PY_OP_GE: return MIR_GE;
+    case PY_OP_EQ: return MIR_EQ;
+    case PY_OP_NE: return MIR_NE;
+    default: return MIR_EQ;
+    }
+}
+
+static MIR_insn_code_t pm_native_float_compare_insn(PyOperator op) {
+    switch (op) {
+    case PY_OP_LT: return MIR_DLT;
+    case PY_OP_LE: return MIR_DLE;
+    case PY_OP_GT: return MIR_DGT;
+    case PY_OP_GE: return MIR_DGE;
+    case PY_OP_EQ: return MIR_DEQ;
+    case PY_OP_NE: return MIR_DNE;
+    default: return MIR_DEQ;
+    }
+}
+
 static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
     // chained comparisons: a < b < c → (a < b) and (b < c)
     MIR_reg_t result = pm_new_reg(mt, "cmp", MIR_T_I64);
     MIR_label_t l_false = pm_new_label(mt);
     MIR_label_t l_end = pm_new_label(mt);
 
+    // Phase 2: for simple (non-chained) int comparisons, use native path with runtime type guard
+    if (cmp->op_count == 1 && pm_is_native_int_compare_op(cmp->ops[0])) {
+        TypeId lt = pm_get_effective_type(mt, cmp->left);
+        TypeId rt = pm_get_effective_type(mt, cmp->comparators[0]);
+
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            // transpile both as boxed first (for fallback)
+            MIR_reg_t lhs_boxed = pm_transpile_expression(mt, cmp->left);
+            MIR_reg_t rhs_boxed = pm_transpile_expression(mt, cmp->comparators[0]);
+
+            MIR_label_t l_boxed_cmp = pm_new_label(mt);
+
+            // runtime type guard: verify both are actually INT
+            MIR_reg_t l_tag = pm_new_reg(mt, "clt", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, l_tag),
+                MIR_new_reg_op(mt->ctx, lhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_cmp),
+                MIR_new_reg_op(mt->ctx, l_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+            MIR_reg_t r_tag = pm_new_reg(mt, "crt", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, r_tag),
+                MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_cmp),
+                MIR_new_reg_op(mt->ctx, r_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+            // native int compare
+            MIR_reg_t l_val = pm_emit_unbox_int(mt, lhs_boxed);
+            MIR_reg_t r_val = pm_emit_unbox_int(mt, rhs_boxed);
+            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, pm_native_int_compare_insn(cmp->ops[0]),
+                MIR_new_reg_op(mt->ctx, cmp_res),
+                MIR_new_reg_op(mt->ctx, l_val),
+                MIR_new_reg_op(mt->ctx, r_val)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
+                MIR_new_reg_op(mt->ctx, cmp_res)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_TRUE_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // boxed fallback: call runtime compare
+            pm_emit_label(mt, l_boxed_cmp);
+            const char* fn = pm_compare_op_func(cmp->ops[0]);
+            MIR_reg_t boxed_cmp = pm_call_2(mt, fn, MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, boxed_cmp)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            pm_emit_label(mt, l_false);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_label(mt, l_end);
+            return result;
+        }
+
+        // native float comparison
+        if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
+            (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+            MIR_reg_t l = pm_transpile_as_native_float(mt, cmp->left);
+            MIR_reg_t r = pm_transpile_as_native_float(mt, cmp->comparators[0]);
+            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmpf", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, pm_native_float_compare_insn(cmp->ops[0]),
+                MIR_new_reg_op(mt->ctx, cmp_res),
+                MIR_new_reg_op(mt->ctx, l),
+                MIR_new_reg_op(mt->ctx, r)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
+                MIR_new_reg_op(mt->ctx, cmp_res)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_TRUE_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            pm_emit_label(mt, l_false);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_label(mt, l_end);
+            return result;
+        }
+    }
+
+    // general path: boxed comparisons with chaining support
     MIR_reg_t left = pm_transpile_expression(mt, cmp->left);
 
     for (int i = 0; i < cmp->op_count; i++) {
@@ -863,6 +1387,63 @@ static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
 
     pm_emit_label(mt, l_end);
     return result;
+}
+
+// ============================================================================
+// TCO helpers
+// ============================================================================
+
+// Check if a call node directly calls the given function by name.
+static bool pm_is_py_recursive_call(PyCallNode* call, PyFuncCollected* fc) {
+    if (!call || !fc || !call->function) return false;
+    if (call->function->node_type != PY_AST_NODE_IDENTIFIER) return false;
+    PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+    int name_len = (int)strlen(fc->name);
+    return (int)fn_id->name->len == name_len &&
+           strncmp(fn_id->name->chars, fc->name, name_len) == 0;
+}
+
+// Recursively check if a function body contains a tail-recursive call.
+// Tail position: return f(...), or return f(...) inside if/elif/else branches.
+static bool pm_has_py_tail_call(PyAstNode* node, PyFuncCollected* fc) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case PY_AST_NODE_BLOCK: {
+        // only the last statement can be in tail position
+        PyAstNode* s = ((PyBlockNode*)node)->statements;
+        PyAstNode* last = NULL;
+        while (s) { last = s; s = s->next; }
+        return pm_has_py_tail_call(last, fc);
+    }
+    case PY_AST_NODE_RETURN: {
+        PyReturnNode* ret = (PyReturnNode*)node;
+        if (!ret->value) return false;
+        if (ret->value->node_type == PY_AST_NODE_CALL)
+            return pm_is_py_recursive_call((PyCallNode*)ret->value, fc);
+        return false;
+    }
+    case PY_AST_NODE_IF: {
+        PyIfNode* ifn = (PyIfNode*)node;
+        if (pm_has_py_tail_call(ifn->body, fc)) return true;
+        for (PyAstNode* e = ifn->elif_clauses; e; e = e->next)
+            if (e->node_type == PY_AST_NODE_ELIF &&
+                pm_has_py_tail_call(((PyIfNode*)e)->body, fc)) return true;
+        if (pm_has_py_tail_call(ifn->else_body, fc)) return true;
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+// Check if a function should use TCO: must be named, non-closure, non-generator,
+// and have at least one tail-recursive call in its body.
+static bool pm_should_use_tco(PyFuncCollected* fc) {
+    if (!fc || !fc->node || !fc->node->name) return false;
+    if (fc->is_closure) return false;
+    if (fc->is_generator) return false;
+    if (fc->has_star_args || fc->has_kwargs) return false;
+    return pm_has_py_tail_call(fc->node->body, fc);
 }
 
 static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
@@ -1552,6 +2133,83 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
         }
         if (target_fc && target_fc->func_item) {
+            // ======== TCO interception ========
+            // If this is a tail-recursive call to the current TCO function,
+            // convert to: evaluate args → assign to params → goto tco_label
+            if (mt->tco_func && mt->in_tail_position && target_fc == mt->tco_func) {
+                log_debug("py-mir: TCO tail call to '%s' — converting to goto", mt->tco_func->name);
+
+                // arguments are NOT in tail position
+                bool saved_tail = mt->in_tail_position;
+                mt->in_tail_position = false;
+
+                int total_params = target_fc->param_count;
+
+                // Phase 1: evaluate all arguments into temporaries
+                MIR_reg_t temps[16];
+                int arg_idx = 0;
+                PyAstNode* a = call->arguments;
+                // positional args
+                while (a && arg_idx < total_params) {
+                    if (a->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                        a = a->next; continue;
+                    }
+                    temps[arg_idx] = pm_transpile_expression(mt, a);
+                    arg_idx++;
+                    a = a->next;
+                }
+                // fill remaining with null
+                while (arg_idx < total_params) {
+                    temps[arg_idx] = pm_emit_null(mt);
+                    arg_idx++;
+                }
+
+                // Phase 2: assign temporaries to parameter registers
+                int offset = target_fc->is_closure ? 1 : 0;
+                PyAstNode* pnode = target_fc->node->params;
+                for (int i = 0; i < total_params && i < 16; i++) {
+                    String* pn = NULL;
+                    while (pnode) {
+                        if (pnode->node_type == PY_AST_NODE_LIST_SPLAT_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_DICT_SPLAT_PARAMETER) {
+                            pnode = pnode->next;
+                            continue;
+                        }
+                        if (pnode->node_type == PY_AST_NODE_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+                            pn = ((PyParamNode*)pnode)->name;
+                        }
+                        pnode = pnode->next;
+                        break;
+                    }
+                    if (pn) {
+                        char pname[128];
+                        snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
+                        PyMirVarEntry* pvar = pm_find_var(mt, pname);
+                        if (pvar) {
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, pvar->reg),
+                                MIR_new_reg_op(mt->ctx, temps[i])));
+                        }
+                    }
+                }
+
+                mt->in_tail_position = saved_tail;
+
+                // jump back to function start
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, mt->tco_label)));
+                mt->block_returned = true;
+
+                // return dummy register (unreachable but MIR needs a value)
+                MIR_reg_t dummy = pm_new_reg(mt, "tco_dummy", MIR_T_I64);
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, dummy),
+                    MIR_new_int_op(mt->ctx, 0)));
+                return dummy;
+            }
+
             int total_params = target_fc->param_count;
             // build ordered argument array: init all slots to null
             MIR_reg_t ordered_args[16];
@@ -2392,6 +3050,8 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
 // ============================================================================
 
 static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assign) {
+    // infer type of RHS for type propagation
+    TypeId rhs_type = pm_get_effective_type(mt, assign->value);
     MIR_reg_t val = pm_transpile_expression(mt, assign->value);
 
     // walk targets
@@ -2422,6 +3082,11 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var->reg),
                         MIR_new_reg_op(mt->ctx, val)));
+                    // update type hint
+                    if (rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT)
+                        var->type_hint = rhs_type;
+                    else
+                        var->type_hint = LMD_TYPE_NULL; // unknown, clear previous hint
                 }
             } else {
                 // new variable
@@ -2429,7 +3094,7 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                 pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, reg),
                     MIR_new_reg_op(mt->ctx, val)));
-                pm_set_var(mt, vname, reg);
+                pm_set_var_with_type(mt, vname, reg, rhs_type);
             }
         } else if (target->node_type == PY_AST_NODE_SUBSCRIPT) {
             PySubscriptNode* sub = (PySubscriptNode*)target;
@@ -2513,6 +3178,125 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
     case PY_OP_BIT_OR_ASSIGN:    bin_op = PY_OP_BIT_OR; break;
     case PY_OP_BIT_XOR_ASSIGN:   bin_op = PY_OP_BIT_XOR; break;
     default:                     bin_op = PY_OP_ADD; break;
+    }
+
+    // Phase 1: native int augmented assignment for simple identifier targets
+    if (aug->target->node_type == PY_AST_NODE_IDENTIFIER && bin_op != PY_OP_DIV && bin_op != PY_OP_POW) {
+        TypeId lt = pm_get_effective_type(mt, aug->target);
+        TypeId rt = pm_get_effective_type(mt, aug->value);
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            MIR_insn_code_t op;
+            bool native_ok = true;
+            switch (bin_op) {
+            case PY_OP_ADD: op = MIR_ADD; break;
+            case PY_OP_SUB: op = MIR_SUB; break;
+            case PY_OP_MUL: op = MIR_MUL; break;
+            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+            case PY_OP_MOD: op = MIR_MOD; break;
+            case PY_OP_LSHIFT: op = MIR_LSH; break;
+            case PY_OP_RSHIFT: op = MIR_RSH; break;
+            case PY_OP_BIT_AND: op = MIR_AND; break;
+            case PY_OP_BIT_OR: op = MIR_OR; break;
+            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            default: native_ok = false; break;
+            }
+            if (native_ok) {
+                PyIdentifierNode* id = (PyIdentifierNode*)aug->target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+
+                if (!pm_is_global_in_current_func(mt, vname)) {
+                    PyMirVarEntry* var = pm_find_var(mt, vname);
+                    if (var && !var->from_env && var->type_hint == LMD_TYPE_INT) {
+                        const char* fn = pm_binary_op_func(bin_op);
+                        bool can_overflow = (bin_op == PY_OP_ADD || bin_op == PY_OP_SUB ||
+                                             bin_op == PY_OP_MUL || bin_op == PY_OP_LSHIFT);
+
+                        // transpile RHS as boxed Item first (needed for fallback)
+                        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, aug->value);
+
+                        MIR_label_t l_boxed_path = pm_new_label(mt);
+                        MIR_label_t l_end = pm_new_label(mt);
+
+                        // runtime type guard: verify variable is actually INT
+                        MIR_reg_t var_tag = pm_new_reg(mt, "vt", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, var_tag),
+                            MIR_new_reg_op(mt->ctx, var->reg), MIR_new_int_op(mt->ctx, 56)));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_path),
+                            MIR_new_reg_op(mt->ctx, var_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+                        // runtime type guard: verify RHS is actually INT
+                        MIR_reg_t rhs_tag = pm_new_reg(mt, "rhst", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, rhs_tag),
+                            MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_path),
+                            MIR_new_reg_op(mt->ctx, rhs_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+                        // native path: unbox and compute
+                        MIR_reg_t l = pm_emit_unbox_int(mt, var->reg);
+                        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
+                        MIR_reg_t res = pm_new_reg(mt, "naug", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+                            MIR_new_reg_op(mt->ctx, res),
+                            MIR_new_reg_op(mt->ctx, l),
+                            MIR_new_reg_op(mt->ctx, r)));
+
+                        if (can_overflow) {
+                            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+                            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+                            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+                            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+                            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+                                MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+                            MIR_label_t l_ok = pm_new_label(mt);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+                                MIR_new_reg_op(mt->ctx, in_range)));
+                            // overflow → runtime call with boxed operands
+                            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, ov_result)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                            // fast path: inline box
+                            pm_emit_label(mt, l_ok);
+                            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+                            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+                                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, tagged)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                        } else {
+                            MIR_reg_t boxed = pm_box_int_reg(mt, res);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                        }
+
+                        // boxed fallback: runtime call (wrong type or overflow)
+                        pm_emit_label(mt, l_boxed_path);
+                        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, var->reg),
+                            MIR_new_reg_op(mt->ctx, boxed_res)));
+                        pm_emit_label(mt, l_end);
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     MIR_reg_t left = pm_transpile_expression(mt, aug->target);
@@ -2669,6 +3453,16 @@ static void pm_transpile_while(PyMirTranspiler* mt, PyWhileNode* wh) {
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
 
+// detect if a call expression is range(...)
+static bool pm_is_range_call(PyAstNode* iter) {
+    if (!iter || iter->node_type != PY_AST_NODE_CALL) return false;
+    PyCallNode* call = (PyCallNode*)iter;
+    if (!call->function || call->function->node_type != PY_AST_NODE_IDENTIFIER) return false;
+    PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+    return fn_id->name->len == 5 && strncmp(fn_id->name->chars, "range", 5) == 0 &&
+           call->arg_count >= 1 && call->arg_count <= 3;
+}
+
 static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
     // in generator context, use iterator protocol to survive yields inside the loop
     if (mt->in_generator) {
@@ -2676,7 +3470,141 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         return;
     }
 
-    // evaluate iterable and get an iterator object (works for lists, generators, ranges, etc.)
+    // Phase 3: optimized range-for loop with native counter
+    if (forn->target->node_type == PY_AST_NODE_IDENTIFIER && pm_is_range_call(forn->iter)) {
+        PyCallNode* call = (PyCallNode*)forn->iter;
+        PyIdentifierNode* target_id = (PyIdentifierNode*)forn->target;
+
+        // extract range arguments: range(stop), range(start, stop), range(start, stop, step)
+        PyAstNode* arg1 = call->arguments;
+        PyAstNode* arg2 = arg1 ? arg1->next : NULL;
+        PyAstNode* arg3 = arg2 ? arg2->next : NULL;
+
+        MIR_reg_t start_reg, stop_reg, step_reg;
+        if (call->arg_count == 1) {
+            // range(stop): start=0, step=1
+            start_reg = pm_new_reg(mt, "rstart", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, start_reg),
+                MIR_new_int_op(mt->ctx, 0)));
+            stop_reg = pm_transpile_as_native_int(mt, arg1);
+            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, step_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+        } else if (call->arg_count == 2) {
+            // range(start, stop): step=1
+            start_reg = pm_transpile_as_native_int(mt, arg1);
+            stop_reg = pm_transpile_as_native_int(mt, arg2);
+            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, step_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+        } else {
+            // range(start, stop, step)
+            start_reg = pm_transpile_as_native_int(mt, arg1);
+            stop_reg = pm_transpile_as_native_int(mt, arg2);
+            step_reg = pm_transpile_as_native_int(mt, arg3);
+        }
+
+        // counter register
+        MIR_reg_t counter = pm_new_reg(mt, "rcnt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, start_reg)));
+
+        // set loop var with INT type hint to enable native arithmetic inside the body
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)target_id->name->len, target_id->name->chars);
+
+        // create or find the loop variable register
+        MIR_reg_t var_reg;
+        PyMirVarEntry* existing_var = pm_find_var(mt, vname);
+        if (existing_var) {
+            var_reg = existing_var->reg;
+        } else {
+            var_reg = pm_new_reg(mt, vname, MIR_T_I64);
+        }
+
+        MIR_label_t l_test = pm_new_label(mt);
+        MIR_label_t l_continue = pm_new_label(mt);
+        MIR_label_t l_end = pm_new_label(mt);
+
+        if (mt->loop_depth < 32) {
+            mt->loop_stack[mt->loop_depth].continue_label = l_continue;
+            mt->loop_stack[mt->loop_depth].break_label = l_end;
+            mt->loop_depth++;
+        }
+
+        pm_emit_label(mt, l_test);
+
+        // test: counter < stop (for positive step) or counter > stop (for negative step)
+        // for simplicity and common case (step=1), use counter >= stop → exit
+        // for general case with variable step, check (counter - stop) * sign(step) >= 0
+        // but for benchmarks, step is almost always 1, so check counter >= stop
+        MIR_reg_t cmp_exit = pm_new_reg(mt, "rcmp", MIR_T_I64);
+        if (call->arg_count <= 2) {
+            // step is always 1: simple counter >= stop check
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+        } else {
+            // general step: check if (counter - stop) has same sign as step
+            // use: step > 0 ? counter >= stop : counter <= stop
+            MIR_reg_t step_pos = pm_new_reg(mt, "spos", MIR_T_I64);
+            MIR_reg_t cmp_fwd = pm_new_reg(mt, "cfwd", MIR_T_I64);
+            MIR_reg_t cmp_bwd = pm_new_reg(mt, "cbwd", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GT, MIR_new_reg_op(mt->ctx, step_pos),
+                MIR_new_reg_op(mt->ctx, step_reg), MIR_new_int_op(mt->ctx, 0)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp_fwd),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, cmp_bwd),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+            // cmp_exit = step > 0 ? cmp_fwd : cmp_bwd
+            MIR_label_t l_use_fwd = pm_new_label(mt);
+            MIR_label_t l_cmp_done = pm_new_label(mt);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_use_fwd),
+                MIR_new_reg_op(mt->ctx, step_pos)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, cmp_bwd)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cmp_done)));
+            pm_emit_label(mt, l_use_fwd);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, cmp_fwd)));
+            pm_emit_label(mt, l_cmp_done);
+        }
+
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, cmp_exit)));
+
+        // box counter and assign to loop variable (with INT type hint)
+        MIR_reg_t boxed_cnt = pm_box_int_reg(mt, counter);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var_reg),
+            MIR_new_reg_op(mt->ctx, boxed_cnt)));
+        pm_set_var_with_type(mt, vname, var_reg, LMD_TYPE_INT);
+
+        // body
+        if (forn->body) {
+            PyAstNode* s;
+            if (forn->body->node_type == PY_AST_NODE_BLOCK) {
+                s = ((PyBlockNode*)forn->body)->statements;
+            } else {
+                s = forn->body;
+            }
+            while (s) { pm_transpile_statement(mt, s); s = s->next; }
+        }
+
+        pm_emit_label(mt, l_continue);
+
+        // increment counter natively: counter += step
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, step_reg)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
+        pm_emit_label(mt, l_end);
+
+        if (mt->loop_depth > 0) mt->loop_depth--;
+        return;
+    }
+
+    // general for loop path: evaluate iterable and get an iterator object
     MIR_reg_t iterable = pm_transpile_expression(mt, forn->iter);
     MIR_reg_t iter_obj = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
@@ -2783,12 +3711,21 @@ static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
         pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, si)));
         return;
     }
+    // TCO: return value is in tail position
+    bool saved_tail = mt->in_tail_position;
+    mt->block_returned = false;  // reset per-return so earlier TCO jumps don't suppress this ret
+    if (mt->tco_func) {
+        mt->in_tail_position = true;
+    }
     MIR_reg_t val;
     if (ret->value) {
         val = pm_transpile_expression(mt, ret->value);
     } else {
         val = pm_emit_null(mt);
     }
+    mt->in_tail_position = saved_tail;
+    // if TCO converted the call to a jump, block_returned is set — skip the ret
+    if (mt->block_returned) return;
     pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
 }
 
@@ -3264,6 +4201,236 @@ static void pm_transpile_match(PyMirTranspiler* mt, PyMatchNode* mn) {
     }
 
     pm_emit_label(mt, l_match_end);
+}
+
+// ============================================================================
+// Package / module resolution helper (Phase E)
+// ============================================================================
+
+// Check if a file exists and is a regular file
+static bool pm_file_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Check if a directory exists
+static bool pm_dir_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Count leading dots in a module name for relative imports
+static int pm_count_leading_dots(const char* name, int len) {
+    int count = 0;
+    while (count < len && name[count] == '.') count++;
+    return count;
+}
+
+// Try loading a module from a base path (without extension).
+// Tries: base_path.py, base_path/__init__.py, base_path.js, base_path.ls
+// Returns the loaded namespace Item or ItemNull.
+static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
+    StrBuf* try_buf = strbuf_new();
+    Item ns = ItemNull;
+
+    // try base_path.py
+    strbuf_append_format(try_buf, "%s.py", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        // check circular import
+        if (module_is_loading(try_buf->str)) {
+            ModuleDescriptor* desc = module_get(try_buf->str);
+            if (desc) {
+                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+                strbuf_free(try_buf);
+                return desc->namespace_obj;
+            }
+        }
+        ns = load_py_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path/__init__.py (package directory)
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s/__init__.py", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        if (module_is_loading(try_buf->str)) {
+            ModuleDescriptor* desc = module_get(try_buf->str);
+            if (desc) {
+                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+                strbuf_free(try_buf);
+                return desc->namespace_obj;
+            }
+        }
+        ns = load_py_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path.js
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s.js", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        ns = load_js_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path.ls
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s.ls", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        Script* script = load_script(runtime, try_buf->str, NULL, true);
+        if (script && script->ast_root) {
+            ns = module_build_lambda_namespace(script);
+            if (ns.item != ItemNull.item) {
+                strbuf_free(try_buf);
+                return ns;
+            }
+        }
+    }
+
+    strbuf_free(try_buf);
+    return ItemNull;
+}
+
+// Resolve a Python module import to a namespace Item.
+// Handles built-in modules, single-file imports, package imports (pkg/__init__.py),
+// dotted imports (pkg.submod), relative imports (from .x, from ..x), and circular imports.
+static Item pm_resolve_py_import(const char* mod_name, int mod_len,
+                                  const char* script_filename, Runtime* runtime) {
+    // check built-in modules first
+    PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
+    if (builtin_init) {
+        return builtin_init();
+    }
+
+    // determine base directory of the current script
+    StrBuf* base_dir = strbuf_new();
+    const char* last_slash = script_filename ? strrchr(script_filename, '/') : NULL;
+    if (last_slash) {
+        strbuf_append_format(base_dir, "%.*s", (int)(last_slash - script_filename), script_filename);
+    } else {
+        strbuf_append_str(base_dir, ".");
+    }
+
+    // count leading dots for relative imports
+    int dot_count = pm_count_leading_dots(mod_name, mod_len);
+    const char* rel_name = mod_name + dot_count;
+    int rel_len = mod_len - dot_count;
+
+    // resolve base directory for relative imports (go up directories)
+    StrBuf* resolve_dir = strbuf_new();
+    if (dot_count > 0) {
+        // relative import: start from current script directory
+        strbuf_append_str(resolve_dir, base_dir->str);
+        // each dot beyond the first goes up one directory level
+        for (int d = 1; d < dot_count; d++) {
+            const char* up_slash = strrchr(resolve_dir->str, '/');
+            if (up_slash && up_slash != resolve_dir->str) {
+                int new_len = (int)(up_slash - resolve_dir->str);
+                resolve_dir->str[new_len] = '\0';
+                resolve_dir->length = new_len;
+            }
+        }
+    } else {
+        // absolute import: start from script directory
+        strbuf_append_str(resolve_dir, base_dir->str);
+    }
+
+    // build the base path: resolve_dir / rel_name (with dots converted to slashes)
+    StrBuf* base_path = strbuf_new();
+    strbuf_append_str(base_path, resolve_dir->str);
+
+    if (rel_len > 0) {
+        strbuf_append_char(base_path, '/');
+        for (int i = 0; i < rel_len; i++) {
+            strbuf_append_char(base_path, rel_name[i] == '.' ? '/' : rel_name[i]);
+        }
+    }
+
+    Item ns = ItemNull;
+
+    if (rel_len > 0) {
+        // has a module name after dots (or no dots at all)
+        const char* first_dot = (const char*)memchr(rel_name, '.', rel_len);
+        if (first_dot) {
+            // dotted import: e.g. pkg.submod
+            // Always use hierarchical loading so that each component gets attached
+            // to its parent namespace (e.g. mypkg.utils → mypkg_ns["utils"] = utils_ns)
+            {
+                int comp_start = 0;
+                Item parent_ns = ItemNull;
+                StrBuf* comp_path = strbuf_new();
+                strbuf_append_str(comp_path, resolve_dir->str);
+
+                for (int i = 0; i <= rel_len; i++) {
+                    if (i == rel_len || rel_name[i] == '.') {
+                        int comp_len = i - comp_start;
+                        if (comp_len > 0) {
+                            strbuf_append_char(comp_path, '/');
+                            strbuf_append_format(comp_path, "%.*s", comp_len, rel_name + comp_start);
+
+                            Item sub_ns = pm_try_load_module(runtime, comp_path->str);
+                            if (sub_ns.item == ItemNull.item) break;
+
+                            if (parent_ns.item != ItemNull.item) {
+                                // attach submodule as attribute of parent package
+                                Item key = {.item = s2it(heap_create_name(rel_name + comp_start, comp_len))};
+                                js_property_set(parent_ns, key, sub_ns);
+                            }
+                            parent_ns = sub_ns;
+                            ns = sub_ns;
+                        }
+                        comp_start = i + 1;
+                    }
+                }
+                strbuf_free(comp_path);
+            }
+        } else {
+            // simple (non-dotted) name
+            ns = pm_try_load_module(runtime, base_path->str);
+        }
+    } else if (dot_count > 0) {
+        // bare relative import: "from . import x" — module_name is just dots
+        // load the package directory's __init__.py
+        StrBuf* init_path = strbuf_new();
+        strbuf_append_format(init_path, "%s/__init__.py", resolve_dir->str);
+        if (pm_file_exists(init_path->str)) {
+            if (module_is_loading(init_path->str)) {
+                ModuleDescriptor* desc = module_get(init_path->str);
+                if (desc) ns = desc->namespace_obj;
+            } else {
+                ns = load_py_module(runtime, init_path->str);
+            }
+        }
+        strbuf_free(init_path);
+    }
+
+    // fallback: try relative to entry-point script directory
+    if (ns.item == ItemNull.item && py_entry_script_dir[0] && dot_count == 0) {
+        StrBuf* entry_path = strbuf_new();
+        strbuf_append_str(entry_path, py_entry_script_dir);
+        if (rel_len > 0) {
+            strbuf_append_char(entry_path, '/');
+            for (int i = 0; i < rel_len; i++) {
+                strbuf_append_char(entry_path, rel_name[i] == '.' ? '/' : rel_name[i]);
+            }
+        }
+        ns = pm_try_load_module(runtime, entry_path->str);
+        strbuf_free(entry_path);
+    }
+
+    strbuf_free(base_dir);
+    strbuf_free(resolve_dir);
+    strbuf_free(base_path);
+    return ns;
 }
 
 // ============================================================================
@@ -3839,77 +5006,24 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (dot) local_len = (int)(dot - mod_name);
         }
 
-        // resolve module path relative to source file directory
-        StrBuf* path_buf = strbuf_new();
-        if (mt->filename) {
-            const char* last_slash = strrchr(mt->filename, '/');
-            if (last_slash) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(last_slash - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-        } else {
-            strbuf_append_str(path_buf, "./");
-        }
-        // convert dots to slashes for sub-module paths
-        for (int i = 0; i < mod_len; i++) {
-            strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-        }
-
-        Item ns = ItemNull;
-
-        // --- check built-in modules first (Phase C/D) ---
-        PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
-        if (builtin_init) {
-            ns = builtin_init();
-        }
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
 
         if (ns.item == ItemNull.item) {
-        StrBuf* try_buf = strbuf_new();
-
-        strbuf_append_format(try_buf, "%s.py", path_buf->str);
-        ns = load_py_module(mt->runtime, try_buf->str);
-
-        if (ns.item == ItemNull.item) {
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.js", path_buf->str);
-            ns = load_js_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.ls", path_buf->str);
-            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
-            if (script && script->ast_root) {
-                ns = module_build_lambda_namespace(script);
-            }
-        }
-
-        // fallback: try relative to entry-point script directory (for package imports)
-        if (ns.item == ItemNull.item && py_entry_script_dir[0]) {
-            StrBuf* root_buf = strbuf_new();
-            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.py", root_buf->str);
-            ns = load_py_module(mt->runtime, try_buf->str);
-            if (ns.item == ItemNull.item) {
-                strbuf_reset(try_buf);
-                strbuf_append_format(try_buf, "%s.js", root_buf->str);
-                ns = load_js_module(mt->runtime, try_buf->str);
-            }
-            strbuf_free(root_buf);
-        }
-
-        strbuf_free(try_buf);
-        } // end built-in check
-        strbuf_free(path_buf);
-
-        if (ns.item == ItemNull.item) {
-            log_error("py-mir: import '%.*s': module not found (no .py/.js/.ls)", mod_len, mod_name);
+            log_error("py-mir: import '%.*s': module not found", mod_len, mod_name);
             break;
+        }
+
+        // For dotted imports without alias (e.g. "import mypkg.utils"), the local
+        // binding is the FIRST component (mypkg), not the last (utils).
+        // pm_resolve_py_import returns the last component's namespace and attaches
+        // each component as an attribute of its parent. Re-resolve the first component.
+        if (!imp->alias) {
+            const char* dot = (const char*)memchr(mod_name, '.', mod_len);
+            if (dot) {
+                int first_len = (int)(dot - mod_name);
+                Item first_ns = pm_resolve_py_import(mod_name, first_len, mt->filename, mt->runtime);
+                if (first_ns.item != ItemNull.item) ns = first_ns;
+            }
         }
 
         // bind namespace map to _py_<localname>
@@ -4054,95 +5168,14 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         break;
     }
     case PY_AST_NODE_IMPORT_FROM: {
-        // from ./module import name1, name2
+        // from <module> import name1, name2
         PyImportNode* imp = (PyImportNode*)stmt;
         if (!imp->module_name) break;
 
         const char* mod_name = imp->module_name->chars;
         int mod_len = (int)imp->module_name->len;
 
-        // resolve module path relative to the source file's directory
-        StrBuf* path_buf = strbuf_new();
-        // extract the directory of the current script for relative resolution
-        const char* script_dir_end = mt->filename ? strrchr(mt->filename, '/') : NULL;
-        if (mod_name[0] == '.') {
-            // explicit relative import (leading dot)
-            if (script_dir_end) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-            // append the module path (skip leading dot, convert dots to slashes)
-            for (int i = 1; i < mod_len; i++) {
-                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-        } else {
-            // absolute module name — resolve relative to script's directory
-            if (script_dir_end) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-        }
-
-        // try loading as .py, .js, .ls
-        Item ns = ItemNull;
-        const char* base_path = path_buf->str;
-        int base_len = (int)path_buf->length;
-
-        // --- check built-in modules first (Phase C) ---
-        PyBuiltinModuleInitFn builtin_init_from = py_stdlib_find_builtin(mod_name, mod_len);
-        if (builtin_init_from) {
-            ns = builtin_init_from();
-        }
-
-        // try .py first
-        StrBuf* try_buf = strbuf_new();
-        if (ns.item == ItemNull.item) {
-        strbuf_append_format(try_buf, "%s.py", base_path);
-        ns = load_py_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            // try .js
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.js", base_path);
-            ns = load_js_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            // try .ls — load Lambda script and build namespace
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.ls", base_path);
-            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
-            if (script && script->ast_root) {
-                ns = module_build_lambda_namespace(script);
-            }
-        }
-
-        // fallback: try relative to entry-point script directory (for package imports)
-        if (ns.item == ItemNull.item && py_entry_script_dir[0] && mod_name[0] != '.') {
-            StrBuf* root_buf = strbuf_new();
-            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.py", root_buf->str);
-            ns = load_py_module(mt->runtime, try_buf->str);
-            if (ns.item == ItemNull.item) {
-                strbuf_reset(try_buf);
-                strbuf_append_format(try_buf, "%s.js", root_buf->str);
-                ns = load_js_module(mt->runtime, try_buf->str);
-            }
-            strbuf_free(root_buf);
-        }
-
-        strbuf_free(try_buf);
-        strbuf_free(path_buf);
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
 
         if (ns.item == ItemNull.item) {
             log_error("py-mir: failed to load module '%.*s'", mod_len, mod_name);
@@ -4181,6 +5214,77 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
         }
 
+        // determine the package directory for resolving submodule imports
+        // (needed for "from . import submod" where submod is a separate .py file,
+        // and for "from pkg import submod" where pkg is a package with __init__.py)
+        int dot_count = pm_count_leading_dots(mod_name, mod_len);
+        StrBuf* pkg_dir = NULL;
+        if (dot_count > 0) {
+            // relative import: compute the package directory
+            const char* last_slash = mt->filename ? strrchr(mt->filename, '/') : NULL;
+            pkg_dir = strbuf_new();
+            if (last_slash) {
+                strbuf_append_format(pkg_dir, "%.*s", (int)(last_slash - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(pkg_dir, ".");
+            }
+            for (int d = 1; d < dot_count; d++) {
+                const char* up = strrchr(pkg_dir->str, '/');
+                if (up && up != pkg_dir->str) {
+                    int new_len = (int)(up - pkg_dir->str);
+                    pkg_dir->str[new_len] = '\0';
+                    pkg_dir->length = new_len;
+                }
+            }
+            // if there's a module name after dots, append it
+            const char* rel_name = mod_name + dot_count;
+            int rel_len = mod_len - dot_count;
+            if (rel_len > 0) {
+                strbuf_append_char(pkg_dir, '/');
+                for (int i = 0; i < rel_len; i++) {
+                    strbuf_append_char(pkg_dir, rel_name[i] == '.' ? '/' : rel_name[i]);
+                }
+            }
+        } else if (mod_len > 0) {
+            // absolute import (e.g. "from mypkg import submod"):
+            // compute the package directory by resolving the module name as a directory
+            const char* script_dir_end = mt->filename ? strrchr(mt->filename, '/') : NULL;
+            StrBuf* candidate_dir = strbuf_new();
+            if (script_dir_end) {
+                strbuf_append_format(candidate_dir, "%.*s", (int)(script_dir_end - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(candidate_dir, ".");
+            }
+            strbuf_append_char(candidate_dir, '/');
+            for (int i = 0; i < mod_len; i++) {
+                strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+            // only use it as pkg_dir if it's a package (has __init__.py)
+            StrBuf* init_check = strbuf_new();
+            strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
+            if (pm_file_exists(init_check->str)) {
+                pkg_dir = candidate_dir;
+            } else {
+                strbuf_free(candidate_dir);
+                // also try from py_entry_script_dir
+                if (py_entry_script_dir[0]) {
+                    strbuf_reset(init_check);
+                    candidate_dir = strbuf_new();
+                    strbuf_append_format(candidate_dir, "%s/", py_entry_script_dir);
+                    for (int i = 0; i < mod_len; i++) {
+                        strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
+                    }
+                    strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
+                    if (pm_file_exists(init_check->str)) {
+                        pkg_dir = candidate_dir;
+                    } else {
+                        strbuf_free(candidate_dir);
+                    }
+                }
+            }
+            strbuf_free(init_check);
+        }
+
         // for each imported name, extract from namespace and store as variable
         PyAstNode* name_node = imp->names;
         while (name_node) {
@@ -4190,11 +5294,27 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     const char* sym_name = name_imp->module_name->chars;
                     int sym_len = (int)name_imp->module_name->len;
 
-                    // get function from namespace
+                    // get from namespace
                     Item key = {.item = s2it(heap_create_name(sym_name, sym_len))};
                     Item value = js_property_get(ns, key);
 
-                    if (value.item != ItemNull.item) {
+                    // if not found in namespace and we have a package dir,
+                    // try loading as a submodule (from . import submod)
+                    // js_property_get returns UNDEFINED (not ItemNull) for missing keys
+                    bool not_in_ns = (value.item == ItemNull.item || get_type_id(value) == LMD_TYPE_UNDEFINED);
+                    if (not_in_ns && pkg_dir) {
+                        StrBuf* submod_path = strbuf_new();
+                        strbuf_append_format(submod_path, "%s/%.*s", pkg_dir->str, sym_len, sym_name);
+                        value = pm_try_load_module(mt->runtime, submod_path->str);
+                        if (value.item != ItemNull.item) {
+                            // also add to parent namespace for future lookups
+                            js_property_set(ns, key, value);
+                        }
+                        strbuf_free(submod_path);
+                    }
+
+                    bool value_valid = (value.item != ItemNull.item && get_type_id(value) != LMD_TYPE_UNDEFINED);
+                    if (value_valid) {
                         // use alias if provided, otherwise original name
                         const char* local_name = sym_name;
                         int local_len = sym_len;
@@ -4211,6 +5331,15 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                             MIR_new_reg_op(mt->ctx, val_reg),
                             MIR_new_int_op(mt->ctx, (int64_t)value.item)));
                         pm_set_var(mt, vname, val_reg);
+
+                        // also store as module var for export and nested function access
+                        int imp_midx = pm_get_global_var_index(mt, vname);
+                        if (imp_midx >= 0) {
+                            pm_call_void_2(mt, "py_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, imp_midx),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                        }
+
                         log_debug("py-mir: imported '%.*s' as '%s'", sym_len, sym_name, vname);
                     } else {
                         log_error("py-mir: name '%.*s' not found in module '%.*s'",
@@ -4220,6 +5349,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
             name_node = name_node->next;
         }
+        if (pkg_dir) strbuf_free(pkg_dir);
         break;
     }
     default:
@@ -5964,6 +7094,59 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         }
     }
 
+    // ===== TCO Setup =====
+    bool use_tco = pm_should_use_tco(fc);
+    PyFuncCollected* saved_tco_func = mt->tco_func;
+    MIR_label_t saved_tco_label = mt->tco_label;
+    MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
+    bool saved_tail_position = mt->in_tail_position;
+    bool saved_block_returned = mt->block_returned;
+
+    if (use_tco) {
+        log_debug("py-mir: TCO enabled for '%s'", fc->name);
+        mt->tco_func = fc;
+
+        // create iteration counter register, init to 0
+        mt->tco_count_reg = pm_new_reg(mt, "tco_count", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+
+        // create the TCO loop label
+        mt->tco_label = MIR_new_label(mt->ctx);
+        pm_emit(mt, mt->tco_label);
+
+        // increment counter: tco_count = tco_count + 1
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 1)));
+
+        // guard: if tco_count > LAMBDA_TCO_MAX_ITERATIONS, call overflow error
+        MIR_label_t ok_label = pm_new_label(mt);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BLE, MIR_new_label_op(mt->ctx, ok_label),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, LAMBDA_TCO_MAX_ITERATIONS)));
+
+        // overflow path: call lambda_stack_overflow_error(func_name)
+        // lambda_stack_overflow_error takes a const char* — pass a raw C string pointer
+        String* fn_str = name_pool_create_len(mt->tp->name_pool, fc->name, strlen(fc->name));
+        MIR_reg_t fn_name_ptr = pm_new_reg(mt, "tco_fn", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, fn_name_ptr),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fn_str->chars)));
+        pm_call_void_1(mt, "lambda_stack_overflow_error",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name_ptr));
+
+        // emit a ret after overflow call (unreachable but needed for MIR validation)
+        pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
+
+        pm_emit_label(mt, ok_label);
+        mt->in_tail_position = false;
+        mt->block_returned = false;
+    }
+
     // compile body
     pm_transpile_block(mt, fc->node->body);
 
@@ -5972,6 +7155,13 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
 
     MIR_finish_func(mt->ctx);
+
+    // restore TCO state
+    mt->tco_func = saved_tco_func;
+    mt->tco_label = saved_tco_label;
+    mt->tco_count_reg = saved_tco_count_reg;
+    mt->in_tail_position = saved_tail_position;
+    mt->block_returned = saved_block_returned;
 
     // restore parent state
     pm_pop_scope(mt);
@@ -6071,6 +7261,40 @@ static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
                     mt->global_var_count++;
                     log_debug("py-mir: import var '%s' → module_var[%d]", var_name, idx);
                 }
+            }
+        } else if (s->node_type == PY_AST_NODE_IMPORT_FROM && mt->global_var_count < 64) {
+            // register from...import names as module vars for export
+            PyImportNode* imp = (PyImportNode*)s;
+            PyAstNode* name_node = imp->names;
+            while (name_node && mt->global_var_count < 64) {
+                if (name_node->node_type == PY_AST_NODE_IMPORT) {
+                    PyImportNode* name_imp = (PyImportNode*)name_node;
+                    if (name_imp->module_name) {
+                        const char* local_name = name_imp->module_name->chars;
+                        int local_len = (int)name_imp->module_name->len;
+                        if (name_imp->alias) {
+                            local_name = name_imp->alias->chars;
+                            local_len = (int)name_imp->alias->len;
+                        }
+                        // skip wildcard import
+                        if (!(local_len == 1 && local_name[0] == '*')) {
+                            char var_name[132];
+                            snprintf(var_name, sizeof(var_name), "_py_%.*s", local_len, local_name);
+                            bool already = false;
+                            for (int i = 0; i < mt->global_var_count; i++) {
+                                if (strcmp(mt->global_var_names[i], var_name) == 0) { already = true; break; }
+                            }
+                            if (!already) {
+                                int idx = mt->module_var_count++;
+                                snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", var_name);
+                                mt->global_var_indices[mt->global_var_count] = idx;
+                                mt->global_var_count++;
+                                log_debug("py-mir: from-import var '%s' → module_var[%d]", var_name, idx);
+                            }
+                        }
+                    }
+                }
+                name_node = name_node->next;
             }
         }
         s = s->next;
@@ -6382,6 +7606,11 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         log_debug("py-mir: module '%s' already loaded, returning cached namespace", py_path);
         return cached->namespace_obj;
     }
+    // check for circular import (module is currently being loaded)
+    if (cached && cached->loading) {
+        log_info("py-mir: circular import detected for '%s', returning partial namespace", py_path);
+        return cached->namespace_obj;
+    }
 
     char* source = read_text_file(py_path);
     if (!source) {
@@ -6476,6 +7705,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     MIR_load_module(mt->ctx, mt->module);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
+    // mark module as loading before execution (circular import detection)
+    ModuleDescriptor* loading_desc = module_register_loading(py_path, "python");
+
     // execute py_main to run module-level code (assignments, etc.)
     typedef Item (*py_main_func_t)(Context*);
     py_main_func_t py_main = (py_main_func_t)find_func(ctx, "py_main");
@@ -6496,9 +7728,10 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         void* func_ptr = find_func(ctx, mir_name);
 
         if (func_ptr) {
-            // use js_new_function so js_function_get_ptr can extract func_ptr
-            // when Lambda imports this module via cross-language import path
-            Item val = js_new_function(func_ptr, fc->param_count);
+            // Use to_fn_n to create a Lambda Function* (compatible with py_call_function).
+            // js_new_function creates a JsFunction with a different struct layout,
+            // which causes py_call_function to read garbage fn->ptr and crash.
+            Item val = {.function = to_fn_n((fn_ptr)func_ptr, fc->param_count)};
             Item key = {.item = s2it(heap_create_name(fc->name))};
             js_property_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
@@ -6510,13 +7743,16 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         const char* var_name = mt->global_var_names[i];
         int var_idx = mt->global_var_indices[i];
         Item value = py_get_module_var(var_idx);
+        log_debug("py-mir: module var[%d] '%s' (slot %d) = 0x%llx type=%d",
+            i, var_name, var_idx, (unsigned long long)value.item, (int)get_type_id(value));
         if (value.item == ItemNull.item) continue;
         // strip _py_ prefix for the export key
         const char* export_name = (strncmp(var_name, "_py_", 4) == 0) ? var_name + 4 : var_name;
         Item key = {.item = s2it(heap_create_name(export_name))};
         // functions exported above take priority over module vars
         Item existing = js_property_get(ns, key);
-        if (existing.item == ItemNull.item) {
+        bool not_found = (existing.item == ItemNull.item || get_type_id(existing) == LMD_TYPE_UNDEFINED);
+        if (not_found) {
             js_property_set(ns, key, value);
             log_debug("py-mir: module export var '%s' type=%d", export_name, (int)get_type_id(value));
         }

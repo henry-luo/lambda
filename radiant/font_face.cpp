@@ -3,6 +3,7 @@
 #include "../lib/font/font.h"  // unified font module — font_face_register, font_family_exists
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_font_face.hpp"
+#include "../lambda/input/input.hpp"  // download_to_cache
 extern "C" {
 #include "../lib/url.h"
 #include "../lib/memtrack.h"
@@ -11,9 +12,30 @@ extern "C" {
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
-#ifdef _WIN32
-#include <direct.h>  // for _fullpath
-#endif
+#include "../lib/file.h"
+
+static const char* FONT_CACHE_DIR = "./temp/font_cache";
+
+// Download a remote font URL to cache and return the local cache path.
+// Returns a mem_strdup'd path on success, nullptr on failure.
+static char* download_font_url(const char* url) {
+    char* cache_path = nullptr;
+    char* content = download_to_cache(url, FONT_CACHE_DIR, &cache_path);
+    if (content) {
+        free(content);  // we only need the cache file path, not the in-memory content
+    }
+    if (cache_path) {
+        // convert stdlib path to mem-tracked string
+        char* result = mem_strdup(cache_path, MEM_CAT_LAYOUT);
+        free(cache_path);
+        return result;
+    }
+    return nullptr;
+}
+
+static bool is_http_url(const char* url) {
+    return url && (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0);
+}
 
 // Text flow logging categories
 log_category_t* font_log = NULL;
@@ -137,6 +159,40 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         CssFontFaceDescriptor* css_desc = css_descs[i];
         if (!css_desc) continue;
 
+        // Download remote font URLs to local cache
+        if (css_desc->src_urls) {
+            for (int j = 0; j < css_desc->src_count; j++) {
+                if (is_http_url(css_desc->src_urls[j].url)) {
+                    char* local_path = download_font_url(css_desc->src_urls[j].url);
+                    if (local_path) {
+                        clog_info(font_log, "Downloaded remote font '%s' -> %s",
+                                  css_desc->src_urls[j].url, local_path);
+                        mem_free(css_desc->src_urls[j].url);
+                        css_desc->src_urls[j].url = local_path;
+                    } else {
+                        clog_warn(font_log, "Failed to download remote font: %s",
+                                  css_desc->src_urls[j].url);
+                        mem_free(css_desc->src_urls[j].url);
+                        css_desc->src_urls[j].url = nullptr;
+                    }
+                }
+            }
+        }
+        if (is_http_url(css_desc->src_url)) {
+            char* local_path = download_font_url(css_desc->src_url);
+            if (local_path) {
+                clog_info(font_log, "Downloaded remote font '%s' -> %s",
+                          css_desc->src_url, local_path);
+                mem_free(css_desc->src_url);
+                css_desc->src_url = local_path;
+            } else {
+                clog_warn(font_log, "Failed to download remote font: %s",
+                          css_desc->src_url);
+                mem_free(css_desc->src_url);
+                css_desc->src_url = nullptr;
+            }
+        }
+
         // Skip fonts without any loadable source
         if ((!css_desc->src_urls || css_desc->src_count == 0) && !css_desc->src_url && !css_desc->src_local) {
             clog_debug(font_log, "Skipping @font-face '%s': no local source available",
@@ -219,17 +275,11 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
                 }
             } else {
                 // Relative path - resolve to absolute using CWD so font paths are correct
-                char resolved[4096];
-#ifdef _WIN32
-                if (_fullpath(resolved, stylesheet->origin_url, sizeof(resolved))) {
-#else
-                if (realpath(stylesheet->origin_url, resolved)) {
-#endif
-                    stylesheet_path = strdup(resolved);
-                    if (stylesheet_path) {
-                        base_path = stylesheet_path;
-                        clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
-                    }
+                char* resolved = file_realpath(stylesheet->origin_url);
+                if (resolved) {
+                    stylesheet_path = resolved;  // file_realpath returns malloc'd string
+                    base_path = stylesheet_path;
+                    clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
                 }
             }
         }
@@ -342,9 +392,13 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // descriptors directly, without going through load_font_with_descriptors().
     if (uicon->font_ctx && descriptor->family_name) {
         // map CssEnum weight/style → FontWeight/FontSlant
+        // Note: CSS_VALUE_NORMAL and CSS_VALUE_BOLD are CssEnum values (not
+        // numeric weights), so check them explicitly before the numeric range.
         FontWeight fw = FONT_WEIGHT_NORMAL;
-        if (descriptor->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
-        else if (descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
+        if (descriptor->font_weight == CSS_VALUE_BOLD)
+            fw = FONT_WEIGHT_BOLD;
+        else if (descriptor->font_weight != CSS_VALUE_NORMAL &&
+                 descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
             fw = (FontWeight)descriptor->font_weight;
 
         FontSlant fs = FONT_SLANT_NORMAL;

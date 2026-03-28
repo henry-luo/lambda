@@ -114,6 +114,21 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                      float physical_size, FontWeight weight, FontSlant slant) {
     if (!ctx || !path) return NULL;
 
+    // Strip URL query string and fragment from file path (e.g., "font.ttf?v=4.0.3#iefix" → "font.ttf")
+    // CSS @font-face src URLs commonly include version parameters that aren't part of the file path
+    char clean_path[2048];
+    size_t path_len = strlen(path);
+    if (path_len >= sizeof(clean_path)) path_len = sizeof(clean_path) - 1;
+    memcpy(clean_path, path, path_len);
+    clean_path[path_len] = '\0';
+    for (size_t i = 0; i < path_len; i++) {
+        if (clean_path[i] == '?' || clean_path[i] == '#') {
+            clean_path[i] = '\0';
+            break;
+        }
+    }
+    path = clean_path;
+
     // detect format by reading file magic bytes
     FILE* fp = fopen(path, "rb");
     if (!fp) {
