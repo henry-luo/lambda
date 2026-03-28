@@ -3,14 +3,13 @@
 
 #include "enhanced_file_cache.h"
 #include "../../lib/file_utils.h"
+#include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <errno.h>
-#include <unistd.h>
 #include <mbedtls/sha256.h>
 
 // hashmap entry for URL→CacheMetadata lookup
@@ -158,8 +157,7 @@ char* enhanced_cache_lookup(EnhancedFileCache* cache, const char* url) {
 
     if (found && found->meta && found->meta->cache_path) {
         // check if file still exists
-        struct stat st;
-        if (stat(found->meta->cache_path, &st) == 0) {
+        if (file_exists(found->meta->cache_path)) {
             // check if expired
             if (found->meta->expires > 0 && found->meta->expires < time(NULL)) {
                 log_debug("cache: expired entry for %s", url);
@@ -215,7 +213,7 @@ char* enhanced_cache_store(EnhancedFileCache* cache, const char* url,
 
             // remove file from disk
             if (victim->cache_path) {
-                unlink(victim->cache_path);
+                file_delete(victim->cache_path);
             }
 
             // update stats
@@ -335,7 +333,7 @@ void enhanced_cache_evict_lru(EnhancedFileCache* cache) {
 
         // remove file from disk
         if (victim->cache_path) {
-            unlink(victim->cache_path);
+            file_delete(victim->cache_path);
         }
 
         // update stats
@@ -392,7 +390,7 @@ void enhanced_cache_clear(EnhancedFileCache* cache) {
     while (hashmap_iter((struct hashmap*)cache->metadata_map, &iter, &item)) {
         CacheEntry* entry = (CacheEntry*)item;
         if (entry->meta && entry->meta->cache_path) {
-            unlink(entry->meta->cache_path);
+            file_delete(entry->meta->cache_path);
         }
     }
 
@@ -433,8 +431,7 @@ bool enhanced_cache_is_valid(EnhancedFileCache* cache, const char* url) {
     bool valid = false;
     if (found && found->meta && found->meta->cache_path) {
         // check file exists
-        struct stat st;
-        if (stat(found->meta->cache_path, &st) == 0) {
+        if (file_exists(found->meta->cache_path)) {
             // check not expired
             if (found->meta->expires == 0 || found->meta->expires >= time(NULL)) {
                 valid = true;
