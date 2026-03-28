@@ -1436,6 +1436,20 @@ echo "- Brotli: $([ -f "mac-deps/brotli/out/libbrotlidec.a" ] && echo "✓ Built
 echo "- WOFF2: $([ -f "mac-deps/woff2/out/libwoff2dec.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- RE2: $([ -f "build_temp/re2-noabsl/CMakeLists.txt" ] && echo "✓ Source available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "build_temp/utf8proc/build/libutf8proc.a" ] && echo "✓ Built" || echo "✗ Missing")"
+# Clone GNU Bash test suite (optional, for bash transpiler conformance tests)
+if [ ! -d "ref/bash" ]; then
+    echo ""
+    echo "Cloning GNU Bash test suite..."
+    mkdir -p ref
+    if git clone --depth 1 https://git.savannah.gnu.org/git/bash.git ref/bash 2>/dev/null; then
+        echo "✅ GNU Bash test suite cloned to ref/bash"
+    else
+        echo "⚠️  Could not clone GNU Bash repo (optional, needed for bash conformance tests)"
+    fi
+else
+    echo "✅ GNU Bash test suite already present at ref/bash"
+fi
+echo "- Bash tests: $([ -d "ref/bash/tests" ] && echo \"✓ Available\" || echo \"✗ Missing\")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make build           # Build Lambda main project"

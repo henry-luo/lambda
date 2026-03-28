@@ -1745,7 +1745,12 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
                   final_y_bfc, space.left, space.right, effective_left, effective_right, available_width, float_total_width);
 
         // Check if float fits at this Y position
-        if (available_width >= float_total_width) {
+        // Use tiny epsilon for float32 rounding in percentage-based layouts.
+        // When sibling floats have percentage widths summing to 100%, both widths
+        // round up slightly after double→float32 truncation, causing their sum to
+        // exceed the parent width by ~0.0001px. Without this tolerance the second
+        // float wraps to the next line. Browsers avoid this via fixed-point math.
+        if (available_width >= float_total_width - 0.001f) {
             // Float fits here - determine X position
             if (block->position->float_prop == CSS_VALUE_LEFT) {
                 // Left float: position at left edge of available space
