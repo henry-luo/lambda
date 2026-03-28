@@ -846,6 +846,11 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
         const char* href = extract_element_attribute(elem, "href", nullptr);
 
         if (rel && href && str_ieq_const(rel, strlen(rel), "stylesheet")) {
+            // Check media attribute - skip stylesheets that don't apply to screen
+            const char* media = extract_element_attribute(elem, "media", nullptr);
+            if (media && !css_evaluate_media_query(engine, media)) {
+                log_debug("[CSS] Skipping <link> stylesheet '%s' - media '%s' does not match screen", href, media);
+            } else {
             log_debug("[CSS] Found <link rel='stylesheet' href='%s'>", href);
 
             // Resolve relative path using base_path (supports file:// and http:// URLs)
@@ -957,6 +962,7 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
             } else {
                 log_warn("[CSS] Failed to load stylesheet: %s", css_path);
             }
+            } // end media check else
         }
     }
 
@@ -981,6 +987,11 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
 
     // Check if this is a <style> element
     if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
+        // Check media attribute - skip styles that don't apply to screen
+        const char* media = extract_element_attribute(elem, "media", nullptr);
+        if (media && !css_evaluate_media_query(engine, media)) {
+            log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
+        } else {
         // Extract text content from style element
         for (int64_t i = 0; i < elem->length; i++) {
             Item child_item = elem->items[i];
@@ -1012,6 +1023,7 @@ void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool,
                 }
             }
         }
+        } // end media check else
     }
 
     // Recursively process children
@@ -1035,6 +1047,11 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
 
     // Check if this is a <style> element
     if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
+        // Check media attribute - skip styles that don't apply to screen
+        const char* media = extract_element_attribute(elem, "media", nullptr);
+        if (media && !css_evaluate_media_query(engine, media)) {
+            log_debug("[CSS] Skipping <style> element - media '%s' does not match screen", media);
+        } else {
         // Extract text content from style element
         // Text content should be in the element's children
         for (int64_t i = 0; i < elem->length; i++) {
@@ -1053,6 +1070,7 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
                 }
             }
         }
+        } // end media check else
     }
 
     // Recursively process children
