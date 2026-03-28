@@ -74,6 +74,7 @@ struct PyMirVarEntry {
     bool from_env;
     int env_slot;
     MIR_reg_t env_reg;
+    TypeId type_hint;  // LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_NULL (unknown)
 };
 
 struct PyLoopLabels {
@@ -451,6 +452,16 @@ static void pm_set_var(PyMirTranspiler* mt, const char* name, MIR_reg_t reg) {
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
+static void pm_set_var_with_type(PyMirTranspiler* mt, const char* name, MIR_reg_t reg, TypeId type_hint) {
+    PyVarScopeEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.var.reg = reg;
+    entry.var.mir_type = MIR_T_I64;
+    entry.var.type_hint = type_hint;
+    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+}
+
 static void pm_set_env_var(PyMirTranspiler* mt, const char* name, MIR_reg_t env_reg, int slot) {
     PyVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
@@ -563,6 +574,255 @@ static MIR_reg_t pm_emit_bool(PyMirTranspiler* mt, bool value) {
     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)bval)));
     return r;
+}
+
+// ============================================================================
+// Native type inference and inline arithmetic (Phase 1-3 optimizations)
+// ============================================================================
+
+// forward declaration
+static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr);
+
+// infer the effective type of an AST expression without emitting code
+static TypeId pm_get_effective_type(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) return LMD_TYPE_NULL;
+
+    switch (expr->node_type) {
+    case PY_AST_NODE_LITERAL: {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) return LMD_TYPE_INT;
+        if (lit->literal_type == PY_LITERAL_FLOAT) return LMD_TYPE_FLOAT;
+        if (lit->literal_type == PY_LITERAL_BOOLEAN) return LMD_TYPE_BOOL;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_IDENTIFIER: {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint) return var->type_hint;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_BINARY_OP: {
+        PyBinaryNode* bin = (PyBinaryNode*)expr;
+        TypeId lt = pm_get_effective_type(mt, bin->left);
+        TypeId rt = pm_get_effective_type(mt, bin->right);
+        if (bin->op == PY_OP_DIV) return LMD_TYPE_FLOAT; // true division always yields float
+        if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_UNARY_OP: {
+        PyUnaryNode* un = (PyUnaryNode*)expr;
+        if (un->op == PY_OP_NEGATE || un->op == PY_OP_POSITIVE || un->op == PY_OP_BIT_NOT)
+            return pm_get_effective_type(mt, un->operand);
+        return LMD_TYPE_NULL;
+    }
+    case PY_AST_NODE_CALL: {
+        // len() returns int
+        PyCallNode* call = (PyCallNode*)expr;
+        if (call->function && call->function->node_type == PY_AST_NODE_IDENTIFIER) {
+            PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "len", 3) == 0)
+                return LMD_TYPE_INT;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "int", 3) == 0)
+                return LMD_TYPE_INT;
+            if (fn_id->name->len == 5 && strncmp(fn_id->name->chars, "float", 5) == 0)
+                return LMD_TYPE_FLOAT;
+            if (fn_id->name->len == 3 && strncmp(fn_id->name->chars, "abs", 3) == 0)
+                return pm_get_effective_type(mt, call->arguments);
+        }
+        return LMD_TYPE_NULL;
+    }
+    default:
+        return LMD_TYPE_NULL;
+    }
+}
+
+// emit MIR code to produce an unboxed int64 from a boxed Item register
+static MIR_reg_t pm_emit_unbox_int(PyMirTranspiler* mt, MIR_reg_t item) {
+    MIR_reg_t result = pm_new_reg(mt, "ubi", MIR_T_I64);
+    // shift left 8 to discard tag, arithmetic shift right 8 for sign extension
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, item), MIR_new_int_op(mt->ctx, 8)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 8)));
+    return result;
+}
+
+// box an unboxed int64 register back to a tagged Item, with INT56 range check
+static MIR_reg_t pm_box_int_reg(PyMirTranspiler* mt, MIR_reg_t val) {
+    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+
+    MIR_reg_t result = pm_new_reg(mt, "bxi", MIR_T_I64);
+    MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+    MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+    MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+    MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+    MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+        MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+        MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+
+    MIR_label_t l_ok = pm_new_label(mt);
+    MIR_label_t l_end = pm_new_label(mt);
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+        MIR_new_reg_op(mt->ctx, in_range)));
+    // out of INT56 range → call py_add runtime for bigint promotion
+    uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    pm_emit_label(mt, l_ok);
+    pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, tagged)));
+    pm_emit_label(mt, l_end);
+    return result;
+}
+
+// emit code to produce an unboxed int64 from an expression (literal → direct, var → unbox)
+static MIR_reg_t pm_transpile_as_native_int(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) {
+        MIR_reg_t z = pm_new_reg(mt, "zero", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, z),
+            MIR_new_int_op(mt->ctx, 0)));
+        return z;
+    }
+    // integer literal → emit constant directly
+    if (expr->node_type == PY_AST_NODE_LITERAL) {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
+            MIR_reg_t r = pm_new_reg(mt, "ilit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, lit->value.int_value)));
+            return r;
+        }
+        if (lit->literal_type == PY_LITERAL_BOOLEAN) {
+            MIR_reg_t r = pm_new_reg(mt, "blit", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, lit->value.boolean_value ? 1 : 0)));
+            return r;
+        }
+    }
+    // identifier with known INT type → unbox from register
+    if (expr->node_type == PY_AST_NODE_IDENTIFIER) {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint == LMD_TYPE_INT) {
+            return pm_emit_unbox_int(mt, var->reg);
+        }
+    }
+    // binary expression of int op int → recurse natively
+    if (expr->node_type == PY_AST_NODE_BINARY_OP) {
+        PyBinaryNode* bin = (PyBinaryNode*)expr;
+        TypeId lt = pm_get_effective_type(mt, bin->left);
+        TypeId rt = pm_get_effective_type(mt, bin->right);
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            MIR_reg_t l = pm_transpile_as_native_int(mt, bin->left);
+            MIR_reg_t r = pm_transpile_as_native_int(mt, bin->right);
+            MIR_insn_code_t op;
+            switch (bin->op) {
+            case PY_OP_ADD: op = MIR_ADD; break;
+            case PY_OP_SUB: op = MIR_SUB; break;
+            case PY_OP_MUL: op = MIR_MUL; break;
+            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+            case PY_OP_MOD: op = MIR_MOD; break;
+            case PY_OP_LSHIFT: op = MIR_LSH; break;
+            case PY_OP_RSHIFT: op = MIR_RSH; break;
+            case PY_OP_BIT_AND: op = MIR_AND; break;
+            case PY_OP_BIT_OR: op = MIR_OR; break;
+            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            default: goto fallback;
+            }
+            MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, op,
+                MIR_new_reg_op(mt->ctx, res),
+                MIR_new_reg_op(mt->ctx, l),
+                MIR_new_reg_op(mt->ctx, r)));
+            return res;
+        }
+    }
+    // unary negate on int
+    if (expr->node_type == PY_AST_NODE_UNARY_OP) {
+        PyUnaryNode* un = (PyUnaryNode*)expr;
+        TypeId ot = pm_get_effective_type(mt, un->operand);
+        if (ot == LMD_TYPE_INT && un->op == PY_OP_NEGATE) {
+            MIR_reg_t inner = pm_transpile_as_native_int(mt, un->operand);
+            MIR_reg_t res = pm_new_reg(mt, "neg", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
+                MIR_new_reg_op(mt->ctx, res),
+                MIR_new_reg_op(mt->ctx, inner)));
+            return res;
+        }
+    }
+fallback:;
+    // fallback: transpile as boxed then unbox
+    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
+    return pm_emit_unbox_int(mt, boxed);
+}
+
+// emit code to produce an unboxed double from an expression
+static MIR_reg_t pm_transpile_as_native_float(PyMirTranspiler* mt, PyAstNode* expr) {
+    if (!expr) {
+        MIR_reg_t z = pm_new_reg(mt, "fzero", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, z),
+            MIR_new_double_op(mt->ctx, 0.0)));
+        return z;
+    }
+    // float literal → emit constant directly
+    if (expr->node_type == PY_AST_NODE_LITERAL) {
+        PyLiteralNode* lit = (PyLiteralNode*)expr;
+        if (lit->literal_type == PY_LITERAL_FLOAT) {
+            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_double_op(mt->ctx, lit->value.float_value)));
+            return r;
+        }
+        // int literal → convert to double
+        if (lit->literal_type == PY_LITERAL_INT && !lit->is_bigint_literal) {
+            MIR_reg_t i = pm_new_reg(mt, "i2f", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, i),
+                MIR_new_int_op(mt->ctx, lit->value.int_value)));
+            MIR_reg_t r = pm_new_reg(mt, "dlit", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_reg_op(mt->ctx, i)));
+            return r;
+        }
+    }
+    // identifier with known FLOAT type → unbox
+    if (expr->node_type == PY_AST_NODE_IDENTIFIER) {
+        PyIdentifierNode* id = (PyIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+        PyMirVarEntry* var = pm_find_var(mt, vname);
+        if (var && var->type_hint == LMD_TYPE_FLOAT) {
+            return pm_call_1(mt, "it2d", MIR_T_D,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+        }
+        // int var used in float context → unbox int then convert
+        if (var && var->type_hint == LMD_TYPE_INT) {
+            MIR_reg_t i = pm_emit_unbox_int(mt, var->reg);
+            MIR_reg_t d = pm_new_reg(mt, "i2d", MIR_T_D);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, d),
+                MIR_new_reg_op(mt->ctx, i)));
+            return d;
+        }
+    }
+    // fallback: transpile as boxed then call it2d
+    MIR_reg_t boxed = pm_transpile_expression(mt, expr);
+    return pm_call_1(mt, "it2d", MIR_T_D,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
 }
 
 // ============================================================================
@@ -721,6 +981,152 @@ static const char* pm_compare_op_func(PyOperator op) {
 }
 
 static MIR_reg_t pm_transpile_binary(PyMirTranspiler* mt, PyBinaryNode* bin) {
+    // Phase 1: native integer arithmetic when both operands are provably INT
+    TypeId lt = pm_get_effective_type(mt, bin->left);
+    TypeId rt = pm_get_effective_type(mt, bin->right);
+
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op != PY_OP_DIV && bin->op != PY_OP_POW) {
+        MIR_insn_code_t op;
+        bool can_overflow = false;
+        switch (bin->op) {
+        case PY_OP_ADD: op = MIR_ADD; can_overflow = true; break;
+        case PY_OP_SUB: op = MIR_SUB; can_overflow = true; break;
+        case PY_OP_MUL: op = MIR_MUL; can_overflow = true; break;
+        case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+        case PY_OP_MOD: op = MIR_MOD; break;
+        case PY_OP_LSHIFT: op = MIR_LSH; can_overflow = true; break;
+        case PY_OP_RSHIFT: op = MIR_RSH; break;
+        case PY_OP_BIT_AND: op = MIR_AND; break;
+        case PY_OP_BIT_OR: op = MIR_OR; break;
+        case PY_OP_BIT_XOR: op = MIR_XOR; break;
+        default: goto boxed_path;
+        }
+        const char* fn = pm_binary_op_func(bin->op);
+
+        // transpile both as boxed Items first (needed for runtime fallback)
+        MIR_reg_t lhs_boxed = pm_transpile_expression(mt, bin->left);
+        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, bin->right);
+
+        MIR_reg_t final_result = pm_new_reg(mt, "bxr", MIR_T_I64);
+        MIR_label_t l_boxed_call = pm_new_label(mt);
+        MIR_label_t l_end = pm_new_label(mt);
+
+        // runtime type guard: verify both operands are actually INT at runtime
+        MIR_reg_t l_tag = pm_new_reg(mt, "lt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, l_tag),
+            MIR_new_reg_op(mt->ctx, lhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_call),
+            MIR_new_reg_op(mt->ctx, l_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+        MIR_reg_t r_tag = pm_new_reg(mt, "rt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, r_tag),
+            MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_call),
+            MIR_new_reg_op(mt->ctx, r_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+        // native path: unbox and compute
+        MIR_reg_t l = pm_emit_unbox_int(mt, lhs_boxed);
+        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
+
+        // for LSHIFT: CPU masks shift to 6 bits, so shift >= 64 gives wrong results
+        if (bin->op == PY_OP_LSHIFT) {
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BGE, MIR_new_label_op(mt->ctx, l_boxed_call),
+                MIR_new_reg_op(mt->ctx, r), MIR_new_int_op(mt->ctx, 63)));
+        }
+
+        MIR_reg_t res = pm_new_reg(mt, "ni", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+
+        if (can_overflow) {
+            // range check: if result outside INT56, fall back to boxed runtime call
+            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+                MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+            MIR_label_t l_ok = pm_new_label(mt);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+                MIR_new_reg_op(mt->ctx, in_range)));
+            // overflow → runtime call with boxed operands (handles bigint promotion)
+            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, ov_result)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            // fast path: inline box the native result
+            pm_emit_label(mt, l_ok);
+            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, tagged)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        } else {
+            MIR_reg_t boxed = pm_box_int_reg(mt, res);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+                MIR_new_reg_op(mt->ctx, boxed)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        }
+
+        // boxed fallback: runtime call (wrong type at runtime or overflow)
+        pm_emit_label(mt, l_boxed_call);
+        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, final_result),
+            MIR_new_reg_op(mt->ctx, boxed_res)));
+        pm_emit_label(mt, l_end);
+        return final_result;
+    }
+
+    // native float arithmetic when both operands are numeric and at least one is float
+    if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
+        (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+        MIR_insn_code_t op;
+        switch (bin->op) {
+        case PY_OP_ADD: op = MIR_DADD; break;
+        case PY_OP_SUB: op = MIR_DSUB; break;
+        case PY_OP_MUL: op = MIR_DMUL; break;
+        case PY_OP_DIV: op = MIR_DDIV; break;
+        default: goto boxed_path;
+        }
+        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
+        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
+        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+        return pm_box_float(mt, res);
+    }
+
+    // true division on int/int yields float
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT && bin->op == PY_OP_DIV) {
+        MIR_reg_t l = pm_transpile_as_native_float(mt, bin->left);
+        MIR_reg_t r = pm_transpile_as_native_float(mt, bin->right);
+        MIR_reg_t res = pm_new_reg(mt, "nf", MIR_T_D);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
+            MIR_new_reg_op(mt->ctx, res),
+            MIR_new_reg_op(mt->ctx, l),
+            MIR_new_reg_op(mt->ctx, r)));
+        return pm_box_float(mt, res);
+    }
+
+boxed_path:;
+    // fallback: boxed runtime call
     MIR_reg_t left = pm_transpile_expression(mt, bin->left);
     MIR_reg_t right = pm_transpile_expression(mt, bin->right);
     const char* fn = pm_binary_op_func(bin->op);
@@ -798,12 +1204,122 @@ static MIR_reg_t pm_transpile_boolean(PyMirTranspiler* mt, PyBooleanNode* bop) {
     return result;
 }
 
+// check if a comparison operator can be done natively on integers
+static bool pm_is_native_int_compare_op(PyOperator op) {
+    return op == PY_OP_LT || op == PY_OP_LE || op == PY_OP_GT || op == PY_OP_GE ||
+           op == PY_OP_EQ || op == PY_OP_NE;
+}
+
+static MIR_insn_code_t pm_native_int_compare_insn(PyOperator op) {
+    switch (op) {
+    case PY_OP_LT: return MIR_LT;
+    case PY_OP_LE: return MIR_LE;
+    case PY_OP_GT: return MIR_GT;
+    case PY_OP_GE: return MIR_GE;
+    case PY_OP_EQ: return MIR_EQ;
+    case PY_OP_NE: return MIR_NE;
+    default: return MIR_EQ;
+    }
+}
+
+static MIR_insn_code_t pm_native_float_compare_insn(PyOperator op) {
+    switch (op) {
+    case PY_OP_LT: return MIR_DLT;
+    case PY_OP_LE: return MIR_DLE;
+    case PY_OP_GT: return MIR_DGT;
+    case PY_OP_GE: return MIR_DGE;
+    case PY_OP_EQ: return MIR_DEQ;
+    case PY_OP_NE: return MIR_DNE;
+    default: return MIR_DEQ;
+    }
+}
+
 static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
     // chained comparisons: a < b < c → (a < b) and (b < c)
     MIR_reg_t result = pm_new_reg(mt, "cmp", MIR_T_I64);
     MIR_label_t l_false = pm_new_label(mt);
     MIR_label_t l_end = pm_new_label(mt);
 
+    // Phase 2: for simple (non-chained) int comparisons, use native path with runtime type guard
+    if (cmp->op_count == 1 && pm_is_native_int_compare_op(cmp->ops[0])) {
+        TypeId lt = pm_get_effective_type(mt, cmp->left);
+        TypeId rt = pm_get_effective_type(mt, cmp->comparators[0]);
+
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            // transpile both as boxed first (for fallback)
+            MIR_reg_t lhs_boxed = pm_transpile_expression(mt, cmp->left);
+            MIR_reg_t rhs_boxed = pm_transpile_expression(mt, cmp->comparators[0]);
+
+            MIR_label_t l_boxed_cmp = pm_new_label(mt);
+
+            // runtime type guard: verify both are actually INT
+            MIR_reg_t l_tag = pm_new_reg(mt, "clt", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, l_tag),
+                MIR_new_reg_op(mt->ctx, lhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_cmp),
+                MIR_new_reg_op(mt->ctx, l_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+            MIR_reg_t r_tag = pm_new_reg(mt, "crt", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, r_tag),
+                MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_cmp),
+                MIR_new_reg_op(mt->ctx, r_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+            // native int compare
+            MIR_reg_t l_val = pm_emit_unbox_int(mt, lhs_boxed);
+            MIR_reg_t r_val = pm_emit_unbox_int(mt, rhs_boxed);
+            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmp", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, pm_native_int_compare_insn(cmp->ops[0]),
+                MIR_new_reg_op(mt->ctx, cmp_res),
+                MIR_new_reg_op(mt->ctx, l_val),
+                MIR_new_reg_op(mt->ctx, r_val)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
+                MIR_new_reg_op(mt->ctx, cmp_res)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_TRUE_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            // boxed fallback: call runtime compare
+            pm_emit_label(mt, l_boxed_cmp);
+            const char* fn = pm_compare_op_func(cmp->ops[0]);
+            MIR_reg_t boxed_cmp = pm_call_2(mt, fn, MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, lhs_boxed),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, boxed_cmp)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+            pm_emit_label(mt, l_false);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_label(mt, l_end);
+            return result;
+        }
+
+        // native float comparison
+        if ((lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) &&
+            (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+            MIR_reg_t l = pm_transpile_as_native_float(mt, cmp->left);
+            MIR_reg_t r = pm_transpile_as_native_float(mt, cmp->comparators[0]);
+            MIR_reg_t cmp_res = pm_new_reg(mt, "ncmpf", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, pm_native_float_compare_insn(cmp->ops[0]),
+                MIR_new_reg_op(mt->ctx, cmp_res),
+                MIR_new_reg_op(mt->ctx, l),
+                MIR_new_reg_op(mt->ctx, r)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_false),
+                MIR_new_reg_op(mt->ctx, cmp_res)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_TRUE_VAL)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+            pm_emit_label(mt, l_false);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_FALSE_VAL)));
+            pm_emit_label(mt, l_end);
+            return result;
+        }
+    }
+
+    // general path: boxed comparisons with chaining support
     MIR_reg_t left = pm_transpile_expression(mt, cmp->left);
 
     for (int i = 0; i < cmp->op_count; i++) {
@@ -2392,6 +2908,8 @@ static MIR_reg_t pm_transpile_expression(PyMirTranspiler* mt, PyAstNode* expr) {
 // ============================================================================
 
 static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assign) {
+    // infer type of RHS for type propagation
+    TypeId rhs_type = pm_get_effective_type(mt, assign->value);
     MIR_reg_t val = pm_transpile_expression(mt, assign->value);
 
     // walk targets
@@ -2422,6 +2940,11 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                     pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var->reg),
                         MIR_new_reg_op(mt->ctx, val)));
+                    // update type hint
+                    if (rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT)
+                        var->type_hint = rhs_type;
+                    else
+                        var->type_hint = LMD_TYPE_NULL; // unknown, clear previous hint
                 }
             } else {
                 // new variable
@@ -2429,7 +2952,7 @@ static void pm_transpile_assignment(PyMirTranspiler* mt, PyAssignmentNode* assig
                 pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_reg_op(mt->ctx, reg),
                     MIR_new_reg_op(mt->ctx, val)));
-                pm_set_var(mt, vname, reg);
+                pm_set_var_with_type(mt, vname, reg, rhs_type);
             }
         } else if (target->node_type == PY_AST_NODE_SUBSCRIPT) {
             PySubscriptNode* sub = (PySubscriptNode*)target;
@@ -2513,6 +3036,125 @@ static void pm_transpile_aug_assignment(PyMirTranspiler* mt, PyAugAssignmentNode
     case PY_OP_BIT_OR_ASSIGN:    bin_op = PY_OP_BIT_OR; break;
     case PY_OP_BIT_XOR_ASSIGN:   bin_op = PY_OP_BIT_XOR; break;
     default:                     bin_op = PY_OP_ADD; break;
+    }
+
+    // Phase 1: native int augmented assignment for simple identifier targets
+    if (aug->target->node_type == PY_AST_NODE_IDENTIFIER && bin_op != PY_OP_DIV && bin_op != PY_OP_POW) {
+        TypeId lt = pm_get_effective_type(mt, aug->target);
+        TypeId rt = pm_get_effective_type(mt, aug->value);
+        if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+            MIR_insn_code_t op;
+            bool native_ok = true;
+            switch (bin_op) {
+            case PY_OP_ADD: op = MIR_ADD; break;
+            case PY_OP_SUB: op = MIR_SUB; break;
+            case PY_OP_MUL: op = MIR_MUL; break;
+            case PY_OP_FLOOR_DIV: op = MIR_DIV; break;
+            case PY_OP_MOD: op = MIR_MOD; break;
+            case PY_OP_LSHIFT: op = MIR_LSH; break;
+            case PY_OP_RSHIFT: op = MIR_RSH; break;
+            case PY_OP_BIT_AND: op = MIR_AND; break;
+            case PY_OP_BIT_OR: op = MIR_OR; break;
+            case PY_OP_BIT_XOR: op = MIR_XOR; break;
+            default: native_ok = false; break;
+            }
+            if (native_ok) {
+                PyIdentifierNode* id = (PyIdentifierNode*)aug->target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_py_%.*s", (int)id->name->len, id->name->chars);
+
+                if (!pm_is_global_in_current_func(mt, vname)) {
+                    PyMirVarEntry* var = pm_find_var(mt, vname);
+                    if (var && !var->from_env && var->type_hint == LMD_TYPE_INT) {
+                        const char* fn = pm_binary_op_func(bin_op);
+                        bool can_overflow = (bin_op == PY_OP_ADD || bin_op == PY_OP_SUB ||
+                                             bin_op == PY_OP_MUL || bin_op == PY_OP_LSHIFT);
+
+                        // transpile RHS as boxed Item first (needed for fallback)
+                        MIR_reg_t rhs_boxed = pm_transpile_expression(mt, aug->value);
+
+                        MIR_label_t l_boxed_path = pm_new_label(mt);
+                        MIR_label_t l_end = pm_new_label(mt);
+
+                        // runtime type guard: verify variable is actually INT
+                        MIR_reg_t var_tag = pm_new_reg(mt, "vt", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, var_tag),
+                            MIR_new_reg_op(mt->ctx, var->reg), MIR_new_int_op(mt->ctx, 56)));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_path),
+                            MIR_new_reg_op(mt->ctx, var_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+                        // runtime type guard: verify RHS is actually INT
+                        MIR_reg_t rhs_tag = pm_new_reg(mt, "rhst", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, rhs_tag),
+                            MIR_new_reg_op(mt->ctx, rhs_boxed), MIR_new_int_op(mt->ctx, 56)));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_boxed_path),
+                            MIR_new_reg_op(mt->ctx, rhs_tag), MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_INT)));
+
+                        // native path: unbox and compute
+                        MIR_reg_t l = pm_emit_unbox_int(mt, var->reg);
+                        MIR_reg_t r = pm_emit_unbox_int(mt, rhs_boxed);
+                        MIR_reg_t res = pm_new_reg(mt, "naug", MIR_T_I64);
+                        pm_emit(mt, MIR_new_insn(mt->ctx, op,
+                            MIR_new_reg_op(mt->ctx, res),
+                            MIR_new_reg_op(mt->ctx, l),
+                            MIR_new_reg_op(mt->ctx, r)));
+
+                        if (can_overflow) {
+                            int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+                            int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+                            MIR_reg_t le_max = pm_new_reg(mt, "le", MIR_T_I64);
+                            MIR_reg_t ge_min = pm_new_reg(mt, "ge", MIR_T_I64);
+                            MIR_reg_t in_range = pm_new_reg(mt, "rng", MIR_T_I64);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+                                MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+                            MIR_label_t l_ok = pm_new_label(mt);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+                                MIR_new_reg_op(mt->ctx, in_range)));
+                            // overflow → runtime call with boxed operands
+                            MIR_reg_t ov_result = pm_call_2(mt, fn, MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, ov_result)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                            // fast path: inline box
+                            pm_emit_label(mt, l_ok);
+                            MIR_reg_t masked = pm_new_reg(mt, "mask", MIR_T_I64);
+                            MIR_reg_t tagged = pm_new_reg(mt, "tag", MIR_T_I64);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+                                MIR_new_reg_op(mt->ctx, res), MIR_new_int_op(mt->ctx, (int64_t)PY_MASK56)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+                                MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, tagged)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                        } else {
+                            MIR_reg_t boxed = pm_box_int_reg(mt, res);
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, var->reg),
+                                MIR_new_reg_op(mt->ctx, boxed)));
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                        }
+
+                        // boxed fallback: runtime call (wrong type or overflow)
+                        pm_emit_label(mt, l_boxed_path);
+                        MIR_reg_t boxed_res = pm_call_2(mt, fn, MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs_boxed));
+                        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, var->reg),
+                            MIR_new_reg_op(mt->ctx, boxed_res)));
+                        pm_emit_label(mt, l_end);
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     MIR_reg_t left = pm_transpile_expression(mt, aug->target);
@@ -2669,6 +3311,16 @@ static void pm_transpile_while(PyMirTranspiler* mt, PyWhileNode* wh) {
     if (mt->loop_depth > 0) mt->loop_depth--;
 }
 
+// detect if a call expression is range(...)
+static bool pm_is_range_call(PyAstNode* iter) {
+    if (!iter || iter->node_type != PY_AST_NODE_CALL) return false;
+    PyCallNode* call = (PyCallNode*)iter;
+    if (!call->function || call->function->node_type != PY_AST_NODE_IDENTIFIER) return false;
+    PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+    return fn_id->name->len == 5 && strncmp(fn_id->name->chars, "range", 5) == 0 &&
+           call->arg_count >= 1 && call->arg_count <= 3;
+}
+
 static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
     // in generator context, use iterator protocol to survive yields inside the loop
     if (mt->in_generator) {
@@ -2676,7 +3328,141 @@ static void pm_transpile_for(PyMirTranspiler* mt, PyForNode* forn) {
         return;
     }
 
-    // evaluate iterable and get an iterator object (works for lists, generators, ranges, etc.)
+    // Phase 3: optimized range-for loop with native counter
+    if (forn->target->node_type == PY_AST_NODE_IDENTIFIER && pm_is_range_call(forn->iter)) {
+        PyCallNode* call = (PyCallNode*)forn->iter;
+        PyIdentifierNode* target_id = (PyIdentifierNode*)forn->target;
+
+        // extract range arguments: range(stop), range(start, stop), range(start, stop, step)
+        PyAstNode* arg1 = call->arguments;
+        PyAstNode* arg2 = arg1 ? arg1->next : NULL;
+        PyAstNode* arg3 = arg2 ? arg2->next : NULL;
+
+        MIR_reg_t start_reg, stop_reg, step_reg;
+        if (call->arg_count == 1) {
+            // range(stop): start=0, step=1
+            start_reg = pm_new_reg(mt, "rstart", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, start_reg),
+                MIR_new_int_op(mt->ctx, 0)));
+            stop_reg = pm_transpile_as_native_int(mt, arg1);
+            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, step_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+        } else if (call->arg_count == 2) {
+            // range(start, stop): step=1
+            start_reg = pm_transpile_as_native_int(mt, arg1);
+            stop_reg = pm_transpile_as_native_int(mt, arg2);
+            step_reg = pm_new_reg(mt, "rstep", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, step_reg),
+                MIR_new_int_op(mt->ctx, 1)));
+        } else {
+            // range(start, stop, step)
+            start_reg = pm_transpile_as_native_int(mt, arg1);
+            stop_reg = pm_transpile_as_native_int(mt, arg2);
+            step_reg = pm_transpile_as_native_int(mt, arg3);
+        }
+
+        // counter register
+        MIR_reg_t counter = pm_new_reg(mt, "rcnt", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, start_reg)));
+
+        // set loop var with INT type hint to enable native arithmetic inside the body
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_py_%.*s", (int)target_id->name->len, target_id->name->chars);
+
+        // create or find the loop variable register
+        MIR_reg_t var_reg;
+        PyMirVarEntry* existing_var = pm_find_var(mt, vname);
+        if (existing_var) {
+            var_reg = existing_var->reg;
+        } else {
+            var_reg = pm_new_reg(mt, vname, MIR_T_I64);
+        }
+
+        MIR_label_t l_test = pm_new_label(mt);
+        MIR_label_t l_continue = pm_new_label(mt);
+        MIR_label_t l_end = pm_new_label(mt);
+
+        if (mt->loop_depth < 32) {
+            mt->loop_stack[mt->loop_depth].continue_label = l_continue;
+            mt->loop_stack[mt->loop_depth].break_label = l_end;
+            mt->loop_depth++;
+        }
+
+        pm_emit_label(mt, l_test);
+
+        // test: counter < stop (for positive step) or counter > stop (for negative step)
+        // for simplicity and common case (step=1), use counter >= stop → exit
+        // for general case with variable step, check (counter - stop) * sign(step) >= 0
+        // but for benchmarks, step is almost always 1, so check counter >= stop
+        MIR_reg_t cmp_exit = pm_new_reg(mt, "rcmp", MIR_T_I64);
+        if (call->arg_count <= 2) {
+            // step is always 1: simple counter >= stop check
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+        } else {
+            // general step: check if (counter - stop) has same sign as step
+            // use: step > 0 ? counter >= stop : counter <= stop
+            MIR_reg_t step_pos = pm_new_reg(mt, "spos", MIR_T_I64);
+            MIR_reg_t cmp_fwd = pm_new_reg(mt, "cfwd", MIR_T_I64);
+            MIR_reg_t cmp_bwd = pm_new_reg(mt, "cbwd", MIR_T_I64);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GT, MIR_new_reg_op(mt->ctx, step_pos),
+                MIR_new_reg_op(mt->ctx, step_reg), MIR_new_int_op(mt->ctx, 0)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, cmp_fwd),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, cmp_bwd),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, stop_reg)));
+            // cmp_exit = step > 0 ? cmp_fwd : cmp_bwd
+            MIR_label_t l_use_fwd = pm_new_label(mt);
+            MIR_label_t l_cmp_done = pm_new_label(mt);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_use_fwd),
+                MIR_new_reg_op(mt->ctx, step_pos)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, cmp_bwd)));
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_cmp_done)));
+            pm_emit_label(mt, l_use_fwd);
+            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, cmp_exit),
+                MIR_new_reg_op(mt->ctx, cmp_fwd)));
+            pm_emit_label(mt, l_cmp_done);
+        }
+
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, cmp_exit)));
+
+        // box counter and assign to loop variable (with INT type hint)
+        MIR_reg_t boxed_cnt = pm_box_int_reg(mt, counter);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, var_reg),
+            MIR_new_reg_op(mt->ctx, boxed_cnt)));
+        pm_set_var_with_type(mt, vname, var_reg, LMD_TYPE_INT);
+
+        // body
+        if (forn->body) {
+            PyAstNode* s;
+            if (forn->body->node_type == PY_AST_NODE_BLOCK) {
+                s = ((PyBlockNode*)forn->body)->statements;
+            } else {
+                s = forn->body;
+            }
+            while (s) { pm_transpile_statement(mt, s); s = s->next; }
+        }
+
+        pm_emit_label(mt, l_continue);
+
+        // increment counter natively: counter += step
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, counter),
+            MIR_new_reg_op(mt->ctx, step_reg)));
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
+        pm_emit_label(mt, l_end);
+
+        if (mt->loop_depth > 0) mt->loop_depth--;
+        return;
+    }
+
+    // general for loop path: evaluate iterable and get an iterator object
     MIR_reg_t iterable = pm_transpile_expression(mt, forn->iter);
     MIR_reg_t iter_obj = pm_call_1(mt, "py_get_iterator", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));

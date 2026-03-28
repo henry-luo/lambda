@@ -268,7 +268,9 @@
                 "lib/cmdedit.c",
                 "lib/cmdedit_utf8.c",
                 "lib/mime-detect.c",
-                "lib/mime-types.c"
+                "lib/mime-types.c",
+                "lib/shell.c",
+                "lib/file_utils.c"
             ],
             "libraries": [
                 "utf8proc",
@@ -1435,6 +1437,35 @@
                         ],
                         "binary": "test_pdf_writer_gtest.exe",
                         "icon": "📄"
+                    },
+                    {
+                        "source": "test_shell_gtest.cpp",
+                        "name": "Shell Module Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_shell_gtest.exe",
+                        "icon": "🐚"
+                    },
+                    {
+                        "source": "test_file_module_gtest.cpp",
+                        "name": "File Module Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "additional_sources": [
+                            "lib/file.c"
+                        ],
+                        "binary": "test_file_module_gtest.exe",
+                        "icon": "📂"
                     },
                     {
                         "source": "perf/test_avl_tree_perf.cpp",

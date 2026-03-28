@@ -920,9 +920,35 @@ extern "C" Item py_lt(Item left, Item right) {
 }
 
 extern "C" Item py_le(Item left, Item right) {
-    Item lt_r = py_lt(left, right);
-    Item eq_r = py_eq(left, right);
-    return (Item){.item = b2it(it2b(lt_r) || it2b(eq_r))};
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        return (Item){.item = b2it(it2i(left) <= it2i(right))};
+    }
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) <= 0)};
+    }
+    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+        return (Item){.item = b2it(py_get_number(left) <= py_get_number(right))};
+    }
+    if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
+        String* a = it2s(left);
+        String* b = it2s(right);
+        if (a == b) return (Item){.item = ITEM_TRUE};
+        int cmp = memcmp(a->chars, b->chars, a->len < b->len ? a->len : b->len);
+        if (cmp == 0) return (Item){.item = b2it(a->len <= b->len)};
+        return (Item){.item = b2it(cmp <= 0)};
+    }
+    if (lt == LMD_TYPE_MAP && py_is_instance(left)) {
+        Item bm = py_getattr(left, (Item){.item = s2it(heap_create_name("__le__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL) {
+            Item r = py_call_function(bm, &right, 1);
+            if (get_type_id(r) != LMD_TYPE_NULL) return r;
+        }
+    }
+    // fallback: lt or eq
+    return (Item){.item = b2it(it2b(py_lt(left, right)) || it2b(py_eq(left, right)))};
 }
 
 extern "C" Item py_gt(Item left, Item right) {
@@ -930,6 +956,34 @@ extern "C" Item py_gt(Item left, Item right) {
 }
 
 extern "C" Item py_ge(Item left, Item right) {
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        return (Item){.item = b2it(it2i(left) >= it2i(right))};
+    }
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) >= 0)};
+    }
+    if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
+        return (Item){.item = b2it(py_get_number(left) >= py_get_number(right))};
+    }
+    if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
+        String* a = it2s(left);
+        String* b = it2s(right);
+        if (a == b) return (Item){.item = ITEM_TRUE};
+        int cmp = memcmp(a->chars, b->chars, a->len < b->len ? a->len : b->len);
+        if (cmp == 0) return (Item){.item = b2it(a->len >= b->len)};
+        return (Item){.item = b2it(cmp >= 0)};
+    }
+    if (lt == LMD_TYPE_MAP && py_is_instance(left)) {
+        Item bm = py_getattr(left, (Item){.item = s2it(heap_create_name("__ge__"))});
+        if (get_type_id(bm) != LMD_TYPE_NULL) {
+            Item r = py_call_function(bm, &right, 1);
+            if (get_type_id(r) != LMD_TYPE_NULL) return r;
+        }
+    }
+    // fallback
     return py_le(right, left);
 }
 

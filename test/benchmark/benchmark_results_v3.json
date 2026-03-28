@@ -368,7 +368,7 @@
     },
     "collatz": {
       "category": "numeric",
-      "mir": 300.787,
+      "mir": 439.163,
       "c2mir": 339.761,
       "lambdajs": 6221.611125,
       "quickjs": 6217.803,
