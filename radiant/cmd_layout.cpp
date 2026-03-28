@@ -4299,23 +4299,50 @@ static char* generate_output_path(const char* input_file, const char* output_dir
     if (!basename) {
         basename = strrchr(input_file, '\\');
     }
-    basename = basename ? basename + 1 : input_file;
+    const char* file_start = basename ? basename + 1 : input_file;
+
+    // Extract parent directory name to disambiguate files with same basename
+    // (e.g., web-tmpl/dreamy/index.html and web-tmpl/zenlike/index.html)
+    const char* parent_name = NULL;
+    size_t parent_len = 0;
+    if (basename && basename > input_file) {
+        // Find the start of the parent directory
+        const char* parent_end = basename; // points to the last '/' before basename
+        const char* p = parent_end - 1;
+        while (p >= input_file && *p != '/' && *p != '\\') {
+            p--;
+        }
+        parent_name = p + 1;
+        parent_len = (size_t)(parent_end - parent_name);
+    }
 
     // Find extension and replace with .json
-    const char* ext = strrchr(basename, '.');
-    size_t name_len = ext ? (size_t)(ext - basename) : strlen(basename);
+    const char* ext = strrchr(file_start, '.');
+    size_t name_len = ext ? (size_t)(ext - file_start) : strlen(file_start);
 
-    // Build output path: output_dir/basename.json
+    // Build output path: output_dir/[parentdir__]basename.json
     size_t dir_len = strlen(output_dir);
     bool need_slash = (dir_len > 0 && output_dir[dir_len - 1] != '/' && output_dir[dir_len - 1] != '\\');
+    // prefix = "parentdir__" if parent exists (parent_len + 2 for "__")
+    size_t prefix_len = (parent_name && parent_len > 0) ? parent_len + 2 : 0;
 
-    size_t path_len = dir_len + (need_slash ? 1 : 0) + name_len + 5 + 1; // ".json" + null
+    size_t path_len = dir_len + (need_slash ? 1 : 0) + prefix_len + name_len + 5 + 1; // ".json" + null
     char* output_path = (char*)mem_alloc(path_len, MEM_CAT_LAYOUT);
 
-    if (need_slash) {
-        snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, basename);
+    if (prefix_len > 0) {
+        if (need_slash) {
+            snprintf(output_path, path_len, "%s/%.*s__%.*s.json", output_dir,
+                     (int)parent_len, parent_name, (int)name_len, file_start);
+        } else {
+            snprintf(output_path, path_len, "%s%.*s__%.*s.json", output_dir,
+                     (int)parent_len, parent_name, (int)name_len, file_start);
+        }
     } else {
-        snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, basename);
+        if (need_slash) {
+            snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, file_start);
+        } else {
+            snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, file_start);
+        }
     }
 
     return output_path;
