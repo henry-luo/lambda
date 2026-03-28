@@ -2414,11 +2414,55 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // This handles cases where font shorthand was used (sets blk->line_height without
             // creating a CSS_PROPERTY_LINE_HEIGHT declaration)
             if (prop_id == CSS_PROPERTY_LINE_HEIGHT && ancestor && ancestor->blk && ancestor->blk->line_height) {
-                log_debug("[CSS INHERIT] Found computed line-height in parent <%s> via font shorthand",
+                log_debug("[CSS INHERIT] Found computed line-height in parent <%s>",
                     ancestor->tag_name ? ancestor->tag_name : "?");
                 ViewSpan* span = (ViewSpan*)lycon->view;
                 if (!span->blk) { span->blk = alloc_block_prop(lycon); }
-                span->blk->line_height = ancestor->blk->line_height;
+                const CssValue* alh = ancestor->blk->line_height;
+                // CSS 2.1 §10.8.1: <length> and <percentage> line-height values
+                // are computed at the declaring element and inherited as computed
+                // px. Only unitless <number> inherits the multiplier.
+                // Font-relative units (em, ex, ch) and percentages must be resolved
+                // against the declaring ancestor's font-size, not the child's.
+                bool needs_compute = false;
+                float ancestor_fs = (ancestor->font) ? ancestor->font->font_size : 0;
+                if (alh->type == CSS_VALUE_TYPE_LENGTH) {
+                    CssUnit unit = alh->data.length.unit;
+                    if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+                        needs_compute = (ancestor_fs > 0);
+                    }
+                } else if (alh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    needs_compute = (ancestor_fs > 0);
+                }
+                if (needs_compute) {
+                    CssValue* computed = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+                    computed->type = CSS_VALUE_TYPE_LENGTH;
+                    float px;
+                    if (alh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        px = (float)(alh->data.percentage.value * ancestor_fs / 100.0);
+                    } else {
+                        float val = (float)alh->data.length.value;
+                        CssUnit unit = alh->data.length.unit;
+                        if (unit == CSS_UNIT_EM) {
+                            px = val * ancestor_fs;
+                        } else if (unit == CSS_UNIT_EX) {
+                            px = val * ancestor_fs * 0.5f; // approximate x-height
+                        } else { // CSS_UNIT_CH
+                            px = val * ancestor_fs * 0.5f; // approximate ch width
+                        }
+                    }
+                    computed->data.length.value = px;
+                    computed->data.length.unit = CSS_UNIT_PX;
+                    log_debug("[CSS INHERIT] line-height: computed %.2f%s → %.2fpx (ancestor font-size=%.1f)",
+                              alh->type == CSS_VALUE_TYPE_PERCENTAGE ? alh->data.percentage.value :
+                              alh->data.length.value,
+                              alh->type == CSS_VALUE_TYPE_PERCENTAGE ? "%" :
+                              alh->data.length.unit == CSS_UNIT_EM ? "em" : "ex/ch",
+                              px, ancestor_fs);
+                    span->blk->line_height = computed;
+                } else {
+                    span->blk->line_height = ancestor->blk->line_height;
+                }
                 continue;
             }
 
@@ -2471,6 +2515,43 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     }
                     // font is already correctly set via alloc_font_prop copying lycon->font.style
                     continue;
+                }
+
+                // CSS 2.1 §10.8.1: line-height <length>/<percentage> inherit as
+                // computed px. Font-relative units must resolve against the
+                // declaring ancestor's font-size, not the inheriting element's.
+                if (prop_id == CSS_PROPERTY_LINE_HEIGHT && ancestor && ancestor->font
+                    && inherited_decl->value) {
+                    const CssValue* v = inherited_decl->value;
+                    bool needs_compute = false;
+                    float anc_fs = ancestor->font->font_size;
+                    if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                        CssUnit u = v->data.length.unit;
+                        if (u == CSS_UNIT_EM || u == CSS_UNIT_EX || u == CSS_UNIT_CH)
+                            needs_compute = (anc_fs > 0);
+                    } else if (v->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        needs_compute = (anc_fs > 0);
+                    }
+                    if (needs_compute) {
+                        ViewSpan* span = (ViewSpan*)lycon->view;
+                        if (!span->blk) { span->blk = alloc_block_prop(lycon); }
+                        CssValue* computed = (CssValue*)alloc_prop(lycon, sizeof(CssValue));
+                        computed->type = CSS_VALUE_TYPE_LENGTH;
+                        float px;
+                        if (v->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                            px = (float)(v->data.percentage.value * anc_fs / 100.0);
+                        } else {
+                            float val = (float)v->data.length.value;
+                            CssUnit u = v->data.length.unit;
+                            px = val * anc_fs * (u == CSS_UNIT_EM ? 1.0f : 0.5f);
+                        }
+                        computed->data.length.value = px;
+                        computed->data.length.unit = CSS_UNIT_PX;
+                        span->blk->line_height = computed;
+                        log_debug("[CSS INHERIT] line-height via decl: computed → %.2fpx (ancestor fs=%.1f)",
+                                  px, anc_fs);
+                        continue;
+                    }
                 }
 
                 // Apply the inherited property using the ancestor's declaration
