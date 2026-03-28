@@ -21,7 +21,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <chrono>       // timing - acceptable for profiling
-#include <unistd.h>
 #include <limits.h>
 extern "C" {
 #include "../lib/mempool.h"
@@ -4354,7 +4353,7 @@ static char* generate_output_path(const char* input_file, const char* output_dir
  */
 int cmd_layout(int argc, char** argv) {
     // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
-    if (access("log.conf", F_OK) == 0) {
+    if (file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");
         if (file) { fclose(file); }
     }
