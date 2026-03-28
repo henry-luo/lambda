@@ -1153,17 +1153,23 @@ extern "C" Item py_getattr(Item object, Item name) {
         if (get_type_id(raw) != LMD_TYPE_NULL) {
             if (get_type_id(raw) == LMD_TYPE_FUNC)
                 return py_bind_method(raw, object);
-            // property descriptor check
+            // descriptor protocol: any Map with a __get__ method acts as a descriptor
             if (get_type_id(raw) == LMD_TYPE_MAP) {
-                bool f = false;
-                Item is_prop = _map_get((TypeMap*)it2map(raw)->type,
-                                        it2map(raw)->data, (char*)"__is_property__", &f);
-                if (f && get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
-                    bool f2 = false;
-                    Item getter = _map_get((TypeMap*)it2map(raw)->type,
-                                           it2map(raw)->data, (char*)"__get__", &f2);
-                    if (f2 && get_type_id(getter) == LMD_TYPE_FUNC)
+                // fast path: __is_property__ marker (existing property() descriptors)
+                Item is_prop = py_map_get_cstr(raw, "__is_property__");
+                if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                    Item getter = py_map_get_cstr(raw, "__get__");
+                    if (get_type_id(getter) == LMD_TYPE_FUNC)
                         return py_call_function(py_bind_method(getter, object), NULL, 0);
+                }
+                // general descriptor: class instance with __get__ method
+                else if (py_is_instance(raw)) {
+                    Item get_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__get__"))});
+                    if (get_type_id(get_fn) != LMD_TYPE_NULL) {
+                        Item obj_type = py_get_class(object);
+                        Item args[2] = { object, obj_type };
+                        return py_call_function(get_fn, args, 2);
+                    }
                 }
             }
             return raw;
@@ -1187,11 +1193,12 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
     Map* m = it2map(object);
     if (!m || !py_input) return object;
 
-    // property descriptor: if instance's class has a data descriptor (__set__), invoke it
+    // descriptor protocol: if instance's class has a data descriptor (__set__), invoke it
     if (py_is_instance(object)) {
         Item cls = py_get_class(object);
         Item raw = py_mro_lookup(cls, name);
         if (get_type_id(raw) == LMD_TYPE_MAP) {
+            // fast path: __is_property__ marker
             Item is_prop = py_map_get_cstr(raw, "__is_property__");
             if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
                 Item setter = py_map_get_cstr(raw, "__set__");
@@ -1201,9 +1208,17 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
                     py_call_function(bound_setter, args, 1);
                     return value;
                 }
-                // read-only property — ignore write silently (matches CPython AttributeError)
-                // for now just return without writing
+                // read-only property — skip write silently
                 return value;
+            }
+            // general descriptor: class instance with __set__
+            if (py_is_instance(raw)) {
+                Item set_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__set__"))});
+                if (get_type_id(set_fn) != LMD_TYPE_NULL) {
+                    Item args[2] = { object, value };
+                    py_call_function(set_fn, args, 2);
+                    return value;
+                }
             }
         }
     }
@@ -1218,6 +1233,47 @@ extern "C" Item py_hasattr(Item object, Item name) {
     // return True if py_getattr returns a non-null value
     Item result = py_getattr(object, name);
     return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_NULL)};
+}
+
+// Phase F2: delete an attribute, invoking __delete__ descriptor if present.
+extern "C" Item py_delattr(Item object, Item name) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
+
+    // descriptor protocol: check for __delete__ in class MRO
+    if (py_is_instance(object)) {
+        Item cls = py_get_class(object);
+        Item raw = py_mro_lookup(cls, name);
+        if (get_type_id(raw) == LMD_TYPE_MAP) {
+            // fast path: __is_property__ marker
+            Item is_prop = py_map_get_cstr(raw, "__is_property__");
+            if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                Item deleter = py_map_get_cstr(raw, "__delete__");
+                if (get_type_id(deleter) == LMD_TYPE_FUNC) {
+                    py_call_function(py_bind_method(deleter, object), NULL, 0);
+                    return ItemNull;
+                }
+            }
+            // general descriptor with __delete__
+            if (py_is_instance(raw)) {
+                Item del_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__delete__"))});
+                if (get_type_id(del_fn) != LMD_TYPE_NULL) {
+                    Item args[1] = { object };
+                    py_call_function(del_fn, args, 1);
+                    return ItemNull;
+                }
+            }
+        }
+    }
+
+    // no descriptor: remove own attribute by setting to a deleted sentinel
+    // We don't have map_remove, so store ItemNull to shadow the attribute
+    Map* m = it2map(object);
+    if (m && py_input) {
+        String* key = it2s(name);
+        map_put(m, key, ItemNull, py_input);
+    }
+    return ItemNull;
 }
 
 // ============================================================================
@@ -1309,6 +1365,21 @@ extern "C" Item py_subscript_get(Item object, Item key) {
         return py_list_get(object, key);
     }
     if (ot == LMD_TYPE_MAP) {
+        // Phase F4: if object is a class and has __class_getitem__, call it
+        if (py_is_class(object)) {
+            Item cgi_fn = py_mro_lookup(object, (Item){.item = s2it(heap_create_name("__class_getitem__"))});
+            if (get_type_id(cgi_fn) == LMD_TYPE_FUNC) {
+                Item args[2] = { object, key };
+                return py_call_function(cgi_fn, args, 2);
+            }
+            // no __class_getitem__: return a simple generic alias Map {__origin__: cls, __args__: [key]}
+            Item alias = py_new_object();
+            py_map_set_cstr(alias, "__origin__", object);
+            Item args_list = py_list_new(0);
+            py_list_append(args_list, key);
+            py_map_set_cstr(alias, "__args__", args_list);
+            return alias;
+        }
         return py_getattr(object, key);
     }
     if (ot == LMD_TYPE_STRING) {
@@ -1971,13 +2042,25 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
         return py_call_function(fn_item, new_args, na + 1);
     }
 
-    // class call (construction): allocate instance + call __init__
+    // class call (construction): check for custom __new__ first
     if (py_is_class(func)) {
+        // Look for __new__ defined in the class itself (not from object base)
+        // Only check the class's own dict (index 0 in MRO = the class itself)
+        Item own_new = py_map_get_cstr(func, "__new__");
+        if (get_type_id(own_new) != LMD_TYPE_NULL) {
+            // custom __new__: call __new__(cls, *args) — cls is first arg
+            Item new_args[17];
+            new_args[0] = func;
+            int na = arg_count > 16 ? 16 : arg_count;
+            for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
+            return py_call_function(own_new, new_args, na + 1);
+        }
+
+        // default instance creation + __init__
         Item inst = py_new_instance(func);
         Item init_fn = py_mro_lookup(func,
             (Item){.item = s2it(heap_create_name("__init__"))});
         if (get_type_id(init_fn) != LMD_TYPE_NULL) {
-            // call __init__(inst, *args) — prepend inst
             Item init_args[17];
             init_args[0] = inst;
             int na = arg_count > 16 ? 16 : arg_count;
@@ -2056,7 +2139,6 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
 extern "C" void py_raise(Item exception) {
     py_exception_pending = true;
     py_exception_value = exception;
-    log_debug("py: exception raised");
 }
 
 extern "C" Item py_check_exception(void) {

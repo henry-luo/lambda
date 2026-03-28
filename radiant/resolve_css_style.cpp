@@ -475,22 +475,56 @@ static int16_t map_font_weight_numeric(const CssValue* value) {
     return 0;
 }
 
-// Specificity Calculation
-int32_t get_lambda_specificity(const CssDeclaration* decl) {
+// Cascade Priority Calculation
+// Encodes full CSS cascade ordering into a single int64_t for correct
+// shorthand vs longhand resolution. Per CSS Cascading Level 4:
+//   cascade_level > CSS specificity > source_order
+// Bits 56-63: cascade level (1-8)
+// Bits 32-55: CSS specificity (ids<<16 | classes<<8 | elements, plus inline flag)
+// Bits 0-31:  source_order (higher = later declaration = wins ties)
+int64_t get_cascade_priority(const CssDeclaration* decl) {
     if (!decl) {
-        log_debug("[CSS] get_lambda_specificity: decl is NULL");
+        log_debug("[CSS] get_cascade_priority: decl is NULL");
         return 0;
     }
-    // Lambda CssSpecificity is a struct with (inline_style, ids, classes, elements) components
-    // Convert to int32_t by packing:
-    // inline_style is highest priority (bit 24), then ids (bits 16-23), classes (8-15), elements (0-7)
-    int32_t specificity = (decl->specificity.inline_style << 24) |
-                          (decl->specificity.ids << 16) |
-                          (decl->specificity.classes << 8) |
-                          decl->specificity.elements;
-    log_debug("[CSS] decl specificity: inline=%d, ids=%d, classes=%d, elmts=%d => %d",
-        decl->specificity.inline_style, decl->specificity.ids, decl->specificity.classes, decl->specificity.elements, specificity);
-    return specificity;
+
+    // cascade level per CSS Cascading and Inheritance Level 4
+    int level;
+    if (decl->specificity.important) {
+        switch (decl->origin) {
+            case CSS_ORIGIN_USER_AGENT: level = 8; break;
+            case CSS_ORIGIN_USER:       level = 7; break;
+            default:                    level = 6; break; // author !important
+        }
+    } else {
+        if (decl->origin == CSS_ORIGIN_AUTHOR && decl->specificity.inline_style) {
+            level = 4; // inline styles
+        } else {
+            switch (decl->origin) {
+                case CSS_ORIGIN_USER_AGENT: level = 1; break;
+                case CSS_ORIGIN_USER:       level = 2; break;
+                case CSS_ORIGIN_ANIMATION:
+                case CSS_ORIGIN_TRANSITION: level = 5; break;
+                default:                    level = 3; break; // author normal
+            }
+        }
+    }
+
+    int32_t css_specificity = (decl->specificity.inline_style << 24) |
+                              (decl->specificity.ids << 16) |
+                              (decl->specificity.classes << 8) |
+                              decl->specificity.elements;
+
+    int64_t priority = ((int64_t)level << 56) |
+                       ((int64_t)(css_specificity & 0xFFFFFF) << 32) |
+                       (int64_t)decl->source_order;
+
+    log_debug("[CSS] cascade priority: level=%d, spec=%d (i=%d,id=%d,cl=%d,el=%d), order=%u => %lld",
+        level, css_specificity,
+        decl->specificity.inline_style, decl->specificity.ids,
+        decl->specificity.classes, decl->specificity.elements,
+        decl->source_order, (long long)priority);
+    return priority;
 }
 
 // Helper: Check if element has float:left or float:right
@@ -1523,7 +1557,7 @@ static float resolve_margin_with_inherit(LayoutContext* lycon, CssPropertyId pro
 
 // Helper function to copy border side values from parent to child for inherit
 // side: 0=top, 1=right, 2=bottom, 3=left
-static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, int side, int32_t specificity) {
+static bool copy_border_side_inherit(LayoutContext* lycon, ViewSpan* span, int side, int64_t specificity) {
     DomElement* current = (DomElement*)lycon->view;
     if (!current || !current->parent || !current->parent->is_element()) return false;
     DomElement* parent = (DomElement*)current->parent;
@@ -1611,10 +1645,10 @@ static float resolve_padding_with_inherit(LayoutContext* lycon, CssPropertyId pr
 
 // resolve property 'margin', 'padding', etc.
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
-    const CssValue *src_space, int32_t specificity, Spacing* trg_spacing) {
+    const CssValue *src_space, int64_t specificity, Spacing* trg_spacing) {
     bool is_margin = property == CSS_PROPERTY_MARGIN;
     bool is_padding = property == CSS_PROPERTY_PADDING;
-    log_debug("resolve_spacing_prop with specificity %d", specificity);
+    log_debug("resolve_spacing_prop with specificity %lld", (long long)specificity);
 
     // handle 'inherit' keyword for the entire shorthand
     if (src_space->type == CSS_VALUE_TYPE_KEYWORD && src_space->data.keyword == CSS_VALUE_INHERIT) {
@@ -1727,7 +1761,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         if (trg_margin) trg_margin->top_type = sp.top_type;
         log_debug("updated top spacing to %f", trg_spacing->top);
     } else {
-        log_debug("skipped top spacing update due to lower specificity: %d <= %d", specificity, trg_spacing->top_specificity);
+        log_debug("skipped top spacing update due to lower specificity: %lld <= %lld", (long long)specificity, (long long)trg_spacing->top_specificity);
     }
     if (specificity >= trg_spacing->bottom_specificity) {
         trg_spacing->bottom = sp.bottom;
@@ -2652,8 +2686,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
     if (!value) { log_debug("No value in declaration");  return; }
     log_debug("[Lambda CSS Property] Processing property %d, %s, value type=%d",
         prop_id, css_property_name_from_id(prop_id), value->type);
-    int32_t specificity = get_lambda_specificity(decl);
-    log_debug("[Lambda CSS Property] Specificity: %d", specificity);
+    int64_t specificity = get_cascade_priority(decl);
+    log_debug("[Lambda CSS Property] Specificity: %lld", (long long)specificity);
 
     // Handle CSS custom properties (--variable-name: value)
     if (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-') {
@@ -5978,11 +6012,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             set_multi_value(&border, value);
             for (int side = 1; side <= 3; side += 2) {  // sides 1=right, 3=left
                 float* width_p   = side == 1 ? &span->bound->border->width.right  : &span->bound->border->width.left;
-                int32_t* ws_p   = side == 1 ? &span->bound->border->width.right_specificity : &span->bound->border->width.left_specificity;
+                int64_t* ws_p   = side == 1 ? &span->bound->border->width.right_specificity : &span->bound->border->width.left_specificity;
                 CssEnum* style_p  = side == 1 ? &span->bound->border->right_style : &span->bound->border->left_style;
-                int32_t* ss_p   = side == 1 ? &span->bound->border->right_style_specificity : &span->bound->border->left_style_specificity;
+                int64_t* ss_p   = side == 1 ? &span->bound->border->right_style_specificity : &span->bound->border->left_style_specificity;
                 Color* color_p   = side == 1 ? &span->bound->border->right_color : &span->bound->border->left_color;
-                int32_t* cs_p   = side == 1 ? &span->bound->border->right_color_specificity : &span->bound->border->left_color_specificity;
+                int64_t* cs_p   = side == 1 ? &span->bound->border->right_color_specificity : &span->bound->border->left_color_specificity;
                 CssPropertyId width_prop = side == 1 ? CSS_PROPERTY_BORDER_RIGHT_WIDTH : CSS_PROPERTY_BORDER_LEFT_WIDTH;
                 if (border.style) {
                     *style_p = border.style->data.keyword;  *ss_p = specificity;
@@ -6044,11 +6078,11 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             set_multi_value(&border, value);
             for (int side = 0; side <= 2; side += 2) {  // sides 0=top, 2=bottom
                 float* width_p   = side == 0 ? &span->bound->border->width.top    : &span->bound->border->width.bottom;
-                int32_t* ws_p   = side == 0 ? &span->bound->border->width.top_specificity : &span->bound->border->width.bottom_specificity;
+                int64_t* ws_p   = side == 0 ? &span->bound->border->width.top_specificity : &span->bound->border->width.bottom_specificity;
                 CssEnum* style_p  = side == 0 ? &span->bound->border->top_style   : &span->bound->border->bottom_style;
-                int32_t* ss_p   = side == 0 ? &span->bound->border->top_style_specificity : &span->bound->border->bottom_style_specificity;
+                int64_t* ss_p   = side == 0 ? &span->bound->border->top_style_specificity : &span->bound->border->bottom_style_specificity;
                 Color* color_p   = side == 0 ? &span->bound->border->top_color    : &span->bound->border->bottom_color;
-                int32_t* cs_p   = side == 0 ? &span->bound->border->top_color_specificity : &span->bound->border->bottom_color_specificity;
+                int64_t* cs_p   = side == 0 ? &span->bound->border->top_color_specificity : &span->bound->border->bottom_color_specificity;
                 CssPropertyId width_prop = side == 0 ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_BORDER_BOTTOM_WIDTH;
                 if (border.style) {
                     *style_p = border.style->data.keyword;  *ss_p = specificity;

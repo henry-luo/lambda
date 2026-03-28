@@ -33,6 +33,7 @@ extern TypeMap EmptyMap;
 // ============================================================================
 
 Item py_object_class = {0};
+Item py_type_class = {0};   // built-in 'type' metaclass
 
 // table of built-in exception classes (name → Item)
 #define PY_BUILTIN_CLASS_MAX 32
@@ -241,7 +242,8 @@ extern "C" Item py_compute_mro(Item cls) {
 // Class creation
 // ============================================================================
 
-extern "C" Item py_class_new(Item name, Item bases, Item methods) {
+// internal: core class creation logic (no metaclass check)
+static Item py_class_new_core(Item name, Item bases, Item methods) {
     // create the class as a Map
     Item cls = py_new_object();
 
@@ -284,6 +286,63 @@ extern "C" Item py_class_new(Item name, Item bases, Item methods) {
     Item mro = py_compute_mro(cls);
     py_map_set_cstr(cls, "__mro__", mro);
 
+    // Phase F3: call __init_subclass__(cls) on each direct base that defines it.
+    // This notifies parent classes that a new subclass was created.
+    if (get_type_id(bases) == LMD_TYPE_ARRAY) {
+        Array* bases_arr = it2arr(bases);
+        for (int i = 0; i < bases_arr->length; i++) {
+            Item base = bases_arr->items[i];
+            if (get_type_id(base) != LMD_TYPE_MAP) continue;
+            // look up __init_subclass__ in this base's MRO (skip object's default)
+            Item init_sub_name = (Item){.item = s2it(heap_create_name("__init_subclass__"))};
+            Item init_sub = py_mro_lookup(base, init_sub_name);
+            if (get_type_id(init_sub) == LMD_TYPE_NULL) continue;
+            if (get_type_id(init_sub) == LMD_TYPE_FUNC) {
+                // call it as a class method: __init_subclass__(cls)
+                Item args[1] = { cls };
+                py_call_function(init_sub, args, 1);
+            }
+        }
+    }
+
+    return cls;
+}
+
+extern "C" Item py_class_new(Item name, Item bases, Item methods) {
+    // check if any base has an inherited metaclass — if so, delegate to it
+    if (get_type_id(bases) == LMD_TYPE_ARRAY) {
+        Array* bases_arr = it2arr(bases);
+        for (int i = 0; i < bases_arr->length; i++) {
+            Item base = bases_arr->items[i];
+            if (get_type_id(base) != LMD_TYPE_MAP) continue;
+            Item meta = py_map_get_cstr(base, "__metaclass__");
+            if (get_type_id(meta) == LMD_TYPE_MAP && py_is_class(meta)) {
+                return py_class_new_meta(meta, name, bases, methods);
+            }
+        }
+    }
+
+    return py_class_new_core(name, bases, methods);
+}
+
+// ============================================================================
+// Metaclass creation (Phase F5)
+// ============================================================================
+
+// Call metaclass(name, bases, methods) — the metaclass is treated as a callable.
+extern "C" Item py_class_new_meta(Item metaclass, Item name, Item bases, Item methods) {
+    Item args[3] = { name, bases, methods };
+    return py_call_function(metaclass, args, 3);
+}
+
+// type.__new__(mcs, name, bases, namespace) — create a class from a metaclass __new__.
+// Exposed to Python code as an attribute of the built-in `type` class.
+extern "C" Item py_type_new(Item mcs, Item name, Item bases, Item namespace_dict) {
+    Item cls = py_class_new_core(name, bases, namespace_dict);
+    // store the metaclass as the class's type so subclasses can inherit it
+    if (get_type_id(mcs) == LMD_TYPE_MAP && py_is_class(mcs)) {
+        py_map_set_cstr(cls, "__metaclass__", mcs);
+    }
     return cls;
 }
 
@@ -429,6 +488,22 @@ extern "C" Item py_get_builtin_class(const char* name) {
     return ItemNull;
 }
 
+// built-in Exception.__init__(self, *args) — stores self.args and self.message
+static Item py_exception_init(Item self, Item message) {
+    py_map_set_cstr(self, "message", message);
+    Item args_list = py_list_new(1);
+    py_list_append(args_list, message);
+    py_map_set_cstr(self, "args", args_list);
+    return ItemNull;
+}
+
+// built-in Exception.__str__(self) — returns the message string
+static Item py_exception_str(Item self) {
+    Item msg = py_map_get_cstr(self, "message");
+    if (get_type_id(msg) != LMD_TYPE_NULL) return msg;
+    return (Item){.item = s2it(heap_create_name(""))};
+}
+
 static Item make_builtin_exc_class(const char* name, Item base) {
     Item bases = py_list_new(0);
     py_list_append(bases, base);
@@ -455,8 +530,30 @@ extern "C" void py_init_builtin_classes(void) {
 
     register_builtin_class("object", py_object_class);
 
+    // 'type' — built-in metaclass with __new__ → py_type_new
+    {
+        Item type_name = (Item){.item = s2it(heap_create_name("type"))};
+        py_type_class = py_new_object();
+        py_map_set_cstr(py_type_class, "__is_class__", py_bool_item(true));
+        py_map_set_cstr(py_type_class, "__name__", type_name);
+        Item type_bases = py_list_new(0);
+        py_list_append(type_bases, py_object_class);
+        py_map_set_cstr(py_type_class, "__bases__", type_bases);
+        Item type_mro = py_list_new(0);
+        py_list_append(type_mro, py_type_class);
+        py_list_append(type_mro, py_object_class);
+        py_map_set_cstr(py_type_class, "__mro__", type_mro);
+        // __new__: py_type_new(mcs, name, bases, namespace) takes 4 params
+        Item type_new_fn = py_new_function((void*)py_type_new, 4);
+        py_map_set_cstr(py_type_class, "__new__", type_new_fn);
+        register_builtin_class("type", py_type_class);
+    }
+
     // Exception hierarchy
     Item exc_cls         = make_builtin_exc_class("Exception",         py_object_class);
+    // add built-in __init__ and __str__ to Exception base
+    py_map_set_cstr(exc_cls, "__init__", py_new_function((void*)py_exception_init, 2));
+    py_map_set_cstr(exc_cls, "__str__",  py_new_function((void*)py_exception_str,  1));
     Item runtime_err     = make_builtin_exc_class("RuntimeError",      exc_cls);
     Item type_err        = make_builtin_exc_class("TypeError",         exc_cls);
     Item val_err         = make_builtin_exc_class("ValueError",        exc_cls);
@@ -485,6 +582,24 @@ extern "C" void py_init_builtin_classes(void) {
     register_builtin_class("NotImplementedError", not_impl_err);
     register_builtin_class("LookupError",         lookup_err);
     register_builtin_class("ArithmeticError",     arithmetic_err);
+
+    // primitive type classes — these need __name__ so user code can do int.__name__ etc.
+    static const char* prim_names[] = { "int", "float", "str", "bool", "list", "dict",
+                                        "tuple", "set", "bytes", "NoneType" };
+    for (int i = 0; i < 10; i++) {
+        Item prim_cls = py_new_object();
+        py_map_set_cstr(prim_cls, "__is_class__", py_bool_item(true));
+        Item prim_name_item = (Item){.item = s2it(heap_create_name(prim_names[i]))};
+        py_map_set_cstr(prim_cls, "__name__", prim_name_item);
+        Item prim_bases = py_list_new(0);
+        py_list_append(prim_bases, py_object_class);
+        py_map_set_cstr(prim_cls, "__bases__", prim_bases);
+        Item prim_mro = py_list_new(0);
+        py_list_append(prim_mro, prim_cls);
+        py_list_append(prim_mro, py_object_class);
+        py_map_set_cstr(prim_cls, "__mro__", prim_mro);
+        register_builtin_class(prim_names[i], prim_cls);
+    }
 
     log_debug("py: built-in class hierarchy initialized (%d classes)", py_builtin_class_count);
 }

@@ -4017,6 +4017,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
 
+    // CSS 2.1 §10.4: Track whether image dimensions were auto-derived from intrinsic ratio.
+    // When min/max constraints change one dimension, the other must scale proportionally.
+    bool image_height_auto_derived = false;
+    bool image_width_auto_derived = false;
+
     if (elmt_name == HTM_TAG_IMG) { // load image intrinsic width and height
         log_debug("[IMG LAYOUT] Processing IMG element: %s", block->source_loc());
         const char *value;
@@ -4068,10 +4073,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 if (lycon->block.given_width >= 0 && !width_is_zero_percent) {
                     // Width specified, scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
+                    image_height_auto_derived = true;
                 }
                 else if (lycon->block.given_height >= 0 && lycon->block.given_width < 0) {
                     // Height specified, scale unspecified width
                     lycon->block.given_width = lycon->block.given_height * w / h;
+                    image_width_auto_derived = true;
                 }
                 else {
                     // Both width and height unspecified, or width was 0% on 0-width parent
@@ -4090,6 +4097,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                         lycon->block.given_width = w;
                         lycon->block.given_height = h;
                     }
+                    image_height_auto_derived = true;
+                    image_width_auto_derived = true;
                 }
             }
             // else both width and height specified (non-zero)
@@ -4177,11 +4186,35 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     else if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != CSS_VALUE_AUTO)) {
         content_width = max(lycon->block.given_width, 0);
         log_debug("Using given_width: content_width=%.2f", content_width);
+        bool width_was_clamped = false;
+        float pre_clamp_width = content_width;
         content_width = adjust_min_max_width(block, content_width);
-        log_debug("After adjust_min_max_width: content_width=%.2f", content_width);
+        width_was_clamped = (content_width != pre_clamp_width);
+        log_debug("After adjust_min_max_width: content_width=%.2f, clamped=%d", content_width, width_was_clamped);
+
+        // CSS 2.1 §10.4: For replaced elements (images) with intrinsic ratio,
+        // when min/max-width constrains the used width, scale height proportionally
+        if (image_height_auto_derived && block->embed && block->embed->img && width_was_clamped) {
+            float iw = block->embed->img->width;
+            float ih = block->embed->img->height;
+            if (iw > 0) {
+                lycon->block.given_height = content_width * ih / iw;
+                log_debug("[IMG] Aspect ratio: width %.2f→%.2f, height scaled to %.2f",
+                          pre_clamp_width, content_width, lycon->block.given_height);
+            }
+        }
+
+        // CSS 2.1 §10.3.2: For replaced elements with 'width: auto', the intrinsic
+        // width is the used width (content-box). box-sizing: border-box only applies
+        // to explicitly set CSS widths, not to intrinsic dimensions. However, when
+        // min/max-width constrains the width, the constraint IS in border-box terms.
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
-            log_debug("After adjust_border_padding (border-box): content_width=%.2f", content_width);
+            if (!image_width_auto_derived || width_was_clamped) {
+                if (block->bound) content_width = adjust_border_padding_width(block, content_width);
+                log_debug("After adjust_border_padding (border-box): content_width=%.2f", content_width);
+            } else {
+                log_debug("[IMG] Skipping border-box for intrinsic width: content_width=%.2f", content_width);
+            }
         }
     }
     else { // derive from parent block width
@@ -4238,9 +4271,32 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     float content_height = -1;
     if (lycon->block.given_height >= 0) {
         content_height = max(lycon->block.given_height, 0);
+        bool height_was_clamped = false;
+        float pre_clamp_height = content_height;
         content_height = adjust_min_max_height(block, content_height);
+        height_was_clamped = (content_height != pre_clamp_height);
+
+        // CSS 2.1 §10.7: For replaced elements with intrinsic ratio,
+        // when min/max-height constrains the used height, scale width proportionally
+        if (image_width_auto_derived && block->embed && block->embed->img && height_was_clamped) {
+            float iw = block->embed->img->width;
+            float ih = block->embed->img->height;
+            if (ih > 0) {
+                content_width = content_height * iw / ih;
+                log_debug("[IMG] Aspect ratio: height %.2f→%.2f, width scaled to %.2f",
+                          pre_clamp_height, content_height, content_width);
+            }
+        }
+
+        // CSS 2.1 §10.6.2: For replaced elements with 'height: auto', the intrinsic
+        // height is the used height (content-box). box-sizing: border-box only applies
+        // to explicitly set CSS heights, not to intrinsic dimensions.
         if (block->blk && block->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
-            if (block->bound) content_height = adjust_border_padding_height(block, content_height);
+            if (!image_height_auto_derived || height_was_clamped) {
+                if (block->bound) content_height = adjust_border_padding_height(block, content_height);
+            } else {
+                log_debug("[IMG] Skipping border-box for intrinsic height: content_height=%.2f", content_height);
+            }
         }
     }
     else { // auto height - will be determined by content

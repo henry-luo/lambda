@@ -63,6 +63,7 @@ Item py_match_mapping_rest(Item obj, Item excluded_keys);
 Item py_getattr(Item object, Item name);
 Item py_setattr(Item object, Item name, Item value);
 Item py_hasattr(Item object, Item name);
+Item py_delattr(Item object, Item name);  // Phase F2: descriptor __delete__ + remove own attr
 Item py_new_object(void);
 
 // ========================================================================
