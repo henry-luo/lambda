@@ -5926,12 +5926,14 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
         // Helper: when a sys func returns a boxed Item (c_ret_tid=ANY) but the
         // call expression has a specific native type, unbox to native format.
         // This ensures consistency with local/dynamic calls which also unbox
-        // Items to native types (FLOAT→double, INT→int64, BOOL→int64, INT64→int64).
+        // Items to native types (FLOAT→double, INT→int64, BOOL→int64, INT64→int64,
+        // STRING→String*, SYMBOL→Symbol*).
         TypeId call_expr_tid = ((AstNode*)call_node)->type ? ((AstNode*)call_node)->type->type_id : LMD_TYPE_ANY;
         #define POST_PROCESS_UNBOX(result) \
             if (c_ret_tid == LMD_TYPE_ANY && \
                 (call_expr_tid == LMD_TYPE_FLOAT || call_expr_tid == LMD_TYPE_INT || \
-                 call_expr_tid == LMD_TYPE_BOOL || call_expr_tid == LMD_TYPE_INT64)) { \
+                 call_expr_tid == LMD_TYPE_BOOL || call_expr_tid == LMD_TYPE_INT64 || \
+                 call_expr_tid == LMD_TYPE_STRING || call_expr_tid == LMD_TYPE_SYMBOL)) { \
                 result = emit_unbox(mt, result, call_expr_tid); \
             }
 
