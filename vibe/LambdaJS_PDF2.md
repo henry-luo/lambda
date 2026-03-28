@@ -20,34 +20,42 @@
 | 7 crashing specs | 0 | ~253 | 0% |
 | **Combined** | **2,840** | **~3,626** | **78.3%** |
 
-**Progress:** +106 passing tests (+3.1% combined rate). 5 formerly-crashing specs now run. 15 of 22 specs produce results.
+**Latest State (2025-03-28) — After Phase 2/3/4 Partial Implementation:**
+
+| Category | Passed | Total | Rate |
+|----------|--------|-------|------|
+| 16 running specs | 2,844 | 3,375 | 84.3% |
+| 6 crashing specs | 0 | ~251 | 0% |
+| **Combined** | **2,844** | **~3,626** | **78.4%** |
+
+**Progress:** +110 passing tests total (+4.9% combined rate). 6 formerly-crashing specs now run. 16 of 22 specs produce results.
 
 **Four-phase roadmap (updated with actuals):**
 
 | Phase | Focus | Est. New Passes | Actual | Status |
 |-------|-------|----------------|--------|--------|
 | Phase 1 | Transpiler crash fixes | +200–400 | **+106** | **Partial** (5/12 unblocked) |
-| Phase 2 | String & number primitives | +40–55 | — | Not started |
-| Phase 3 | Runtime semantics (undefined, instanceof, RegExp) | +90–120 | — | Not started |
-| Phase 4 | Collection iteration (Map/Set) | +20–30 | — | Not started |
-| **Total** | | **+350–600** | **+106 so far** | **In progress** |
+| Phase 2 | String & number primitives | +40–55 | **+1** | **Done** (codePointAt already worked) |
+| Phase 3 | Runtime semantics (undefined, instanceof, RegExp) | +90–120 | **+3** | **Partial** (instanceof+Error done, undefined remaining) |
+| Phase 4 | Collection iteration (Map/Set) | +20–30 | **+0** | **Partial** (Map for...of+order done, URL remaining) |
+| **Total** | | **+350–600** | **+110 so far** | **In progress** |
 
 ---
 
 ## 2. Current Scoreboard
 
-### 2.1 Running Specs (15) — Updated 2025-07-28
+### 2.1 Running Specs (16) — Updated 2025-03-28
 
 | Spec | Passed | Failed | Total | Change from Baseline | Primary Failure Causes |
 |------|--------|--------|-------|---------------------|------------------------|
 | encodings_spec | 1807 | 0 | 1807 | — | — (perfect) |
-| core_utils_spec | 833 | 45 | 878 | **+12** | toString(16), codePointAt, RegExp, replaceAll, charCodeAt |
-| primitives_spec | 64 | 58 | 122 | **+2** | undefined vs null, instanceof, Map iteration |
+| core_utils_spec | 834 | 44 | 878 | **+13** | toString(16), RegExp, replaceAll |
+| primitives_spec | 66 | 56 | 122 | **+4** | undefined vs null, Map iteration |
 | type1_parser_spec | 21 | 3 | 24 | **+19** | *(mostly fixed — was broken by super() P3 bug)* |
 | function_spec | 21 | 93 | 114 | **+13** | Constructor returns null (remaining closure/class issues) |
 | pdf_find_utils_spec | 19 | 3 | 22 | **+9** | Unicode category detection (RegExp, codePointAt) |
 | unicode_spec | 15 | 11 | 26 | **+7** | Map lookup, RegExp |
-| util_spec | 13 | 39 | 52 | **+2** | charCodeAt→UTF-8 bug, Error inheritance, URL, RegExp |
+| util_spec | 14 | 38 | 52 | **+3** | charCodeAt→UTF-8 bug, URL, RegExp |
 | bidi_spec | 8 | 2 | 10 | **+3** | RegExp, Unicode category |
 | murmurhash3_spec | 0 | 7 | 7 | — | toString(16), bitwise on hash values |
 | **colorspace_spec** | **32** | **42** | **74** | **NEW** | *(was crash — getter/setter fix)* |
@@ -55,8 +63,9 @@
 | **xfa_parser_spec** | **2** | **115** | **117** | **NEW** | *(was crash — AST builder fix)* |
 | **xfa_tohtml_spec** | **1** | **49** | **50** | **NEW** | *(was crash — AST builder fix)* |
 | **xfa_serialize_data_spec** | **0** | **1** | **1** | **NEW** | *(was crash — AST builder fix)* |
+| **stream_spec** | **0** | **1** | **1** | **NEW** | *(was crash — collection bug workaround)* |
 
-### 2.2 Crashing Specs (7) — Down from 12
+### 2.2 Crashing Specs (6) — Down from 12
 
 | Spec | ~Assertions | Crash Error | Root Cause | Status |
 |------|------------|-------------|------------|--------|
@@ -66,7 +75,6 @@
 | default_appearance_spec | ~23 | `Repeated item declaration _ColorSpace_isDefaultDecode` | Shares colorspace dependency | Remaining |
 | xml_spec | ~16 | `captured variable '_js_pos' not found in scope` | Closure capture in scope | Remaining |
 | autolinker_spec | ~13 | `assignment to undefined var '_js_scale'` | Destructuring in constructor params | Remaining |
-| stream_spec | ~2 | `js_collection_create` / `js_get_collection_data` | Collection runtime bug | Remaining |
 
 ---
 
@@ -79,20 +87,20 @@ Created and ran diagnostic test files (`temp/test_diag{5-8}.js`) to isolate spec
 | Feature | Status | Diagnostic Result |
 |---------|--------|-------------------|
 | `Number.toString(radix)` | ✅ FIXED | `(255).toString(16)` → `"ff"` (was broken: radix ignored) |
-| `String.prototype.codePointAt` | ❌ MISSING | `"A".codePointAt(0)` → `null` |
+| `String.prototype.codePointAt` | ✅ WORKS | `"A".codePointAt(0)` → `65` (was reported missing, but already implemented) |
 | `new RegExp(pattern)` | ✅ FIXED | `new RegExp("^[a-z]+$").test("hello")` → `true` (was broken) |
 | `String.replaceAll(regex, fn)` | ✅ FIXED | Callback now invoked correctly (was returning `[object Object]`) |
 | `undefined` vs `null` | ❌ CONFLATED | Missing property returns `null`, `=== undefined` fails |
-| `instanceof` (user classes) | ❌ BROKEN | `e instanceof MyError` → `false` always |
-| `Error.message` propagation | ❌ BROKEN | `new MyError("test").message` → `null` |
+| `instanceof` (user classes) | ✅ FIXED | `e instanceof MyError` → `true` (prototype chain walking via `__class_name__`) |
+| `Error.message` propagation | ✅ FIXED | `new MyError("test").message` → `"test"` (super() for builtin Error classes) |
 | `charCodeAt` (non-ASCII) | ✅ FIXED | Now returns UTF-16 code units (was returning UTF-8 bytes) |
 | `String.fromCharCode(0)` | ✅ FIXED | NUL character now handled (was producing empty string) |
-| `Map` for...of | ❌ BROKEN | `for (var [k,v] of map)` produces no iterations |
-| `Map.forEach` order | ⚠️ REVERSED | Iterates LIFO instead of insertion-order (FIFO) |
+| `Map` for...of | ✅ FIXED | `for (var [k,v] of map)` now yields entries (js_iterable_to_array handles Map/Set) |
+| `Map.forEach` order | ✅ FIXED | Iterates in insertion order (doubly-linked list in JsCollectionData) |
 | Getter/setter (class) | ✅ FIXED | No longer crashes with `Repeated item declaration` |
 | Closure capture (class) | ⚠️ PARTIAL | 5 specs unblocked; 4 specs still crash (deeper capture patterns) |
 | Object destructuring | ✅ FIXED | Constructor/function destructuring patterns work |
-| `Array.from(iter, mapFn)` | ❌ PARTIAL | Mapper function (2nd arg) ignored |
+| `Array.from(iter, mapFn)` | ✅ FIXED | Mapper function applied via `js_array_from_with_mapper` |
 | Super() constructor chain | ✅ FIXED | 3-level inheritance works (was broken by P3 optimization) |
 | Static class properties | ✅ FIXED | `ClassName.PROP` works (was returning null from MCONST_CLASS) |
 | Class method scope | ✅ FIXED | Method names no longer pollute enclosing scope |
@@ -119,7 +127,7 @@ Created and ran diagnostic test files (`temp/test_diag{5-8}.js`) to isolate spec
 | A2 | Getter/setter naming collision | ✅ FIXED | ~~colorspace~~, default_appearance (still shares dep) | ~~99~~ → ~23 remaining |
 | A3 | AST builder: `Failed to build function body` | ✅ FIXED | ~~xfa_parser, xfa_tohtml, xfa_serialize_data~~ | ~~174~~ → 0 |
 | A4 | Destructuring in constructor: `{ scale, rotation }` param pattern | ✅ FIXED (general), but autolinker still crashes | autolinker | ~13 |
-| A5 | Collection runtime: `js_collection_create` type confusion | Remaining | stream | ~2 |
+| A5 | Collection runtime: `js_collection_create` type confusion | ⚠️ Partial (stream now runs but 0/1 pass) | stream | ~2 |
 | A6 | **NEW:** Super() constructor P3 optimization incompatible with inheritance | ✅ FIXED | type1_parser (was 2/24 → 21/24) | — |
 | A7 | **NEW:** MCONST_CLASS returned null — static class properties broken | ✅ FIXED | function_spec (was TIMEOUT → 21/114) | — |
 | A8 | **NEW:** Class method names polluting enclosing scope | ✅ FIXED | Multiple specs affected | — |
@@ -130,19 +138,19 @@ Created and ran diagnostic test files (`temp/test_diag{5-8}.js`) to isolate spec
 | ID | Issue | Status | Affected Tests |
 |----|-------|--------|---------------|
 | B1 | `Number.toString(radix)` ignores radix | ✅ FIXED | ~~escapePDFName (5), stringToUTF16HexString (4), murmurhash3 (5)~~ |
-| B2 | `String.prototype.codePointAt` not implemented — returns null | ❌ Remaining | encodeToXmlString (2), unicode tests |
+| B2 | `String.prototype.codePointAt` — was reported missing but already works | ✅ Already worked | ~~encodeToXmlString (2), unicode tests~~ |
 | B3 | `String.replaceAll(regex, fn)` — callback not invoked | ✅ FIXED | ~~escapeString (1), text processing~~ |
 | B4 | `String.fromCharCode(0)` — NUL char produces empty string | ✅ FIXED | ~~bytesToString (3), binary patterns~~ |
 | B5 | `charCodeAt` returns UTF-8 bytes not UTF-16 code units for non-ASCII | ✅ FIXED | ~~stringToPDFString (8), getModificationDate (2), stringToUTF16String (4)~~ |
-| B6 | `Array.from(iterable, mapFn)` — mapper argument ignored | ❌ Remaining | minor impact |
+| B6 | `Array.from(iterable, mapFn)` — mapper argument ignored | ✅ FIXED | ~~minor impact~~ |
 
 **Category C: Runtime Semantics (~90–120 assertion fixes)**
 
 | ID | Issue | Status | Affected Tests |
 |----|-------|--------|---------------|
 | C1 | `undefined` vs `null` conflation — missing property returns `null` not `undefined` | ❌ Remaining | primitives Dict (20+), util, general |
-| C2 | `instanceof` always false for user-defined classes | ❌ Remaining | BaseException (2), isDict (1), type checks |
-| C3 | `Error` class: `super(msg)` doesn't set `.message`, inheritance broken | ❌ Remaining | BaseException (5), toThrow patterns |
+| C2 | `instanceof` always false for user-defined classes | ✅ FIXED | ~~BaseException (2), isDict (1), type checks~~ |
+| C3 | `Error` class: `super(msg)` doesn't set `.message`, inheritance broken | ✅ FIXED | ~~BaseException (5), toThrow patterns~~ |
 | C4 | `new RegExp(pattern, flags)` — dynamic regex construction broken | ✅ FIXED | ~~validateCSSFont (10), recoverJsURL (7), isAscii (2), bidi (5), pdf_find_utils (8)~~ |
 | C5 | `expect().toThrow()` depends on C2+C3 (instanceof + Error) | ❌ Remaining | toRomanNumerals (3), primitives (4), util (2) |
 
@@ -150,8 +158,8 @@ Created and ran diagnostic test files (`temp/test_diag{5-8}.js`) to isolate spec
 
 | ID | Issue | Affected Tests |
 |----|-------|---------------|
-| D1 | `Map[Symbol.iterator]` / `for...of` on Map — no entries produced | Dict forEach/iteration (5), RefSetCache (4) |
-| D2 | `Map.forEach` iterates in LIFO order instead of insertion order | parseXFAPath (1), ordering-sensitive tests |
+| D1 | `Map[Symbol.iterator]` / `for...of` on Map — no entries produced | ✅ FIXED — Dict forEach/iteration (5), RefSetCache (4) |
+| D2 | `Map.forEach` iterates in LIFO order instead of insertion order | ✅ FIXED — parseXFAPath (1), ordering-sensitive tests |
 | D3 | `URL` constructor not implemented (or incomplete) | createValidAbsoluteUrl (8) |
 | D4 | `ReadableStream` stub — `.getReader` returns object not function | ReadableStream (1) |
 
@@ -189,6 +197,19 @@ Created and ran diagnostic test files (`temp/test_diag{5-8}.js`) to isolate spec
 | 3 | **MCONST_CLASS returns runtime class object** — `MCONST_CLASS` was a null placeholder, meaning `ClassName.staticProp` always returned null. Now stores class object in module var with `module_var_index` | `transpile_js_mir.cpp` | function_spec: TIMEOUT → 21/114; unblocked all static property access |
 | 4 | **IIFE body class writeback** — esbuild bundles wrap all code in `(() => { ... })()`. Class declarations inside IIFE bodies weren't being stored to module vars. Extended condition from `mt->in_main` to include `is_iife_body` | `transpile_js_mir.cpp` | Critical for all esbuild bundles |
 | 5 | **Variable alias detection** — esbuild emits `var _X = class _X { }; var X = _X;`. The public name `X` wasn't recognized as a class, so `new X()` fell to generic constructor path | `transpile_js_mir.cpp` | Enabled class construction via alias names |
+
+### Fixes Implemented — Session 3 (2025-03-28)
+
+| # | Fix | Files Modified | Impact |
+|---|-----|---------------|--------|
+| 1 | **`Array.from` with mapper** — `Array.from(iter, mapFn)` now applies the mapper to each element via new `js_array_from_with_mapper` runtime function | `js_globals.cpp`, `transpile_js_mir.cpp`, `js_runtime.h`, `sys_func_registry.c` | Array.from mapper works |
+| 2 | **`instanceof` for user-defined classes** — Prototype chain walking via `__class_name__` property. Each `new ClassName()` sets `__class_name__` on the instance and builds a `__proto__` chain with ancestor class names. `instanceof` either uses compile-time class name resolution (for known classes/aliases) or runtime `__proto__` chain walking | `js_globals.cpp`, `transpile_js_mir.cpp`, `js_runtime.h`, `sys_func_registry.c` | primitives_spec +2, util_spec +1 |
+| 3 | **Error class inheritance** — `super()` in builtin Error subclasses (Error, TypeError, RangeError, SyntaxError, ReferenceError) now sets `this.message` and `this.name`. `js_new_error`/`js_new_error_with_name` set `__class_name__` for instanceof support | `transpile_js_mir.cpp`, `js_runtime.cpp` | Error.message/name propagation works |
+| 4 | **Map for...of iteration** — `js_iterable_to_array` now detects Map/Set collections and calls `.entries()`/`.values()` to produce iterable arrays for `for...of` loops | `js_runtime.cpp` | Map for...of yields entries |
+| 5 | **Map insertion order** — Added doubly-linked list (`JsCollectionOrderNode`) to `JsCollectionData` to track insertion order. `forEach`, `keys`, `values`, `entries` all iterate in FIFO order. `set` appends/updates, `delete` removes, `clear` resets | `js_runtime.cpp` | Map.forEach/iteration in correct order |
+| 6 | **Import resolver registration** — Registered `js_array_from_with_mapper` and `js_instanceof_classname` in `jit_runtime_imports[]` so MIR JIT can resolve them at link time | `sys_func_registry.c` | Fixed "failed to resolve native fn/pn" errors |
+| 7 | **`instanceof` compile-time class resolution** — `instanceof` with any known class name (including aliases like `var MyError = _MyError`) now resolves to `js_instanceof_classname` at compile time, avoiding null variable lookups for classes inside function bodies | `transpile_js_mir.cpp` | instanceof MyError works in IIFEs |
+| 8 | **`codePointAt` verification** — Confirmed already working (was reported as missing in earlier diagnostics but implementation exists) | — | No code change needed |
 
 ---
 
@@ -297,9 +318,9 @@ The P3 optimization (`js_set_shaped_slot`) compiles constructor bodies to write 
 
 Radix conversion implemented for bases 2-36. `(255).toString(16)` → `"ff"`.
 
-#### 2.2 String.prototype.codePointAt (B2) — NOT DONE
+#### 2.2 String.prototype.codePointAt (B2) — ALREADY WORKS ✅
 
-Still returns null. Needs implementation.
+Was reported as returning null in earlier diagnostics, but re-testing confirms `"A".codePointAt(0)` → `65` works correctly. No code change needed.
 
 #### 2.3 charCodeAt for Non-ASCII (B5) — DONE ✅
 
@@ -335,42 +356,29 @@ Callback function is now invoked for each match.
 
 **Recommendation:** Option A is the correct long-term fix. It requires changes in `lambda-data.hpp` (new sentinel), `js_runtime.cpp` (property access returns undefined), and `transpile_js_mir.cpp` (undefined literal).
 
-#### 3.3 instanceof for User-Defined Classes (C2)
+#### 3.3 instanceof for User-Defined Classes (C2) — DONE ✅
 
-**Problem:** `instanceof` always returns `false` for user-defined classes. `e instanceof MyError` → `false`.
+**Status:** Fixed. Implemented `__class_name__`-based prototype chain walking. Each `new ClassName()` sets `__class_name__` on the instance and builds a `__proto__` chain with ancestor class names. At compile time, `instanceof` with known classes (including aliases like `var MyError = _MyError`) resolves directly to `js_instanceof_classname` for reliable name-based checking. Runtime fallback uses `js_instanceof` which extracts `__class_name__` from the constructor.
 
-**Fix:** Implement prototype chain walking:
-1. Get the object's `[[Prototype]]` chain
-2. Walk up the chain checking if any prototype matches `Constructor.prototype`
-3. Return `true` if found, `false` if the chain ends
+**Implementation:** `js_globals.cpp` (new `js_instanceof_classname`), `transpile_js_mir.cpp` (compile-time class resolution + `__proto__` chain setup), `js_runtime.h`, `sys_func_registry.c`.
 
-**Impact:** ~5 direct fixes (BaseException, isDict)
+#### 3.4 Error Class Inheritance (C3) — DONE ✅
 
-#### 3.4 Error Class Inheritance (C3)
+**Status:** Fixed. `super()` in builtin Error subclasses (Error, TypeError, RangeError, SyntaxError, ReferenceError) now emits code to set `this.message = first_arg` and `this.name = error_type_name`. `js_new_error`/`js_new_error_with_name` also set `__class_name__` for instanceof support.
 
-**Problem:** `class MyError extends Error { constructor(msg) { super(msg); } }` doesn't propagate `msg` to the Error's `.message` property. `.message` returns `null`.
-
-**Fix:** Ensure `super(msg)` in Error subclasses calls the Error constructor which sets `.message = msg`, `.name = "Error"`, and `.stack`.
-
-**Impact:** ~7 direct fixes (BaseException name/message/stack, toThrow pattern support)
+**Implementation:** `transpile_js_mir.cpp` (super() handling for builtin Error parents), `js_runtime.cpp` (`__class_name__` on error objects).
 
 ---
 
 ### Phase 4: Collection Iteration & Miscellaneous
 
-#### 4.1 Map[Symbol.iterator] / for...of (D1)
+#### 4.1 Map[Symbol.iterator] / for...of (D1) — DONE ✅
 
-**Problem:** `for (var [k, v] of map)` produces no iterations. Map doesn't implement `Symbol.iterator`.
+**Status:** Fixed. `js_iterable_to_array` now detects Map and Set collections by checking for `JsCollectionData` in the `__collection__` property. For Maps, it calls `.entries()` to produce `[key, value]` pair arrays. For Sets, it calls `.values()`.
 
-**Fix:** Implement `Map.prototype[Symbol.iterator]` that returns an iterator yielding `[key, value]` pairs. Also implement `Map.prototype.keys()`, `.values()`, `.entries()` iterators.
+#### 4.2 Map Insertion Order (D2) — DONE ✅
 
-**Impact:** ~9 direct fixes (Dict iteration, RefSetCache)
-
-#### 4.2 Map Insertion Order (D2)
-
-**Problem:** `Map.forEach` iterates in LIFO order (last-inserted first) instead of insertion order (FIFO).
-
-**Fix:** Ensure the internal Map data structure maintains insertion order. If using a hash table, add a linked list to track insertion order.
+**Status:** Fixed. Added a doubly-linked list (`JsCollectionOrderNode` with key, value, next, prev) to `JsCollectionData`. `set` appends new entries or updates existing values in-place. `delete` removes from the list. `clear` resets head/tail. `forEach`, `keys`, `values`, `entries` all iterate the linked list in FIFO order.
 
 **Impact:** ~2 direct fixes
 
@@ -382,13 +390,9 @@ Callback function is now invoked for each match.
 
 **Impact:** ~8 direct fixes (createValidAbsoluteUrl)
 
-#### 4.4 Array.from Mapper (B6)
+#### 4.4 Array.from Mapper (B6) — DONE ✅
 
-**Problem:** `Array.from(iterable, mapFn)` ignores the second argument.
-
-**Fix:** Apply `mapFn` to each element during array construction.
-
-**Impact:** ~2 direct fixes
+**Status:** Fixed. New `js_array_from_with_mapper(Item iterable, Item mapFn)` function calls `js_array_from()` then applies `mapFn` to each element via `js_call_function()`. Transpiler passes the second argument when present.
 
 ---
 
@@ -419,64 +423,62 @@ Additionally, fixes to the 10 already-running specs contributed:
 
 ### 5.2 Revised Score Estimates (Remaining Work)
 
-**After completing Phase 1 (remaining 7 crash fixes):**
+**After completing Phase 1 (remaining 6 crash fixes):**
 
 | Spec | Current | Projected | Delta |
 |------|---------|-----------|-------|
-| 15 running specs | 2,840/3,373 | 2,840/3,373 | — |
-| 7 crashing specs (fixed) | 0/~253 | ~80/~253 | +80 |
-| **Total** | **2,840/~3,626** | **~2,920/~3,626** | **+80** |
+| 16 running specs | 2,844/3,375 | 2,844/3,375 | — |
+| 6 crashing specs (fixed) | 0/~251 | ~80/~251 | +80 |
+| **Total** | **2,844/~3,626** | **~2,924/~3,626** | **+80** |
 
-**After Phase 2 (remaining: codePointAt, Array.from mapper):**
+**After Phase 2 (DONE — codePointAt already works, Array.from mapper fixed):**
 
-| Spec | Delta |
-|------|-------|
-| unicode_spec | +3 (codePointAt) |
-| core_utils (encodeToXmlString) | +2 |
-| **Subtotal** | **+5** |
+No significant remaining items.
 
-*(Most Phase 2 items already implemented — remainder is minor)*
-
-**After Phase 3 (undefined vs null, instanceof, Error):**
+**After Phase 3 (remaining: undefined vs null):**
 
 | Spec | Delta |
 |------|-------|
-| primitives | +25 (undefined vs null 20, instanceof 5) |
-| util | +7 (Error 5, instanceof 2) |
+| primitives | +25 (undefined vs null 20, remaining instanceof cascades 5) |
+| util | +7 (remaining Error/instanceof cascades) |
 | core_utils | +3 (toThrow patterns) |
 | Newly-running specs | +30 (cascading) |
 | **Subtotal** | **+65** |
 
-**After Phase 4 (Map for...of, insertion order, URL):**
+Note: instanceof (C2) and Error inheritance (C3) are now fixed but many dependent tests also require `undefined` vs `null` (C1) to pass. The +4 actual gain from C2+C3+D1+D2 (vs ~23 estimated) confirms overlapping root causes.
+
+**After Phase 4 (remaining: URL constructor):**
 
 | Spec | Delta |
 |------|-------|
-| primitives | +9 (Map iteration for Dict/RefSetCache) |
 | util | +8 (URL constructor) |
 | Newly-running specs | +5 |
-| **Subtotal** | **+22** |
+| **Subtotal** | **+13** |
+
+Note: Map for...of (D1) and insertion order (D2) are now fixed but similarly blocked by undefined-vs-null overlap.
 
 ### 5.3 Revised Projected Final Scoreboard
 
-| Spec | Baseline (7/27) | Current (7/28) | Projected Final | Change |
-|------|-----------------|----------------|-----------------|--------|
-| encodings_spec | 1807/1807 | 1807/1807 | 1807/1807 | — |
-| core_utils_spec | 821/878 | 833/878 | 858/878 | +37 |
-| primitives_spec | 62/122 | 64/122 | 98/122 | +36 |
-| type1_parser_spec | 2/24 | 21/24 | 22/24 | +20 |
-| function_spec | 8/114 | 21/114 | 70/114 | +62 |
-| pdf_find_utils_spec | 10/22 | 19/22 | 20/22 | +10 |
-| unicode_spec | 8/26 | 15/26 | 19/26 | +11 |
-| util_spec | 11/52 | 13/52 | 40/52 | +29 |
-| bidi_spec | 5/10 | 8/10 | 10/10 | +5 |
-| murmurhash3_spec | 0/7 | 0/7 | 5/7 | +5 |
-| colorspace_spec | CRASH | 32/74 | 50/74 | +50 |
-| cff_parser_spec | CRASH | 4/69 | 30/69 | +30 |
-| xfa_parser_spec | CRASH | 2/117 | 40/117 | +40 |
-| xfa_tohtml_spec | CRASH | 1/50 | 15/50 | +15 |
-| xfa_serialize_data_spec | CRASH | 0/1 | 1/1 | +1 |
-| 7 remaining crashes | CRASH | CRASH | ~80/~253 | +80 |
-| **Total** | **2,734/~3,635** | **2,840/~3,626** | **~3,165/~3,626** | **+431 (87%)** |
+| Spec | Baseline (7/27) | Phase 1 (7/28) | Current (3/28) | Projected Final | Change |
+|------|-----------------|----------------|----------------|-----------------|--------|
+| encodings_spec | 1807/1807 | 1807/1807 | 1807/1807 | 1807/1807 | — |
+| core_utils_spec | 821/878 | 833/878 | 834/878 | 858/878 | +37 |
+| primitives_spec | 62/122 | 64/122 | 66/122 | 98/122 | +36 |
+| type1_parser_spec | 2/24 | 21/24 | 21/24 | 22/24 | +20 |
+| function_spec | 8/114 | 21/114 | 21/114 | 70/114 | +62 |
+| pdf_find_utils_spec | 10/22 | 19/22 | 19/22 | 20/22 | +10 |
+| unicode_spec | 8/26 | 15/26 | 15/26 | 19/26 | +11 |
+| util_spec | 11/52 | 13/52 | 14/52 | 40/52 | +29 |
+| bidi_spec | 5/10 | 8/10 | 8/10 | 10/10 | +5 |
+| murmurhash3_spec | 0/7 | 0/7 | 0/7 | 5/7 | +5 |
+| colorspace_spec | CRASH | 32/74 | 32/74 | 50/74 | +50 |
+| cff_parser_spec | CRASH | 4/69 | 4/69 | 30/69 | +30 |
+| xfa_parser_spec | CRASH | 2/117 | 2/117 | 40/117 | +40 |
+| xfa_tohtml_spec | CRASH | 1/50 | 1/50 | 15/50 | +15 |
+| xfa_serialize_data_spec | CRASH | 0/1 | 0/1 | 1/1 | +1 |
+| stream_spec | CRASH | CRASH | 0/1 | 1/1 | +1 |
+| 6 remaining crashes | CRASH | CRASH | CRASH | ~80/~251 | +80 |
+| **Total** | **2,734/~3,635** | **2,840/~3,626** | **2,844/~3,626** | **~3,166/~3,626** | **+432 (87%)** |
 
 ---
 
@@ -491,17 +493,17 @@ Additionally, fixes to the 10 already-running specs contributed:
 | 🟡 P1 | Number.toString(radix) | 2.1 | LOW | ~14 fixes | ✅ DONE |
 | 🟡 P1 | charCodeAt UTF-8→UTF-16 | 2.3 | MED | ~14 fixes, fundamental correctness | ✅ DONE |
 | 🟡 P1 | undefined vs null separation | 3.2 | HIGH | ~25 fixes, pervasive correctness | ❌ Not started |
-| 🟡 P1 | instanceof (user classes) | 3.3 | MED | ~5 fixes + enables toThrow | ❌ Not started |
-| 🟡 P1 | Error class inheritance | 3.4 | LOW | ~7 fixes | ❌ Not started |
-| 🟢 P2 | codePointAt | 2.2 | LOW | ~5 fixes | ❌ Not started |
+| 🟡 P1 | instanceof (user classes) | 3.3 | MED | ~5 fixes + enables toThrow | ✅ DONE |
+| 🟡 P1 | Error class inheritance | 3.4 | LOW | ~7 fixes | ✅ DONE |
+| 🟢 P2 | codePointAt | 2.2 | LOW | ~5 fixes | ✅ Already worked |
 | 🟢 P2 | String.fromCharCode(0) | 2.4 | LOW | ~3 fixes | ✅ DONE |
 | 🟢 P2 | replaceAll with callback | 2.5 | LOW | ~2 fixes | ✅ DONE |
-| 🟢 P2 | Map for...of / iteration | 4.1 | MED | ~9 fixes | ❌ Not started |
+| 🟢 P2 | Map for...of / iteration | 4.1 | MED | ~9 fixes | ✅ DONE |
 | 🟢 P2 | Object destructuring params | 1.4 | MED | Unblocks 1 spec (~13 assertions) | ✅ DONE (general) |
 | 🔵 P3 | URL constructor | 4.3 | MED | ~8 fixes | ❌ Not started |
-| 🔵 P3 | Map insertion order | 4.2 | LOW | ~2 fixes | ❌ Not started |
-| 🔵 P3 | Array.from mapper | 4.4 | LOW | ~2 fixes | ❌ Not started |
-| 🔵 P3 | js_collection_create bug | 1.5 | LOW | Unblocks 1 spec (~2 assertions) | ❌ Not started |
+| 🔵 P3 | Map insertion order | 4.2 | LOW | ~2 fixes | ✅ DONE |
+| 🔵 P3 | Array.from mapper | 4.4 | LOW | ~2 fixes | ✅ DONE |
+| 🔵 P3 | js_collection_create bug | 1.5 | LOW | Unblocks 1 spec (~2 assertions) | ⚠️ Partial (stream runs, 0/1 pass) |
 
 ---
 
@@ -667,9 +669,9 @@ done
 
 ## 10. Summary
 
-### Progress So Far (2025-07-27 → 2025-07-28)
+### Progress So Far (2025-07-27 → 2025-03-28)
 
-**+106 passing tests** (2,734 → 2,840). **5 formerly-crashing specs now run** (12 → 7 crashes). **15 of 22 specs produce results.**
+**+110 passing tests** (2,734 → 2,844). **6 formerly-crashing specs now run** (12 → 6 crashes). **16 of 22 specs produce results.**
 
 Key wins:
 - **type1_parser_spec:** 2/24 → 21/24 (P3/super() fix)
@@ -677,24 +679,46 @@ Key wins:
 - **colorspace_spec:** CRASH → 32/74 (getter/setter fix)
 - **cff_parser_spec:** CRASH → 4/69 (closure capture fix)
 - **pdf_find_utils_spec:** 10/22 → 19/22 (RegExp fix)
-- **core_utils_spec:** 821/878 → 833/878 (multiple fixes)
+- **core_utils_spec:** 821/878 → 834/878 (multiple fixes)
+- **primitives_spec:** 62/122 → 66/122 (instanceof + Map iteration fixes)
+- **util_spec:** 11/52 → 14/52 (Error inheritance + various)
+- **stream_spec:** CRASH → 0/1 (collection bug workaround)
+
+### Session 3 Achievements (2025-03-28)
+
+Implemented 6 runtime/transpiler fixes across Phases 2–4:
+
+| Fix | Category | Files Changed |
+|-----|----------|---------------|
+| `Array.from` with mapper | B6 | `js_globals.cpp`, `transpile_js_mir.cpp`, `js_runtime.h`, `sys_func_registry.c` |
+| `instanceof` prototype chain | C2 | `js_globals.cpp`, `transpile_js_mir.cpp`, `js_runtime.h`, `sys_func_registry.c` |
+| Error class super() | C3 | `transpile_js_mir.cpp`, `js_runtime.cpp` |
+| Map `for...of` | D1 | `js_runtime.cpp` |
+| Map insertion order | D2 | `js_runtime.cpp` |
+| `codePointAt` verified | B2 | — (already worked) |
+
+Net improvement: +4 passing tests (2,840 → 2,844), +1 newly running spec (stream_spec).
+
+The lower-than-expected gain (+4 vs estimated ~23 for C2+C3+D1+D2) indicates that the affected tests have **multiple overlapping root causes** — fixing instanceof alone doesn't fix tests that also depend on `undefined` vs `null` (C1) or other gaps. The `undefined` vs `null` separation (C1) remains the highest-impact remaining item.
 
 ### Remaining Path to 90%+
 
 The path from **78% to 87%+** requires:
 
 1. **Remaining closure capture fixes** — 4 specs still crash (crypto, parser, xfa_formcalc, xml) due to deeper capture patterns
-2. **undefined vs null separation** — pervasive correctness issue affecting primitives, util, and newly-running specs
-3. **instanceof + Error inheritance** — needed for `expect().toThrow()` patterns
-4. **Map for...of iteration** — affects Dict tests in primitives_spec
-5. **URL constructor** — affects 8 tests in util_spec
+2. **undefined vs null separation** — pervasive correctness issue affecting primitives, util, and newly-running specs. **Highest remaining ROI item.** Many tests that should now pass with instanceof/Map fixes are still blocked by null-vs-undefined conflation.
+3. **URL constructor** — affects 8 tests in util_spec
 
 The **highest-ROI remaining items** are:
 - **Remaining closure capture** (A1): Unblocks 4 specs / ~215 assertions
-- **undefined vs null** (C1): ~25 fixes + cascading improvements in newly-running specs
-- **instanceof** (C2) + **Error** (C3): Combined ~12 fixes + enables toThrow patterns
-- **codePointAt** (B2): Quick ~5 fix win
-- **Map iteration** (D1): ~9 fixes in primitives
+- **undefined vs null** (C1): ~25 fixes + cascading improvements in newly-running specs. **This is the single biggest remaining blocker** — it causes cascading failures in tests that also depend on fixed features (instanceof, Map iteration, Error).
+- **URL constructor** (D3): ~8 fixes in util_spec
+
+### Completed Items (no longer blocking)
+- ~~instanceof (C2) + Error (C3)~~ → Done. Prototype chain walking + super() for Error subclasses.
+- ~~Map for...of (D1) + insertion order (D2)~~ → Done. Doubly-linked list for FIFO iteration.
+- ~~codePointAt (B2)~~ → Already worked. No fix needed.
+- ~~Array.from mapper (B6)~~ → Done. `js_array_from_with_mapper` function.
 
 ### Architectural Lessons Learned
 
