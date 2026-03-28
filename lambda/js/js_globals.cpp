@@ -477,17 +477,30 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // Get the class name from right (constructor's __class_name__)
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item right_name = map_get(right.map, class_key);
-    if (right_name.item == 0) return (Item){.item = b2it(false)};
+    if (right_name.item == 0 || get_type_id(right_name) != LMD_TYPE_STRING)
+        return (Item){.item = b2it(false)};
+
+    // Delegate to name-based check
+    return js_instanceof_classname(left, right_name);
+}
+
+// instanceof check by class name string — walks prototype chain checking __class_name__
+extern "C" Item js_instanceof_classname(Item left, Item classname) {
+    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+
+    String* rn = it2s(classname);
+    if (!rn) return (Item){.item = b2it(false)};
+
+    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
 
     // Check if left has this class name in its prototype chain
     Item obj = left;
     int depth = 0;
     while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
         Item obj_name = map_get(obj.map, class_key);
-        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING &&
-            get_type_id(right_name) == LMD_TYPE_STRING) {
+        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
             String* on = it2s(obj_name);
-            String* rn = it2s(right_name);
             if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
                 return (Item){.item = b2it(true)};
             }
@@ -890,6 +903,23 @@ extern "C" Item js_array_from(Item iterable) {
         return result;
     }
     return js_array_new(0);
+}
+
+// Array.from(iterable, mapFn) — with optional mapper function
+extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
+    Item arr = js_array_from(iterable);
+    // Apply mapper if provided and is a function
+    if (get_type_id(mapFn) == LMD_TYPE_FUNC) {
+        int64_t len = js_array_length(arr);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+            Item idx_item = (Item){.item = i2it(i)};
+            Item args[2] = {elem, idx_item};
+            Item mapped = js_call_function(mapFn, ItemNull, args, 2);
+            js_array_set(arr, (Item){.item = i2it(i)}, mapped);
+        }
+    }
+    return arr;
 }
 
 // =============================================================================

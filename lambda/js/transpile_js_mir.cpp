@@ -4235,6 +4235,59 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
     } else {
         left = jm_transpile_box_item(mt, bin->left);
     }
+
+    // Special case: instanceof — always use name-based check when possible.
+    // This handles builtin classes (Error, TypeError, etc.), user-defined classes,
+    // class aliases (var MyError = _MyError), and unresolved identifiers.
+    // Name-based check is more reliable than runtime variable lookup because class
+    // objects may not exist at runtime (e.g., class declarations inside function bodies).
+    if (bin->op == JS_OP_INSTANCEOF && bin->right &&
+        bin->right->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* rid = (JsIdentifierNode*)bin->right;
+        if (rid->name) {
+            const char* rname = rid->name->chars;
+            int rlen = (int)rid->name->len;
+            // Check if right side resolves to a known class (including aliases)
+            JsClassEntry* rce = jm_find_class(mt, rname, rlen);
+            if (rce) {
+                // Use the actual class name (not the alias) for the check
+                MIR_reg_t classname = jm_box_string_literal(mt, rce->name->chars,
+                    (int)rce->name->len);
+                return jm_call_2(mt, "js_instanceof_classname", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, classname));
+            }
+            // Check for builtin class names
+            bool is_builtin_class =
+                (rlen == 5 && strncmp(rname, "Error", 5) == 0) ||
+                (rlen == 9 && strncmp(rname, "TypeError", 9) == 0) ||
+                (rlen == 10 && strncmp(rname, "RangeError", 10) == 0) ||
+                (rlen == 11 && strncmp(rname, "SyntaxError", 11) == 0) ||
+                (rlen == 14 && strncmp(rname, "ReferenceError", 14) == 0);
+            // Also check if the right side is an unresolved identifier
+            if (!is_builtin_class) {
+                char rv_name[128];
+                snprintf(rv_name, sizeof(rv_name), "_js_%.*s", rlen, rname);
+                JsMirVarEntry* rv = jm_find_var(mt, rv_name);
+                if (!rv) {
+                    JsModuleConstEntry mclookup;
+                    snprintf(mclookup.name, sizeof(mclookup.name), "_js_%.*s", rlen, rname);
+                    JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &mclookup);
+                    if (!mc) {
+                        // Unresolved identifier — treat as name-based instanceof
+                        is_builtin_class = true;
+                    }
+                }
+            }
+            if (is_builtin_class) {
+                MIR_reg_t classname = jm_box_string_literal(mt, rname, rlen);
+                return jm_call_2(mt, "js_instanceof_classname", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, classname));
+            }
+        }
+    }
+
     MIR_reg_t right = jm_transpile_box_item(mt, bin->right);
     return jm_call_2(mt, fn_name, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
@@ -5836,6 +5889,42 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     return jm_emit_null(mt);
                 }
             } else {
+                // No user-defined superclass — check for builtin parent class (Error, etc.)
+                // When super(msg) is called in a class extending Error, set this.message and this.name
+                if (mt->current_class && mt->current_class->node &&
+                    mt->current_class->node->superclass &&
+                    mt->current_class->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* super_id = (JsIdentifierNode*)mt->current_class->node->superclass;
+                    if (super_id->name) {
+                        const char* sname = super_id->name->chars;
+                        int slen = (int)super_id->name->len;
+                        bool is_error_class =
+                            (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
+                            (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
+                            (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
+                            (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
+                            (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
+                        if (is_error_class) {
+                            // Set this.message = first arg, this.name = error type name
+                            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                            MIR_reg_t msg_key = jm_box_string_literal(mt, "message", 7);
+                            MIR_reg_t msg_val = (call->arguments) ?
+                                jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_val));
+                            MIR_reg_t name_key = jm_box_string_literal(mt, "name", 4);
+                            MIR_reg_t name_val = jm_box_string_literal(mt, sname, slen);
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, name_val));
+                            log_debug("js-mir: super() for builtin Error class '%.*s'", slen, sname);
+                            return this_val;
+                        }
+                    }
+                }
                 log_debug("js-mir: super() called but no parent class context");
                 return jm_emit_null(mt);
             }
@@ -6174,10 +6263,18 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_json_stringify", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-            // Array.from(iterable)
+            // Array.from(iterable, mapFn?)
             if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
                 prop->name && prop->name->len == 4 && strncmp(prop->name->chars, "from", 4) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                // Check if second argument (mapFn) is provided
+                JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
+                if (second_arg) {
+                    MIR_reg_t mapFn = jm_transpile_box_item(mt, second_arg);
+                    return jm_call_2(mt, "js_array_from_with_mapper", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mapFn));
+                }
                 return jm_call_1(mt, "js_array_from", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
@@ -9894,6 +9991,69 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
+        }
+
+        // Set up __proto__ chain with __class_name__ for each ancestor class
+        // so that `instanceof ParentClass` works through prototype chain walking
+        {
+            // Build __proto__ chain for user-defined superclasses
+            JsClassEntry* sc = ce->superclass;
+            MIR_reg_t last_proto = obj;
+            while (sc) {
+                MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
+                MIR_reg_t pcn_val = jm_box_string_literal(mt, sc->name->chars, (int)sc->name->len);
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
+                jm_call_void_2(mt, "js_set_prototype",
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, last_proto),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
+                last_proto = proto_obj;
+                sc = sc->superclass;
+            }
+            // Check for builtin superclass (Error, TypeError, etc.) when no JsClassEntry
+            if (!ce->superclass && ce->node && ce->node->superclass &&
+                ce->node->superclass->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
+                if (super_id->name) {
+                    const char* sname = super_id->name->chars;
+                    int slen = (int)super_id->name->len;
+                    // Check for known builtin error classes
+                    bool is_error_class =
+                        (slen == 5 && strncmp(sname, "Error", 5) == 0) ||
+                        (slen == 9 && strncmp(sname, "TypeError", 9) == 0) ||
+                        (slen == 10 && strncmp(sname, "RangeError", 10) == 0) ||
+                        (slen == 11 && strncmp(sname, "SyntaxError", 11) == 0) ||
+                        (slen == 14 && strncmp(sname, "ReferenceError", 14) == 0);
+                    if (is_error_class) {
+                        MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                        MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
+                        MIR_reg_t pcn_val = jm_box_string_literal(mt, sname, slen);
+                        jm_call_3(mt, "js_property_set", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
+                        jm_call_void_2(mt, "js_set_prototype",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
+                        // Also add a root "Error" proto entry if this is a specific error type
+                        if (slen != 5) {
+                            MIR_reg_t root_proto = jm_call_0(mt, "js_new_object", MIR_T_I64);
+                            MIR_reg_t rcn_key = jm_box_string_literal(mt, "__class_name__", 14);
+                            MIR_reg_t rcn_val = jm_box_string_literal(mt, "Error", 5);
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, rcn_val));
+                            jm_call_void_2(mt, "js_set_prototype",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto));
+                        }
+                    }
+                }
+            }
         }
 
         // Inherit methods from parent classes (walk up superclass chain, base-first)
