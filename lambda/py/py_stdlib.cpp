@@ -12,13 +12,16 @@
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <dirent.h>
+#ifndef _WIN32
+#include <unistd.h>    // for usleep
+#endif
 
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/stringbuf.h"
+#include "../../lib/file.h"
+#include "../../lib/file_utils.h"
+#include "../../lib/shell.h"
 #include "../sysinfo.h"
 
 // Lambda runtime externs (defined in py_runtime.cpp)
@@ -241,9 +244,11 @@ extern "C" Item py_stdlib_math_init(void) {
 
 // os.getcwd()
 static Item py_os_getcwd(void) {
-    char buf[1024];
-    if (getcwd(buf, sizeof(buf))) {
-        return mk_str(buf);
+    char* cwd = file_getcwd();
+    if (cwd) {
+        Item result = mk_str(cwd);
+        free(cwd);
+        return result;
     }
     return mk_str(".");
 }
@@ -257,17 +262,15 @@ static Item py_os_listdir(Item path_item) {
     }
 
     Item result = py_list_new(0);
-    DIR* d = opendir(path);
-    if (!d) return result;
+    ArrayList* entries = dir_list(path);
+    if (!entries) return result;
 
-    struct dirent* entry;
-    while ((entry = readdir(d)) != NULL) {
-        if (entry->d_name[0] == '.' &&
-            (entry->d_name[1] == '\0' || (entry->d_name[1] == '.' && entry->d_name[2] == '\0')))
-            continue;
-        py_list_append(result, mk_str(entry->d_name));
+    for (int i = 0; i < entries->length; i++) {
+        DirEntry* entry = (DirEntry*)entries->data[i];
+        py_list_append(result, mk_str(entry->name));
+        dir_entry_free(entry);
     }
-    closedir(d);
+    arraylist_free(entries);
     return result;
 }
 
@@ -298,26 +301,21 @@ static Item py_os_path_join(Item a, Item b, Item c, Item d, Item e, Item f) {
 static Item py_os_path_exists(Item p) {
     String* s = it2s(p);
     if (!s || !s->chars) return (Item){.item = b2it(false)};
-    struct stat st;
-    return (Item){.item = b2it(stat(s->chars, &st) == 0)};
+    return (Item){.item = b2it(file_exists(s->chars))};
 }
 
 // os.path.isfile(p)
 static Item py_os_path_isfile(Item p) {
     String* s = it2s(p);
     if (!s || !s->chars) return (Item){.item = b2it(false)};
-    struct stat st;
-    if (stat(s->chars, &st) != 0) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(S_ISREG(st.st_mode))};
+    return (Item){.item = b2it(file_is_file(s->chars))};
 }
 
 // os.path.isdir(p)
 static Item py_os_path_isdir(Item p) {
     String* s = it2s(p);
     if (!s || !s->chars) return (Item){.item = b2it(false)};
-    struct stat st;
-    if (stat(s->chars, &st) != 0) return (Item){.item = b2it(false)};
-    return (Item){.item = b2it(S_ISDIR(st.st_mode))};
+    return (Item){.item = b2it(file_is_dir(s->chars))};
 }
 
 // os.path.basename(p)
@@ -347,19 +345,22 @@ static Item py_os_path_dirname(Item p) {
 static Item py_os_path_abspath(Item p) {
     String* s = it2s(p);
     if (!s || !s->chars) return mk_str("");
-    char resolved[PATH_MAX];
-    if (realpath(s->chars, resolved)) {
-        return mk_str(resolved);
+    char* resolved = file_realpath(s->chars);
+    if (resolved) {
+        Item result = mk_str(resolved);
+        free(resolved);
+        return result;
     }
     // fallback: prepend cwd
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd))) {
+    char* cwd = file_getcwd();
+    if (cwd) {
         StrBuf* sb = strbuf_new();
         strbuf_append_str(sb, cwd);
         strbuf_append_char(sb, '/');
         strbuf_append_str(sb, s->chars);
         Item result = mk_str(sb->str);
         strbuf_free(sb);
+        free(cwd);
         return result;
     }
     return p;
@@ -412,7 +413,7 @@ extern "C" Item py_stdlib_os_path_init(void) {
 static Item py_os_getenv(Item key, Item defval) {
     String* s = it2s(key);
     if (!s || !s->chars) return defval;
-    const char* val = getenv(s->chars);
+    const char* val = shell_getenv(s->chars);
     if (!val) return defval;
     return mk_str(val);
 }

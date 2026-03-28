@@ -436,12 +436,15 @@ struct Container {
     };
 
     // ArrayList definition for MIR runtime (item_keys return type)
+#ifndef _ARRAYLIST_STRUCT_DEFINED
+#define _ARRAYLIST_STRUCT_DEFINED
     typedef void *ArrayListValue;
     struct _ArrayList {
         ArrayListValue *data;
         int length;
         int _alloced;
     };
+#endif
 
     // Map, Object, Element struct definitions for direct field access optimization
     // Layout must match the C++ structs in lambda.hpp exactly

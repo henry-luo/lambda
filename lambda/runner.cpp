@@ -1,10 +1,9 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #ifndef _WIN32
 #include <pthread.h>
-#include <unistd.h>
+#include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
 #include "mark_builder.hpp"
@@ -13,7 +12,9 @@
 #include "module_registry.h"
 #include "js/js_runtime.h"
 #include "template_registry.h"
+#include "../lib/file.h"
 #include "../lib/file_utils.h"
+#include "../lib/shell.h"
 
 extern "C" Item js_property_get(Item object, Item key);
 
@@ -38,13 +39,12 @@ const char* g_lambda_home = "./lambda";
 
 // check if a directory exists
 static bool dir_exists(const char* path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    return file_is_dir(path);
 }
 
 void lambda_home_init(void) {
     // 1. environment variable always wins
-    const char* env = getenv("LAMBDA_HOME");
+    const char* env = shell_getenv("LAMBDA_HOME");
     if (env && env[0]) {
         g_lambda_home = env;
         return;
@@ -77,7 +77,6 @@ char* lambda_home_path(const char* rel) {
 
 #if _WIN32
 #include <windows.h>
-#include <direct.h>  // for _fullpath
 #endif
 
 // ============================================================================
@@ -107,7 +106,7 @@ int profile_count = 0;
 
 bool is_profile_enabled() {
     if (!profile_checked) {
-        const char* env = getenv("LAMBDA_PROFILE");
+        const char* env = shell_getenv("LAMBDA_PROFILE");
         profile_enabled = (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0));
         profile_checked = true;
     }
