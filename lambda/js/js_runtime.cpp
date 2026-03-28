@@ -90,6 +90,9 @@ extern "C" Item js_new_error(Item message) {
     js_property_set(obj, name_key, name_val);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set __class_name__ for instanceof support
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    js_property_set(obj, cn_key, name_val);
     return obj;
 }
 
@@ -100,6 +103,9 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
     js_property_set(obj, name_key, error_name);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set __class_name__ for instanceof support
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    js_property_set(obj, cn_key, error_name);
     return obj;
 }
 
@@ -1754,6 +1760,14 @@ struct JsCollectionEntry {
     Item value;
 };
 
+// Insertion-order node for Map/Set (doubly-linked list)
+struct JsCollectionOrderNode {
+    Item key;
+    Item value;
+    JsCollectionOrderNode* next;
+    JsCollectionOrderNode* prev;
+};
+
 // 0 = Map, 1 = Set
 #define JS_COLLECTION_MAP 0
 #define JS_COLLECTION_SET 1
@@ -1761,6 +1775,8 @@ struct JsCollectionEntry {
 struct JsCollectionData {
     HashMap* hmap;
     int type; // JS_COLLECTION_MAP or JS_COLLECTION_SET
+    JsCollectionOrderNode* order_head; // insertion-order linked list (oldest first)
+    JsCollectionOrderNode* order_tail; // newest entry
 };
 
 static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t seed1) {
@@ -1829,16 +1845,59 @@ static Item js_collection_create(int type) {
     JsCollectionData* cd = (JsCollectionData*)pool_calloc(js_input->pool, sizeof(JsCollectionData));
     cd->hmap = hm;
     cd->type = type;
+    cd->order_head = NULL;
+    cd->order_tail = NULL;
     Item obj = js_new_object();
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
-    log_error("js_collection_create: cd=%p addr=%lld cd_val.item=0x%llx cd_val_tid=%d", cd, (long long)(uintptr_t)cd, (unsigned long long)cd_val.item, (int)get_type_id(cd_val));
     js_property_set(obj, cd_key, cd_val);
     // set initial size property
     Item size_key = (Item){.item = s2it(heap_create_name("size"))};
     Item size_val = (Item){.item = i2it(0)};
     js_property_set(obj, size_key, size_val);
     return obj;
+}
+
+// Helper: add or update an entry in the insertion-order list
+static void js_collection_order_upsert(JsCollectionData* cd, Item key, Item value) {
+    // Check if key already exists in the order list
+    JsCollectionOrderNode* node = cd->order_head;
+    while (node) {
+        JsCollectionEntry ea = {.key = node->key};
+        JsCollectionEntry eb = {.key = key};
+        if (js_collection_compare(&ea, &eb, NULL) == 0) {
+            // Key exists — update value in-place (preserves insertion order)
+            node->value = value;
+            return;
+        }
+        node = node->next;
+    }
+    // New entry — append to tail
+    JsCollectionOrderNode* n = (JsCollectionOrderNode*)pool_calloc(js_input->pool, sizeof(JsCollectionOrderNode));
+    n->key = key;
+    n->value = value;
+    n->next = NULL;
+    n->prev = cd->order_tail;
+    if (cd->order_tail) cd->order_tail->next = n;
+    else cd->order_head = n;
+    cd->order_tail = n;
+}
+
+// Helper: remove an entry from the insertion-order list
+static void js_collection_order_remove(JsCollectionData* cd, Item key) {
+    JsCollectionOrderNode* node = cd->order_head;
+    while (node) {
+        JsCollectionEntry ea = {.key = node->key};
+        JsCollectionEntry eb = {.key = key};
+        if (js_collection_compare(&ea, &eb, NULL) == 0) {
+            if (node->prev) node->prev->next = node->next;
+            else cd->order_head = node->next;
+            if (node->next) node->next->prev = node->prev;
+            else cd->order_tail = node->prev;
+            return;
+        }
+        node = node->next;
+    }
 }
 
 static void js_collection_update_size(Item obj, JsCollectionData* cd) {
@@ -1873,6 +1932,8 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
                 entry.value = arg2;
             }
             hashmap_set(cd->hmap, &entry);
+            // Maintain insertion-order list
+            js_collection_order_upsert(cd, entry.key, entry.value);
             js_collection_update_size(obj, cd);
             return obj; // return collection for chaining
         }
@@ -1890,72 +1951,71 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
         case 3: { // delete(key)
             JsCollectionEntry probe = {.key = arg1};
             const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_delete(cd->hmap, &probe);
+            js_collection_order_remove(cd, arg1);
             js_collection_update_size(obj, cd);
             return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 4: { // clear()
             hashmap_clear(cd->hmap, false);
+            cd->order_head = NULL;
+            cd->order_tail = NULL;
             js_collection_update_size(obj, cd);
             return make_js_undefined();
         }
-        case 5: { // forEach(callback)
-            size_t iter = 0;
-            void* item;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+        case 5: { // forEach(callback) — insertion order
+            JsCollectionOrderNode* node = cd->order_head;
+            while (node) {
                 if (cd->type == JS_COLLECTION_SET) {
                     // callback(value, value, set)
-                    js_call_function(arg1, make_js_undefined(), &e->key, 1);
+                    js_call_function(arg1, make_js_undefined(), &node->key, 1);
                 } else {
                     // callback(value, key, map)
-                    Item args[2] = {e->value, e->key};
+                    Item args[2] = {node->value, node->key};
                     js_call_function(arg1, make_js_undefined(), args, 2);
                 }
+                node = node->next;
             }
             return make_js_undefined();
         }
-        case 6: { // keys() — returns array
+        case 6: { // keys() — returns array in insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
-                js_array_set_int(arr, idx, e->key);
+            while (node) {
+                js_array_set_int(arr, idx, node->key);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
-        case 7: { // values()
+        case 7: { // values() — insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+            while (node) {
                 if (cd->type == JS_COLLECTION_SET)
-                    js_array_set_int(arr, idx, e->key);
+                    js_array_set_int(arr, idx, node->key);
                 else
-                    js_array_set_int(arr, idx, e->value);
+                    js_array_set_int(arr, idx, node->value);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
-        case 8: { // entries() — returns array of [key, value] pairs
+        case 8: { // entries() — returns array of [key, value] pairs in insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+            while (node) {
                 Item pair = js_array_new(2);
-                js_array_set_int(pair, 0, e->key);
-                js_array_set_int(pair, 1, e->value);
+                js_array_set_int(pair, 0, node->key);
+                js_array_set_int(pair, 1, node->value);
                 js_array_set_int(arr, idx, pair);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
@@ -3621,6 +3681,20 @@ extern "C" Item js_iterable_to_array(Item iterable) {
             array_push(arr.array, value);
         }
         return arr;
+    }
+
+    // Check if it's a Map/Set collection — convert to array of entries
+    if (get_type_id(iterable) == LMD_TYPE_MAP) {
+        JsCollectionData* cd = js_get_collection_data(iterable);
+        if (cd) {
+            if (cd->type == JS_COLLECTION_MAP) {
+                // Map: return array of [key, value] pairs
+                return js_collection_method(iterable, 8, ItemNull, ItemNull); // entries()
+            } else {
+                // Set: return array of values
+                return js_collection_method(iterable, 7, ItemNull, ItemNull); // values()
+            }
+        }
     }
 
     // Fallback: return as-is (might be a map treated as iterable)

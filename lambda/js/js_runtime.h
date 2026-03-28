@@ -204,6 +204,7 @@ void js_console_log_multi(Item* args, int argc);
 // =============================================================================
 
 Item js_instanceof(Item left, Item right);
+Item js_instanceof_classname(Item left, Item classname);
 Item js_in(Item key, Item object);
 Item js_nullish_coalesce(Item left, Item right);
 
@@ -262,6 +263,7 @@ Item js_number_is_safe_integer(Item value);
 // =============================================================================
 
 Item js_array_from(Item iterable);
+Item js_array_from_with_mapper(Item iterable, Item mapFn);
 Item js_json_parse(Item str_item);
 Item js_json_stringify(Item value);
 Item js_delete_property(Item obj, Item key);
