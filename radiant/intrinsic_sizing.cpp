@@ -2642,9 +2642,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (view->embed && view->embed->img) {
                 ImageSurface* img = view->embed->img;
                 float img_height = (float)img->height;
-                // If width is constrained, scale height proportionally
-                if (width > 0 && width < img->width && img->width > 0) {
-                    img_height = width * img->height / img->width;
+                // Scale height proportionally when width differs from intrinsic.
+                // For SVG: always scale (vector images are resolution-independent).
+                // For raster: only scale down (raster images have fixed pixel counts).
+                if (width > 0 && img->width > 0 &&
+                    (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
+                    img_height = width * (float)img->height / (float)img->width;
                 }
                 log_debug("calculate_max_content_height: IMG intrinsic height=%.1f", img_height);
                 return img_height;
@@ -2663,8 +2666,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 if (view->embed->img) {
                     ImageSurface* img = view->embed->img;
                     float img_height = (float)img->height;
-                    if (width > 0 && width < img->width && img->width > 0) {
-                        img_height = width * img->height / img->width;
+                    if (width > 0 && img->width > 0 &&
+                        (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
+                        img_height = width * (float)img->height / (float)img->width;
                     }
                     log_debug("calculate_max_content_height: IMG intrinsic height=%.1f (loaded)", img_height);
                     return img_height;
