@@ -739,6 +739,98 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
 }
 
 /**
+ * Resolve @import rules within a stylesheet: load and parse imported CSS files,
+ * add them to the stylesheet list. This handles CSS like @import url('font-awesome.css');
+ */
+static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
+                                        CssEngine* engine, Pool* pool,
+                                        CssStylesheet*** stylesheets, int* count, int depth) {
+    if (!stylesheet || !engine || !pool || !stylesheets || !count) return;
+    if (depth > 5) {
+        log_warn("[CSS @import] Maximum @import nesting depth reached (5), skipping");
+        return;
+    }
+
+    // Get directory of the stylesheet for resolving relative import URLs
+    char dir_buf[1024];
+    const char* import_base_dir = nullptr;
+    if (stylesheet_path) {
+        const char* last_slash = strrchr(stylesheet_path, '/');
+        if (last_slash) {
+            size_t dir_len = last_slash - stylesheet_path + 1;
+            if (dir_len < sizeof(dir_buf)) {
+                memcpy(dir_buf, stylesheet_path, dir_len);
+                dir_buf[dir_len] = '\0';
+                import_base_dir = dir_buf;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        CssRule* rule = stylesheet->rules[i];
+        if (!rule || rule->type != CSS_RULE_IMPORT) continue;
+
+        const char* import_url = rule->data.import_rule.url;
+        if (!import_url || import_url[0] == '\0') continue;
+
+        log_debug("[CSS @import] Processing: @import '%s' (base: %s)", import_url,
+                  import_base_dir ? import_base_dir : "(none)");
+
+        // Resolve import path relative to the stylesheet
+        char import_path[1024];
+        if (strstr(import_url, "://") != nullptr) {
+            // Absolute URL
+            strncpy(import_path, import_url, sizeof(import_path) - 1);
+            import_path[sizeof(import_path) - 1] = '\0';
+        } else if (import_base_dir) {
+            snprintf(import_path, sizeof(import_path), "%s%s", import_base_dir, import_url);
+        } else {
+            strncpy(import_path, import_url, sizeof(import_path) - 1);
+            import_path[sizeof(import_path) - 1] = '\0';
+        }
+
+        // Load and parse the imported CSS file
+        char* css_content = nullptr;
+        bool is_http = (strncmp(import_path, "http://", 7) == 0 || strncmp(import_path, "https://", 8) == 0);
+        if (is_http) {
+            size_t content_size = 0;
+            css_content = download_http_content(import_path, &content_size, nullptr);
+        } else {
+            css_content = read_text_file(import_path);
+        }
+
+        if (!css_content) {
+            log_warn("[CSS @import] Failed to load imported stylesheet: %s", import_path);
+            continue;
+        }
+
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (!css_pool_copy) {
+            free(css_content);
+            continue;
+        }
+        str_copy(css_pool_copy, css_len + 1, css_content, css_len);
+        free(css_content);
+
+        CssStylesheet* imported = css_parse_stylesheet(engine, css_pool_copy, import_path);
+        if (imported && imported->rule_count > 0) {
+            log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
+
+            *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                          (*count + 1) * sizeof(CssStylesheet*));
+            (*stylesheets)[*count] = imported;
+            (*count)++;
+
+            // Recursively resolve @imports within the imported stylesheet
+            resolve_stylesheet_imports(imported, import_path, engine, pool, stylesheets, count, depth + 1);
+        } else {
+            log_warn("[CSS @import] Failed to parse imported stylesheet: %s", import_path);
+        }
+    }
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -853,6 +945,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                                                                       (*count + 1) * sizeof(CssStylesheet*));
                         (*stylesheets)[*count] = stylesheet;
                         (*count)++;
+
+                        // Resolve @import rules within this stylesheet
+                        resolve_stylesheet_imports(stylesheet, css_path, engine, pool, stylesheets, count, 0);
                     } else {
                         log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
                     }

@@ -1002,10 +1002,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             }
-            // Ultimate fallback — placeholder size
+            // Ultimate fallback — broken image with no dimensions
+            // Per HTML spec, broken images are treated as inline elements, not replaced.
+            // Browsers render them at ~0x0 for layout purposes (possibly with small icon).
             if (replaced_width < 0) {
-                replaced_width = 40;
-                log_debug("  -> replaced IMG fallback width: 40");
+                replaced_width = 0;
+                log_debug("  -> replaced IMG fallback width: 0 (broken image)");
             }
         }
         else if (replaced_tag == HTM_TAG_IFRAME) {
@@ -2743,7 +2745,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 int h = atoi(attr_h);
                 if (h > 0) return (float)h;
             }
-            return 30.0f;  // placeholder
+            return 0.0f;  // broken image (browsers render as empty inline element)
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150
