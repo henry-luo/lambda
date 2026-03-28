@@ -35,6 +35,16 @@ void sysinfo_init(void);
 void sysinfo_set_args(int argc, char** argv);
 
 /**
+ * Get the stored command line argument count.
+ */
+int sysinfo_get_argc(void);
+
+/**
+ * Get the stored command line argument vector.
+ */
+char** sysinfo_get_argv(void);
+
+/**
  * Shutdown sysinfo module and free resources.
  */
 void sysinfo_shutdown(void);

@@ -60,6 +60,10 @@ static const uint64_t PY_ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
 static const uint64_t PY_STR_TAG        = (uint64_t)LMD_TYPE_STRING << 56;
 static const uint64_t PY_MASK56         = 0x00FFFFFFFFFFFFFFULL;
 
+// directory of the entry-point script, used for absolute import resolution
+// in sub-modules (prevents path doubling for package-internal imports)
+static char py_entry_script_dir[512] = "";
+
 // ============================================================================
 // Transpiler structs
 // ============================================================================
@@ -3881,6 +3885,24 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
         }
 
+        // fallback: try relative to entry-point script directory (for package imports)
+        if (ns.item == ItemNull.item && py_entry_script_dir[0]) {
+            StrBuf* root_buf = strbuf_new();
+            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
+            for (int i = 0; i < mod_len; i++) {
+                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.py", root_buf->str);
+            ns = load_py_module(mt->runtime, try_buf->str);
+            if (ns.item == ItemNull.item) {
+                strbuf_reset(try_buf);
+                strbuf_append_format(try_buf, "%s.js", root_buf->str);
+                ns = load_js_module(mt->runtime, try_buf->str);
+            }
+            strbuf_free(root_buf);
+        }
+
         strbuf_free(try_buf);
         } // end built-in check
         strbuf_free(path_buf);
@@ -4099,6 +4121,24 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (script && script->ast_root) {
                 ns = module_build_lambda_namespace(script);
             }
+        }
+
+        // fallback: try relative to entry-point script directory (for package imports)
+        if (ns.item == ItemNull.item && py_entry_script_dir[0] && mod_name[0] != '.') {
+            StrBuf* root_buf = strbuf_new();
+            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
+            for (int i = 0; i < mod_len; i++) {
+                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+            strbuf_reset(try_buf);
+            strbuf_append_format(try_buf, "%s.py", root_buf->str);
+            ns = load_py_module(mt->runtime, try_buf->str);
+            if (ns.item == ItemNull.item) {
+                strbuf_reset(try_buf);
+                strbuf_append_format(try_buf, "%s.js", root_buf->str);
+                ns = load_js_module(mt->runtime, try_buf->str);
+            }
+            strbuf_free(root_buf);
         }
 
         strbuf_free(try_buf);
@@ -4643,9 +4683,9 @@ static void pm_collect_functions_r(PyMirTranspiler* mt, PyAstNode* node, int par
             pm_collect_functions_r(mt, body_stmt, parent_index);
             body_stmt = body_stmt->next;
         }
-        // tag the newly added entries as methods of this class
+        // tag only DIRECT children of the class body as methods (not nested functions inside methods)
         for (int mi = before; mi < mt->func_count; mi++) {
-            if (!mt->func_entries[mi].is_method) {
+            if (!mt->func_entries[mi].is_method && mt->func_entries[mi].parent_index == parent_index) {
                 mt->func_entries[mi].is_method = true;
                 snprintf(mt->func_entries[mi].class_name,
                     sizeof(mt->func_entries[mi].class_name),
@@ -5358,8 +5398,43 @@ static void pm_collect_lambdas_r(PyMirTranspiler* mt, PyAstNode* node, int paren
           pm_collect_lambdas_r(mt, c->conditions, parent_func_index); pm_collect_lambdas_r(mt, c->inner, parent_func_index); } break;
     case PY_AST_NODE_FSTRING:
         { PyAstNode* p = ((PyFStringNode*)node)->parts; while (p) { pm_collect_lambdas_r(mt, p, parent_func_index); p = p->next; } } break;
+    case PY_AST_NODE_CLASS_DEF: {
+        // recurse into class body so lambdas inside methods are collected
+        PyClassDefNode* cls = (PyClassDefNode*)node;
+        PyAstNode* body_stmt = NULL;
+        if (cls->body && cls->body->node_type == PY_AST_NODE_BLOCK) {
+            body_stmt = ((PyBlockNode*)cls->body)->statements;
+        } else {
+            body_stmt = cls->body;
+        }
+        while (body_stmt) {
+            pm_collect_lambdas_r(mt, body_stmt, parent_func_index);
+            body_stmt = body_stmt->next;
+        }
+        break;
+    }
     default:
         break;
+    }
+}
+
+// ============================================================================
+// MIR function name generation — ensures unique names for nested functions
+// ============================================================================
+
+static void pm_make_mir_func_name(PyMirTranspiler* mt, PyFuncCollected* fc, char* fn_name, int fn_name_size) {
+    if (fc->is_method && fc->class_name[0]) {
+        snprintf(fn_name, fn_name_size, "_%s_%s", fc->class_name, fc->name);
+    } else if (fc->parent_index >= 0) {
+        // nested function — include parent info for uniqueness
+        PyFuncCollected* parent = &mt->func_entries[fc->parent_index];
+        if (parent->is_method && parent->class_name[0]) {
+            snprintf(fn_name, fn_name_size, "_%s_%s__%s", parent->class_name, parent->name, fc->name);
+        } else {
+            snprintf(fn_name, fn_name_size, "_%s__%s", parent->name, fc->name);
+        }
+    } else {
+        snprintf(fn_name, fn_name_size, "_%s", fc->name);
     }
 }
 
@@ -5369,11 +5444,7 @@ static void pm_collect_lambdas_r(PyMirTranspiler* mt, PyAstNode* node, int paren
 
 static void pm_compile_generator(PyMirTranspiler* mt, PyFuncCollected* fc) {
     char fn_name[260];
-    if (fc->is_method && fc->class_name[0]) {
-        snprintf(fn_name, sizeof(fn_name), "_%s_%s", fc->class_name, fc->name);
-    } else {
-        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
-    }
+    pm_make_mir_func_name(mt, fc, fn_name, sizeof(fn_name));
     log_debug("py-mir: compiling generator '%s'", fn_name);
 
     // ---- Step 1: Collect all local variables ----
@@ -5701,11 +5772,7 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
     }
 
     char fn_name[260];
-    if (fc->is_method && fc->class_name[0]) {
-        snprintf(fn_name, sizeof(fn_name), "_%s_%s", fc->class_name, fc->name);
-    } else {
-        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
-    }
+    pm_make_mir_func_name(mt, fc, fn_name, sizeof(fn_name));
 
     // build parameter list; closures get _py__env as hidden first param
     // *args functions get _py__varargs (ptr) + _py__varargc (count) as extra params
@@ -6054,7 +6121,7 @@ static void pm_transpile_ast(PyMirTranspiler* mt, PyAstNode* root) {
         PyFuncCollected* fc = &mt->func_entries[i];
         if (fc->is_method) continue;  // methods are accessed via py_getattr
         char fn_name[260];
-        snprintf(fn_name, sizeof(fn_name), "_%s", fc->name);
+        pm_make_mir_func_name(mt, fc, fn_name, sizeof(fn_name));
         MIR_item_t fwd = MIR_new_forward(mt->ctx, fn_name);
         fc->func_item = fwd;  // direct-call path uses this; overwritten by real func later
         PyLocalFuncEntry lfe;
@@ -6194,6 +6261,22 @@ Item transpile_py_to_mir(Runtime* runtime, const char* py_source, const char* fi
     mt->ctx = ctx;
     mt->filename = filename;
     mt->runtime = runtime;
+
+    // store entry-point script directory for sub-module import resolution
+    if (filename) {
+        const char* last_slash = strrchr(filename, '/');
+        if (last_slash) {
+            int dir_len = (int)(last_slash - filename);
+            if (dir_len < (int)sizeof(py_entry_script_dir) - 1) {
+                memcpy(py_entry_script_dir, filename, dir_len);
+                py_entry_script_dir[dir_len] = '\0';
+            }
+        } else {
+            py_entry_script_dir[0] = '.';
+            py_entry_script_dir[1] = '\0';
+        }
+    }
+
     mt->import_cache = hashmap_new(sizeof(PyImportCacheEntry), 64, 0, 0,
         py_import_cache_hash, py_import_cache_cmp, NULL, NULL);
     mt->local_funcs = hashmap_new(sizeof(PyLocalFuncEntry), 32, 0, 0,
