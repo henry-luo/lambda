@@ -1002,12 +1002,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             }
-            // Ultimate fallback — broken image with no dimensions
-            // Per HTML spec, broken images are treated as inline elements, not replaced.
-            // Browsers render them at ~0x0 for layout purposes (possibly with small icon).
+            // Ultimate fallback — broken image icon size
+            // Chrome renders broken images at 16x16 (the broken image icon)
             if (replaced_width < 0) {
-                replaced_width = 0;
-                log_debug("  -> replaced IMG fallback width: 0 (broken image)");
+                replaced_width = 16;
+                log_debug("  -> replaced IMG fallback width: 16 (broken image icon)");
             }
         }
         else if (replaced_tag == HTM_TAG_IFRAME) {
@@ -2745,7 +2744,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 int h = atoi(attr_h);
                 if (h > 0) return (float)h;
             }
-            return 0.0f;  // broken image (browsers render as empty inline element)
+            return 16.0f;  // broken image icon size (Chrome uses 16x16)
         }
         else if (elem_tag == HTM_TAG_IFRAME || elem_tag == HTM_TAG_VIDEO || elem_tag == HTM_TAG_CANVAS) {
             return 150.0f;  // CSS default 300x150
