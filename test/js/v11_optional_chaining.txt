@@ -3,7 +3,7 @@ opt deep: 42
 null?.prop: undefined
 undef?.prop: undefined
 person?.name: Alice
-person?.missing: null
+person?.missing: undefined
 arr?.[1]: 20
 null?.[0]: undefined
 null

@@ -215,9 +215,28 @@ extern "C" Item js_to_string(Item value) {
     case LMD_TYPE_STRING:
         return value;
 
-    case LMD_TYPE_ARRAY:
-        // TODO: Implement array toString
-        return (Item){.item = s2it(heap_create_name("[object Array]"))};
+    case LMD_TYPE_ARRAY: {
+        // JS: String([1,2,3]) => "1,2,3" (same as Array.prototype.join(","))
+        Array* a = value.array;
+        if (!a || a->length == 0) {
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
+        StrBuf* sb = strbuf_new();
+        for (int i = 0; i < a->length; i++) {
+            if (i > 0) strbuf_append_str_n(sb, ",", 1);
+            TypeId etype = get_type_id(a->items[i]);
+            if (etype != LMD_TYPE_NULL && etype != LMD_TYPE_UNDEFINED) {
+                Item elem_str = js_to_string(a->items[i]);
+                String* s = it2s(elem_str);
+                if (s && s->len > 0) {
+                    strbuf_append_str_n(sb, s->chars, (int)s->len);
+                }
+            }
+        }
+        String* result = heap_create_name(sb->str, sb->length);
+        strbuf_free(sb);
+        return (Item){.item = s2it(result)};
+    }
 
     case LMD_TYPE_MAP:
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
@@ -832,9 +851,9 @@ extern "C" Item js_prototype_lookup(Item object, Item property);
 // Like _map_get but avoids strncmp+strlen overhead by using pre-computed key_len.
 // Still uses last-writer-wins since type changes can create duplicate shape entries.
 // Also handles spread/nested map entries (field->name == NULL).
-static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
+static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found = nullptr) {
     TypeMap* map_type = (TypeMap*)m->type;
-    if (!map_type || !map_type->shape) return ItemNull;
+    if (!map_type || !map_type->shape) { if (out_found) *out_found = false; return ItemNull; }
 
     // A1: Try hash table first for O(1) lookup (covers >99% of JS objects).
     // The hash table uses last-writer-wins via typemap_hash_insert, so the
@@ -842,6 +861,7 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
     if (map_type->field_count > 0) {
         ShapeEntry* entry = typemap_hash_lookup(map_type, key_str, key_len);
         if (entry) {
+            if (out_found) *out_found = true;
             return _map_read_field(entry, m->data);
         }
         // Not found in hash table — may have overflowed (capacity=32).
@@ -849,27 +869,31 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
         // check unnamed (nested/spread) entries.
         ShapeEntry* field = map_type->shape;
         Item overflow_result = ItemNull;
+        bool found = false;
         while (field) {
             if (!field->name) {
                 Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
                 if (nested_map && nested_map->type_id == LMD_TYPE_MAP) {
                     bool nested_found;
                     Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
-                    if (nested_found) return nested_result;
+                    if (nested_found) { if (out_found) *out_found = true; return nested_result; }
                 }
             } else if (field->name->str == key_str ||  // A6: interned pointer match
                        (field->name->length == (size_t)key_len &&
                         memcmp(field->name->str, key_str, key_len) == 0)) {
                 overflow_result = _map_read_field(field, m->data);
+                found = true;
             }
             field = field->next;
         }
+        if (out_found) *out_found = found;
         return overflow_result;
     }
 
     // Fallback: linear scan for objects without hash table
     ShapeEntry* field = map_type->shape;
     Item result = ItemNull;
+    bool found = false;
     while (field) {
         if (!field->name) {
             Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
@@ -878,15 +902,18 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
                 Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
                 if (nested_found) {
                     result = nested_result;
+                    found = true;
                 }
             }
         } else if (field->name->str == key_str ||  // A6: interned pointer match
                    (field->name->length == (size_t)key_len &&
                     memcmp(field->name->str, key_str, key_len) == 0)) {
             result = _map_read_field(field, m->data);
+            found = true;
         }
         field = field->next;
     }
+    if (out_found) *out_found = found;
     return result;
 }
 
@@ -984,21 +1011,23 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
         Item result = ItemNull;
+        bool own_found = false;
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
-            result = js_map_get_fast(object.map, key_str, key_len);
+            result = js_map_get_fast(object.map, key_str, key_len, &own_found);
         } else {
             result = map_get(object.map, key);  // fallback for non-string keys
+            own_found = (result.item != ItemNull.item);
         }
+        if (own_found) return result;
         // Prototype chain fallback: if property not found on own object, walk __proto__
-        if (result.item == ItemNull.item) {
-            result = js_prototype_lookup(object, key);
-        }
+        result = js_prototype_lookup(object, key);
+        if (result.item != ItemNull.item) return result;
         // Getter property fallback: check for __get_<propName> on object or prototype
         // Only check for getter if the key doesn't start with '_' (private properties
         // never have getters) and is short enough to be a getter name
-        if (result.item == ItemNull.item && key._type_id == LMD_TYPE_STRING) {
+        if (key._type_id == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
                 char getter_key[256];
@@ -1011,11 +1040,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
                     // Invoke getter with this = object (0 args)
-                    result = js_call_function(getter, object, NULL, 0);
+                    return js_call_function(getter, object, NULL, 0);
                 }
             }
         }
-        return result;
+        // Property not found — return undefined (JS semantics)
+        return make_js_undefined();
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
     } else if (type == LMD_TYPE_ARRAY) {
@@ -1026,13 +1056,17 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
                 return (Item){.item = i2it(object.array->length)};
             }
+            // Only allow numeric string keys for array index access
+            if (str_key->len == 0 || (str_key->chars[0] < '0' || str_key->chars[0] > '9')) {
+                return make_js_undefined();
+            }
         }
         // Numeric index access
         int idx = (int)js_get_number(key);
         if (idx >= 0 && idx < object.array->length) {
             return object.array->items[idx];
         }
-        return ItemNull;
+        return make_js_undefined();
     } else if (type == LMD_TYPE_STRING) {
         // String character access: str[index]
         String* str = it2s(object);
@@ -1047,7 +1081,7 @@ extern "C" Item js_property_get(Item object, Item key) {
             char ch[2] = { str->chars[idx], '\0' };
             return (Item){.item = s2it(heap_create_name(ch))};
         }
-        return ItemNull;
+        return make_js_undefined();
     }
 
     // Function: reading .prototype property
@@ -1068,7 +1102,7 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
     }
 
-    return ItemNull;
+    return make_js_undefined();
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
@@ -1274,7 +1308,7 @@ extern "C" Item js_array_new_from_item(Item arg) {
 
 extern "C" Item js_array_get(Item array, Item index) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
-        return ItemNull;
+        return make_js_undefined();
     }
 
     int idx = (int)js_get_number(index);
@@ -1284,7 +1318,7 @@ extern "C" Item js_array_get(Item array, Item index) {
         return arr->items[idx];
     }
 
-    return ItemNull;
+    return make_js_undefined();
 }
 
 // P10e: Fast array access with native int index (no js_get_number overhead)
@@ -1294,7 +1328,7 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         if (index >= 0 && index < arr->length) {
             return arr->items[index];
         }
-        return ItemNull;
+        return make_js_undefined();
     }
     // fall back to general property access for strings, maps, etc.
     return js_property_access(array, (Item){.item = i2it((int)index)});
@@ -1825,6 +1859,8 @@ static JsCollectionData* js_get_collection_data(Item obj) {
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_item = js_property_get(obj, cd_key);
     TypeId tid = get_type_id(cd_item);
+    // Property not found (undefined) or null → no collection data
+    if (tid == LMD_TYPE_UNDEFINED || tid == LMD_TYPE_NULL) return NULL;
     if (tid != LMD_TYPE_INT && tid != LMD_TYPE_INT64) {
         log_error("js_get_collection_data: cd_item tid=%d (not INT/INT64), cd_item.item=0x%llx", (int)tid, (unsigned long long)cd_item.item);
         return NULL;
@@ -1912,6 +1948,33 @@ extern "C" Item js_map_collection_new(void) {
 
 extern "C" Item js_set_collection_new(void) {
     return js_collection_create(JS_COLLECTION_SET);
+}
+
+extern "C" Item js_set_collection_new_from(Item iterable) {
+    Item set = js_collection_create(JS_COLLECTION_SET);
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_ARRAY) {
+        Array* a = iterable.array;
+        for (int i = 0; i < a->length; i++) {
+            js_collection_method(set, 0, a->items[i], ItemNull);
+        }
+    }
+    return set;
+}
+
+extern "C" Item js_map_collection_new_from(Item iterable) {
+    Item map = js_collection_create(JS_COLLECTION_MAP);
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_ARRAY) {
+        Array* a = iterable.array;
+        for (int i = 0; i < a->length; i++) {
+            Item entry = a->items[i];
+            if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
+                js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
+            }
+        }
+    }
+    return map;
 }
 
 // Map/Set method dispatch
@@ -2378,6 +2441,51 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return fn_upper(str);
     }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
+        if (argc > 0) {
+            Item sep = args[0];
+            // check if separator is a regex (Map with __rd property)
+            JsRegexData* rd = js_get_regex_data(sep);
+            if (rd) {
+                // regex split
+                String* s = it2s(str);
+                if (!s || s->len == 0) {
+                    Item result = js_array_new(1);
+                    js_array_push(result, (Item){.item = s2it(heap_create_name(""))});
+                    return result;
+                }
+                Item result = js_array_new(0);
+                re2::StringPiece input(s->chars, s->len);
+                int num_groups = rd->re2->NumberOfCapturingGroups();
+                int total_groups = num_groups + 1;
+                if (total_groups > 16) total_groups = 16;
+                re2::StringPiece match[16];
+                int pos = 0;
+                while (pos <= (int)s->len) {
+                    bool found = rd->re2->Match(input, pos, (int)s->len,
+                        re2::RE2::UNANCHORED, match, total_groups);
+                    if (!found || match[0].size() == 0) break;
+                    int match_start = (int)(match[0].data() - s->chars);
+                    int match_end = match_start + (int)match[0].size();
+                    // add substring before match
+                    String* part = heap_strcpy(s->chars + pos, match_start - pos);
+                    js_array_push(result, (Item){.item = s2it(part)});
+                    // add capturing groups
+                    for (int g = 1; g < total_groups; g++) {
+                        if (match[g].data()) {
+                            String* gstr = heap_strcpy((char*)match[g].data(), (int)match[g].size());
+                            js_array_push(result, (Item){.item = s2it(gstr)});
+                        } else {
+                            js_array_push(result, make_js_undefined());
+                        }
+                    }
+                    pos = match_end;
+                }
+                // add remainder
+                String* tail = heap_strcpy(s->chars + pos, (int)s->len - pos);
+                js_array_push(result, (Item){.item = s2it(tail)});
+                return result;
+            }
+        }
         Item sep = argc > 0 ? args[0] : (Item){.item = s2it(heap_create_name(""))};
         return fn_split(str, sep);
     }
@@ -3164,6 +3272,44 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         String* result = heap_strcpy(buf->str, buf->length);
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
+    }
+
+    // keys() — returns array of indices [0, 1, 2, ...]
+    if (method->len == 4 && strncmp(method->chars, "keys", 4) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
+        Array* a = arr.array;
+        Item result = js_array_new(a->length);
+        Array* r = result.array;
+        for (int i = 0; i < a->length; i++) {
+            r->items[i] = (Item){.item = i2it(i)};
+        }
+        r->length = a->length;
+        return result;
+    }
+    // values() — returns shallow copy of array
+    if (method->len == 6 && strncmp(method->chars, "values", 6) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
+        Array* a = arr.array;
+        Item result = js_array_new(a->length);
+        Array* r = result.array;
+        memcpy(r->items, a->items, a->length * sizeof(Item));
+        r->length = a->length;
+        return result;
+    }
+    // entries() — returns array of [index, value] pairs
+    if (method->len == 7 && strncmp(method->chars, "entries", 7) == 0) {
+        if (arr_type != LMD_TYPE_ARRAY) return js_array_new(0);
+        Array* a = arr.array;
+        Item result = js_array_new(a->length);
+        for (int i = 0; i < a->length; i++) {
+            Item pair = js_array_new(2);
+            Array* p = pair.array;
+            p->items[0] = (Item){.item = i2it(i)};
+            p->items[1] = a->items[i];
+            p->length = 2;
+            array_push(result.array, pair);
+        }
+        return result;
     }
 
     log_debug("js_array_method: unknown method '%.*s'", (int)method->len, method->chars);

@@ -484,26 +484,26 @@ Note: Map for...of (D1) and insertion order (D2) are now fixed but similarly blo
 
 ## 6. Implementation Priority Matrix (Updated)
 
-| Priority | Issue | Phase | Effort | Value | Status |
-|----------|-------|-------|--------|-------|--------|
-| 🔴 P0 | Closure capture in class methods | 1.1 | HIGH | Unblocks 5 specs (~285 assertions) | ⚠️ Partial (1/5 unblocked) |
-| 🔴 P0 | Getter/setter naming collision | 1.2 | MED | Unblocks 2 specs (~99 assertions) | ✅ DONE |
-| 🔴 P0 | AST builder failures | 1.3 | MED-HIGH | Unblocks 3 specs (~174 assertions) | ✅ DONE |
-| 🔴 P0 | Dynamic RegExp construction | 3.1 | MED | ~32 fixes across 5 running specs | ✅ DONE |
-| 🟡 P1 | Number.toString(radix) | 2.1 | LOW | ~14 fixes | ✅ DONE |
-| 🟡 P1 | charCodeAt UTF-8→UTF-16 | 2.3 | MED | ~14 fixes, fundamental correctness | ✅ DONE |
-| 🟡 P1 | undefined vs null separation | 3.2 | HIGH | ~25 fixes, pervasive correctness | ❌ Not started |
-| 🟡 P1 | instanceof (user classes) | 3.3 | MED | ~5 fixes + enables toThrow | ✅ DONE |
-| 🟡 P1 | Error class inheritance | 3.4 | LOW | ~7 fixes | ✅ DONE |
-| 🟢 P2 | codePointAt | 2.2 | LOW | ~5 fixes | ✅ Already worked |
-| 🟢 P2 | String.fromCharCode(0) | 2.4 | LOW | ~3 fixes | ✅ DONE |
-| 🟢 P2 | replaceAll with callback | 2.5 | LOW | ~2 fixes | ✅ DONE |
-| 🟢 P2 | Map for...of / iteration | 4.1 | MED | ~9 fixes | ✅ DONE |
-| 🟢 P2 | Object destructuring params | 1.4 | MED | Unblocks 1 spec (~13 assertions) | ✅ DONE (general) |
-| 🔵 P3 | URL constructor | 4.3 | MED | ~8 fixes | ❌ Not started |
-| 🔵 P3 | Map insertion order | 4.2 | LOW | ~2 fixes | ✅ DONE |
-| 🔵 P3 | Array.from mapper | 4.4 | LOW | ~2 fixes | ✅ DONE |
-| 🔵 P3 | js_collection_create bug | 1.5 | LOW | Unblocks 1 spec (~2 assertions) | ⚠️ Partial (stream runs, 0/1 pass) |
+| Priority | Issue                            | Phase | Effort   | Value                              | Status                             |
+| -------- | -------------------------------- | ----- | -------- | ---------------------------------- | ---------------------------------- |
+| 🔴 P0    | Closure capture in class methods | 1.1   | HIGH     | Unblocks 5 specs (~285 assertions) | ⚠️ Partial (1/5 unblocked)         |
+| 🔴 P0    | Getter/setter naming collision   | 1.2   | MED      | Unblocks 2 specs (~99 assertions)  | ✅ DONE                             |
+| 🔴 P0    | AST builder failures             | 1.3   | MED-HIGH | Unblocks 3 specs (~174 assertions) | ✅ DONE                             |
+| 🔴 P0    | Dynamic RegExp construction      | 3.1   | MED      | ~32 fixes across 5 running specs   | ✅ DONE                             |
+| 🟡 P1    | Number.toString(radix)           | 2.1   | LOW      | ~14 fixes                          | ✅ DONE                             |
+| 🟡 P1    | charCodeAt UTF-8→UTF-16          | 2.3   | MED      | ~14 fixes, fundamental correctness | ✅ DONE                             |
+| 🟡 P1    | undefined vs null separation     | 3.2   | HIGH     | ~25 fixes, pervasive correctness   | ❌ Not started                      |
+| 🟡 P1    | instanceof (user classes)        | 3.3   | MED      | ~5 fixes + enables toThrow         | ✅ DONE                             |
+| 🟡 P1    | Error class inheritance          | 3.4   | LOW      | ~7 fixes                           | ✅ DONE                             |
+| 🟢 P2    | codePointAt                      | 2.2   | LOW      | ~5 fixes                           | ✅ Already worked                   |
+| 🟢 P2    | String.fromCharCode(0)           | 2.4   | LOW      | ~3 fixes                           | ✅ DONE                             |
+| 🟢 P2    | replaceAll with callback         | 2.5   | LOW      | ~2 fixes                           | ✅ DONE                             |
+| 🟢 P2    | Map for...of / iteration         | 4.1   | MED      | ~9 fixes                           | ✅ DONE                             |
+| 🟢 P2    | Object destructuring params      | 1.4   | MED      | Unblocks 1 spec (~13 assertions)   | ✅ DONE (general)                   |
+| 🔵 P3    | URL constructor                  | 4.3   | MED      | ~8 fixes                           | ❌ Not started                      |
+| 🔵 P3    | Map insertion order              | 4.2   | LOW      | ~2 fixes                           | ✅ DONE                             |
+| 🔵 P3    | Array.from mapper                | 4.4   | LOW      | ~2 fixes                           | ✅ DONE                             |
+| 🔵 P3    | js_collection_create bug         | 1.5   | LOW      | Unblocks 1 spec (~2 assertions)    | ⚠️ Partial (stream runs, 0/1 pass) |
 
 ---
 

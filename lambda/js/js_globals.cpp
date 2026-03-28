@@ -349,7 +349,7 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
                 uint64_t val = negative ? (uint64_t)(-(int64_t)n) : (uint64_t)n;
                 char buf[68]; // max 64 binary digits + sign + null
                 int pos = 66;
-                buf[67] = '\0';
+                buf[66] = '\0';
                 if (val == 0) {
                     buf[--pos] = '0';
                 } else {
@@ -360,7 +360,7 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
                     }
                 }
                 if (negative) buf[--pos] = '-';
-                return (Item){.item = s2it(heap_create_name(&buf[pos], 67 - pos))};
+                return (Item){.item = s2it(heap_create_name(&buf[pos], 66 - pos))};
             }
         }
         return js_to_string(num);
@@ -404,6 +404,8 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     } else if (type == LMD_TYPE_FLOAT) {
         code = (int)it2d(code_item);
     }
+    // JS fromCharCode uses UTF-16 code units (truncate to 16-bit)
+    code &= 0xFFFF;
 
     char buf[5]; // max 4 bytes for UTF-8 + null
     int len = 0;
@@ -423,6 +425,45 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     buf[len] = '\0';
 
     return (Item){.item = s2it(heap_strcpy(buf, len))};
+}
+
+// Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
+// Takes a Lambda Array of code points and returns a concatenated string
+extern "C" Item js_string_fromCharCode_array(Item arr_item) {
+    if (get_type_id(arr_item) != LMD_TYPE_ARRAY) {
+        return js_string_fromCharCode(arr_item); // fallback: single arg
+    }
+    Array* arr = arr_item.array;
+    int len = arr->length;
+    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
+    // Each char can be up to 3 bytes in UTF-8
+    char* buf = (char*)malloc(len * 3 + 1);
+    int pos = 0;
+    for (int i = 0; i < len; i++) {
+        int code = 0;
+        TypeId type = get_type_id(arr->items[i]);
+        if (type == LMD_TYPE_INT) {
+            code = (int)it2i(arr->items[i]);
+        } else if (type == LMD_TYPE_FLOAT) {
+            code = (int)it2d(arr->items[i]);
+        }
+        // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
+        code &= 0xFFFF;
+        if (code < 128) {
+            buf[pos++] = (char)code;
+        } else if (code < 0x800) {
+            buf[pos++] = (char)(0xC0 | (code >> 6));
+            buf[pos++] = (char)(0x80 | (code & 0x3F));
+        } else {
+            buf[pos++] = (char)(0xE0 | (code >> 12));
+            buf[pos++] = (char)(0x80 | ((code >> 6) & 0x3F));
+            buf[pos++] = (char)(0x80 | (code & 0x3F));
+        }
+    }
+    buf[pos] = '\0';
+    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
+    free(buf);
+    return result;
 }
 
 // =============================================================================
@@ -520,9 +561,10 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_MAP) {
-        // check if property exists on map
-        Item result = js_property_access(object, key);
-        return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_NULL)};
+        // check if property exists on map (including prototype chain)
+        // js_property_get returns make_js_undefined() for missing properties
+        Item result = js_property_get(object, key);
+        return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_UNDEFINED)};
     }
     if (type == LMD_TYPE_ARRAY) {
         // check if index is valid
@@ -604,6 +646,20 @@ extern "C" Item js_alert(Item msg) {
 
 extern "C" Item js_object_keys(Item object) {
     TypeId type = get_type_id(object);
+
+    // For arrays, return indices as string keys: ["0", "1", "2", ...]
+    if (type == LMD_TYPE_ARRAY) {
+        int len = object.array->length;
+        Item result = js_array_new(len);
+        for (int i = 0; i < len; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", i);
+            Item key_str = (Item){.item = s2it(heap_create_name(buf))};
+            js_array_set(result, (Item){.item = i2it(i)}, key_str);
+        }
+        return result;
+    }
+
     if (type != LMD_TYPE_MAP) {
         return js_array_new(0);
     }
@@ -1155,4 +1211,119 @@ extern "C" Item js_symbol_to_string(Item sym) {
     }
 
     return (Item){.item = s2it(heap_create_name("Symbol()", 8))};
+}
+
+// =============================================================================
+// URL Constructor — wraps lib/url.c
+// =============================================================================
+
+static Item js_url_to_object(Url* url) {
+    if (!url || !url->is_valid) {
+        if (url) url_destroy(url);
+        return ItemNull;
+    }
+    Item obj = js_new_object();
+
+    // Helper macro to set a string property
+    #define URL_SET_PROP(propname, getter) do { \
+        const char* _v = getter(url); \
+        Item _key = (Item){.item = s2it(heap_create_name(propname))}; \
+        Item _val = _v ? (Item){.item = s2it(heap_create_name(_v, strlen(_v)))} : (Item){.item = s2it(heap_create_name("", 0))}; \
+        js_property_set(obj, _key, _val); \
+    } while(0)
+
+    URL_SET_PROP("href", url_get_href);
+    // Compute origin: protocol + "//" + host (hostname + optional port)
+    {
+        const char* proto = url_get_protocol(url);
+        const char* host = url_get_host(url);
+        const char* hostname = url_get_hostname(url);
+        // For schemes like mailto:, tel: — origin is "null"
+        bool has_authority = proto && (strncmp(proto, "http", 4) == 0 ||
+                                       strncmp(proto, "ftp", 3) == 0 ||
+                                       strncmp(proto, "ws", 2) == 0);
+        char origin_buf[512];
+        if (has_authority && hostname && hostname[0]) {
+            const char* h = (host && host[0]) ? host : hostname;
+            snprintf(origin_buf, sizeof(origin_buf), "%s//%s", proto ? proto : "", h);
+        } else {
+            snprintf(origin_buf, sizeof(origin_buf), "null");
+        }
+        Item o_key = (Item){.item = s2it(heap_create_name("origin"))};
+        Item o_val = (Item){.item = s2it(heap_create_name(origin_buf, strlen(origin_buf)))};
+        js_property_set(obj, o_key, o_val);
+    }
+    URL_SET_PROP("protocol", url_get_protocol);
+    URL_SET_PROP("username", url_get_username);
+    URL_SET_PROP("password", url_get_password);
+    URL_SET_PROP("host", url_get_host);
+    URL_SET_PROP("hostname", url_get_hostname);
+    URL_SET_PROP("port", url_get_port);
+    URL_SET_PROP("pathname", url_get_pathname);
+    URL_SET_PROP("search", url_get_search);
+    URL_SET_PROP("hash", url_get_hash);
+
+    #undef URL_SET_PROP
+
+    url_destroy(url);
+    return obj;
+}
+
+extern "C" Item js_url_construct(Item input) {
+    TypeId tid = get_type_id(input);
+    if (tid != LMD_TYPE_STRING) return ItemNull;
+    String* s = it2s(input);
+    if (!s || s->len == 0) return ItemNull;
+
+    Url* url = url_parse(s->chars);
+    return js_url_to_object(url);
+}
+
+extern "C" Item js_url_construct_with_base(Item input, Item base) {
+    TypeId tid_base = get_type_id(base);
+    if (tid_base != LMD_TYPE_STRING) {
+        return js_url_construct(input);
+    }
+    String* base_str = it2s(base);
+    if (!base_str || base_str->len == 0) {
+        return js_url_construct(input);
+    }
+
+    TypeId tid = get_type_id(input);
+    if (tid != LMD_TYPE_STRING) return ItemNull;
+    String* s = it2s(input);
+    if (!s) return ItemNull;
+
+    Url* base_url = url_parse(base_str->chars);
+    if (!base_url || !base_url->is_valid) {
+        if (base_url) url_destroy(base_url);
+        return ItemNull;
+    }
+    Url* url = url_parse_with_base(s->chars, base_url);
+    url_destroy(base_url);
+    return js_url_to_object(url);
+}
+
+extern "C" Item js_url_parse(Item input, Item base) {
+    TypeId tid = get_type_id(input);
+    if (tid != LMD_TYPE_STRING) return ItemNull;
+
+    TypeId tid_base = get_type_id(base);
+    if (tid_base == LMD_TYPE_STRING) {
+        return js_url_construct_with_base(input, base);
+    }
+    return js_url_construct(input);
+}
+
+extern "C" Item js_url_can_parse(Item input) {
+    TypeId tid = get_type_id(input);
+    if (tid != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* s = it2s(input);
+    if (!s || s->len == 0) return (Item){.item = b2it(false)};
+
+    Url* url = url_parse(s->chars);
+    if (!url) return (Item){.item = b2it(false)};
+    bool valid = url->is_valid;
+    url_destroy(url);
+    return valid ? (Item){.item = b2it(true)} : (Item){.item = b2it(false)};
 }
