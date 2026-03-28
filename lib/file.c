@@ -767,3 +767,40 @@ const char* file_path_ext(const char* path) {
     if (!dot || dot == base) return NULL;
     return dot;
 }
+
+// ---------------------------------------------------------------------------
+// Cache / directory convenience
+// ---------------------------------------------------------------------------
+
+int file_ensure_dir(const char* dir_path) {
+    if (!dir_path) return -1;
+    if (file_exists(dir_path)) {
+        if (file_is_dir(dir_path)) return 0;
+        log_error("file_ensure_dir: path exists but is not a directory: %s", dir_path);
+        return -1;
+    }
+    if (!create_dir(dir_path)) {
+        log_error("file_ensure_dir: failed to create directory: %s", dir_path);
+        return -1;
+    }
+    return 0;
+}
+
+char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
+    if (!key || !cache_dir) return NULL;
+    if (!ext) ext = ".cache";
+
+    // DJB2 hash
+    unsigned long hash = 5381;
+    for (const char* s = key; *s; s++) {
+        hash = ((hash << 5) + hash) + (unsigned char)*s;
+    }
+
+    size_t dir_len = strlen(cache_dir);
+    size_t ext_len = strlen(ext);
+    // "<dir>/<8hex><ext>\0"
+    char* buf = (char*)malloc(dir_len + 1 + 8 + ext_len + 1);
+    if (!buf) return NULL;
+    snprintf(buf, dir_len + 1 + 8 + ext_len + 1, "%s/%08lx%s", cache_dir, hash, ext);
+    return buf;
+}

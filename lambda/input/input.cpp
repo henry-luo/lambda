@@ -1,6 +1,3 @@
-#include <unistd.h>
-#include <stdio.h>
-#include <sys/stat.h>
 #include "input.hpp"
 #include "input-parsers.h"
 #include "../lambda-decimal.hpp"
@@ -603,41 +600,13 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
 // Helper function to read text file from file:// URL
 static char* read_file_from_url(Url* url) {
     if (!url || url->scheme != URL_SCHEME_FILE) {
-        fprintf(stderr, "Only file:// URLs are supported for file reading\n");
+        log_error("Only file:// URLs are supported for file reading");
         return NULL;
     }
     const char* pathname = url_get_pathname(url);
     if (!pathname) return NULL;
     log_debug("Reading file from path: %s", pathname);
-
-    FILE* file = fopen(pathname, "r");
-    if (!file) {
-        perror("Failed to open file");
-        return NULL;
-    }
-
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    if (file_size <= 0) {
-        fclose(file);
-        return NULL;
-    }
-
-    // Allocate buffer and read file
-    char* content = (char*)malloc(file_size + 1);
-    if (!content) {
-        fclose(file);
-        return NULL;
-    }
-
-    size_t bytes_read = fread(content, 1, file_size, file);
-    content[bytes_read] = '\0';
-
-    fclose(file);
-    return content;
+    return read_text_file(pathname);
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
@@ -668,8 +637,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         }
         #endif
         if (pathname) {
-            struct stat st;
-            if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (file_is_dir(pathname)) {
                 // URL points to a directory - use directory listing
                 log_debug("URL points to directory, using input_from_directory\n");
                 // Pass original URL string to preserve relative path info

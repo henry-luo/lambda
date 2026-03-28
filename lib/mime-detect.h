@@ -38,6 +38,11 @@ const char* detect_mime_from_content(MimeDetector* detector, const char* data, s
 int match_glob(const char* pattern, const char* string);
 int match_magic(const char* pattern, size_t pattern_len, const char* data, size_t data_len, int offset);
 
+// Map an HTTP Content-Type header value (e.g. "text/html; charset=utf-8")
+// to a file extension including the dot (e.g. ".html").
+// Returns a static string — no allocation.  Returns NULL for unknown types.
+const char* mime_extension_from_content_type(const char* content_type);
+
 // External declarations for MIME type data
 extern MimePattern magic_patterns[];
 extern MimeGlob glob_patterns[];

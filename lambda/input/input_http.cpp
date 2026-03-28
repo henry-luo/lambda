@@ -6,14 +6,11 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <unistd.h>
 #include "input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
-#include "lib/log.h"
+#include "../../lib/mime-detect.h"
 
 // Structure to hold response data
 typedef struct {
@@ -38,7 +35,7 @@ static size_t write_response_callback(void* contents, size_t size, size_t nmemb,
     char* new_data = (char*)realloc(response->data, response->size + total_size + 1);
 
     if (!new_data) {
-        fprintf(stderr, "HTTP: Memory allocation failed\n");
+        log_error("HTTP: Memory allocation failed");
         return 0;
     }
 
@@ -56,7 +53,7 @@ static bool curl_initialized = false;
 static bool init_curl() {
     if (!curl_initialized) {
         if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-            fprintf(stderr, "HTTP: Failed to initialize libcurl\n");
+            log_error("HTTP: Failed to initialize libcurl");
             return false;
         }
         curl_initialized = true;
@@ -65,70 +62,19 @@ static bool init_curl() {
 }
 
 // Map HTTP Content-Type to file extension for routing
-// Returns a static string (no need to free)
-const char* content_type_to_extension(const char* content_type) {
-    if (!content_type) return nullptr;
-
-    // Extract the main type, ignoring charset and other params
-    // e.g., "text/html; charset=utf-8" -> "text/html"
-    char main_type[128];
-    const char* semicolon = strchr(content_type, ';');
-    size_t len = semicolon ? (size_t)(semicolon - content_type) : strlen(content_type);
-    if (len >= sizeof(main_type)) len = sizeof(main_type) - 1;
-    strncpy(main_type, content_type, len);
-    main_type[len] = '\0';
-
-    // Trim trailing whitespace
-    while (len > 0 && (main_type[len-1] == ' ' || main_type[len-1] == '\t')) {
-        main_type[--len] = '\0';
+// Delegates to lib/mime-detect; defaults to ".html" for unknown types
+static const char* content_type_to_extension(const char* content_type) {
+    const char* ext = mime_extension_from_content_type(content_type);
+    if (ext) return ext;
+    if (content_type) {
+        log_debug("HTTP: Unknown content-type '%s', defaulting to .html", content_type);
     }
-
-    // Map common MIME types to extensions
-    if (str_ieq_const(main_type, len, "text/html")) return ".html";
-    if (str_ieq_const(main_type, len, "application/xhtml+xml")) return ".html";
-    if (str_ieq_const(main_type, len, "text/plain")) return ".txt";
-    if (str_ieq_const(main_type, len, "text/css")) return ".css";
-    if (str_ieq_const(main_type, len, "text/javascript")) return ".js";
-    if (str_ieq_const(main_type, len, "application/javascript")) return ".js";
-    if (str_ieq_const(main_type, len, "application/json")) return ".json";
-    if (str_ieq_const(main_type, len, "text/xml")) return ".xml";
-    if (str_ieq_const(main_type, len, "application/xml")) return ".xml";
-    if (str_ieq_const(main_type, len, "text/markdown")) return ".md";
-    if (str_ieq_const(main_type, len, "text/x-markdown")) return ".md";
-    if (str_ieq_const(main_type, len, "application/pdf")) return ".pdf";
-    if (str_ieq_const(main_type, len, "image/svg+xml")) return ".svg";
-    if (str_ieq_const(main_type, len, "image/png")) return ".png";
-    if (str_ieq_const(main_type, len, "image/jpeg")) return ".jpg";
-    if (str_ieq_const(main_type, len, "image/gif")) return ".gif";
-    if (str_ieq_const(main_type, len, "image/webp")) return ".webp";
-    if (str_ieq_const(main_type, len, "application/x-latex")) return ".tex";
-    if (str_ieq_const(main_type, len, "text/x-tex")) return ".tex";
-    if (str_ieq_const(main_type, len, "application/x-yaml")) return ".yaml";
-    if (str_ieq_const(main_type, len, "text/yaml")) return ".yaml";
-    if (str_ieq_const(main_type, len, "application/toml")) return ".toml";
-    if (str_ieq_const(main_type, len, "text/csv")) return ".csv";
-
-    log_debug("HTTP: Unknown content-type '%s', defaulting to .html", content_type);
-    return ".html";  // Default to HTML for unknown types
+    return ".html";
 }
 
-// Generate cache filename from URL (simple hash-based approach)
+// Generate cache filename from URL — delegates to lib/file
 static char* generate_cache_filename(const char* url, const char* cache_dir) {
-    // Simple hash function for URL
-    unsigned long hash = 5381;
-    const char* str = url;
-    int c;
-
-    while ((c = *str++)) {
-        hash = ((hash << 5) + hash) + c;
-    }
-
-    // Create filename with hash
-    char* filename = (char*)malloc(strlen(cache_dir) + 32);
-    if (!filename) return NULL;
-
-    snprintf(filename, strlen(cache_dir) + 32, "%s/%08lx.cache", cache_dir, hash);
-    return filename;
+    return file_cache_path(url, cache_dir, ".cache");
 }
 
 // Download HTTP/HTTPS resource and return content in memory
@@ -139,7 +85,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 
     CURL* curl = curl_easy_init();
     if (!curl) {
-        fprintf(stderr, "HTTP: Failed to initialize curl handle\n");
+        log_error("HTTP: Failed to initialize curl handle");
         return NULL;
     }
 
@@ -174,7 +120,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) {
-        fprintf(stderr, "HTTP: Download failed: %s\n", curl_easy_strerror(res));
+        log_error("HTTP: Download failed: %s", curl_easy_strerror(res));
         free(response.data);
         curl_easy_cleanup(curl);
         return NULL;
@@ -185,7 +131,7 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
 
     if (response_code >= 400) {
-        fprintf(stderr, "HTTP: Server returned error %ld for %s\n", response_code, url);
+        log_error("HTTP: Server returned error %ld for %s", response_code, url);
         free(response.data);
         curl_easy_cleanup(curl);
         return NULL;
@@ -219,32 +165,19 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     }
 
     // Check if file already exists in cache
-    struct stat st;
-    if (stat(cache_filename, &st) == 0) {
-        log_debug("HTTP: Using cached file %s\n", cache_filename);
+    if (file_exists(cache_filename)) {
+        log_debug("HTTP: Using cached file %s", cache_filename);
 
         // Read cached file
-        FILE* file = fopen(cache_filename, "rb");
-        if (file) {
-            fseek(file, 0, SEEK_END);
-            long file_size = ftell(file);
-            fseek(file, 0, SEEK_SET);
-
-            char* content = (char*)malloc(file_size + 1);
-            if (content) {
-                size_t bytes_read = fread(content, 1, file_size, file);
-                content[bytes_read] = '\0';
-                fclose(file);
-
-                if (out_cache_path) {
-                    *out_cache_path = cache_filename;
-                } else {
-                    free(cache_filename);
-                }
-
-                return content;
+        size_t cached_size = 0;
+        char* content = read_binary_file(cache_filename, &cached_size);
+        if (content) {
+            if (out_cache_path) {
+                *out_cache_path = cache_filename;
+            } else {
+                free(cache_filename);
             }
-            fclose(file);
+            return content;
         }
     }
 
@@ -257,14 +190,10 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     }
 
     // Save to cache
-    FILE* cache_file = fopen(cache_filename, "wb");
-    if (cache_file) {
-        fwrite(content, 1, content_size, cache_file);
-        fclose(cache_file);
-        log_debug("HTTP: Cached content to %s\n", cache_filename);
+    if (write_binary_file(cache_filename, content, content_size) == 0) {
+        log_debug("HTTP: Cached content to %s", cache_filename);
     } else {
-        fprintf(stderr, "HTTP: Failed to write cache file %s: %s\n",
-                cache_filename, strerror(errno));
+        log_error("HTTP: Failed to write cache file %s", cache_filename);
     }
 
     if (out_cache_path) {

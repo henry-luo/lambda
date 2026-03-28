@@ -148,6 +148,18 @@ const char* file_path_basename(const char* path);
 // File extension including dot (pointer into input string — no alloc).
 const char* file_path_ext(const char* path);
 
+// ---------------------------------------------------------------------------
+// Cache / directory convenience
+// ---------------------------------------------------------------------------
+
+// Ensure directory exists; return 0 on success, -1 if path exists but is not
+// a directory or creation fails.
+int file_ensure_dir(const char* dir_path);
+
+// Generate a cache file path from `key` using a DJB2 hash.
+// Result is "<cache_dir>/<hex_hash>.<ext>".  Caller must free().
+char* file_cache_path(const char* key, const char* cache_dir, const char* ext);
+
 #ifdef __cplusplus
 }
 #endif
