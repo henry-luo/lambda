@@ -2,15 +2,9 @@
 
 ## Overview
 
-A common C-level shell and process module (`lib/shell.c` + `lib/shell.h`) providing unified CLI and process-execution utilities for all Lambda runtime targets: **Lambda Script**, **JavaScript**, **Python**, and **Bash** transpilation.
+**Fully implemented.** A common C-level shell and process module (`lib/shell.c` + `lib/shell.h`) providing unified CLI and process-execution utilities for all Lambda runtime targets: **Lambda Script**, **JavaScript**, **Python**, and **Bash** transpilation. All 17 public functions are implemented with both POSIX and Win32 backends.
 
-Currently, shell-related operations are scattered:
-- Bash transpiler uses `posix_spawn` directly in `lambda/bash/`
-- Test harness has ad-hoc `popen()` wrappers (`test/test_html_roundtrip_gtest.cpp`)
-- Environment variable access uses raw `getenv()`/`setenv()` calls with no abstraction
-- No unified way to capture command output, check exit codes, or manage subprocesses
-
-This module consolidates all process and shell interaction into a single, cross-platform C library that every runtime backend can call.
+The module has been adopted across the codebase — all files under `lambda/` and `radiant/` use `shell_getenv()` instead of raw `getenv()`, and `shell_exec_line()` instead of `popen()`/`posix_spawn()`.
 
 ## Design Principles
 
@@ -193,40 +187,45 @@ Transpiled `subprocess` / `child_process` calls map to `shell_exec`/`shell_spawn
 
 ## Implementation Phases
 
-### Phase 1: Core Synchronous Execution
+### Phase 1: Core Synchronous Execution — ✅ Complete
 - Implement `shell_exec`, `shell_exec_simple`, `shell_result_free`
 - POSIX (posix_spawn + pipe) and Win32 (CreateProcess) backends
 - Timeout via `alarm()`/`SIGALRM` (POSIX) or `WaitForSingleObject` timeout (Win32)
 - Unit tests: exit codes, stdout/stderr capture, timeout, missing program
 
-### Phase 2: Environment & Utilities
+### Phase 2: Environment & Utilities — ✅ Complete
 - `shell_getenv`, `shell_setenv`, `shell_unsetenv`
 - `shell_which` — PATH scanning with stat + permission check
 - `shell_quote_arg` — safe argument escaping
 - `shell_get_home_dir`, `shell_get_temp_dir`, `shell_get_hostname`
 - Unit tests: env round-trip, which resolution, quoting edge cases
 
-### Phase 3: Background Processes
+### Phase 3: Background Processes — ✅ Complete
 - Implement `ShellProcess` handle with `shell_spawn`, `shell_process_poll/wait/kill/free`
 - Non-blocking pipe reads via `fcntl(O_NONBLOCK)` / `PeekNamedPipe`
 - Unit tests: spawn + poll loop, kill + cleanup, wait timeout
 
-### Phase 4: Streaming & Line Callbacks
+### Phase 4: Streaming & Line Callbacks — ✅ Complete
 - `ShellLineCallback` integration for `on_stdout` / `on_stderr`
 - Buffered line splitting over raw pipe reads
 - Early abort when callback returns false
 - Unit tests: large output streaming, partial line handling
 
-### Phase 5: Runtime Integration
+### Phase 5: Codebase Migration — ✅ Complete
+- All `lambda/` files migrated to use `lib/shell.h` (`shell_getenv`, `shell_exec_line`)
+- All `radiant/` files migrated to use `lib/shell.h` (`shell_getenv`)
+- Build: 0 errors, 0 warnings. Tests: 716/716 baseline pass.
+
+### Phase 6: `shell_exec_line` & Advanced — ✅ Complete
+- `/bin/sh -c` execution for Bash transpiler compatibility
+- `merge_stderr` option
+- Custom `env` array passing (child-only environment variables)
+
+### Phase 7: Runtime Integration — Not started
 - Register `io.exec`, `io.spawn`, `io.poll`, `io.kill` in `sys_func_registry.c`
 - Wire Bash transpiler to use `shell_exec` instead of direct `posix_spawn`
 - Add JS/Python transpiler mappings
 - Integration tests with Lambda scripts
-
-### Phase 6: `shell_exec_line` & Advanced
-- `/bin/sh -c` execution for Bash transpiler compatibility
-- `merge_stderr` option
-- Custom `env` array passing (child-only environment variables)
 - Cross-platform CI validation (macOS, Linux, Windows)
 
 ## Relationship to Module IO: File
