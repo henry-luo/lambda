@@ -22,6 +22,9 @@ Item py_stdlib_functools_init(void);
 Item py_stdlib_collections_init(void);
 Item py_stdlib_io_init(void);
 Item py_stdlib_copy_init(void);
+Item py_stdlib_array_init(void);
+Item py_stdlib_abc_init(void);
+Item py_stdlib_enum_init(void);
 
 // Builtin module lookup: returns init function or NULL if not a builtin.
 // Used by the transpiler for both `import X` and `from X import Y`.

@@ -939,8 +939,11 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             child->position->bottom = child->position->bottom_percent * cb_height / 100.0f;
         }
 
-        // If bottom is specified but not top, recompute y from bottom edge
-        if (changed && child->position && child->position->has_bottom && !child->position->has_top) {
+        // If bottom is specified but not top, recompute y from bottom edge.
+        // This must be unconditional: this function runs after an auto-height
+        // containing block is finalized, so cb_height changed for ALL children,
+        // not just those with percentage values.
+        if (child->position && child->position->has_bottom && !child->position->has_top) {
             float border_offset_y = 0;
             if (containing_block->bound && containing_block->bound->border) {
                 border_offset_y = containing_block->bound->border->width.top;
@@ -1028,16 +1031,45 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             }
             // else both are specified, use them as-is
 
-            // Update block dimensions
+            // Update block dimensions and persist the image-derived height into
+            // block->blk so the auto-sizing check later (which reads blk->given_height
+            // instead of lycon->block.given_height) won't overwrite it.
             block->width = lycon->block.given_width;
             block->height = lycon->block.given_height;
             lycon->block.content_width = lycon->block.given_width;
             lycon->block.content_height = lycon->block.given_height;
+            if (block->blk) {
+                block->blk->given_height = lycon->block.given_height;
+                block->blk->given_width = lycon->block.given_width;
+            }
 
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
             log_debug("[ABS IMG] final dimensions: %.1f x %.1f", block->width, block->height);
+
+            // Recalculate position for right/bottom-positioned replaced elements.
+            // calculate_absolute_position computed x/y using the pre-image width/height
+            // (shrink-to-fit or 0 for auto), but the IMG sizing code may have changed
+            // the dimensions via aspect ratio. Re-derive x/y from the new block size.
+            if (block->position->has_right && !block->position->has_left) {
+                float cb_border_left = (cb->bound && cb->bound->border) ? cb->bound->border->width.left : 0;
+                float cb_border_right = (cb->bound && cb->bound->border) ? cb->bound->border->width.right : 0;
+                float cb_padding_width = cb->width - cb_border_left - cb_border_right;
+                float margin_right = (block->bound) ? block->bound->margin.right : 0;
+                block->x = cb_border_left + cb_padding_width - block->position->right - margin_right - block->width;
+                log_debug("[ABS IMG] right-positioned X recalc: x=%.1f (cb_pad_w=%.1f, right=%.1f, width=%.1f)",
+                          block->x, cb_padding_width, block->position->right, block->width);
+            }
+            if (block->position->has_bottom && !block->position->has_top) {
+                float cb_border_top = (cb->bound && cb->bound->border) ? cb->bound->border->width.top : 0;
+                float cb_border_bottom = (cb->bound && cb->bound->border) ? cb->bound->border->width.bottom : 0;
+                float cb_padding_height = cb->height - cb_border_top - cb_border_bottom;
+                float margin_bottom = (block->bound) ? block->bound->margin.bottom : 0;
+                block->y = cb_border_top + cb_padding_height - block->position->bottom - margin_bottom - block->height;
+                log_debug("[ABS IMG] bottom-positioned Y recalc: y=%.1f (cb_pad_h=%.1f, bottom=%.1f, height=%.1f)",
+                          block->y, cb_padding_height, block->position->bottom, block->height);
+            }
         } else {
             // Failed to load image - use placeholder
             if (lycon->block.given_width <= 0) lycon->block.given_width = 40;

@@ -116,6 +116,9 @@ extern "C" void sysinfo_set_args(int argc, char** argv) {
     g_argv = argv;
 }
 
+extern "C" int sysinfo_get_argc(void) { return g_argc; }
+extern "C" char** sysinfo_get_argv(void) { return g_argv; }
+
 extern "C" void sysinfo_init(void) {
     if (g_cache && g_cache->initialized) return;
 

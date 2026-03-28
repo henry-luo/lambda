@@ -19,6 +19,7 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/stringbuf.h"
+#include "../sysinfo.h"
 
 // Lambda runtime externs (defined in py_runtime.cpp)
 extern Input* py_input;
@@ -458,8 +459,18 @@ extern "C" Item py_stdlib_sys_init(void) {
 
     mod_set_func(mod, "exit", (void*)py_sys_exit, 1);
 
-    // sys.argv — empty list (populated by caller if desired)
-    mod_set(mod, "argv", py_list_new(0));
+    // sys.argv — populated from CLI args: ./lambda.exe py script.py arg1 arg2
+    // Python sees [script.py, arg1, arg2]
+    {
+        Item argv_list = py_list_new(0);
+        int argc = sysinfo_get_argc();
+        char** argv = sysinfo_get_argv();
+        // skip "lambda.exe" and "py" (indices 0 and 1), start at 2
+        for (int i = 2; i < argc; i++) {
+            py_list_append(argv_list, mk_str(argv[i]));
+        }
+        mod_set(mod, "argv", argv_list);
+    }
 
     // sys.version
     mod_set(mod, "version", mk_str("3.12.0 (Lambda Python)"));
@@ -863,12 +874,39 @@ static Item py_time_perf_counter(void) {
     return mk_float(pn_clock());
 }
 
+// time.perf_counter_ns() — monotonic nanoseconds as integer
+static Item py_time_perf_counter_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    int64_t ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    return mk_int(ns);
+}
+
+// time.time_ns() — Unix epoch nanoseconds as integer
+static Item py_time_time_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    int64_t ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    return mk_int(ns);
+}
+
+// time.monotonic_ns() — monotonic nanoseconds as integer
+static Item py_time_monotonic_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    int64_t ns = (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+    return mk_int(ns);
+}
+
 extern "C" Item py_stdlib_time_init(void) {
     Item mod = py_dict_new();
-    mod_set_func(mod, "time",         (void*)py_time_time, 0);
-    mod_set_func(mod, "monotonic",    (void*)py_time_monotonic, 0);
-    mod_set_func(mod, "sleep",        (void*)py_time_sleep, 1);
-    mod_set_func(mod, "perf_counter", (void*)py_time_perf_counter, 0);
+    mod_set_func(mod, "time",            (void*)py_time_time, 0);
+    mod_set_func(mod, "time_ns",         (void*)py_time_time_ns, 0);
+    mod_set_func(mod, "monotonic",       (void*)py_time_monotonic, 0);
+    mod_set_func(mod, "monotonic_ns",    (void*)py_time_monotonic_ns, 0);
+    mod_set_func(mod, "sleep",           (void*)py_time_sleep, 1);
+    mod_set_func(mod, "perf_counter",    (void*)py_time_perf_counter, 0);
+    mod_set_func(mod, "perf_counter_ns", (void*)py_time_perf_counter_ns, 0);
     return mod;
 }
 
@@ -1167,6 +1205,63 @@ extern "C" Item py_stdlib_copy_init(void) {
 }
 
 // =========================================================================
+// ARRAY MODULE — typed array stub backed by Lambda Array
+// =========================================================================
+
+// array.array(typecode, initializer) — returns a Lambda list
+// Type codes are accepted but not enforced; storage uses generic Items.
+static Item py_array_array_new(Item typecode, Item initializer) {
+    if (get_type_id(initializer) == LMD_TYPE_ARRAY) {
+        return initializer;
+    }
+    return py_list_new(0);
+}
+
+extern "C" Item py_stdlib_array_init(void) {
+    Item mod = py_dict_new();
+    mod_set_func(mod, "array", (void*)py_array_array_new, 2);
+    return mod;
+}
+
+// =========================================================================
+// ABC MODULE — abstract base class stubs
+// =========================================================================
+
+// abstractmethod decorator — passthrough (marks method as abstract in CPython;
+// for benchmark compatibility we just return the function unmodified)
+static Item py_abc_abstractmethod(Item func) {
+    return func;
+}
+
+extern "C" Item py_stdlib_abc_init(void) {
+    Item mod = py_dict_new();
+    mod_set_func(mod, "abstractmethod", (void*)py_abc_abstractmethod, 1);
+    // ABC base class — an empty class that can be used as a base
+    Item bases = py_list_new(0);
+    Item methods = py_dict_new();
+    Item abc_class = py_class_new(mk_str("ABC"), bases, methods);
+    mod_set(mod, "ABC", abc_class);
+    return mod;
+}
+
+// =========================================================================
+// ENUM MODULE — minimal Enum class stub
+// =========================================================================
+
+extern "C" Item py_stdlib_enum_init(void) {
+    Item mod = py_dict_new();
+    // Enum — an empty base class; subclass attributes become enum values.
+    // In LambdaPy, class body assignments already set class-level attributes,
+    // so ClassName.MEMBER naturally resolves without special metaclass logic.
+    Item bases = py_list_new(0);
+    Item methods = py_dict_new();
+    Item enum_class = py_class_new(mk_str("Enum"), bases, methods);
+    mod_set(mod, "Enum", enum_class);
+    mod_set(mod, "IntEnum", enum_class);
+    return mod;
+}
+
+// =========================================================================
 // BUILTIN MODULE LOOKUP TABLE
 // =========================================================================
 
@@ -1189,6 +1284,9 @@ static BuiltinModuleEntry builtin_modules[] = {
     {"collections", py_stdlib_collections_init},
     {"io",          py_stdlib_io_init},
     {"copy",        py_stdlib_copy_init},
+    {"array",       py_stdlib_array_init},
+    {"abc",         py_stdlib_abc_init},
+    {"enum",        py_stdlib_enum_init},
     {NULL, NULL}
 };
 

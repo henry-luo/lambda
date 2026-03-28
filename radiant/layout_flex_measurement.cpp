@@ -771,10 +771,118 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                             }
                         }
                         if (has_text_content) {
-                            // Use the computed text line height for text-containing elements
-                            elem_height = text_line_height;
-                            log_debug("Element %s has text content, using text_line_height=%d",
-                                      sub_child->node_name(), elem_height);
+                            // Resolve child's CSS line-height for content height
+                            // (text_line_height is the font-metric "normal" line height,
+                            //  but CSS line-height may differ, e.g. Bootstrap line-height:1.5)
+                            int child_content_height = text_line_height;
+                            ViewElement* sub_view = (ViewElement*)elem;
+                            int child_fs = elem_font_size;
+                            if (sub_view && sub_view->font && sub_view->font->font_size > 0) {
+                                child_fs = (int)(sub_view->font->font_size + 0.5f);
+                            }
+                            if (sub_view && sub_view->blk && sub_view->blk->line_height) {
+                                const CssValue* lh = sub_view->blk->line_height;
+                                if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                                    child_content_height = (int)(lh->data.number.value * child_fs + 0.5f);
+                                } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                                    float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh);
+                                    if (lh_px > 0) child_content_height = (int)(lh_px + 0.5f);
+                                }
+                                // CSS_VALUE_TYPE_KEYWORD "normal" → keep font metric fallback
+                            } else if (elem->specified_style) {
+                                CssDeclaration* lh_decl = style_tree_get_declaration(
+                                    elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                                if (lh_decl && lh_decl->value) {
+                                    if (lh_decl->value->type == CSS_VALUE_TYPE_NUMBER) {
+                                        child_content_height = (int)(lh_decl->value->data.number.value * child_fs + 0.5f);
+                                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                        float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
+                                        if (lh_px > 0) child_content_height = (int)(lh_px + 0.5f);
+                                    }
+                                }
+                            }
+                            elem_height = child_content_height;
+
+                            // Add child's vertical padding and border (CSS box model)
+                            float vert_extra = 0;
+                            if (sub_view && sub_view->bound) {
+                                vert_extra += sub_view->bound->padding.top + sub_view->bound->padding.bottom;
+                                if (sub_view->bound->border) {
+                                    vert_extra += sub_view->bound->border->width.top + sub_view->bound->border->width.bottom;
+                                }
+                            }
+                            if (vert_extra == 0 && elem && elem->specified_style) {
+                                // Fallback: resolve from specified_style (handles shorthand)
+                                float pad_top = 0, pad_bottom = 0;
+                                CssDeclaration* pt = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_TOP);
+                                if (pt && pt->value && pt->value->type == CSS_VALUE_TYPE_LENGTH)
+                                    pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING_TOP, pt->value);
+                                CssDeclaration* pb = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING_BOTTOM);
+                                if (pb && pb->value && pb->value->type == CSS_VALUE_TYPE_LENGTH)
+                                    pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING_BOTTOM, pb->value);
+                                if (pad_top == 0 && pad_bottom == 0) {
+                                    CssDeclaration* pad_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
+                                    if (pad_sh && pad_sh->value) {
+                                        if (pad_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                            pad_top = pad_bottom = resolve_length_value(lycon, CSS_PROPERTY_PADDING, pad_sh->value);
+                                        } else if (pad_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                                            int cnt = pad_sh->value->data.list.count;
+                                            CssValue** vals = pad_sh->value->data.list.values;
+                                            if (cnt >= 1 && vals[0]->type == CSS_VALUE_TYPE_LENGTH) {
+                                                pad_top = resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[0]);
+                                                pad_bottom = (cnt >= 3 && vals[2]->type == CSS_VALUE_TYPE_LENGTH)
+                                                    ? resolve_length_value(lycon, CSS_PROPERTY_PADDING, vals[2]) : pad_top;
+                                            }
+                                        }
+                                    }
+                                }
+                                float brd_top = 0, brd_bottom = 0;
+                                CssDeclaration* bt_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_TOP_WIDTH);
+                                if (bt_d && bt_d->value && bt_d->value->type == CSS_VALUE_TYPE_LENGTH)
+                                    brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_TOP_WIDTH, bt_d->value);
+                                CssDeclaration* bb_d = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_BOTTOM_WIDTH);
+                                if (bb_d && bb_d->value && bb_d->value->type == CSS_VALUE_TYPE_LENGTH)
+                                    brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, bb_d->value);
+                                if (brd_top == 0 && brd_bottom == 0) {
+                                    CssDeclaration* bw_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER_WIDTH);
+                                    if (bw_sh && bw_sh->value) {
+                                        if (bw_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                            brd_top = brd_bottom = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_sh->value);
+                                        } else if (bw_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                                            int cnt = bw_sh->value->data.list.count;
+                                            CssValue** vals = bw_sh->value->data.list.values;
+                                            if (cnt >= 1 && vals[0]->type == CSS_VALUE_TYPE_LENGTH) {
+                                                brd_top = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[0]);
+                                                brd_bottom = (cnt >= 3 && vals[2]->type == CSS_VALUE_TYPE_LENGTH)
+                                                    ? resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[2]) : brd_top;
+                                            }
+                                        }
+                                    }
+                                    if (brd_top == 0 && brd_bottom == 0) {
+                                        CssDeclaration* b_sh = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BORDER);
+                                        if (b_sh && b_sh->value) {
+                                            float bw = 0;
+                                            if (b_sh->value->type == CSS_VALUE_TYPE_LIST) {
+                                                for (int bi = 0; bi < b_sh->value->data.list.count; bi++) {
+                                                    CssValue* bv = b_sh->value->data.list.values[bi];
+                                                    if (bv->type == CSS_VALUE_TYPE_LENGTH || bv->type == CSS_VALUE_TYPE_NUMBER) {
+                                                        bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bv);
+                                                        break;
+                                                    }
+                                                }
+                                            } else if (b_sh->value->type == CSS_VALUE_TYPE_LENGTH) {
+                                                bw = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, b_sh->value);
+                                            }
+                                            brd_top = brd_bottom = bw;
+                                        }
+                                    }
+                                }
+                                vert_extra = pad_top + pad_bottom + brd_top + brd_bottom;
+                            }
+                            elem_height += (int)(vert_extra + 0.5f);
+                            if (vert_extra > 0) has_explicit_height_css = true;
+                            log_debug("Element %s: content_height=%d, padding+border=%.1f, total=%d",
+                                      sub_child->node_name(), child_content_height, vert_extra, elem_height);
                         } else {
                             // Check for explicit CSS height property before using default
                             log_debug("Checking explicit CSS height for %s, elem=%p, specified_style=%p",
@@ -1857,6 +1965,37 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 } else if (c->is_element()) {
                     ViewElement* child_view = (ViewElement*)c->as_element();
                     if (child_view) {
+                        // CSS Flexbox §4.1: Absolutely positioned children and display:none
+                        // elements are not flex items and should not contribute to intrinsic sizing.
+                        DisplayValue child_display = resolve_display_value((void*)c);
+                        if (child_display.outer == CSS_VALUE_NONE) {
+                            c = c->next_sibling;
+                            continue;
+                        }
+                        // Check position:absolute/fixed — out-of-flow, not a flex item
+                        ViewBlock* child_block = (ViewBlock*)child_view;
+                        if (child_block->position && child_block->position->position &&
+                            (child_block->position->position == CSS_VALUE_ABSOLUTE ||
+                             child_block->position->position == CSS_VALUE_FIXED)) {
+                            c = c->next_sibling;
+                            continue;
+                        }
+                        // Fallback: check CSS specified_style for position (may not be resolved on view yet)
+                        if (child_view->specified_style && child_view->specified_style->tree) {
+                            AvlNode* pos_node = avl_tree_search(child_view->specified_style->tree, CSS_PROPERTY_POSITION);
+                            if (pos_node) {
+                                StyleNode* sn = (StyleNode*)pos_node->declaration;
+                                if (sn && sn->winning_decl && sn->winning_decl->value &&
+                                    sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    CssEnum pos_kw = sn->winning_decl->value->data.keyword;
+                                    if (pos_kw == CSS_VALUE_ABSOLUTE || pos_kw == CSS_VALUE_FIXED) {
+                                        c = c->next_sibling;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+
                         // First check View-level resolved dimensions
                         bool child_has_explicit_width = (child_view->blk && child_view->blk->given_width >= 0);
                         bool child_has_explicit_height = (child_view->blk && child_view->blk->given_height >= 0);
