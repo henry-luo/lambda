@@ -32,6 +32,9 @@ typedef struct Html5Token {
     // For comment and character tokens
     String* data;
 
+    // Source line number (1-based) of the opening '<' for start/end tag tokens
+    int source_line;
+
     // Memory context
     Pool* pool;
     Arena* arena;

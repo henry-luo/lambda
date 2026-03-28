@@ -933,8 +933,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         // Extract argument as string
         char* pseudo_arg = NULL;
+        int arg_end = *pos; // position of ')' or end
         if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
-            int arg_end = *pos;
+            arg_end = *pos;
             // Build argument string from tokens
             size_t arg_len = 0;
             for (int i = arg_start; i < arg_end; i++) {
@@ -977,6 +978,19 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         selector->value = func_name;
         selector->argument = pseudo_arg;
+
+        // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+        if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+            selector->type == CSS_SELECTOR_PSEUDO_IS ||
+            selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+            selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+            int sub_pos = arg_start;
+            CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+            if (sub_group && sub_group->selector_count > 0) {
+                selector->function_selectors = sub_group->selectors;
+                selector->function_selector_count = sub_group->selector_count;
+            }
+        }
 
         log_debug(" Functional pseudo-class: '%s(%s)'",
                func_name, pseudo_arg ? pseudo_arg : "");
@@ -1203,8 +1217,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 // Extract argument as string
                 char* pseudo_arg = NULL;
+                int arg_end = *pos; // position of ')' or end
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
-                    int arg_end = *pos;
+                    arg_end = *pos;
                     // Build argument string from tokens
                     size_t arg_len = 0;
                     for (int i = arg_start; i < arg_end; i++) {
@@ -1247,6 +1262,19 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 selector->value = func_name;
                 selector->argument = pseudo_arg;
+
+                // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+                if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+                    selector->type == CSS_SELECTOR_PSEUDO_IS ||
+                    selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+                    selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+                    int sub_pos = arg_start;
+                    CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+                    if (sub_group && sub_group->selector_count > 0) {
+                        selector->function_selectors = sub_group->selectors;
+                        selector->function_selector_count = sub_group->selector_count;
+                    }
+                }
 
                 log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
                        func_name, pseudo_arg ? pseudo_arg : "");
@@ -1793,7 +1821,30 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                             rule->data.conditional_rule.rules[rule->data.conditional_rule.rule_count++] = nested_rule;
                         }
                     } else {
-                        break;
+                        // CSS error recovery: skip the unparseable rule and continue
+                        // parsing remaining nested rules (e.g., @page inside @media).
+                        // Look for the next rule boundary (closing brace or semicolon).
+                        int brace_depth = 0;
+                        bool found_block = false;
+                        while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                            if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                                found_block = true;
+                                brace_depth = 1;
+                                pos++;
+                                while (pos < token_count && brace_depth > 0) {
+                                    if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                                    else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                                    pos++;
+                                }
+                                break;
+                            } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                                pos++;
+                                break;
+                            }
+                            pos++;
+                        }
+                        // if we stopped at a RIGHT_BRACE without finding a block/semicolon,
+                        // that's the parent @media's closing brace — don't consume it
                     }
                 }
 
@@ -1841,9 +1892,27 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             } else if (keyword_name && strcmp(keyword_name, "keyframes") == 0) {
                 rule->type = CSS_RULE_KEYFRAMES;
             } else {
-                // Unknown at-rule - skip it
-                log_debug(" Skipping unknown @-rule: %s", keyword_name ? keyword_name : "null");
-                return 0;
+                // Unknown at-rule (e.g., @page, @layer, @property) - skip it
+                // Per CSS spec, skip the at-rule's block or up to semicolon
+                while (pos < token_count &&
+                       tokens[pos].type != CSS_TOKEN_LEFT_BRACE &&
+                       tokens[pos].type != CSS_TOKEN_SEMICOLON) {
+                    pos++;
+                }
+                if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                    pos++; // consume ';'
+                } else if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                    // skip the block by matching braces
+                    int brace_depth = 1;
+                    pos++; // consume '{'
+                    while (pos < token_count && brace_depth > 0) {
+                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                        pos++;
+                    }
+                }
+                *out_rule = NULL;
+                return pos - start_pos;
             }
 
             // Store the name

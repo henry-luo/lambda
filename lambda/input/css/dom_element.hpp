@@ -37,6 +37,7 @@ typedef RadiantState StateStore;  // For backward compatibility
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
+typedef struct Runtime Runtime;  // From lambda/lambda.h
 
 // Forward declaration for TexNode (unified TeX pipeline)
 namespace tex { struct TexNode; }
@@ -91,6 +92,9 @@ struct DomDocument {
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
+    // Reactive UI: retained Lambda runtime for event handler execution
+    Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -100,7 +104,8 @@ struct DomDocument {
                     viewport_initial_scale(1.0f), viewport_min_scale(0.0f), viewport_max_scale(0.0f),
                     viewport_width(0), viewport_height(0),
                     body_transform_scale(1.0f),
-                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true) {}
+                    resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
+                    lambda_runtime(nullptr) {}
 };
 
 typedef struct {
@@ -232,6 +237,12 @@ struct DomElement : DomNode {
     // The TexNode tree IS the view tree - no conversion needed
     tex::TexNode* tex_root;
 
+    // Intrinsic sizing cache for avoiding redundant measurement during layout
+    float cached_min_content_width;
+    float cached_max_content_width;
+    bool has_cached_intrinsic_widths;
+    bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
+
     // Constructor
     DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
@@ -244,7 +255,9 @@ struct DomElement : DomNode {
         content_width(0), content_height(0),
         blk(nullptr), scroller(nullptr), embed(nullptr), position(nullptr),
         transform(nullptr), filter(nullptr), multicol(nullptr), pseudo(nullptr),
-        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr) {}
+        vpath(nullptr), layout_cache(nullptr), tex_root(nullptr),
+        cached_min_content_width(0), cached_max_content_width(0),
+        has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };
 
 // Pseudo-class state flags

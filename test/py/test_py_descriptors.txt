@@ -1,0 +1,7 @@
+ALICE
+BOB
+50
+75
+caught: out of range
+99
+deleting _x

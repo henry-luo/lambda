@@ -281,6 +281,18 @@ const char* DomNode::node_name() const {
     }
 }
 
+const char* DomNode::source_loc() const {
+    if (source_line <= 0) {
+        return node_name();
+    }
+    // use a small ring of static buffers to allow multiple source_loc() calls in one log statement
+    static char bufs[4][64];
+    static int buf_idx = 0;
+    char* buf = bufs[buf_idx++ & 3];
+    snprintf(buf, 64, "%s:%d", node_name(), source_line);
+    return buf;
+}
+
 // ============================================================================
 // Tree Manipulation Implementation
 // ============================================================================

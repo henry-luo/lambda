@@ -6,6 +6,7 @@
  */
 #include "py_runtime.h"
 #include "py_class.h"
+#include "py_bigint.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -77,6 +78,11 @@ extern "C" Item py_to_int(Item value) {
         if (endptr == str->chars) return (Item){.item = i2it(0)};
         return (Item){.item = i2it((int64_t)v)};
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            return py_bigint_normalize(value);
+        }
+        return (Item){.item = i2it(0)};
     default:
         return (Item){.item = i2it(0)};
     }
@@ -211,6 +217,11 @@ extern "C" Item py_to_str(Item value) {
         strbuf_free(sb);
         return map_result;
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            return py_bigint_to_str_item(value);
+        }
+        return (Item){.item = s2it(heap_create_name("<decimal>"))};
     case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("<function>"))};
     default:
@@ -244,6 +255,12 @@ extern "C" bool py_is_truthy(Item value) {
         Array* arr = it2arr(value);
         return arr && arr->length > 0;
     }
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) {
+            // non-zero bigint is truthy: compare against zero int56
+            return py_bigint_cmp(value, (Item){.item = i2it(0)}) != 0;
+        }
+        return false;
     case LMD_TYPE_MAP: {
         Map* m = it2map(value);
         if (!m || !m->type) return false;
@@ -291,6 +308,9 @@ double py_get_number(Item value) {
     case LMD_TYPE_INT: return (double)it2i(value);
     case LMD_TYPE_FLOAT: return it2d(value);
     case LMD_TYPE_BOOL: return it2b(value) ? 1.0 : 0.0;
+    case LMD_TYPE_DECIMAL:
+        if (py_is_bigint(value)) return py_bigint_to_double(value);
+        return 0.0;
     default: return 0.0;
     }
 }
@@ -308,15 +328,22 @@ extern "C" Item py_add(Item left, Item right) {
         return fn_join(left, right);
     }
 
-    // int + int → int (unless overflow)
+    // int + int → int (unless overflow → bigint)
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         int64_t r = a + b;
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        // overflow → float
-        return py_make_number((double)a + (double)b);
+        // overflow → bigint
+        return py_bigint_add(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_add(left, right);
+        }
     }
 
     // numeric addition
@@ -344,7 +371,15 @@ extern "C" Item py_subtract(Item left, Item right) {
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        return py_make_number((double)a - (double)b);
+        // overflow → bigint
+        return py_bigint_sub(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_sub(left, right);
+        }
     }
 
     return fn_sub(left, right);
@@ -399,13 +434,21 @@ extern "C" Item py_multiply(Item left, Item right) {
         int64_t a = it2i(left), b = it2i(right);
         // check overflow
         if (b != 0 && (a > INT56_MAX / (b > 0 ? b : -b) || a < INT56_MIN / (b > 0 ? b : -b))) {
-            return py_make_number((double)a * (double)b);
+            // overflow → bigint
+            return py_bigint_mul(left, right);
         }
         int64_t r = a * b;
         if (r >= INT56_MIN && r <= INT56_MAX) {
             return (Item){.item = i2it(r)};
         }
-        return py_make_number((double)a * (double)b);
+        return py_bigint_mul(left, right);
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_mul(left, right);
+        }
     }
 
     return fn_mul(left, right);
@@ -429,6 +472,13 @@ extern "C" Item py_divide(Item left, Item right) {
 extern "C" Item py_floor_divide(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
+
+    // bigint floor division
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_floordiv(left, right);
+        }
+    }
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
@@ -618,6 +668,13 @@ extern "C" Item py_modulo(Item left, Item right) {
         return py_string_format_percent(left, right);
     }
 
+    // bigint modulo
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_mod(left, right);
+        }
+    }
+
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t a = it2i(left), b = it2i(right);
         if (b == 0) {
@@ -655,25 +712,42 @@ extern "C" Item py_power(Item left, Item right) {
             *ptr = pow((double)base, (double)exp);
             return (Item){.item = d2it(ptr)};
         }
-        // positive integer exponent: compute by squaring
+        if (exp == 0) return (Item){.item = i2it(1)};
+        if (base == 0) return (Item){.item = i2it(0)};
+        if (base == 1) return (Item){.item = i2it(1)};
+        if (base == -1) return (Item){.item = i2it((exp & 1) ? -1 : 1)};
+        // positive integer exponent: compute by squaring with overflow detection.
+        // use __builtin_mul_overflow to catch both result*b and b*b overflow.
         int64_t result = 1;
         int64_t b = base;
         int64_t e = exp;
         while (e > 0) {
             if (e & 1) {
-                // overflow check
-                if (result > INT56_MAX / (b > 0 ? b : -b > 0 ? -b : 1)) {
-                    return py_make_number(pow((double)base, (double)exp));
+                int64_t tmp;
+                if (__builtin_mul_overflow(result, b, &tmp) ||
+                    tmp < INT56_MIN || tmp > INT56_MAX) {
+                    return py_bigint_pow(left, right);
                 }
-                result *= b;
+                result = tmp;
             }
             e >>= 1;
-            if (e > 0) b *= b;
+            if (e > 0) {
+                int64_t tmp;
+                if (__builtin_mul_overflow(b, b, &tmp)) {
+                    // b*b overflows — any further multiplication will also overflow
+                    return py_bigint_pow(left, right);
+                }
+                b = tmp;
+            }
         }
-        if (result >= INT56_MIN && result <= INT56_MAX) {
-            return (Item){.item = i2it(result)};
+        return (Item){.item = i2it(result)};
+    }
+
+    // bigint operands
+    if (lt == LMD_TYPE_DECIMAL || rt == LMD_TYPE_DECIMAL) {
+        if (py_is_bigint(left) || py_is_bigint(right)) {
+            return py_bigint_pow(left, right);
         }
-        return py_make_number(pow((double)base, (double)exp));
     }
 
     return fn_pow(left, right);
@@ -684,6 +758,9 @@ extern "C" Item py_negate(Item operand) {
     if (type == LMD_TYPE_INT) {
         int64_t v = -it2i(operand);
         return (Item){.item = i2it(v)};
+    }
+    if (type == LMD_TYPE_DECIMAL && py_is_bigint(operand)) {
+        return py_bigint_neg(operand);
     }
     return fn_neg(operand);
 }
@@ -721,10 +798,39 @@ extern "C" Item py_bit_xor(Item left, Item right) {
 }
 
 extern "C" Item py_lshift(Item left, Item right) {
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+    // bigint shift OR shift >= 62 bits (to avoid UB and produce correct bigint result)
+    if (lt == LMD_TYPE_DECIMAL || py_is_bigint(left)) {
+        return py_bigint_lshift(left, right);
+    }
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        int64_t shift = it2i(right);
+        if (shift < 0) { log_error("py: ValueError: negative shift count"); return ItemNull; }
+        if (shift >= 56) {
+            // result won't fit in int56 — promote to bigint
+            return py_bigint_lshift(left, right);
+        }
+        int64_t a = it2i(left);
+        int64_t r = a << shift;
+        if (r >= INT56_MIN && r <= INT56_MAX) return (Item){.item = i2it(r)};
+        return py_bigint_lshift(left, right);
+    }
     return (Item){.item = i2it((int64_t)py_get_number(left) << (int64_t)py_get_number(right))};
 }
 
 extern "C" Item py_rshift(Item left, Item right) {
+    TypeId lt = get_type_id(left);
+    TypeId rt = get_type_id(right);
+    if (lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) {
+        return py_bigint_rshift(left, right);
+    }
+    if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
+        int64_t shift = it2i(right);
+        if (shift < 0) { log_error("py: ValueError: negative shift count"); return ItemNull; }
+        if (shift >= 56) return (Item){.item = i2it(it2i(left) >= 0 ? 0 : -1)};
+        return (Item){.item = i2it(it2i(left) >> shift)};
+    }
     return (Item){.item = i2it((int64_t)py_get_number(left) >> (int64_t)py_get_number(right))};
 }
 
@@ -741,6 +847,10 @@ extern "C" Item py_eq(Item left, Item right) {
 
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         return (Item){.item = b2it(it2i(left) == it2i(right))};
+    }
+    // bigint comparison
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) == 0)};
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
         return (Item){.item = b2it(py_get_number(left) == py_get_number(right))};
@@ -784,6 +894,10 @@ extern "C" Item py_lt(Item left, Item right) {
 
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) && (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT)) {
         return (Item){.item = b2it(py_get_number(left) < py_get_number(right))};
+    }
+    // bigint comparison
+    if ((lt == LMD_TYPE_DECIMAL && py_is_bigint(left)) || (rt == LMD_TYPE_DECIMAL && py_is_bigint(right))) {
+        return (Item){.item = b2it(py_bigint_cmp(left, right) < 0)};
     }
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
         String* a = it2s(left);
@@ -881,6 +995,77 @@ extern "C" Item py_contains(Item container, Item value) {
 }
 
 // ============================================================================
+// match/case pattern matching helpers (Phase B)
+// ============================================================================
+
+// Returns true Item if obj is a sequence (list/array) but not a string or mapping.
+// Strings and bytes do not match sequence patterns per Python semantics.
+extern "C" Item py_match_is_sequence(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t == LMD_TYPE_ARRAY) return (Item){.item = ITEM_TRUE};
+    // tuples are also arrays in Lambda
+    return (Item){.item = ITEM_FALSE};
+}
+
+// Returns true Item if obj is a mapping (dict/map, but not a class instance).
+extern "C" Item py_match_is_mapping(Item obj) {
+    TypeId t = get_type_id(obj);
+    if (t != LMD_TYPE_MAP) return (Item){.item = ITEM_FALSE};
+    // exclude class instances (they have __class__ key set) — only pure dicts match
+    Map* m = it2map(obj);
+    if (!m) return (Item){.item = ITEM_FALSE};
+    bool found = false;
+    _map_get((TypeMap*)m->type, m->data, "__class__", &found);
+    if (found) return (Item){.item = ITEM_FALSE};
+    return (Item){.item = ITEM_TRUE};
+}
+
+// Returns a new dict containing all key-value pairs from obj whose keys are NOT
+// in the excluded_keys list (used for **rest in mapping patterns).
+extern "C" Item py_match_mapping_rest(Item obj, Item excluded_keys) {
+    Item result = py_dict_new();
+    if (get_type_id(obj) != LMD_TYPE_MAP) return result;
+    Map* m = it2map(obj);
+    if (!m || !m->type || !m->data) return result;
+
+    TypeMap* tm = (TypeMap*)m->type;
+    uint64_t* data = (uint64_t*)m->data;
+
+    // Walk shape linked list to iterate all fields
+    for (ShapeEntry* e = tm->shape; e; e = e->next) {
+        if (!e->name || !e->name->str) continue;
+        // skip dunder keys (internal metadata)
+        if (e->name->length >= 2 && e->name->str[0] == '_' && e->name->str[1] == '_') continue;
+
+        // check if key should be excluded
+        bool excluded = false;
+        if (get_type_id(excluded_keys) == LMD_TYPE_ARRAY) {
+            Array* keys = it2arr(excluded_keys);
+            for (int j = 0; j < keys->length; j++) {
+                Item k = keys->items[j];
+                if (get_type_id(k) == LMD_TYPE_STRING) {
+                    String* ks = it2s(k);
+                    if (ks && ks->len == (int)e->name->length &&
+                        memcmp(ks->chars, e->name->str, e->name->length) == 0) {
+                        excluded = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!excluded) {
+            // key item
+            Item key_item = (Item){.item = s2it(heap_strcpy((char*)e->name->str, (int64_t)e->name->length))};
+            // value item: read from data at byte_offset
+            int slot = (int)(e->byte_offset / 8);
+            Item val = {.item = data[slot]};
+            py_dict_set(result, key_item, val);
+        }
+    }
+    return result;
+}
+
+// ============================================================================
 // Object/attribute operations
 // ============================================================================
 
@@ -968,17 +1153,23 @@ extern "C" Item py_getattr(Item object, Item name) {
         if (get_type_id(raw) != LMD_TYPE_NULL) {
             if (get_type_id(raw) == LMD_TYPE_FUNC)
                 return py_bind_method(raw, object);
-            // property descriptor check
+            // descriptor protocol: any Map with a __get__ method acts as a descriptor
             if (get_type_id(raw) == LMD_TYPE_MAP) {
-                bool f = false;
-                Item is_prop = _map_get((TypeMap*)it2map(raw)->type,
-                                        it2map(raw)->data, (char*)"__is_property__", &f);
-                if (f && get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
-                    bool f2 = false;
-                    Item getter = _map_get((TypeMap*)it2map(raw)->type,
-                                           it2map(raw)->data, (char*)"__get__", &f2);
-                    if (f2 && get_type_id(getter) == LMD_TYPE_FUNC)
+                // fast path: __is_property__ marker (existing property() descriptors)
+                Item is_prop = py_map_get_cstr(raw, "__is_property__");
+                if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                    Item getter = py_map_get_cstr(raw, "__get__");
+                    if (get_type_id(getter) == LMD_TYPE_FUNC)
                         return py_call_function(py_bind_method(getter, object), NULL, 0);
+                }
+                // general descriptor: class instance with __get__ method
+                else if (py_is_instance(raw)) {
+                    Item get_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__get__"))});
+                    if (get_type_id(get_fn) != LMD_TYPE_NULL) {
+                        Item obj_type = py_get_class(object);
+                        Item args[2] = { object, obj_type };
+                        return py_call_function(get_fn, args, 2);
+                    }
                 }
             }
             return raw;
@@ -1002,6 +1193,36 @@ extern "C" Item py_setattr(Item object, Item name, Item value) {
     Map* m = it2map(object);
     if (!m || !py_input) return object;
 
+    // descriptor protocol: if instance's class has a data descriptor (__set__), invoke it
+    if (py_is_instance(object)) {
+        Item cls = py_get_class(object);
+        Item raw = py_mro_lookup(cls, name);
+        if (get_type_id(raw) == LMD_TYPE_MAP) {
+            // fast path: __is_property__ marker
+            Item is_prop = py_map_get_cstr(raw, "__is_property__");
+            if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                Item setter = py_map_get_cstr(raw, "__set__");
+                if (get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item bound_setter = py_bind_method(setter, object);
+                    Item args[1] = { value };
+                    py_call_function(bound_setter, args, 1);
+                    return value;
+                }
+                // read-only property — skip write silently
+                return value;
+            }
+            // general descriptor: class instance with __set__
+            if (py_is_instance(raw)) {
+                Item set_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__set__"))});
+                if (get_type_id(set_fn) != LMD_TYPE_NULL) {
+                    Item args[2] = { object, value };
+                    py_call_function(set_fn, args, 2);
+                    return value;
+                }
+            }
+        }
+    }
+
     String* key = it2s(name);
     // always write to this object's own dict (instance or class dict)
     map_put(m, key, value, py_input);
@@ -1012,6 +1233,47 @@ extern "C" Item py_hasattr(Item object, Item name) {
     // return True if py_getattr returns a non-null value
     Item result = py_getattr(object, name);
     return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_NULL)};
+}
+
+// Phase F2: delete an attribute, invoking __delete__ descriptor if present.
+extern "C" Item py_delattr(Item object, Item name) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    if (get_type_id(name) != LMD_TYPE_STRING) return ItemNull;
+
+    // descriptor protocol: check for __delete__ in class MRO
+    if (py_is_instance(object)) {
+        Item cls = py_get_class(object);
+        Item raw = py_mro_lookup(cls, name);
+        if (get_type_id(raw) == LMD_TYPE_MAP) {
+            // fast path: __is_property__ marker
+            Item is_prop = py_map_get_cstr(raw, "__is_property__");
+            if (get_type_id(is_prop) == LMD_TYPE_BOOL && it2b(is_prop)) {
+                Item deleter = py_map_get_cstr(raw, "__delete__");
+                if (get_type_id(deleter) == LMD_TYPE_FUNC) {
+                    py_call_function(py_bind_method(deleter, object), NULL, 0);
+                    return ItemNull;
+                }
+            }
+            // general descriptor with __delete__
+            if (py_is_instance(raw)) {
+                Item del_fn = py_getattr(raw, (Item){.item = s2it(heap_create_name("__delete__"))});
+                if (get_type_id(del_fn) != LMD_TYPE_NULL) {
+                    Item args[1] = { object };
+                    py_call_function(del_fn, args, 1);
+                    return ItemNull;
+                }
+            }
+        }
+    }
+
+    // no descriptor: remove own attribute by setting to a deleted sentinel
+    // We don't have map_remove, so store ItemNull to shadow the attribute
+    Map* m = it2map(object);
+    if (m && py_input) {
+        String* key = it2s(name);
+        map_put(m, key, ItemNull, py_input);
+    }
+    return ItemNull;
 }
 
 // ============================================================================
@@ -1103,6 +1365,21 @@ extern "C" Item py_subscript_get(Item object, Item key) {
         return py_list_get(object, key);
     }
     if (ot == LMD_TYPE_MAP) {
+        // Phase F4: if object is a class and has __class_getitem__, call it
+        if (py_is_class(object)) {
+            Item cgi_fn = py_mro_lookup(object, (Item){.item = s2it(heap_create_name("__class_getitem__"))});
+            if (get_type_id(cgi_fn) == LMD_TYPE_FUNC) {
+                Item args[2] = { object, key };
+                return py_call_function(cgi_fn, args, 2);
+            }
+            // no __class_getitem__: return a simple generic alias Map {__origin__: cls, __args__: [key]}
+            Item alias = py_new_object();
+            py_map_set_cstr(alias, "__origin__", object);
+            Item args_list = py_list_new(0);
+            py_list_append(args_list, key);
+            py_map_set_cstr(alias, "__args__", args_list);
+            return alias;
+        }
         return py_getattr(object, key);
     }
     if (ot == LMD_TYPE_STRING) {
@@ -1528,6 +1805,11 @@ extern "C" Item py_builtin_open(Item path_item, Item mode_item) {
 // ============================================================================
 
 extern "C" Item py_get_iterator(Item iterable) {
+    // generator objects are already iterators — pass through unchanged
+    if (get_type_id(iterable) == LMD_TYPE_FUNC) {
+        Function* fn = iterable.function;
+        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) return iterable;
+    }
     // create a stateful iterator object: {__data__: iterable, __idx__: 0, __len__: len}
     Item len_item = py_builtin_len(iterable);
     int64_t len = (get_type_id(len_item) == LMD_TYPE_INT) ? it2i(len_item) : 0;
@@ -1540,6 +1822,18 @@ extern "C" Item py_get_iterator(Item iterable) {
 }
 
 extern "C" Item py_iterator_next(Item iterator) {
+    // generator objects: call resume function
+    if (get_type_id(iterator) == LMD_TYPE_FUNC) {
+        Function* fn = iterator.function;
+        if (fn && (fn->flags & FN_FLAG_IS_GENERATOR)) {
+            uint64_t* frame = (uint64_t*)fn->closure_env;
+            if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+            typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+            resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+            uint64_t result = resume(frame, ItemNull.item);
+            return (Item){.item = result};
+        }
+    }
     // advance iterator: read __data__/__idx__/__len__, return next item or StopIteration
     if (get_type_id(iterator) != LMD_TYPE_MAP) {
         return py_stop_iteration();
@@ -1748,13 +2042,25 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
         return py_call_function(fn_item, new_args, na + 1);
     }
 
-    // class call (construction): allocate instance + call __init__
+    // class call (construction): check for custom __new__ first
     if (py_is_class(func)) {
+        // Look for __new__ defined in the class itself (not from object base)
+        // Only check the class's own dict (index 0 in MRO = the class itself)
+        Item own_new = py_map_get_cstr(func, "__new__");
+        if (get_type_id(own_new) != LMD_TYPE_NULL) {
+            // custom __new__: call __new__(cls, *args) — cls is first arg
+            Item new_args[17];
+            new_args[0] = func;
+            int na = arg_count > 16 ? 16 : arg_count;
+            for (int i = 0; i < na; i++) new_args[i + 1] = args ? args[i] : ItemNull;
+            return py_call_function(own_new, new_args, na + 1);
+        }
+
+        // default instance creation + __init__
         Item inst = py_new_instance(func);
         Item init_fn = py_mro_lookup(func,
             (Item){.item = s2it(heap_create_name("__init__"))});
         if (get_type_id(init_fn) != LMD_TYPE_NULL) {
-            // call __init__(inst, *args) — prepend inst
             Item init_args[17];
             init_args[0] = inst;
             int na = arg_count > 16 ? 16 : arg_count;
@@ -1833,7 +2139,6 @@ extern "C" Item py_call_function(Item func, Item* args, int arg_count) {
 extern "C" void py_raise(Item exception) {
     py_exception_pending = true;
     py_exception_value = exception;
-    log_debug("py: exception raised");
 }
 
 extern "C" Item py_check_exception(void) {
@@ -1946,4 +2251,67 @@ extern "C" Item py_stop_iteration(void) {
 extern "C" bool py_is_stop_iteration(Item value) {
     if (!py_stop_iteration_initialized) return false;
     return value.item == py_stop_iteration_sentinel.item;
+}
+
+// ============================================================================
+// Phase A: Python generator protocol
+// ============================================================================
+
+// Create a generator object from a MIR resume function and a pre-allocated frame.
+// Frame layout: slot 0 = state (0=fresh, N=resume point, -1=exhausted),
+//               slots 1..N = local variables (params first).
+extern "C" Item py_gen_create(void* resume_fn_ptr, int frame_size) {
+    if (!py_input || frame_size <= 0 || frame_size > 256) return ItemNull;
+    Function* fn = (Function*)pool_calloc(py_input->pool, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->flags = FN_FLAG_IS_GENERATOR;
+    fn->arity = 0;
+    fn->ptr = (fn_ptr)resume_fn_ptr;
+    uint64_t* frame = (uint64_t*)pool_calloc(py_input->pool, frame_size * sizeof(uint64_t));
+    fn->closure_env = frame;
+    fn->closure_field_count = (uint8_t)(frame_size < 255 ? frame_size : 255);
+    // frame[0] = 0: fresh (not started)
+    return (Item){.function = fn};
+}
+
+// Return the frame array pointer of a generator as an i64 (for MIR store ops).
+extern "C" int64_t py_gen_get_frame_c(Item gen) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return 0;
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return 0;
+    return (int64_t)(uintptr_t)fn->closure_env;
+}
+
+// Advance a generator by sending ItemNull (used by next()).
+// Also callable from py_iterator_next above.
+extern "C" Item py_gen_next(Item gen) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    uint64_t* frame = (uint64_t*)fn->closure_env;
+    if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+    uint64_t result = resume(frame, ItemNull.item);
+    return (Item){.item = result};
+}
+
+// Send a value into a generator (used by gen.send(val)).
+extern "C" Item py_gen_send(Item gen, Item value) {
+    if (get_type_id(gen) != LMD_TYPE_FUNC) return py_stop_iteration();
+    Function* fn = gen.function;
+    if (!fn || !(fn->flags & FN_FLAG_IS_GENERATOR)) return py_stop_iteration();
+    uint64_t* frame = (uint64_t*)fn->closure_env;
+    if (!frame || (int64_t)frame[0] == -1) return py_stop_iteration();
+    typedef uint64_t (*resume_fn_t)(uint64_t*, uint64_t);
+    resume_fn_t resume = (resume_fn_t)(void*)fn->ptr;
+    uint64_t result = resume(frame, value.item);
+    return (Item){.item = result};
+}
+
+// Check if an Item is a generator object.
+extern "C" bool py_is_generator(Item x) {
+    if (get_type_id(x) != LMD_TYPE_FUNC) return false;
+    Function* fn = x.function;
+    return fn && (fn->flags & FN_FLAG_IS_GENERATOR) != 0;
 }

@@ -1,0 +1,37 @@
+one
+two
+three
+other
+zero
+captured: 42
+one
+wildcard
+small
+medium
+large
+Hello
+Hola
+Bonjour
+Unknown
+empty
+one: 42
+two: 1, 2
+many: 1, 2, rest=2
+negative
+zero
+positive
+matched as pair, y=99
+no match
+true
+false
+none
+other
+nested: a=1 b=2 c=3
+no match
+origin
+y-axis at 5
+x-axis at 3
+(1, 2)
+buying apple
+selling 3 of banana
+unknown action: donate

@@ -8,6 +8,7 @@
 
 #include "../lib/log.h"
 #include <chrono>
+
 #include <cctype>
 #include <cwctype>
 #include <utf8proc.h>

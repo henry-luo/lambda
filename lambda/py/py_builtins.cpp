@@ -6,6 +6,7 @@
  */
 #include "py_runtime.h"
 #include "py_class.h"
+#include "py_bigint.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -217,6 +218,9 @@ extern "C" Item py_builtin_abs(Item value) {
         double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *ptr = fabs(d);
         return (Item){.item = d2it(ptr)};
+    }
+    if (type == LMD_TYPE_DECIMAL && py_is_bigint(value)) {
+        return py_bigint_abs(value);
     }
     return value;
 }
@@ -512,6 +516,7 @@ extern "C" Item py_builtin_any(Item iterable) {
 // ============================================================================
 
 extern "C" Item py_builtin_bin(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_bin_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[68];
     int pos = 0;
@@ -531,6 +536,7 @@ extern "C" Item py_builtin_bin(Item n) {
 }
 
 extern "C" Item py_builtin_oct(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_oct_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[32];
     int len;
@@ -543,6 +549,7 @@ extern "C" Item py_builtin_oct(Item n) {
 }
 
 extern "C" Item py_builtin_hex(Item n) {
+    if (py_is_bigint(n)) return py_bigint_to_hex_item(n);
     int64_t val = (get_type_id(n) == LMD_TYPE_INT) ? it2i(n) : (int64_t)py_get_number(n);
     char buf[32];
     int len;
@@ -777,7 +784,17 @@ extern "C" Item py_builtin_list(Item iterable) {
         }
         return (Item){.array = result};
     }
-    return py_list_new(0);
+    // general case: use iterator protocol (handles generators, ranges, maps, etc.)
+    {
+        Item iter = py_get_iterator(iterable);
+        Array* result = array();
+        for (;;) {
+            Item item = py_iterator_next(iter);
+            if (py_is_stop_iteration(item)) break;
+            array_push(result, item);
+        }
+        return (Item){.array = result};
+    }
 }
 
 extern "C" Item py_builtin_dict(Item* args, int argc) {
@@ -1678,5 +1695,27 @@ extern "C" Item py_builtin_property(Item fget) {
     Item true_val  = (Item){.item = b2it(1)};
     py_dict_set(prop, key_prop, true_val);
     py_dict_set(prop, key_get,  fget);
+    return prop;
+}
+
+// Adds/replaces the __set__ function on an existing property descriptor.
+// Returns the same property Map (mutated in place) for convenience.
+extern "C" Item py_property_setter(Item prop, Item fset) {
+    if (get_type_id(prop) != LMD_TYPE_MAP) {
+        // not a property yet — wrap in one
+        prop = py_builtin_property(ItemNull);
+    }
+    Item key_set = (Item){.item = s2it(heap_strcpy((char*)"__set__", 7))};
+    py_dict_set(prop, key_set, fset);
+    return prop;
+}
+
+// Adds/replaces the __delete__ function on an existing property descriptor.
+extern "C" Item py_property_deleter(Item prop, Item fdel) {
+    if (get_type_id(prop) != LMD_TYPE_MAP) {
+        prop = py_builtin_property(ItemNull);
+    }
+    Item key_del = (Item){.item = s2it(heap_strcpy((char*)"__delete__", 10))};
+    py_dict_set(prop, key_del, fdel);
     return prop;
 }

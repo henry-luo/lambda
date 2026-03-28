@@ -15,6 +15,7 @@
 // str.h included via view.hpp
 #include <cmath>
 #include <cstring>
+#include <chrono>
 
 // ============================================================================
 // Helper: Read border width from CSS specified style
@@ -577,6 +578,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
+
+    // check intrinsic sizing cache to avoid redundant subtree traversals
+    if (!content_only && element->has_cached_intrinsic_widths) {
+        return {element->cached_min_content_width, element->cached_max_content_width};
+    }
+
+    // re-entrancy guard: if we're already measuring this element, break the cycle
+    if (element->measuring_intrinsic_width) {
+        log_debug("measure_element_intrinsic_widths: cycle detected for %s, returning {0,0}", element->node_name());
+        return {0, 0};
+    }
+    element->measuring_intrinsic_width = true;
+    // RAII guard to clear measuring flag on all return paths
+    struct MeasureGuard {
+        DomElement* e;
+        MeasureGuard(DomElement* e) : e(e) {}
+        ~MeasureGuard() { e->measuring_intrinsic_width = false; }
+    } measure_guard(element);
+
+    auto t_measure_start = std::chrono::high_resolution_clock::now();
 
     // CRITICAL FIX: Set up font context for this element BEFORE measuring text children
     // This ensures text measurement uses the element's own font (e.g., monospace for <code>)
@@ -1946,6 +1967,152 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    // CSS Generated Content §2: ::before/::after pseudo-elements generate boxes that
+    // participate in the element's inline formatting context. Their outer width (content +
+    // border + padding + margin) contributes to the element's intrinsic inline size.
+    {
+        float pseudo_extra_width = 0;
+        for (int pi = 0; pi < 2; pi++) {
+            bool is_before = (pi == 0);
+            bool has_pseudo = is_before ? dom_element_has_before_content(element)
+                                        : dom_element_has_after_content(element);
+            if (!has_pseudo) continue;
+
+            StyleTree* ps = is_before ? element->before_styles : element->after_styles;
+            if (!ps || !ps->tree) continue;
+
+            // CSS Generated Content §2: Pseudo-elements default to display:inline.
+            // If display:block/table/list-item, the pseudo generates a block-level box
+            // that doesn't contribute to inline content sum — skip it here.
+            CssDeclaration* pd_decl = style_tree_get_declaration(ps, CSS_PROPERTY_DISPLAY);
+            if (pd_decl && pd_decl->value && pd_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum dv = pd_decl->value->data.keyword;
+                if (dv == CSS_VALUE_BLOCK || dv == CSS_VALUE_TABLE ||
+                    dv == CSS_VALUE_LIST_ITEM || dv == CSS_VALUE_FLEX ||
+                    dv == CSS_VALUE_GRID || dv == CSS_VALUE_NONE) continue;
+            }
+
+            // Measure content text width
+            float content_w = 0;
+            const char* pc = dom_element_get_pseudo_element_content(element,
+                is_before ? 1 /*PSEUDO_ELEMENT_BEFORE*/ : 2 /*PSEUDO_ELEMENT_AFTER*/);
+            if (pc && *pc) {
+                TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, pc, strlen(pc));
+                content_w = tw.max_content;
+            }
+
+            // Get explicit width if set
+            CssDeclaration* pw_decl = style_tree_get_declaration(ps, CSS_PROPERTY_WIDTH);
+            if (pw_decl && pw_decl->value && pw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                float ew = resolve_length_value(lycon, CSS_PROPERTY_WIDTH, pw_decl->value);
+                if (!isnan(ew) && ew >= 0) content_w = fmax(content_w, ew);
+            }
+
+            // Resolve horizontal border widths (3-tier: shorthand → longhand → side)
+            float border_l = 0, border_r = 0;
+            bool bw_found = false;
+            CssDeclaration* bw_decl = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_WIDTH);
+            if (bw_decl && bw_decl->value) {
+                if (bw_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, bw_decl->value);
+                    if (!isnan(v)) { border_l = border_r = v; bw_found = true; }
+                } else if (bw_decl->value->type == CSS_VALUE_TYPE_LIST && bw_decl->value->data.list.count >= 2) {
+                    int cnt = bw_decl->value->data.list.count;
+                    CssValue** vals = bw_decl->value->data.list.values;
+                    border_r = resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[1]);
+                    border_l = (cnt >= 4) ? resolve_length_value(lycon, CSS_PROPERTY_BORDER_WIDTH, vals[3]) : border_r;
+                    bw_found = true;
+                }
+            }
+            if (!bw_found) {
+                CssDeclaration* bl_w = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_LEFT_WIDTH);
+                if (bl_w && bl_w->value && bl_w->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, bl_w->value);
+                    if (!isnan(v) && v > 0) { border_l = v; bw_found = true; }
+                }
+                CssDeclaration* br_w = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_RIGHT_WIDTH);
+                if (br_w && br_w->value && br_w->value->type == CSS_VALUE_TYPE_LENGTH) {
+                    float v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, br_w->value);
+                    if (!isnan(v) && v > 0) { border_r = v; bw_found = true; }
+                }
+            }
+            if (border_l == 0) {
+                CssDeclaration* bl_d = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_LEFT);
+                if (bl_d && bl_d->value) {
+                    const CssValue* v = bl_d->value;
+                    if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                        float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v);
+                        if (!isnan(lv) && lv > 0) border_l = lv;
+                    } else if (v->type == CSS_VALUE_TYPE_LIST) {
+                        for (int i = 0; i < v->data.list.count; i++) {
+                            if (v->data.list.values[i] && v->data.list.values[i]->type == CSS_VALUE_TYPE_LENGTH) {
+                                float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_LEFT_WIDTH, v->data.list.values[i]);
+                                if (!isnan(lv) && lv > 0) { border_l = lv; break; }
+                            }
+                        }
+                    }
+                }
+            }
+            if (border_r == 0) {
+                CssDeclaration* br_d = style_tree_get_declaration(ps, CSS_PROPERTY_BORDER_RIGHT);
+                if (br_d && br_d->value) {
+                    const CssValue* v = br_d->value;
+                    if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                        float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v);
+                        if (!isnan(lv) && lv > 0) border_r = lv;
+                    } else if (v->type == CSS_VALUE_TYPE_LIST) {
+                        for (int i = 0; i < v->data.list.count; i++) {
+                            if (v->data.list.values[i] && v->data.list.values[i]->type == CSS_VALUE_TYPE_LENGTH) {
+                                float lv = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RIGHT_WIDTH, v->data.list.values[i]);
+                                if (!isnan(lv) && lv > 0) { border_r = lv; break; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Resolve horizontal padding
+            float pad_l = 0, pad_r = 0;
+            CssDeclaration* pl_d = style_tree_get_declaration(ps, CSS_PROPERTY_PADDING_LEFT);
+            if (pl_d && pl_d->value) {
+                float v = resolve_length_value(lycon, CSS_PROPERTY_PADDING_LEFT, pl_d->value);
+                if (!isnan(v) && v > 0) pad_l = v;
+            }
+            CssDeclaration* pr_d = style_tree_get_declaration(ps, CSS_PROPERTY_PADDING_RIGHT);
+            if (pr_d && pr_d->value) {
+                float v = resolve_length_value(lycon, CSS_PROPERTY_PADDING_RIGHT, pr_d->value);
+                if (!isnan(v) && v > 0) pad_r = v;
+            }
+
+            // Resolve horizontal margin
+            float mar_l = 0, mar_r = 0;
+            CssDeclaration* ml_d = style_tree_get_declaration(ps, CSS_PROPERTY_MARGIN_LEFT);
+            if (ml_d && ml_d->value) {
+                float v = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml_d->value);
+                if (!isnan(v) && v > 0) mar_l = v;
+            }
+            CssDeclaration* mr_d = style_tree_get_declaration(ps, CSS_PROPERTY_MARGIN_RIGHT);
+            if (mr_d && mr_d->value) {
+                float v = resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr_d->value);
+                if (!isnan(v) && v > 0) mar_r = v;
+            }
+
+            float outer_w = content_w + border_l + border_r + pad_l + pad_r + mar_l + mar_r;
+            if (outer_w > 0) {
+                pseudo_extra_width += outer_w;
+                log_debug("  pseudo ::%s intrinsic width: content=%.1f border=%.1f+%.1f pad=%.1f+%.1f margin=%.1f+%.1f outer=%.1f",
+                          is_before ? "before" : "after", content_w, border_l, border_r, pad_l, pad_r, mar_l, mar_r, outer_w);
+            }
+        }
+
+        if (pseudo_extra_width > 0) {
+            has_inline_content = true;
+            inline_max_sum += pseudo_extra_width;
+            inline_min_sum += pseudo_extra_width;
+            log_debug("  pseudo-element total width: %.1f added to inline content", pseudo_extra_width);
+        }
+    }
+
     // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block container.
     // Add text-indent to inline max-content width (it contributes to preferred width).
     float text_indent = 0.0f;
@@ -2198,6 +2365,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         lycon->font = saved_font;
     }
 
+    // store result in intrinsic sizing cache
+    if (!content_only) {
+        element->cached_min_content_width = sizes.min_content;
+        element->cached_max_content_width = sizes.max_content;
+        element->has_cached_intrinsic_widths = true;
+    }
+
+    auto t_measure_end = std::chrono::high_resolution_clock::now();
+    double measure_ms = std::chrono::duration<double, std::milli>(t_measure_end - t_measure_start).count();
+    if (measure_ms > 100.0) {
+        log_warn("SLOW MEASURE: %s took %.0fms", element->source_loc(), measure_ms);
+    }
+
     return sizes;
 }
 
@@ -2308,6 +2488,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
                     float lh_px = (float)lh->data.length.value;
                     if (lh_px > 0) line_height = lh_px;
+                } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    line_height = font_size * (float)(lh->data.percentage.value / 100.0);
                 }
                 break;
             }
@@ -2320,6 +2502,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     } else if (lh_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                         float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
                         if (lh_px > 0) line_height = lh_px;
+                    } else if (lh_decl->value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        line_height = font_size * (float)(lh_decl->value->data.percentage.value / 100.0);
                     }
                     break;
                 }
@@ -2354,6 +2538,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     if (units_per_line > 0) {
                         effective_width = units_per_line * widths.min_content;
                     }
+                } else if (widths.min_content > width && widths.min_content > 0) {
+                    // Each break unit overflows the line and gets its own line
+                    effective_width = widths.min_content;
                 }
                 num_lines = (int)ceil(text_width / effective_width);
             }
@@ -2372,8 +2559,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     DomElement* element = node->as_element();
     if (!element) return 0;
 
-    float height = 0;
+    // CSS 2.1 §9.2.4: Elements with display: none do not generate boxes
+    // and contribute zero height.
     ViewBlock* view = (ViewBlock*)element;
+    if (view->display.outer == CSS_VALUE_NONE || view->display.inner == CSS_VALUE_NONE) {
+        return 0;
+    }
+
+    float height = 0;
 
     // Set up element's own font context for accurate text measurement.
     // child text nodes inherit lycon->font, so we must set the element's font
@@ -2449,9 +2642,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (view->embed && view->embed->img) {
                 ImageSurface* img = view->embed->img;
                 float img_height = (float)img->height;
-                // If width is constrained, scale height proportionally
-                if (width > 0 && width < img->width && img->width > 0) {
-                    img_height = width * img->height / img->width;
+                // Scale height proportionally when width differs from intrinsic.
+                // For SVG: always scale (vector images are resolution-independent).
+                // For raster: only scale down (raster images have fixed pixel counts).
+                if (width > 0 && img->width > 0 &&
+                    (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
+                    img_height = width * (float)img->height / (float)img->width;
                 }
                 log_debug("calculate_max_content_height: IMG intrinsic height=%.1f", img_height);
                 return img_height;
@@ -2470,8 +2666,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 if (view->embed->img) {
                     ImageSurface* img = view->embed->img;
                     float img_height = (float)img->height;
-                    if (width > 0 && width < img->width && img->width > 0) {
-                        img_height = width * img->height / img->width;
+                    if (width > 0 && img->width > 0 &&
+                        (img->format == IMAGE_FORMAT_SVG || width < img->width)) {
+                        img_height = width * (float)img->height / (float)img->width;
                     }
                     log_debug("calculate_max_content_height: IMG intrinsic height=%.1f (loaded)", img_height);
                     return img_height;
@@ -2824,6 +3021,11 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             if (c->is_element()) {
                 DomElement* child_elem = c->as_element();
+                // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
+                ViewElement* child_ve = (ViewElement*)child_elem;
+                if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
+                    continue;
+                }
                 // Check if child is an inline element
                 const char* child_tag = child_elem->node_name();
                 if (child_tag && (
@@ -2978,6 +3180,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         bool is_block_flow = !is_grid_container && !is_flex_container && !has_only_inline_content;
 
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewElement* child_ve = (ViewElement*)child_elem;
+                if (child_ve->display.outer == CSS_VALUE_NONE || child_ve->display.inner == CSS_VALUE_NONE) {
+                    continue;
+                }
+            }
             float child_height = calculate_max_content_height(lycon, child, content_w);
 
             // Resolve child's vertical margins for height estimation
@@ -3110,8 +3320,22 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
 }
 
 float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float available_width) {
-    float min_content = calculate_min_content_width(lycon, node);
-    float max_content = calculate_max_content_width(lycon, node);
+    // measure both min and max content in a single call to avoid redundant subtree traversals
+    float min_content, max_content;
+    if (node && node->is_element()) {
+        DomElement* element = node->as_element();
+        if (element) {
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, element);
+            min_content = sizes.min_content;
+            max_content = sizes.max_content;
+        } else {
+            min_content = calculate_min_content_width(lycon, node);
+            max_content = calculate_max_content_width(lycon, node);
+        }
+    } else {
+        min_content = calculate_min_content_width(lycon, node);
+        max_content = calculate_max_content_width(lycon, node);
+    }
 
     // fit-content = clamp(min-content, available, max-content)
     // = min(max-content, max(min-content, available))
@@ -3137,8 +3361,21 @@ IntrinsicSizesBidirectional measure_intrinsic_sizes(
 
     // Step 1: Measure width intrinsic sizes
     // Width measurement doesn't depend on available width
-    result.min_content_width = calculate_min_content_width(lycon, node);
-    result.max_content_width = calculate_max_content_width(lycon, node);
+    // measure both min and max content widths in a single call
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        if (elem) {
+            IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, elem);
+            result.min_content_width = sizes.min_content;
+            result.max_content_width = sizes.max_content;
+        } else {
+            result.min_content_width = calculate_min_content_width(lycon, node);
+            result.max_content_width = calculate_max_content_width(lycon, node);
+        }
+    } else {
+        result.min_content_width = calculate_min_content_width(lycon, node);
+        result.max_content_width = calculate_max_content_width(lycon, node);
+    }
 
     // Step 2: Determine the width to use for height measurement
     // Height depends on width due to text wrapping

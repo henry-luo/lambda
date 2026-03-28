@@ -116,6 +116,7 @@ Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
+Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
 Item js_regex_exec(Item regex, Item str);
 Item js_debug_check_callee(Item callee, int64_t site_id);
@@ -203,6 +204,7 @@ void js_console_log_multi(Item* args, int argc);
 // =============================================================================
 
 Item js_instanceof(Item left, Item right);
+Item js_instanceof_classname(Item left, Item classname);
 Item js_in(Item key, Item object);
 Item js_nullish_coalesce(Item left, Item right);
 
@@ -232,6 +234,7 @@ Item js_map_method(Item obj, Item method_name, Item* args, int argc);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 Item js_get_prototype(Item object);
+Item js_prototype_lookup(Item object, Item property);
 
 // =============================================================================
 // v9: Object extensions
@@ -260,6 +263,7 @@ Item js_number_is_safe_integer(Item value);
 // =============================================================================
 
 Item js_array_from(Item iterable);
+Item js_array_from_with_mapper(Item iterable, Item mapFn);
 Item js_json_parse(Item str_item);
 Item js_json_stringify(Item value);
 Item js_delete_property(Item obj, Item key);

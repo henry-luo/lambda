@@ -483,7 +483,29 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             // Here we just return true to not block the match
             return true;
 
-        // Pseudo-classes
+        // Functional pseudo-classes: :not(), :is(), :where(), :has()
+        case CSS_SELECTOR_PSEUDO_NOT:
+            return selector_matcher_matches_not(matcher,
+                simple_selector->function_selectors,
+                (int)simple_selector->function_selector_count,
+                element);
+        case CSS_SELECTOR_PSEUDO_IS:
+            return selector_matcher_matches_is(matcher,
+                simple_selector->function_selectors,
+                (int)simple_selector->function_selector_count,
+                element);
+        case CSS_SELECTOR_PSEUDO_WHERE:
+            return selector_matcher_matches_where(matcher,
+                simple_selector->function_selectors,
+                (int)simple_selector->function_selector_count,
+                element);
+        case CSS_SELECTOR_PSEUDO_HAS:
+            return selector_matcher_matches_has(matcher,
+                simple_selector->function_selectors,
+                (int)simple_selector->function_selector_count,
+                element);
+
+        // Other pseudo-classes
         default:
             if (simple_selector->type >= CSS_SELECTOR_PSEUDO_ROOT &&
                 simple_selector->type <= CSS_SELECTOR_PSEUDO_OUT_OF_RANGE) {

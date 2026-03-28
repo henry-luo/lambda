@@ -48,6 +48,10 @@ std::vector<LambdaTestInfo> discover_all_c2mir_tests() {
         if (test.test_name == "import_js") continue;  // requires JS runtime (cross-lang import)
         if (test.test_name == "import_js_naming") continue;  // requires JS runtime
         if (test.test_name == "import_py") continue;  // requires Python runtime (cross-lang import)
+        if (test.test_name == "view_template") continue;  // view/edit templates only supported in MIR Direct
+        if (test.test_name == "view_state") continue;  // view state management only supported in MIR Direct
+        if (test.test_name == "render_map") continue;  // render map only supported in MIR Direct
+        if (test.test_name == "edit_bridge") continue;  // edit bridge only supported in MIR Direct
         filtered.push_back(test);
     }
     return filtered;

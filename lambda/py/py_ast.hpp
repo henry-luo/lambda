@@ -82,6 +82,14 @@ typedef enum PyAstNodeType {
     PY_AST_NODE_DECORATOR,
     PY_AST_NODE_FSTRING_EXPR,           // f-string interpolation with format spec
 
+    // Phase B: match/case
+    PY_AST_NODE_MATCH,                  // match subject: cases...
+    PY_AST_NODE_CASE,                   // case pattern [if guard]: body
+    PY_AST_NODE_PATTERN,                // discriminated by PyPatternKind
+
+    PY_AST_NODE_YIELD,                  // yield expr / yield from expr
+    PY_AST_NODE_AWAIT,                  // await expr (Phase D: async/await)
+
     PY_AST_NODE_COUNT
 } PyAstNodeType;
 
@@ -170,6 +178,8 @@ typedef struct PyLiteralNode {
         String* string_value;
         bool boolean_value;
     } value;
+    bool is_bigint_literal;         // true when the literal exceeds int64 range
+    const char* bigint_literal_str; // heap-allocated decimal string for large literals
 } PyLiteralNode;
 
 // Python binary operation node
@@ -227,6 +237,7 @@ typedef struct PyFunctionDefNode {
     PyAstNode* body;                // function body (block of statements)
     PyAstNode* decorators;          // decorator list (linked list)
     PyAstNode* return_annotation;   // return type annotation (ignored at runtime)
+    bool is_async;                  // true for async def (Phase D)
 } PyFunctionDefNode;
 
 // Python call expression node
@@ -317,6 +328,7 @@ typedef struct PyClassDefNode {
     PyAstNode* bases;               // base classes (linked list)
     PyAstNode* body;                // class body
     PyAstNode* decorators;
+    PyAstNode* metaclass;           // metaclass= keyword argument value (Phase F5)
 } PyClassDefNode;
 
 // Python try statement node
@@ -460,3 +472,74 @@ typedef struct PyImportNode {
     String* alias;                  // as alias (optional)
     PyAstNode* names;               // linked list of imported names (for from...import)
 } PyImportNode;
+
+// Python yield / yield from expression node (Phase A: generators)
+typedef struct PyYieldNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_YIELD
+    PyAstNode* value;       // yielded value (NULL for bare yield)
+    bool is_from;           // true for 'yield from'
+} PyYieldNode;
+
+// Python await expression node (Phase D: async/await)
+typedef struct PyAwaitNode {
+    PyAstNode base;         // node_type == PY_AST_NODE_AWAIT
+    PyAstNode* value;       // the awaited expression
+} PyAwaitNode;
+
+// ============================================================================
+// Phase B: match/case pattern matching
+// ============================================================================
+
+typedef enum PyPatternKind {
+    PY_PAT_LITERAL,     // integer/float/string/True/False/None literal
+    PY_PAT_CAPTURE,     // single identifier binding (e.g. case x:)
+    PY_PAT_WILDCARD,    // _ wildcard
+    PY_PAT_OR,          // union_pattern: elements is a linked list of alternatives
+    PY_PAT_SEQUENCE,    // list_pattern or tuple_pattern: elements linked list; rest_name if *rest
+    PY_PAT_MAPPING,     // dict_pattern: kv_pairs linked list; rest_name if **rest
+    PY_PAT_CLASS,       // class_pattern: name=class, elements=positional, kv_pairs=keyword
+    PY_PAT_AS,          // as_pattern: literal=inner pattern, name=alias
+    PY_PAT_VALUE,       // dotted constant (e.g. Status.OK): name=full dotted string
+    PY_PAT_STAR,        // *name or *_ splat inside sequence pattern: name (NULL for _)
+} PyPatternKind;
+
+// Pattern node — discriminated by kind.
+// Fields are shared/reused across kinds as documented above.
+typedef struct PyPatternNode {
+    PyAstNode base;             // base.node_type == PY_AST_NODE_PATTERN
+    PyPatternKind kind;
+    PyAstNode*  literal;        // LITERAL: expr; OR-unused; AS: inner pattern; CLASS-unused
+    bool        literal_neg;    // LITERAL: true if preceded by unary minus
+    String*     name;           // CAPTURE/STAR: var name; AS: alias; CLASS: class name; VALUE: dotted text
+    PyAstNode*  elements;       // OR: alternatives; SEQUENCE: sub-patterns; CLASS: positionals
+    String*     rest_name;      // SEQUENCE *rest name; MAPPING **rest name (NULL if absent)
+    PyAstNode*  kv_pairs;       // MAPPING: linked list of PyPatternKVNode; CLASS: keyword patterns
+    int32_t     rest_pos;       // SEQUENCE: index of *rest (-1 if none); all elements[0..rest_pos-1] before star
+} PyPatternNode;
+
+// Key-value pair inside a mapping pattern: {key_pattern: val_pattern}
+// Also reused for class keyword patterns: attr_name=sub_pattern
+// Stored as a PyPatternNode where name=attr_key (or NULL), literal=key_expr, right via kv_pairs chain.
+// For simplicity, both mapping KV and class keyword share this struct.
+typedef struct PyPatternKVNode {
+    PyAstNode   base;           // base.node_type == PY_AST_NODE_PATTERN
+    PyPatternKind kind;         // always PY_PAT_LITERAL (for mapping) or PY_PAT_CAPTURE (class kw)
+    PyAstNode*  key_pat;        // mapping: key literal/value; class: NULL (name holds attr)
+    PyAstNode*  val_pat;        // value pattern to match against
+    String*     attr_name;      // class keyword attr name (e.g. "x" in ClassName(x=pat))
+} PyPatternKVNode;
+
+// match statement node
+typedef struct PyMatchNode {
+    PyAstNode base;
+    PyAstNode* subject;         // subject expression
+    PyAstNode* cases;           // linked list of PyCaseNode
+} PyMatchNode;
+
+// case clause node
+typedef struct PyCaseNode {
+    PyAstNode base;
+    PyAstNode* pattern;         // PyPatternNode
+    PyAstNode* guard;           // optional if-guard expression
+    PyAstNode* body;            // body block/statement
+} PyCaseNode;

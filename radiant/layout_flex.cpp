@@ -472,10 +472,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // or main-axis sizing), treat it as definite. This ensures nested flex
         // containers use the stretched height as their cross size, not content.
         // (Parallels the existing main-axis fix for column flex at line ~400.)
-        if (!has_definite_height_for_cross && container->height > 0 && !is_absolute) {
+        // CRITICAL: Use content_height (height minus padding/border) not container->height.
+        // container->height can be positive from padding/border alone even when height is
+        // auto, which would incorrectly mark auto-height containers as having definite cross.
+        if (!has_definite_height_for_cross && content_height > 0 && !is_absolute) {
             has_definite_height_for_cross = true;
-            log_debug("init_flex_container: cross-axis height definite from parent layout (%.1f)",
-                      container->height);
+            log_debug("init_flex_container: cross-axis height definite from parent layout (content_height=%d)",
+                      content_height);
         }
         flex->has_definite_cross_size = has_definite_height_for_cross;
     } else {
@@ -532,8 +535,8 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     log_info("=== layout_flex_container ENTRY ===");
     FlexContainerLayout* flex_layout = lycon->flex_container;
 
-    log_info("FLEX START - container: %dx%d at (%d,%d)",
-           container->width, container->height, container->x, container->y);
+    log_info("FLEX START %s - container: %dx%d at (%d,%d)",
+           container->source_loc(), container->width, container->height, container->x, container->y);
     log_debug("FLEX PROPERTIES - direction=%d, align_items=%d, justify=%d, wrap=%d",
            flex_layout->direction, flex_layout->align_items, flex_layout->justify, flex_layout->wrap);
     // DEBUG: Gap settings applied
@@ -2240,11 +2243,11 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         // (correct container_content_width) after CSS has been re-resolved above.
         // Without this, the cached measured_height (computed with wrong % parent) is reused.
         invalidate_measurement_cache_for_node(child);
-        log_debug("Step 1: Creating View for %s", child->node_name());
+        log_debug("Step 1: Creating View for %s", child->source_loc());
         init_flex_item_view(lycon, child);
 
         // Step 2: Measure content (uses resolved styles)
-        log_debug("Step 2: Measuring content for %s", child->node_name());
+        log_debug("Step 2: Measuring content for %s", child->source_loc());
         measure_flex_child_content(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
@@ -2985,8 +2988,29 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     }
                 }
 
-                if (has_css_width) {
-                    // §4.5: specified_size_suggestion = computed main size, clamped by max
+                // CSS Flexbox §4.5: The specified size suggestion is:
+                //   1. If flex-basis is definite AND width is also set → use flex base size
+                //      (flex-basis overrides width for the specified size suggestion)
+                //   2. Else if width is definite → use width
+                //   3. Otherwise → undefined (use content size only)
+                // Note: When only flex-basis is set without width, there's no "specified size"
+                // for auto-minimum purposes — the content minimum prevails.
+                bool has_definite_flex_basis = item->fi && item->fi->flex_basis >= 0;
+                if (has_definite_flex_basis && has_css_width) {
+                    int specified_suggestion;
+                    if (item->fi->flex_basis_is_percent) {
+                        specified_suggestion = (int)(item->fi->flex_basis * flex_layout->main_axis_size / 100.0f);
+                    } else {
+                        specified_suggestion = (int)item->fi->flex_basis;
+                    }
+                    if (max_width > 0 && max_width < INT_MAX && specified_suggestion > max_width) {
+                        specified_suggestion = max_width;
+                    }
+                    // content-based minimum = min(content_suggestion, specified_suggestion)
+                    min_width = (content_suggestion < specified_suggestion) ? content_suggestion : specified_suggestion;
+                    log_debug("resolve_flex_item_constraints: auto min-width = min(content=%d, flex_basis=%d) = %d",
+                              content_suggestion, specified_suggestion, min_width);
+                } else if (has_css_width) {
                     int specified_suggestion = (int)item->blk->given_width;
                     if (max_width > 0 && max_width < INT_MAX && specified_suggestion > max_width) {
                         specified_suggestion = max_width;
@@ -3036,8 +3060,26 @@ void resolve_flex_item_constraints(ViewElement* item, FlexContainerLayout* flex_
                     }
                 }
 
-                if (has_css_height) {
-                    // §4.5: specified_size_suggestion = computed main size, clamped by max
+                // CSS Flexbox §4.5: The specified size suggestion:
+                //   1. If flex-basis is definite AND height is also set → use flex base size
+                //   2. Else if height is definite → use height
+                //   3. Otherwise → undefined (use content size only)
+                bool has_definite_flex_basis_h = item->fi && item->fi->flex_basis >= 0;
+                if (has_definite_flex_basis_h && has_css_height) {
+                    int specified_suggestion;
+                    if (item->fi->flex_basis_is_percent) {
+                        specified_suggestion = (int)(item->fi->flex_basis * flex_layout->main_axis_size / 100.0f);
+                    } else {
+                        specified_suggestion = (int)item->fi->flex_basis;
+                    }
+                    if (max_height > 0 && max_height < INT_MAX && specified_suggestion > max_height) {
+                        specified_suggestion = max_height;
+                    }
+                    // content-based minimum = min(content_suggestion, specified_suggestion)
+                    min_height = (content_suggestion < specified_suggestion) ? content_suggestion : specified_suggestion;
+                    log_debug("resolve_flex_item_constraints: auto min-height = min(content=%d, flex_basis=%d) = %d",
+                              content_suggestion, specified_suggestion, min_height);
+                } else if (has_css_height) {
                     int specified_suggestion = (int)item->blk->given_height;
                     if (max_height > 0 && max_height < INT_MAX && specified_suggestion > max_height) {
                         specified_suggestion = max_height;
@@ -5685,18 +5727,35 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                     log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit height=%.1f (border-box)",
                               i, j, hypothetical_cross);
                 } else {
-                    // FIX: For items without explicit height, use recursive measurement
-                    // This handles nested flex containers properly
-                    float measured_height = measure_flex_content_height(item);
-                    if (measured_height > 0) {
-                        float padding_border_height = 0;
-                        if (item->bound) {
-                            padding_border_height += item->bound->padding.top + item->bound->padding.bottom;
-                            if (item->bound->border) {
-                                padding_border_height += item->bound->border->width.top + item->bound->border->width.bottom;
-                            }
+                    // CSS Flexbox §9.4: "Determine the hypothetical cross size of each item
+                    // by performing layout with the used main size and the available space."
+                    // Use calculate_max_content_height at the item's actual width (not the
+                    // cached intrinsic_height.max_content which was computed at max-content
+                    // width). This is critical for items with inline-block children that
+                    // wrap differently at different widths.
+                    float item_content_width = (float)item->width;
+                    if (item->bound) {
+                        item_content_width -= item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            item_content_width -= item->bound->border->width.left + item->bound->border->width.right;
                         }
-                        hypothetical_cross = measured_height + padding_border_height;
+                    }
+                    if (item_content_width < 0) item_content_width = 0;
+
+                    float measured_height = 0;
+                    if (item_content_width > 0) {
+                        measured_height = calculate_max_content_height(lycon, (DomNode*)item, item_content_width);
+                    }
+                    if (measured_height <= 0) {
+                        // Fallback to recursive flex measurement for nested flex containers
+                        measured_height = measure_flex_content_height(item);
+                    }
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] %s measured_height=%.1f (content_w=%.1f, width=%.1f)",
+                              i, j, item->node_name(), measured_height, item_content_width, item->width);
+
+                    if (measured_height > 0) {
+                        // calculate_max_content_height returns border-box height
+                        hypothetical_cross = measured_height;
                         // Update item dimensions so alignment uses correct size
                         item->height = (int)hypothetical_cross;
                     } else {

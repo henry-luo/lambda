@@ -416,7 +416,46 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
                 block = (ViewBlock*)parent;
                 goto INHERIT;
             }
-            return *parent->blk->line_height;
+            CssValue value = *parent->blk->line_height;
+            // CSS 2.1 §10.8.1: <length> and <percentage> line-height values are
+            // computed at the declaring element and inherited as the computed px
+            // value. Only unitless <number> inherits the multiplier.
+            // Font-relative units (em, ex, ch) must be resolved against the
+            // declaring parent's font-size, not the inheriting child's.
+            if (value.type == CSS_VALUE_TYPE_LENGTH) {
+                CssUnit unit = value.data.length.unit;
+                if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
+                    float parent_fs = parent->font ? parent->font->font_size : 0;
+                    if (parent_fs > 0) {
+                        float multiplier = (float)value.data.length.value;
+                        float computed_px;
+                        if (unit == CSS_UNIT_EM) {
+                            computed_px = multiplier * parent_fs;
+                        } else if (unit == CSS_UNIT_EX) {
+                            float x_ratio = font_get_x_height_ratio(lycon->font.font_handle);
+                            computed_px = multiplier * parent_fs * x_ratio;
+                        } else { // CSS_UNIT_CH
+                            computed_px = multiplier * parent_fs * 0.5f;
+                        }
+                        log_debug("inherit line-height: resolved %.2f%s against parent font-size %.1f → %.2fpx",
+                                  multiplier, unit == CSS_UNIT_EM ? "em" : unit == CSS_UNIT_EX ? "ex" : "ch",
+                                  parent_fs, computed_px);
+                        value.data.length.value = computed_px;
+                        value.data.length.unit = CSS_UNIT_PX;
+                    }
+                }
+            } else if (value.type == CSS_VALUE_TYPE_PERCENTAGE) {
+                float parent_fs = parent->font ? parent->font->font_size : 0;
+                if (parent_fs > 0) {
+                    float computed_px = (float)(value.data.percentage.value * parent_fs / 100.0);
+                    log_debug("inherit line-height: resolved %.1f%% against parent font-size %.1f → %.2fpx",
+                              value.data.percentage.value, parent_fs, computed_px);
+                    value.type = CSS_VALUE_TYPE_LENGTH;
+                    value.data.length.value = computed_px;
+                    value.data.length.unit = CSS_UNIT_PX;
+                }
+            }
+            return value;
         }
         block = (ViewBlock*)parent;
         goto INHERIT;
@@ -1214,7 +1253,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    log_debug("layout node %s, advance_y: %f", node->node_name(), lycon->block.advance_y);
+    log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
 
     // Log for IMG elements
     uintptr_t node_tag = node->tag();
@@ -1303,7 +1342,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
         DisplayValue display = resolve_display_value(node);
-        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->node_name(), display.outer, display.inner);
+        log_debug("processing element: %s, with display: outer=%d, inner=%d", node->source_loc(), display.outer, display.inner);
 
         // Log IMG display resolution
         if (node_tag == HTM_TAG_IMG) {
@@ -1555,7 +1594,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_info("[TIMING] layout: context init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
 
     // resolve CSS style
-    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->node_name());
+    log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->source_loc());
     dom_node_resolve_style(elmt, lycon);
     log_debug("DEBUG: After resolve style");
 

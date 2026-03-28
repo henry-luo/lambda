@@ -304,6 +304,14 @@ typedef enum SysFunc {
     // file-based find/replace (procedural)
     SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
     SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
+    // view/edit template apply
+    SYSFUNC_APPLY1,          // apply(target) - apply view templates to target
+    SYSFUNC_APPLY2,          // apply(target, options) - apply with options map
+    // edit bridge — MarkEditor operations (Phase 4)
+    SYSFUNC_EDIT_UNDO,       // undo() - undo last edit commit
+    SYSFUNC_EDIT_REDO,       // redo() - redo last undone commit
+    SYSFUNC_EDIT_COMMIT,     // commit() - commit current edits as version
+    SYSFUNC_EDIT_COMMIT1,    // commit(description) - commit with description
 } SysFunc;
 
 typedef struct Type {
@@ -496,8 +504,10 @@ Item item_spread(Item item);
 typedef void* (*fn_ptr)();
 
 // Function flags (stored in Function.flags field)
-#define FN_FLAG_BOXED_RET  0x01  // bit 0: fn->ptr returns RetItem instead of Item
-#define FN_FLAG_HAS_KWARGS 0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
+#define FN_FLAG_BOXED_RET     0x01  // bit 0: fn->ptr returns RetItem instead of Item
+#define FN_FLAG_HAS_KWARGS    0x02  // bit 1: fn->ptr has an extra Item **kwargs_map param
+#define FN_FLAG_IS_GENERATOR  0x04  // bit 2: function is a Python generator (resume fn, frame in closure_env)
+#define FN_FLAG_IS_COROUTINE  0x08  // bit 3: function is a Python coroutine (async def)
 
 // Function as first-class value
 // Supports both direct function references and closures
@@ -1182,6 +1192,10 @@ typedef struct Context {
     Item fn_error(Item message);  // raise a user-defined error
     Symbol* fn_symbol1(Item item);  // convert to symbol
     Item fn_symbol2(Item name, Item url);  // create namespaced symbol
+
+    // view/edit template apply
+    Item fn_apply1(Item target);
+    Item fn_apply2(Item target, Item options);
 
     Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 

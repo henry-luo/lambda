@@ -333,6 +333,36 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
         return js_toFixed(num, digits);
     }
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+        if (argc > 0) {
+            Item radix_item = js_to_number(args[0]);
+            int radix = 10;
+            TypeId rt = get_type_id(radix_item);
+            if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
+            else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
+            if (radix >= 2 && radix <= 36 && radix != 10) {
+                // convert number to string with given radix
+                int64_t n = 0;
+                TypeId nt = get_type_id(num);
+                if (nt == LMD_TYPE_INT) n = it2i(num);
+                else if (nt == LMD_TYPE_FLOAT) n = (int64_t)it2d(num);
+                bool negative = n < 0;
+                uint64_t val = negative ? (uint64_t)(-(int64_t)n) : (uint64_t)n;
+                char buf[68]; // max 64 binary digits + sign + null
+                int pos = 66;
+                buf[67] = '\0';
+                if (val == 0) {
+                    buf[--pos] = '0';
+                } else {
+                    const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+                    while (val > 0) {
+                        buf[--pos] = digits[val % radix];
+                        val /= radix;
+                    }
+                }
+                if (negative) buf[--pos] = '-';
+                return (Item){.item = s2it(heap_create_name(&buf[pos], 67 - pos))};
+            }
+        }
         return js_to_string(num);
     }
 
@@ -376,21 +406,23 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     }
 
     char buf[5]; // max 4 bytes for UTF-8 + null
+    int len = 0;
     if (code < 128) {
         buf[0] = (char)code;
-        buf[1] = '\0';
+        len = 1;
     } else if (code < 0x800) {
         buf[0] = (char)(0xC0 | (code >> 6));
         buf[1] = (char)(0x80 | (code & 0x3F));
-        buf[2] = '\0';
+        len = 2;
     } else {
         buf[0] = (char)(0xE0 | (code >> 12));
         buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
         buf[2] = (char)(0x80 | (code & 0x3F));
-        buf[3] = '\0';
+        len = 3;
     }
+    buf[len] = '\0';
 
-    return (Item){.item = s2it(heap_create_name(buf))};
+    return (Item){.item = s2it(heap_strcpy(buf, len))};
 }
 
 // =============================================================================
@@ -445,17 +477,30 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // Get the class name from right (constructor's __class_name__)
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     Item right_name = map_get(right.map, class_key);
-    if (right_name.item == 0) return (Item){.item = b2it(false)};
+    if (right_name.item == 0 || get_type_id(right_name) != LMD_TYPE_STRING)
+        return (Item){.item = b2it(false)};
+
+    // Delegate to name-based check
+    return js_instanceof_classname(left, right_name);
+}
+
+// instanceof check by class name string — walks prototype chain checking __class_name__
+extern "C" Item js_instanceof_classname(Item left, Item classname) {
+    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+    if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+
+    String* rn = it2s(classname);
+    if (!rn) return (Item){.item = b2it(false)};
+
+    Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
 
     // Check if left has this class name in its prototype chain
     Item obj = left;
     int depth = 0;
     while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
         Item obj_name = map_get(obj.map, class_key);
-        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING &&
-            get_type_id(right_name) == LMD_TYPE_STRING) {
+        if (obj_name.item != 0 && get_type_id(obj_name) == LMD_TYPE_STRING) {
             String* on = it2s(obj_name);
-            String* rn = it2s(right_name);
             if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
                 return (Item){.item = b2it(true)};
             }
@@ -858,6 +903,23 @@ extern "C" Item js_array_from(Item iterable) {
         return result;
     }
     return js_array_new(0);
+}
+
+// Array.from(iterable, mapFn) — with optional mapper function
+extern "C" Item js_array_from_with_mapper(Item iterable, Item mapFn) {
+    Item arr = js_array_from(iterable);
+    // Apply mapper if provided and is a function
+    if (get_type_id(mapFn) == LMD_TYPE_FUNC) {
+        int64_t len = js_array_length(arr);
+        for (int64_t i = 0; i < len; i++) {
+            Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+            Item idx_item = (Item){.item = i2it(i)};
+            Item args[2] = {elem, idx_item};
+            Item mapped = js_call_function(mapFn, ItemNull, args, 2);
+            js_array_set(arr, (Item){.item = i2it(i)}, mapped);
+        }
+    }
+    return arr;
 }
 
 // =============================================================================

@@ -35,6 +35,51 @@ extern Symbol* fn_symbol(Item item);     // JIT name: fn_symbol1
 extern Item fn_split(Item str, Item sep); // JIT name: fn_split2
 extern Item fn_replace(Item str, Item old_str, Item new_str); // JIT name: fn_replace3
 
+// view/edit template apply
+extern Item fn_apply1(Item target);
+extern Item fn_apply2(Item target, Item options);
+
+// template state store (reactive UI Phase 2)
+extern Item tmpl_state_get(Item model_item, const char* template_ref, const char* state_name);
+extern void tmpl_state_set(Item model_item, const char* template_ref,
+                           const char* state_name, Item value);
+extern Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
+                                   const char* state_name, Item default_value);
+
+// render map (reactive UI Phase 3 — observer-based reconciliation)
+extern void render_map_record(Item source_item, const char* template_ref,
+                              Item result_node, Item parent_result, int child_index);
+extern void render_map_mark_dirty(Item source_item, const char* template_ref);
+extern bool render_map_has_dirty(void);
+extern int render_map_retransform(void);
+extern Item render_map_get_result(Item source_item, const char* template_ref);
+
+// edit bridge (reactive UI Phase 4 — MarkEditor integration)
+extern int edit_bridge_init(void* input_ptr);
+extern void edit_bridge_destroy(void);
+extern bool edit_bridge_active(void);
+extern Item edit_map_update(Item map, const char* key, Item value);
+extern Item edit_map_delete(Item map, const char* key);
+extern Item edit_elmt_update_attr(Item element, const char* attr_name, Item value);
+extern Item edit_elmt_delete_attr(Item element, const char* attr_name);
+extern Item edit_elmt_insert_child(Item element, int index, Item child);
+extern Item edit_elmt_delete_child(Item element, int index);
+extern Item edit_elmt_replace_child(Item element, int index, Item new_child);
+extern Item edit_array_set(Item array, int64_t index, Item value);
+extern Item edit_array_insert(Item array, int64_t index, Item value);
+extern Item edit_array_delete(Item array, int64_t index);
+extern Item edit_array_append(Item array, Item value);
+extern int edit_commit(const char* description);
+extern bool edit_undo(void);
+extern bool edit_redo(void);
+extern Item edit_current(void);
+
+// edit bridge sys func wrappers
+extern Item fn_undo(void);
+extern Item fn_redo(void);
+extern Item fn_commit0(void);
+extern Item fn_commit1(Item description);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -42,6 +87,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "js/js_runtime.h"
 #include "py/py_runtime.h"
 #include "py/py_class.h"
+#include "py/py_bigint.h"
+#include "py/py_async.h"
+#include "py/py_stdlib.h"
 #include "bash/bash_runtime.h"
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
@@ -586,6 +634,30 @@ SysFuncInfo sys_func_defs[] = {
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file3", NULL, NULL, NULL, false, 0},
     // {SYSPROC_REPLACE_FILE4, "replace", 4, &TYPE_NULL, true, true, false, LMD_TYPE_PATH, true,
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
+
+    // ========================================================================
+    // View/edit template apply
+    // ========================================================================
+    {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply1", FPTR(fn_apply1), NULL, NULL, false, 0},
+
+    {SYSFUNC_APPLY2, "apply", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply2", FPTR(fn_apply2), NULL, NULL, false, 0},
+
+    // ========================================================================
+    // Edit bridge version control (reactive UI Phase 4)
+    // ========================================================================
+    {SYSFUNC_EDIT_UNDO, "undo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_undo", FPTR(fn_undo), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_REDO, "redo", 0, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_redo", FPTR(fn_redo), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_COMMIT, "commit", 0, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_commit0", FPTR(fn_commit0), NULL, NULL, false, 0},
+
+    {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -1006,6 +1078,7 @@ JitImport jit_runtime_imports[] = {
     {"js_apply_function", FPTR(js_apply_function)},
     {"js_bind_function", FPTR(js_bind_function)},
     {"js_create_regex", FPTR(js_create_regex)},
+    {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_regex_test", FPTR(js_regex_test)},
     {"js_regex_exec", FPTR(js_regex_exec)},
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},
@@ -1060,6 +1133,7 @@ JitImport jit_runtime_imports[] = {
     {"js_console_log_multi", FPTR(js_console_log_multi)},
     // additional operators
     {"js_instanceof", FPTR(js_instanceof)},
+    {"js_instanceof_classname", FPTR(js_instanceof_classname)},
     {"js_in", FPTR(js_in)},
     {"js_nullish_coalesce", FPTR(js_nullish_coalesce)},
     // object utilities
@@ -1085,6 +1159,7 @@ JitImport jit_runtime_imports[] = {
     {"js_number_is_safe_integer", FPTR(js_number_is_safe_integer)},
     // v9: Array.from, JSON, delete
     {"js_array_from", FPTR(js_array_from)},
+    {"js_array_from_with_mapper", FPTR(js_array_from_with_mapper)},
     {"js_json_parse", FPTR(js_json_parse)},
     {"js_json_stringify", FPTR(js_json_stringify)},
     {"js_delete_property", FPTR(js_delete_property)},
@@ -1195,6 +1270,10 @@ JitImport jit_runtime_imports[] = {
     // Phase 3: WeakMap / WeakSet (aliased to Map/Set)
     {"js_weakmap_new", FPTR(js_weakmap_new)},
     {"js_weakset_new", FPTR(js_weakset_new)},
+    // prototype chain
+    {"js_get_prototype", FPTR(js_get_prototype)},
+    {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_prototype_lookup", FPTR(js_prototype_lookup)},
 
     // ========================================================================
     // Python runtime functions
@@ -1222,6 +1301,8 @@ JitImport jit_runtime_imports[] = {
     {"py_bit_xor", FPTR(py_bit_xor)},
     {"py_lshift", FPTR(py_lshift)},
     {"py_rshift", FPTR(py_rshift)},
+    // bigint
+    {"py_bigint_from_cstr", FPTR(py_bigint_from_cstr)},
     // comparison
     {"py_eq", FPTR(py_eq)},
     {"py_ne", FPTR(py_ne)},
@@ -1232,13 +1313,19 @@ JitImport jit_runtime_imports[] = {
     {"py_is", FPTR(py_is)},
     {"py_is_not", FPTR(py_is_not)},
     {"py_contains", FPTR(py_contains)},
+    {"py_match_is_sequence", FPTR(py_match_is_sequence)},
+    {"py_match_is_mapping", FPTR(py_match_is_mapping)},
+    {"py_match_mapping_rest", FPTR(py_match_mapping_rest)},
     // object/attr
     {"py_getattr", FPTR(py_getattr)},
     {"py_setattr", FPTR(py_setattr)},
     {"py_hasattr", FPTR(py_hasattr)},
+    {"py_delattr", FPTR(py_delattr)},
     {"py_new_object", FPTR(py_new_object)},
     // class system
     {"py_class_new", FPTR(py_class_new)},
+    {"py_class_new_meta", FPTR(py_class_new_meta)},
+    {"py_type_new", FPTR(py_type_new)},
     {"py_new_instance", FPTR(py_new_instance)},
     {"py_bind_method", FPTR(py_bind_method)},
     {"py_is_bound_method", FPTR(py_is_bound_method)},
@@ -1336,6 +1423,8 @@ JitImport jit_runtime_imports[] = {
     {"py_builtin_pow", FPTR(py_builtin_pow)},
     {"py_builtin_callable", FPTR(py_builtin_callable)},
     {"py_builtin_property", FPTR(py_builtin_property)},
+    {"py_property_setter", FPTR(py_property_setter)},
+    {"py_property_deleter", FPTR(py_property_deleter)},
     {"py_builtin_sorted_ex", FPTR(py_builtin_sorted_ex)},
     {"py_list_sort_ex", FPTR(py_list_sort_ex)},
     // method dispatchers
@@ -1347,6 +1436,19 @@ JitImport jit_runtime_imports[] = {
     // stop iteration
     {"py_stop_iteration", FPTR(py_stop_iteration)},
     {"py_is_stop_iteration", FPTR(py_is_stop_iteration)},
+    // generator protocol
+    {"py_gen_create", FPTR(py_gen_create)},
+    {"py_gen_get_frame_c", FPTR(py_gen_get_frame_c)},
+    {"py_gen_next", FPTR(py_gen_next)},
+    {"py_gen_send", FPTR(py_gen_send)},
+    // coroutine protocol (Phase D)
+    {"py_coro_create", FPTR(py_coro_create)},
+    {"py_coro_set_return", FPTR(py_coro_set_return)},
+    {"py_coro_get_return", FPTR(py_coro_get_return)},
+    {"py_coro_drive", FPTR(py_coro_drive)},
+    {"py_asyncio_run", FPTR(py_asyncio_run)},
+    {"py_asyncio_sleep", FPTR(py_asyncio_sleep)},
+    {"py_asyncio_gather", FPTR(py_asyncio_gather)},
 
     // ========================================================================
     // Bash runtime functions
@@ -1580,6 +1682,44 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_6", FPTR(fn_call_boxed_6)},
     {"fn_call_boxed_7", FPTR(fn_call_boxed_7)},
     {"fn_call_boxed_8", FPTR(fn_call_boxed_8)},
+
+    // ========================================================================
+    // Template state store (reactive UI Phase 2)
+    // ========================================================================
+    {"tmpl_state_get", FPTR(tmpl_state_get)},
+    {"tmpl_state_set", FPTR(tmpl_state_set)},
+    {"tmpl_state_get_or_init", FPTR(tmpl_state_get_or_init)},
+
+    // ========================================================================
+    // Render map (reactive UI Phase 3 — observer-based reconciliation)
+    // ========================================================================
+    {"render_map_record", FPTR(render_map_record)},
+    {"render_map_mark_dirty", FPTR(render_map_mark_dirty)},
+    {"render_map_has_dirty", FPTR(render_map_has_dirty)},
+    {"render_map_retransform", FPTR(render_map_retransform)},
+    {"render_map_get_result", FPTR(render_map_get_result)},
+
+    // ========================================================================
+    // Edit bridge (reactive UI Phase 4 — MarkEditor integration)
+    // ========================================================================
+    {"edit_bridge_init", FPTR(edit_bridge_init)},
+    {"edit_bridge_destroy", FPTR(edit_bridge_destroy)},
+    {"edit_bridge_active", FPTR(edit_bridge_active)},
+    {"edit_map_update", FPTR(edit_map_update)},
+    {"edit_map_delete", FPTR(edit_map_delete)},
+    {"edit_elmt_update_attr", FPTR(edit_elmt_update_attr)},
+    {"edit_elmt_delete_attr", FPTR(edit_elmt_delete_attr)},
+    {"edit_elmt_insert_child", FPTR(edit_elmt_insert_child)},
+    {"edit_elmt_delete_child", FPTR(edit_elmt_delete_child)},
+    {"edit_elmt_replace_child", FPTR(edit_elmt_replace_child)},
+    {"edit_array_set", FPTR(edit_array_set)},
+    {"edit_array_insert", FPTR(edit_array_insert)},
+    {"edit_array_delete", FPTR(edit_array_delete)},
+    {"edit_array_append", FPTR(edit_array_append)},
+    {"edit_commit", FPTR(edit_commit)},
+    {"edit_undo", FPTR(edit_undo)},
+    {"edit_redo", FPTR(edit_redo)},
+    {"edit_current", FPTR(edit_current)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

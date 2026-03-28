@@ -44,6 +44,7 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/transpiler.hpp"
 #include "../lambda/mark_builder.hpp"
@@ -52,6 +53,8 @@ extern "C" {
 #include "../radiant/font_face.h"
 #include "../radiant/pdf/pdf_to_view.hpp"
 #include "../radiant/script_runner.h"
+#include "../lambda/render_map.h"
+#include "../lambda/template_state.h"
 
 // External C++ function declarations from Radiant
 int ui_context_init(UiContext* uicon, bool headless);
@@ -80,6 +83,7 @@ DomDocument* load_pdf_doc(Url* pdf_url, int viewport_width, int viewport_height,
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length);  // From input-pdf.cpp
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -1629,7 +1633,8 @@ void apply_stylesheet_to_dom_tree_fast(DomElement* root, CssStylesheet* styleshe
  * @return DomDocument structure with Lambda CSS DOM, ready for layout
  */
 DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
-    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr) {
+    int viewport_width, int viewport_height, Pool* pool, const char* html_source = nullptr,
+    bool track_source_lines = false) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -1675,7 +1680,20 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     type_str->len = 4;
     str_copy(type_str->chars, type_str->len + 1, "html", 4);
 
-    Input* input = input_from_source(html_content, html_url, type_str, nullptr);
+    Input* input = nullptr;
+    if (track_source_lines) {
+        // Use extended parser to record source line numbers on elements
+        input = Input::create(pool, html_url);
+        if (input) {
+            Html5ParseOptions parse_opts = { .track_source_lines = true };
+            Element* doc = html5_parse_ex(input, html_content, &parse_opts);
+            if (doc) {
+                input->root = (Item){.element = doc};
+            }
+        }
+    } else {
+        input = input_from_source(html_content, html_url, type_str, nullptr);
+    }
     if (html_content_owned) free(html_content);  // only free what we allocated
 
     auto t_parse = high_resolution_clock::now();
@@ -3618,16 +3636,17 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Step 1: Initialize Runtime and evaluate the Lambda script
     auto step1_start = std::chrono::high_resolution_clock::now();
 
-    Runtime runtime;
-    runtime_init(&runtime);
+    Runtime* runtime = (Runtime*)calloc(1, sizeof(Runtime));
+    runtime_init(runtime);
 
     log_debug("[Lambda Script] Evaluating script...");
-    // Use C2MIR JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
-    Input* script_output = run_script(&runtime, nullptr, script_filepath, false);
+    // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
+    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
 
     if (!script_output || !script_output->root.item) {
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3642,7 +3661,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // Check if the script returned an error
     if (result_type == LMD_TYPE_ERROR) {
         log_error("[Lambda Script] Script evaluation returned an error");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3659,7 +3679,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             "svg{display:block;}"
             "</style></head><body>%s</body></html>",
             svg_content);
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -3676,7 +3697,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                 return write_svg_wrapped_html(svg_str->chars);
             }
             log_error("[Lambda Script] Failed to format SVG element");
-            runtime_cleanup(&runtime);
+            runtime_cleanup(runtime);
+            free(runtime);
             return nullptr;
         }
     } else if (result_type == LMD_TYPE_STRING) {
@@ -3691,7 +3713,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
                 (strncmp(result_str->chars, "<html", 5) == 0 ||
                  (result_str->len >= 9 && strncmp(result_str->chars, "<!DOCTYPE", 9) == 0))) {
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
-            runtime_cleanup(&runtime);
+            runtime_cleanup(runtime);
+            free(runtime);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
@@ -3778,7 +3801,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     DomDocument* dom_doc = dom_document_create(script_output);
     if (!dom_doc) {
         log_error("[Lambda Script] Failed to create DomDocument");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3790,7 +3814,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!dom_root) {
         log_error("[Lambda Script] Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
 
@@ -3803,7 +3828,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     CssEngine* css_engine = css_engine_create(pool);
     if (!css_engine) {
         log_error("[Lambda Script] Failed to create CSS engine");
-        runtime_cleanup(&runtime);
+        runtime_cleanup(runtime);
+        free(runtime);
         return nullptr;
     }
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
@@ -3884,8 +3910,15 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     dom_doc->view_tree = nullptr;  // Will be created during layout
     dom_doc->state = nullptr;
 
-    // Note: Don't cleanup runtime yet - the script_output and its pool are still in use
-    // The pool will be cleaned up when dom_doc is freed
+    // Register doc root for render map parent fixup during retransform
+    Item html_item_root = {.element = html_elem};
+    render_map_set_doc_root(html_item_root);
+
+    // Store the retained runtime on the document for event handler execution.
+    // The GC heap, JIT code, and name pool remain live for the session.
+    dom_doc->lambda_runtime = runtime;
+
+    // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 
     auto total_end = std::chrono::high_resolution_clock::now();
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
@@ -3893,6 +3926,76 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 
     log_notice("[Lambda Script] Script document loaded and styled");
     return dom_doc;
+}
+
+// ============================================================================
+// Reactive UI: rebuild DOM after template handler modifies state
+// ============================================================================
+
+/**
+ * Rebuild the DOM tree from the Lambda html_root element after a template
+ * handler has modified state and render_map_retransform() has updated the
+ * Lambda element tree. Rebuilds DOM, re-applies CSS, and triggers relayout.
+ */
+void rebuild_lambda_doc(UiContext* uicon) {
+    if (!uicon || !uicon->document) {
+        log_error("rebuild_lambda_doc: no document");
+        return;
+    }
+
+    DomDocument* doc = uicon->document;
+    Element* html_elem = doc->html_root;
+    if (!html_elem) {
+        log_error("rebuild_lambda_doc: no html_root in document");
+        return;
+    }
+
+    log_info("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
+
+    // ensure CSS property system is initialized
+    css_property_system_init(doc->pool);
+
+    // rebuild DOM tree from Lambda elements
+    DomElement* new_root = build_dom_tree_from_element(html_elem, doc, nullptr);
+    if (!new_root) {
+        log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
+        return;
+    }
+
+    // replace old DOM root
+    doc->root = new_root;
+
+    // re-extract and apply inline <style> elements
+    CssEngine* css_engine = css_engine_create(doc->pool);
+    if (css_engine) {
+        int inline_count = 0;
+        CssStylesheet** inline_sheets = extract_and_collect_css(
+            html_elem, css_engine, nullptr, doc->pool, &inline_count);
+
+        SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+        if (inline_sheets && inline_count > 0) {
+            for (int i = 0; i < inline_count; i++) {
+                if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
+                    apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
+                                                      matcher, doc->pool, css_engine);
+                }
+            }
+        }
+    }
+
+    // apply inline style attributes
+    apply_inline_styles_to_tree(new_root, html_elem, doc->pool);
+
+    // mark view tree dirty for full relayout
+    doc->view_tree = nullptr;  // force full layout rebuild
+
+    // trigger relayout + repaint
+    layout_html_doc(uicon, doc, false);
+    if (doc->view_tree) {
+        render_html_doc(uicon, doc->view_tree, NULL);
+    }
+
+    log_info("rebuild_lambda_doc: DOM rebuild and relayout complete");
 }
 
 /**
@@ -4042,7 +4145,8 @@ static bool layout_single_file(
     int viewport_width,
     int viewport_height,
     UiContext* ui_context,
-    Url* cwd
+    Url* cwd,
+    bool track_source_lines = false
 ) {
     log_debug("[Layout] Processing file: %s", input_file);
 
@@ -4124,7 +4228,8 @@ static bool layout_single_file(
         log_info("[Layout] Detected SVG file, using SVG→ViewTree pipeline");
         doc = load_svg_doc(input_url, viewport_width, viewport_height, pool, 1.0f);
     } else {
-        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool);
+        doc = load_lambda_html_doc(input_url, css_file, viewport_width, viewport_height, pool,
+                                   nullptr, track_source_lines);
     }
 
     if (!doc) {
@@ -4306,7 +4411,8 @@ int cmd_layout(int argc, char** argv) {
             opts.viewport_width,
             opts.viewport_height,
             &ui_context,
-            cwd
+            cwd,
+            opts.debug
         );
 
         if (success) {

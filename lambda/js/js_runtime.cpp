@@ -90,6 +90,9 @@ extern "C" Item js_new_error(Item message) {
     js_property_set(obj, name_key, name_val);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set __class_name__ for instanceof support
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    js_property_set(obj, cn_key, name_val);
     return obj;
 }
 
@@ -100,6 +103,9 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
     js_property_set(obj, name_key, error_name);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set __class_name__ for instanceof support
+    Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+    js_property_set(obj, cn_key, error_name);
     return obj;
 }
 
@@ -838,8 +844,11 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
         if (entry) {
             return _map_read_field(entry, m->data);
         }
-        // Not found in hash table — check for spread/nested maps (rare)
+        // Not found in hash table — may have overflowed (capacity=32).
+        // Walk all named fields linearly to catch overflow entries, and also
+        // check unnamed (nested/spread) entries.
         ShapeEntry* field = map_type->shape;
+        Item overflow_result = ItemNull;
         while (field) {
             if (!field->name) {
                 Map* nested_map = *(Map**)((char*)m->data + field->byte_offset);
@@ -848,10 +857,14 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len) {
                     Item nested_result = _map_get((TypeMap*)nested_map->type, nested_map->data, (char*)key_str, &nested_found);
                     if (nested_found) return nested_result;
                 }
+            } else if (field->name->str == key_str ||  // A6: interned pointer match
+                       (field->name->length == (size_t)key_len &&
+                        memcmp(field->name->str, key_str, key_len) == 0)) {
+                overflow_result = _map_read_field(field, m->data);
             }
             field = field->next;
         }
-        return ItemNull;
+        return overflow_result;
     }
 
     // Fallback: linear scan for objects without hash table
@@ -1112,6 +1125,24 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
             return js_dom_set_property(object, key, value);
+        }
+        // Setter property dispatch: check for __set_<propName> on object or prototype
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key && str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+                char setter_key[256];
+                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
+                Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
+                Item setter = map_get(m, sk);
+                if (setter.item == ItemNull.item) {
+                    setter = js_prototype_lookup(object, sk);
+                }
+                if (setter.item != ItemNull.item && get_type_id(setter) == LMD_TYPE_FUNC) {
+                    Item args[1] = { value };
+                    js_call_function(setter, object, args, 1);
+                    return value;
+                }
+            }
         }
         // JS object / Lambda map: try fn_map_set first (update existing field),
         // fall back to map_put for new keys
@@ -1483,7 +1514,7 @@ static int js_call_count = 0;
 // Debug: check callee before calling, print site info if null
 extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     if (get_type_id(callee) != LMD_TYPE_FUNC) {
-        log_error("js_debug_check_callee: NULL callee at site_id=%lld (type=%d, call_count=%d)",
+        log_debug("js_debug_check_callee: non-function callee at site_id=%lld (type=%d, call_count=%d)",
             (long long)site_id, get_type_id(callee), js_call_count);
     }
     return ItemNull;
@@ -1493,7 +1524,7 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     js_call_count++;
 
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
-        log_error("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
+        log_debug("js_call_function[%d]: not a function (type=%d, item=0x%llx, argc=%d, this_type=%d)",
             js_call_count, get_type_id(func_item), (unsigned long long)func_item.item, arg_count,
             get_type_id(this_val));
         return ItemNull;
@@ -1643,6 +1674,23 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     return regex_obj;
 }
 
+// new RegExp(pattern, flags) — construct regex from string arguments at runtime
+extern "C" Item js_regexp_construct(Item pattern_item, Item flags_item) {
+    const char* pattern = "";
+    int pattern_len = 0;
+    const char* flags = "";
+    int flags_len = 0;
+    if (get_type_id(pattern_item) == LMD_TYPE_STRING) {
+        String* ps = it2s(pattern_item);
+        if (ps) { pattern = ps->chars; pattern_len = (int)ps->len; }
+    }
+    if (get_type_id(flags_item) == LMD_TYPE_STRING) {
+        String* fs = it2s(flags_item);
+        if (fs) { flags = fs->chars; flags_len = (int)fs->len; }
+    }
+    return js_create_regex(pattern, pattern_len, flags, flags_len);
+}
+
 static JsRegexData* js_get_regex_data(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return NULL;
     Item rd_key = (Item){.item = s2it(heap_create_name(JS_REGEX_DATA_KEY))};
@@ -1712,6 +1760,14 @@ struct JsCollectionEntry {
     Item value;
 };
 
+// Insertion-order node for Map/Set (doubly-linked list)
+struct JsCollectionOrderNode {
+    Item key;
+    Item value;
+    JsCollectionOrderNode* next;
+    JsCollectionOrderNode* prev;
+};
+
 // 0 = Map, 1 = Set
 #define JS_COLLECTION_MAP 0
 #define JS_COLLECTION_SET 1
@@ -1719,6 +1775,8 @@ struct JsCollectionEntry {
 struct JsCollectionData {
     HashMap* hmap;
     int type; // JS_COLLECTION_MAP or JS_COLLECTION_SET
+    JsCollectionOrderNode* order_head; // insertion-order linked list (oldest first)
+    JsCollectionOrderNode* order_tail; // newest entry
 };
 
 static uint64_t js_collection_hash(const void *item, uint64_t seed0, uint64_t seed1) {
@@ -1787,16 +1845,59 @@ static Item js_collection_create(int type) {
     JsCollectionData* cd = (JsCollectionData*)pool_calloc(js_input->pool, sizeof(JsCollectionData));
     cd->hmap = hm;
     cd->type = type;
+    cd->order_head = NULL;
+    cd->order_tail = NULL;
     Item obj = js_new_object();
     Item cd_key = (Item){.item = s2it(heap_create_name(JS_COLLECTION_DATA_KEY))};
     Item cd_val = (Item){.item = i2it((int64_t)(uintptr_t)cd)};
-    log_error("js_collection_create: cd=%p addr=%lld cd_val.item=0x%llx cd_val_tid=%d", cd, (long long)(uintptr_t)cd, (unsigned long long)cd_val.item, (int)get_type_id(cd_val));
     js_property_set(obj, cd_key, cd_val);
     // set initial size property
     Item size_key = (Item){.item = s2it(heap_create_name("size"))};
     Item size_val = (Item){.item = i2it(0)};
     js_property_set(obj, size_key, size_val);
     return obj;
+}
+
+// Helper: add or update an entry in the insertion-order list
+static void js_collection_order_upsert(JsCollectionData* cd, Item key, Item value) {
+    // Check if key already exists in the order list
+    JsCollectionOrderNode* node = cd->order_head;
+    while (node) {
+        JsCollectionEntry ea = {.key = node->key};
+        JsCollectionEntry eb = {.key = key};
+        if (js_collection_compare(&ea, &eb, NULL) == 0) {
+            // Key exists — update value in-place (preserves insertion order)
+            node->value = value;
+            return;
+        }
+        node = node->next;
+    }
+    // New entry — append to tail
+    JsCollectionOrderNode* n = (JsCollectionOrderNode*)pool_calloc(js_input->pool, sizeof(JsCollectionOrderNode));
+    n->key = key;
+    n->value = value;
+    n->next = NULL;
+    n->prev = cd->order_tail;
+    if (cd->order_tail) cd->order_tail->next = n;
+    else cd->order_head = n;
+    cd->order_tail = n;
+}
+
+// Helper: remove an entry from the insertion-order list
+static void js_collection_order_remove(JsCollectionData* cd, Item key) {
+    JsCollectionOrderNode* node = cd->order_head;
+    while (node) {
+        JsCollectionEntry ea = {.key = node->key};
+        JsCollectionEntry eb = {.key = key};
+        if (js_collection_compare(&ea, &eb, NULL) == 0) {
+            if (node->prev) node->prev->next = node->next;
+            else cd->order_head = node->next;
+            if (node->next) node->next->prev = node->prev;
+            else cd->order_tail = node->prev;
+            return;
+        }
+        node = node->next;
+    }
 }
 
 static void js_collection_update_size(Item obj, JsCollectionData* cd) {
@@ -1831,6 +1932,8 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
                 entry.value = arg2;
             }
             hashmap_set(cd->hmap, &entry);
+            // Maintain insertion-order list
+            js_collection_order_upsert(cd, entry.key, entry.value);
             js_collection_update_size(obj, cd);
             return obj; // return collection for chaining
         }
@@ -1848,72 +1951,71 @@ extern "C" Item js_collection_method(Item obj, int method_id, Item arg1, Item ar
         case 3: { // delete(key)
             JsCollectionEntry probe = {.key = arg1};
             const JsCollectionEntry* found = (const JsCollectionEntry*)hashmap_delete(cd->hmap, &probe);
+            js_collection_order_remove(cd, arg1);
             js_collection_update_size(obj, cd);
             return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
         }
         case 4: { // clear()
             hashmap_clear(cd->hmap, false);
+            cd->order_head = NULL;
+            cd->order_tail = NULL;
             js_collection_update_size(obj, cd);
             return make_js_undefined();
         }
-        case 5: { // forEach(callback)
-            size_t iter = 0;
-            void* item;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+        case 5: { // forEach(callback) — insertion order
+            JsCollectionOrderNode* node = cd->order_head;
+            while (node) {
                 if (cd->type == JS_COLLECTION_SET) {
                     // callback(value, value, set)
-                    js_call_function(arg1, make_js_undefined(), &e->key, 1);
+                    js_call_function(arg1, make_js_undefined(), &node->key, 1);
                 } else {
                     // callback(value, key, map)
-                    Item args[2] = {e->value, e->key};
+                    Item args[2] = {node->value, node->key};
                     js_call_function(arg1, make_js_undefined(), args, 2);
                 }
+                node = node->next;
             }
             return make_js_undefined();
         }
-        case 6: { // keys() — returns array
+        case 6: { // keys() — returns array in insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
-                js_array_set_int(arr, idx, e->key);
+            while (node) {
+                js_array_set_int(arr, idx, node->key);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
-        case 7: { // values()
+        case 7: { // values() — insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+            while (node) {
                 if (cd->type == JS_COLLECTION_SET)
-                    js_array_set_int(arr, idx, e->key);
+                    js_array_set_int(arr, idx, node->key);
                 else
-                    js_array_set_int(arr, idx, e->value);
+                    js_array_set_int(arr, idx, node->value);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
-        case 8: { // entries() — returns array of [key, value] pairs
+        case 8: { // entries() — returns array of [key, value] pairs in insertion order
             size_t count = hashmap_count(cd->hmap);
             Item arr = js_array_new((int)count);
-            size_t iter = 0;
-            void* item;
+            JsCollectionOrderNode* node = cd->order_head;
             int idx = 0;
-            while (hashmap_iter(cd->hmap, &iter, &item)) {
-                JsCollectionEntry* e = (JsCollectionEntry*)item;
+            while (node) {
                 Item pair = js_array_new(2);
-                js_array_set_int(pair, 0, e->key);
-                js_array_set_int(pair, 1, e->value);
+                js_array_set_int(pair, 0, node->key);
+                js_array_set_int(pair, 1, node->value);
                 js_array_set_int(arr, idx, pair);
                 idx++;
+                node = node->next;
             }
             return arr;
         }
@@ -2103,6 +2205,132 @@ static Item js_arg_to_int(Item arg) {
 }
 
 // =============================================================================
+// String replace/replaceAll implementation with regex + callback support
+// =============================================================================
+
+static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all) {
+    String* s = it2s(str);
+    if (!s || s->len == 0) return str;
+    bool replacement_is_func = (get_type_id(args[1]) == LMD_TYPE_FUNC);
+    JsRegexData* rd = js_get_regex_data(args[0]);
+
+    if (rd) {
+        // regex-based replace
+        re2::StringPiece input(s->chars, s->len);
+        int ngroups = rd->re2->NumberOfCapturingGroups() + 1;
+        if (ngroups > 16) ngroups = 16;
+        re2::StringPiece matches[16];
+        StrBuf* buf = strbuf_new();
+        int pos = 0;
+        bool found_match = false;
+        while (pos <= (int)s->len) {
+            bool matched = rd->re2->Match(input, pos, (int)s->len,
+                re2::RE2::UNANCHORED, matches, ngroups);
+            if (!matched) break;
+            found_match = true;
+            int match_start = (int)(matches[0].data() - s->chars);
+            int match_len = (int)matches[0].size();
+            // append text before match
+            if (match_start > pos)
+                strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
+            if (replacement_is_func) {
+                // call function(match, g1, g2, ..., offset, originalString)
+                int fn_argc = ngroups + 2;
+                Item* fn_args = (Item*)alloca(fn_argc * sizeof(Item));
+                for (int i = 0; i < ngroups; i++) {
+                    if (matches[i].data()) {
+                        fn_args[i] = (Item){.item = s2it(heap_strcpy(
+                            (char*)matches[i].data(), (int)matches[i].size()))};
+                    } else {
+                        fn_args[i] = ItemNull;
+                    }
+                }
+                fn_args[ngroups] = (Item){.item = i2it(match_start)};
+                fn_args[ngroups + 1] = str;
+                Item result = js_call_function(args[1], ItemNull, fn_args, fn_argc);
+                Item result_str = js_to_string(result);
+                String* rs = it2s(result_str);
+                if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+            } else {
+                // string replacement
+                Item repl_str = js_to_string(args[1]);
+                String* rs = it2s(repl_str);
+                if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+            }
+            pos = match_start + match_len;
+            if (match_len == 0) pos++; // avoid infinite loop on zero-length match
+            if (!is_replace_all && !(rd->global)) break;
+        }
+        if (found_match) {
+            // append remaining text
+            if (pos < (int)s->len)
+                strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
+            String* result = heap_strcpy(buf->str, buf->length);
+            strbuf_free(buf);
+            return (Item){.item = s2it(result)};
+        }
+        strbuf_free(buf);
+        return str;
+    }
+
+    // string-based replace
+    String* search = it2s(js_to_string(args[0]));
+    if (!search || search->len == 0) {
+        if (!replacement_is_func) return fn_replace(str, args[0], args[1]);
+        return str;
+    }
+    if (!replacement_is_func) {
+        if (is_replace_all) {
+            // simple string replaceAll via loop
+            Item result = str;
+            int max_iter = 10000;
+            while (max_iter-- > 0) {
+                Item replaced = fn_replace(result, args[0], args[1]);
+                String* r = it2s(replaced);
+                String* prev_s = it2s(result);
+                if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0)
+                    break;
+                result = replaced;
+            }
+            return result;
+        }
+        return fn_replace(str, args[0], args[1]);
+    }
+    // string search with function callback
+    StrBuf* buf = strbuf_new();
+    int pos = 0;
+    bool found_any = false;
+    while (pos <= (int)s->len - (int)search->len) {
+        const char* found = (const char*)memmem(s->chars + pos, s->len - pos, search->chars, search->len);
+        if (!found) break;
+        found_any = true;
+        int match_start = (int)(found - s->chars);
+        if (match_start > pos)
+            strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
+        // call function(match, offset, originalString)
+        Item fn_args[3];
+        fn_args[0] = args[0]; // the matched string == search string
+        fn_args[1] = (Item){.item = i2it(match_start)};
+        fn_args[2] = str;
+        Item result = js_call_function(args[1], ItemNull, fn_args, 3);
+        Item result_str = js_to_string(result);
+        String* rs = it2s(result_str);
+        if (rs) strbuf_append_str_n(buf, rs->chars, rs->len);
+        pos = match_start + (int)search->len;
+        if (!is_replace_all) break;
+    }
+    if (found_any) {
+        if (pos < (int)s->len)
+            strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
+        String* result = heap_strcpy(buf->str, buf->length);
+        strbuf_free(buf);
+        return (Item){.item = s2it(result)};
+    }
+    strbuf_free(buf);
+    return str;
+}
+
+// =============================================================================
 // String Method Dispatcher
 // =============================================================================
 
@@ -2180,7 +2408,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 7 && strncmp(method->chars, "replace", 7) == 0) {
         if (argc < 2) return str;
-        return fn_replace(str, args[0], args[1]);
+        return js_string_replace_impl(str, args, argc, false);
     }
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
@@ -2190,11 +2418,66 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (argc < 1) return ItemNull;
         String* s = it2s(str);
         if (!s || s->len == 0) return ItemNull;
-        int idx = (int)js_get_number(args[0]);
-        if (idx < 0 || idx >= (int)s->len) return ItemNull;
-        // return the char code (byte value for ASCII/Latin1, first byte for UTF-8)
-        unsigned char ch = (unsigned char)s->chars[idx];
-        return (Item){.item = i2it((int64_t)ch)};
+        int target_idx = (int)js_get_number(args[0]);
+        if (target_idx < 0) return ItemNull;
+        // walk UTF-8 bytes, counting UTF-16 code units
+        int utf16_idx = 0;
+        int byte_pos = 0;
+        while (byte_pos < (int)s->len) {
+            unsigned char b = (unsigned char)s->chars[byte_pos];
+            uint32_t cp = 0;
+            int bytes = 1;
+            if (b < 0x80) { cp = b; bytes = 1; }
+            else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+            else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+            else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+            for (int i = 1; i < bytes && byte_pos + i < (int)s->len; i++)
+                cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
+            if (cp >= 0x10000) {
+                // surrogate pair: 2 UTF-16 code units
+                if (utf16_idx == target_idx) {
+                    uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
+                    return (Item){.item = i2it((int64_t)hi)};
+                }
+                if (utf16_idx + 1 == target_idx) {
+                    uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+                    return (Item){.item = i2it((int64_t)lo)};
+                }
+                utf16_idx += 2;
+            } else {
+                if (utf16_idx == target_idx)
+                    return (Item){.item = i2it((int64_t)cp)};
+                utf16_idx++;
+            }
+            byte_pos += bytes;
+        }
+        return ItemNull;
+    }
+    if (method->len == 11 && strncmp(method->chars, "codePointAt", 11) == 0) {
+        if (argc < 1) return ItemNull;
+        String* s = it2s(str);
+        if (!s || s->len == 0) return ItemNull;
+        int target_idx = (int)js_get_number(args[0]);
+        if (target_idx < 0) return ItemNull;
+        // walk UTF-8, counting UTF-16 code units to find the right position
+        int utf16_idx = 0;
+        int byte_pos = 0;
+        while (byte_pos < (int)s->len) {
+            unsigned char b = (unsigned char)s->chars[byte_pos];
+            uint32_t cp = 0;
+            int bytes = 1;
+            if (b < 0x80) { cp = b; bytes = 1; }
+            else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+            else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+            else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+            for (int i = 1; i < bytes && byte_pos + i < (int)s->len; i++)
+                cp = (cp << 6) | ((unsigned char)s->chars[byte_pos + i] & 0x3F);
+            if (utf16_idx == target_idx)
+                return (Item){.item = i2it((int64_t)cp)};
+            utf16_idx += (cp >= 0x10000) ? 2 : 1;
+            byte_pos += bytes;
+        }
+        return ItemNull;
     }
     if (method->len == 6 && strncmp(method->chars, "concat", 6) == 0) {
         Item result = str;
@@ -2218,25 +2501,10 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         strbuf_free(buf);
         return (Item){.item = s2it(result)};
     }
-    // replaceAll — replace all occurrences
+    // replaceAll — redirect to unified replace handler
     if (method->len == 10 && strncmp(method->chars, "replaceAll", 10) == 0) {
         if (argc < 2) return str;
-        // repeatedly replace until no more occurrences
-        Item result = str;
-        String* search_str = it2s(js_to_string(args[0]));
-        if (!search_str || search_str->len == 0) return str;
-        int max_iter = 10000; // safety limit
-        while (max_iter-- > 0) {
-            Item replaced = fn_replace(result, args[0], args[1]);
-            // if nothing changed, we're done
-            String* r = it2s(replaced);
-            String* prev_s = it2s(result);
-            if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0) {
-                break;
-            }
-            result = replaced;
-        }
-        return result;
+        return js_string_replace_impl(str, args, argc, true);
     }
     // padStart(targetLength, padString?)
     if (method->len == 8 && strncmp(method->chars, "padStart", 8) == 0) {
@@ -3413,6 +3681,20 @@ extern "C" Item js_iterable_to_array(Item iterable) {
             array_push(arr.array, value);
         }
         return arr;
+    }
+
+    // Check if it's a Map/Set collection — convert to array of entries
+    if (get_type_id(iterable) == LMD_TYPE_MAP) {
+        JsCollectionData* cd = js_get_collection_data(iterable);
+        if (cd) {
+            if (cd->type == JS_COLLECTION_MAP) {
+                // Map: return array of [key, value] pairs
+                return js_collection_method(iterable, 8, ItemNull, ItemNull); // entries()
+            } else {
+                // Set: return array of values
+                return js_collection_method(iterable, 7, ItemNull, ItemNull); // values()
+            }
+        }
     }
 
     // Fallback: return as-is (might be a map treated as iterable)
