@@ -2989,6 +2989,42 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 log_debug("FLEX FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
                     lycon->block.advance_y, block->height);
 
+                // CSS Flexbox §9.9.1: For inline-flex with auto width, compute
+                // shrink-to-fit width from the positioned flex items. The flex algorithm
+                // uses the full available width as main_axis_size, so items are positioned
+                // with flex-start (default). The actual content width is the rightmost
+                // edge of any flex item (including its margin).
+                if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+                    (!block->blk || block->blk->given_width < 0)) {
+                    float max_right = 0;
+                    for (View* child = block->first_child; child; child = child->next_sibling) {
+                        if (child->view_type == RDT_VIEW_BLOCK ||
+                            child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            child->view_type == RDT_VIEW_LIST_ITEM) {
+                            ViewElement* item = (ViewElement*)child->as_element();
+                            if (item) {
+                                // Skip absolutely positioned children (not flex items per §4.1)
+                                ViewBlock* vb = (ViewBlock*)item;
+                                if (vb->position && vb->position->position &&
+                                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                     vb->position->position == CSS_VALUE_FIXED)) {
+                                    continue;
+                                }
+                                float right = item->x + item->width;
+                                if (item->bound) {
+                                    right += item->bound->margin.right;
+                                }
+                                if (right > max_right) max_right = right;
+                            }
+                        }
+                    }
+                    if (max_right > 0) {
+                        lycon->block.max_width = max_right;
+                        log_debug("INLINE-FLEX: computed max_width %.1f from flex items",
+                                  lycon->block.max_width);
+                    }
+                }
+
                 finalize_block_flow(lycon, block, block->display.outer);
                 return;
             }
@@ -3011,6 +3047,39 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 }
                 log_debug("GRID FINALIZE: Updated advance_y=%.1f from block->height=%.1f",
                     lycon->block.advance_y, block->height);
+
+                // CSS Grid §12.1: For inline-grid with auto width, compute
+                // shrink-to-fit width from the positioned grid items (same as inline-flex).
+                if (block->display.outer == CSS_VALUE_INLINE_BLOCK &&
+                    (!block->blk || block->blk->given_width < 0)) {
+                    float max_right = 0;
+                    for (View* child = block->first_child; child; child = child->next_sibling) {
+                        if (child->view_type == RDT_VIEW_BLOCK ||
+                            child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            child->view_type == RDT_VIEW_LIST_ITEM) {
+                            ViewElement* item = (ViewElement*)child->as_element();
+                            if (item) {
+                                // Skip absolutely positioned children (not grid items)
+                                ViewBlock* vb = (ViewBlock*)item;
+                                if (vb->position && vb->position->position &&
+                                    (vb->position->position == CSS_VALUE_ABSOLUTE ||
+                                     vb->position->position == CSS_VALUE_FIXED)) {
+                                    continue;
+                                }
+                                float right = item->x + item->width;
+                                if (item->bound) {
+                                    right += item->bound->margin.right;
+                                }
+                                if (right > max_right) max_right = right;
+                            }
+                        }
+                    }
+                    if (max_right > 0) {
+                        lycon->block.max_width = max_right;
+                        log_debug("INLINE-GRID: computed max_width %.1f from grid items",
+                                  lycon->block.max_width);
+                    }
+                }
 
                 finalize_block_flow(lycon, block, block->display.outer);
                 return;

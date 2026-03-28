@@ -5724,18 +5724,35 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                     log_debug("HYPOTHETICAL_CROSS: item[%d][%d] using explicit height=%.1f (border-box)",
                               i, j, hypothetical_cross);
                 } else {
-                    // FIX: For items without explicit height, use recursive measurement
-                    // This handles nested flex containers properly
-                    float measured_height = measure_flex_content_height(item);
-                    if (measured_height > 0) {
-                        float padding_border_height = 0;
-                        if (item->bound) {
-                            padding_border_height += item->bound->padding.top + item->bound->padding.bottom;
-                            if (item->bound->border) {
-                                padding_border_height += item->bound->border->width.top + item->bound->border->width.bottom;
-                            }
+                    // CSS Flexbox §9.4: "Determine the hypothetical cross size of each item
+                    // by performing layout with the used main size and the available space."
+                    // Use calculate_max_content_height at the item's actual width (not the
+                    // cached intrinsic_height.max_content which was computed at max-content
+                    // width). This is critical for items with inline-block children that
+                    // wrap differently at different widths.
+                    float item_content_width = (float)item->width;
+                    if (item->bound) {
+                        item_content_width -= item->bound->padding.left + item->bound->padding.right;
+                        if (item->bound->border) {
+                            item_content_width -= item->bound->border->width.left + item->bound->border->width.right;
                         }
-                        hypothetical_cross = measured_height + padding_border_height;
+                    }
+                    if (item_content_width < 0) item_content_width = 0;
+
+                    float measured_height = 0;
+                    if (item_content_width > 0) {
+                        measured_height = calculate_max_content_height(lycon, (DomNode*)item, item_content_width);
+                    }
+                    if (measured_height <= 0) {
+                        // Fallback to recursive flex measurement for nested flex containers
+                        measured_height = measure_flex_content_height(item);
+                    }
+                    log_debug("HYPOTHETICAL_CROSS: item[%d][%d] %s measured_height=%.1f (content_w=%.1f, width=%.1f)",
+                              i, j, item->node_name(), measured_height, item_content_width, item->width);
+
+                    if (measured_height > 0) {
+                        // calculate_max_content_height returns border-box height
+                        hypothetical_cross = measured_height;
                         // Update item dimensions so alignment uses correct size
                         item->height = (int)hypothetical_cross;
                     } else {
