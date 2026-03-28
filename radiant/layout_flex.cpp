@@ -472,10 +472,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // or main-axis sizing), treat it as definite. This ensures nested flex
         // containers use the stretched height as their cross size, not content.
         // (Parallels the existing main-axis fix for column flex at line ~400.)
-        if (!has_definite_height_for_cross && container->height > 0 && !is_absolute) {
+        // CRITICAL: Use content_height (height minus padding/border) not container->height.
+        // container->height can be positive from padding/border alone even when height is
+        // auto, which would incorrectly mark auto-height containers as having definite cross.
+        if (!has_definite_height_for_cross && content_height > 0 && !is_absolute) {
             has_definite_height_for_cross = true;
-            log_debug("init_flex_container: cross-axis height definite from parent layout (%.1f)",
-                      container->height);
+            log_debug("init_flex_container: cross-axis height definite from parent layout (content_height=%d)",
+                      content_height);
         }
         flex->has_definite_cross_size = has_definite_height_for_cross;
     } else {
