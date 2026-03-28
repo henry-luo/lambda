@@ -1676,7 +1676,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
+		echo "Available suites: basic, baseline, css2.1, flex, grid, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -1728,9 +1728,13 @@ capture-layout:
 	                        fi; \
 	                    done; \
 	                done; \
+	                if [ -z "$$TEST_FILE" ] && [ -f "data/web-tmpl/$${TEST_VAR}/index.html" ]; then \
+	                    TEST_FILE="data/web-tmpl/$${TEST_VAR}/index.html"; \
+	                    FOUND_SUITE="web-tmpl"; \
+	                fi; \
 	                if [ -z "$$TEST_FILE" ]; then \
 	                    echo "❌ Error: Test file '$$TEST_VAR' not found in any suite directory"; \
-	                    echo "   Searched in: basic, baseline, css2.1, flex, grid, yoga, wpt-css-*"; \
+	                    echo "   Searched in: basic, baseline, css2.1, flex, grid, yoga, web-tmpl, wpt-css-*"; \
 	                    exit 1; \
 	                fi; \
 	                echo "📄 Found test in suite: $$FOUND_SUITE" \
@@ -1786,6 +1790,9 @@ test-layout:
 							fi; \
 						done; \
 					done; \
+					if [ -z "$$TEST_FILE" ] && [ -f "test/layout/data/web-tmpl/$${TEST_VAR}/index.html" ]; then \
+						TEST_FILE="$${TEST_VAR}/index.html"; \
+					fi; \
 					if [ -z "$$TEST_FILE" ]; then \
 						TEST_FILE="$${TEST_VAR}.html"; \
 					fi \
