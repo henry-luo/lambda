@@ -524,7 +524,7 @@ struct InlineProp {
 
 typedef struct Spacing {
     struct { float top, right, bottom, left; };  // for margin, padding, border
-    int32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
+    int64_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
 
 typedef struct Margin : Spacing {
@@ -533,15 +533,15 @@ typedef struct Margin : Spacing {
 
 typedef struct Corner {
     struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
-    int32_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
+    int64_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
 } Corner;
 
 typedef struct {
     Spacing width;
     CssEnum top_style, right_style, bottom_style, left_style;
-    int32_t top_style_specificity, right_style_specificity, bottom_style_specificity, left_style_specificity;
+    int64_t top_style_specificity, right_style_specificity, bottom_style_specificity, left_style_specificity;
     Color top_color, right_color, bottom_color, left_color;
-    int32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
+    int64_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Corner radius;
 } BorderProp;
 

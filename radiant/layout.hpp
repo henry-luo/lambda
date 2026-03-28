@@ -462,12 +462,14 @@ Color color_name_to_rgb(CssEnum color_name);
 
 /**
  * Get specificity value from Lambda CSS declaration
- * Converts Lambda CssSpecificity to Lexbor-compatible int32_t
+ * Converts Lambda CssDeclaration to a full cascade priority value encoding
+ * cascade level, CSS specificity, and source order for correct shorthand vs
+ * longhand resolution.
  *
  * @param decl CSS declaration with specificity info
- * @return int32_t specificity value
+ * @return int64_t cascade priority value (higher = higher priority)
  */
-int32_t get_lambda_specificity(const CssDeclaration* decl);
+int64_t get_cascade_priority(const CssDeclaration* decl);
 
 // Resolve CSS length value to pixels
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);

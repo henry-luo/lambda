@@ -1133,6 +1133,7 @@ JitImport jit_runtime_imports[] = {
     {"js_console_log_multi", FPTR(js_console_log_multi)},
     // additional operators
     {"js_instanceof", FPTR(js_instanceof)},
+    {"js_instanceof_classname", FPTR(js_instanceof_classname)},
     {"js_in", FPTR(js_in)},
     {"js_nullish_coalesce", FPTR(js_nullish_coalesce)},
     // object utilities
@@ -1158,6 +1159,7 @@ JitImport jit_runtime_imports[] = {
     {"js_number_is_safe_integer", FPTR(js_number_is_safe_integer)},
     // v9: Array.from, JSON, delete
     {"js_array_from", FPTR(js_array_from)},
+    {"js_array_from_with_mapper", FPTR(js_array_from_with_mapper)},
     {"js_json_parse", FPTR(js_json_parse)},
     {"js_json_stringify", FPTR(js_json_stringify)},
     {"js_delete_property", FPTR(js_delete_property)},

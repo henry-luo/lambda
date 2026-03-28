@@ -394,9 +394,9 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         break;
     case LMD_TYPE_SYMBOL:
         if (titem->symbol && titem->symbol->chars) {
-            strbuf_append_str(strbuf, titem->symbol->chars);
+            strbuf_append_format(strbuf, "'%s'", titem->symbol->chars);
         } else {
-            strbuf_append_str(strbuf, "");
+            strbuf_append_str(strbuf, "''");
         }
         break;
     case LMD_TYPE_BINARY:

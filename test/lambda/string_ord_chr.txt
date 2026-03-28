@@ -65,11 +65,11 @@
 }
 {
   t: "chr -1",
-  r: null
+  r: ""
 }
 {
   t: "chr too big",
-  r: null
+  r: ""
 }
 {
   t: "rt chr-ord",
