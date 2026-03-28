@@ -190,6 +190,13 @@ struct PyMirTranspiler {
     // Runtime pointer for cross-language module loading
     Runtime* runtime;
 
+    // ---- TCO (Tail Call Optimization) state ----
+    PyFuncCollected* tco_func;      // current function being TCO'd (NULL if not TCO)
+    MIR_label_t tco_label;          // jump target at top of function body
+    MIR_reg_t tco_count_reg;        // iteration counter for overflow guard
+    bool in_tail_position;          // true when current expression is in tail position
+    bool block_returned;            // set when TCO jump replaces a return
+
     // ---- Generator compilation state (valid during pm_compile_generator) ----
     bool in_generator;              // true while compiling a generator resume function
     bool in_async;                  // true while compiling an async def (Phase D)
@@ -1381,6 +1388,63 @@ static MIR_reg_t pm_transpile_compare(PyMirTranspiler* mt, PyCompareNode* cmp) {
     return result;
 }
 
+// ============================================================================
+// TCO helpers
+// ============================================================================
+
+// Check if a call node directly calls the given function by name.
+static bool pm_is_py_recursive_call(PyCallNode* call, PyFuncCollected* fc) {
+    if (!call || !fc || !call->function) return false;
+    if (call->function->node_type != PY_AST_NODE_IDENTIFIER) return false;
+    PyIdentifierNode* fn_id = (PyIdentifierNode*)call->function;
+    int name_len = (int)strlen(fc->name);
+    return (int)fn_id->name->len == name_len &&
+           strncmp(fn_id->name->chars, fc->name, name_len) == 0;
+}
+
+// Recursively check if a function body contains a tail-recursive call.
+// Tail position: return f(...), or return f(...) inside if/elif/else branches.
+static bool pm_has_py_tail_call(PyAstNode* node, PyFuncCollected* fc) {
+    if (!node) return false;
+    switch (node->node_type) {
+    case PY_AST_NODE_BLOCK: {
+        // only the last statement can be in tail position
+        PyAstNode* s = ((PyBlockNode*)node)->statements;
+        PyAstNode* last = NULL;
+        while (s) { last = s; s = s->next; }
+        return pm_has_py_tail_call(last, fc);
+    }
+    case PY_AST_NODE_RETURN: {
+        PyReturnNode* ret = (PyReturnNode*)node;
+        if (!ret->value) return false;
+        if (ret->value->node_type == PY_AST_NODE_CALL)
+            return pm_is_py_recursive_call((PyCallNode*)ret->value, fc);
+        return false;
+    }
+    case PY_AST_NODE_IF: {
+        PyIfNode* ifn = (PyIfNode*)node;
+        if (pm_has_py_tail_call(ifn->body, fc)) return true;
+        for (PyAstNode* e = ifn->elif_clauses; e; e = e->next)
+            if (e->node_type == PY_AST_NODE_ELIF &&
+                pm_has_py_tail_call(((PyIfNode*)e)->body, fc)) return true;
+        if (pm_has_py_tail_call(ifn->else_body, fc)) return true;
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+// Check if a function should use TCO: must be named, non-closure, non-generator,
+// and have at least one tail-recursive call in its body.
+static bool pm_should_use_tco(PyFuncCollected* fc) {
+    if (!fc || !fc->node || !fc->node->name) return false;
+    if (fc->is_closure) return false;
+    if (fc->is_generator) return false;
+    if (fc->has_star_args || fc->has_kwargs) return false;
+    return pm_has_py_tail_call(fc->node->body, fc);
+}
+
 static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
     // check for builtin calls
     if (call->function && call->function->node_type == PY_AST_NODE_IDENTIFIER) {
@@ -2068,6 +2132,83 @@ static MIR_reg_t pm_transpile_call(PyMirTranspiler* mt, PyCallNode* call) {
             }
         }
         if (target_fc && target_fc->func_item) {
+            // ======== TCO interception ========
+            // If this is a tail-recursive call to the current TCO function,
+            // convert to: evaluate args → assign to params → goto tco_label
+            if (mt->tco_func && mt->in_tail_position && target_fc == mt->tco_func) {
+                log_debug("py-mir: TCO tail call to '%s' — converting to goto", mt->tco_func->name);
+
+                // arguments are NOT in tail position
+                bool saved_tail = mt->in_tail_position;
+                mt->in_tail_position = false;
+
+                int total_params = target_fc->param_count;
+
+                // Phase 1: evaluate all arguments into temporaries
+                MIR_reg_t temps[16];
+                int arg_idx = 0;
+                PyAstNode* a = call->arguments;
+                // positional args
+                while (a && arg_idx < total_params) {
+                    if (a->node_type == PY_AST_NODE_KEYWORD_ARGUMENT) {
+                        a = a->next; continue;
+                    }
+                    temps[arg_idx] = pm_transpile_expression(mt, a);
+                    arg_idx++;
+                    a = a->next;
+                }
+                // fill remaining with null
+                while (arg_idx < total_params) {
+                    temps[arg_idx] = pm_emit_null(mt);
+                    arg_idx++;
+                }
+
+                // Phase 2: assign temporaries to parameter registers
+                int offset = target_fc->is_closure ? 1 : 0;
+                PyAstNode* pnode = target_fc->node->params;
+                for (int i = 0; i < total_params && i < 16; i++) {
+                    String* pn = NULL;
+                    while (pnode) {
+                        if (pnode->node_type == PY_AST_NODE_LIST_SPLAT_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_DICT_SPLAT_PARAMETER) {
+                            pnode = pnode->next;
+                            continue;
+                        }
+                        if (pnode->node_type == PY_AST_NODE_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_DEFAULT_PARAMETER ||
+                            pnode->node_type == PY_AST_NODE_TYPED_PARAMETER) {
+                            pn = ((PyParamNode*)pnode)->name;
+                        }
+                        pnode = pnode->next;
+                        break;
+                    }
+                    if (pn) {
+                        char pname[128];
+                        snprintf(pname, sizeof(pname), "_py_%.*s", (int)pn->len, pn->chars);
+                        PyMirVarEntry* pvar = pm_find_var(mt, pname);
+                        if (pvar) {
+                            pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, pvar->reg),
+                                MIR_new_reg_op(mt->ctx, temps[i])));
+                        }
+                    }
+                }
+
+                mt->in_tail_position = saved_tail;
+
+                // jump back to function start
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, mt->tco_label)));
+                mt->block_returned = true;
+
+                // return dummy register (unreachable but MIR needs a value)
+                MIR_reg_t dummy = pm_new_reg(mt, "tco_dummy", MIR_T_I64);
+                pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, dummy),
+                    MIR_new_int_op(mt->ctx, 0)));
+                return dummy;
+            }
+
             int total_params = target_fc->param_count;
             // build ordered argument array: init all slots to null
             MIR_reg_t ordered_args[16];
@@ -3569,12 +3710,21 @@ static void pm_transpile_return(PyMirTranspiler* mt, PyReturnNode* ret) {
         pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, si)));
         return;
     }
+    // TCO: return value is in tail position
+    bool saved_tail = mt->in_tail_position;
+    mt->block_returned = false;  // reset per-return so earlier TCO jumps don't suppress this ret
+    if (mt->tco_func) {
+        mt->in_tail_position = true;
+    }
     MIR_reg_t val;
     if (ret->value) {
         val = pm_transpile_expression(mt, ret->value);
     } else {
         val = pm_emit_null(mt);
     }
+    mt->in_tail_position = saved_tail;
+    // if TCO converted the call to a jump, block_returned is set — skip the ret
+    if (mt->block_returned) return;
     pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
 }
 
@@ -6750,6 +6900,59 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         }
     }
 
+    // ===== TCO Setup =====
+    bool use_tco = pm_should_use_tco(fc);
+    PyFuncCollected* saved_tco_func = mt->tco_func;
+    MIR_label_t saved_tco_label = mt->tco_label;
+    MIR_reg_t saved_tco_count_reg = mt->tco_count_reg;
+    bool saved_tail_position = mt->in_tail_position;
+    bool saved_block_returned = mt->block_returned;
+
+    if (use_tco) {
+        log_debug("py-mir: TCO enabled for '%s'", fc->name);
+        mt->tco_func = fc;
+
+        // create iteration counter register, init to 0
+        mt->tco_count_reg = pm_new_reg(mt, "tco_count", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+
+        // create the TCO loop label
+        mt->tco_label = MIR_new_label(mt->ctx);
+        pm_emit(mt, mt->tco_label);
+
+        // increment counter: tco_count = tco_count + 1
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, 1)));
+
+        // guard: if tco_count > LAMBDA_TCO_MAX_ITERATIONS, call overflow error
+        MIR_label_t ok_label = pm_new_label(mt);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_BLE, MIR_new_label_op(mt->ctx, ok_label),
+            MIR_new_reg_op(mt->ctx, mt->tco_count_reg),
+            MIR_new_int_op(mt->ctx, LAMBDA_TCO_MAX_ITERATIONS)));
+
+        // overflow path: call lambda_stack_overflow_error(func_name)
+        // lambda_stack_overflow_error takes a const char* — pass a raw C string pointer
+        String* fn_str = name_pool_create_len(mt->tp->name_pool, fc->name, strlen(fc->name));
+        MIR_reg_t fn_name_ptr = pm_new_reg(mt, "tco_fn", MIR_T_I64);
+        pm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, fn_name_ptr),
+            MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fn_str->chars)));
+        pm_call_void_1(mt, "lambda_stack_overflow_error",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_name_ptr));
+
+        // emit a ret after overflow call (unreachable but needed for MIR validation)
+        pm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+            MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
+
+        pm_emit_label(mt, ok_label);
+        mt->in_tail_position = false;
+        mt->block_returned = false;
+    }
+
     // compile body
     pm_transpile_block(mt, fc->node->body);
 
@@ -6758,6 +6961,13 @@ static void pm_compile_function(PyMirTranspiler* mt, PyFuncCollected* fc) {
         MIR_new_int_op(mt->ctx, (int64_t)PY_ITEM_NULL_VAL)));
 
     MIR_finish_func(mt->ctx);
+
+    // restore TCO state
+    mt->tco_func = saved_tco_func;
+    mt->tco_label = saved_tco_label;
+    mt->tco_count_reg = saved_tco_count_reg;
+    mt->in_tail_position = saved_tail_position;
+    mt->block_returned = saved_block_returned;
 
     // restore parent state
     pm_pop_scope(mt);
