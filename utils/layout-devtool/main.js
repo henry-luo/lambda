@@ -151,14 +151,34 @@ class LayoutDevTool {
 
         if (stat.isDirectory()) {
           const files = await fs.readdir(categoryPath);
-          const tests = files.filter(f =>
+          // Direct HTML/HTM files (e.g., baseline/test.html)
+          const htmlTests = files.filter(f =>
             (f.endsWith('.html') || f.endsWith('.htm')) && !f.startsWith('.')
           );
+          // Subdirectories containing index.html (e.g., web-tmpl/dreamy/index.html)
+          const dirTests = [];
+          for (const f of files) {
+            if (f.startsWith('.')) continue;
+            const subPath = path.join(categoryPath, f);
+            try {
+              const subStat = await fs.stat(subPath);
+              if (subStat.isDirectory()) {
+                const indexFile = path.join(subPath, 'index.html');
+                try {
+                  await fs.access(indexFile);
+                  dirTests.push(f + '/index.html');
+                } catch { /* no index.html */ }
+              }
+            } catch { /* stat failed */ }
+          }
+          const tests = [...htmlTests, ...dirTests];
 
-          tree.push({
-            name: category,
-            tests: tests.sort()
-          });
+          if (tests.length > 0) {
+            tree.push({
+              name: category,
+              tests: tests.sort()
+            });
+          }
         }
       }
 
@@ -173,7 +193,11 @@ class LayoutDevTool {
 
   async runTest(testPath, options = {}) {
     return new Promise((resolve, reject) => {
-      const testName = path.basename(testPath, path.extname(testPath));
+      // For subdirectory tests (e.g., web-tmpl/dreamy/index.html), use the directory name
+      let testName = path.basename(testPath, path.extname(testPath));
+      if (testName === 'index') {
+        testName = path.basename(path.dirname(testPath));
+      }
 
       // Run via make layout command
       const args = ['layout', `test=${testName}`];

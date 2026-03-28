@@ -102,7 +102,7 @@ function TestTree({ onTestSelect, selectedTest }) {
                     <span className="status-icon">
                       {getStatusIcon(cat.name, test)}
                     </span>
-                    <span className="test-name">{test}</span>
+                    <span className="test-name">{test.endsWith('/index.html') ? test.slice(0, -'/index.html'.length) : test}</span>
                   </div>
                 ))}
               </div>
