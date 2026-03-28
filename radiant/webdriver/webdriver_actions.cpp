@@ -12,6 +12,7 @@
 #include "../render_img.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/file.h"
 #include "../../lambda/input/css/dom_element.hpp"
 #include <cstring>
 #include <cstdlib>
@@ -452,7 +453,7 @@ char* webdriver_screenshot(WebDriverSession* session) {
     free(data);
     
     // Clean up temp file
-    remove(tmp_file);
+    file_delete(tmp_file);
     
     return encoded;
 }
