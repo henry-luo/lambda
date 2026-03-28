@@ -212,10 +212,17 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                 temp_str[out++] = src[i]; // keep as-is
                             }
                         } else if (next == 'x') {
-                            // Hex escape: \xHH
+                            // Hex escape: \xHH → encode as UTF-8
                             if (i + 3 < content_len) {
                                 char hex[3] = {src[i+2], src[i+3], 0};
-                                temp_str[out++] = (char)strtoul(hex, NULL, 16);
+                                uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
+                                if (cp < 0x80) {
+                                    temp_str[out++] = (char)cp;
+                                } else {
+                                    // 0x80-0xFF: 2-byte UTF-8
+                                    temp_str[out++] = (char)(0xC0 | (cp >> 6));
+                                    temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                }
                                 i += 3;
                             } else {
                                 temp_str[out++] = src[i];
