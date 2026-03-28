@@ -400,9 +400,13 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // descriptors directly, without going through load_font_with_descriptors().
     if (uicon->font_ctx && descriptor->family_name) {
         // map CssEnum weight/style → FontWeight/FontSlant
+        // Note: CSS_VALUE_NORMAL and CSS_VALUE_BOLD are CssEnum values (not
+        // numeric weights), so check them explicitly before the numeric range.
         FontWeight fw = FONT_WEIGHT_NORMAL;
-        if (descriptor->font_weight == CSS_VALUE_BOLD) fw = FONT_WEIGHT_BOLD;
-        else if (descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
+        if (descriptor->font_weight == CSS_VALUE_BOLD)
+            fw = FONT_WEIGHT_BOLD;
+        else if (descriptor->font_weight != CSS_VALUE_NORMAL &&
+                 descriptor->font_weight >= 100 && descriptor->font_weight <= 900)
             fw = (FontWeight)descriptor->font_weight;
 
         FontSlant fs = FONT_SLANT_NORMAL;

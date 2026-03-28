@@ -20,6 +20,47 @@
 bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     if (!ctx || !desc || !desc->family) return false;
 
+    // check if an entry with the same family/weight/slant already exists —
+    // if so, merge the new sources into it (supports Google Fonts subsets
+    // where multiple @font-face rules cover different unicode-ranges)
+    for (int i = 0; i < ctx->face_descriptor_count; i++) {
+        FontFaceEntry* existing = ctx->face_descriptors[i];
+        if (!existing || !existing->family) continue;
+        if (str_icmp(existing->family, strlen(existing->family),
+                     desc->family, strlen(desc->family)) != 0) continue;
+        if (existing->weight != desc->weight || existing->slant != desc->slant) continue;
+
+        // merge: append new sources to existing entry
+        if (desc->source_count > 0 && desc->sources) {
+            int old_count = existing->source_count;
+            int new_count = old_count + desc->source_count;
+            struct FontFaceEntrySrc* merged = (struct FontFaceEntrySrc*)pool_calloc(
+                ctx->pool, (size_t)new_count * sizeof(struct FontFaceEntrySrc));
+            if (!merged) return false;
+
+            // copy existing sources
+            if (existing->sources && old_count > 0) {
+                memcpy(merged, existing->sources,
+                       (size_t)old_count * sizeof(struct FontFaceEntrySrc));
+            }
+            // append new sources
+            for (int j = 0; j < desc->source_count; j++) {
+                if (desc->sources[j].path) {
+                    merged[old_count + j].path = arena_strdup(ctx->arena, desc->sources[j].path);
+                }
+                if (desc->sources[j].format) {
+                    merged[old_count + j].format = arena_strdup(ctx->arena, desc->sources[j].format);
+                }
+            }
+            existing->sources = merged;
+            existing->source_count = new_count;
+
+            log_info("font_face: merged %d sources into '%s' (weight=%d, slant=%d, total=%d)",
+                     desc->source_count, desc->family, (int)desc->weight, (int)desc->slant, new_count);
+        }
+        return true;
+    }
+
     // grow the array if needed
     if (ctx->face_descriptor_count >= ctx->face_descriptor_capacity) {
         int new_cap = (ctx->face_descriptor_capacity == 0) ? 8
@@ -236,6 +277,20 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
         }
 
         if (handle) {
+            // verify the font has basic Latin characters — subsetted fonts
+            // (e.g. Google Fonts unicode-range subsets) may load successfully
+            // but lack common characters
+            FT_Face face = handle->ft_face;
+            if (face && (FT_Get_Char_Index(face, 'a') == 0 ||
+                         FT_Get_Char_Index(face, 'A') == 0) &&
+                        i + 1 < desc->source_count) {
+                // this source lacks Latin chars — try next source
+                log_debug("font_face: source %d for '%s' lacks Latin chars, trying next",
+                          i, desc->family);
+                font_handle_release(handle);
+                continue;
+            }
+
             // cache in entry for future loads (mutable cast is safe here)
             if (entry) {
                 ((FontFaceEntry*)entry)->loaded_handle = handle;
