@@ -12,9 +12,7 @@ extern "C" {
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include <stdlib.h>
-#ifdef _WIN32
-#include <direct.h>  // for _fullpath
-#endif
+#include "../lib/file.h"
 
 static const char* FONT_CACHE_DIR = "./temp/font_cache";
 
@@ -277,17 +275,11 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
                 }
             } else {
                 // Relative path - resolve to absolute using CWD so font paths are correct
-                char resolved[4096];
-#ifdef _WIN32
-                if (_fullpath(resolved, stylesheet->origin_url, sizeof(resolved))) {
-#else
-                if (realpath(stylesheet->origin_url, resolved)) {
-#endif
-                    stylesheet_path = strdup(resolved);
-                    if (stylesheet_path) {
-                        base_path = stylesheet_path;
-                        clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
-                    }
+                char* resolved = file_realpath(stylesheet->origin_url);
+                if (resolved) {
+                    stylesheet_path = resolved;  // file_realpath returns malloc'd string
+                    base_path = stylesheet_path;
+                    clog_debug(font_log, "Using stylesheet origin_url (resolved relative path) for font resolution: %s", base_path);
                 }
             }
         }

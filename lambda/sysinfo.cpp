@@ -17,6 +17,8 @@
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
+#include "../lib/file.h"
+#include "../lib/shell.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -25,12 +27,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>  // for _getpid
-#include <direct.h>   // for _getcwd
 #define getpid _getpid
-#define getcwd _getcwd
 #else
 #include <sys/utsname.h>
-#include <unistd.h>
+#include <unistd.h>    // for getpid, getuid
 #include <pwd.h>
 #endif
 
@@ -526,14 +526,14 @@ static const char* get_home_dir(void) {
 #ifdef _WIN32
     static char home[MAX_PATH] = {0};
     if (home[0] == 0) {
-        const char* userprofile = getenv("USERPROFILE");
+        const char* userprofile = shell_getenv("USERPROFILE");
         if (userprofile) {
             strncpy(home, userprofile, sizeof(home) - 1);
         }
     }
     return home;
 #else
-    const char* home = getenv("HOME");
+    const char* home = shell_getenv("HOME");
     if (home) return home;
 
     struct passwd* pw = getpwuid(getuid());
@@ -551,7 +551,7 @@ static const char* get_temp_dir(void) {
     }
     return temp;
 #else
-    const char* temp = getenv("TMPDIR");
+    const char* temp = shell_getenv("TMPDIR");
     if (temp) return temp;
     return "/tmp";
 #endif
@@ -707,9 +707,10 @@ static Item resolve_proc(const char** segments, int count) {
         MapBuilder self = builder.map();
         self.put("pid", (int64_t)getpid());
 
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd))) {
+        char* cwd = file_getcwd();
+        if (cwd) {
             self.put("cwd", cwd);
+            free(cwd);
         }
 
         proc.put("self", self.final());
@@ -727,9 +728,10 @@ static Item resolve_proc(const char** segments, int count) {
             MapBuilder self = builder.map();
             self.put("pid", (int64_t)getpid());
 
-            char cwd[1024];
-            if (getcwd(cwd, sizeof(cwd))) {
+            char* cwd = file_getcwd();
+            if (cwd) {
                 self.put("cwd", cwd);
+                free(cwd);
             }
 
             return self.final();
@@ -744,10 +746,12 @@ static Item resolve_proc(const char** segments, int count) {
             }
 
             if (strcmp(field, "cwd") == 0) {
-                char cwd[1024];
-                if (getcwd(cwd, sizeof(cwd))) {
+                char* cwd = file_getcwd();
+                if (cwd) {
                     MarkBuilder builder(input);
-                    return builder.createStringItem(cwd);
+                    Item result = builder.createStringItem(cwd);
+                    free(cwd);
+                    return result;
                 }
                 return ItemNull;
             }
@@ -791,7 +795,7 @@ static Item resolve_proc(const char** segments, int count) {
                 }
                 else if (count >= 3) {
                     // sys.proc.self.env.VARNAME
-                    const char* var = getenv(segments[2]);
+                    const char* var = shell_getenv(segments[2]);
                     if (var) {
                         MarkBuilder builder(input);
                         return builder.createStringItem(var);

@@ -413,6 +413,50 @@ int file_delete(const char* path) {
     return 0;
 }
 
+#ifndef _WIN32
+#include <ftw.h>
+static int delete_recursive_cb(const char* fpath, const struct stat* sb,
+                               int typeflag, struct FTW* ftwbuf) {
+    (void)sb; (void)ftwbuf;
+    int rv;
+    if (typeflag == FTW_D || typeflag == FTW_DP) {
+        rv = rmdir(fpath);
+    } else {
+        rv = remove(fpath);
+    }
+    if (rv != 0) {
+        log_error("file_delete_recursive: cannot remove '%s': %s", fpath, strerror(errno));
+    }
+    return rv;
+}
+#endif
+
+int file_delete_recursive(const char* path) {
+    if (!path) {
+        log_error("file_delete_recursive: NULL path");
+        return -1;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        log_error("file_delete_recursive: path does not exist: '%s'", path);
+        return -1;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        return file_delete(path);
+    }
+#ifdef _WIN32
+    char cmd[4096];
+    snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", path);
+    int result = system(cmd);
+    if (result != 0) {
+        log_error("file_delete_recursive: failed to delete directory '%s'", path);
+    }
+    return result;
+#else
+    return nftw(path, delete_recursive_cb, 64, FTW_DEPTH | FTW_PHYS);
+#endif
+}
+
 int file_touch(const char* path) {
     if (!path) {
         log_error("file_touch: NULL path");
@@ -543,6 +587,33 @@ bool file_is_symlink(const char* path) {
 #endif
 }
 
+bool file_is_readable(const char* path) {
+    if (!path) return false;
+#ifdef _WIN32
+    return _access(path, 4) == 0;  // 4 = read
+#else
+    return access(path, R_OK) == 0;
+#endif
+}
+
+bool file_is_writable(const char* path) {
+    if (!path) return false;
+#ifdef _WIN32
+    return _access(path, 2) == 0;  // 2 = write
+#else
+    return access(path, W_OK) == 0;
+#endif
+}
+
+bool file_is_executable(const char* path) {
+    if (!path) return false;
+#ifdef _WIN32
+    return _access(path, 0) == 0;  // Windows: just check existence
+#else
+    return access(path, X_OK) == 0;
+#endif
+}
+
 FileStat file_stat(const char* path) {
     FileStat fs;
     memset(&fs, 0, sizeof(fs));
@@ -584,6 +655,16 @@ int64_t file_size(const char* path) {
     struct stat st;
     if (stat(path, &st) != 0) return -1;
     return (int64_t)st.st_size;
+}
+
+char* file_getcwd(void) {
+    char buf[4096];
+#ifdef _WIN32
+    if (!_getcwd(buf, sizeof(buf))) return NULL;
+#else
+    if (!getcwd(buf, sizeof(buf))) return NULL;
+#endif
+    return strdup(buf);
 }
 
 char* file_realpath(const char* path) {
@@ -766,4 +847,41 @@ const char* file_path_ext(const char* path) {
     const char* dot = strrchr(base, '.');
     if (!dot || dot == base) return NULL;
     return dot;
+}
+
+// ---------------------------------------------------------------------------
+// Cache / directory convenience
+// ---------------------------------------------------------------------------
+
+int file_ensure_dir(const char* dir_path) {
+    if (!dir_path) return -1;
+    if (file_exists(dir_path)) {
+        if (file_is_dir(dir_path)) return 0;
+        log_error("file_ensure_dir: path exists but is not a directory: %s", dir_path);
+        return -1;
+    }
+    if (!create_dir(dir_path)) {
+        log_error("file_ensure_dir: failed to create directory: %s", dir_path);
+        return -1;
+    }
+    return 0;
+}
+
+char* file_cache_path(const char* key, const char* cache_dir, const char* ext) {
+    if (!key || !cache_dir) return NULL;
+    if (!ext) ext = ".cache";
+
+    // DJB2 hash
+    unsigned long hash = 5381;
+    for (const char* s = key; *s; s++) {
+        hash = ((hash << 5) + hash) + (unsigned char)*s;
+    }
+
+    size_t dir_len = strlen(cache_dir);
+    size_t ext_len = strlen(ext);
+    // "<dir>/<8hex><ext>\0"
+    char* buf = (char*)malloc(dir_len + 1 + 8 + ext_len + 1);
+    if (!buf) return NULL;
+    snprintf(buf, dir_len + 1 + 8 + ext_len + 1, "%s/%08lx%s", cache_dir, hash, ext);
+    return buf;
 }

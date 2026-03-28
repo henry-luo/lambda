@@ -13,7 +13,6 @@
 
 #include <cstring>
 #include <cstdlib>
-#include <sys/stat.h>
 
 extern Input* js_input;
 

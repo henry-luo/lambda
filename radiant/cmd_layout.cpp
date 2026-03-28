@@ -21,7 +21,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <chrono>       // timing - acceptable for profiling
-#include <unistd.h>
 #include <limits.h>
 extern "C" {
 #include "../lib/mempool.h"
@@ -739,6 +738,98 @@ void extract_body_transform_scale(DomElement* root, DomDocument* doc) {
 }
 
 /**
+ * Resolve @import rules within a stylesheet: load and parse imported CSS files,
+ * add them to the stylesheet list. This handles CSS like @import url('font-awesome.css');
+ */
+static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* stylesheet_path,
+                                        CssEngine* engine, Pool* pool,
+                                        CssStylesheet*** stylesheets, int* count, int depth) {
+    if (!stylesheet || !engine || !pool || !stylesheets || !count) return;
+    if (depth > 5) {
+        log_warn("[CSS @import] Maximum @import nesting depth reached (5), skipping");
+        return;
+    }
+
+    // Get directory of the stylesheet for resolving relative import URLs
+    char dir_buf[1024];
+    const char* import_base_dir = nullptr;
+    if (stylesheet_path) {
+        const char* last_slash = strrchr(stylesheet_path, '/');
+        if (last_slash) {
+            size_t dir_len = last_slash - stylesheet_path + 1;
+            if (dir_len < sizeof(dir_buf)) {
+                memcpy(dir_buf, stylesheet_path, dir_len);
+                dir_buf[dir_len] = '\0';
+                import_base_dir = dir_buf;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < stylesheet->rule_count; i++) {
+        CssRule* rule = stylesheet->rules[i];
+        if (!rule || rule->type != CSS_RULE_IMPORT) continue;
+
+        const char* import_url = rule->data.import_rule.url;
+        if (!import_url || import_url[0] == '\0') continue;
+
+        log_debug("[CSS @import] Processing: @import '%s' (base: %s)", import_url,
+                  import_base_dir ? import_base_dir : "(none)");
+
+        // Resolve import path relative to the stylesheet
+        char import_path[1024];
+        if (strstr(import_url, "://") != nullptr) {
+            // Absolute URL
+            strncpy(import_path, import_url, sizeof(import_path) - 1);
+            import_path[sizeof(import_path) - 1] = '\0';
+        } else if (import_base_dir) {
+            snprintf(import_path, sizeof(import_path), "%s%s", import_base_dir, import_url);
+        } else {
+            strncpy(import_path, import_url, sizeof(import_path) - 1);
+            import_path[sizeof(import_path) - 1] = '\0';
+        }
+
+        // Load and parse the imported CSS file
+        char* css_content = nullptr;
+        bool is_http = (strncmp(import_path, "http://", 7) == 0 || strncmp(import_path, "https://", 8) == 0);
+        if (is_http) {
+            size_t content_size = 0;
+            css_content = download_http_content(import_path, &content_size, nullptr);
+        } else {
+            css_content = read_text_file(import_path);
+        }
+
+        if (!css_content) {
+            log_warn("[CSS @import] Failed to load imported stylesheet: %s", import_path);
+            continue;
+        }
+
+        size_t css_len = strlen(css_content);
+        char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+        if (!css_pool_copy) {
+            free(css_content);
+            continue;
+        }
+        str_copy(css_pool_copy, css_len + 1, css_content, css_len);
+        free(css_content);
+
+        CssStylesheet* imported = css_parse_stylesheet(engine, css_pool_copy, import_path);
+        if (imported && imported->rule_count > 0) {
+            log_debug("[CSS @import] Parsed imported stylesheet '%s': %zu rules", import_path, imported->rule_count);
+
+            *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                          (*count + 1) * sizeof(CssStylesheet*));
+            (*stylesheets)[*count] = imported;
+            (*count)++;
+
+            // Recursively resolve @imports within the imported stylesheet
+            resolve_stylesheet_imports(imported, import_path, engine, pool, stylesheets, count, depth + 1);
+        } else {
+            log_warn("[CSS @import] Failed to parse imported stylesheet: %s", import_path);
+        }
+    }
+}
+
+/**
  * Recursively collect <link rel="stylesheet"> references from HTML
  * Loads and parses external CSS files
  */
@@ -853,6 +944,9 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
                                                                       (*count + 1) * sizeof(CssStylesheet*));
                         (*stylesheets)[*count] = stylesheet;
                         (*count)++;
+
+                        // Resolve @import rules within this stylesheet
+                        resolve_stylesheet_imports(stylesheet, css_path, engine, pool, stylesheets, count, 0);
                     } else {
                         log_warn("[CSS] Failed to parse stylesheet or empty: %s", css_path);
                     }
@@ -4299,23 +4393,50 @@ static char* generate_output_path(const char* input_file, const char* output_dir
     if (!basename) {
         basename = strrchr(input_file, '\\');
     }
-    basename = basename ? basename + 1 : input_file;
+    const char* file_start = basename ? basename + 1 : input_file;
+
+    // Extract parent directory name to disambiguate files with same basename
+    // (e.g., web-tmpl/dreamy/index.html and web-tmpl/zenlike/index.html)
+    const char* parent_name = NULL;
+    size_t parent_len = 0;
+    if (basename && basename > input_file) {
+        // Find the start of the parent directory
+        const char* parent_end = basename; // points to the last '/' before basename
+        const char* p = parent_end - 1;
+        while (p >= input_file && *p != '/' && *p != '\\') {
+            p--;
+        }
+        parent_name = p + 1;
+        parent_len = (size_t)(parent_end - parent_name);
+    }
 
     // Find extension and replace with .json
-    const char* ext = strrchr(basename, '.');
-    size_t name_len = ext ? (size_t)(ext - basename) : strlen(basename);
+    const char* ext = strrchr(file_start, '.');
+    size_t name_len = ext ? (size_t)(ext - file_start) : strlen(file_start);
 
-    // Build output path: output_dir/basename.json
+    // Build output path: output_dir/[parentdir__]basename.json
     size_t dir_len = strlen(output_dir);
     bool need_slash = (dir_len > 0 && output_dir[dir_len - 1] != '/' && output_dir[dir_len - 1] != '\\');
+    // prefix = "parentdir__" if parent exists (parent_len + 2 for "__")
+    size_t prefix_len = (parent_name && parent_len > 0) ? parent_len + 2 : 0;
 
-    size_t path_len = dir_len + (need_slash ? 1 : 0) + name_len + 5 + 1; // ".json" + null
+    size_t path_len = dir_len + (need_slash ? 1 : 0) + prefix_len + name_len + 5 + 1; // ".json" + null
     char* output_path = (char*)mem_alloc(path_len, MEM_CAT_LAYOUT);
 
-    if (need_slash) {
-        snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, basename);
+    if (prefix_len > 0) {
+        if (need_slash) {
+            snprintf(output_path, path_len, "%s/%.*s__%.*s.json", output_dir,
+                     (int)parent_len, parent_name, (int)name_len, file_start);
+        } else {
+            snprintf(output_path, path_len, "%s%.*s__%.*s.json", output_dir,
+                     (int)parent_len, parent_name, (int)name_len, file_start);
+        }
     } else {
-        snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, basename);
+        if (need_slash) {
+            snprintf(output_path, path_len, "%s/%.*s.json", output_dir, (int)name_len, file_start);
+        } else {
+            snprintf(output_path, path_len, "%s%.*s.json", output_dir, (int)name_len, file_start);
+        }
     }
 
     return output_path;
@@ -4327,7 +4448,7 @@ static char* generate_output_path(const char* input_file, const char* output_dir
  */
 int cmd_layout(int argc, char** argv) {
     // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
-    if (access("log.conf", F_OK) == 0) {
+    if (file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");
         if (file) { fclose(file); }
     }

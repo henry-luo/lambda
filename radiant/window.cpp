@@ -5,11 +5,12 @@
 #include <wchar.h>
 #include <assert.h>
 #include <stdbool.h>
-#include <unistd.h>
 #include <string.h>
 #include <strings.h>  // for strcasecmp
 #include "../lib/log.h"
 #include "../lib/str.h"
+#include "../lib/file.h"
+#include "../lib/shell.h"
 #include "layout.hpp"
 #include "font_face.h"
 #include "state_store.hpp"
@@ -483,7 +484,7 @@ void render(GLFWwindow* window) {
 void log_init_wrapper() {
     // empty existing log file and load config only when log.conf is present (dev/debug mode)
     // in release mode (no log.conf), skip to avoid creating log.txt in the working directory
-    if (access("log.conf", F_OK) == 0) {
+    if (file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");
         if (file) { fclose(file); }
         log_parse_config_file("log.conf");
@@ -692,7 +693,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
     }
 
     // Check for auto-close after initial render (for testing/benchmarking)
-    bool auto_close_enabled = (getenv("LAMBDA_AUTO_CLOSE") != NULL);
+    bool auto_close_enabled = (shell_getenv("LAMBDA_AUTO_CLOSE") != NULL);
     if (auto_close_enabled) {
         log_info("First frame rendered, auto-closing window for testing");
         glfwSetWindowShouldClose(window, GLFW_TRUE);

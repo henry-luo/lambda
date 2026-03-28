@@ -62,6 +62,8 @@ typedef struct _ArrayList ArrayList;
  * Definition of an @ref ArrayList.
  */ 
 
+#ifndef _ARRAYLIST_STRUCT_DEFINED
+#define _ARRAYLIST_STRUCT_DEFINED
 struct _ArrayList {
 
 	/** Entries in the array */
@@ -76,6 +78,7 @@ struct _ArrayList {
 
 	int _alloced;
 };
+#endif
 
 /**
  * Compare two values in an arraylist to determine if they are equal.

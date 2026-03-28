@@ -271,3 +271,61 @@ const char* detect_mime_type(MimeDetector* detector, const char* filename, const
     
     return "application/octet-stream";
 }
+
+// ---------------------------------------------------------------------------
+// Content-Type header to file extension mapping
+// ---------------------------------------------------------------------------
+
+static int mime_ieq(const char* a, size_t alen, const char* b) {
+    size_t blen = strlen(b);
+    if (alen != blen) return 0;
+    for (size_t i = 0; i < alen; i++) {
+        char ca = a[i]; if (ca >= 'A' && ca <= 'Z') ca += 32;
+        char cb = b[i]; if (cb >= 'A' && cb <= 'Z') cb += 32;
+        if (ca != cb) return 0;
+    }
+    return 1;
+}
+
+const char* mime_extension_from_content_type(const char* content_type) {
+    if (!content_type) return NULL;
+
+    // strip parameters  (e.g. "; charset=utf-8")
+    const char* semi = strchr(content_type, ';');
+    size_t len = semi ? (size_t)(semi - content_type) : strlen(content_type);
+
+    // trim trailing whitespace
+    while (len > 0 && (content_type[len-1] == ' ' || content_type[len-1] == '\t')) len--;
+
+    // lookup table — ordered roughly by frequency
+    static const struct { const char* mime; const char* ext; } table[] = {
+        {"text/html",                ".html"},
+        {"application/xhtml+xml",    ".html"},
+        {"text/plain",               ".txt"},
+        {"text/css",                 ".css"},
+        {"text/javascript",          ".js"},
+        {"application/javascript",   ".js"},
+        {"application/json",         ".json"},
+        {"text/xml",                 ".xml"},
+        {"application/xml",          ".xml"},
+        {"text/markdown",            ".md"},
+        {"text/x-markdown",          ".md"},
+        {"application/pdf",          ".pdf"},
+        {"image/svg+xml",            ".svg"},
+        {"image/png",                ".png"},
+        {"image/jpeg",               ".jpg"},
+        {"image/gif",                ".gif"},
+        {"image/webp",               ".webp"},
+        {"application/x-latex",      ".tex"},
+        {"text/x-tex",               ".tex"},
+        {"application/x-yaml",       ".yaml"},
+        {"text/yaml",                ".yaml"},
+        {"application/toml",         ".toml"},
+        {"text/csv",                 ".csv"},
+    };
+    int n = (int)(sizeof(table) / sizeof(table[0]));
+    for (int i = 0; i < n; i++) {
+        if (mime_ieq(content_type, len, table[i].mime)) return table[i].ext;
+    }
+    return NULL;
+}

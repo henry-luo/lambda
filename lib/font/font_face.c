@@ -254,6 +254,9 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
     float physical_size = size_px * pixel_ratio;
 
     // try each source in order
+    FontHandle* fallback_handle = NULL;  // last successfully loaded font (may lack Latin chars)
+    int fallback_source_idx = -1;
+    const char* fallback_src_path = NULL;
     for (int i = 0; i < desc->source_count; i++) {
         const char* src_path = desc->sources[i].path;
         if (!src_path) continue;
@@ -284,10 +287,14 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             if (face && (FT_Get_Char_Index(face, 'a') == 0 ||
                          FT_Get_Char_Index(face, 'A') == 0) &&
                         i + 1 < desc->source_count) {
-                // this source lacks Latin chars — try next source
+                // this source lacks Latin chars — save as fallback and try next
+                // (icon fonts like FontAwesome legitimately lack Latin chars)
                 log_debug("font_face: source %d for '%s' lacks Latin chars, trying next",
                           i, desc->family);
-                font_handle_release(handle);
+                if (fallback_handle) font_handle_release(fallback_handle);
+                fallback_handle = handle;
+                fallback_source_idx = i;
+                fallback_src_path = src_path;
                 continue;
             }
 
@@ -298,10 +305,23 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
             }
             log_info("font_face: loaded '%s' from source %d: %s",
                      desc->family, i, src_path);
+            if (fallback_handle) font_handle_release(fallback_handle);
             return handle;
         }
 
         log_debug("font_face: source %d failed for '%s': %s", i, desc->family, src_path);
+    }
+
+    // If no source had Latin chars but we have a loadable fallback, use it
+    // (icon/symbol fonts legitimately lack Latin characters)
+    if (fallback_handle) {
+        if (entry) {
+            ((FontFaceEntry*)entry)->loaded_handle = fallback_handle;
+            font_handle_retain(fallback_handle);
+        }
+        log_info("font_face: loaded '%s' from source %d (icon/symbol font): %s",
+                 desc->family, fallback_source_idx, fallback_src_path);
+        return fallback_handle;
     }
 
     log_error("font_face: all sources failed for '%s'", desc->family);

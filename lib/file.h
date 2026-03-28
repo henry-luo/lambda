@@ -86,6 +86,9 @@ int file_move(const char* src, const char* dst);
 // Delete a file (not directory). Returns 0 on success, -1 on error.
 int file_delete(const char* path);
 
+// Delete a file or directory recursively. Returns 0 on success, -1 on error.
+int file_delete_recursive(const char* path);
+
 // Create empty file or update modification time. Returns 0 on success, -1 on error.
 int file_touch(const char* path);
 
@@ -106,11 +109,17 @@ bool     file_exists(const char* path);
 bool     file_is_file(const char* path);
 bool     file_is_dir(const char* path);
 bool     file_is_symlink(const char* path);
+bool     file_is_readable(const char* path);
+bool     file_is_writable(const char* path);
+bool     file_is_executable(const char* path);
 FileStat file_stat(const char* path);
 int64_t  file_size(const char* path);
 
 // Resolve to absolute canonical path. Caller must free(). NULL on error.
 char* file_realpath(const char* path);
+
+// Return current working directory as malloc'd string. Caller must free().
+char* file_getcwd(void);
 
 // ---------------------------------------------------------------------------
 // Streaming reads
@@ -147,6 +156,18 @@ const char* file_path_basename(const char* path);
 
 // File extension including dot (pointer into input string — no alloc).
 const char* file_path_ext(const char* path);
+
+// ---------------------------------------------------------------------------
+// Cache / directory convenience
+// ---------------------------------------------------------------------------
+
+// Ensure directory exists; return 0 on success, -1 if path exists but is not
+// a directory or creation fails.
+int file_ensure_dir(const char* dir_path);
+
+// Generate a cache file path from `key` using a DJB2 hash.
+// Result is "<cache_dir>/<hex_hash>.<ext>".  Caller must free().
+char* file_cache_path(const char* key, const char* cache_dir, const char* ext);
 
 #ifdef __cplusplus
 }

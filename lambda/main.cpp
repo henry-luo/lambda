@@ -7,7 +7,8 @@
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
-#include <unistd.h>  // for getcwd
+#include "../lib/file.h"    // For file_exists, file_delete, file_getcwd
+#include "../lib/shell.h"   // For shell_getenv
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
@@ -519,7 +520,7 @@ int exec_convert(int argc, char* argv[]) {
 
     // Check if input file exists (skip check for HTTP/HTTPS URLs)
     bool is_http_url = (strncmp(input_file, "http://", 7) == 0 || strncmp(input_file, "https://", 8) == 0);
-    if (!is_http_url && access(input_file, F_OK) != 0) {
+    if (!is_http_url && !file_exists(input_file)) {
         printf("Error: Input file '%s' does not exist\n", input_file);
         return 1;
     }
@@ -541,8 +542,8 @@ int exec_convert(int argc, char* argv[]) {
     printf("Reading input file: %s\n", input_file);
 
     // Create absolute URL for the input file
-    char cwd_path[PATH_MAX];
-    if (!getcwd(cwd_path, sizeof(cwd_path))) {
+    char* cwd_path = file_getcwd();
+    if (!cwd_path) {
         printf("Error: Failed to get current directory\n");
         pool_destroy(temp_pool);
         return 1;
@@ -557,6 +558,7 @@ int exec_convert(int argc, char* argv[]) {
         // Relative path
         snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, input_file);
     }
+    free(cwd_path);
 
     // Create URL string
     String* url_string = create_string(temp_pool, file_url);
@@ -792,7 +794,7 @@ int main(int argc, char *argv[]) {
     lambda_home_init();
 
     // Initialize logging system with config file if available
-    if (access("log.conf", F_OK) == 0) {
+    if (file_exists("log.conf")) {
         // log.conf exists, load it
         if (log_parse_config_file("log.conf") != LOG_OK) {
             fprintf(stderr, "Warning: Failed to parse log.conf, using defaults\n");
@@ -826,7 +828,7 @@ int main(int argc, char *argv[]) {
     // Initialize memory tracker early in program lifecycle
     log_debug("initializing memory tracker");
     // Check environment variable for debug mode
-    const char* memtrack_env = getenv("MEMTRACK_MODE");
+    const char* memtrack_env = shell_getenv("MEMTRACK_MODE");
     MemtrackMode mode = MEMTRACK_MODE_STATS;  // Default to stats mode
     if (memtrack_env && strcmp(memtrack_env, "DEBUG") == 0) {
         mode = MEMTRACK_MODE_DEBUG;
@@ -1453,7 +1455,7 @@ int main(int argc, char *argv[]) {
 
         // Check if HTML file exists (skip check for HTTP/HTTPS URLs)
         bool is_http_url = (strncmp(html_file, "http://", 7) == 0 || strncmp(html_file, "https://", 8) == 0);
-        if (!is_http_url && access(html_file, F_OK) != 0) {
+        if (!is_http_url && !file_exists(html_file)) {
             printf("Error: Input file '%s' does not exist\n", html_file);
             log_finish();
             return 1;
@@ -1585,7 +1587,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 // Clean up temp file
-                unlink(temp_svg);
+                file_delete(temp_svg);
 
                 if (exit_code == 0) {
                     printf("Graph rendered successfully to '%s'\n", output_file);
@@ -1720,7 +1722,7 @@ int main(int argc, char *argv[]) {
 
         // Check if file exists (skip check for HTTP/HTTPS URLs)
         bool is_http_url = (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0);
-        if (!is_http_url && access(filename, F_OK) != 0) {
+        if (!is_http_url && !file_exists(filename)) {
             printf("Error: File '%s' does not exist\n", filename);
             log_finish();
             return 1;
@@ -1897,7 +1899,7 @@ int main(int argc, char *argv[]) {
             exit_code = view_doc_in_window_with_events(temp_svg, event_file);
 
             // Clean up temp file after viewing
-            unlink(temp_svg);
+            file_delete(temp_svg);
 
             log_debug("view command completed with result: %d", exit_code);
             log_finish();
@@ -1924,14 +1926,14 @@ int main(int argc, char *argv[]) {
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
-            if (temp_file_path) { unlink(temp_file_path); free(temp_file_path); }
+            if (temp_file_path) { file_delete(temp_file_path); free(temp_file_path); }
             log_finish();
             return 1;
         }
 
         // Cleanup temp file if we created one from HTTP URL
         if (temp_file_path) {
-            unlink(temp_file_path);
+            file_delete(temp_file_path);
             free(temp_file_path);
         }
 
@@ -2127,7 +2129,7 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
-            if (access(script_path, F_OK) != 0) {
+            if (!file_exists(script_path)) {
                 fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
                 fflush(stdout);
                 printf("\x01" "BATCH_END 1\n");
@@ -2231,7 +2233,7 @@ int main(int argc, char *argv[]) {
         }
 
         // Check if script file exists
-        if (access(script_file, F_OK) != 0) {
+        if (!file_exists(script_file)) {
             printf("Error: Script file '%s' does not exist\n", script_file);
             log_finish();
             return 1;

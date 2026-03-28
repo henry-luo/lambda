@@ -512,8 +512,8 @@ extern "C" Item bash_test_n(Item value) {
 }
 
 // file test operators
-#include <sys/stat.h>
-#include <unistd.h>
+#include "../../lib/file.h"
+#include <unistd.h>  // for pipe, read, write, close, getuid, fork
 
 static const char* bash_item_to_cstr(Item value) {
     Item str = bash_to_string(value);
@@ -524,61 +524,56 @@ static const char* bash_item_to_cstr(Item value) {
 
 extern "C" Item bash_test_f(Item value) {
     const char* path = bash_item_to_cstr(value);
-    struct stat st;
-    bool result = (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+    bool result = file_is_file(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_d(Item value) {
     const char* path = bash_item_to_cstr(value);
-    struct stat st;
-    bool result = (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+    bool result = file_is_dir(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_e(Item value) {
     const char* path = bash_item_to_cstr(value);
-    struct stat st;
-    bool result = (stat(path, &st) == 0);
+    bool result = file_exists(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_r(Item value) {
     const char* path = bash_item_to_cstr(value);
-    bool result = (access(path, R_OK) == 0);
+    bool result = file_is_readable(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_w(Item value) {
     const char* path = bash_item_to_cstr(value);
-    bool result = (access(path, W_OK) == 0);
+    bool result = file_is_writable(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_x(Item value) {
     const char* path = bash_item_to_cstr(value);
-    bool result = (access(path, X_OK) == 0);
+    bool result = file_is_executable(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_s(Item value) {
     const char* path = bash_item_to_cstr(value);
-    struct stat st;
-    bool result = (stat(path, &st) == 0 && st.st_size > 0);
+    bool result = (file_size(path) > 0);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
 extern "C" Item bash_test_l(Item value) {
     const char* path = bash_item_to_cstr(value);
-    struct stat st;
-    bool result = (lstat(path, &st) == 0 && S_ISLNK(st.st_mode));
+    bool result = file_is_symlink(path);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }

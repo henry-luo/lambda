@@ -6,36 +6,64 @@ Extend the existing file I/O modules (`lib/file.c` and `lib/file_utils.c`) into 
 
 ### Current State
 
-**`lib/file.c`** provides minimal operations:
-- `read_text_file(filename)` — read entire file into malloc'd buffer
-- `read_binary_file(filename, &size)` — read binary with size output
-- `write_text_file(filename, content)` — write string to file
-- `create_dir(dir_path)` — recursive directory creation
+**All functions are implemented.** The module is fully operational with 37+ public functions across `lib/file.c` and 8 functions in `lib/file_utils.c`. The entire codebase (`lambda/`, `radiant/`) has been migrated to use these modules instead of direct POSIX headers.
+
+**`lib/file.c`** provides:
+- Read/write: `read_text_file`, `read_binary_file`, `write_text_file`, `write_binary_file`, `append_text_file`, `append_binary_file`, `write_text_file_atomic`
+- File ops: `file_copy`, `file_move`, `file_delete`, `file_delete_recursive`, `file_touch`, `file_symlink`, `file_chmod`, `file_rename`
+- Queries: `file_exists`, `file_is_file`, `file_is_dir`, `file_is_symlink`, `file_is_readable`, `file_is_writable`, `file_is_executable`, `file_stat`, `file_size`, `file_realpath`, `file_getcwd`
+- Streaming: `file_read_lines`
+- Temp files: `file_temp_path`, `file_temp_create`, `dir_temp_create`
+- Path utils: `file_path_join`, `file_path_dirname`, `file_path_basename`, `file_path_ext`
+- Extras: `file_ensure_dir`, `file_cache_path`, `create_dir`
 
 **`lib/file_utils.c`** provides:
-- `create_dir_recursive(path)` — `mkdir -p` equivalent
+- `create_dir_recursive` — `mkdir -p` equivalent
+- `dir_list` — list directory children as `ArrayList` of `DirEntry*`
+- `dir_walk` — recursive depth-first traversal with callback
+- `dir_delete` — recursive rm (`rm -rf`)
+- `dir_copy` — recursive directory copy
+- `file_glob` — shell glob pattern expansion
+- `file_find` — name pattern search under a directory
+- `dir_entry_free` — cleanup helper
 
-### Gaps
+### Capability Status
 
 | Capability | Status |
 |------------|--------|
-| Read file (text / binary) | ✅ Exists |
-| Write file (text) | ✅ Exists |
-| Create directory | ✅ Exists (duplicated across file.c and file_utils.c) |
-| Write binary / append mode | ❌ Missing |
-| Atomic write (temp + rename) | ❌ Missing |
-| Copy / move / delete files | ❌ Missing |
-| Symlink / chmod / touch | ❌ Missing |
-| File metadata (stat) | ❌ Missing (only used inline) |
-| Directory listing / glob | ❌ Missing |
-| Recursive directory walk | ❌ Missing |
-| Temporary file creation | ❌ Missing |
-| File existence / type check | ❌ Missing |
-| File locking | ❌ Missing |
-| Streaming read (line-by-line) | ❌ Missing |
+| Read file (text / binary) | ✅ Implemented |
+| Write file (text) | ✅ Implemented |
+| Write binary / append mode | ✅ Implemented |
+| Atomic write (temp + rename) | ✅ Implemented |
+| Create directory | ✅ Implemented (consolidated) |
+| Copy / move / delete files | ✅ Implemented |
+| Symlink / chmod / touch | ✅ Implemented |
+| File metadata (stat) | ✅ Implemented (`FileStat` struct) |
+| File existence / type check | ✅ Implemented |
+| Directory listing | ✅ Implemented (`dir_list`) |
+| Recursive directory walk | ✅ Implemented (`dir_walk`) |
+| Glob / find | ✅ Implemented |
+| Temporary file creation | ✅ Implemented (under `./temp/`) |
+| Streaming read (line-by-line) | ✅ Implemented (`file_read_lines`) |
+| Path utilities | ✅ Implemented |
+| File locking | ❌ Not yet needed |
 | Watch / notify | ❌ Out of scope (future) |
 
-This proposal fills every gap to give Lambda a file I/O layer comparable to Python's `os` + `os.path` + `shutil`, Node.js `fs`, and Bash builtins — all from pure C.
+### Codebase Migration Status
+
+All files under `lambda/` and `radiant/` have been migrated to use `lib/file.h` and `lib/shell.h` instead of direct POSIX file headers (`<unistd.h>`, `<sys/stat.h>`, `<dirent.h>`, `<direct.h>`).
+
+**Migrated directories:**
+- `lambda/input/` — all input parsers
+- `lambda/format/` — all output formatters
+- `lambda/` core — runner, target, main, lambda-proc, sysinfo, path, parse
+- `lambda/bash/` — bash runtime
+- `lambda/py/` — Python stdlib
+- `lambda/js/` — JS filesystem
+- `lambda/network/` — enhanced file cache
+- `radiant/` — window, font_face, cmd_layout, webdriver
+
+Build: 0 errors, 0 warnings. Tests: 716/716 baseline pass.
 
 ## Design Principles
 
@@ -320,42 +348,50 @@ Python `os`, `os.path`, `shutil` → file module:
 
 ## Implementation Phases
 
-### Phase 1: Write Extensions & Consolidation
+### Phase 1: Write Extensions & Consolidation — ✅ Complete
 - `write_binary_file`, `append_text_file`, `append_binary_file`
 - `write_text_file_atomic` (temp + rename pattern)
 - Consolidate `create_dir` / `create_dir_recursive` duplication
 - Unit tests for all new write functions
 
-### Phase 2: File Operations
+### Phase 2: File Operations — ✅ Complete
 - `file_copy`, `file_move`, `file_delete`, `file_touch`
 - `file_symlink`, `file_chmod`, `file_rename`
 - Cross-filesystem move (copy + delete fallback)
 - Unit tests: copy overwrite behavior, move across mounts, symlink resolution
 
-### Phase 3: Metadata & Queries
+### Phase 3: Metadata & Queries — ✅ Complete
 - `FileStat` struct, `file_stat`, `file_exists`, `file_is_file`, `file_is_dir`, `file_is_symlink`
 - `file_size`, `file_realpath`
+- Bonus: `file_is_readable`, `file_is_writable`, `file_is_executable`, `file_getcwd`
 - Unit tests: stat fields, symlink detection, non-existent paths
 
-### Phase 4: Directory Operations
+### Phase 4: Directory Operations — ✅ Complete
 - `dir_list` returning `ArrayList` of `DirEntry*`
 - `dir_walk` with `FileWalkCallback` (depth-first, skip subtrees)
-- `dir_delete` (recursive rm)
+- `dir_delete` (recursive rm), `file_delete_recursive`
 - `dir_copy` (recursive copy)
 - Unit tests: listing order, walk depth, recursive delete safety
 
-### Phase 5: Glob, Find & Streaming
+### Phase 5: Glob, Find & Streaming — ✅ Complete
 - `file_glob` — POSIX `glob()` / Win32 `FindFirstFile` wrapper
 - `file_find` — name pattern search (uses `dir_walk` internally)
 - `file_read_lines` — buffered line streaming with callback
 - Unit tests: glob patterns, find recursion, large file streaming
 
-### Phase 6: Path Utilities & Temp Files  
+### Phase 6: Path Utilities & Temp Files — ✅ Complete
 - `file_path_join`, `file_path_dirname`, `file_path_basename`, `file_path_ext`
 - `file_temp_path`, `file_temp_create`, `dir_temp_create`
+- Bonus: `file_ensure_dir`, `file_cache_path`
 - Unit tests: join edge cases (trailing slashes, empty segments), temp uniqueness
 
-### Phase 7: Runtime Integration
+### Phase 7: Codebase Migration — ✅ Complete
+- All `lambda/` files migrated to use `lib/file.h` / `lib/shell.h`
+- All `radiant/` files migrated to use `lib/file.h` / `lib/shell.h`
+- `lib/mime-detect.h/c` extracted from input parsers
+- Build: 0 errors, 0 warnings. Tests: 716/716 baseline pass.
+
+### Phase 8: Runtime Integration — Not started
 - Wire all functions to `io.*` system procedures in `sys_func_registry.c`
 - Update Bash transpiler to use file module instead of inline implementations
 - Add JS/Python transpiler mappings
