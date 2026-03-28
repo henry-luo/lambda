@@ -1197,6 +1197,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
 
+    // Track floated block-level children for intrinsic sizing
+    // CSS Sizing 3 §5: At max-content, floats arrange side-by-side (infinite width),
+    // so their max-content widths are summed. At min-content, each float wraps to its
+    // own line, so min-content is the max of individual float min-content widths.
+    float float_max_sum = 0.0f;   // Sum of floated children's max-content widths
+    float float_min_max = 0.0f;   // Max of individual floated children's min-content widths
+
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
     // Also check if it's a ROW flex container (children laid out horizontally -> SUM widths)
     bool is_flex_container = false;
@@ -1774,6 +1781,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 inline_min_sum = 0;
             }
 
+            // Detect if this block child is floated
+            // CSS Sizing 3 §5: Floated children are out-of-flow but contribute to
+            // the container's intrinsic size. At max-content (infinite width), floats
+            // arrange side-by-side, so their widths are summed.
+            bool child_is_float = false;
+            if (child->is_element()) {
+                DomElement* child_elem = child->as_element();
+                ViewBlock* child_view = (ViewBlock*)child_elem;
+                // Check resolved position first
+                if (child_view->position &&
+                    child_view->position->position != CSS_VALUE_ABSOLUTE &&
+                    child_view->position->position != CSS_VALUE_FIXED &&
+                    (child_view->position->float_prop == CSS_VALUE_LEFT ||
+                     child_view->position->float_prop == CSS_VALUE_RIGHT)) {
+                    child_is_float = true;
+                } else if (child_elem->specified_style) {
+                    // Fall back to specified CSS style
+                    CssDeclaration* float_decl = style_tree_get_declaration(
+                        child_elem->specified_style, CSS_PROPERTY_FLOAT);
+                    if (float_decl && float_decl->value &&
+                        float_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum float_val = float_decl->value->data.keyword;
+                        if (float_val == CSS_VALUE_LEFT || float_val == CSS_VALUE_RIGHT) {
+                            child_is_float = true;
+                        }
+                    }
+                }
+            }
+
             // For block-level children: take max of each
             // Also include horizontal margins for proper shrink-to-fit calculation
             // CSS 2.2 Section 10.3.5: floated/absolutely positioned elements use shrink-to-fit
@@ -1861,9 +1897,37 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                               child_elem->node_name(), child_sizes.max_content);
                 }
             }
-            sizes.min_content = max(sizes.min_content, child_sizes.min_content);
-            sizes.max_content = max(sizes.max_content, child_width);
+            if (child_is_float) {
+                // Floated block child: accumulate for side-by-side arrangement
+                // At max-content (infinite width), all floats fit on one line → sum widths
+                // At min-content, each float wraps to its own line → max of widths
+                float_max_sum += child_width;
+                float_min_max = max(float_min_max, child_sizes.min_content);
+                log_debug("  float child: accumulating max_sum=%.1f, min_max=%.1f",
+                          float_max_sum, float_min_max);
+            } else {
+                // Non-floated block child: flush any accumulated float run first
+                if (float_max_sum > 0) {
+                    sizes.min_content = max(sizes.min_content, float_min_max);
+                    sizes.max_content = max(sizes.max_content, float_max_sum);
+                    log_debug("  flushing float run: max_sum=%.1f, min_max=%.1f before block %s",
+                              float_max_sum, float_min_max,
+                              child->is_element() ? child->as_element()->node_name() : "?");
+                    float_max_sum = 0;
+                    float_min_max = 0;
+                }
+                sizes.min_content = max(sizes.min_content, child_sizes.min_content);
+                sizes.max_content = max(sizes.max_content, child_width);
+            }
         }
+    }
+
+    // Flush any remaining float run after the child loop
+    if (float_max_sum > 0) {
+        sizes.min_content = max(sizes.min_content, float_min_max);
+        sizes.max_content = max(sizes.max_content, float_max_sum);
+        log_debug("  flushing final float run: max_sum=%.1f, min_max=%.1f",
+                  float_max_sum, float_min_max);
     }
 
     // Restore parent context
