@@ -18,7 +18,6 @@
 #include "../../../lib/str.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 // helper: map a functional pseudo-class name to its selector type
 static CssSelectorType css_functional_pseudo_type(const char* func_name) {

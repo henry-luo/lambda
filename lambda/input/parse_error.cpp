@@ -1,5 +1,4 @@
 #include "parse_error.hpp"
-#include <cstdio>
 #include <cstring>
 
 namespace lambda {
