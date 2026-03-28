@@ -1,6 +1,6 @@
 basic: 1 2 3
 rest: 10 4 20 30
-partial: 100 200 null
+partial: 100 200 undefined
 pair: 1 one
 pair: 2 two
 pair: 3 three

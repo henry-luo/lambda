@@ -939,8 +939,11 @@ void re_resolve_abs_children_vertical(ViewBlock* containing_block) {
             child->position->bottom = child->position->bottom_percent * cb_height / 100.0f;
         }
 
-        // If bottom is specified but not top, recompute y from bottom edge
-        if (changed && child->position && child->position->has_bottom && !child->position->has_top) {
+        // If bottom is specified but not top, recompute y from bottom edge.
+        // This must be unconditional: this function runs after an auto-height
+        // containing block is finalized, so cb_height changed for ALL children,
+        // not just those with percentage values.
+        if (child->position && child->position->has_bottom && !child->position->has_top) {
             float border_offset_y = 0;
             if (containing_block->bound && containing_block->bound->border) {
                 border_offset_y = containing_block->bound->border->width.top;
