@@ -753,7 +753,9 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         }
 
         if (!func->body) {
-            log_error("Failed to build function body");
+            uint32_t start = ts_node_start_byte(body_node);
+            StrView body_src = js_node_source(tp, body_node);
+            log_error("Failed to build function body (body_type=%s, start=%u, src=%.*s)", body_type, start, (int)(body_src.length > 60 ? 60 : body_src.length), body_src.str);
             return NULL;
         }
     }
@@ -1135,9 +1137,14 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
 
         return (JsAstNode*)assign;
     } else if (strcmp(node_type, "parenthesized_expression") == 0) {
-        // Handle parenthesized expressions - just return the inner expression
-        TSNode inner_node = ts_node_named_child(expr_node, 0);
-        return build_js_expression(tp, inner_node);
+        // Handle parenthesized expressions - skip comment children, return first real expression
+        uint32_t nc = ts_node_named_child_count(expr_node);
+        for (uint32_t i = 0; i < nc; i++) {
+            TSNode inner_node = ts_node_named_child(expr_node, i);
+            if (strcmp(ts_node_type(inner_node), "comment") == 0) continue;
+            return build_js_expression(tp, inner_node);
+        }
+        return NULL;
     } else if (strcmp(node_type, "sequence_expression") == 0) {
         // v11: Comma operator — evaluate all, return last
         JsSequenceNode* seq = (JsSequenceNode*)alloc_js_ast_node(
@@ -2218,6 +2225,11 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     // Get method key
     TSNode key_node = ts_node_child_by_field_name(method_node, "name", strlen("name"));
     if (!ts_node_is_null(key_node)) {
+        // Check if this is a computed property name [expr]
+        const char* key_type = ts_node_type(key_node);
+        if (strcmp(key_type, "computed_property_name") == 0) {
+            method->computed = true;
+        }
         method->key = build_js_expression(tp, key_node);
     }
 

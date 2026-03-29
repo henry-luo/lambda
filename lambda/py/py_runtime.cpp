@@ -1142,9 +1142,9 @@ extern "C" Item py_getattr(Item object, Item name) {
     if (!key) return ItemNull;
     Map* m = it2map(object);
     if (!m) return ItemNull;
-    // JS-backed HashMap object (type == NULL): delegate to js_property_get
-    // This handles imported module namespaces created via js_new_object()
-    if (!m->type) {
+    // JS-backed HashMap object: type is NULL or EmptyMap (from js_new_object())
+    // These use map_put/js_property_get for storage, not the shape-based _map_get
+    if (!m->type || m->type == &EmptyMap) {
         return js_property_get(object, name);
     }
 

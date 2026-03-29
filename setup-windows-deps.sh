@@ -1305,6 +1305,19 @@ else
     echo "⚠️  C++ compiler not found"
 fi
 
+# Clone GNU Bash test suite (optional, for bash transpiler conformance tests)
+if [ ! -d "ref/bash" ]; then
+    echo ""
+    echo "Cloning GNU Bash test suite..."
+    mkdir -p ref
+    if git clone --depth 1 https://git.savannah.gnu.org/git/bash.git ref/bash 2>/dev/null; then
+        echo "✅ GNU Bash test suite cloned to ref/bash"
+    else
+        echo "⚠️  Could not clone GNU Bash repo (optional, needed for bash conformance tests)"
+    fi
+else
+    echo "✅ GNU Bash test suite already present at ref/bash"
+fi
 echo ""
 echo "Setup completed! You can now build Lambda natively for Windows."
 echo ""

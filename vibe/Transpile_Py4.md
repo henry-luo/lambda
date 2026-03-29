@@ -4,7 +4,7 @@
 
 LambdaPy v3 closed the major OOP and module-system gaps (~14.4K LOC). The features explicitly deferred from v3 are: **generators/`yield`**, **`match`/`case` pattern matching**, **standard library module stubs**, **`async`/`await`**, **full package imports**, and **metaclasses/advanced OOP** (including `@prop.setter`, full descriptor protocol, `__init_subclass__`, `__class_getitem__`). This proposal targets those in priority order.
 
-> **Implementation Status:** Phase A (generators/yield), Phase B (match/case), Phase C (arbitrary-precision integers), Phase C (standard library module stubs), Phase D (async/await), and Phase F (advanced OOP — descriptors, `__init_subclass__`, `__class_getitem__`, metaclasses) are complete. Phase E (full package system) is pending.
+> **Implementation Status:** Phase A (generators/yield), Phase B (match/case), Phase C (arbitrary-precision integers), Phase C (standard library module stubs), Phase D (async/await), Phase E (full package system), and Phase F (advanced OOP — descriptors, `__init_subclass__`, `__class_getitem__`, metaclasses) are complete. All v4 phases are done.
 
 ### Architecture Position
 
@@ -23,7 +23,7 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
        Phase C: Standard library module stubs               ✅ COMPLETE
        Phase C: Arbitrary-precision integers                ✅ COMPLETE
        Phase D: async/await and event loop                  ✅ COMPLETE
-       Phase E: Full package system                         ⏳ pending
+       Phase E: Full package system                         ✅ COMPLETE
        Phase F: Advanced OOP (metaclasses, descriptors)     ✅ COMPLETE
 ```
 
@@ -41,9 +41,9 @@ v4:  Generators, pattern matching, stdlib, async, packages  (this doc, target ~2
 | `async def` / `await`                                         | `await` stripped to inner expression                    | ✅ **DONE** — coroutines via generator state machine, `py_async.cpp`          |
 | `async for` / `async with`                                    | ❌                                                       | ⏳ pending (v4 stretch goal)                                                  |
 | `asyncio.run()` / `asyncio.gather()`                          | ❌                                                       | ✅ **DONE** — single-threaded cooperative event loop                          |
-| `import pkg.submod`                                           | ❌ Deferred                                              | ✅ Package resolution with `__init__.py`                                      |
-| Relative imports (`from . import x`)                          | ❌ Deferred                                              | ✅                                                                            |
-| Circular imports                                              | ❌ Not handled                                           | ✅ Partial loading / forward references                                       |
+| `import pkg.submod`                                           | ❌ Deferred                                              | ✅ **DONE** — hierarchical resolution with `__init__.py`, submodule attachment |
+| Relative imports (`from . import x`)                          | ❌ Deferred                                              | ✅ **DONE** — dot-based directory traversal, `from . import` and `from .. import` |
+| Circular imports                                              | ❌ Not handled                                           | ✅ **DONE** — partial loading with `module_is_loading` guard                  |
 | `@prop.setter` / `@prop.deleter`                              | ❌ Deferred from v3                                      | ✅ **DONE** — setter and deleter fully implemented                            |
 | Full descriptor protocol (`__get__`, `__set__`, `__delete__`) | ❌                                                       | ✅ **DONE** — data/non-data descriptor dispatch in `py_getattr`/`py_setattr`  |
 | `__init_subclass__`                                           | ❌                                                       | ✅ **DONE** — called on bases during `py_class_new`, supports `**kwargs`      |
@@ -986,13 +986,36 @@ asyncio.run(main6())
 
 ---
 
-## 7. Phase E: Full Package System
+## 7. Phase E: Full Package System ✅ COMPLETE
 
 **Goal:** Enable `import pkg.submod`, `from pkg import name`, relative imports (`from . import x`, `from ..utils import y`), and correct handling of circular imports.
 
 **Estimated effort:** ~550 LOC. Extensions to `lambda/py/py_module.cpp`, `lambda/py/py_module.h`. Additions to `transpile_py_mir.cpp`.
 
 **Prerequisite:** Phase C (stdlib module stubs) for completeness, but can be implemented independently.
+
+### E0. Implementation Summary (completed)
+
+**Approach:** All package resolution implemented in `transpile_py_mir.cpp` via `pm_resolve_py_import` and supporting functions. No separate `py_module.cpp` was needed — the module registry (`module_registry.cpp`) and `load_py_module` in the transpiler handle all loading, caching, and namespace construction.
+
+**What was implemented:**
+- `pm_resolve_py_import` in `transpile_py_mir.cpp`: unified resolution for absolute and relative imports, dotted names, and `__init__.py` packages.
+- Hierarchical package loading: for dotted imports like `import pkg.submod`, each component is loaded in order and attached to its parent namespace via `js_property_set`, ensuring `pkg.submod.ATTR` attribute chains work correctly.
+- `pm_try_load_module`: tries `.py`, `/__init__.py`, `.js`, `.ls` extensions in order; checks module cache and circular import guards.
+- `load_py_module`: loads a single `.py` file — parses, builds AST, transpiles to MIR, JIT-compiles, executes module body, and builds namespace Map with exported functions and variables. Uses `to_fn_n` for correct `Function` struct layout compatible with `py_call_function`.
+- Relative imports: dot-counting in `from .x import y` / `from ..x import y` traverses up directories from the importing file's location.
+- Circular import detection: `module_is_loading` flag prevents infinite recursion; returns partial namespace for modules still being loaded.
+- IMPORT_FROM handler: loads submodules on demand when `from pkg import submod` references a name not in the package's `__init__.py` namespace; computes `pkg_dir` from the resolved package's file path.
+- IMPORT handler: for `import pkg.submod`, correctly binds `_py_pkg` to the top-level package namespace (not the last component).
+- `js_property_get` returns `UNDEFINED` (type 25), not `ItemNull` (type 1), for missing keys — all namespace lookups correctly handle both sentinel values.
+- Test: `test/py/test_py_packages.py` — 7 test scenarios (9 output lines), all PASS.
+
+**Key bug fixes during implementation:**
+1. `js_property_get` returns `make_js_undefined()` (0x19<<56) for missing keys, not `ItemNull` — fixed all `== ItemNull.item` checks to also cover `LMD_TYPE_UNDEFINED`.
+2. `js_new_function` creates `JsFunction` (wrong layout) vs `to_fn_n` creates `Function` (correct layout for `py_call_function`) — fixed by using `to_fn_n`.
+3. IMPORT_FROM submodule discovery missed UNDEFINED values — fixed.
+4. IMPORT handler for dotted names (`import pkg.submod`) bound the wrong namespace to the variable — fixed by re-resolving the first component.
+5. Dotted imports tried flat-file loading first, skipping hierarchical parent attachment — fixed by always using hierarchical loading for dotted names.
 
 ### E1. Package Resolution
 

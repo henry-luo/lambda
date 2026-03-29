@@ -1678,7 +1678,7 @@ extern "C" Item py_dict_method(Item dict_item, Item method_name, Item* args, int
         return tuple;
     }
 
-    log_debug("py: dict.%s() not implemented", method->chars);
+    log_debug("py: dict.%s() not implemented → returning ItemNull", method->chars);
     return ItemNull;
 }
 
