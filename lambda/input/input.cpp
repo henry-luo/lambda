@@ -646,6 +646,16 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
                 url_destroy(abs_url);
                 return input;
             }
+
+            // check if file should be handled as a relational database
+            const char* type_str = type ? type->chars : NULL;
+            const char* rdb_driver = rdb_detect_format(pathname, type_str);
+            if (rdb_driver) {
+                log_debug("rdb: detected driver '%s' for path '%s'", rdb_driver, pathname);
+                Input* input = input_rdb_from_path(pathname, rdb_driver);
+                url_destroy(abs_url);
+                return input;
+            }
         }
 
         // URL points to a file - read as normal
@@ -741,6 +751,14 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
                 pathname++; // Skip the leading '/' for Windows paths
             }
             #endif
+
+            // check if file should be handled as a relational database
+            const char* type_str = type ? type->chars : NULL;
+            const char* rdb_driver = rdb_detect_format(pathname, type_str);
+            if (rdb_driver) {
+                log_debug("input_from_target: rdb detected driver '%s' for '%s'", rdb_driver, pathname);
+                return input_rdb_from_path(pathname, rdb_driver);
+            }
 
             log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
             char* source = read_text_file(pathname);

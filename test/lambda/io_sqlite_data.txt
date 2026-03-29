@@ -1,0 +1,22 @@
+["Electronics", "Books", "Empty"]
+["Widget", "Gadget", "Novel", "Textbook", "Cable"]
+[9.99, 49.99, 14.99, 89.99, 4.99]
+3
+{
+  id: 1,
+  name: "Electronics",
+  description: "Electronic gadgets"
+}
+{
+  id: 2,
+  name: "Books",
+  description: "Paper and digital books"
+}
+{
+  id: 3,
+  name: "Empty",
+  description: null
+}
+["Widget", "Gadget", "Novel", "Textbook", "Cable"]
+["sale", "popular"]
+"blue"
