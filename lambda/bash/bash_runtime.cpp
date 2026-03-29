@@ -41,6 +41,16 @@ static bool bash_opt_errexit = false;   // -e
 static bool bash_opt_nounset = false;   // -u
 static bool bash_opt_xtrace = false;    // -x
 static bool bash_opt_pipefail = false;  // pipefail
+static bool bash_opt_extdebug = false;  // shopt -s extdebug
+
+static int bash_current_lineno = 0;
+static int bash_debug_trap_lineno = 0;
+static int bash_debug_trap_base_depth = 0;
+
+#define BASH_FUNCNAME_STACK_MAX 256
+static String* bash_funcname_stack[BASH_FUNCNAME_STACK_MAX];
+static int bash_funcname_depth = 0;
+static bool bash_debug_trap_running = false;
 
 // Trap handler table — indices:
 //   0=EXIT 1=ERR 2=DEBUG 3=HUP(SIGHUP) 4=INT(SIGINT) 5=QUIT(SIGQUIT) 6=TERM(SIGTERM)
@@ -592,6 +602,17 @@ static bool bash_item_is_empty(Item val) {
     return false;
 }
 
+// check if variable is truly unset (null), not just empty
+static bool bash_item_is_unset(Item val) {
+    TypeId type = get_type_id(val);
+    if (type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(val);
+        return !s;
+    }
+    return false;
+}
+
 static Item bash_make_string(const char* str, size_t len) {
     return (Item){.item = s2it(heap_create_name(str, len))};
 }
@@ -618,6 +639,36 @@ extern "C" Item bash_expand_alt(Item val, Item alt) {
 // ${var:?msg} — error if unset or empty
 extern "C" Item bash_expand_error(Item val, Item msg) {
     if (bash_item_is_empty(val)) {
+        String* m = it2s(bash_to_string(msg));
+        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+    }
+    return val;
+}
+
+// --- nocolon variants: only trigger on truly unset, not empty ---
+
+// ${var-default} — return default only if var is unset
+extern "C" Item bash_expand_default_nocolon(Item val, Item def) {
+    return bash_item_is_unset(val) ? def : val;
+}
+
+// ${var=default} — assign default only if var is unset
+extern "C" Item bash_expand_assign_default_nocolon(Item var_name, Item val, Item def) {
+    if (bash_item_is_unset(val)) {
+        bash_set_var(var_name, def);
+        return def;
+    }
+    return val;
+}
+
+// ${var+alt} — return alt if var is set (even if empty)
+extern "C" Item bash_expand_alt_nocolon(Item val, Item alt) {
+    return bash_item_is_unset(val) ? (Item){.item = s2it(NULL)} : alt;
+}
+
+// ${var?msg} — error only if var is unset
+extern "C" Item bash_expand_error_nocolon(Item val, Item msg) {
+    if (bash_item_is_unset(val)) {
         String* m = it2s(bash_to_string(msg));
         log_error("bash: %s", m ? m->chars : "parameter null or not set");
     }
@@ -860,8 +911,17 @@ extern "C" Item bash_expand_tilde(Item word) {
     const char* suffix = w + 1; // after ~
 
     if (*suffix == '\0' || *suffix == '/') {
-        // ~ or ~/path → use $HOME
-        home = getenv("HOME");
+        // ~ or ~/path → use $HOME from bash variable table first, then getenv
+        // look HOME up via bash_get_var (forward declared in bash_runtime.h)
+        Item home_name = (Item){.item = s2it(heap_create_name("HOME", 4))};
+        extern Item bash_get_var(Item name);
+        Item home_val = bash_get_var(home_name);
+        const char* bash_home = bash_item_to_cstr(home_val);
+        if (bash_home && *bash_home) {
+            home = bash_home;
+        } else {
+            home = getenv("HOME");
+        }
         if (!home) {
             struct passwd* pw = getpwuid(getuid());
             if (pw) home = pw->pw_dir;
@@ -1384,6 +1444,16 @@ extern "C" void bash_set_exit_code(int code) {
     bash_last_exit_code = code & 0xFF;
 }
 
+// Save exit code as plain Item int for later restoration (avoids Item vs int confusion)
+extern "C" Item bash_save_exit_code(void) {
+    return (Item){.item = i2it(bash_last_exit_code)};
+}
+
+// Restore exit code from a saved Item int (counterpart to bash_save_exit_code)
+extern "C" void bash_restore_exit_code(Item saved) {
+    bash_last_exit_code = (int)it2i(saved) & 0xFF;
+}
+
 extern "C" void bash_negate_exit_code(void) {
     bash_last_exit_code = (bash_last_exit_code == 0) ? 1 : 0;
 }
@@ -1798,6 +1868,12 @@ extern "C" void bash_runtime_init(void) {
     bash_opt_nounset = false;
     bash_opt_xtrace = false;
     bash_opt_pipefail = false;
+    bash_opt_extdebug = false;
+    bash_current_lineno = 0;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+    bash_funcname_depth = 0;
+    bash_debug_trap_running = false;
     // clear trap state
     for (int i = 0; i < BASH_TRAP_NUM; i++) {
         bash_trap_handlers[i] = NULL;
@@ -1842,6 +1918,11 @@ extern "C" void bash_runtime_cleanup(void) {
             bash_func_scope_stack[bash_func_scope_depth] = NULL;
         }
     }
+    bash_funcname_depth = 0;
+    bash_current_lineno = 0;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+    bash_debug_trap_running = false;
     log_debug("bash: runtime cleanup");
 }
 
@@ -1945,7 +2026,7 @@ extern "C" Item bash_get_var(Item name) {
     // fall through to global table
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->value;
-    return (Item){.item = s2it(heap_create_name("", 0))};  // unset = empty string
+    return (Item){.item = s2it(NULL)};  // unset = null (distinguishable from empty string)
 }
 
 extern "C" void bash_set_local_var(Item name, Item value) {
@@ -2489,6 +2570,9 @@ extern "C" void bash_set_option(Item option, bool enable) {
     } else if (s->len == 8 && memcmp(s->chars, "pipefail", 8) == 0) {
         bash_opt_pipefail = enable;
         log_debug("bash: set pipefail=%s", enable ? "on" : "off");
+    } else if (s->len == 8 && memcmp(s->chars, "extdebug", 8) == 0) {
+        bash_opt_extdebug = enable;
+        log_debug("bash: set extdebug=%s", enable ? "on" : "off");
     } else {
         log_debug("bash: set: unknown option '%.*s'", s->len, s->chars);
     }
@@ -2508,6 +2592,48 @@ extern "C" bool bash_get_option_xtrace(void) {
 
 extern "C" bool bash_get_option_pipefail(void) {
     return bash_opt_pipefail;
+}
+
+extern "C" bool bash_get_option_extdebug(void) {
+    return bash_opt_extdebug;
+}
+
+extern "C" Item bash_get_lineno(void) {
+    if (bash_debug_trap_running && bash_funcname_depth <= bash_debug_trap_base_depth) {
+        return (Item){.item = i2it(bash_debug_trap_lineno)};
+    }
+    return (Item){.item = i2it(bash_current_lineno)};
+}
+
+extern "C" void bash_set_lineno(int line) {
+    bash_current_lineno = line;
+}
+
+extern "C" void bash_push_funcname(Item name) {
+    if (bash_funcname_depth >= BASH_FUNCNAME_STACK_MAX) return;
+    String* s = it2s(name);
+    if (!s) s = heap_create_name("", 0);
+    bash_funcname_stack[bash_funcname_depth++] = s;
+}
+
+extern "C" void bash_pop_funcname(void) {
+    if (bash_funcname_depth > 0) bash_funcname_depth--;
+}
+
+extern "C" Item bash_get_funcname(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+
+    int stack_idx = bash_funcname_depth - 1 - idx;
+    if (stack_idx < 0 || stack_idx >= bash_funcname_depth) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return (Item){.item = s2it(bash_funcname_stack[stack_idx])};
 }
 
 // ============================================================================
@@ -2605,6 +2731,33 @@ extern "C" void bash_trap_run_exit(void) {
     Item code_item = {.item = s2it(code_str)};
     bash_eval_string(code_item);
     free(code);
+}
+
+extern "C" Item bash_run_debug_trap(void) {
+    if (bash_debug_trap_running) {
+        return (Item){.item = i2it(0)};
+    }
+    if (!bash_trap_handlers[BASH_TRAP_IDX_DEBUG] || bash_trap_handlers[BASH_TRAP_IDX_DEBUG][0] == '\0') {
+        return (Item){.item = i2it(0)};
+    }
+
+    bash_debug_trap_running = true;
+    bash_debug_trap_lineno = bash_current_lineno;
+    bash_debug_trap_base_depth = bash_funcname_depth;
+    String* code_str = heap_create_name(bash_trap_handlers[BASH_TRAP_IDX_DEBUG],
+                                        (int)strlen(bash_trap_handlers[BASH_TRAP_IDX_DEBUG]));
+    Item code_item = {.item = s2it(code_str)};
+    bash_eval_string(code_item);
+    int trap_ec = bash_last_exit_code;
+    bash_debug_trap_running = false;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+
+    if (bash_opt_extdebug && trap_ec == 2) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(2)};
+    }
+    return (Item){.item = i2it(0)};
 }
 
 extern "C" void bash_trap_check(void) {

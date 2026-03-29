@@ -10,6 +10,7 @@
 #include "bash_transpiler.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
+#include "../../lib/strbuf.h"
 #include <tree_sitter/tree-sitter-bash.h>
 #include <cstring>
 #include <cstdlib>
@@ -23,6 +24,7 @@
 
 // forward declarations
 static BashAstNode* build_statement(BashTranspiler* tp, TSNode node);
+static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_command(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_if_statement(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_for_statement(BashTranspiler* tp, TSNode node);
@@ -189,6 +191,7 @@ static BashAstNode* build_statement(BashTranspiler* tp, TSNode node) {
             BashAstNode* arg = NULL;
             if (strcmp(child_type, "word") == 0) arg = build_word(tp, child);
             else if (strcmp(child_type, "raw_string") == 0) arg = build_raw_string(tp, child);
+            else if (strcmp(child_type, "ansi_c_string") == 0) arg = build_ansi_c_string(tp, child);
             else if (strcmp(child_type, "string") == 0) arg = build_string_node(tp, child);
             else if (strcmp(child_type, "simple_expansion") == 0 ||
                      strcmp(child_type, "expansion") == 0) arg = build_expansion(tp, child);
@@ -327,6 +330,8 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
             child_ast = build_string_node(tp, child);
         } else if (strcmp(child_type, "raw_string") == 0) {
             child_ast = build_raw_string(tp, child);
+        } else if (strcmp(child_type, "ansi_c_string") == 0) {
+            child_ast = build_ansi_c_string(tp, child);
         } else if (strcmp(child_type, "simple_expansion") == 0 ||
                    strcmp(child_type, "expansion") == 0) {
             child_ast = build_expansion(tp, child);
@@ -386,6 +391,8 @@ static BashAstNode* build_expr_node(BashTranspiler* tp, TSNode node) {
         return build_string_node(tp, node);
     } else if (strcmp(type, "raw_string") == 0) {
         return build_raw_string(tp, node);
+    } else if (strcmp(type, "ansi_c_string") == 0) {
+        return build_ansi_c_string(tp, node);
     } else if (strcmp(type, "command_substitution") == 0) {
         return build_command_substitution(tp, node);
     } else if (strcmp(type, "concatenation") == 0) {
@@ -507,6 +514,141 @@ static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node) {
     return (BashAstNode*)raw;
 }
 
+static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
+    // ANSI-C quoted string: $'...'
+    BashRawStringNode* raw = (BashRawStringNode*)alloc_bash_ast_node(
+        tp, BASH_AST_NODE_RAW_STRING, node, sizeof(BashRawStringNode));
+
+    uint32_t start = ts_node_start_byte(node) + 2;  // skip $'
+    uint32_t end = ts_node_end_byte(node) - 1;      // skip trailing '
+    if (end <= start) {
+        raw->text = name_pool_create_len(tp->name_pool, "", 0);
+        return (BashAstNode*)raw;
+    }
+
+    StrBuf* sb = strbuf_new_cap((int)(end - start) + 1);
+    const char* s = tp->source + start;
+    uint32_t i = 0;
+    while (start + i < end) {
+        char c = s[i++];
+        if (c != '\\' || start + i >= end) {
+            strbuf_append_char(sb, c);
+            continue;
+        }
+
+        char esc = s[i++];
+        switch (esc) {
+        case 'a': strbuf_append_char(sb, '\a'); break;
+        case 'b': strbuf_append_char(sb, '\b'); break;
+        case 'e': case 'E': strbuf_append_char(sb, 27); break;
+        case 'f': strbuf_append_char(sb, '\f'); break;
+        case 'n': strbuf_append_char(sb, '\n'); break;
+        case 'r': strbuf_append_char(sb, '\r'); break;
+        case 't': strbuf_append_char(sb, '\t'); break;
+        case 'v': strbuf_append_char(sb, '\v'); break;
+        case '\\': strbuf_append_char(sb, '\\'); break;
+        case '\'': strbuf_append_char(sb, '\''); break;
+        case '"': strbuf_append_char(sb, '"'); break;
+        case 'c': {
+            if (start + i < end) {
+                unsigned char ctrl = (unsigned char)s[i++];
+                strbuf_append_char(sb, (char)(ctrl & 0x1f));
+            }
+            break;
+        }
+        case 'x': {
+            int value = 0;
+            bool have_digits = false;
+            if (start + i < end && s[i] == '{') {
+                i++;
+                while (start + i < end && s[i] != '}') {
+                    char h = s[i];
+                    int digit = -1;
+                    if (h >= '0' && h <= '9') digit = h - '0';
+                    else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                    else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                    else break;
+                    value = value * 16 + digit;
+                    have_digits = true;
+                    i++;
+                }
+                if (start + i < end && s[i] == '}') {
+                    i++;
+                }
+                if (!have_digits) {
+                    // bash treats malformed \x{...} with no hex digits as terminating the string
+                    i = end - start;
+                    break;
+                }
+            } else {
+                for (int j = 0; j < 2 && start + i < end; j++) {
+                    char h = s[i];
+                    int digit = -1;
+                    if (h >= '0' && h <= '9') digit = h - '0';
+                    else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                    else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                    else break;
+                    value = value * 16 + digit;
+                    have_digits = true;
+                    i++;
+                }
+            }
+            if (have_digits) strbuf_append_char(sb, (char)value);
+            break;
+        }
+        case 'u':
+        case 'U': {
+            int max_digits = (esc == 'u') ? 4 : 8;
+            int value = 0;
+            bool have_digits = false;
+            for (int j = 0; j < max_digits && start + i < end; j++) {
+                char h = s[i];
+                int digit = -1;
+                if (h >= '0' && h <= '9') digit = h - '0';
+                else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                else break;
+                value = value * 16 + digit;
+                have_digits = true;
+                i++;
+            }
+            if (have_digits) {
+                if (value <= 0x7f) strbuf_append_char(sb, (char)value);
+                else if (value <= 0x7ff) {
+                    strbuf_append_char(sb, (char)(0xc0 | ((value >> 6) & 0x1f)));
+                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
+                } else if (value <= 0xffff) {
+                    strbuf_append_char(sb, (char)(0xe0 | ((value >> 12) & 0x0f)));
+                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
+                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
+                } else {
+                    strbuf_append_char(sb, (char)(0xf0 | ((value >> 18) & 0x07)));
+                    strbuf_append_char(sb, (char)(0x80 | ((value >> 12) & 0x3f)));
+                    strbuf_append_char(sb, (char)(0x80 | ((value >> 6) & 0x3f)));
+                    strbuf_append_char(sb, (char)(0x80 | (value & 0x3f)));
+                }
+            }
+            break;
+        }
+        case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
+            int value = esc - '0';
+            for (int j = 0; j < 2 && start + i < end && s[i] >= '0' && s[i] <= '7'; j++) {
+                value = value * 8 + (s[i++] - '0');
+            }
+            strbuf_append_char(sb, (char)value);
+            break;
+        }
+        default:
+            strbuf_append_char(sb, esc);
+            break;
+        }
+    }
+
+    raw->text = name_pool_create_len(tp->name_pool, sb->str, sb->length);
+    strbuf_free(sb);
+    return (BashAstNode*)raw;
+}
+
 static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
     // check if the entire concatenation is a brace expansion pattern like {a,b,c} or {a..e}
     StrView src = bash_node_source(tp, node);
@@ -546,6 +688,8 @@ static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
             part = build_string_node(tp, child);
         } else if (strcmp(child_type, "raw_string") == 0) {
             part = build_raw_string(tp, child);
+        } else if (strcmp(child_type, "ansi_c_string") == 0) {
+            part = build_ansi_c_string(tp, child);
         } else if (strcmp(child_type, "command_substitution") == 0) {
             part = build_command_substitution(tp, child);
         } else {
@@ -783,14 +927,31 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
             // detect operator (comes after variable name)
             if (found_var && !op_str) {
                 op_str = name_pool_create_len(tp->name_pool, ch_src.str, ch_src.length);
-                if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '-')
+                if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '-') {
                     expansion->expand_type = BASH_EXPAND_DEFAULT;
-                else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '=')
+                    expansion->has_colon = true;
+                } else if (ch_src.length == 1 && ch_src.str[0] == '-') {
+                    expansion->expand_type = BASH_EXPAND_DEFAULT;
+                    expansion->has_colon = false;
+                } else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '=') {
                     expansion->expand_type = BASH_EXPAND_ASSIGN_DEFAULT;
-                else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '+')
+                    expansion->has_colon = true;
+                } else if (ch_src.length == 1 && ch_src.str[0] == '=') {
+                    expansion->expand_type = BASH_EXPAND_ASSIGN_DEFAULT;
+                    expansion->has_colon = false;
+                } else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '+') {
                     expansion->expand_type = BASH_EXPAND_ALT;
-                else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '?')
+                    expansion->has_colon = true;
+                } else if (ch_src.length == 1 && ch_src.str[0] == '+') {
+                    expansion->expand_type = BASH_EXPAND_ALT;
+                    expansion->has_colon = false;
+                } else if (ch_src.length == 2 && ch_src.str[0] == ':' && ch_src.str[1] == '?') {
                     expansion->expand_type = BASH_EXPAND_ERROR;
+                    expansion->has_colon = true;
+                } else if (ch_src.length == 1 && ch_src.str[0] == '?') {
+                    expansion->expand_type = BASH_EXPAND_ERROR;
+                    expansion->has_colon = false;
+                }
                 else if (ch_src.length == 2 && ch_src.str[0] == '#' && ch_src.str[1] == '#')
                     expansion->expand_type = BASH_EXPAND_TRIM_PREFIX_LONG;
                 else if (ch_src.length == 1 && ch_src.str[0] == '#')
@@ -1039,15 +1200,17 @@ static BashAstNode* build_for_statement(BashTranspiler* tp, TSNode node) {
         } else if (strcmp(child_type, "do_group") == 0 ||
                    strcmp(child_type, "compound_statement") == 0) {
             for_node->body = build_block(tp, child);
-        } else if (strcmp(child_type, "word") == 0 ||
-                   strcmp(child_type, "string") == 0 ||
-                   strcmp(child_type, "raw_string") == 0 ||
+         } else if (strcmp(child_type, "word") == 0 ||
+                 strcmp(child_type, "string") == 0 ||
+                 strcmp(child_type, "raw_string") == 0 ||
+                 strcmp(child_type, "ansi_c_string") == 0 ||
                    strcmp(child_type, "simple_expansion") == 0 ||
                    strcmp(child_type, "expansion") == 0 ||
                    strcmp(child_type, "number") == 0) {
             BashAstNode* word;
             if (strcmp(child_type, "string") == 0) word = build_string_node(tp, child);
             else if (strcmp(child_type, "raw_string") == 0) word = build_raw_string(tp, child);
+             else if (strcmp(child_type, "ansi_c_string") == 0) word = build_ansi_c_string(tp, child);
             else if (strcmp(child_type, "simple_expansion") == 0 ||
                      strcmp(child_type, "expansion") == 0) word = build_expansion(tp, child);
             else word = build_word(tp, child);
@@ -1160,6 +1323,21 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
                             tail->next = stmt;
                         }
                     }
+                }
+            }
+
+            // detect terminator type (;;, ;&, ;;&) from anonymous children
+            item->terminator = 0; // default: ;;
+            uint32_t all_child_count = ts_node_child_count(child);
+            for (uint32_t j = 0; j < all_child_count; j++) {
+                TSNode anon = ts_node_child(child, j);
+                StrView sv = bash_node_source(tp, anon);
+                if (sv.length == 3 && memcmp(sv.str, ";;&", 3) == 0) {
+                    item->terminator = 2;
+                    break;
+                } else if (sv.length == 2 && memcmp(sv.str, ";&", 2) == 0) {
+                    item->terminator = 1;
+                    break;
                 }
             }
 
@@ -1327,6 +1505,8 @@ static BashAstNode* build_assignment(BashTranspiler* tp, TSNode node) {
             assign->value = build_string_node(tp, child);
         } else if (strcmp(child_type, "raw_string") == 0) {
             assign->value = build_raw_string(tp, child);
+        } else if (strcmp(child_type, "ansi_c_string") == 0) {
+            assign->value = build_ansi_c_string(tp, child);
         } else if (strcmp(child_type, "simple_expansion") == 0 ||
                    strcmp(child_type, "expansion") == 0) {
             assign->value = build_expansion(tp, child);
@@ -1775,6 +1955,7 @@ static BashAstNode* build_array(BashTranspiler* tp, TSNode node) {
 
         if (strcmp(child_type, "string") == 0) elem = build_string_node(tp, child);
         else if (strcmp(child_type, "raw_string") == 0) elem = build_raw_string(tp, child);
+        else if (strcmp(child_type, "ansi_c_string") == 0) elem = build_ansi_c_string(tp, child);
         else elem = build_word(tp, child);
 
         if (elem) {
@@ -1956,8 +2137,9 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
     }
 
     // attach file_redirect nodes to the command
-    if (file_redirect_count > 0 && inner_cmd && inner_cmd->node_type == BASH_AST_NODE_COMMAND) {
-        BashCommandNode* cmd = (BashCommandNode*)inner_cmd;
+    if (file_redirect_count > 0 && inner_cmd) {
+        // build the redirect node list (shared logic for COMMAND and non-COMMAND inner)
+        BashAstNode* redir_head = NULL;
         BashAstNode* redir_tail = NULL;
         for (int i = 0; i < file_redirect_count; i++) {
             TSNode fr = file_redirects[i];
@@ -2017,12 +2199,32 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                 break;
             }
 
-            if (!cmd->redirects) {
-                cmd->redirects = (BashAstNode*)redir;
+            if (!redir_head) {
+                redir_head = (BashAstNode*)redir;
             } else {
                 redir_tail->next = (BashAstNode*)redir;
             }
             redir_tail = (BashAstNode*)redir;
+        }
+
+        if (inner_cmd->node_type == BASH_AST_NODE_COMMAND) {
+            // attach redirects directly to the command node
+            BashCommandNode* cmd = (BashCommandNode*)inner_cmd;
+            if (!cmd->redirects) {
+                cmd->redirects = redir_head;
+            } else {
+                // append to existing redirect list
+                BashAstNode* tail = cmd->redirects;
+                while (tail->next) tail = tail->next;
+                tail->next = redir_head;
+            }
+        } else {
+            // inner is a pipeline, subshell, compound, list, etc. — wrap it
+            BashRedirectedNode* wrapper = (BashRedirectedNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_REDIRECTED, node, sizeof(BashRedirectedNode));
+            wrapper->inner = inner_cmd;
+            wrapper->redirects = redir_head;
+            return (BashAstNode*)wrapper;
         }
     }
 
@@ -2086,5 +2288,7 @@ BashAstNode* build_bash_expression(BashTranspiler* tp, TSNode expr_node) {
         return build_string_node(tp, expr_node);
     if (strcmp(type, "raw_string") == 0)
         return build_raw_string(tp, expr_node);
+    if (strcmp(type, "ansi_c_string") == 0)
+        return build_ansi_c_string(tp, expr_node);
     return build_word(tp, expr_node);
 }

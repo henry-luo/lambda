@@ -106,6 +106,10 @@ Item bash_expand_default(Item value, Item default_val);     // ${var:-default}
 Item bash_expand_assign_default(Item var_name, Item value, Item default_val); // ${var:=default}
 Item bash_expand_alt(Item value, Item alt_val);             // ${var:+alt}
 Item bash_expand_error(Item value, Item msg);               // ${var:?msg}
+Item bash_expand_default_nocolon(Item value, Item default_val);     // ${var-default}
+Item bash_expand_assign_default_nocolon(Item var_name, Item value, Item default_val); // ${var=default}
+Item bash_expand_alt_nocolon(Item value, Item alt_val);             // ${var+alt}
+Item bash_expand_error_nocolon(Item value, Item msg);               // ${var?msg}
 Item bash_expand_trim_prefix(Item val, Item pat);           // ${var#pat}
 Item bash_expand_trim_prefix_long(Item val, Item pat);      // ${var##pat}
 Item bash_expand_trim_suffix(Item val, Item pat);           // ${var%pat}
@@ -171,9 +175,16 @@ Item bash_shift_args(int n);                        // shift [n]
 // Special variables
 Item bash_get_exit_code(void);                      // $?
 void bash_set_exit_code(int code);
+Item bash_save_exit_code(void);                     // save exit code as Item for restoration
+void bash_restore_exit_code(Item saved);            // restore exit code from saved Item
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_return_with_code(Item val);               // set exit code from value
 Item bash_get_script_name(void);                    // $0
+Item bash_get_lineno(void);                         // $LINENO
+void bash_set_lineno(int line);                     // update current statement line
+Item bash_get_funcname(Item index);                 // ${FUNCNAME[n]}
+void bash_push_funcname(Item name);                 // enter function/debug frame
+void bash_pop_funcname(void);                       // leave function/debug frame
 
 // ========================================================================
 // Scope lifecycle
@@ -187,7 +198,8 @@ void bash_scope_pop_subshell(void);                 // restore after subshell
 // Built-in commands
 // ========================================================================
 Item bash_builtin_echo(Item* args, int argc);
-Item bash_builtin_printf(Item format, Item* args, int argc);
+Item bash_builtin_printf(Item* all_args, int total_argc);
+Item bash_builtin_let(Item* args, int argc);
 Item bash_builtin_test(Item* args, int argc);       // test / [ ]
 Item bash_builtin_true(void);
 Item bash_builtin_false(void);
@@ -287,6 +299,7 @@ bool bash_get_option_errexit(void);                  // -e: exit on error
 bool bash_get_option_nounset(void);                  // -u: error on undefined var
 bool bash_get_option_xtrace(void);                   // -x: trace commands
 bool bash_get_option_pipefail(void);                 // -o pipefail
+bool bash_get_option_extdebug(void);                 // shopt -s extdebug
 
 // ========================================================================
 // Signal handling / trap (Phase 8)
@@ -294,6 +307,7 @@ bool bash_get_option_pipefail(void);                 // -o pipefail
 void bash_trap_set(Item handler, Item signal_name);  // register trap handler string
 void bash_trap_run_exit(void);                       // run EXIT trap (idempotent)
 void bash_trap_check(void);                          // check and run pending signal traps
+Item bash_run_debug_trap(void);                      // run DEBUG trap before a command
 Item bash_eval_string(Item code);                    // evaluate bash code string in current scope
 
 // ========================================================================

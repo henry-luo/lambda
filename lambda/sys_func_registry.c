@@ -1531,6 +1531,10 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_assign_default", FPTR(bash_expand_assign_default)},
     {"bash_expand_alt", FPTR(bash_expand_alt)},
     {"bash_expand_error", FPTR(bash_expand_error)},
+    {"bash_expand_default_nocolon", FPTR(bash_expand_default_nocolon)},
+    {"bash_expand_assign_default_nocolon", FPTR(bash_expand_assign_default_nocolon)},
+    {"bash_expand_alt_nocolon", FPTR(bash_expand_alt_nocolon)},
+    {"bash_expand_error_nocolon", FPTR(bash_expand_error_nocolon)},
     {"bash_expand_trim_prefix", FPTR(bash_expand_trim_prefix)},
     {"bash_expand_trim_prefix_long", FPTR(bash_expand_trim_prefix_long)},
     {"bash_expand_trim_suffix", FPTR(bash_expand_trim_suffix)},
@@ -1582,9 +1586,16 @@ JitImport jit_runtime_imports[] = {
     {"bash_shift_args", FPTR(bash_shift_args)},
     {"bash_get_exit_code", FPTR(bash_get_exit_code)},
     {"bash_set_exit_code", FPTR(bash_set_exit_code)},
+    {"bash_save_exit_code", FPTR(bash_save_exit_code)},
+    {"bash_restore_exit_code", FPTR(bash_restore_exit_code)},
     {"bash_negate_exit_code", FPTR(bash_negate_exit_code)},
     {"bash_return_with_code", FPTR(bash_return_with_code)},
     {"bash_get_script_name", FPTR(bash_get_script_name)},
+    {"bash_get_lineno", FPTR(bash_get_lineno)},
+    {"bash_set_lineno", FPTR(bash_set_lineno)},
+    {"bash_get_funcname", FPTR(bash_get_funcname)},
+    {"bash_push_funcname", FPTR(bash_push_funcname)},
+    {"bash_pop_funcname", FPTR(bash_pop_funcname)},
     // output capture
     {"bash_begin_capture", FPTR(bash_begin_capture)},
     {"bash_end_capture", FPTR(bash_end_capture)},
@@ -1614,6 +1625,7 @@ JitImport jit_runtime_imports[] = {
     // built-in commands
     {"bash_builtin_echo", FPTR(bash_builtin_echo)},
     {"bash_builtin_printf", FPTR(bash_builtin_printf)},
+    {"bash_builtin_let", FPTR(bash_builtin_let)},
     {"bash_builtin_test", FPTR(bash_builtin_test)},
     {"bash_builtin_true", FPTR(bash_builtin_true)},
     {"bash_builtin_false", FPTR(bash_builtin_false)},
@@ -1657,6 +1669,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_trap_set", FPTR(bash_trap_set)},
     {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
     {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_run_debug_trap", FPTR(bash_run_debug_trap)},
     {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
