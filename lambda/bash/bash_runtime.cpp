@@ -592,6 +592,17 @@ static bool bash_item_is_empty(Item val) {
     return false;
 }
 
+// check if variable is truly unset (null), not just empty
+static bool bash_item_is_unset(Item val) {
+    TypeId type = get_type_id(val);
+    if (type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(val);
+        return !s;
+    }
+    return false;
+}
+
 static Item bash_make_string(const char* str, size_t len) {
     return (Item){.item = s2it(heap_create_name(str, len))};
 }
@@ -618,6 +629,36 @@ extern "C" Item bash_expand_alt(Item val, Item alt) {
 // ${var:?msg} — error if unset or empty
 extern "C" Item bash_expand_error(Item val, Item msg) {
     if (bash_item_is_empty(val)) {
+        String* m = it2s(bash_to_string(msg));
+        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+    }
+    return val;
+}
+
+// --- nocolon variants: only trigger on truly unset, not empty ---
+
+// ${var-default} — return default only if var is unset
+extern "C" Item bash_expand_default_nocolon(Item val, Item def) {
+    return bash_item_is_unset(val) ? def : val;
+}
+
+// ${var=default} — assign default only if var is unset
+extern "C" Item bash_expand_assign_default_nocolon(Item var_name, Item val, Item def) {
+    if (bash_item_is_unset(val)) {
+        bash_set_var(var_name, def);
+        return def;
+    }
+    return val;
+}
+
+// ${var+alt} — return alt if var is set (even if empty)
+extern "C" Item bash_expand_alt_nocolon(Item val, Item alt) {
+    return bash_item_is_unset(val) ? (Item){.item = s2it(NULL)} : alt;
+}
+
+// ${var?msg} — error only if var is unset
+extern "C" Item bash_expand_error_nocolon(Item val, Item msg) {
+    if (bash_item_is_unset(val)) {
         String* m = it2s(bash_to_string(msg));
         log_error("bash: %s", m ? m->chars : "parameter null or not set");
     }
@@ -860,8 +901,17 @@ extern "C" Item bash_expand_tilde(Item word) {
     const char* suffix = w + 1; // after ~
 
     if (*suffix == '\0' || *suffix == '/') {
-        // ~ or ~/path → use $HOME
-        home = getenv("HOME");
+        // ~ or ~/path → use $HOME from bash variable table first, then getenv
+        // look HOME up via bash_get_var (forward declared in bash_runtime.h)
+        Item home_name = (Item){.item = s2it(heap_create_name("HOME", 4))};
+        extern Item bash_get_var(Item name);
+        Item home_val = bash_get_var(home_name);
+        const char* bash_home = bash_item_to_cstr(home_val);
+        if (bash_home && *bash_home) {
+            home = bash_home;
+        } else {
+            home = getenv("HOME");
+        }
         if (!home) {
             struct passwd* pw = getpwuid(getuid());
             if (pw) home = pw->pw_dir;
@@ -1382,6 +1432,16 @@ extern "C" Item bash_get_exit_code(void) {
 
 extern "C" void bash_set_exit_code(int code) {
     bash_last_exit_code = code & 0xFF;
+}
+
+// Save exit code as plain Item int for later restoration (avoids Item vs int confusion)
+extern "C" Item bash_save_exit_code(void) {
+    return (Item){.item = i2it(bash_last_exit_code)};
+}
+
+// Restore exit code from a saved Item int (counterpart to bash_save_exit_code)
+extern "C" void bash_restore_exit_code(Item saved) {
+    bash_last_exit_code = (int)it2i(saved) & 0xFF;
 }
 
 extern "C" void bash_negate_exit_code(void) {
@@ -1945,7 +2005,7 @@ extern "C" Item bash_get_var(Item name) {
     // fall through to global table
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->value;
-    return (Item){.item = s2it(heap_create_name("", 0))};  // unset = empty string
+    return (Item){.item = s2it(NULL)};  // unset = null (distinguishable from empty string)
 }
 
 extern "C" void bash_set_local_var(Item name, Item value) {

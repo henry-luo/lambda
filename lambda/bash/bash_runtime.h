@@ -106,6 +106,10 @@ Item bash_expand_default(Item value, Item default_val);     // ${var:-default}
 Item bash_expand_assign_default(Item var_name, Item value, Item default_val); // ${var:=default}
 Item bash_expand_alt(Item value, Item alt_val);             // ${var:+alt}
 Item bash_expand_error(Item value, Item msg);               // ${var:?msg}
+Item bash_expand_default_nocolon(Item value, Item default_val);     // ${var-default}
+Item bash_expand_assign_default_nocolon(Item var_name, Item value, Item default_val); // ${var=default}
+Item bash_expand_alt_nocolon(Item value, Item alt_val);             // ${var+alt}
+Item bash_expand_error_nocolon(Item value, Item msg);               // ${var?msg}
 Item bash_expand_trim_prefix(Item val, Item pat);           // ${var#pat}
 Item bash_expand_trim_prefix_long(Item val, Item pat);      // ${var##pat}
 Item bash_expand_trim_suffix(Item val, Item pat);           // ${var%pat}
@@ -171,6 +175,8 @@ Item bash_shift_args(int n);                        // shift [n]
 // Special variables
 Item bash_get_exit_code(void);                      // $?
 void bash_set_exit_code(int code);
+Item bash_save_exit_code(void);                     // save exit code as Item for restoration
+void bash_restore_exit_code(Item saved);            // restore exit code from saved Item
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_return_with_code(Item val);               // set exit code from value
 Item bash_get_script_name(void);                    // $0
@@ -187,7 +193,8 @@ void bash_scope_pop_subshell(void);                 // restore after subshell
 // Built-in commands
 // ========================================================================
 Item bash_builtin_echo(Item* args, int argc);
-Item bash_builtin_printf(Item format, Item* args, int argc);
+Item bash_builtin_printf(Item* all_args, int total_argc);
+Item bash_builtin_let(Item* args, int argc);
 Item bash_builtin_test(Item* args, int argc);       // test / [ ]
 Item bash_builtin_true(void);
 Item bash_builtin_false(void);
