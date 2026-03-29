@@ -28,8 +28,11 @@
  *     {"type": "assert_selection", "is_collapsed": false},
  *     {"type": "assert_target", "view_type": 1},
  *     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Hello"},
+ *     {"type": "assert_value", "target": {"selector": "input#email"}, "equals": "user@test.com"},
+ *     {"type": "assert_checked", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "assert_visible", "target": {"selector": ".modal"}, "visible": true},
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
+ *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
@@ -71,8 +74,11 @@ enum SimEventType {
     SIM_EVENT_ASSERT_SELECTION,
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
+    SIM_EVENT_ASSERT_VALUE,    // verify form field value
+    SIM_EVENT_ASSERT_CHECKED,  // verify checkbox/radio state
     SIM_EVENT_ASSERT_VISIBLE,  // verify element visibility
     SIM_EVENT_ASSERT_FOCUS,    // verify focused element
+    SIM_EVENT_ASSERT_STATE,    // verify pseudo-state (:hover, :active, etc.)
     SIM_EVENT_ASSERT_SCROLL,   // verify scroll position
     // Utilities
     SIM_EVENT_LOG,
@@ -103,6 +109,9 @@ struct SimEvent {
     char* assert_contains;       // for assert_text: substring match
     char* assert_equals;         // for assert_text: exact match
     bool expected_visible;       // for assert_visible
+    bool expected_checked;       // for assert_checked
+    char* state_name;            // for assert_state: e.g. ":hover", ":active"
+    bool expected_state_value;   // for assert_state: expected boolean
     float expected_scroll_x;     // for assert_scroll
     float expected_scroll_y;     // for assert_scroll
     float scroll_tolerance;      // for assert_scroll

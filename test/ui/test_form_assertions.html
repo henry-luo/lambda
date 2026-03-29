@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Form Assertions Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 10px; }
+        h2 { margin-bottom: 8px; }
+        .info { margin-bottom: 8px; color: #666; }
+        .field { margin-bottom: 6px; }
+        .field label { display: inline-block; width: 80px; }
+        .field input[type="text"] { padding: 2px 4px; }
+        .radio-group, .checkbox-group { margin-bottom: 6px; }
+        .radio-group label, .checkbox-group label { margin-right: 12px; }
+        #btn-submit {
+            display: inline-block;
+            padding: 6px 16px;
+            background: #4488cc;
+            color: white;
+            border: 1px solid #336699;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .hidden-box { display: none; width: 100px; height: 50px; background: red; }
+    </style>
+</head>
+<body>
+    <h2>Form Test</h2>
+    <p class="info">This page is for testing form assertions.</p>
+
+    <div class="field">
+        <label for="email">Email:</label>
+        <input type="text" id="email" value="user@test.com">
+    </div>
+    <div class="field">
+        <label for="name">Name:</label>
+        <input type="text" id="name" value="Alice">
+    </div>
+    <div class="field">
+        <label for="empty">Empty:</label>
+        <input type="text" id="empty" value="">
+    </div>
+
+    <div class="checkbox-group">
+        <label><input type="checkbox" id="agree" checked> Agree</label>
+        <label><input type="checkbox" id="newsletter"> Newsletter</label>
+    </div>
+
+    <div class="radio-group">
+        <label><input type="radio" name="choice" id="radio-a" value="a" checked> Choice A</label>
+        <label><input type="radio" name="choice" id="radio-b" value="b"> Choice B</label>
+    </div>
+
+    <button id="btn-submit">Submit</button>
+    <div class="hidden-box">Hidden</div>
+</body>
+</html>

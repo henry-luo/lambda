@@ -2702,13 +2702,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             dom_element_set_attribute(dom_elem, "name", name_value);
         }
         // checked attribute sets :checked pseudo-state (for checkbox/radio)
-        const char* checked_value = extract_element_attribute(elem, "checked", doc->arena);
-        if (checked_value) {
+        // Use has_attr() since boolean attributes have no string value (stored as ITEM_NULL)
+        if (elem->has_attr("checked")) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_CHECKED);
         }
         // disabled attribute sets :disabled pseudo-state
-        const char* disabled_value = extract_element_attribute(elem, "disabled", doc->arena);
-        if (disabled_value) {
+        if (elem->has_attr("disabled")) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
         }
     }

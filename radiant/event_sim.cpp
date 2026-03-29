@@ -262,6 +262,76 @@ static void get_element_center_abs(View* view, float* cx, float* cy) {
     *cy = abs_y + view->height / 2;
 }
 
+// Check if an element is a checkbox/radio input
+static bool sim_is_checkbox_or_radio(View* view) {
+    if (!view || !view->is_element()) return false;
+    ViewElement* elem = (ViewElement*)view;
+    if (elem->tag() != HTM_TAG_INPUT) return false;
+    const char* type = elem->get_attribute("type");
+    return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
+}
+
+// Direct toggle of checkbox/radio state (bypasses coordinate hit-testing)
+// Used when event simulator clicks a selector-resolved form control.
+static void sim_toggle_checkbox_radio(View* input, RadiantState* state) {
+    if (!input || !input->is_element()) return;
+    ViewElement* elem = (ViewElement*)input;
+    const char* type = elem->get_attribute("type");
+    if (!type) return;
+
+    if (strcmp(type, "checkbox") == 0) {
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        bool new_state = !is_checked;
+        if (new_state) {
+            elem->pseudo_state |= PSEUDO_STATE_CHECKED;
+        } else {
+            elem->pseudo_state &= ~PSEUDO_STATE_CHECKED;
+        }
+        state->needs_repaint = true;
+        log_info("event_sim: toggled checkbox to %s", new_state ? "checked" : "unchecked");
+    }
+    else if (strcmp(type, "radio") == 0) {
+        bool is_checked = dom_element_has_pseudo_state(elem, PSEUDO_STATE_CHECKED);
+        if (!is_checked) {
+            // Uncheck other radios in the same group
+            const char* name = elem->get_attribute("name");
+            if (name) {
+                View* root = input;
+                while (root->parent) root = root->parent;
+                // Traverse all views to find matching radios
+                View* search = root;
+                while (search) {
+                    if (search != input && search->is_element()) {
+                        ViewElement* se = (ViewElement*)search;
+                        if (se->tag() == HTM_TAG_INPUT) {
+                            const char* st = se->get_attribute("type");
+                            const char* sn = se->get_attribute("name");
+                            if (st && strcmp(st, "radio") == 0 && sn && strcmp(sn, name) == 0) {
+                                if (dom_element_has_pseudo_state(se, PSEUDO_STATE_CHECKED)) {
+                                    se->pseudo_state &= ~PSEUDO_STATE_CHECKED;
+                                }
+                            }
+                        }
+                    }
+                    // Depth-first traversal
+                    if (search->is_element()) {
+                        DomElement* de = search->as_element();
+                        if (de->first_child) { search = (View*)de->first_child; continue; }
+                    }
+                    if (search->next()) { search = search->next(); continue; }
+                    search = search->parent;
+                    while (search && !search->next()) search = search->parent;
+                    if (search) search = search->next();
+                }
+            }
+            // Check this radio
+            elem->pseudo_state |= PSEUDO_STATE_CHECKED;
+            state->needs_repaint = true;
+            log_info("event_sim: checked radio button");
+        }
+    }
+}
+
 // Extract visible text from a view tree recursively
 static void sim_extract_text(View* view, StrBuf* buf) {
     if (!view) return;
@@ -483,6 +553,19 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "assert_value") == 0) {
+        ev->type = SIM_EVENT_ASSERT_VALUE;
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_checked") == 0) {
+        ev->type = SIM_EVENT_ASSERT_CHECKED;
+        ev->expected_checked = reader.get("checked").asBool();
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "assert_visible") == 0) {
         ev->type = SIM_EVENT_ASSERT_VISIBLE;
         ev->expected_visible = reader.get("visible").asBool();
@@ -490,6 +573,13 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
     else if (strcmp(type_str, "assert_focus") == 0) {
         ev->type = SIM_EVENT_ASSERT_FOCUS;
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_state") == 0) {
+        ev->type = SIM_EVENT_ASSERT_STATE;
+        const char* state = reader.get("state").cstring();
+        if (state) ev->state_name = mem_strdup(state, MEM_CAT_LAYOUT);
+        ev->expected_state_value = reader.get("value").asBool();
         parse_target(reader, ev);
     }
     else if (strcmp(type_str, "assert_scroll") == 0) {
@@ -879,11 +969,37 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         // ===== High-level actions =====
 
         case SIM_EVENT_CLICK: {
+            // For selector-targeted checkbox/radio, check state before click
+            // to detect if the coordinate-based click already handled the toggle
+            View* form_elem = nullptr;
+            bool was_checked = false;
+            if (ev->target_selector) {
+                DomDocument* doc = uicon->document;
+                form_elem = find_element_by_selector(doc, ev->target_selector);
+                if (form_elem && sim_is_checkbox_or_radio(form_elem)) {
+                    was_checked = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                } else {
+                    form_elem = nullptr;
+                }
+            }
+
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             log_info("event_sim: click at (%d, %d) button=%d", x, y, ev->button);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
+
+            // If the coordinate click didn't toggle the checkbox/radio, do it directly
+            if (form_elem) {
+                bool is_checked_now = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
+                if (is_checked_now == was_checked) {
+                    // State didn't change — coordinate click missed the element
+                    RadiantState* state = (RadiantState*)uicon->document->state;
+                    if (state && !dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_DISABLED)) {
+                        sim_toggle_checkbox_radio(form_elem, state);
+                    }
+                }
+            }
             break;
         }
 
@@ -1023,6 +1139,106 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
             } else {
                 log_info("event_sim: assert_visible PASS");
+                ctx->pass_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_VALUE: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: assert_value - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = (DomElement*)elem;
+            const char* val = dom_element_get_attribute(dom_elem, "value");
+            const char* actual = val ? val : "";
+            bool passed = true;
+            if (ev->assert_equals) {
+                if (strcmp(actual, ev->assert_equals) != 0) {
+                    log_error("event_sim: assert_value FAIL - expected '%s', got '%s'",
+                             ev->assert_equals, actual);
+                    passed = false;
+                }
+            }
+            if (ev->assert_contains) {
+                if (!strstr(actual, ev->assert_contains)) {
+                    log_error("event_sim: assert_value FAIL - expected to contain '%s', got '%s'",
+                             ev->assert_contains, actual);
+                    passed = false;
+                }
+            }
+            if (passed) {
+                log_info("event_sim: assert_value PASS (value='%s')", actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_CHECKED: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: assert_checked - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = (DomElement*)elem;
+            bool is_checked = (dom_elem->pseudo_state & PSEUDO_STATE_CHECKED) != 0;
+            if (is_checked != ev->expected_checked) {
+                log_error("event_sim: assert_checked FAIL - expected %s, got %s",
+                         ev->expected_checked ? "checked" : "unchecked",
+                         is_checked ? "checked" : "unchecked");
+                ctx->fail_count++;
+            } else {
+                log_info("event_sim: assert_checked PASS (%s)", is_checked ? "checked" : "unchecked");
+                ctx->pass_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_STATE: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem || !elem->is_element()) {
+                log_error("event_sim: assert_state - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            if (!ev->state_name) {
+                log_error("event_sim: assert_state - missing 'state' field");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = (DomElement*)elem;
+            uint32_t mask = 0;
+            if (strcmp(ev->state_name, ":hover") == 0) mask = PSEUDO_STATE_HOVER;
+            else if (strcmp(ev->state_name, ":active") == 0) mask = PSEUDO_STATE_ACTIVE;
+            else if (strcmp(ev->state_name, ":focus") == 0) mask = PSEUDO_STATE_FOCUS;
+            else if (strcmp(ev->state_name, ":visited") == 0) mask = PSEUDO_STATE_VISITED;
+            else if (strcmp(ev->state_name, ":checked") == 0) mask = PSEUDO_STATE_CHECKED;
+            else if (strcmp(ev->state_name, ":disabled") == 0) mask = PSEUDO_STATE_DISABLED;
+            else if (strcmp(ev->state_name, ":enabled") == 0) mask = PSEUDO_STATE_ENABLED;
+            else if (strcmp(ev->state_name, ":focus-visible") == 0) mask = PSEUDO_STATE_FOCUS_VISIBLE;
+            else {
+                log_error("event_sim: assert_state - unknown state '%s'", ev->state_name);
+                ctx->fail_count++;
+                break;
+            }
+            bool has_state = (dom_elem->pseudo_state & mask) != 0;
+            if (has_state != ev->expected_state_value) {
+                log_error("event_sim: assert_state FAIL - expected %s=%s, got %s",
+                         ev->state_name,
+                         ev->expected_state_value ? "true" : "false",
+                         has_state ? "true" : "false");
+                ctx->fail_count++;
+            } else {
+                log_info("event_sim: assert_state PASS (%s=%s)",
+                        ev->state_name, has_state ? "true" : "false");
                 ctx->pass_count++;
             }
             break;
