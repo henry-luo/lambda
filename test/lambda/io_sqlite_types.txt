@@ -3,10 +3,13 @@ int
 string
 float
 9.99
+decimal
+0.25
+type.null
 bool
 true
 false
-string
+datetime
 type.null
 type.null
 array
