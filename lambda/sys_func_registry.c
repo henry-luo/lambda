@@ -1468,6 +1468,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // type conversion
     {"bash_to_int", FPTR(bash_to_int)},
+    {"bash_arith_eval_value", FPTR(bash_arith_eval_value)},
     {"bash_to_string", FPTR(bash_to_string)},
     {"bash_is_truthy", FPTR(bash_is_truthy)},
     {"bash_exit_code", FPTR(bash_exit_code)},
@@ -1568,6 +1569,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_assoc_count", FPTR(bash_assoc_count)},
     // variable attributes
     {"bash_declare_var", FPTR(bash_declare_var)},
+    {"bash_declare_local_var", FPTR(bash_declare_local_var)},
     {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
     {"bash_is_assoc", FPTR(bash_is_assoc)},
     // variable scope
@@ -1594,12 +1596,24 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_lineno", FPTR(bash_get_lineno)},
     {"bash_set_lineno", FPTR(bash_set_lineno)},
     {"bash_get_funcname", FPTR(bash_get_funcname)},
+    {"bash_get_funcname_count", FPTR(bash_get_funcname_count)},
+    {"bash_get_bash_source", FPTR(bash_get_bash_source)},
+    {"bash_get_bash_lineno", FPTR(bash_get_bash_lineno)},
+    {"bash_get_bash_source_count", FPTR(bash_get_bash_source_count)},
+    {"bash_get_bash_lineno_count", FPTR(bash_get_bash_lineno_count)},
     {"bash_push_funcname", FPTR(bash_push_funcname)},
     {"bash_pop_funcname", FPTR(bash_pop_funcname)},
+    {"bash_push_source", FPTR(bash_push_source)},
+    {"bash_pop_source", FPTR(bash_pop_source)},
+    {"bash_push_call_frame", FPTR(bash_push_call_frame)},
+    {"bash_pop_call_frame", FPTR(bash_pop_call_frame)},
     // output capture
     {"bash_begin_capture", FPTR(bash_begin_capture)},
     {"bash_end_capture", FPTR(bash_end_capture)},
     {"bash_end_capture_raw", FPTR(bash_end_capture_raw)},
+    {"bash_cmd_sub_word_split", FPTR(bash_cmd_sub_word_split)},
+    {"bash_cmd_sub_enter", FPTR(bash_cmd_sub_enter)},
+    {"bash_cmd_sub_exit", FPTR(bash_cmd_sub_exit)},
     {"bash_raw_write", FPTR(bash_raw_write)},
     {"bash_write_heredoc", FPTR(bash_write_heredoc)},
     {"bash_raw_putc", FPTR(bash_raw_putc)},
@@ -1638,6 +1652,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_builtin_unset", FPTR(bash_builtin_unset)},
     {"bash_builtin_cd", FPTR(bash_builtin_cd)},
     {"bash_builtin_pwd", FPTR(bash_builtin_pwd)},
+    {"bash_builtin_caller", FPTR(bash_builtin_caller)},
     // pipeline builtins
     {"bash_builtin_cat", FPTR(bash_builtin_cat)},
     {"bash_builtin_wc", FPTR(bash_builtin_wc)},
@@ -1670,6 +1685,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
     {"bash_trap_check", FPTR(bash_trap_check)},
     {"bash_run_debug_trap", FPTR(bash_run_debug_trap)},
+    {"bash_run_return_trap", FPTR(bash_run_return_trap)},
     {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
