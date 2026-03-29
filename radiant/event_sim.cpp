@@ -14,6 +14,9 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/css/css_parser.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/dom_element.hpp"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
@@ -172,6 +175,174 @@ static bool find_text_position(DomDocument* doc, const char* target_text, float*
     return find_text_position_recursive((View*)doc->view_tree->root, target_text, 0, 0, out_x, out_y);
 }
 
+// ============================================================================
+// CSS Selector Element Finding
+// ============================================================================
+
+// Traverse view tree depth-first, calling visitor for each element
+typedef bool (*SimViewVisitor)(View* view, void* udata);
+
+static bool sim_traverse_views(View* view, SimViewVisitor visitor, void* udata) {
+    if (!view) return true;
+    if (view->is_element()) {
+        if (!visitor(view, udata)) return false;
+    }
+    DomElement* elem = view->as_element();
+    if (elem) {
+        View* child = (View*)elem->first_child;
+        while (child) {
+            if (!sim_traverse_views(child, visitor, udata)) return false;
+            child = (View*)child->next_sibling;
+        }
+    }
+    return true;
+}
+
+typedef struct {
+    CssSelector* selector;
+    SelectorMatcher* matcher;
+    View* result;
+} SimSelectorCtx;
+
+static bool sim_selector_visitor(View* view, void* udata) {
+    SimSelectorCtx* ctx = (SimSelectorCtx*)udata;
+    if (!view->is_element()) return true;
+    DomElement* dom_elem = (DomElement*)view;
+    if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
+        ctx->result = view;
+        return false;  // stop on first match
+    }
+    return true;
+}
+
+// Find first element matching a CSS selector in the document
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
+
+    Pool* pool = doc->pool;
+    if (!pool) return NULL;
+
+    // Tokenize and parse the selector
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text), pool, &token_count);
+    if (!tokens || token_count == 0) {
+        log_error("event_sim: failed to tokenize selector '%s'", selector_text);
+        return NULL;
+    }
+    int pos = 0;
+    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
+    if (!selector) {
+        log_error("event_sim: failed to parse selector '%s'", selector_text);
+        return NULL;
+    }
+
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) return NULL;
+
+    SimSelectorCtx ctx = {0};
+    ctx.selector = selector;
+    ctx.matcher = matcher;
+    ctx.result = NULL;
+
+    sim_traverse_views((View*)doc->view_tree->root, sim_selector_visitor, &ctx);
+    return ctx.result;
+}
+
+// Get absolute position center of an element
+static void get_element_center_abs(View* view, float* cx, float* cy) {
+    if (!view) { *cx = 0; *cy = 0; return; }
+    float abs_x = 0, abs_y = 0;
+    View* current = view;
+    while (current) {
+        abs_x += current->x;
+        abs_y += current->y;
+        current = (View*)current->parent;
+    }
+    *cx = abs_x + view->width / 2;
+    *cy = abs_y + view->height / 2;
+}
+
+// Extract visible text from a view tree recursively
+static void sim_extract_text(View* view, StrBuf* buf) {
+    if (!view) return;
+    if (view->view_type == RDT_VIEW_TEXT) {
+        DomText* text = view->as_text();
+        if (text && text->text) strbuf_append_str(buf, text->text);
+        return;
+    }
+    DomElement* elem = view->as_element();
+    if (elem) {
+        DomNode* child = elem->first_child;
+        while (child) {
+            sim_extract_text((View*)child, buf);
+            child = child->next_sibling;
+        }
+    }
+}
+
+// Resolve a target to (x,y) coordinates. Tries target_selector first, then target_text, then raw x/y.
+// Returns true if resolved, sets out_x, out_y.
+static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_y) {
+    // Priority: selector > text > raw coordinates
+    if (ev->target_selector && doc) {
+        View* elem = find_element_by_selector(doc, ev->target_selector);
+        if (elem) {
+            float fx, fy;
+            get_element_center_abs(elem, &fx, &fy);
+            *out_x = (int)fx;
+            *out_y = (int)fy;
+            log_info("event_sim: resolved selector '%s' to (%d, %d)", ev->target_selector, *out_x, *out_y);
+            return true;
+        }
+        log_error("event_sim: selector '%s' not found", ev->target_selector);
+        return false;
+    }
+    if (ev->target_text && doc) {
+        float fx, fy;
+        if (find_text_position(doc, ev->target_text, &fx, &fy)) {
+            *out_x = (int)fx;
+            *out_y = (int)fy;
+            log_info("event_sim: resolved text '%s' to (%d, %d)", ev->target_text, *out_x, *out_y);
+            return true;
+        }
+        log_error("event_sim: target_text '%s' not found", ev->target_text);
+        return false;
+    }
+    *out_x = ev->x;
+    *out_y = ev->y;
+    return true;
+}
+
+// Resolve a target to a View* element (for assertions and actions that need the element)
+static View* resolve_target_element(SimEvent* ev, DomDocument* doc) {
+    if (ev->target_selector && doc) {
+        return find_element_by_selector(doc, ev->target_selector);
+    }
+    return NULL;
+}
+
+// Parse target object: {"selector": "...", "text": "..."}
+// Also reads legacy top-level target_text for backward compat
+static void parse_target(MapReader& reader, SimEvent* ev) {
+    // New unified target object
+    ItemReader target_item = reader.get("target");
+    if (target_item.isMap()) {
+        MapReader target_map = target_item.asMap();
+        const char* sel = target_map.get("selector").cstring();
+        if (sel) ev->target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+        const char* txt = target_map.get("text").cstring();
+        if (txt) ev->target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
+        // target can also carry x,y
+        if (target_map.has("x")) ev->x = target_map.get("x").asInt32();
+        if (target_map.has("y")) ev->y = target_map.get("y").asInt32();
+    }
+    // Legacy target_text at top level
+    if (!ev->target_text) {
+        const char* target = reader.get("target_text").cstring();
+        if (target) ev->target_text = mem_strdup(target, MEM_CAT_LAYOUT);
+    }
+}
+
 // Parse a single event from MapReader
 static SimEvent* parse_sim_event(MapReader& reader) {
     SimEvent* ev = (SimEvent*)mem_calloc(1, sizeof(SimEvent), MEM_CAT_LAYOUT);
@@ -194,9 +365,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_MOUSE_MOVE;
         ev->x = reader.get("x").asInt32();
         ev->y = reader.get("y").asInt32();
-        // also support target_text for mouse_move
-        const char* target = reader.get("target_text").cstring();
-        if (target) ev->target_text = mem_strdup(target, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "mouse_down") == 0) {
         ev->type = SIM_EVENT_MOUSE_DOWN;
@@ -206,9 +375,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->mods = reader.get("mods").asInt32();
         const char* mods_str = reader.get("mods_str").cstring();
         if (mods_str) ev->mods = parse_mods_string(mods_str);
-        // support target_text to find text and click on it
-        const char* target = reader.get("target_text").cstring();
-        if (target) ev->target_text = mem_strdup(target, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
     }
     else if (strcmp(type_str, "mouse_up") == 0) {
         ev->type = SIM_EVENT_MOUSE_UP;
@@ -254,8 +421,10 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_SCROLL;
         ev->x = reader.get("x").asInt32();
         ev->y = reader.get("y").asInt32();
-        ev->scroll_dx = (float)reader.get("dx").asFloat();
-        ev->scroll_dy = (float)reader.get("dy").asFloat();
+        {
+            ItemReader dx = reader.get("dx"); ev->scroll_dx = (float)(dx.isFloat() ? dx.asFloat() : dx.asInt());
+            ItemReader dy = reader.get("dy"); ev->scroll_dy = (float)(dy.isFloat() ? dy.asFloat() : dy.asInt());
+        }
     }
     else if (strcmp(type_str, "assert_caret") == 0) {
         ev->type = SIM_EVENT_ASSERT_CARET;
@@ -263,6 +432,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_char_offset = reader.get("char_offset").asInt32();
         if (ev->expected_view_type == 0) ev->expected_view_type = -1;  // treat 0 as "don't check"
         if (ev->expected_char_offset == 0 && !reader.has("char_offset")) ev->expected_char_offset = -1;
+        int not_type = reader.get("view_type_not").asInt32();
+        if (not_type > 0) {
+            ev->expected_view_type = not_type;
+            ev->negate_view_type = true;
+        }
     }
     else if (strcmp(type_str, "assert_selection") == 0) {
         ev->type = SIM_EVENT_ASSERT_SELECTION;
@@ -272,6 +446,60 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_ASSERT_TARGET;
         ev->expected_view_type = reader.get("view_type").asInt32();
         if (ev->expected_view_type == 0) ev->expected_view_type = -1;
+    }
+    else if (strcmp(type_str, "click") == 0) {
+        ev->type = SIM_EVENT_CLICK;
+        ev->x = reader.get("x").asInt32();
+        ev->y = reader.get("y").asInt32();
+        ev->button = reader.get("button").asInt32();
+        ev->mods = reader.get("mods").asInt32();
+        const char* mods_str = reader.get("mods_str").cstring();
+        if (mods_str) ev->mods = parse_mods_string(mods_str);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "dblclick") == 0) {
+        ev->type = SIM_EVENT_DBLCLICK;
+        ev->x = reader.get("x").asInt32();
+        ev->y = reader.get("y").asInt32();
+        ev->button = reader.get("button").asInt32();
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "type") == 0) {
+        ev->type = SIM_EVENT_TYPE;
+        const char* text = reader.get("text").cstring();
+        if (text) ev->input_text = mem_strdup(text, MEM_CAT_LAYOUT);
+        ev->clear_first = reader.get("clear").asBool();
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "focus") == 0) {
+        ev->type = SIM_EVENT_FOCUS;
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_text") == 0) {
+        ev->type = SIM_EVENT_ASSERT_TEXT;
+        const char* contains = reader.get("contains").cstring();
+        if (contains) ev->assert_contains = mem_strdup(contains, MEM_CAT_LAYOUT);
+        const char* equals = reader.get("equals").cstring();
+        if (equals) ev->assert_equals = mem_strdup(equals, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_visible") == 0) {
+        ev->type = SIM_EVENT_ASSERT_VISIBLE;
+        ev->expected_visible = reader.get("visible").asBool();
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_focus") == 0) {
+        ev->type = SIM_EVENT_ASSERT_FOCUS;
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "assert_scroll") == 0) {
+        ev->type = SIM_EVENT_ASSERT_SCROLL;
+        {
+            ItemReader sx = reader.get("x"); ev->expected_scroll_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+            ItemReader sy = reader.get("y"); ev->expected_scroll_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+            ItemReader st = reader.get("tolerance"); ev->scroll_tolerance = (float)(st.isFloat() ? st.asFloat() : st.asInt());
+        }
+        if (ev->scroll_tolerance <= 0) ev->scroll_tolerance = 1.0f;
     }
     else if (strcmp(type_str, "log") == 0) {
         ev->type = SIM_EVENT_LOG;
@@ -359,6 +587,11 @@ EventSimContext* event_sim_load(const char* json_file) {
     ctx->auto_close = true;
     ctx->pass_count = 0;
     ctx->fail_count = 0;
+    ctx->test_name = NULL;
+
+    // Parse optional test name
+    const char* name = root_map.get("name").cstring();
+    if (name) ctx->test_name = mem_strdup(name, MEM_CAT_LAYOUT);
 
     // Parse each event
     int count = (int)events_arr.length();
@@ -391,11 +624,16 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->message) mem_free(ev->message);
             if (ev->file_path) mem_free(ev->file_path);
             if (ev->target_text) mem_free(ev->target_text);
+            if (ev->target_selector) mem_free(ev->target_selector);
+            if (ev->input_text) mem_free(ev->input_text);
+            if (ev->assert_contains) mem_free(ev->assert_contains);
+            if (ev->assert_equals) mem_free(ev->assert_equals);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
     }
 
+    if (ctx->test_name) mem_free(ctx->test_name);
     if (ctx->result_file) fclose(ctx->result_file);
     mem_free(ctx);
 }
@@ -450,6 +688,15 @@ static void sim_scroll(UiContext* uicon, int x, int y, float dx, float dy) {
     handle_event(uicon, uicon->document, &event);
 }
 
+// Simulate a text input event (single Unicode codepoint)
+static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
+    RdtEvent event;
+    event.text_input.type = RDT_EVENT_TEXT_INPUT;
+    event.text_input.timestamp = glfwGetTime();
+    event.text_input.codepoint = codepoint;
+    handle_event(uicon, uicon->document, &event);
+}
+
 // Assert helper for caret state
 static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     DomDocument* doc = uicon->document;
@@ -463,16 +710,26 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     bool passed = true;
 
     if (ev->expected_view_type >= 0) {
-        // Check view type of caret view
-        if (!caret || !caret->view) {
-            log_error("event_sim: assert_caret - no caret view");
-            passed = false;
-        } else {
-            ViewType actual_type = caret->view->view_type;
-            if (actual_type != ev->expected_view_type) {
-                log_error("event_sim: assert_caret - view_type mismatch: expected %d, got %d",
-                         ev->expected_view_type, actual_type);
+        if (ev->negate_view_type) {
+            // pass if there is no caret, or caret view type is not the rejected type
+            bool has_forbidden = caret && caret->view && caret->view->view_type == ev->expected_view_type;
+            if (has_forbidden) {
+                log_error("event_sim: assert_caret - view_type should NOT be %d, but it is",
+                         ev->expected_view_type);
                 passed = false;
+            }
+        } else {
+            // Check view type of caret view
+            if (!caret || !caret->view) {
+                log_error("event_sim: assert_caret - no caret view");
+                passed = false;
+            } else {
+                ViewType actual_type = caret->view->view_type;
+                if (actual_type != ev->expected_view_type) {
+                    log_error("event_sim: assert_caret - view_type mismatch: expected %d, got %d",
+                             ev->expected_view_type, actual_type);
+                    passed = false;
+                }
             }
         }
     }
@@ -558,51 +815,32 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_MOUSE_MOVE: {
-            int x = ev->x, y = ev->y;
-            // resolve target_text to coordinates if specified
-            if (ev->target_text && uicon->document) {
-                float fx, fy;
-                if (find_text_position(uicon->document, ev->target_text, &fx, &fy)) {
-                    x = (int)fx;
-                    y = (int)fy;
-                } else {
-                    log_error("event_sim: target_text '%s' not found", ev->target_text);
-                }
-            }
+            int x, y;
+            resolve_target(ev, uicon->document, &x, &y);
             log_info("event_sim: mouse_move to (%d, %d)", x, y);
             sim_mouse_move(uicon, x, y);
             break;
         }
 
         case SIM_EVENT_MOUSE_DOWN: {
-            int x = ev->x, y = ev->y;
-            // resolve target_text to coordinates if specified
-            if (ev->target_text && uicon->document) {
-                float fx, fy;
-                if (find_text_position(uicon->document, ev->target_text, &fx, &fy)) {
-                    x = (int)fx;
-                    y = (int)fy;
-                    fprintf(stderr, "[EVENT_SIM] Resolved target_text '%s' to (%d, %d)\n", ev->target_text, x, y);
-                } else {
-                    log_error("event_sim: target_text '%s' not found", ev->target_text);
-                    fprintf(stderr, "[EVENT_SIM] ERROR: target_text '%s' not found\n", ev->target_text);
-                }
-            }
+            int x, y;
+            resolve_target(ev, uicon->document, &x, &y);
             log_info("event_sim: mouse_down at (%d, %d) button=%d", x, y, ev->button);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             break;
         }
 
-        case SIM_EVENT_MOUSE_UP:
-            log_info("event_sim: mouse_up at (%d, %d) button=%d", ev->x, ev->y, ev->button);
-            sim_mouse_button(uicon, ev->x, ev->y, ev->button, ev->mods, false);
+        case SIM_EVENT_MOUSE_UP: {
+            int x, y;
+            resolve_target(ev, uicon->document, &x, &y);
+            log_info("event_sim: mouse_up at (%d, %d) button=%d", x, y, ev->button);
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
             break;
+        }
 
         case SIM_EVENT_MOUSE_DRAG:
             log_info("event_sim: mouse_drag from (%d, %d) to (%d, %d)", ev->x, ev->y, ev->to_x, ev->to_y);
-            // Simulate drag: down at start, move to end, up at end
             sim_mouse_button(uicon, ev->x, ev->y, ev->button, ev->mods, true);
-            // Interpolate some positions
             for (int step = 1; step <= 5; step++) {
                 int px = ev->x + (ev->to_x - ev->x) * step / 5;
                 int py = ev->y + (ev->to_y - ev->y) * step / 5;
@@ -638,6 +876,88 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             sim_scroll(uicon, ev->x, ev->y, ev->scroll_dx, ev->scroll_dy);
             break;
 
+        // ===== High-level actions =====
+
+        case SIM_EVENT_CLICK: {
+            int x, y;
+            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            log_info("event_sim: click at (%d, %d) button=%d", x, y, ev->button);
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
+            break;
+        }
+
+        case SIM_EVENT_DBLCLICK: {
+            int x, y;
+            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            log_info("event_sim: dblclick at (%d, %d)", x, y);
+            // First click
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
+            sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
+            // Second click with clicks=2
+            sim_mouse_move(uicon, x, y);
+            {
+                RdtEvent event;
+                event.mouse_button.type = RDT_EVENT_MOUSE_DOWN;
+                event.mouse_button.timestamp = glfwGetTime();
+                event.mouse_button.x = x;
+                event.mouse_button.y = y;
+                event.mouse_button.button = ev->button;
+                event.mouse_button.clicks = 2;
+                event.mouse_button.mods = ev->mods;
+                handle_event(uicon, uicon->document, &event);
+                event.mouse_button.type = RDT_EVENT_MOUSE_UP;
+                handle_event(uicon, uicon->document, &event);
+            }
+            break;
+        }
+
+        case SIM_EVENT_TYPE: {
+            // Click target first to focus it
+            if (ev->target_selector || ev->target_text) {
+                int x, y;
+                if (resolve_target(ev, uicon->document, &x, &y)) {
+                    sim_mouse_button(uicon, x, y, 0, 0, true);
+                    sim_mouse_button(uicon, x, y, 0, 0, false);
+                }
+            }
+            // If clear_first, send Cmd+A then Delete
+            if (ev->clear_first) {
+                #ifdef __APPLE__
+                sim_key(uicon, GLFW_KEY_A, RDT_MOD_SUPER, true);
+                sim_key(uicon, GLFW_KEY_A, RDT_MOD_SUPER, false);
+                #else
+                sim_key(uicon, GLFW_KEY_A, RDT_MOD_CTRL, true);
+                sim_key(uicon, GLFW_KEY_A, RDT_MOD_CTRL, false);
+                #endif
+                sim_key(uicon, GLFW_KEY_DELETE, 0, true);
+                sim_key(uicon, GLFW_KEY_DELETE, 0, false);
+            }
+            // Type each character
+            if (ev->input_text) {
+                log_info("event_sim: type '%s'", ev->input_text);
+                const char* p = ev->input_text;
+                while (*p) {
+                    // Simple ASCII handling - treat each byte as a codepoint
+                    uint32_t cp = (uint32_t)(unsigned char)*p;
+                    sim_text_input(uicon, cp);
+                    p++;
+                }
+            }
+            break;
+        }
+
+        case SIM_EVENT_FOCUS: {
+            int x, y;
+            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            log_info("event_sim: focus via click at (%d, %d)", x, y);
+            sim_mouse_button(uicon, x, y, 0, 0, true);
+            sim_mouse_button(uicon, x, y, 0, 0, false);
+            break;
+        }
+
+        // ===== Assertions =====
+
         case SIM_EVENT_ASSERT_CARET:
             log_info("event_sim: assert_caret view_type=%d char_offset=%d", ev->expected_view_type, ev->expected_char_offset);
             assert_caret(ctx, uicon, ev);
@@ -653,8 +973,111 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             assert_target(ctx, uicon, ev);
             break;
 
+        case SIM_EVENT_ASSERT_TEXT: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem) {
+                log_error("event_sim: assert_text - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            StrBuf* buf = strbuf_new_cap(256);
+            sim_extract_text(elem, buf);
+            bool passed = true;
+            if (ev->assert_contains) {
+                if (!buf->str || !strstr(buf->str, ev->assert_contains)) {
+                    log_error("event_sim: assert_text FAIL - expected to contain '%s', got '%s'",
+                             ev->assert_contains, buf->str ? buf->str : "(empty)");
+                    passed = false;
+                }
+            }
+            if (ev->assert_equals) {
+                if (!buf->str || strcmp(buf->str, ev->assert_equals) != 0) {
+                    log_error("event_sim: assert_text FAIL - expected '%s', got '%s'",
+                             ev->assert_equals, buf->str ? buf->str : "(empty)");
+                    passed = false;
+                }
+            }
+            if (passed) {
+                log_info("event_sim: assert_text PASS");
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            strbuf_free(buf);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_VISIBLE: {
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem) {
+                log_error("event_sim: assert_visible - target element not found");
+                ctx->fail_count++;
+                break;
+            }
+            bool is_visible = (elem->width > 0 && elem->height > 0);
+            if (is_visible != ev->expected_visible) {
+                log_error("event_sim: assert_visible FAIL - expected %s, element has size %.1fx%.1f",
+                         ev->expected_visible ? "visible" : "hidden", elem->width, elem->height);
+                ctx->fail_count++;
+            } else {
+                log_info("event_sim: assert_visible PASS");
+                ctx->pass_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_FOCUS: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state || !doc->state->focus) {
+                log_error("event_sim: assert_focus - no document or focus state");
+                ctx->fail_count++;
+                break;
+            }
+            View* expected = resolve_target_element(ev, doc);
+            View* actual = doc->state->focus->current;
+            if (!expected) {
+                log_error("event_sim: assert_focus - target element not found");
+                ctx->fail_count++;
+            } else if (actual != expected) {
+                log_error("event_sim: assert_focus FAIL - focus not on expected element");
+                ctx->fail_count++;
+            } else {
+                log_info("event_sim: assert_focus PASS");
+                ctx->pass_count++;
+            }
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_SCROLL: {
+            DomDocument* doc = uicon->document;
+            if (!doc || !doc->state) {
+                log_error("event_sim: assert_scroll - no document state");
+                ctx->fail_count++;
+                break;
+            }
+            float actual_x = doc->state->scroll_x;
+            float actual_y = doc->state->scroll_y;
+            float tol = ev->scroll_tolerance;
+            bool pass_x = (ev->expected_scroll_x == 0 && !ev->expected_scroll_y) ||
+                          (actual_x >= ev->expected_scroll_x - tol && actual_x <= ev->expected_scroll_x + tol);
+            bool pass_y = (actual_y >= ev->expected_scroll_y - tol && actual_y <= ev->expected_scroll_y + tol);
+            if (!pass_x || !pass_y) {
+                log_error("event_sim: assert_scroll FAIL - expected (%.1f, %.1f) +/-%.1f, got (%.1f, %.1f)",
+                         ev->expected_scroll_x, ev->expected_scroll_y, tol, actual_x, actual_y);
+                ctx->fail_count++;
+            } else {
+                log_info("event_sim: assert_scroll PASS (%.1f, %.1f)", actual_x, actual_y);
+                ctx->pass_count++;
+            }
+            break;
+        }
+
+        // ===== Utilities =====
+
         case SIM_EVENT_LOG:
-            fprintf(stderr, "[EVENT_SIM] %s\n", ev->message ? ev->message : "(no message)");
+            fprintf(stderr, "[EVENT_SIM] %s\\n", ev->message ? ev->message : "(no message)");
             break;
 
         case SIM_EVENT_RENDER:
@@ -735,6 +1158,9 @@ void event_sim_print_results(EventSimContext* ctx) {
     fprintf(stderr, "\n");
     fprintf(stderr, "========================================\n");
     fprintf(stderr, " EVENT SIMULATION RESULTS\n");
+    if (ctx->test_name) {
+        fprintf(stderr, " Test: %s\n", ctx->test_name);
+    }
     fprintf(stderr, "========================================\n");
     fprintf(stderr, " Events executed: %d\n", ctx->current_index);
     fprintf(stderr, " Assertions: %d passed, %d failed\n", ctx->pass_count, ctx->fail_count);

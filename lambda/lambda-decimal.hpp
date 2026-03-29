@@ -77,6 +77,18 @@ void decimal_free_string(char* str);
 // Uses the provided arena or heap depending on allocation mode
 Item decimal_deep_copy(Item item, void* arena, bool is_unlimited);
 
+// Create a fixed decimal Item from a string, with Decimal struct arena-allocated.
+// The mpd_t* inside is heap-allocated (not GC-managed) and will be freed on arena teardown.
+// Use this in input parsers where GC-heap allocation is not safe.
+// Returns ItemNull if str is null or parse fails.
+Item decimal_from_string_arena(const char* str, void* arena_ptr);
+
+// Create a fixed decimal Item from a double, with Decimal struct arena-allocated.
+Item decimal_from_double_arena(double val, void* arena_ptr);
+
+// Create a fixed decimal Item from an int64, with Decimal struct arena-allocated.
+Item decimal_from_int64_arena(int64_t val, void* arena_ptr);
+
 // ─────────────────────────────────────────────────────────────────────
 // Formatting (to string)
 // ─────────────────────────────────────────────────────────────────────

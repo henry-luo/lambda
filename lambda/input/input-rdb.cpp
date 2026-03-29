@@ -14,6 +14,7 @@
 #include "input.hpp"
 #include "input-parsers.h"
 #include "../mark_builder.hpp"
+#include "../lambda-decimal.hpp"
 #include "../../lib/rdb.h"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
@@ -53,21 +54,43 @@ static Item rdb_value_to_item(MarkBuilder& builder, RdbValue val, RdbType declar
         case RDB_TYPE_STRING:
             return builder.createStringItem(val.str_val);
 
-        case RDB_TYPE_DATETIME:
-            // datetime strings are stored as ISO-8601 text in SQLite;
-            // for now, return as string — future: parse_datetime_string()
+        case RDB_TYPE_DATETIME: {
+            if (val.type != RDB_TYPE_STRING || !val.str_val) return ItemNull;
+            // try ISO-8601 first (with 'T' separator), then Lambda format (space separator)
+            DateTime* dt = datetime_parse_iso8601(builder.pool(), val.str_val);
+            if (!dt) dt = datetime_parse_lambda(builder.pool(), val.str_val);
+            if (dt) return {.item = k2it(dt)};
+            // fallback: return as string if parsing fails
             return builder.createStringItem(val.str_val);
+        }
 
         case RDB_TYPE_JSON:
             // auto-parse JSON column content via existing JSON parser
-            if (val.str_val && val.str_len > 0) {
+            if (val.type == RDB_TYPE_STRING && val.str_val && val.str_len > 0) {
                 return parse_json_to_item(builder.input(), val.str_val);
             }
             return ItemNull;
 
-        case RDB_TYPE_DECIMAL:
-            // decimal strings — for now, return as string
-            return builder.createStringItem(val.str_val);
+        case RDB_TYPE_DECIMAL: {
+            // SQLite stores DECIMAL columns as REAL, INTEGER, or TEXT at the storage level.
+            // Use arena-safe decimal creation to avoid GC collecting the value before use.
+            // Prefer string representation for exact precision; fall back to float/int.
+            if (val.type == RDB_TYPE_STRING && val.str_val) {
+                Item dec = decimal_from_string_arena(val.str_val, builder.arena());
+                if (dec._type_id == LMD_TYPE_DECIMAL) return dec;
+            }
+            if (val.type == RDB_TYPE_FLOAT) {
+                Item dec = decimal_from_double_arena(val.float_val, builder.arena());
+                if (dec._type_id == LMD_TYPE_DECIMAL) return dec;
+                return builder.createFloat(val.float_val);
+            }
+            if (val.type == RDB_TYPE_INT) {
+                Item dec = decimal_from_int64_arena(val.int_val, builder.arena());
+                if (dec._type_id == LMD_TYPE_DECIMAL) return dec;
+                return builder.createInt(val.int_val);
+            }
+            return ItemNull;
+        }
 
         case RDB_TYPE_BLOB:
             // deferred to Phase 2

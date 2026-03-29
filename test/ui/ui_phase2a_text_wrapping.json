@@ -1,0 +1,19 @@
+{
+  "name": "Phase 2a: Text wrapping - caret in wrapped text (baseline_502)",
+  "html": "test/layout/data/baseline/baseline_502_text_wrapping.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 2a: assert_visible + assert_text + click caret on baseline_502 ==="},
+    {"type": "log", "message": "Coord note: .narrow-container at (0,0) 180x156, padding=15px, font=16px Arial"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "assert_visible", "target": {"selector": ".narrow-container"}, "visible": true},
+    {"type": "assert_text",    "target": {"selector": ".narrow-container"}, "contains": "long sentence"},
+    {"type": "assert_text",    "target": {"selector": ".narrow-container"}, "contains": "This is a long sentence"},
+
+    {"type": "log", "message": "Clicking on wrapped text via text-search..."},
+    {"type": "click", "target": {"text": "long sentence"}},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "render", "file": "./temp/phase2a_text_wrap.png"}
+  ]
+}

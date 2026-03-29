@@ -1,0 +1,26 @@
+{
+  "name": "Scroll test",
+  "html": "test/ui/test_scroll.html",
+  "description": "Test scrolling and verify scroll position",
+  "events": [
+    {"type": "log", "message": "=== Scroll test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Verify initial scroll position is at top"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5},
+
+    {"type": "log", "message": "Step 2: Scroll down"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -5},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Scroll down more"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 4: Verify top section is visible"},
+    {"type": "assert_visible", "target": {"selector": "#sec-top"}, "visible": true},
+
+    {"type": "log", "message": "=== Scroll test complete ==="},
+    {"type": "wait", "ms": 100}
+  ]
+}

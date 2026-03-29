@@ -10,7 +10,7 @@
  *   - <db> element structure (tag, name, table_count)
  *   - Schema namespace (columns, indexes, foreign keys)
  *   - Data namespace (rows as arrays of maps)
- *   - Value conversion (int, float, string, null, datetime, JSON auto-parse)
+ *   - Value conversion (int, float, decimal, string, null, datetime, JSON auto-parse)
  *   - View access
  *   - Multi-table databases
  *   - Empty databases
@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/lambda-decimal.hpp"
 #include "../lambda/mark_reader.hpp"
 #include "../lib/mempool.h"
 #include "../lib/log.h"
@@ -61,6 +62,7 @@ static void create_plugin_test_db(const char* path) {
         "  name TEXT NOT NULL,"
         "  category_id INTEGER,"
         "  price REAL,"
+        "  weight DECIMAL(10,3),"
         "  in_stock BOOLEAN DEFAULT 1,"
         "  created_at DATETIME,"
         "  tags JSON,"
@@ -70,11 +72,11 @@ static void create_plugin_test_db(const char* path) {
         "  SELECT * FROM products WHERE price < 20.0;"
         "INSERT INTO categories VALUES (1, 'Electronics'), (2, 'Books');"
         "INSERT INTO products VALUES "
-        "  (1, 'Widget', 1, 9.99, 1, '2024-01-15 08:00:00', "
+        "  (1, 'Widget', 1, 9.99, 0.250, 1, '2024-01-15 08:00:00', "
         "   '[\"sale\",\"popular\"]'),"
-        "  (2, 'Gadget', 1, 49.99, 1, '2024-02-20 10:30:00', "
+        "  (2, 'Gadget', 1, 49.99, 1.500, 1, '2024-02-20 10:30:00', "
         "   '{\"color\":\"blue\"}'),"
-        "  (3, 'Novel', 2, 14.99, 0, '2024-03-10 12:00:00', NULL);";
+        "  (3, 'Novel', 2, 14.99, NULL, 0, '2024-03-10 12:00:00', NULL);";
 
     sqlite3_exec(db, ddl, NULL, NULL, NULL);
     sqlite3_close(db);
@@ -374,9 +376,33 @@ TEST_F(InputRdbTest, ValueConversion_Datetime) {
     MapReader prod0 = prods.get(0).asMap();
 
     ItemReader dt = prod0.get("created_at");
-    // datetime currently stored as string in Phase 1
-    EXPECT_TRUE(dt.isString());
-    EXPECT_STREQ(dt.cstring(), "2024-01-15 08:00:00");
+    EXPECT_TRUE(dt.isDatetime());
+    DateTime dtime = dt.asDatetime();
+    EXPECT_EQ(DATETIME_GET_YEAR(&dtime), 2024);
+    EXPECT_EQ(DATETIME_GET_MONTH(&dtime), 1u);
+    EXPECT_EQ(dtime.day, 15);
+    EXPECT_EQ(dtime.hour, 8);
+    EXPECT_EQ(dtime.minute, 0);
+    EXPECT_EQ(dtime.second, 0);
+}
+
+TEST_F(InputRdbTest, ValueConversion_Decimal) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+
+    MapReader prod0 = prods.get(0).asMap();
+    ItemReader weight0 = prod0.get("weight");
+    EXPECT_EQ(weight0.getType(), LMD_TYPE_DECIMAL);
+    char* weight0_str = decimal_to_string(weight0.item());
+    ASSERT_NE(weight0_str, nullptr);
+    EXPECT_STREQ(weight0_str, "0.25");
+    decimal_free_string(weight0_str);
+
+    MapReader prod2 = prods.get(2).asMap();
+    ItemReader weight2 = prod2.get("weight");
+    EXPECT_TRUE(weight2.isNull());
 }
 
 TEST_F(InputRdbTest, ValueConversion_JsonArray) {

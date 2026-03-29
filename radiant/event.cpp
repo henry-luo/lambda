@@ -1977,6 +1977,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Restore font
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
+            } else if (evcon.target->is_element()) {
+                // Non-text element target within body
+                // Browser behavior: clicking on replaced elements (img, svg, video,
+                // input, button, etc.) clears text caret; clicking on content blocks
+                // (div, p, li) does NOT clear caret since browsers place caret at
+                // nearest text position within the block.
+                DomElement* target_elem = (DomElement*)evcon.target;
+                if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
+                    caret_clear(state);
+                    selection_clear(state);
+                    evcon.need_repaint = true;
+                }
+            }
+        } else if (event->type == RDT_EVENT_MOUSE_DOWN && !evcon.target) {
+            // Click outside all content (e.g., below body) — clear caret and selection
+            // In browsers, clicking outside the document body clears the text caret
+            if (state) {
+                caret_clear(state);
+                selection_clear(state);
+                evcon.need_repaint = true;
             }
         } else if (event->type == RDT_EVENT_MOUSE_UP) {
             // Clear :active state

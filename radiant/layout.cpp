@@ -1702,6 +1702,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         float border_box_height = root_css_height + root_bp_top + root_bp_bottom;
         html->height = border_box_height;
         lycon->block.given_height = root_css_height;
+        if (html->blk) html->blk->given_height = root_css_height;
         log_debug("[CSS] Root explicit height: css_height=%.1f, border_box=%.1f", root_css_height, border_box_height);
     }
 

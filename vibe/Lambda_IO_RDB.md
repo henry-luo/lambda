@@ -1425,38 +1425,40 @@ let by_genre = for (b in db.data.book, let g = b.genre)
 
 ### Phase 1: Core Read-Only Access (This Proposal)
 
-| Feature | Priority | Complexity |
-|---------|----------|-----------|
-| Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium |
-| SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium |
-| RDB connection via `input()` | P0 | Low |
-| Schema introspection → Lambda types | P0 | Medium |
-| Table element structure | P0 | Medium |
-| Basic `for` → `SELECT * FROM table` | P0 | Medium |
-| `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium |
-| `order by` → `ORDER BY` | P0 | Low |
-| `limit` / `offset` → `LIMIT` / `OFFSET` | P0 | Low |
-| Parameterized SQL (injection prevention) | P0 | Low |
-| Lazy loading (cursor-based iteration) | P0 | Medium |
-| FK introspection (`RdbForeignKey` structs) | P0 | Medium |
-| FK auto-navigation (many-to-one, lazy) | P0 | Medium |
-| FK reverse navigation (one-to-many, lazy) | P1 | Medium |
-| FK JOIN batching inside `for` clauses | P1 | High |
-| Aggregate pushdown (`count`, `sum`, `avg`, `min`, `max`) | P1 | Medium |
-| Datetime column → Lambda `datetime` | P0 | Medium |
-| JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium |
-| Views exposed as table elements | P0 | Low |
-| Schema introspection (indexes, triggers, functions) | P0 | Medium |
-| `db.schema` / `db.data` namespace structure | P0 | Medium |
-| Result caching (LRU by query) | P1 | Medium |
-| `in` list → `IN (...)` | P1 | Low |
-| String functions → `LIKE` | P1 | Low |
-| Null checks → `IS NULL` / `IS NOT NULL` | P1 | Low |
-| `len(db.data.table)` → `SELECT COUNT(*)` | P1 | Low |
-| Index access `db.data.table[n]` → `LIMIT 1 OFFSET n` | P1 | Low |
-| Vendor SQLite amalgamation in `lib/` | P0 | Low |
-| GTest unit tests (generic + SQLite) | P0 | Medium |
-| Lambda integration test scripts (.ls + .txt) | P0 | Medium |
+Status reflects the current repository state, not the intended end-state of the proposal.
+
+| Feature | Priority | Complexity | Status |
+|---------|----------|-----------|--------|
+| Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium | Implemented |
+| SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium | Implemented |
+| RDB connection via `input()` | P0 | Low | Implemented |
+| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs, datetime, JSON, and decimal typing are exposed; triggers and functions are not |
+| Table element structure | P0 | Medium | Partial: `db.data.<table>` is exposed, but rows are eagerly materialized arrays rather than lazy table proxies |
+| Basic `for` → `SELECT * FROM table` | P0 | Medium | Partial: table rows are loaded with `SELECT *` during `input()`, but `for` clauses are not lowered to SQL |
+| `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium | Not implemented |
+| `order by` → `ORDER BY` | P0 | Low | Not implemented |
+| `limit` / `offset` → `LIMIT` / `OFFSET` | P0 | Low | Not implemented |
+| Parameterized SQL (injection prevention) | P0 | Low | Not implemented |
+| Lazy loading (cursor-based iteration) | P0 | Medium | Not implemented |
+| FK introspection (`RdbForeignKey` structs) | P0 | Medium | Implemented |
+| FK auto-navigation (many-to-one, lazy) | P0 | Medium | Not implemented |
+| FK reverse navigation (one-to-many, lazy) | P1 | Medium | Not implemented |
+| FK JOIN batching inside `for` clauses | P1 | High | Not implemented |
+| Aggregate pushdown (`count`, `sum`, `avg`, `min`, `max`) | P1 | Medium | Not implemented |
+| Datetime column → Lambda `datetime` | P0 | Medium | Implemented |
+| JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | Implemented |
+| Views exposed as table elements | P0 | Low | Implemented |
+| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed; triggers and SQL functions are not |
+| `db.schema` / `db.data` namespace structure | P0 | Medium | Implemented |
+| Result caching (LRU by query) | P1 | Medium | Not implemented |
+| `in` list → `IN (...)` | P1 | Low | Not implemented |
+| String functions → `LIKE` | P1 | Low | Not implemented |
+| Null checks → `IS NULL` / `IS NOT NULL` | P1 | Low | Not implemented |
+| `len(db.data.table)` → `SELECT COUNT(*)` | P1 | Low | Not implemented |
+| Index access `db.data.table[n]` → `LIMIT 1 OFFSET n` | P1 | Low | Not implemented |
+| Vendor SQLite amalgamation in `lib/` | P0 | Low | Implemented |
+| GTest unit tests (generic + SQLite) | P0 | Medium | Implemented |
+| Lambda integration test scripts (.ls + .txt) | P0 | Medium | Partial: core read-path coverage exists, but SQL pushdown and lazy-loading scenarios are still absent |
 
 ### Phase 2: Advanced Queries (Future)
 

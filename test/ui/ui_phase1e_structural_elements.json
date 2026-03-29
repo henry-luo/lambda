@@ -1,0 +1,51 @@
+{
+  "name": "Phase 1e: Click structural elements - table, positioned elements (baseline_830)",
+  "html": "test/layout/data/baseline/baseline_830_advanced_elements.html",
+  "description": "Tests click hit-testing on table cells and positioned elements. Table section starts at y=229 with padding 10. Table header 'Name' text center ~(42,255), 'Value' ~(106,255). Data cell 'Alpha' ~(40,284), '100' ~(98,284). 'Beta' ~(37,313), '200' ~(98,313). Position section at y=338. Relative text 'Relative' ~(90,373). Absolute text 'Absolute' ~(1120,403). Body height=438, outside at y=470.",
+  "events": [
+    {"type": "log", "message": "=== Phase 1e: structural element click tests (table, position) ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- A. Table cell clicks ---"},
+
+    {"type": "log", "message": "--- A1. Click table header 'Name' (42, 255) ---"},
+    {"type": "click", "x": 42, "y": 255},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A2. Click table header 'Value' (106, 255) ---"},
+    {"type": "click", "x": 106, "y": 255},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A3. Click table cell 'Alpha' (40, 284) ---"},
+    {"type": "click", "x": 40, "y": 284},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A4. Click table cell '100' (98, 284) ---"},
+    {"type": "click", "x": 98, "y": 284},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A5. Click table cell 'Beta' (37, 313) ---"},
+    {"type": "click", "x": 37, "y": 313},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A6. Click table cell '200' (98, 313) ---"},
+    {"type": "click", "x": 98, "y": 313},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- B. Positioned element clicks ---"},
+
+    {"type": "log", "message": "--- B1. Click relative-positioned text 'Relative' (90, 373) ---"},
+    {"type": "click", "x": 90, "y": 373},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- B2. Click absolute-positioned text 'Absolute' (1120, 403) ---"},
+    {"type": "click", "x": 1120, "y": 403},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- C. Outside-body click to verify caret clears ---"},
+    {"type": "click", "x": 600, "y": 470},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "render", "file": "./temp/phase1e_structural_elements.png"}
+  ]
+}

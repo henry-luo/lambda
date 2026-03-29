@@ -1,0 +1,28 @@
+{
+  "name": "Phase 2b: Inline spans - visibility, text, click (baseline_503)",
+  "html": "test/layout/data/baseline/baseline_503_styled_spans.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 2b: inline spans on baseline_503_styled_spans ==="},
+    {"type": "log", "message": "Coord note: .bold-text at (70,24) 66x17; .colored-text at (218,24) 53x17"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "assert_visible", "target": {"selector": ".text-container"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": ".bold-text"},      "visible": true},
+    {"type": "assert_visible", "target": {"selector": ".colored-text"},   "visible": true},
+
+    {"type": "assert_text", "target": {"selector": ".bold-text"},    "contains": "bold text"},
+    {"type": "assert_text", "target": {"selector": ".colored-text"}, "contains": "red text"},
+    {"type": "assert_text", "target": {"selector": ".larger-text"},  "contains": "larger text"},
+    {"type": "assert_text", "target": {"selector": ".text-container"}, "contains": "bold text"},
+
+    {"type": "log", "message": "Clicking bold-text span via selector..."},
+    {"type": "click", "target": {"selector": ".bold-text"}},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "Clicking colored-text span via text-search..."},
+    {"type": "click", "target": {"text": "red text"}},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "render", "file": "./temp/phase2b_styled_spans.png"}
+  ]
+}
