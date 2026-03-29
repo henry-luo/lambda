@@ -107,6 +107,9 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     case LMD_TYPE_DTIME:
         *(DateTime*)field_ptr = value.get_datetime();
         break;
+    case LMD_TYPE_DECIMAL:
+        *(Decimal**)field_ptr = value.get_decimal();
+        break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = value.get_string();
         break;
@@ -223,6 +226,9 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
         break;
     case LMD_TYPE_DTIME:
         *(DateTime*)field_ptr = value.get_datetime();
+        break;
+    case LMD_TYPE_DECIMAL:
+        *(Decimal**)field_ptr = value.get_decimal();
         break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = value.get_string();

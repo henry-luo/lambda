@@ -8,19 +8,21 @@ db.table_count
 
 // categories columns
 len(db.schema.categories.columns)
-db.schema.categories.columns[0].name
-1
-db.schema.categories.columns[0].pk
-db.schema.categories.columns[1].name
-2
-db.schema.categories.columns[1].pk
+[db.schema.categories.columns[0].name, db.schema.categories.columns[0].pk]
+[db.schema.categories.columns[1].name, db.schema.categories.columns[1].pk]
+[db.schema.categories.columns[2].name, db.schema.categories.columns[2].nullable]
 
-// products column count (id, name, category_id, price, in_stock, created_at, tags)
+// products column count (id, name, category_id, price, weight, in_stock, created_at, tags)
 len(db.schema.products.columns)
+[db.schema.products.columns[4].name, db.schema.products.columns[4].type, db.schema.products.columns[4].nullable]
+[db.schema.products.columns[3].name, db.schema.products.columns[3].nullable]
+[db.schema.products.columns[6].name, db.schema.products.columns[6].type]
+[db.schema.products.columns[7].name, db.schema.products.columns[7].type]
 
 // products FK — using array to keep strings separate
 len(db.schema.products.foreign_keys)
 [db.schema.products.foreign_keys[0].column, db.schema.products.foreign_keys[0].ref_table, db.schema.products.foreign_keys[0].ref_column]
 
-// view flag
+// view schema metadata
+[len(db.schema.cheap_products.columns), db.schema.cheap_products.columns[2].name]
 db.schema.cheap_products.view

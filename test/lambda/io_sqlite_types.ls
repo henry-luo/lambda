@@ -1,5 +1,5 @@
 // Test: SQLite type mapping and value conversion
-// Verifies: int, float, bool, string, null, datetime-as-string, JSON auto-parse
+// Verifies: int, float, bool, string, null, datetime, decimal, JSON auto-parse
 
 let db = input('./test/input/test_rdb_full.db', 'sqlite')^
 
@@ -14,13 +14,20 @@ type(db.data.products[0].name)
 type(db.data.products[0].price)
 db.data.products[0].price
 
+// DECIMAL type — weight
+type(db.data.products[0].weight)
+db.data.products[0].weight
+
+// NULL decimal
+type(db.data.products[4].weight)
+
 // BOOL type — in_stock
 type(db.data.products[0].in_stock)
 db.data.products[0].in_stock
 // in_stock = 0 (Novel, row 2)
 db.data.products[2].in_stock
 
-// DATETIME stored as string
+// DATETIME type
 type(db.data.products[0].created_at)
 
 // NULL value
