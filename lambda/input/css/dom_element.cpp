@@ -2608,7 +2608,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
               parent ? parent->tag_name : "none", (long long)elem->length);
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
-    if (strcmp(tag_name, "!--") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
+    // HTML5 parser uses "#comment", CSS/older parsers use "!--"
+    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -2734,7 +2735,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
             // Check if this is a comment or DOCTYPE
-            if (strcmp(child_tag_name, "!--") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
+            // HTML5 parser uses "#comment", CSS/older parsers use "!--"
+            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
                 if (comment_node) {

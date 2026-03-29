@@ -1717,26 +1717,37 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
         FloatAvailableSpace space = block_context_space_at_y(bfc, final_y_bfc, float_total_height);
 
         // CSS 2.1 §9.5.1: Compute effective available width
-        // Normally, the float must fit within the containing block boundaries.
-        // But if the float is wider than its containing block, it may overflow per Rule 7.
+        // Rule 1: float's left outer edge >= containing block's left edge
+        // Rule 7: float's right outer edge <= containing block's right edge
+        // The BFC space (space.left/right) reflects other float intrusions.
+        // When no other float constrains a side, the containing block boundary
+        // is the only constraint — not the BFC element's content width, which
+        // may be narrower than the containing block when intermediate elements
+        // use negative margins (e.g., Bootstrap .row { margin: 0 -15px }).
         float effective_left, effective_right;
         if (block->position->float_prop == CSS_VALUE_LEFT) {
-            effective_left = max(space.left, containing_block_left_bfc);
+            effective_left = space.has_left_float
+                ? max(space.left, containing_block_left_bfc)
+                : containing_block_left_bfc;
             if (float_wider_than_cb) {
                 // Float is wider than CB — use BFC space (allow overflow to right)
                 effective_right = space.right;
             } else {
-                // Normal case — constrain by containing block right edge
-                effective_right = min(space.right, containing_block_right_bfc);
+                effective_right = space.has_right_float
+                    ? min(space.right, containing_block_right_bfc)
+                    : containing_block_right_bfc;
             }
         } else {
-            effective_right = min(space.right, containing_block_right_bfc);
+            effective_right = space.has_right_float
+                ? min(space.right, containing_block_right_bfc)
+                : containing_block_right_bfc;
             if (float_wider_than_cb) {
                 // Float is wider than CB — use BFC space (allow overflow to left)
                 effective_left = space.left;
             } else {
-                // Normal case — constrain by containing block left edge
-                effective_left = max(space.left, containing_block_left_bfc);
+                effective_left = space.has_left_float
+                    ? max(space.left, containing_block_left_bfc)
+                    : containing_block_left_bfc;
             }
         }
         float available_width = effective_right - effective_left;

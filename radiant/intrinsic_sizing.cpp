@@ -1504,6 +1504,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         IntrinsicSizes child_sizes = {0, 0};
         bool is_inline = false;
 
+        // CSS 2.1 §1.3: Comment nodes generate no boxes and do not participate in layout
+        if (child->is_comment()) {
+            continue;
+        }
+
         if (child->is_text()) {
             const char* text = (const char*)child->text_data();
             if (text) {
