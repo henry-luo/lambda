@@ -1,0 +1,14 @@
+"name:"
+"test_rdb.db"
+"tables:"
+1
+"first user:"
+"Alice"
+30
+"second user:"
+"Bob"
+87.0
+"third user:"
+"Carol"
+"user count:"
+3

@@ -27,7 +27,9 @@
         "radiant/pdf",
         "radiant/webdriver"
     ],
-    "source_files": [],
+    "source_files": [
+        "lib/sqlite3.c"
+    ],
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp",
@@ -38,6 +40,10 @@
         "lib/font_config.c",
         "lambda/input/input-ini.cpp",
         "lambda/input/input-prop.cpp"
+    ],
+    "defines": [
+        "SQLITE_THREADSAFE=0",
+        "SQLITE_OMIT_LOAD_EXTENSION"
     ],
     "includes": [
         ".",
@@ -270,7 +276,10 @@
                 "lib/mime-detect.c",
                 "lib/mime-types.c",
                 "lib/shell.c",
-                "lib/file_utils.c"
+                "lib/file_utils.c",
+                "lib/sqlite3.c",
+                "lib/rdb.c",
+                "lib/rdb_sqlite.c"
             ],
             "libraries": [
                 "utf8proc",
@@ -280,7 +289,9 @@
             "cpp_flags": "-Ibuild_temp/utf8proc -DUTF8PROC_STATIC",
             "link": "static",
             "defines": [
-                "UTF8PROC_STATIC"
+                "UTF8PROC_STATIC",
+                "SQLITE_THREADSAFE=0",
+                "SQLITE_OMIT_LOAD_EXTENSION"
             ]
         },
         {
@@ -1156,6 +1167,20 @@
                 "name": "📚 Library Tests",
                 "category": "baseline",
                 "tests": [
+                    {
+                        "source": "test_rdb_gtest.cpp",
+                        "name": "RDB SQLite Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_rdb_gtest.exe",
+                        "icon": "🗄️"
+                    },
                     {
                         "source": "test_str_gtest.cpp",
                         "name": "Str Library Tests",
