@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <unistd.h>
 #include <regex.h>
 
@@ -626,6 +627,75 @@ extern "C" Item bash_builtin_pwd(void) {
     }
     bash_set_exit_code(1);
     return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_builtin_caller(Item* args, int argc) {
+    int frame = 0;
+    if (argc > 0) {
+        String* arg = it2s(bash_to_string(args[0]));
+        if (!arg || arg->len == 0) {
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        if (arg->chars[0] == '-' && !(arg->len > 1 && isdigit((unsigned char)arg->chars[1]))) {
+            String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: caller: %.*s: invalid option\n",
+                    src ? src->len : 0, src ? src->chars : "",
+                    (int)it2i(bash_get_lineno()), arg->len, arg->chars);
+            fprintf(stderr, "caller: usage: caller [expr]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+        char buf[64];
+        int copy_len = arg->len < (int)sizeof(buf) - 1 ? arg->len : (int)sizeof(buf) - 1;
+        memcpy(buf, arg->chars, copy_len);
+        buf[copy_len] = '\0';
+        char* end = NULL;
+        long parsed = strtol(buf, &end, 10);
+        if (!end || *end != '\0' || parsed < 0) {
+            String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: caller: %.*s: invalid number\n",
+                    src ? src->len : 0, src ? src->chars : "",
+                    (int)it2i(bash_get_lineno()), arg->len, arg->chars);
+            fprintf(stderr, "caller: usage: caller [expr]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+        frame = (int)parsed;
+    }
+
+    Item line_item = bash_get_bash_lineno((Item){.item = i2it(frame)});
+    int line = (int)it2i(line_item);
+    String* src = it2s(bash_get_bash_source((Item){.item = i2it(frame + 1)}));
+    String* func = it2s(bash_get_funcname((Item){.item = i2it(frame + 1)}));
+
+    if (argc == 0 && line == 0) {
+        bash_raw_write("0 NULL\n", 7);
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    if (line == 0 || !src || src->len == 0) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    char buf[1024];
+    if (argc == 0) {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s\n", line, src->len, src->chars);
+        bash_raw_write(buf, n);
+    } else if (func && func->len > 0) {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s %.*s\n", line, func->len, func->chars, src->len, src->chars);
+        bash_raw_write(buf, n);
+    } else {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s\n", line, src->len, src->chars);
+        bash_raw_write(buf, n);
+    }
+
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
 }
 
 // ============================================================================
