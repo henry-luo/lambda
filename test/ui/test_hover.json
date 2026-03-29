@@ -1,0 +1,34 @@
+{
+  "name": "Hover over elements",
+  "description": "Move mouse over elements and verify hover target changes",
+  "events": [
+    {"type": "log", "message": "=== Hover test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Move to box1"},
+    {"type": "mouse_move", "target": {"selector": "#box1"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 2: Verify box1 is visible"},
+    {"type": "assert_visible", "target": {"selector": "#box1"}, "visible": true},
+
+    {"type": "log", "message": "Step 3: Move to box2"},
+    {"type": "mouse_move", "target": {"selector": "#box2"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 4: Move to box3"},
+    {"type": "mouse_move", "target": {"selector": "#box3"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 5: Click on box2 text"},
+    {"type": "click", "target": {"text": "Box 2"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_caret", "view_type": 1, "char_offset": -1},
+
+    {"type": "log", "message": "Step 6: Render hover test output"},
+    {"type": "render", "file": "./temp/test_hover_output.png"},
+
+    {"type": "log", "message": "=== Hover test complete ==="},
+    {"type": "wait", "ms": 100}
+  ]
+}

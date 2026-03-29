@@ -2,14 +2,21 @@
  * Event Simulation System for Radiant Viewer
  * 
  * Allows loading and replaying events from a JSON file for automated testing.
+ * Supports primitive events (mouse_down, key_press, etc.) and high-level
+ * actions (click, dblclick, type) plus assertions for verification.
  * 
  * JSON Format:
  * {
+ *   "name": "Test name",
  *   "events": [
  *     {"type": "wait", "ms": 500},
+ *     {"type": "click", "target": {"selector": "#btn"}},
+ *     {"type": "click", "target": {"text": "Click here"}},
+ *     {"type": "dblclick", "target": {"text": "Select word"}},
+ *     {"type": "type", "target": {"selector": "input"}, "text": "hello"},
  *     {"type": "mouse_move", "x": 100, "y": 200},
  *     {"type": "mouse_down", "x": 100, "y": 200, "button": 0, "mods": 0},
- *     {"type": "mouse_down", "target_text": "Click here"},  // find text and click
+ *     {"type": "mouse_down", "target_text": "Click here"},
  *     {"type": "mouse_up", "x": 100, "y": 200, "button": 0, "mods": 0},
  *     {"type": "mouse_drag", "from_x": 100, "from_y": 200, "to_x": 200, "to_y": 200},
  *     {"type": "key_press", "key": "a"},
@@ -17,11 +24,15 @@
  *     {"type": "key_up", "key": "Control"},
  *     {"type": "key_combo", "key": "c", "mods": ["ctrl"]},
  *     {"type": "scroll", "x": 100, "y": 200, "dx": 0, "dy": -3},
- *     {"type": "assert_caret", "view_type": 4, "char_offset": 5},
+ *     {"type": "assert_caret", "view_type": 1, "char_offset": 5},
  *     {"type": "assert_selection", "is_collapsed": false},
- *     {"type": "assert_target", "view_type": 4},
+ *     {"type": "assert_target", "view_type": 1},
+ *     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Hello"},
+ *     {"type": "assert_visible", "target": {"selector": ".modal"}, "visible": true},
+ *     {"type": "assert_focus", "target": {"selector": "input#email"}},
+ *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
  *     {"type": "log", "message": "Test step completed"},
- *     {"type": "render", "file": "/tmp/output.png"},
+ *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
  *   ]
  * }
@@ -39,6 +50,7 @@ struct GLFWwindow;
 
 // Event simulation command types
 enum SimEventType {
+    // Primitive events
     SIM_EVENT_WAIT,
     SIM_EVENT_MOUSE_MOVE,
     SIM_EVENT_MOUSE_DOWN,
@@ -49,9 +61,20 @@ enum SimEventType {
     SIM_EVENT_KEY_UP,
     SIM_EVENT_KEY_COMBO,
     SIM_EVENT_SCROLL,
+    // High-level actions
+    SIM_EVENT_CLICK,           // click (mouse_down + mouse_up)
+    SIM_EVENT_DBLCLICK,        // double-click
+    SIM_EVENT_TYPE,            // type text into focused element
+    SIM_EVENT_FOCUS,           // focus an element (via click)
+    // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
     SIM_EVENT_ASSERT_TARGET,
+    SIM_EVENT_ASSERT_TEXT,     // verify element text content
+    SIM_EVENT_ASSERT_VISIBLE,  // verify element visibility
+    SIM_EVENT_ASSERT_FOCUS,    // verify focused element
+    SIM_EVENT_ASSERT_SCROLL,   // verify scroll position
+    // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
     SIM_EVENT_DUMP_CARET       // dump caret state to file
@@ -73,6 +96,15 @@ struct SimEvent {
     char* message;               // for log events
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it
+    char* target_selector;       // CSS selector for targeting elements
+    char* input_text;            // for type action: text to type
+    bool clear_first;            // for type action: select-all + delete before typing
+    char* assert_contains;       // for assert_text: substring match
+    char* assert_equals;         // for assert_text: exact match
+    bool expected_visible;       // for assert_visible
+    float expected_scroll_x;     // for assert_scroll
+    float expected_scroll_y;     // for assert_scroll
+    float scroll_tolerance;      // for assert_scroll
 };
 
 // Event simulation context
@@ -85,6 +117,7 @@ struct EventSimContext {
     int pass_count;              // assertions passed
     int fail_count;              // assertions failed
     FILE* result_file;           // optional result output file
+    char* test_name;             // optional test name from JSON
 };
 
 // Load events from JSON file

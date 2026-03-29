@@ -1,0 +1,28 @@
+{
+  "name": "Click on text - caret placement",
+  "description": "Click on paragraph text and verify caret is placed on a text view",
+  "events": [
+    {"type": "log", "message": "=== Click on text test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Click on paragraph text using target_text"},
+    {"type": "click", "target": {"text": "paragraph"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 2: Assert caret is on a TEXT view (view_type=1)"},
+    {"type": "assert_caret", "view_type": 1, "char_offset": -1},
+
+    {"type": "log", "message": "Step 3: Verify text content of title"},
+    {"type": "assert_text", "target": {"selector": "#title"}, "equals": "Click Test Page"},
+
+    {"type": "log", "message": "Step 4: Verify highlighted span contains expected text"},
+    {"type": "assert_text", "target": {"selector": ".highlight"}, "contains": "highlighted"},
+
+    {"type": "log", "message": "Step 5: Verify elements are visible"},
+    {"type": "assert_visible", "target": {"selector": "#title"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#result"}, "visible": true},
+
+    {"type": "log", "message": "=== Click on text test complete ==="},
+    {"type": "wait", "ms": 100}
+  ]
+}

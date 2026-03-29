@@ -1,0 +1,30 @@
+{
+  "name": "Phase 3a: Mouse drag text selection (baseline_809)",
+  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 3a: drag text selection on baseline_809_text_align ==="},
+    {"type": "log", "message": "Coord note: .left container (10,10) 344x62; inner <p> at (32,32) 300x18"},
+    {"type": "log", "message": "Drag from ~x=40,y=41 (start of 'This text') to ~x=230,y=41 (past 'is left')"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "assert_visible", "target": {"selector": ".left"}, "visible": true},
+
+    {"type": "log", "message": "Dragging across left-aligned text..."},
+    {"type": "mouse_drag",
+     "from_x": 40,  "from_y": 41,
+     "to_x":   230, "to_y":   41,
+     "button": 0},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "render", "file": "./temp/phase3a_drag_left.png"},
+
+    {"type": "log", "message": "Dragging across center-aligned text (p at (32,104) 300x18, y_center=113)..."},
+    {"type": "mouse_drag",
+     "from_x": 95,  "from_y": 113,
+     "to_x":   310, "to_y":   113,
+     "button": 0},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "render", "file": "./temp/phase3a_drag_center.png"}
+  ]
+}

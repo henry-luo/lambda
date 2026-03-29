@@ -1,0 +1,27 @@
+{
+  "name": "Phase 1b: Click text - three aligned paragraphs (baseline_809)",
+  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 1b: assert_visible + assert_text on baseline_809_text_align ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "assert_visible", "target": {"selector": ".left"},   "visible": true},
+    {"type": "assert_visible", "target": {"selector": ".center"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": ".right"},  "visible": true},
+
+    {"type": "assert_text", "target": {"selector": ".left"},   "contains": "left-aligned"},
+    {"type": "assert_text", "target": {"selector": ".center"}, "contains": "center-aligned"},
+    {"type": "assert_text", "target": {"selector": ".right"},  "contains": "right-aligned"},
+
+    {"type": "log", "message": "Clicking left-aligned text by text-search..."},
+    {"type": "log", "message": "Coord note: p inside .left at (32,32) 300x18; text 'left-aligned' ~x=145,y=41"},
+    {"type": "click", "target": {"text": "left-aligned"}},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "Clicking center-aligned text..."},
+    {"type": "click", "target": {"text": "center-aligned"}},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "render", "file": "./temp/phase1b_text_align.png"}
+  ]
+}

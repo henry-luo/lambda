@@ -1,0 +1,34 @@
+{
+  "name": "Click on elements - buttons and links",
+  "description": "Click on buttons and links by CSS selector and verify caret state",
+  "events": [
+    {"type": "log", "message": "=== Click elements test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Click primary button by selector"},
+    {"type": "click", "target": {"selector": "#btn-primary"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 2: Verify button text content"},
+    {"type": "assert_text", "target": {"selector": "#btn-primary"}, "equals": "Primary Action"},
+
+    {"type": "log", "message": "Step 3: Click link by text content"},
+    {"type": "click", "target": {"text": "Go to Section 1"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 4: Click secondary button"},
+    {"type": "click", "target": {"selector": "#btn-secondary"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 5: Verify section content"},
+    {"type": "assert_text", "target": {"selector": "#section1 h2"}, "equals": "Section 1"},
+    {"type": "assert_text", "target": {"selector": "#section2 p"}, "contains": "section 2"},
+
+    {"type": "log", "message": "Step 6: Verify elements are visible"},
+    {"type": "assert_visible", "target": {"selector": "#btn-primary"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#section1"}, "visible": true},
+
+    {"type": "log", "message": "=== Click elements test complete ==="},
+    {"type": "wait", "ms": 100}
+  ]
+}
