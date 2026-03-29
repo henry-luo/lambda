@@ -781,3 +781,862 @@ TEST_F(RdbTest, SelectFromView) {
     rdb_finalize(stmt);
     rdb_close(conn);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §14 Type Mapping Edge Cases
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_TYPES = "temp/test_rdb_types.db";
+
+static void create_types_database(const char* path) {
+    sqlite3* db = NULL;
+    sqlite3_open(path, &db);
+
+    const char* ddl =
+        "CREATE TABLE types_test ("
+        "  col_integer INTEGER,"
+        "  col_int INT,"
+        "  col_bigint BIGINT,"
+        "  col_smallint SMALLINT,"
+        "  col_tinyint TINYINT,"
+        "  col_boolean BOOLEAN,"
+        "  col_real REAL,"
+        "  col_double DOUBLE,"
+        "  col_float FLOAT,"
+        "  col_decimal DECIMAL(10,2),"
+        "  col_numeric NUMERIC,"
+        "  col_date DATE,"
+        "  col_datetime DATETIME,"
+        "  col_timestamp TIMESTAMP,"
+        "  col_json JSON,"
+        "  col_blob BLOB,"
+        "  col_text TEXT,"
+        "  col_varchar VARCHAR(255),"
+        "  col_char CHAR(10),"
+        "  col_clob CLOB,"
+        "  col_notype"
+        ");"
+        "INSERT INTO types_test VALUES ("
+        "  42, 100, 9999999999, 32000, 127, 1, 3.14, 2.718, 1.5, "
+        "  19.99, 123.45, '2024-03-15', '2024-03-15 10:30:00', "
+        "  '2024-03-15T08:00:00Z', '{\"key\":\"value\"}', X'DEADBEEF', "
+        "  'hello', 'world', 'fixed', 'large text', 'untyped'"
+        ");";
+
+    sqlite3_exec(db, ddl, NULL, NULL, NULL);
+    sqlite3_close(db);
+}
+
+class RdbTypesTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    RdbConn* conn;
+
+    void SetUp() override {
+        ensure_temp_dir();
+        pool = pool_create();
+        rdb_sqlite_register();
+        create_types_database(TEST_DB_TYPES);
+        conn = rdb_open(pool, TEST_DB_TYPES, "sqlite", true);
+        ASSERT_NE(conn, nullptr);
+        rdb_load_schema(conn);
+    }
+
+    void TearDown() override {
+        rdb_close(conn);
+        pool_destroy(pool);
+        unlink(TEST_DB_TYPES);
+    }
+};
+
+TEST_F(RdbTypesTest, MapInteger) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_integer");
+    EXPECT_EQ(col->type, RDB_TYPE_INT);
+}
+
+TEST_F(RdbTypesTest, MapInt) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_int");
+    EXPECT_EQ(col->type, RDB_TYPE_INT);
+}
+
+TEST_F(RdbTypesTest, MapBigint) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_bigint");
+    EXPECT_EQ(col->type, RDB_TYPE_INT);
+}
+
+TEST_F(RdbTypesTest, MapSmallint) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_smallint");
+    EXPECT_EQ(col->type, RDB_TYPE_INT);
+}
+
+TEST_F(RdbTypesTest, MapTinyint) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_tinyint");
+    EXPECT_EQ(col->type, RDB_TYPE_INT);
+}
+
+TEST_F(RdbTypesTest, MapBoolean) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_boolean");
+    EXPECT_EQ(col->type, RDB_TYPE_BOOL);
+}
+
+TEST_F(RdbTypesTest, MapReal) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_real");
+    EXPECT_EQ(col->type, RDB_TYPE_FLOAT);
+}
+
+TEST_F(RdbTypesTest, MapDouble) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_double");
+    EXPECT_EQ(col->type, RDB_TYPE_FLOAT);
+}
+
+TEST_F(RdbTypesTest, MapFloat) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_float");
+    EXPECT_EQ(col->type, RDB_TYPE_FLOAT);
+}
+
+TEST_F(RdbTypesTest, MapDecimal) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_decimal");
+    EXPECT_EQ(col->type, RDB_TYPE_DECIMAL);
+}
+
+TEST_F(RdbTypesTest, MapNumeric) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_numeric");
+    EXPECT_EQ(col->type, RDB_TYPE_DECIMAL);
+}
+
+TEST_F(RdbTypesTest, MapDate) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_date");
+    EXPECT_EQ(col->type, RDB_TYPE_DATETIME);
+}
+
+TEST_F(RdbTypesTest, MapDatetime) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_datetime");
+    EXPECT_EQ(col->type, RDB_TYPE_DATETIME);
+}
+
+TEST_F(RdbTypesTest, MapTimestamp) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_timestamp");
+    EXPECT_EQ(col->type, RDB_TYPE_DATETIME);
+}
+
+TEST_F(RdbTypesTest, MapJson) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_json");
+    EXPECT_EQ(col->type, RDB_TYPE_JSON);
+}
+
+TEST_F(RdbTypesTest, MapBlob) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_blob");
+    EXPECT_EQ(col->type, RDB_TYPE_BLOB);
+}
+
+TEST_F(RdbTypesTest, MapText) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_text");
+    EXPECT_EQ(col->type, RDB_TYPE_STRING);
+}
+
+TEST_F(RdbTypesTest, MapVarchar) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_varchar");
+    EXPECT_EQ(col->type, RDB_TYPE_STRING);
+}
+
+TEST_F(RdbTypesTest, MapChar) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_char");
+    EXPECT_EQ(col->type, RDB_TYPE_STRING);
+}
+
+TEST_F(RdbTypesTest, MapClob) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_clob");
+    EXPECT_EQ(col->type, RDB_TYPE_STRING);
+}
+
+TEST_F(RdbTypesTest, MapNotype) {
+    RdbColumn* col = rdb_get_column(rdb_get_table(conn, "types_test"), "col_notype");
+    // empty type declaration → default STRING
+    EXPECT_EQ(col->type, RDB_TYPE_STRING);
+}
+
+TEST_F(RdbTypesTest, ReadIntegerValue) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_integer FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_INT);
+    EXPECT_EQ(val.int_val, 42);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbTypesTest, ReadBigintValue) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_bigint FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.int_val, 9999999999LL);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbTypesTest, ReadRealValue) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_real FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_FLOAT);
+    EXPECT_DOUBLE_EQ(val.float_val, 3.14);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbTypesTest, ReadBlobIsDeferred) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_blob FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_BLOB);
+    EXPECT_TRUE(val.is_null); // deferred to Phase 2
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbTypesTest, ReadDatetimeAsText) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_datetime FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(val.str_val, "2024-03-15 10:30:00");
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbTypesTest, ReadJsonAsText) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT col_json FROM types_test");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(val.str_val, "{\"key\":\"value\"}");
+    rdb_finalize(stmt);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §15 Schema with Multiple Foreign Keys
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_FK = "temp/test_rdb_fk.db";
+
+static void create_fk_database(const char* path) {
+    sqlite3* db = NULL;
+    sqlite3_open(path, &db);
+
+    const char* ddl =
+        "CREATE TABLE departments (id INTEGER PRIMARY KEY, name TEXT);"
+        "CREATE TABLE roles (id INTEGER PRIMARY KEY, title TEXT);"
+        "CREATE TABLE employees ("
+        "  id INTEGER PRIMARY KEY,"
+        "  name TEXT,"
+        "  department_id INTEGER,"
+        "  role_id INTEGER,"
+        "  manager_id INTEGER,"
+        "  FOREIGN KEY (department_id) REFERENCES departments(id),"
+        "  FOREIGN KEY (role_id) REFERENCES roles(id),"
+        "  FOREIGN KEY (manager_id) REFERENCES employees(id)"
+        ");"
+        "INSERT INTO departments VALUES (1, 'Engineering'), (2, 'Sales');"
+        "INSERT INTO roles VALUES (1, 'Developer'), (2, 'Manager');"
+        "INSERT INTO employees VALUES (1, 'Alice', 1, 2, NULL);"
+        "INSERT INTO employees VALUES (2, 'Bob', 1, 1, 1);"
+        "INSERT INTO employees VALUES (3, 'Carol', 2, 1, 1);";
+
+    sqlite3_exec(db, ddl, NULL, NULL, NULL);
+    sqlite3_close(db);
+}
+
+class RdbFkTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    RdbConn* conn;
+
+    void SetUp() override {
+        ensure_temp_dir();
+        pool = pool_create();
+        rdb_sqlite_register();
+        create_fk_database(TEST_DB_FK);
+        conn = rdb_open(pool, TEST_DB_FK, "sqlite", true);
+        ASSERT_NE(conn, nullptr);
+        rdb_load_schema(conn);
+    }
+
+    void TearDown() override {
+        rdb_close(conn);
+        pool_destroy(pool);
+        unlink(TEST_DB_FK);
+    }
+};
+
+TEST_F(RdbFkTest, MultipleForeignKeys) {
+    RdbTable* emp = rdb_get_table(conn, "employees");
+    ASSERT_NE(emp, nullptr);
+    EXPECT_EQ(emp->fk_count, 3);
+}
+
+TEST_F(RdbFkTest, FkLinkName_StripId) {
+    RdbTable* emp = rdb_get_table(conn, "employees");
+    // department_id → link_name "department"
+    bool found = false;
+    for (int i = 0; i < emp->fk_count; i++) {
+        if (strcmp(emp->foreign_keys[i].column, "department_id") == 0) {
+            EXPECT_STREQ(emp->foreign_keys[i].link_name, "department");
+            EXPECT_STREQ(emp->foreign_keys[i].ref_table, "departments");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(RdbFkTest, FkLinkName_RoleId) {
+    RdbTable* emp = rdb_get_table(conn, "employees");
+    bool found = false;
+    for (int i = 0; i < emp->fk_count; i++) {
+        if (strcmp(emp->foreign_keys[i].column, "role_id") == 0) {
+            EXPECT_STREQ(emp->foreign_keys[i].link_name, "role");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(RdbFkTest, SelfReferentialFk) {
+    RdbTable* emp = rdb_get_table(conn, "employees");
+    bool found = false;
+    for (int i = 0; i < emp->fk_count; i++) {
+        if (strcmp(emp->foreign_keys[i].column, "manager_id") == 0) {
+            EXPECT_STREQ(emp->foreign_keys[i].ref_table, "employees");
+            EXPECT_STREQ(emp->foreign_keys[i].ref_column, "id");
+            EXPECT_STREQ(emp->foreign_keys[i].link_name, "manager");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(RdbFkTest, ReverseFks_Departments) {
+    RdbTable* dept = rdb_get_table(conn, "departments");
+    ASSERT_NE(dept, nullptr);
+    // employees.department_id → departments
+    EXPECT_EQ(dept->reverse_fk_count, 1);
+    EXPECT_STREQ(dept->reverse_fks[0].ref_table, "employees");
+}
+
+TEST_F(RdbFkTest, ReverseFks_Roles) {
+    RdbTable* roles = rdb_get_table(conn, "roles");
+    ASSERT_NE(roles, nullptr);
+    EXPECT_EQ(roles->reverse_fk_count, 1);
+    EXPECT_STREQ(roles->reverse_fks[0].ref_table, "employees");
+}
+
+TEST_F(RdbFkTest, ReverseFks_SelfRef) {
+    RdbTable* emp = rdb_get_table(conn, "employees");
+    // employees.manager_id → employees (self-referential)
+    EXPECT_GE(emp->reverse_fk_count, 1);
+    bool found = false;
+    for (int i = 0; i < emp->reverse_fk_count; i++) {
+        if (strcmp(emp->reverse_fks[i].ref_table, "employees") == 0) {
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §16 Composite Primary Keys and Multi-Column Indexes
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_COMPOSITE = "temp/test_rdb_composite.db";
+
+static void create_composite_database(const char* path) {
+    sqlite3* db = NULL;
+    sqlite3_open(path, &db);
+
+    const char* ddl =
+        "CREATE TABLE order_items ("
+        "  order_id INTEGER NOT NULL,"
+        "  product_id INTEGER NOT NULL,"
+        "  quantity INTEGER,"
+        "  price REAL,"
+        "  PRIMARY KEY (order_id, product_id)"
+        ");"
+        "CREATE INDEX idx_order_items_price_qty ON order_items(price, quantity);"
+        "INSERT INTO order_items VALUES (1, 100, 2, 9.99);"
+        "INSERT INTO order_items VALUES (1, 200, 1, 19.99);"
+        "INSERT INTO order_items VALUES (2, 100, 3, 9.99);";
+
+    sqlite3_exec(db, ddl, NULL, NULL, NULL);
+    sqlite3_close(db);
+}
+
+class RdbCompositeTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    RdbConn* conn;
+
+    void SetUp() override {
+        ensure_temp_dir();
+        pool = pool_create();
+        rdb_sqlite_register();
+        create_composite_database(TEST_DB_COMPOSITE);
+        conn = rdb_open(pool, TEST_DB_COMPOSITE, "sqlite", true);
+        ASSERT_NE(conn, nullptr);
+        rdb_load_schema(conn);
+    }
+
+    void TearDown() override {
+        rdb_close(conn);
+        pool_destroy(pool);
+        unlink(TEST_DB_COMPOSITE);
+    }
+};
+
+TEST_F(RdbCompositeTest, CompositePrimaryKeys) {
+    RdbTable* tbl = rdb_get_table(conn, "order_items");
+    ASSERT_NE(tbl, nullptr);
+
+    RdbColumn* order_id = rdb_get_column(tbl, "order_id");
+    RdbColumn* product_id = rdb_get_column(tbl, "product_id");
+    EXPECT_TRUE(order_id->primary_key);
+    EXPECT_TRUE(product_id->primary_key);
+    // pk_index should be > 0 for both
+    EXPECT_GT(order_id->pk_index, 0);
+    EXPECT_GT(product_id->pk_index, 0);
+    // they should have different pk_index values
+    EXPECT_NE(order_id->pk_index, product_id->pk_index);
+}
+
+TEST_F(RdbCompositeTest, NonPkColumn) {
+    RdbTable* tbl = rdb_get_table(conn, "order_items");
+    RdbColumn* qty = rdb_get_column(tbl, "quantity");
+    EXPECT_FALSE(qty->primary_key);
+    EXPECT_EQ(qty->pk_index, 0);
+}
+
+TEST_F(RdbCompositeTest, MultiColumnIndex) {
+    RdbTable* tbl = rdb_get_table(conn, "order_items");
+    bool found = false;
+    for (int i = 0; i < tbl->index_count; i++) {
+        if (strcmp(tbl->indexes[i].name, "idx_order_items_price_qty") == 0) {
+            EXPECT_EQ(tbl->indexes[i].column_count, 2);
+            EXPECT_FALSE(tbl->indexes[i].unique);
+            EXPECT_STREQ(tbl->indexes[i].columns[0], "price");
+            EXPECT_STREQ(tbl->indexes[i].columns[1], "quantity");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(RdbCompositeTest, RowCountComposite) {
+    EXPECT_EQ(rdb_row_count(conn, "order_items"), 3);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §17 NULL Handling in Result Rows
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_NULLS = "temp/test_rdb_nulls.db";
+
+static void create_nulls_database(const char* path) {
+    sqlite3* db = NULL;
+    sqlite3_open(path, &db);
+
+    const char* ddl =
+        "CREATE TABLE nullable_test ("
+        "  id INTEGER PRIMARY KEY,"
+        "  int_col INTEGER,"
+        "  text_col TEXT,"
+        "  real_col REAL,"
+        "  date_col DATE"
+        ");"
+        "INSERT INTO nullable_test VALUES (1, NULL, NULL, NULL, NULL);"
+        "INSERT INTO nullable_test VALUES (2, 42, 'hello', 3.14, '2024-01-01');"
+        "INSERT INTO nullable_test VALUES (3, NULL, 'world', NULL, '2024-06-15');";
+
+    sqlite3_exec(db, ddl, NULL, NULL, NULL);
+    sqlite3_close(db);
+}
+
+class RdbNullTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    RdbConn* conn;
+
+    void SetUp() override {
+        ensure_temp_dir();
+        pool = pool_create();
+        rdb_sqlite_register();
+        create_nulls_database(TEST_DB_NULLS);
+        conn = rdb_open(pool, TEST_DB_NULLS, "sqlite", true);
+        ASSERT_NE(conn, nullptr);
+        rdb_load_schema(conn);
+    }
+
+    void TearDown() override {
+        rdb_close(conn);
+        pool_destroy(pool);
+        unlink(TEST_DB_NULLS);
+    }
+};
+
+TEST_F(RdbNullTest, AllNullRow) {
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT int_col, text_col, real_col, date_col FROM nullable_test WHERE id = 1");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+
+    for (int c = 0; c < 4; c++) {
+        RdbValue val = rdb_column_value(stmt, c);
+        EXPECT_EQ(val.type, RDB_TYPE_NULL) << "Column " << c << " should be NULL";
+        EXPECT_TRUE(val.is_null) << "Column " << c << " is_null should be true";
+    }
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbNullTest, AllPopulatedRow) {
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT int_col, text_col, real_col, date_col FROM nullable_test WHERE id = 2");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+
+    RdbValue v0 = rdb_column_value(stmt, 0);
+    EXPECT_EQ(v0.type, RDB_TYPE_INT);
+    EXPECT_EQ(v0.int_val, 42);
+
+    RdbValue v1 = rdb_column_value(stmt, 1);
+    EXPECT_EQ(v1.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(v1.str_val, "hello");
+
+    RdbValue v2 = rdb_column_value(stmt, 2);
+    EXPECT_EQ(v2.type, RDB_TYPE_FLOAT);
+    EXPECT_DOUBLE_EQ(v2.float_val, 3.14);
+
+    RdbValue v3 = rdb_column_value(stmt, 3);
+    EXPECT_EQ(v3.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(v3.str_val, "2024-01-01");
+
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbNullTest, MixedNulls) {
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT int_col, text_col, real_col FROM nullable_test WHERE id = 3");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+
+    RdbValue v0 = rdb_column_value(stmt, 0);
+    EXPECT_TRUE(v0.is_null);
+
+    RdbValue v1 = rdb_column_value(stmt, 1);
+    EXPECT_EQ(v1.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(v1.str_val, "world");
+
+    RdbValue v2 = rdb_column_value(stmt, 2);
+    EXPECT_TRUE(v2.is_null);
+
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbNullTest, NullableColumnMetadata) {
+    RdbTable* tbl = rdb_get_table(conn, "nullable_test");
+    // SQLite's PRAGMA table_info reports notnull=0 for INTEGER PRIMARY KEY
+    // (rowid alias can technically accept NULL in edge cases), so we check
+    // that explicitly-unconstrained columns are nullable.
+    RdbColumn* id = rdb_get_column(tbl, "id");
+    RdbColumn* int_col = rdb_get_column(tbl, "int_col");
+    RdbColumn* text_col = rdb_get_column(tbl, "text_col");
+
+    EXPECT_TRUE(id->primary_key);     // confirm it IS the primary key
+    EXPECT_TRUE(int_col->nullable);
+    EXPECT_TRUE(text_col->nullable);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §18 Large Integer / Edge Value Tests
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_EDGE = "temp/test_rdb_edge.db";
+
+static void create_edge_database(const char* path) {
+    sqlite3* db = NULL;
+    sqlite3_open(path, &db);
+
+    const char* ddl =
+        "CREATE TABLE edge_values ("
+        "  id INTEGER PRIMARY KEY,"
+        "  big_pos INTEGER,"
+        "  big_neg INTEGER,"
+        "  zero_int INTEGER,"
+        "  tiny_float REAL,"
+        "  neg_float REAL,"
+        "  empty_str TEXT,"
+        "  unicode_str TEXT"
+        ");"
+        "INSERT INTO edge_values VALUES "
+        "  (1, 9223372036854775807, -9223372036854775808, 0, "
+        "   0.000001, -99999.99, '', '日本語テスト');";
+
+    sqlite3_exec(db, ddl, NULL, NULL, NULL);
+    sqlite3_close(db);
+}
+
+class RdbEdgeTest : public ::testing::Test {
+protected:
+    Pool* pool;
+    RdbConn* conn;
+
+    void SetUp() override {
+        ensure_temp_dir();
+        pool = pool_create();
+        rdb_sqlite_register();
+        create_edge_database(TEST_DB_EDGE);
+        conn = rdb_open(pool, TEST_DB_EDGE, "sqlite", true);
+        ASSERT_NE(conn, nullptr);
+    }
+
+    void TearDown() override {
+        rdb_close(conn);
+        pool_destroy(pool);
+        unlink(TEST_DB_EDGE);
+    }
+};
+
+TEST_F(RdbEdgeTest, MaxInt64) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT big_pos FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.int_val, INT64_MAX);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, MinInt64) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT big_neg FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.int_val, INT64_MIN);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, ZeroInt) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT zero_int FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_INT);
+    EXPECT_EQ(val.int_val, 0);
+    EXPECT_FALSE(val.is_null);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, TinyFloat) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT tiny_float FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_NEAR(val.float_val, 0.000001, 1e-7);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, NegativeFloat) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT neg_float FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_DOUBLE_EQ(val.float_val, -99999.99);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, EmptyString) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT empty_str FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_STRING);
+    EXPECT_EQ(val.str_len, 0);
+    EXPECT_STREQ(val.str_val, "");
+    EXPECT_FALSE(val.is_null);
+    rdb_finalize(stmt);
+}
+
+TEST_F(RdbEdgeTest, UnicodeString) {
+    RdbStmt* stmt = rdb_prepare(conn, "SELECT unicode_str FROM edge_values");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_STRING);
+    EXPECT_STREQ(val.str_val, "日本語テスト");
+    EXPECT_GT(val.str_len, 0);
+    rdb_finalize(stmt);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §19 Read-Write Mode
+ * ══════════════════════════════════════════════════════════════════════ */
+
+static const char* TEST_DB_RW = "temp/test_rdb_rw.db";
+
+TEST_F(RdbTest, OpenReadWrite) {
+    // create a writable database
+    sqlite3* db = NULL;
+    sqlite3_open(TEST_DB_RW, &db);
+    sqlite3_exec(db, "CREATE TABLE t (id INTEGER)", NULL, NULL, NULL);
+    sqlite3_close(db);
+
+    Pool* p = pool_create();
+    RdbConn* conn = rdb_open(p, TEST_DB_RW, "sqlite", false);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_FALSE(conn->readonly);
+
+    // should be able to insert
+    RdbStmt* stmt = rdb_prepare(conn, "INSERT INTO t VALUES (1)");
+    ASSERT_NE(stmt, nullptr);
+    int rc = rdb_step(stmt);
+    EXPECT_EQ(rc, RDB_DONE);
+    rdb_finalize(stmt);
+
+    // verify insert
+    stmt = rdb_prepare(conn, "SELECT id FROM t");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.int_val, 1);
+    rdb_finalize(stmt);
+
+    rdb_close(conn);
+    pool_destroy(p);
+    unlink(TEST_DB_RW);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §20 Multiple Statements on Same Connection
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(RdbTest, MultipleStatementsSequential) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+
+    // first query
+    RdbStmt* s1 = rdb_prepare(conn, "SELECT COUNT(*) FROM authors");
+    ASSERT_EQ(rdb_step(s1), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(s1, 0).int_val, 3);
+    rdb_finalize(s1);
+
+    // second query on same connection
+    RdbStmt* s2 = rdb_prepare(conn, "SELECT COUNT(*) FROM books");
+    ASSERT_EQ(rdb_step(s2), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(s2, 0).int_val, 3);
+    rdb_finalize(s2);
+
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, JoinQuery) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT b.title, a.name FROM books b "
+        "JOIN authors a ON b.author_id = a.id "
+        "ORDER BY b.id");
+    ASSERT_NE(stmt, nullptr);
+
+    // first row
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue title = rdb_column_value(stmt, 0);
+    RdbValue author = rdb_column_value(stmt, 1);
+    EXPECT_STREQ(title.str_val, "Lambda Calculus");
+    EXPECT_STREQ(author.str_val, "Alice");
+
+    // count remaining rows
+    int rows = 1;
+    while (rdb_step(stmt) == RDB_ROW) rows++;
+    EXPECT_EQ(rows, 3);
+
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, AggregateQuery) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT AVG(rating) FROM authors");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    RdbValue val = rdb_column_value(stmt, 0);
+    EXPECT_EQ(val.type, RDB_TYPE_FLOAT);
+    // avg of 4.8, 3.5, 4.2 = 4.166...
+    EXPECT_NEAR(val.float_val, 4.1666, 0.01);
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, GroupByQuery) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT author_id, COUNT(*) FROM books GROUP BY author_id ORDER BY author_id");
+    ASSERT_NE(stmt, nullptr);
+
+    // Alice has 2 books
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 1);
+    EXPECT_EQ(rdb_column_value(stmt, 1).int_val, 2);
+
+    // Bob has 1 book
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_EQ(rdb_column_value(stmt, 0).int_val, 2);
+    EXPECT_EQ(rdb_column_value(stmt, 1).int_val, 1);
+
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, SubqueryBind) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    RdbStmt* stmt = rdb_prepare(conn,
+        "SELECT title FROM books WHERE author_id = ("
+        "  SELECT id FROM authors WHERE name = ?"
+        ") ORDER BY title");
+    ASSERT_NE(stmt, nullptr);
+    rdb_bind_string(stmt, 1, "Alice");
+
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_STREQ(rdb_column_value(stmt, 0).str_val, "Lambda Calculus");
+    ASSERT_EQ(rdb_step(stmt), RDB_ROW);
+    EXPECT_STREQ(rdb_column_value(stmt, 0).str_val, "Type Theory");
+    EXPECT_EQ(rdb_step(stmt), RDB_DONE);
+
+    rdb_finalize(stmt);
+    rdb_close(conn);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §21 Schema Reload
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(RdbTest, SchemaReload) {
+    Pool* p = pool_create();
+    // create a db and add a table after initial schema load
+    sqlite3* db = NULL;
+    const char* path = "temp/test_rdb_reload.db";
+    sqlite3_open(path, &db);
+    sqlite3_exec(db, "CREATE TABLE t1 (id INTEGER)", NULL, NULL, NULL);
+    sqlite3_close(db);
+
+    RdbConn* conn = rdb_open(p, path, "sqlite", false);
+    rdb_load_schema(conn);
+    EXPECT_EQ(conn->schema.table_count, 1);
+
+    // add another table via raw sqlite from outside
+    db = (sqlite3*)conn->handle;
+    sqlite3_exec(db, "CREATE TABLE t2 (id INTEGER)", NULL, NULL, NULL);
+
+    // reload schema should pick up new table
+    rdb_load_schema(conn);
+    EXPECT_EQ(conn->schema.table_count, 2);
+
+    rdb_close(conn);
+    pool_destroy(p);
+    unlink(path);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §22 Error After Bad Prepare
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(RdbTest, ErrorMsgAfterBadPrepare) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    rdb_prepare(conn, "SELECT * FROM nonexistent_table");
+    const char* msg = rdb_error_msg(conn);
+    ASSERT_NE(msg, nullptr);
+    // should mention the table
+    EXPECT_NE(strstr(msg, "nonexistent_table"), nullptr);
+    rdb_close(conn);
+}

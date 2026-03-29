@@ -1728,6 +1728,20 @@
                         "icon": "🔄"
                     },
                     {
+                        "source": "test_input_rdb_gtest.cpp",
+                        "name": "Input RDB Plugin Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_input_rdb_gtest.exe",
+                        "icon": "🗄️"
+                    },
+                    {
                         "source": "test_yaml_suite_gtest.cpp",
                         "name": "YAML Test Suite Conformance",
                         "dependencies": [

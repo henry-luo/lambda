@@ -1,0 +1,12 @@
+3
+3
+"id"
+1
+true
+"name"
+2
+false
+7
+1
+["category_id", "categories", "id"]
+true
