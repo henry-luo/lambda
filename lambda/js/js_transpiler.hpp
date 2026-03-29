@@ -195,6 +195,8 @@ Item js_array_pop(Item array);
 Item js_string_method(Item str, Item method_name, Item* args, int argc);
 Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 Item js_math_method(Item method_name, Item* args, int argc);
+Item js_math_apply(Item method_name, Item args_array);
+Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_math_property(Item prop_name);
 
 // Prototype and inheritance

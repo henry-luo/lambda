@@ -427,38 +427,139 @@ extern "C" Item js_string_fromCharCode(Item code_item) {
     return (Item){.item = s2it(heap_strcpy(buf, len))};
 }
 
+// Helper: encode a UTF-16 code unit to UTF-8 into buf, return bytes written
+static int encode_charcode_utf8(char* buf, int code) {
+    code &= 0xFFFF; // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
+    if (code < 128) {
+        buf[0] = (char)code;
+        return 1;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+        return 2;
+    } else {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+        return 3;
+    }
+}
+
 // Multi-argument String.fromCharCode: js_string_fromCharCode_array(Item arr)
-// Takes a Lambda Array of code points and returns a concatenated string
+// Takes a Lambda Array or TypedArray of code points and returns a concatenated string
 extern "C" Item js_string_fromCharCode_array(Item arr_item) {
-    if (get_type_id(arr_item) != LMD_TYPE_ARRAY) {
+    TypeId type = get_type_id(arr_item);
+
+    // Handle TypedArray (Uint8Array, Int32Array, etc.)
+    if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
+        JsTypedArray* ta = (JsTypedArray*)arr_item.map->data;
+        int len = ta->length;
+        if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
+        char* buf = (char*)malloc(len * 3 + 1);
+        int pos = 0;
+        for (int i = 0; i < len; i++) {
+            int code = 0;
+            switch (ta->element_type) {
+            case JS_TYPED_UINT8:   code = ((uint8_t*)ta->data)[i]; break;
+            case JS_TYPED_INT8:    code = ((int8_t*)ta->data)[i]; break;
+            case JS_TYPED_UINT16:  code = ((uint16_t*)ta->data)[i]; break;
+            case JS_TYPED_INT16:   code = ((int16_t*)ta->data)[i]; break;
+            case JS_TYPED_UINT32:  code = (int)((uint32_t*)ta->data)[i]; break;
+            case JS_TYPED_INT32:   code = ((int32_t*)ta->data)[i]; break;
+            case JS_TYPED_FLOAT32: code = (int)((float*)ta->data)[i]; break;
+            case JS_TYPED_FLOAT64: code = (int)((double*)ta->data)[i]; break;
+            }
+            pos += encode_charcode_utf8(buf + pos, code);
+        }
+        buf[pos] = '\0';
+        Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
+        free(buf);
+        return result;
+    }
+
+    if (type != LMD_TYPE_ARRAY) {
         return js_string_fromCharCode(arr_item); // fallback: single arg
     }
     Array* arr = arr_item.array;
     int len = arr->length;
     if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
-    // Each char can be up to 3 bytes in UTF-8
     char* buf = (char*)malloc(len * 3 + 1);
     int pos = 0;
     for (int i = 0; i < len; i++) {
         int code = 0;
-        TypeId type = get_type_id(arr->items[i]);
-        if (type == LMD_TYPE_INT) {
+        TypeId itype = get_type_id(arr->items[i]);
+        if (itype == LMD_TYPE_INT) {
             code = (int)it2i(arr->items[i]);
-        } else if (type == LMD_TYPE_FLOAT) {
+        } else if (itype == LMD_TYPE_FLOAT) {
             code = (int)it2d(arr->items[i]);
         }
-        // truncate to 16-bit (JS fromCharCode uses UTF-16 code units)
-        code &= 0xFFFF;
-        if (code < 128) {
-            buf[pos++] = (char)code;
-        } else if (code < 0x800) {
-            buf[pos++] = (char)(0xC0 | (code >> 6));
-            buf[pos++] = (char)(0x80 | (code & 0x3F));
-        } else {
-            buf[pos++] = (char)(0xE0 | (code >> 12));
-            buf[pos++] = (char)(0x80 | ((code >> 6) & 0x3F));
-            buf[pos++] = (char)(0x80 | (code & 0x3F));
+        pos += encode_charcode_utf8(buf + pos, code);
+    }
+    buf[pos] = '\0';
+    Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
+    free(buf);
+    return result;
+}
+
+// Helper: encode a full Unicode code point to UTF-8 (up to 4 bytes)
+static int encode_codepoint_utf8(char* buf, int code) {
+    if (code < 0 || code > 0x10FFFF) return 0;
+    if (code < 0x80) {
+        buf[0] = (char)code;
+        return 1;
+    } else if (code < 0x800) {
+        buf[0] = (char)(0xC0 | (code >> 6));
+        buf[1] = (char)(0x80 | (code & 0x3F));
+        return 2;
+    } else if (code < 0x10000) {
+        buf[0] = (char)(0xE0 | (code >> 12));
+        buf[1] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (code & 0x3F));
+        return 3;
+    } else {
+        buf[0] = (char)(0xF0 | (code >> 18));
+        buf[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (code & 0x3F));
+        return 4;
+    }
+}
+
+// String.fromCodePoint(cp) — single code point
+extern "C" Item js_string_fromCodePoint(Item code_item) {
+    int code = 0;
+    TypeId type = get_type_id(code_item);
+    if (type == LMD_TYPE_INT) {
+        code = (int)it2i(code_item);
+    } else if (type == LMD_TYPE_FLOAT) {
+        code = (int)it2d(code_item);
+    }
+    char buf[5];
+    int len = encode_codepoint_utf8(buf, code);
+    buf[len] = '\0';
+    return (Item){.item = s2it(heap_strcpy(buf, len))};
+}
+
+// String.fromCodePoint(cp1, cp2, ...) — multiple code points via array
+extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
+    TypeId type = get_type_id(arr_item);
+    if (type != LMD_TYPE_ARRAY) {
+        return js_string_fromCodePoint(arr_item);
+    }
+    Array* arr = arr_item.array;
+    int len = arr->length;
+    if (len == 0) return (Item){.item = s2it(heap_strcpy("", 0))};
+    char* buf = (char*)malloc(len * 4 + 1);
+    int pos = 0;
+    for (int i = 0; i < len; i++) {
+        int code = 0;
+        TypeId itype = get_type_id(arr->items[i]);
+        if (itype == LMD_TYPE_INT) {
+            code = (int)it2i(arr->items[i]);
+        } else if (itype == LMD_TYPE_FLOAT) {
+            code = (int)it2d(arr->items[i]);
         }
+        pos += encode_codepoint_utf8(buf + pos, code);
     }
     buf[pos] = '\0';
     Item result = (Item){.item = s2it(heap_strcpy(buf, pos))};
@@ -867,10 +968,34 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
 
 extern "C" Item js_has_own_property(Item obj, Item key) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    Item k = js_to_string(key);
-    // direct map_get — no prototype chain walk
-    Item val = map_get(obj.map, k);
-    return (Item){.item = b2it(val.item != ItemNull.item)};
+    // Convert symbol keys to their internal string representation
+    Item k;
+    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -1000000) {
+        int64_t id = -(it2i(key) + 1000000);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+        k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    } else {
+        k = js_to_string(key);
+    }
+    if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+    String* ks = it2s(k);
+    if (!ks) return (Item){.item = b2it(false)};
+    Map* m = obj.map;
+    if (!m || !m->type) return (Item){.item = b2it(false)};
+    TypeMap* tm = (TypeMap*)m->type;
+    // Check shape for key existence — unlike map_get which returns ItemNull for both
+    // "not found" and "found with null value", causing hasOwnProperty to incorrectly
+    // return false for properties set to null.
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        if (e->name && e->name->length == (size_t)ks->len &&
+            strncmp(e->name->str, ks->chars, ks->len) == 0) {
+            return (Item){.item = b2it(true)};
+        }
+        e = e->next;
+    }
+    return (Item){.item = b2it(false)};
 }
 
 // =============================================================================
@@ -956,6 +1081,17 @@ extern "C" Item js_array_from(Item iterable) {
             String* ch = heap_strcpy(&s->chars[i], 1);
             js_array_push(result, (Item){.item = s2it(ch)});
         }
+        return result;
+    }
+    // Use js_iterable_to_array for Map, Set, generators, and other iterables
+    Item converted = js_iterable_to_array(iterable);
+    if (get_type_id(converted) == LMD_TYPE_ARRAY) {
+        // shallow copy to return a new array
+        Array* src = converted.array;
+        Item result = js_array_new(src->length);
+        Array* dst = result.array;
+        memcpy(dst->items, src->items, src->length * sizeof(Item));
+        dst->length = src->length;
         return result;
     }
     return js_array_new(0);

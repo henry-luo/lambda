@@ -84,8 +84,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     void* field_ptr = (char*)mp->data + byte_offset - bsize;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        // null value doesn't need to store anything - type_info says 1 byte but we don't write it
-        // just mark the slot with a zero byte for safety
+    case LMD_TYPE_UNDEFINED:
+        // null/undefined value doesn't need to store anything - just mark the slot
         *(bool*)field_ptr = false;
         break;
     case LMD_TYPE_BOOL:
@@ -127,7 +127,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         log_debug("set field of ANY type to type: %d", type_id);
         TypedItem titem = {.type_id = type_id, .item = item.item};
         switch (type_id) {
-        case LMD_TYPE_NULL: ;
+        case LMD_TYPE_NULL:
+        case LMD_TYPE_UNDEFINED:
             break; // no extra work needed
         case LMD_TYPE_BOOL:
             titem.bool_val = item.bool_val;  break;
@@ -204,8 +205,8 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     void* field_ptr = (char*)elmt->data + byte_offset - bsize;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        // null value doesn't need to store anything - type_info says 1 byte
-        // just mark the slot with a zero byte for safety (matching map_put fix)
+    case LMD_TYPE_UNDEFINED:
+        // null/undefined value doesn't need to store anything
         *(bool*)field_ptr = false;
         break;
     case LMD_TYPE_BOOL:
@@ -645,6 +646,16 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
                 url_destroy(abs_url);
                 return input;
             }
+
+            // check if file should be handled as a relational database
+            const char* type_str = type ? type->chars : NULL;
+            const char* rdb_driver = rdb_detect_format(pathname, type_str);
+            if (rdb_driver) {
+                log_debug("rdb: detected driver '%s' for path '%s'", rdb_driver, pathname);
+                Input* input = input_rdb_from_path(pathname, rdb_driver);
+                url_destroy(abs_url);
+                return input;
+            }
         }
 
         // URL points to a file - read as normal
@@ -740,6 +751,14 @@ Input* input_from_target(Target* target, String* type, String* flavor) {
                 pathname++; // Skip the leading '/' for Windows paths
             }
             #endif
+
+            // check if file should be handled as a relational database
+            const char* type_str = type ? type->chars : NULL;
+            const char* rdb_driver = rdb_detect_format(pathname, type_str);
+            if (rdb_driver) {
+                log_debug("input_from_target: rdb detected driver '%s' for '%s'", rdb_driver, pathname);
+                return input_rdb_from_path(pathname, rdb_driver);
+            }
 
             log_debug("input_from_target: reading file from path: %s", pathname ? pathname : "null");
             char* source = read_text_file(pathname);
