@@ -145,6 +145,11 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node);
 static MIR_op_t bm_transpile_string(BashMirTranspiler* mt, BashStringNode* node);
 static MIR_op_t bm_transpile_concat(BashMirTranspiler* mt, BashConcatNode* node);
+static MIR_label_t bm_new_label(BashMirTranspiler* mt);
+static MIR_reg_t bm_emit_call_0(BashMirTranspiler* mt, const char* fn_name);
+static void bm_emit_call_void_1(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1);
+static bool bm_statement_needs_debug_trap(BashAstNodeType node_type);
+static bool bm_emit_statement_debug_prelude(BashMirTranspiler* mt, BashAstNode* node, MIR_label_t* skip_label);
 
 // ============================================================================
 // Helpers
@@ -173,6 +178,39 @@ static MIR_reg_t bm_new_temp(BashMirTranspiler* mt) {
     char name[32];
     snprintf(name, sizeof(name), "_bt%d", mt->tp->temp_var_counter++);
     return MIR_new_func_reg(mt->ctx, mt->current_func, MIR_T_I64, name);
+}
+
+static bool bm_statement_needs_debug_trap(BashAstNodeType node_type) {
+    switch (node_type) {
+    case BASH_AST_NODE_PROGRAM:
+    case BASH_AST_NODE_FUNCTION_DEF:
+    case BASH_AST_NODE_PIPELINE:
+    case BASH_AST_NODE_LIST:
+    case BASH_AST_NODE_BLOCK:
+    case BASH_AST_NODE_COMPOUND_STATEMENT:
+    case BASH_AST_NODE_REDIRECTED:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool bm_emit_statement_debug_prelude(BashMirTranspiler* mt, BashAstNode* node, MIR_label_t* skip_label) {
+    if (!node) return false;
+
+    TSPoint start = ts_node_start_point(node->node);
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+
+    if (!bm_statement_needs_debug_trap(node->node_type)) return false;
+
+    *skip_label = bm_new_label(mt);
+    MIR_reg_t debug_result = bm_emit_call_0(mt, "bash_run_debug_trap");
+    MIR_append_insn(mt->ctx, mt->current_func_item,
+        MIR_new_insn(mt->ctx, MIR_BEQ,
+                     MIR_new_label_op(mt->ctx, *skip_label),
+                     MIR_new_reg_op(mt->ctx, debug_result),
+                     MIR_new_uint_op(mt->ctx, i2it(2))));
+    return true;
 }
 
 static MIR_label_t bm_new_label(BashMirTranspiler* mt) {
@@ -428,6 +466,9 @@ static MIR_op_t bm_emit_int_literal(BashMirTranspiler* mt, int64_t value) {
 static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     if (!node) return;
 
+    MIR_label_t debug_skip = NULL;
+    bool has_debug_skip = bm_emit_statement_debug_prelude(mt, node, &debug_skip);
+
     switch (node->node_type) {
     case BASH_AST_NODE_COMMAND: {
         BashCommandNode* cmd = (BashCommandNode*)node;
@@ -678,6 +719,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             ret_val = MIR_new_uint_op(mt->ctx, i2it(0));
         }
         // pop scope frame before leaving the function
+        bm_emit_call_void_0(mt, "bash_pop_funcname");
         bm_emit_call_void_0(mt, "bash_scope_pop");
         bm_emit_call_void_0(mt, "bash_pop_positional");
         MIR_append_insn(mt->ctx, mt->current_func_item,
@@ -692,6 +734,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         }
         // run EXIT trap before terminating
         bm_emit_call_void_0(mt, "bash_trap_run_exit");
+        bm_emit_call_void_0(mt, "bash_pop_funcname");
         MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
         MIR_append_insn(mt->ctx, mt->current_func_item,
             MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
@@ -737,6 +780,10 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     default:
         log_debug("bash-mir: unhandled statement type %d", node->node_type);
         break;
+    }
+
+    if (has_debug_skip) {
+        MIR_append_insn(mt->ctx, mt->current_func_item, debug_skip);
     }
 }
 
@@ -902,6 +949,11 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_ACCESS: {
         BashArrayAccessNode* access = (BashArrayAccessNode*)node;
+        if (access->name && access->name->len == 8 && memcmp(access->name->chars, "FUNCNAME", 8) == 0) {
+            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_funcname", idx_val);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
         MIR_op_t arr_val = bm_emit_get_var(mt, access->name->chars);
         MIR_op_t idx_val = bm_transpile_node(mt, access->index);
         const char* fn = bm_is_assoc_var(mt, access->name->chars)
@@ -1032,6 +1084,10 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
 
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node) {
     if (node->name) {
+        if (node->name->len == 6 && memcmp(node->name->chars, "LINENO", 6) == 0) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_lineno");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
         return bm_emit_get_var(mt, node->name->chars);
     }
     return bm_emit_string_literal(mt, "", 0);
@@ -1594,6 +1650,27 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                 }
             }
             if (arg) arg = arg->next;
+        }
+        return bm_emit_int_literal(mt, 0);
+    }
+
+    // shopt -s extdebug / shopt -u extdebug
+    if (cmd_len == 5 && memcmp(cmd_name, "shopt", 5) == 0) {
+        BashAstNode* first = cmd->args;
+        BashAstNode* second = first ? first->next : NULL;
+        if (first && second && first->node_type == BASH_AST_NODE_WORD && second->node_type == BASH_AST_NODE_WORD) {
+            BashWordNode* op = (BashWordNode*)first;
+            BashWordNode* opt = (BashWordNode*)second;
+            if (op->text && opt->text && opt->text->len == 8 && memcmp(opt->text->chars, "extdebug", 8) == 0) {
+                bool enable = (op->text->len == 2 && memcmp(op->text->chars, "-s", 2) == 0);
+                bool disable = (op->text->len == 2 && memcmp(op->text->chars, "-u", 2) == 0);
+                if (enable || disable) {
+                    MIR_op_t opt_val = bm_emit_string_literal(mt, "extdebug", 8);
+                    bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                        MIR_new_int_op(mt->ctx, enable ? 1 : 0));
+                    return bm_emit_int_literal(mt, 0);
+                }
+            }
         }
         return bm_emit_int_literal(mt, 0);
     }
@@ -2377,11 +2454,14 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
         MIR_new_reg_op(mt->ctx, args_reg), MIR_new_reg_op(mt->ctx, argc_reg));
     // push a new dynamic scope frame for local variables
     bm_emit_call_void_0(mt, "bash_scope_push");
+    MIR_op_t func_name_val = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+    bm_emit_call_void_1(mt, "bash_push_funcname", func_name_val);
 
     // transpile function body
     bm_transpile_statement(mt, node->body);
 
     // pop scope frame and restore positional params
+    bm_emit_call_void_0(mt, "bash_pop_funcname");
     bm_emit_call_void_0(mt, "bash_scope_pop");
     bm_emit_call_void_0(mt, "bash_pop_positional");
 
@@ -2855,17 +2935,8 @@ extern "C" Item bash_eval_string(Item code) {
     MIR_load_module(ctx, mt->module);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
-    typedef Item (*eval_entry_t)(void);
-    eval_entry_t entry = (eval_entry_t)find_func(ctx, func_name);
-
-    Item result = {.item = i2it(0)};
-    if (entry) {
-        result = entry();
-    } else {
-        log_error("bash: eval: failed to find entry function '%s'", func_name);
-    }
-
-    // register any user functions so they're callable from outer script
+    // register eval-local user functions before executing entry so trap/eval code
+    // can call functions defined earlier in the same snippet
     size_t iter = 0;
     void* item_ptr;
     while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
@@ -2876,6 +2947,16 @@ extern "C" Item bash_eval_string(Item code) {
         if (func_ptr) {
             bash_register_rt_func(uf->name, func_ptr);
         }
+    }
+
+    typedef Item (*eval_entry_t)(void);
+    eval_entry_t entry = (eval_entry_t)find_func(ctx, func_name);
+
+    Item result = {.item = i2it(0)};
+    if (entry) {
+        result = entry();
+    } else {
+        log_error("bash: eval: failed to find entry function '%s'", func_name);
     }
 
     // save ctx to keep function pointers valid
@@ -3010,6 +3091,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     mt->current_func_item = MIR_new_func(ctx, "bash_main", 1, &ret_type, 0);
     mt->current_func = mt->current_func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
+    bm_emit_call_void_1(mt, "bash_push_funcname", bm_emit_string_literal(mt, "main", 4));
 
     stmt = program->body;
     while (stmt) {
@@ -3019,6 +3101,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 
     // run EXIT trap before returning from main script
     bm_emit_call_void_0(mt, "bash_trap_run_exit");
+    bm_emit_call_void_0(mt, "bash_pop_funcname");
 
     // return exit code
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
@@ -3041,6 +3124,20 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 #endif
 
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    // register top-level user functions before executing main so eval/trap code
+    // can resolve functions defined in the script body
+    size_t iter = 0;
+    void* item_ptr;
+    while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
+        BashMirUserFunc* uf = (BashMirUserFunc*)item_ptr;
+        char full_name[160];
+        snprintf(full_name, sizeof(full_name), "bash_uf_%s", uf->name);
+        BashRtFuncPtr func_ptr = (BashRtFuncPtr)find_func(ctx, full_name);
+        if (func_ptr) {
+            bash_register_rt_func(uf->name, func_ptr);
+        }
+    }
 
     // find and execute bash_main
     typedef Item (*bash_main_func_t)(void);

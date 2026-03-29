@@ -1591,6 +1591,11 @@ JitImport jit_runtime_imports[] = {
     {"bash_negate_exit_code", FPTR(bash_negate_exit_code)},
     {"bash_return_with_code", FPTR(bash_return_with_code)},
     {"bash_get_script_name", FPTR(bash_get_script_name)},
+    {"bash_get_lineno", FPTR(bash_get_lineno)},
+    {"bash_set_lineno", FPTR(bash_set_lineno)},
+    {"bash_get_funcname", FPTR(bash_get_funcname)},
+    {"bash_push_funcname", FPTR(bash_push_funcname)},
+    {"bash_pop_funcname", FPTR(bash_pop_funcname)},
     // output capture
     {"bash_begin_capture", FPTR(bash_begin_capture)},
     {"bash_end_capture", FPTR(bash_end_capture)},
@@ -1664,6 +1669,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_trap_set", FPTR(bash_trap_set)},
     {"bash_trap_run_exit", FPTR(bash_trap_run_exit)},
     {"bash_trap_check", FPTR(bash_trap_check)},
+    {"bash_run_debug_trap", FPTR(bash_run_debug_trap)},
     {"bash_eval_string", FPTR(bash_eval_string)},
 
     // ========================================================================
