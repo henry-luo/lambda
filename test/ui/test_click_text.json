@@ -1,5 +1,6 @@
 {
   "name": "Click on text - caret placement",
+  "html": "test/ui/test_click_text.html",
   "description": "Click on paragraph text and verify caret is placed on a text view",
   "events": [
     {"type": "log", "message": "=== Click on text test ==="},

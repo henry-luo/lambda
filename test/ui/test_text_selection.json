@@ -1,5 +1,6 @@
 {
   "name": "Text selection - double-click and click",
+  "html": "test/ui/test_text_selection.html",
   "description": "Test double-click word selection and single-click to collapse",
   "events": [
     {"type": "log", "message": "=== Text selection test ==="},

@@ -1,5 +1,6 @@
 {
   "name": "Click on elements - buttons and links",
+  "html": "test/ui/test_click_elements.html",
   "description": "Click on buttons and links by CSS selector and verify caret state",
   "events": [
     {"type": "log", "message": "=== Click elements test ==="},

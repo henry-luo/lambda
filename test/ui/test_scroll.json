@@ -1,5 +1,6 @@
 {
   "name": "Scroll test",
+  "html": "test/ui/test_scroll.html",
   "description": "Test scrolling and verify scroll position",
   "events": [
     {"type": "log", "message": "=== Scroll test ==="},

@@ -475,10 +475,32 @@ python3 temp/al2.py test/layout/reference/baseline_809_text_align.json
 | 2b | `baseline_503_styled_spans.html` | `ui_phase2b_styled_spans.json` | `assert_visible` on inline spans, `click` by selector and text |
 | 3a | `baseline_809_text_align.html` | `ui_phase3a_drag_select.json` | `mouse_drag`, `assert_selection is_collapsed: false` |
 
-The `"html"` field at the top of each JSON references the baseline HTML path
-relative to the project root. The GTest runner (`test/test_ui_automation_gtest.cpp`)
-reads this field with `extract_html_from_json()` to determine which HTML to
-load.
+#### How UI tests specify their HTML target
+
+Every UI test JSON file must contain a top-level `"html"` field with the path
+to its HTML file (relative to the project root). The GTest runner
+(`test/test_ui_automation_gtest.cpp`) reads this field with
+`extract_html_from_json()` to determine which page to load.
+
+```json
+{
+  "name": "Phase 1b: text align click test",
+  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "events": [...]
+}
+```
+
+The HTML path can point anywhere in the repo:
+- Baseline layout files: `"html": "test/layout/data/baseline/baseline_809_text_align.html"`
+- Co-located test HTML: `"html": "test/ui/test_click_elements.html"`
+
+JSON files without a valid `"html"` field (or whose HTML file doesn't exist)
+are skipped by the GTest runner.
+
+> **Legacy note**: The runner also has a fallback that matches a sibling
+> `.html` file by base name (e.g., `test_foo.json` → `test_foo.html`), but
+> all tests now use the explicit `"html"` field. New tests should always
+> include it.
 
 #### Running the tests
 
@@ -741,7 +763,8 @@ Event types needed: `type`, `check`, `select_option`, `assert_value`,
 ## GTest Integration
 
 The GTest runner at `test/test_ui_automation_gtest.cpp` auto-discovers all
-`test/ui/test_*.html` + `test/ui/test_*.json` pairs and runs each via:
+`*.json` files in `test/ui/` and reads each file's `"html"` field to resolve
+the HTML target. Each discovered test runs via:
 
 ```sh
 ./lambda.exe view <html> --event-file <json> --no-window

@@ -1,0 +1,29 @@
+{
+  "name": "Phase 1f: Click list elements (baseline_831)",
+  "html": "test/layout/data/baseline/baseline_831_list_elements.html",
+  "description": "Tests click hit-testing on list items. ul at (40,10) inside div padding 10. li1 'First item' text center (69,20). li2 'Second item' text center (79,40). li3 'Third item' text center (71,60). Body height=80, outside at y=100.",
+  "events": [
+    {"type": "log", "message": "=== Phase 1f: list element click tests ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- A. List item text clicks ---"},
+
+    {"type": "log", "message": "--- A1. Click list item 'First item' (69, 20) ---"},
+    {"type": "click", "x": 69, "y": 20},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A2. Click list item 'Second item' (79, 40) ---"},
+    {"type": "click", "x": 79, "y": 40},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A3. Click list item 'Third item' (71, 60) ---"},
+    {"type": "click", "x": 71, "y": 60},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- B. Click outside body to verify caret clears ---"},
+    {"type": "click", "x": 600, "y": 100},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "render", "file": "./temp/phase1f_list_elements.png"}
+  ]
+}

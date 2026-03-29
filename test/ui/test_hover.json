@@ -1,5 +1,6 @@
 {
   "name": "Hover over elements",
+  "html": "test/ui/test_hover.html",
   "description": "Move mouse over elements and verify hover target changes",
   "events": [
     {"type": "log", "message": "=== Hover test ==="},
