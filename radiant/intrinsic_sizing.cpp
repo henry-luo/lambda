@@ -746,7 +746,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ViewBlock* view = (ViewBlock*)element;
             CssEnum display_value = display_decl->value->data.keyword;
             // Set outer display
-            if (display_value == CSS_VALUE_INLINE) {
+            if (display_value == CSS_VALUE_NONE) {
+                view->display.outer = CSS_VALUE_NONE;
+            } else if (display_value == CSS_VALUE_INLINE) {
                 view->display.outer = CSS_VALUE_INLINE;
             } else if (display_value == CSS_VALUE_INLINE_BLOCK) {
                 view->display.outer = CSS_VALUE_INLINE_BLOCK;
@@ -762,6 +764,15 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
 
     log_debug("measure_element_intrinsic: tag=%s, outer=%d", element->node_name(),
               ((ViewBlock*)element)->display.outer);
+
+    // CSS 2.1 §9.2.4: Elements with display:none do not generate boxes
+    // and contribute zero intrinsic size.
+    {
+        ViewBlock* check_none = (ViewBlock*)element;
+        if (check_none->display.outer == CSS_VALUE_NONE || check_none->display.inner == CSS_VALUE_NONE) {
+            return sizes;
+        }
+    }
 
     // Detect table elements early (needed to skip explicit width shortcut for tables)
     bool is_table_display = false;
@@ -1594,23 +1605,35 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             is_inline = true;  // Text nodes are always inline (unless in flex container)
         } else if (child->is_element()) {
             DomElement* child_elem = child->as_element();
+
+            // CSS 2.1 §9.2.4: Skip display:none children — they generate no boxes
+            ViewBlock* child_vb = (ViewBlock*)child_elem;
+            if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
+                continue;
+            }
+
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+
+            // Re-check display:none after measurement (display may be resolved during measurement)
+            if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
+                continue;
+            }
+
             is_inline = is_inline_level_element(child_elem);
 
             log_debug("  child %s: min=%.1f, max=%.1f, is_inline=%d",
                       child_elem->node_name(), child_sizes.min_content, child_sizes.max_content, is_inline);
 
             // For inline elements, also add horizontal margins
+            // CSS Sizing 3 §4: Negative margins reduce the element's outer size contribution
             if (is_inline) {
                 ViewBlock* child_view = (ViewBlock*)child_elem;
                 if (child_view->bound) {
-                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO &&
-                        child_view->bound->margin.left >= 0) {
-                        child_sizes.max_content += (int)child_view->bound->margin.left;
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO) {
+                        child_sizes.max_content += child_view->bound->margin.left;
                     }
-                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO &&
-                        child_view->bound->margin.right >= 0) {
-                        child_sizes.max_content += (int)child_view->bound->margin.right;
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO) {
+                        child_sizes.max_content += child_view->bound->margin.right;
                     }
                 } else if (child_elem->specified_style) {
                     // Fallback: read margins from specified CSS style when bound isn't allocated
@@ -1822,13 +1845,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 ViewBlock* child_view = (ViewBlock*)child_elem;
                 if (child_view->bound) {
                     // Add margins to the child's width for proper shrink-to-fit
-                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO &&
-                        child_view->bound->margin.left >= 0) {
+                    // CSS Sizing 3 §4: Negative margins reduce the element's outer size
+                    if (child_view->bound->margin.left_type != CSS_VALUE_AUTO) {
                         margin_left = child_view->bound->margin.left;
                         child_width += margin_left;
                     }
-                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO &&
-                        child_view->bound->margin.right >= 0) {
+                    if (child_view->bound->margin.right_type != CSS_VALUE_AUTO) {
                         margin_right = child_view->bound->margin.right;
                         child_width += margin_right;
                     }
@@ -1902,7 +1924,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Floated block child: accumulate for side-by-side arrangement
                 // At max-content (infinite width), all floats fit on one line → sum widths
                 // At min-content, each float wraps to its own line → max of widths
-                float_max_sum += child_width;
+                // Pre-round each child's width to match the 0.5px ceil rounding applied
+                // during actual float layout (layout_block.cpp shrink-to-fit). This ensures
+                // the parent's intrinsic width accommodates the sum of rounded children,
+                // preventing float wrapping caused by cumulative rounding error.
+                float rounded_child = ceilf(child_width * 2.0f) / 2.0f;
+                float_max_sum += rounded_child;
                 float_min_max = max(float_min_max, child_sizes.min_content);
                 log_debug("  float child: accumulating max_sum=%.1f, min_max=%.1f",
                           float_max_sum, float_min_max);
