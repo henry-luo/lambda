@@ -497,11 +497,6 @@ The HTML path can point anywhere in the repo:
 JSON files without a valid `"html"` field (or whose HTML file doesn't exist)
 are skipped by the GTest runner.
 
-> **Legacy note**: The runner also has a fallback that matches a sibling
-> `.html` file by base name (e.g., `test_foo.json` → `test_foo.html`), but
-> all tests now use the explicit `"html"` field. New tests should always
-> include it.
-
 #### Running the tests
 
 ```sh

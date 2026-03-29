@@ -1,0 +1,15 @@
+{
+  "name": "List reflow test",
+  "html": "temp/test_list_reflow.html",
+  "events": [
+    {"type": "log", "message": "=== Click on input to trigger focus (and reflow) ==="},
+    {"type": "wait", "ms": 300},
+    {"type": "click", "x": 60, "y": 15},
+    {"type": "wait", "ms": 500},
+    {"type": "log", "message": "=== Click on list item text ==="},
+    {"type": "click", "x": 70, "y": 60},
+    {"type": "wait", "ms": 500},
+    {"type": "assert_caret", "view_type": 1},
+    {"type": "render", "file": "./temp/test_list_reflow.png"}
+  ]
+}

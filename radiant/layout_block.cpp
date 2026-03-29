@@ -2308,6 +2308,13 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
 
+    // Guard against re-insertion during reflow: if pseudo is already a child
+    // of parent, skip insertion to prevent creating circular sibling links
+    // (e.g., marker->next_sibling = marker) which cause infinite loops.
+    for (DomNode* c = parent->first_child; c; c = c->next_sibling) {
+        if (c == (DomNode*)pseudo) return;
+    }
+
     if (is_before) {
         // Insert as first child
         DomNode* old_first = parent->first_child;
