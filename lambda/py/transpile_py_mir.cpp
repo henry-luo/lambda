@@ -26,6 +26,7 @@
 #else
 #include <alloca.h>
 #endif
+#include <sys/stat.h>
 
 // External reference to Lambda runtime context
 extern "C" Context* _lambda_rt;
@@ -4203,6 +4204,236 @@ static void pm_transpile_match(PyMirTranspiler* mt, PyMatchNode* mn) {
 }
 
 // ============================================================================
+// Package / module resolution helper (Phase E)
+// ============================================================================
+
+// Check if a file exists and is a regular file
+static bool pm_file_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Check if a directory exists
+static bool pm_dir_exists(const char* path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Count leading dots in a module name for relative imports
+static int pm_count_leading_dots(const char* name, int len) {
+    int count = 0;
+    while (count < len && name[count] == '.') count++;
+    return count;
+}
+
+// Try loading a module from a base path (without extension).
+// Tries: base_path.py, base_path/__init__.py, base_path.js, base_path.ls
+// Returns the loaded namespace Item or ItemNull.
+static Item pm_try_load_module(Runtime* runtime, const char* base_path) {
+    StrBuf* try_buf = strbuf_new();
+    Item ns = ItemNull;
+
+    // try base_path.py
+    strbuf_append_format(try_buf, "%s.py", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        // check circular import
+        if (module_is_loading(try_buf->str)) {
+            ModuleDescriptor* desc = module_get(try_buf->str);
+            if (desc) {
+                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+                strbuf_free(try_buf);
+                return desc->namespace_obj;
+            }
+        }
+        ns = load_py_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path/__init__.py (package directory)
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s/__init__.py", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        if (module_is_loading(try_buf->str)) {
+            ModuleDescriptor* desc = module_get(try_buf->str);
+            if (desc) {
+                log_info("py-pkg: circular import detected for '%s', returning partial namespace", try_buf->str);
+                strbuf_free(try_buf);
+                return desc->namespace_obj;
+            }
+        }
+        ns = load_py_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path.js
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s.js", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        ns = load_js_module(runtime, try_buf->str);
+        if (ns.item != ItemNull.item) {
+            strbuf_free(try_buf);
+            return ns;
+        }
+    }
+
+    // try base_path.ls
+    strbuf_reset(try_buf);
+    strbuf_append_format(try_buf, "%s.ls", base_path);
+    if (pm_file_exists(try_buf->str)) {
+        Script* script = load_script(runtime, try_buf->str, NULL, true);
+        if (script && script->ast_root) {
+            ns = module_build_lambda_namespace(script);
+            if (ns.item != ItemNull.item) {
+                strbuf_free(try_buf);
+                return ns;
+            }
+        }
+    }
+
+    strbuf_free(try_buf);
+    return ItemNull;
+}
+
+// Resolve a Python module import to a namespace Item.
+// Handles built-in modules, single-file imports, package imports (pkg/__init__.py),
+// dotted imports (pkg.submod), relative imports (from .x, from ..x), and circular imports.
+static Item pm_resolve_py_import(const char* mod_name, int mod_len,
+                                  const char* script_filename, Runtime* runtime) {
+    // check built-in modules first
+    PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
+    if (builtin_init) {
+        return builtin_init();
+    }
+
+    // determine base directory of the current script
+    StrBuf* base_dir = strbuf_new();
+    const char* last_slash = script_filename ? strrchr(script_filename, '/') : NULL;
+    if (last_slash) {
+        strbuf_append_format(base_dir, "%.*s", (int)(last_slash - script_filename), script_filename);
+    } else {
+        strbuf_append_str(base_dir, ".");
+    }
+
+    // count leading dots for relative imports
+    int dot_count = pm_count_leading_dots(mod_name, mod_len);
+    const char* rel_name = mod_name + dot_count;
+    int rel_len = mod_len - dot_count;
+
+    // resolve base directory for relative imports (go up directories)
+    StrBuf* resolve_dir = strbuf_new();
+    if (dot_count > 0) {
+        // relative import: start from current script directory
+        strbuf_append_str(resolve_dir, base_dir->str);
+        // each dot beyond the first goes up one directory level
+        for (int d = 1; d < dot_count; d++) {
+            const char* up_slash = strrchr(resolve_dir->str, '/');
+            if (up_slash && up_slash != resolve_dir->str) {
+                int new_len = (int)(up_slash - resolve_dir->str);
+                resolve_dir->str[new_len] = '\0';
+                resolve_dir->length = new_len;
+            }
+        }
+    } else {
+        // absolute import: start from script directory
+        strbuf_append_str(resolve_dir, base_dir->str);
+    }
+
+    // build the base path: resolve_dir / rel_name (with dots converted to slashes)
+    StrBuf* base_path = strbuf_new();
+    strbuf_append_str(base_path, resolve_dir->str);
+
+    if (rel_len > 0) {
+        strbuf_append_char(base_path, '/');
+        for (int i = 0; i < rel_len; i++) {
+            strbuf_append_char(base_path, rel_name[i] == '.' ? '/' : rel_name[i]);
+        }
+    }
+
+    Item ns = ItemNull;
+
+    if (rel_len > 0) {
+        // has a module name after dots (or no dots at all)
+        const char* first_dot = (const char*)memchr(rel_name, '.', rel_len);
+        if (first_dot) {
+            // dotted import: e.g. pkg.submod
+            // Always use hierarchical loading so that each component gets attached
+            // to its parent namespace (e.g. mypkg.utils → mypkg_ns["utils"] = utils_ns)
+            {
+                int comp_start = 0;
+                Item parent_ns = ItemNull;
+                StrBuf* comp_path = strbuf_new();
+                strbuf_append_str(comp_path, resolve_dir->str);
+
+                for (int i = 0; i <= rel_len; i++) {
+                    if (i == rel_len || rel_name[i] == '.') {
+                        int comp_len = i - comp_start;
+                        if (comp_len > 0) {
+                            strbuf_append_char(comp_path, '/');
+                            strbuf_append_format(comp_path, "%.*s", comp_len, rel_name + comp_start);
+
+                            Item sub_ns = pm_try_load_module(runtime, comp_path->str);
+                            if (sub_ns.item == ItemNull.item) break;
+
+                            if (parent_ns.item != ItemNull.item) {
+                                // attach submodule as attribute of parent package
+                                Item key = {.item = s2it(heap_create_name(rel_name + comp_start, comp_len))};
+                                js_property_set(parent_ns, key, sub_ns);
+                            }
+                            parent_ns = sub_ns;
+                            ns = sub_ns;
+                        }
+                        comp_start = i + 1;
+                    }
+                }
+                strbuf_free(comp_path);
+            }
+        } else {
+            // simple (non-dotted) name
+            ns = pm_try_load_module(runtime, base_path->str);
+        }
+    } else if (dot_count > 0) {
+        // bare relative import: "from . import x" — module_name is just dots
+        // load the package directory's __init__.py
+        StrBuf* init_path = strbuf_new();
+        strbuf_append_format(init_path, "%s/__init__.py", resolve_dir->str);
+        if (pm_file_exists(init_path->str)) {
+            if (module_is_loading(init_path->str)) {
+                ModuleDescriptor* desc = module_get(init_path->str);
+                if (desc) ns = desc->namespace_obj;
+            } else {
+                ns = load_py_module(runtime, init_path->str);
+            }
+        }
+        strbuf_free(init_path);
+    }
+
+    // fallback: try relative to entry-point script directory
+    if (ns.item == ItemNull.item && py_entry_script_dir[0] && dot_count == 0) {
+        StrBuf* entry_path = strbuf_new();
+        strbuf_append_str(entry_path, py_entry_script_dir);
+        if (rel_len > 0) {
+            strbuf_append_char(entry_path, '/');
+            for (int i = 0; i < rel_len; i++) {
+                strbuf_append_char(entry_path, rel_name[i] == '.' ? '/' : rel_name[i]);
+            }
+        }
+        ns = pm_try_load_module(runtime, entry_path->str);
+        strbuf_free(entry_path);
+    }
+
+    strbuf_free(base_dir);
+    strbuf_free(resolve_dir);
+    strbuf_free(base_path);
+    return ns;
+}
+
+// ============================================================================
 // Statement dispatcher
 // ============================================================================
 
@@ -4775,77 +5006,24 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             if (dot) local_len = (int)(dot - mod_name);
         }
 
-        // resolve module path relative to source file directory
-        StrBuf* path_buf = strbuf_new();
-        if (mt->filename) {
-            const char* last_slash = strrchr(mt->filename, '/');
-            if (last_slash) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(last_slash - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-        } else {
-            strbuf_append_str(path_buf, "./");
-        }
-        // convert dots to slashes for sub-module paths
-        for (int i = 0; i < mod_len; i++) {
-            strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-        }
-
-        Item ns = ItemNull;
-
-        // --- check built-in modules first (Phase C/D) ---
-        PyBuiltinModuleInitFn builtin_init = py_stdlib_find_builtin(mod_name, mod_len);
-        if (builtin_init) {
-            ns = builtin_init();
-        }
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
 
         if (ns.item == ItemNull.item) {
-        StrBuf* try_buf = strbuf_new();
-
-        strbuf_append_format(try_buf, "%s.py", path_buf->str);
-        ns = load_py_module(mt->runtime, try_buf->str);
-
-        if (ns.item == ItemNull.item) {
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.js", path_buf->str);
-            ns = load_js_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.ls", path_buf->str);
-            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
-            if (script && script->ast_root) {
-                ns = module_build_lambda_namespace(script);
-            }
-        }
-
-        // fallback: try relative to entry-point script directory (for package imports)
-        if (ns.item == ItemNull.item && py_entry_script_dir[0]) {
-            StrBuf* root_buf = strbuf_new();
-            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.py", root_buf->str);
-            ns = load_py_module(mt->runtime, try_buf->str);
-            if (ns.item == ItemNull.item) {
-                strbuf_reset(try_buf);
-                strbuf_append_format(try_buf, "%s.js", root_buf->str);
-                ns = load_js_module(mt->runtime, try_buf->str);
-            }
-            strbuf_free(root_buf);
-        }
-
-        strbuf_free(try_buf);
-        } // end built-in check
-        strbuf_free(path_buf);
-
-        if (ns.item == ItemNull.item) {
-            log_error("py-mir: import '%.*s': module not found (no .py/.js/.ls)", mod_len, mod_name);
+            log_error("py-mir: import '%.*s': module not found", mod_len, mod_name);
             break;
+        }
+
+        // For dotted imports without alias (e.g. "import mypkg.utils"), the local
+        // binding is the FIRST component (mypkg), not the last (utils).
+        // pm_resolve_py_import returns the last component's namespace and attaches
+        // each component as an attribute of its parent. Re-resolve the first component.
+        if (!imp->alias) {
+            const char* dot = (const char*)memchr(mod_name, '.', mod_len);
+            if (dot) {
+                int first_len = (int)(dot - mod_name);
+                Item first_ns = pm_resolve_py_import(mod_name, first_len, mt->filename, mt->runtime);
+                if (first_ns.item != ItemNull.item) ns = first_ns;
+            }
         }
 
         // bind namespace map to _py_<localname>
@@ -4990,95 +5168,14 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
         break;
     }
     case PY_AST_NODE_IMPORT_FROM: {
-        // from ./module import name1, name2
+        // from <module> import name1, name2
         PyImportNode* imp = (PyImportNode*)stmt;
         if (!imp->module_name) break;
 
         const char* mod_name = imp->module_name->chars;
         int mod_len = (int)imp->module_name->len;
 
-        // resolve module path relative to the source file's directory
-        StrBuf* path_buf = strbuf_new();
-        // extract the directory of the current script for relative resolution
-        const char* script_dir_end = mt->filename ? strrchr(mt->filename, '/') : NULL;
-        if (mod_name[0] == '.') {
-            // explicit relative import (leading dot)
-            if (script_dir_end) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-            // append the module path (skip leading dot, convert dots to slashes)
-            for (int i = 1; i < mod_len; i++) {
-                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-        } else {
-            // absolute module name — resolve relative to script's directory
-            if (script_dir_end) {
-                strbuf_append_format(path_buf, "%.*s/", (int)(script_dir_end - mt->filename), mt->filename);
-            } else {
-                strbuf_append_str(path_buf, "./");
-            }
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(path_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-        }
-
-        // try loading as .py, .js, .ls
-        Item ns = ItemNull;
-        const char* base_path = path_buf->str;
-        int base_len = (int)path_buf->length;
-
-        // --- check built-in modules first (Phase C) ---
-        PyBuiltinModuleInitFn builtin_init_from = py_stdlib_find_builtin(mod_name, mod_len);
-        if (builtin_init_from) {
-            ns = builtin_init_from();
-        }
-
-        // try .py first
-        StrBuf* try_buf = strbuf_new();
-        if (ns.item == ItemNull.item) {
-        strbuf_append_format(try_buf, "%s.py", base_path);
-        ns = load_py_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            // try .js
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.js", base_path);
-            ns = load_js_module(mt->runtime, try_buf->str);
-        }
-
-        if (ns.item == ItemNull.item) {
-            // try .ls — load Lambda script and build namespace
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.ls", base_path);
-            Script* script = load_script(mt->runtime, try_buf->str, NULL, true);
-            if (script && script->ast_root) {
-                ns = module_build_lambda_namespace(script);
-            }
-        }
-
-        // fallback: try relative to entry-point script directory (for package imports)
-        if (ns.item == ItemNull.item && py_entry_script_dir[0] && mod_name[0] != '.') {
-            StrBuf* root_buf = strbuf_new();
-            strbuf_append_format(root_buf, "%s/", py_entry_script_dir);
-            for (int i = 0; i < mod_len; i++) {
-                strbuf_append_char(root_buf, mod_name[i] == '.' ? '/' : mod_name[i]);
-            }
-            strbuf_reset(try_buf);
-            strbuf_append_format(try_buf, "%s.py", root_buf->str);
-            ns = load_py_module(mt->runtime, try_buf->str);
-            if (ns.item == ItemNull.item) {
-                strbuf_reset(try_buf);
-                strbuf_append_format(try_buf, "%s.js", root_buf->str);
-                ns = load_js_module(mt->runtime, try_buf->str);
-            }
-            strbuf_free(root_buf);
-        }
-
-        strbuf_free(try_buf);
-        strbuf_free(path_buf);
+        Item ns = pm_resolve_py_import(mod_name, mod_len, mt->filename, mt->runtime);
 
         if (ns.item == ItemNull.item) {
             log_error("py-mir: failed to load module '%.*s'", mod_len, mod_name);
@@ -5117,6 +5214,77 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
         }
 
+        // determine the package directory for resolving submodule imports
+        // (needed for "from . import submod" where submod is a separate .py file,
+        // and for "from pkg import submod" where pkg is a package with __init__.py)
+        int dot_count = pm_count_leading_dots(mod_name, mod_len);
+        StrBuf* pkg_dir = NULL;
+        if (dot_count > 0) {
+            // relative import: compute the package directory
+            const char* last_slash = mt->filename ? strrchr(mt->filename, '/') : NULL;
+            pkg_dir = strbuf_new();
+            if (last_slash) {
+                strbuf_append_format(pkg_dir, "%.*s", (int)(last_slash - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(pkg_dir, ".");
+            }
+            for (int d = 1; d < dot_count; d++) {
+                const char* up = strrchr(pkg_dir->str, '/');
+                if (up && up != pkg_dir->str) {
+                    int new_len = (int)(up - pkg_dir->str);
+                    pkg_dir->str[new_len] = '\0';
+                    pkg_dir->length = new_len;
+                }
+            }
+            // if there's a module name after dots, append it
+            const char* rel_name = mod_name + dot_count;
+            int rel_len = mod_len - dot_count;
+            if (rel_len > 0) {
+                strbuf_append_char(pkg_dir, '/');
+                for (int i = 0; i < rel_len; i++) {
+                    strbuf_append_char(pkg_dir, rel_name[i] == '.' ? '/' : rel_name[i]);
+                }
+            }
+        } else if (mod_len > 0) {
+            // absolute import (e.g. "from mypkg import submod"):
+            // compute the package directory by resolving the module name as a directory
+            const char* script_dir_end = mt->filename ? strrchr(mt->filename, '/') : NULL;
+            StrBuf* candidate_dir = strbuf_new();
+            if (script_dir_end) {
+                strbuf_append_format(candidate_dir, "%.*s", (int)(script_dir_end - mt->filename), mt->filename);
+            } else {
+                strbuf_append_str(candidate_dir, ".");
+            }
+            strbuf_append_char(candidate_dir, '/');
+            for (int i = 0; i < mod_len; i++) {
+                strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
+            }
+            // only use it as pkg_dir if it's a package (has __init__.py)
+            StrBuf* init_check = strbuf_new();
+            strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
+            if (pm_file_exists(init_check->str)) {
+                pkg_dir = candidate_dir;
+            } else {
+                strbuf_free(candidate_dir);
+                // also try from py_entry_script_dir
+                if (py_entry_script_dir[0]) {
+                    strbuf_reset(init_check);
+                    candidate_dir = strbuf_new();
+                    strbuf_append_format(candidate_dir, "%s/", py_entry_script_dir);
+                    for (int i = 0; i < mod_len; i++) {
+                        strbuf_append_char(candidate_dir, mod_name[i] == '.' ? '/' : mod_name[i]);
+                    }
+                    strbuf_append_format(init_check, "%s/__init__.py", candidate_dir->str);
+                    if (pm_file_exists(init_check->str)) {
+                        pkg_dir = candidate_dir;
+                    } else {
+                        strbuf_free(candidate_dir);
+                    }
+                }
+            }
+            strbuf_free(init_check);
+        }
+
         // for each imported name, extract from namespace and store as variable
         PyAstNode* name_node = imp->names;
         while (name_node) {
@@ -5126,11 +5294,27 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                     const char* sym_name = name_imp->module_name->chars;
                     int sym_len = (int)name_imp->module_name->len;
 
-                    // get function from namespace
+                    // get from namespace
                     Item key = {.item = s2it(heap_create_name(sym_name, sym_len))};
                     Item value = js_property_get(ns, key);
 
-                    if (value.item != ItemNull.item) {
+                    // if not found in namespace and we have a package dir,
+                    // try loading as a submodule (from . import submod)
+                    // js_property_get returns UNDEFINED (not ItemNull) for missing keys
+                    bool not_in_ns = (value.item == ItemNull.item || get_type_id(value) == LMD_TYPE_UNDEFINED);
+                    if (not_in_ns && pkg_dir) {
+                        StrBuf* submod_path = strbuf_new();
+                        strbuf_append_format(submod_path, "%s/%.*s", pkg_dir->str, sym_len, sym_name);
+                        value = pm_try_load_module(mt->runtime, submod_path->str);
+                        if (value.item != ItemNull.item) {
+                            // also add to parent namespace for future lookups
+                            js_property_set(ns, key, value);
+                        }
+                        strbuf_free(submod_path);
+                    }
+
+                    bool value_valid = (value.item != ItemNull.item && get_type_id(value) != LMD_TYPE_UNDEFINED);
+                    if (value_valid) {
                         // use alias if provided, otherwise original name
                         const char* local_name = sym_name;
                         int local_len = sym_len;
@@ -5147,6 +5331,15 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
                             MIR_new_reg_op(mt->ctx, val_reg),
                             MIR_new_int_op(mt->ctx, (int64_t)value.item)));
                         pm_set_var(mt, vname, val_reg);
+
+                        // also store as module var for export and nested function access
+                        int imp_midx = pm_get_global_var_index(mt, vname);
+                        if (imp_midx >= 0) {
+                            pm_call_void_2(mt, "py_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, imp_midx),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+                        }
+
                         log_debug("py-mir: imported '%.*s' as '%s'", sym_len, sym_name, vname);
                     } else {
                         log_error("py-mir: name '%.*s' not found in module '%.*s'",
@@ -5156,6 +5349,7 @@ static void pm_transpile_statement(PyMirTranspiler* mt, PyAstNode* stmt) {
             }
             name_node = name_node->next;
         }
+        if (pkg_dir) strbuf_free(pkg_dir);
         break;
     }
     default:
@@ -7068,6 +7262,40 @@ static void pm_scan_module_vars(PyMirTranspiler* mt, PyAstNode* root) {
                     log_debug("py-mir: import var '%s' → module_var[%d]", var_name, idx);
                 }
             }
+        } else if (s->node_type == PY_AST_NODE_IMPORT_FROM && mt->global_var_count < 64) {
+            // register from...import names as module vars for export
+            PyImportNode* imp = (PyImportNode*)s;
+            PyAstNode* name_node = imp->names;
+            while (name_node && mt->global_var_count < 64) {
+                if (name_node->node_type == PY_AST_NODE_IMPORT) {
+                    PyImportNode* name_imp = (PyImportNode*)name_node;
+                    if (name_imp->module_name) {
+                        const char* local_name = name_imp->module_name->chars;
+                        int local_len = (int)name_imp->module_name->len;
+                        if (name_imp->alias) {
+                            local_name = name_imp->alias->chars;
+                            local_len = (int)name_imp->alias->len;
+                        }
+                        // skip wildcard import
+                        if (!(local_len == 1 && local_name[0] == '*')) {
+                            char var_name[132];
+                            snprintf(var_name, sizeof(var_name), "_py_%.*s", local_len, local_name);
+                            bool already = false;
+                            for (int i = 0; i < mt->global_var_count; i++) {
+                                if (strcmp(mt->global_var_names[i], var_name) == 0) { already = true; break; }
+                            }
+                            if (!already) {
+                                int idx = mt->module_var_count++;
+                                snprintf(mt->global_var_names[mt->global_var_count], 128, "%s", var_name);
+                                mt->global_var_indices[mt->global_var_count] = idx;
+                                mt->global_var_count++;
+                                log_debug("py-mir: from-import var '%s' → module_var[%d]", var_name, idx);
+                            }
+                        }
+                    }
+                }
+                name_node = name_node->next;
+            }
         }
         s = s->next;
     }
@@ -7378,6 +7606,11 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         log_debug("py-mir: module '%s' already loaded, returning cached namespace", py_path);
         return cached->namespace_obj;
     }
+    // check for circular import (module is currently being loaded)
+    if (cached && cached->loading) {
+        log_info("py-mir: circular import detected for '%s', returning partial namespace", py_path);
+        return cached->namespace_obj;
+    }
 
     char* source = read_text_file(py_path);
     if (!source) {
@@ -7472,6 +7705,9 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
     MIR_load_module(mt->ctx, mt->module);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
+    // mark module as loading before execution (circular import detection)
+    ModuleDescriptor* loading_desc = module_register_loading(py_path, "python");
+
     // execute py_main to run module-level code (assignments, etc.)
     typedef Item (*py_main_func_t)(Context*);
     py_main_func_t py_main = (py_main_func_t)find_func(ctx, "py_main");
@@ -7492,9 +7728,10 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         void* func_ptr = find_func(ctx, mir_name);
 
         if (func_ptr) {
-            // use js_new_function so js_function_get_ptr can extract func_ptr
-            // when Lambda imports this module via cross-language import path
-            Item val = js_new_function(func_ptr, fc->param_count);
+            // Use to_fn_n to create a Lambda Function* (compatible with py_call_function).
+            // js_new_function creates a JsFunction with a different struct layout,
+            // which causes py_call_function to read garbage fn->ptr and crash.
+            Item val = {.function = to_fn_n((fn_ptr)func_ptr, fc->param_count)};
             Item key = {.item = s2it(heap_create_name(fc->name))};
             js_property_set(ns, key, val);
             log_debug("py-mir: module export fn '%s' arity=%d", fc->name, fc->param_count);
@@ -7506,13 +7743,16 @@ Item load_py_module(Runtime* runtime, const char* py_path) {
         const char* var_name = mt->global_var_names[i];
         int var_idx = mt->global_var_indices[i];
         Item value = py_get_module_var(var_idx);
+        log_debug("py-mir: module var[%d] '%s' (slot %d) = 0x%llx type=%d",
+            i, var_name, var_idx, (unsigned long long)value.item, (int)get_type_id(value));
         if (value.item == ItemNull.item) continue;
         // strip _py_ prefix for the export key
         const char* export_name = (strncmp(var_name, "_py_", 4) == 0) ? var_name + 4 : var_name;
         Item key = {.item = s2it(heap_create_name(export_name))};
         // functions exported above take priority over module vars
         Item existing = js_property_get(ns, key);
-        if (existing.item == ItemNull.item) {
+        bool not_found = (existing.item == ItemNull.item || get_type_id(existing) == LMD_TYPE_UNDEFINED);
+        if (not_found) {
             js_property_set(ns, key, value);
             log_debug("py-mir: module export var '%s' type=%d", export_name, (int)get_type_id(value));
         }

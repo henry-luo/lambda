@@ -12,6 +12,7 @@
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/str.h"
 #include <cstring>
 #include <cmath>
 #include <cstdlib>
@@ -39,6 +40,20 @@ static int js_module_var_count = 0;
 // Helper to make JS undefined value
 static inline Item make_js_undefined() {
     return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
+// Symbol property key helpers: Symbols are encoded as negative ints (<= -1000000).
+// Convert symbol items to unique string keys for property storage.
+static inline bool js_key_is_symbol(Item key) {
+    if (get_type_id(key) != LMD_TYPE_INT) return false;
+    return it2i(key) <= -1000000;
+}
+
+static inline Item js_symbol_to_key(Item sym) {
+    int64_t id = -(it2i(sym) + 1000000);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
+    return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
 }
 
 extern "C" void js_set_module_var(int index, Item value) {
@@ -283,6 +298,12 @@ extern "C" bool js_is_truthy(Item value) {
     }
 }
 
+// js_is_nullish: returns true if value is null or undefined (for ?? operator)
+extern "C" int64_t js_is_nullish(Item value) {
+    TypeId type = get_type_id(value);
+    return (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) ? 1 : 0;
+}
+
 // =============================================================================
 // Helper: Get numeric value as double
 // =============================================================================
@@ -340,16 +361,23 @@ extern "C" Item js_add(Item left, Item right) {
         return fn_join(left_str, right_str);
     }
 
-    // Numeric addition — delegate to Lambda fn_add after coercion
-    return fn_add(js_to_number(left), js_to_number(right));
+    // Numeric addition — use double arithmetic for JS semantics
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l + r);
 }
 
 extern "C" Item js_subtract(Item left, Item right) {
-    return fn_sub(js_to_number(left), js_to_number(right));
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l - r);
 }
 
 extern "C" Item js_multiply(Item left, Item right) {
-    return fn_mul(js_to_number(left), js_to_number(right));
+    // Use double arithmetic for JS semantics (no integer overflow errors)
+    double l = js_get_number(left);
+    double r = js_get_number(right);
+    return js_make_number(l * r);
 }
 
 extern "C" Item js_divide(Item left, Item right) {
@@ -634,7 +662,7 @@ extern "C" Item js_typeof(Item value) {
         break;
     case LMD_TYPE_INT:
     case LMD_TYPE_FLOAT:
-        result = "number";
+        result = js_key_is_symbol(value) ? "symbol" : "number";
         break;
     case LMD_TYPE_STRING:
         result = "string";
@@ -672,14 +700,22 @@ struct JsFunction {
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return NULL;
+    // Try JsFunction layout first (func_ptr at offset 8)
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    return jsfn->func_ptr;
+    if (jsfn->func_ptr) return jsfn->func_ptr;
+    // Fall back to Function layout (ptr at offset 16)
+    Function* fn = fn_item.function;
+    return (void*)fn->ptr;
 }
 
 extern "C" int js_function_get_arity(Item fn_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return 0;
     JsFunction* jsfn = (JsFunction*)fn_item.function;
-    return jsfn->param_count;
+    // If func_ptr (offset 8) is set, it's JsFunction layout
+    if (jsfn->func_ptr) return jsfn->param_count;
+    // Otherwise it's Function layout — arity at offset 1
+    Function* fn = fn_item.function;
+    return fn->arity;
 }
 
 // P2: Pre-computed size class for sizeof(Map) = 32 bytes → SIZE_CLASSES[1] = 32.
@@ -928,6 +964,8 @@ static Item js_get_proto_key() {
 }
 
 extern "C" Item js_property_get(Item object, Item key) {
+    // Convert Symbol keys to unique string keys for property lookup
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
 
     if (type == LMD_TYPE_MAP) {
@@ -949,10 +987,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
                     JsTypedArray* ta = (JsTypedArray*)object.map->data;
-                    if (ta->buffer) {
-                        return js_arraybuffer_wrap(ta->buffer);
+                    if (!ta->buffer) {
+                        // Create a backing ArrayBuffer lazily for standalone typed arrays
+                        JsArrayBuffer* ab = (JsArrayBuffer*)malloc(sizeof(JsArrayBuffer));
+                        ab->data = ta->data;  // share the same data pointer
+                        ab->byte_length = ta->byte_length;
+                        ta->buffer = ab;
                     }
-                    return (Item){.item = ITEM_NULL};
+                    return js_arraybuffer_wrap(ta->buffer);
                 }
                 if (str_key->len == 17 && strncmp(str_key->chars, "BYTES_PER_ELEMENT", 17) == 0) {
                     JsTypedArray* ta = (JsTypedArray*)object.map->data;
@@ -1106,6 +1148,8 @@ extern "C" Item js_property_get(Item object, Item key) {
 }
 
 extern "C" Item js_property_set(Item object, Item key, Item value) {
+    // Convert Symbol keys to unique string keys for property storage
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
     TypeId type = get_type_id(object);
 
     // Array: result[i] = val or arr.length = n
@@ -1641,6 +1685,23 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
         bound->bound_argc = bound_argc;
     }
     return (Item){.function = (Function*)bound};
+}
+
+// js_func_bind: safe version that checks type first.
+// If func_item is a function → js_bind_function.
+// If func_item is a map/object → call its own .bind() method with the args.
+extern "C" Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc) {
+    if (get_type_id(func_item) == LMD_TYPE_FUNC) {
+        return js_bind_function(func_item, bound_this, bound_args, bound_argc);
+    }
+    // Not a function: call the object's own .bind method
+    // Reconstruct args as [bound_this, ...bound_args]
+    int total = 1 + bound_argc;
+    Item* args = (Item*)pool_calloc(js_input->pool, total * sizeof(Item));
+    args[0] = bound_this;
+    for (int i = 0; i < bound_argc; i++) args[i + 1] = bound_args ? bound_args[i] : ItemNull;
+    Item method_name = (Item){.item = s2it(heap_create_name("bind", 4))};
+    return js_map_method(func_item, method_name, args, total);
 }
 
 // =============================================================================
@@ -2407,11 +2468,59 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     // match method name and delegate to Lambda fn_* functions
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
         if (argc < 1) return (Item){.item = i2it(-1)};
-        return (Item){.item = i2it(fn_index_of(str, args[0]))};
+        if (argc < 2) return (Item){.item = i2it(fn_index_of(str, args[0]))};
+        // indexOf with start position
+        int start_pos = (int)js_get_number(args[1]);
+        String* s = it2s(str);
+        String* sub = it2s(args[0]);
+        if (!s || !sub) return (Item){.item = i2it(-1)};
+        if (start_pos < 0) start_pos = 0;
+        size_t byte_start;
+        if (s->is_ascii) {
+            byte_start = (size_t)start_pos;
+        } else {
+            byte_start = str_utf8_char_to_byte(s->chars, s->len, (size_t)start_pos);
+        }
+        if (byte_start >= s->len) return (Item){.item = i2it(-1)};
+        if (sub->len == 0) return (Item){.item = i2it(start_pos)};
+        if (s->len - byte_start < sub->len) return (Item){.item = i2it(-1)};
+        for (size_t i = byte_start; i <= s->len - sub->len; i++) {
+            if (memcmp(s->chars + i, sub->chars, sub->len) == 0) {
+                int64_t char_index = s->is_ascii ? (int64_t)i : (int64_t)str_utf8_count(s->chars, i);
+                return (Item){.item = i2it(char_index)};
+            }
+        }
+        return (Item){.item = i2it(-1)};
     }
     if (method->len == 11 && strncmp(method->chars, "lastIndexOf", 11) == 0) {
         if (argc < 1) return (Item){.item = i2it(-1)};
-        return (Item){.item = i2it(fn_last_index_of(str, args[0]))};
+        if (argc < 2) return (Item){.item = i2it(fn_last_index_of(str, args[0]))};
+        // lastIndexOf with start position - search backwards from position
+        int end_pos = (int)js_get_number(args[1]);
+        String* s = it2s(str);
+        String* sub = it2s(args[0]);
+        if (!s || !sub) return (Item){.item = i2it(-1)};
+        if (end_pos < 0) return (Item){.item = i2it(-1)};
+        size_t byte_end;
+        if (s->is_ascii) {
+            byte_end = (size_t)end_pos;
+        } else {
+            byte_end = str_utf8_char_to_byte(s->chars, s->len, (size_t)end_pos);
+        }
+        if (byte_end >= s->len) byte_end = s->len - 1;
+        if (sub->len == 0) {
+            int64_t char_pos = s->is_ascii ? (int64_t)byte_end : (int64_t)str_utf8_count(s->chars, byte_end);
+            return (Item){.item = i2it(char_pos < end_pos ? char_pos : end_pos)};
+        }
+        size_t max_start = byte_end + sub->len <= s->len ? byte_end : s->len - sub->len;
+        for (size_t i = max_start + 1; i > 0; i--) {
+            size_t pos = i - 1;
+            if (memcmp(s->chars + pos, sub->chars, sub->len) == 0) {
+                int64_t char_index = s->is_ascii ? (int64_t)pos : (int64_t)str_utf8_count(s->chars, pos);
+                return (Item){.item = i2it(char_index)};
+            }
+        }
+        return (Item){.item = i2it(-1)};
     }
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
         if (argc < 1) return (Item){.item = b2it(false)};
@@ -2793,7 +2902,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
         if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
         Array* a = arr.array;
-        for (int i = 0; i < a->length; i++) {
+        int start = (argc >= 2) ? (int)js_get_number(args[1]) : 0;
+        if (start < 0) start = 0;
+        for (int i = start; i < a->length; i++) {
             if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
@@ -3316,6 +3427,31 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     return ItemNull;
 }
 
+// Generic method call with expanded args array (used for obj.method(...spread) calls)
+extern "C" Item js_method_call_apply(Item obj, Item method_name, Item args_array) {
+    int argc = 0;
+    Item* args = NULL;
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY && args_array.array->length > 0) {
+        argc = (int)args_array.array->length;
+        args = (Item*)alloca(argc * sizeof(Item));
+        for (int i = 0; i < argc; i++) {
+            Item idx = {.item = i2it(i)};
+            args[i] = js_array_get(args_array, idx);
+        }
+    }
+    TypeId obj_type = get_type_id(obj);
+    if (obj_type == LMD_TYPE_STRING) {
+        return js_string_method(obj, method_name, args, argc);
+    }
+    if (obj_type == LMD_TYPE_ARRAY) {
+        return js_array_method(obj, method_name, args, argc);
+    }
+    if (obj_type == LMD_TYPE_INT || obj_type == LMD_TYPE_FLOAT) {
+        return js_number_method(obj, method_name, args, argc);
+    }
+    return js_map_method(obj, method_name, args, argc);
+}
+
 // =============================================================================
 // Math Object Methods
 // =============================================================================
@@ -3468,16 +3604,16 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
     // Math.clz32
     if (method->len == 5 && strncmp(method->chars, "clz32", 5) == 0) {
         if (argc < 1) return js_make_number(32.0);
-        int32_t n = (int32_t)js_get_number(js_to_number(args[0]));
+        uint32_t n = (uint32_t)js_to_int32(js_get_number(args[0]));
         if (n == 0) return js_make_number(32.0);
-        return js_make_number((double)__builtin_clz((unsigned int)n));
+        return js_make_number((double)__builtin_clz(n));
     }
     // Math.imul
     if (method->len == 4 && strncmp(method->chars, "imul", 4) == 0) {
         if (argc < 2) return js_make_number(0.0);
-        int32_t a = (int32_t)js_get_number(js_to_number(args[0]));
-        int32_t b = (int32_t)js_get_number(js_to_number(args[1]));
-        return js_make_number((double)(a * b));
+        int32_t a = js_to_int32(js_get_number(args[0]));
+        int32_t b = js_to_int32(js_get_number(args[1]));
+        return js_make_number((double)((int32_t)((uint32_t)a * (uint32_t)b)));
     }
     // Math.fround
     if (method->len == 6 && strncmp(method->chars, "fround", 6) == 0) {
@@ -3528,6 +3664,24 @@ extern "C" Item js_math_method(Item method_name, Item* args, int argc) {
 
     log_debug("js_math_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
+}
+
+// Math method dispatch where args are in a JS array (for spread calls: Math.max(...arr))
+extern "C" Item js_math_apply(Item method_name, Item args_array) {
+    if (get_type_id(args_array) != LMD_TYPE_ARRAY) {
+        // Fall back to 0-arg call
+        return js_math_method(method_name, NULL, 0);
+    }
+    int argc = (int)args_array.array->length;
+    if (argc == 0) {
+        return js_math_method(method_name, NULL, 0);
+    }
+    Item* args = (Item*)alloca(argc * sizeof(Item));
+    for (int i = 0; i < argc; i++) {
+        Item idx = {.item = i2it(i)};
+        args[i] = js_array_get(args_array, idx);
+    }
+    return js_math_method(method_name, args, argc);
 }
 
 // Math constants as properties
@@ -3840,6 +3994,44 @@ extern "C" Item js_iterable_to_array(Item iterable) {
                 // Set: return array of values
                 return js_collection_method(iterable, 7, ItemNull, ItemNull); // values()
             }
+        }
+    }
+
+    // String: split into individual characters
+    if (get_type_id(iterable) == LMD_TYPE_STRING) {
+        String* str = it2s(iterable);
+        if (str) {
+            Item arr = js_array_new(0);
+            for (int i = 0; i < (int)str->len; i++) {
+                String* ch = heap_create_name(str->chars + i, 1);
+                Item ch_item = (Item){.item = s2it(ch)};
+                array_push(arr.array, ch_item);
+            }
+            return arr;
+        }
+    }
+
+    // Check for iterator protocol: object with .next() method
+    if (get_type_id(iterable) == LMD_TYPE_MAP) {
+        // Already handled above - this is for other objects with next()
+    }
+    TypeId tid = get_type_id(iterable);
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+        // Check if object has a next() method (iterator protocol)
+        String* next_key = heap_create_name("next", 4);
+        Item next_fn = js_property_get(iterable, (Item){.item = s2it(next_key)});
+        if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
+            Item arr = js_array_new(0);
+            for (int safety = 0; safety < 100000; safety++) {
+                Item result = js_call_function(next_fn, iterable, NULL, 0);
+                String* done_key = heap_create_name("done", 4);
+                Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+                if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) break;
+                String* val_key = heap_create_name("value", 5);
+                Item value = js_property_get(result, (Item){.item = s2it(val_key)});
+                array_push(arr.array, value);
+            }
+            return arr;
         }
     }
 

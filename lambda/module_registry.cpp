@@ -12,6 +12,8 @@
 #include <stdlib.h>
 
 extern "C" Item js_property_get(Item object, Item key);
+extern "C" Item js_new_object();
+extern "C" Item js_property_set(Item object, Item key, Item value);
 extern "C" int js_function_get_arity(Item fn_item);
 
 // C++ linkage — defined in build_ast.cpp
@@ -74,6 +76,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
         existing->desc->namespace_obj = namespace_obj;
         existing->desc->mir_ctx = mir_ctx;
         existing->desc->initialized = true;
+        existing->desc->loading = false;
         log_debug("module_registry: updated module '%s' (lang=%s)", path, lang);
         return;
     }
@@ -84,6 +87,7 @@ void module_register(const char* path, const char* lang, Item namespace_obj, voi
     desc->namespace_obj = namespace_obj;
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
+    desc->loading = false;
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
     hashmap_set(registry_map, &entry);
@@ -102,14 +106,40 @@ bool module_is_loaded(const char* path) {
     return desc && desc->initialized;
 }
 
+ModuleDescriptor* module_register_loading(const char* path, const char* lang) {
+    if (!path) return NULL;
+    if (!registry_map) module_registry_init();
+
+    // check if already registered
+    RegistryEntry lookup = { .path = path, .desc = NULL };
+    const RegistryEntry* existing = (const RegistryEntry*)hashmap_get(registry_map, &lookup);
+    if (existing && existing->desc) {
+        existing->desc->loading = true;
+        return existing->desc;
+    }
+
+    ModuleDescriptor* desc = (ModuleDescriptor*)calloc(1, sizeof(ModuleDescriptor));
+    desc->path = strdup(path);
+    desc->source_lang = lang;
+    desc->namespace_obj = js_new_object();
+    desc->mir_ctx = NULL;
+    desc->initialized = false;
+    desc->loading = true;
+
+    RegistryEntry entry = { .path = desc->path, .desc = desc };
+    hashmap_set(registry_map, &entry);
+    log_info("module_registry: marked '%s' as loading (lang=%s)", path, lang);
+    return desc;
+}
+
+bool module_is_loading(const char* path) {
+    ModuleDescriptor* desc = module_get(path);
+    return desc && desc->loading && !desc->initialized;
+}
+
 // =============================================================================
 // Lambda namespace builder
 // =============================================================================
-
-// Forward declarations for JS runtime functions used to build namespace objects.
-// These create heap-allocated maps and set properties without needing Input*.
-extern "C" Item js_new_object();
-extern "C" Item js_property_set(Item object, Item key, Item value);
 
 Item module_build_lambda_namespace(void* script_ptr) {
     Script* script = (Script*)script_ptr;

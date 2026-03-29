@@ -28,6 +28,7 @@ Item js_to_boolean(Item value);
  * Check if a value is truthy according to JavaScript rules.
  */
 bool js_is_truthy(Item value);
+int64_t js_is_nullish(Item value);
 
 // =============================================================================
 // Arithmetic Operators
@@ -115,6 +116,7 @@ Item* js_alloc_env(int count);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
@@ -152,6 +154,7 @@ Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 // =============================================================================
 
 Item js_math_method(Item method_name, Item* args, int argc);
+Item js_math_apply(Item method_name, Item args_array);
 Item js_math_property(Item prop_name);
 
 // =============================================================================
@@ -186,6 +189,8 @@ Item js_number_method(Item num, Item method_name, Item* args, int argc);
 Item js_string_charCodeAt(Item str_item, Item index_item);
 Item js_string_fromCharCode(Item code_item);
 Item js_string_fromCharCode_array(Item arr_item);
+Item js_string_fromCodePoint(Item code_item);
+Item js_string_fromCodePoint_array(Item arr_item);
 
 // =============================================================================
 // v5: Array fill (regular + typed)
@@ -234,6 +239,7 @@ Item js_set_collection_new(void);
 Item js_set_collection_new_from(Item iterable);
 Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
 Item js_map_method(Item obj, Item method_name, Item* args, int argc);
+Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 Item js_get_prototype(Item object);
