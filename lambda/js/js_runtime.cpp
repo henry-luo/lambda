@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <cctype>
 #include <re2/re2.h>
 
 // Global Input context for JS runtime map_put operations.
@@ -33,7 +34,7 @@ static Item js_current_this = {0};
 
 // Module-level variable table for top-level bindings accessible from any function.
 // Populated during js_main execution, read by class method closures.
-#define JS_MAX_MODULE_VARS 256
+#define JS_MAX_MODULE_VARS 2048
 static Item js_module_vars[JS_MAX_MODULE_VARS];
 static int js_module_var_count = 0;
 
@@ -54,6 +55,31 @@ static inline Item js_symbol_to_key(Item sym) {
     char buf[32];
     snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
     return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+}
+
+// Convert any key (string or symbol) to a getter key (__get_<key_string>)
+extern "C" Item js_make_getter_key(Item key) {
+    // convert symbol to string key first
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* s = it2s(key);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "__get_%.*s", (int)s->len, s->chars);
+        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
+    return key;
+}
+
+// Convert any key (string or symbol) to a setter key (__set_<key_string>)
+extern "C" Item js_make_setter_key(Item key) {
+    if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* s = it2s(key);
+        char buf[256];
+        snprintf(buf, sizeof(buf), "__set_%.*s", (int)s->len, s->chars);
+        return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+    }
+    return key;
 }
 
 extern "C" void js_set_module_var(int index, Item value) {
@@ -953,6 +979,12 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
     return result;
 }
 
+// Non-getter data-only property existence check. Used by js_in (the "in" operator)
+// to check if a property exists WITHOUT triggering getters.
+Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found) {
+    return js_map_get_fast(m, key_str, key_len, out_found);
+}
+
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
 // Initialized lazily on first use.
 static Item js_proto_key_item = {0};
@@ -1007,7 +1039,28 @@ extern "C" Item js_property_get(Item object, Item key) {
                     }
                     return (Item){.item = i2it(bpe)};
                 }
+                // Non-numeric string key on typed array: check prototype chain, else undefined
+                // Try numeric parse: only forward to element access if the key is a valid integer string
+                {
+                    String* sk = it2s(key);
+                    bool is_numeric = sk->len > 0;
+                    for (int ni = 0; ni < sk->len; ni++) {
+                        if (sk->chars[ni] < '0' || sk->chars[ni] > '9') { is_numeric = false; break; }
+                    }
+                    if (is_numeric) {
+                        return js_typed_array_get(object, key);
+                    }
+                }
+                // Fall through to prototype chain lookup below for methods/other named props
+                // Look up prototype chain for typed array methods
+                Item ta_proto = js_get_prototype(object);
+                if (ta_proto.item != ITEM_NULL) {
+                    Item result = js_property_get(ta_proto, key);
+                    if (result.item != ITEM_NULL) return result;
+                }
+                return (Item){.item = ITEM_NULL};
             }
+            // Key is not a string (it's an int or other type) — use element access
             return js_typed_array_get(object, key);
         }
         // Check if this is an ArrayBuffer
@@ -1057,6 +1110,35 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
+            // DBG: trace typeface reads
+            if (key_len == 8 && memcmp(key_str, "typeface", 8) == 0) {
+                TypeMap* dbg_tm = (TypeMap*)object.map->type;
+                int dbg_fc = dbg_tm ? dbg_tm->field_count : -1;
+                int dbg_total = 0, dbg_dup = 0, dbg_vis = 0;
+                ShapeEntry* dbg_e = dbg_tm && dbg_tm->shape ? dbg_tm->shape : NULL;
+                char dbg_buf[2048] = {0};
+                int dbg_pos = 0;
+                while (dbg_e) {
+                    dbg_total++;
+                    if (dbg_e->name) {
+                        const char* s = dbg_e->name->str;
+                        int slen = (int)dbg_e->name->length;
+                        bool skip = (slen >= 2 && s[0] == '_' && s[1] == '_') ||
+                                    (slen == 11 && memcmp(s, "constructor", 11) == 0);
+                        if (!skip) {
+                            dbg_vis++;
+                            if (dbg_pos < 1900) {
+                                dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
+                                    "%.*s,", slen < 20 ? slen : 20, s);
+                            }
+                        }
+                        if (slen == 8 && memcmp(s, "typeface", 8) == 0) dbg_dup++;
+                    }
+                    dbg_e = dbg_e->next;
+                }
+                log_debug("DBG_GET typeface: fc=%d total=%d vis=%d tf=%d map=%p keys=%s",
+                    dbg_fc, dbg_total, dbg_vis, dbg_dup, (void*)object.map, dbg_buf);
+            }
             result = js_map_get_fast(object.map, key_str, key_len, &own_found);
         } else {
             result = map_get(object.map, key);  // fallback for non-string keys
@@ -1067,11 +1149,13 @@ extern "C" Item js_property_get(Item object, Item key) {
         result = js_prototype_lookup(object, key);
         if (result.item != ItemNull.item) return result;
         // Getter property fallback: check for __get_<propName> on object or prototype
-        // Only check for getter if the key doesn't start with '_' (private properties
-        // never have getters) and is short enough to be a getter name
+        // Check for getter if: key doesn't start with '_', OR key starts with '__sym_' (symbol getter)
         if (key._type_id == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+            bool check_getter = (str_key->len < 128 && str_key->len > 0 &&
+                (str_key->chars[0] != '_' ||
+                 (str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0)));
+            if (check_getter) {
                 char getter_key[256];
                 snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
                 // Use name pool lookup instead of heap allocation
@@ -1119,9 +1203,9 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
         }
         int idx = (int)js_get_number(key);
-        if (idx >= 0 && idx < (int)str->len) {
-            char ch[2] = { str->chars[idx], '\0' };
-            return (Item){.item = s2it(heap_create_name(ch))};
+        if (idx >= 0) {
+            // Use item_at for proper UTF-8 codepoint indexing
+            return item_at(object, (int64_t)idx);
         }
         return make_js_undefined();
     }
@@ -1536,16 +1620,24 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     typedef Item (*P6)(Item, Item, Item, Item, Item, Item);
     typedef Item (*P7)(Item, Item, Item, Item, Item, Item, Item);
     typedef Item (*P8)(Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P9)(Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P10)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P11)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P12)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P13)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P14)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P15)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
+    typedef Item (*P16)(Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item, Item);
 
     // Pad missing arguments with undefined to match declared param count
-    Item padded_args[8];
+    Item padded_args[16];
     Item undef = make_js_undefined();
     int effective_count = arg_count;
     Item* effective_args = args;
 
     if (arg_count < fn->param_count) {
         effective_count = fn->param_count;
-        if (effective_count > 8) effective_count = 8;
+        if (effective_count > 16) effective_count = 16;
         for (int i = 0; i < effective_count; i++) {
             padded_args[i] = (i < arg_count && args) ? args[i] : undef;
         }
@@ -1565,6 +1657,14 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 5: return ((P6)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
             case 6: return ((P7)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
             case 7: return ((P8)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
+            case 8: return ((P9)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7]);
+            case 9: return ((P10)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8]);
+            case 10: return ((P11)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9]);
+            case 11: return ((P12)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10]);
+            case 12: return ((P13)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11]);
+            case 13: return ((P14)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12]);
+            case 14: return ((P15)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13]);
+            case 15: return ((P16)fn->func_ptr)(env_item, effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14]);
             default:
                 log_error("js_invoke_fn: too many args for closure (%d)", effective_count);
                 return ItemNull;
@@ -1579,6 +1679,14 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
             case 5: return ((P5)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4]);
             case 6: return ((P6)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5]);
             case 7: return ((P7)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6]);
+            case 8: return ((P8)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7]);
+            case 9: return ((P9)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8]);
+            case 10: return ((P10)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9]);
+            case 11: return ((P11)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10]);
+            case 12: return ((P12)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11]);
+            case 13: return ((P13)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12]);
+            case 14: return ((P14)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13]);
+            case 15: return ((P15)fn->func_ptr)(effective_args[0], effective_args[1], effective_args[2], effective_args[3], effective_args[4], effective_args[5], effective_args[6], effective_args[7], effective_args[8], effective_args[9], effective_args[10], effective_args[11], effective_args[12], effective_args[13], effective_args[14]);
             default:
                 log_error("js_invoke_fn: too many args (%d)", effective_count);
                 return ItemNull;
@@ -2019,6 +2127,14 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
         for (int i = 0; i < a->length; i++) {
             js_collection_method(set, 0, a->items[i], ItemNull);
         }
+    } else if (tid == LMD_TYPE_MAP) {
+        // iterable is another Set or Map — iterate its values via the order list
+        JsCollectionData* cd = js_get_collection_data(iterable);
+        if (cd) {
+            for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+                js_collection_method(set, 0, node->key, ItemNull);
+            }
+        }
     }
     return set;
 }
@@ -2032,6 +2148,14 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
             Item entry = a->items[i];
             if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
                 js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
+            }
+        }
+    } else if (tid == LMD_TYPE_MAP) {
+        // copy from another Map
+        JsCollectionData* cd = js_get_collection_data(iterable);
+        if (cd && cd->type == JS_COLLECTION_MAP) {
+            for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+                js_collection_method(map, 0, node->key, node->value);
             }
         }
     }
@@ -2170,7 +2294,9 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         if (method) {
             if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
                 Item value = argc > 0 ? args[0] : ItemNull;
-                return js_typed_array_fill(obj, value);
+                int start = argc > 1 ? (int)it2i(args[1]) : 0;
+                int end = argc > 2 ? (int)it2i(args[2]) : INT_MAX;
+                return js_typed_array_fill(obj, value, start, end);
             }
             if (method->len == 3 && strncmp(method->chars, "set", 3) == 0) {
                 Item source = argc > 0 ? args[0] : ItemNull;
@@ -2188,6 +2314,223 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                 JsTypedArray* ta = (JsTypedArray*)obj.map->data;
                 int end = argc > 1 ? (int)it2i(args[1]) : ta->length;
                 return js_typed_array_slice(obj, start, end);
+            }
+            if (method->len == 3 && strncmp(method->chars, "map", 3) == 0) {
+                if (argc < 1) return obj;
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                Item result = js_typed_array_new((int)ta->element_type, len);
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item mapped = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    js_typed_array_set(result, (Item){.item = i2it(i)}, mapped);
+                }
+                return result;
+            }
+            if (method->len == 7 && strncmp(method->chars, "indexOf", 7) == 0) {
+                if (argc < 1) return (Item){.item = i2it(-1)};
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int from = argc > 1 ? (int)it2i(args[1]) : 0;
+                if (from < 0) { from += len; if (from < 0) from = 0; }
+                for (int i = from; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = i2it(i)};
+                }
+                return (Item){.item = i2it(-1)};
+            }
+            if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
+                if (argc < 1) return (Item){.item = ITEM_FALSE};
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int from = argc > 1 ? (int)it2i(args[1]) : 0;
+                if (from < 0) { from += len; if (from < 0) from = 0; }
+                for (int i = from; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = ITEM_TRUE};
+                }
+                return (Item){.item = ITEM_FALSE};
+            }
+            if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
+                if (argc < 1) return ItemNull;
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    js_call_function(callback, make_js_undefined(), fn_args, 3);
+                }
+                return make_js_undefined();
+            }
+            if (method->len == 6 && strncmp(method->chars, "reduce", 6) == 0) {
+                if (argc < 1) return ItemNull;
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int start_idx = 0;
+                Item acc;
+                if (argc > 1) {
+                    acc = args[1];
+                } else if (len > 0) {
+                    acc = js_typed_array_get(obj, (Item){.item = i2it(0)});
+                    start_idx = 1;
+                } else {
+                    return ItemNull;
+                }
+                for (int i = start_idx; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[4] = {acc, elem, idx_item, obj};
+                    acc = js_call_function(callback, make_js_undefined(), fn_args, 4);
+                }
+                return acc;
+            }
+            if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
+                if (argc < 1) return make_js_undefined();
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    if (js_is_truthy(result)) return elem;
+                }
+                return make_js_undefined();
+            }
+            if (method->len == 9 && strncmp(method->chars, "findIndex", 9) == 0) {
+                if (argc < 1) return (Item){.item = i2it(-1)};
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    if (js_is_truthy(result)) return (Item){.item = i2it(i)};
+                }
+                return (Item){.item = i2it(-1)};
+            }
+            if (method->len == 5 && strncmp(method->chars, "every", 5) == 0) {
+                if (argc < 1) return (Item){.item = ITEM_TRUE};
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    if (!js_is_truthy(result)) return (Item){.item = ITEM_FALSE};
+                }
+                return (Item){.item = ITEM_TRUE};
+            }
+            if (method->len == 4 && strncmp(method->chars, "some", 4) == 0) {
+                if (argc < 1) return (Item){.item = ITEM_FALSE};
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    if (js_is_truthy(result)) return (Item){.item = ITEM_TRUE};
+                }
+                return (Item){.item = ITEM_FALSE};
+            }
+            if (method->len == 4 && strncmp(method->chars, "join", 4) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                const char* sep = ",";
+                int sep_len = 1;
+                if (argc > 0 && get_type_id(args[0]) == LMD_TYPE_STRING) {
+                    String* s = it2s(args[0]);
+                    sep = s->chars;
+                    sep_len = s->len;
+                }
+                StrBuf* sb = strbuf_new();
+                for (int i = 0; i < len; i++) {
+                    if (i > 0) strbuf_append_str_n(sb, sep, sep_len);
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    char buf[32];
+                    int n;
+                    if (get_type_id(elem) == LMD_TYPE_INT) {
+                        n = snprintf(buf, sizeof(buf), "%lld", (long long)it2i(elem));
+                    } else if (get_type_id(elem) == LMD_TYPE_FLOAT) {
+                        n = snprintf(buf, sizeof(buf), "%g", *(double*)it2p(elem));
+                    } else {
+                        n = snprintf(buf, sizeof(buf), "0");
+                    }
+                    strbuf_append_str_n(sb, buf, n);
+                }
+                String* result = heap_create_name(sb->str, sb->length);
+                strbuf_free(sb);
+                return (Item){.item = s2it(result)};
+            }
+            if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
+                if (argc < 1) return js_typed_array_new((int)((JsTypedArray*)obj.map->data)->element_type, 0);
+                Item callback = args[0];
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                // collect matching elements first
+                Item* temp = (Item*)malloc(len * sizeof(Item));
+                int count = 0;
+                for (int i = 0; i < len; i++) {
+                    Item elem = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item idx_item = {.item = i2it(i)};
+                    Item fn_args[3] = {elem, idx_item, obj};
+                    Item result = js_call_function(callback, make_js_undefined(), fn_args, 3);
+                    if (js_is_truthy(result)) temp[count++] = elem;
+                }
+                Item result = js_typed_array_new((int)ta->element_type, count);
+                for (int i = 0; i < count; i++) {
+                    js_typed_array_set(result, (Item){.item = i2it(i)}, temp[i]);
+                }
+                free(temp);
+                return result;
+            }
+            if (method->len == 7 && strncmp(method->chars, "reverse", 7) == 0) {
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                for (int i = 0; i < len / 2; i++) {
+                    Item a = js_typed_array_get(obj, (Item){.item = i2it(i)});
+                    Item b = js_typed_array_get(obj, (Item){.item = i2it(len - 1 - i)});
+                    js_typed_array_set(obj, (Item){.item = i2it(i)}, b);
+                    js_typed_array_set(obj, (Item){.item = i2it(len - 1 - i)}, a);
+                }
+                return obj;
+            }
+            if (method->len == 10 && strncmp(method->chars, "copyWithin", 10) == 0) {
+                // copyWithin(target, start, end?)
+                JsTypedArray* ta = (JsTypedArray*)obj.map->data;
+                int len = ta->length;
+                int target = argc > 0 ? (int)it2i(args[0]) : 0;
+                int start = argc > 1 ? (int)it2i(args[1]) : 0;
+                int end = argc > 2 ? (int)it2i(args[2]) : len;
+                if (target < 0) target += len;
+                if (start < 0) start += len;
+                if (end < 0) end += len;
+                int count = end - start;
+                if (count <= 0) return obj;
+                int elem_size = 1;
+                switch (ta->element_type) {
+                case JS_TYPED_INT8: case JS_TYPED_UINT8: elem_size = 1; break;
+                case JS_TYPED_INT16: case JS_TYPED_UINT16: elem_size = 2; break;
+                case JS_TYPED_INT32: case JS_TYPED_UINT32: case JS_TYPED_FLOAT32: elem_size = 4; break;
+                case JS_TYPED_FLOAT64: elem_size = 8; break;
+                }
+                memmove((uint8_t*)ta->data + target * elem_size,
+                        (uint8_t*)ta->data + start * elem_size,
+                        count * elem_size);
+                return obj;
             }
         }
     }
@@ -2610,6 +2953,27 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             end_item = (Item){.item = i2it(len)};
         }
         return fn_substring(str, start, end_item);
+    }
+    if (method->len == 6 && strncmp(method->chars, "substr", 6) == 0) {
+        // substr(start, length) — legacy method
+        if (argc < 1) return str;
+        String* s = it2s(str);
+        int64_t slen = s ? (int64_t)s->len : 0;
+        int64_t start = (int64_t)js_get_number(args[0]);
+        if (start < 0) { start = slen + start; if (start < 0) start = 0; }
+        int64_t length;
+        if (argc > 1) {
+            length = (int64_t)js_get_number(args[1]);
+            if (length < 0) length = 0;
+        } else {
+            length = slen - start;
+        }
+        if (start >= slen || length <= 0) return (Item){.item = s2it(heap_create_name(""))};
+        int64_t end = start + length;
+        if (end > slen) end = slen;
+        Item start_item = (Item){.item = i2it(start)};
+        Item end_item = (Item){.item = i2it(end)};
+        return fn_substring(str, start_item, end_item);
     }
     if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
         if (argc < 1) return str;
@@ -3835,9 +4199,11 @@ struct JsGenerator {
     int    env_size;
     int64_t state;            // current state index (0=initial, -1=done)
     bool   done;
+    Item   delegate;          // active yield* delegate iterator (ItemNull when none)
+    int64_t delegate_resume;  // state to resume after delegate is exhausted
 };
 
-#define JS_MAX_GENERATORS 256
+#define JS_MAX_GENERATORS 4096
 static JsGenerator js_generators[JS_MAX_GENERATORS];
 static int js_generator_count = 0;
 
@@ -3859,13 +4225,31 @@ extern "C" Item js_gen_yield_result(Item value, int64_t next_state) {
     return arr;
 }
 
-extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
-    if (js_generator_count >= JS_MAX_GENERATORS) {
-        log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
-        return ItemNull;
-    }
+// yield* delegation: create 3-element array [iterable, resume_state, 1(flag)]
+extern "C" Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state) {
+    Item arr = js_array_new(3);
+    arr.array->items[0] = iterable;
+    arr.array->items[1] = (Item){.item = i2it(resume_state)};
+    arr.array->items[2] = (Item){.item = i2it(1)};  // delegation flag
+    return arr;
+}
 
-    int idx = js_generator_count++;
+extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
+    // Try to recycle a completed generator slot first
+    int idx = -1;
+    for (int i = 0; i < js_generator_count; i++) {
+        if (js_generators[i].done) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) {
+        if (js_generator_count >= JS_MAX_GENERATORS) {
+            log_error("generator: exceeded max generators (%d)", JS_MAX_GENERATORS);
+            return ItemNull;
+        }
+        idx = js_generator_count++;
+    }
     JsGenerator* gen = &js_generators[idx];
     gen->type_id = LMD_TYPE_MAP;
     gen->state_fn = func_ptr;
@@ -3873,6 +4257,8 @@ extern "C" Item js_generator_create(void* func_ptr, Item* env, int env_size) {
     gen->env_size = env_size;
     gen->state = 0;
     gen->done = false;
+    gen->delegate = ItemNull;
+    gen->delegate_resume = -1;
 
     // Create a map object that references this generator via a hidden index
     Item obj = js_new_object();
@@ -3903,9 +4289,30 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         return js_make_iter_result(ItemNull, true);
     }
 
+    // If we have an active delegate (from yield*), drain it first
+    if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
+        Item del_result = js_generator_next(gen->delegate, input);
+        // Check if delegate is done
+        if (get_type_id(del_result) == LMD_TYPE_MAP) {
+            String* done_key = heap_create_name("done", 4);
+            Item done_val = js_property_get(del_result, (Item){.item = s2it(done_key)});
+            if (get_type_id(done_val) == LMD_TYPE_BOOL && it2b(done_val)) {
+                // Delegate exhausted — clear it and resume our state machine
+                gen->delegate = ItemNull;
+                gen->state = gen->delegate_resume;
+                gen->delegate_resume = -1;
+                // Fall through to call state machine at resumed state
+            } else {
+                // Delegate still producing — return its result
+                return del_result;
+            }
+        }
+    }
+
     // Call the state machine: fn(env, input, state) -> [value, next_state]
     // The state machine returns {value, next_state} as a 2-element array
     // If next_state == -1, the generator is done
+    // If next_state == -3, this is yield* delegation: value is the iterable
     typedef Item (*GenFn)(Item*, Item, int64_t);
 
     Item result = ((GenFn)gen->state_fn)(gen->env, input, gen->state);
@@ -3916,6 +4323,15 @@ extern "C" Item js_generator_next(Item generator, Item input) {
         int64_t next_state = -1;
         if (arr->length > 1 && get_type_id(arr->items[1]) == LMD_TYPE_INT) {
             next_state = it2i(arr->items[1]);
+        }
+
+        // Check for yield* delegation marker (3-element array with flag)
+        if (arr->length > 2 && get_type_id(arr->items[2]) == LMD_TYPE_INT && it2i(arr->items[2]) == 1) {
+            // value is the iterable to delegate to, next_state is the resume state
+            gen->delegate = value;
+            gen->delegate_resume = next_state;
+            // Immediately start draining the delegate
+            return js_generator_next(generator, make_js_undefined());
         }
 
         if (next_state < 0) {
@@ -4787,10 +5203,23 @@ extern "C" Item js_text_encoder_encode(Item encoder, Item str) {
     return result;
 }
 
-extern "C" Item js_text_decoder_new(void) {
+extern "C" Item js_text_decoder_new(Item encoding_item) {
     Item obj = js_new_object();
+    // Normalize encoding name
+    const char* enc = "utf-8";
+    char enc_buf[32] = "utf-8";
+    if (get_type_id(encoding_item) == LMD_TYPE_STRING) {
+        String* s = it2s(encoding_item);
+        if (s && s->len > 0 && s->len < 32) {
+            // lowercase copy
+            for (int i = 0; i < (int)s->len; i++)
+                enc_buf[i] = (char)tolower((unsigned char)s->chars[i]);
+            enc_buf[s->len] = '\0';
+            enc = enc_buf;
+        }
+    }
     Item k = (Item){.item = s2it(heap_create_name("encoding"))};
-    Item v = (Item){.item = s2it(heap_create_name("utf-8"))};
+    Item v = (Item){.item = s2it(heap_create_name(enc))};
     js_property_set(obj, k, v);
     // Mark as TextDecoder for method dispatch
     Item type_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
@@ -4799,37 +5228,138 @@ extern "C" Item js_text_decoder_new(void) {
     return obj;
 }
 
+// Helper: encode a single Unicode codepoint to UTF-8, return bytes written
+static int js_cp_to_utf8(char* buf, uint32_t cp) {
+    if (cp < 0x80) {
+        buf[0] = (char)cp;
+        return 1;
+    } else if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp < 0x10000) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else if (cp <= 0x10FFFF) {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    } else {
+        // replacement character
+        buf[0] = (char)0xEF; buf[1] = (char)0xBF; buf[2] = (char)0xBD;
+        return 3;
+    }
+}
+
 extern "C" Item js_text_decoder_decode(Item decoder, Item input) {
-    (void)decoder;
+    // Get encoding from decoder object
+    const char* encoding = "utf-8";
+    char enc_buf[32] = "utf-8";
+    if (get_type_id(decoder) == LMD_TYPE_MAP) {
+        Item enc_key = (Item){.item = s2it(heap_create_name("encoding"))};
+        Item enc_val = js_property_get(decoder, enc_key);
+        if (get_type_id(enc_val) == LMD_TYPE_STRING) {
+            String* s = it2s(enc_val);
+            if (s && s->len > 0 && s->len < 32) {
+                memcpy(enc_buf, s->chars, s->len);
+                enc_buf[s->len] = '\0';
+                encoding = enc_buf;
+            }
+        }
+    }
+
+    // Extract raw bytes from input
+    uint8_t* bytes = NULL;
+    int byte_len = 0;
+    uint8_t* heap_buf = NULL;
     TypeId tid = get_type_id(input);
-    if (tid == LMD_TYPE_ARRAY) {
-        // Array of byte values → string
-        Array* arr = input.array;
-        if (!arr || arr->length == 0)
-            return (Item){.item = s2it(heap_create_name(""))};
-        char* buf = (char*)alloca(arr->length + 1);
-        for (int i = 0; i < arr->length; i++) {
-            buf[i] = (char)(unsigned char)js_get_number(arr->items[i]);
-        }
-        buf[arr->length] = '\0';
-        return (Item){.item = s2it(heap_strcpy(buf, arr->length))};
-    }
-    // Handle TypedArray (Uint8Array etc.)
     if (tid == LMD_TYPE_MAP && js_is_typed_array(input)) {
-        Map* m = input.map;
-        JsTypedArray* ta = (JsTypedArray*)m->data;
-        if (!ta || ta->length == 0)
-            return (Item){.item = s2it(heap_create_name(""))};
-        char* buf = (char*)alloca(ta->length + 1);
-        uint8_t* bytes = (uint8_t*)ta->data;
-        for (int i = 0; i < ta->length; i++) {
-            buf[i] = (char)bytes[i];
+        JsTypedArray* ta = (JsTypedArray*)input.map->data;
+        bytes = ta ? (uint8_t*)ta->data : NULL;
+        byte_len = ta ? ta->length : 0;
+    } else if (tid == LMD_TYPE_ARRAY) {
+        Array* arr = input.array;
+        if (arr && arr->length > 0) {
+            heap_buf = (uint8_t*)malloc(arr->length);
+            for (int i = 0; i < arr->length; i++)
+                heap_buf[i] = (uint8_t)js_get_number(arr->items[i]);
+            bytes = heap_buf;
+            byte_len = arr->length;
         }
-        buf[ta->length] = '\0';
-        return (Item){.item = s2it(heap_strcpy(buf, ta->length))};
+    } else if (tid == LMD_TYPE_STRING) {
+        // Pass-through if already a string
+        if (heap_buf) free(heap_buf);
+        return input;
     }
-    if (tid == LMD_TYPE_STRING) return input;
-    return (Item){.item = s2it(heap_create_name(""))};
+
+    if (!bytes || byte_len == 0) {
+        if (heap_buf) free(heap_buf);
+        return (Item){.item = s2it(heap_strcpy("", 0))};
+    }
+
+    Item result;
+    bool is_utf16be = (strncmp(encoding, "utf-16be", 8) == 0);
+    bool is_utf16le = (strncmp(encoding, "utf-16le", 8) == 0) ||
+                     (strncmp(encoding, "utf-16", 6) == 0 && !is_utf16be);
+
+    if (is_utf16be || is_utf16le) {
+        // UTF-16 decode: each code unit is 2 bytes
+        int start = 0;
+        // Check/strip BOM
+        if (byte_len >= 2) {
+            uint16_t bom = is_utf16be ?
+                ((uint16_t)bytes[0] << 8 | bytes[1]) :
+                ((uint16_t)bytes[1] << 8 | bytes[0]);
+            if (bom == 0xFEFF) start = 2; // strip BOM
+        }
+        // Max output: each 2-byte unit → up to 4 UTF-8 bytes
+        int max_out = ((byte_len - start) / 2) * 4 + 4;
+        char* out = (char*)malloc(max_out + 1);
+        int pos = 0;
+        int i = start;
+        while (i + 1 < byte_len) {
+            uint16_t cu = is_utf16be ?
+                ((uint16_t)bytes[i] << 8 | bytes[i+1]) :
+                ((uint16_t)bytes[i+1] << 8 | bytes[i]);
+            i += 2;
+            uint32_t cp;
+            if (cu >= 0xD800 && cu <= 0xDBFF && i + 1 < byte_len) {
+                // High surrogate — read low surrogate
+                uint16_t low = is_utf16be ?
+                    ((uint16_t)bytes[i] << 8 | bytes[i+1]) :
+                    ((uint16_t)bytes[i+1] << 8 | bytes[i]);
+                if (low >= 0xDC00 && low <= 0xDFFF) {
+                    cp = 0x10000 + ((uint32_t)(cu - 0xD800) << 10) + (low - 0xDC00);
+                    i += 2;
+                } else {
+                    cp = 0xFFFD; // replacement
+                }
+            } else if (cu >= 0xDC00 && cu <= 0xDFFF) {
+                cp = 0xFFFD; // lone low surrogate
+            } else {
+                cp = cu;
+            }
+            // Skip BOM codepoint U+FEFF in output
+            if (cp == 0xFEFF && pos == 0) continue;
+            pos += js_cp_to_utf8(out + pos, cp);
+        }
+        out[pos] = '\0';
+        result = (Item){.item = s2it(heap_strcpy(out, pos))};
+        free(out);
+    } else {
+        // UTF-8 (default): strip BOM if present
+        int start = 0;
+        if (byte_len >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            start = 3; // strip UTF-8 BOM
+        result = (Item){.item = s2it(heap_strcpy((char*)bytes + start, byte_len - start))};
+    }
+
+    if (heap_buf) free(heap_buf);
+    return result;
 }
 
 // =============================================================================
@@ -4842,4 +5372,15 @@ extern "C" Item js_weakmap_new(void) {
 
 extern "C" Item js_weakset_new(void) {
     return js_set_collection_new();
+}
+
+// Public collection type checks (for instanceof)
+extern "C" bool js_is_map_instance(Item obj) {
+    JsCollectionData* cd = js_get_collection_data(obj);
+    return cd && cd->type == JS_COLLECTION_MAP;
+}
+
+extern "C" bool js_is_set_instance(Item obj) {
+    JsCollectionData* cd = js_get_collection_data(obj);
+    return cd && cd->type == JS_COLLECTION_SET;
 }

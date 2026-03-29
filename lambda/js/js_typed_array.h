@@ -25,6 +25,7 @@ typedef enum JsTypedArrayType {
     JS_TYPED_UINT32,
     JS_TYPED_FLOAT32,
     JS_TYPED_FLOAT64,
+    JS_TYPED_UINT8_CLAMPED,
 } JsTypedArrayType;
 
 // ArrayBuffer: raw byte storage
@@ -59,7 +60,7 @@ Item js_typed_array_new_from_array(int type_id, Item source);
 Item js_typed_array_get(Item ta, Item index);
 Item js_typed_array_set(Item ta, Item index, Item value);
 int  js_typed_array_length(Item ta);
-Item js_typed_array_fill(Item ta, Item value);
+Item js_typed_array_fill(Item ta, Item value, int start, int end);
 bool js_is_typed_array(Item val);
 Item js_typed_array_subarray(Item ta, int start, int end);
 Item js_typed_array_slice(Item ta, int start, int end);
