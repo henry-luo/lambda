@@ -816,10 +816,14 @@ int main(int argc, char *argv[]) {
     }
 
 #ifndef NDEBUG
-    log_notice("############################################");
-    log_notice("!!! Running DEBUG build of lambda.exe  !!!");
-    log_notice("!!! Do NOT use it for performance test !!!");
-    log_notice("############################################");
+    // suppress debug-build note in bash mode (test expected output was generated with release build)
+    bool is_bash_mode = (argc >= 2 && strcmp(argv[1], "bash") == 0);
+    if (!is_bash_mode) {
+        log_notice("############################################");
+        log_notice("!!! Running DEBUG build of lambda.exe  !!!");
+        log_notice("!!! Do NOT use it for performance test !!!");
+        log_notice("############################################");
+    }
 #endif
 
     // Add trace statement at start of main

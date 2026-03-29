@@ -41,6 +41,34 @@ static bool bash_opt_errexit = false;   // -e
 static bool bash_opt_nounset = false;   // -u
 static bool bash_opt_xtrace = false;    // -x
 static bool bash_opt_pipefail = false;  // pipefail
+static bool bash_opt_extdebug = false;  // shopt -s extdebug
+static bool bash_opt_functrace = false; // -T / set -o functrace
+
+static int bash_current_lineno = 0;
+static int bash_debug_trap_lineno = 0;
+static int bash_debug_trap_base_depth = 0;
+
+#define BASH_FUNCNAME_STACK_MAX 256
+static String* bash_funcname_stack[BASH_FUNCNAME_STACK_MAX];
+static String* bash_funcname_source_stack[BASH_FUNCNAME_STACK_MAX]; // parallel: source file for each funcname entry
+static int bash_funcname_depth = 0;
+
+#define BASH_SOURCE_STACK_MAX 256
+static String* bash_source_stack[BASH_SOURCE_STACK_MAX];
+static int bash_source_depth = 0;
+
+typedef struct BashCallFrame {
+    String* source;
+    int line;
+} BashCallFrame;
+
+static BashCallFrame bash_call_frame_stack[BASH_SOURCE_STACK_MAX];
+static int bash_call_frame_depth = 0;
+static bool bash_debug_trap_running = false;
+static bool bash_return_trap_running = false;
+static int bash_return_trap_lineno = 0;
+static int bash_return_trap_base_depth = 0;
+static int bash_trap_nesting_depth = 0;   // >0 means we are inside any trap handler
 
 // Trap handler table — indices:
 //   0=EXIT 1=ERR 2=DEBUG 3=HUP(SIGHUP) 4=INT(SIGINT) 5=QUIT(SIGQUIT) 6=TERM(SIGTERM)
@@ -50,8 +78,9 @@ static bool bash_opt_pipefail = false;  // pipefail
 #define BASH_TRAP_IDX_HUP   3
 #define BASH_TRAP_IDX_INT   4
 #define BASH_TRAP_IDX_QUIT  5
-#define BASH_TRAP_IDX_TERM  6
-#define BASH_TRAP_NUM       7
+#define BASH_TRAP_IDX_TERM   6
+#define BASH_TRAP_IDX_RETURN 7
+#define BASH_TRAP_NUM        8
 
 static char* bash_trap_handlers[BASH_TRAP_NUM];           // NULL=default, ""=ignore, else=code
 static volatile sig_atomic_t bash_trap_fired[BASH_TRAP_NUM]; // set by OS signal handler
@@ -127,6 +156,118 @@ extern "C" Item bash_to_int(Item value) {
     default:
         return (Item){.item = i2it(0)};
     }
+}
+
+// Lightweight arithmetic evaluator for integer-attributed variable coercion
+// Handles: integer literals, bare variable names, +, -, *, /, %, unary +/-, parentheses
+static const char* arith_p;
+static const char* arith_end;
+
+static void arith_skip_ws(void) {
+    while (arith_p < arith_end && (*arith_p == ' ' || *arith_p == '\t')) arith_p++;
+}
+
+static long long arith_expr(void);
+
+static long long arith_atom(void) {
+    arith_skip_ws();
+    if (arith_p >= arith_end) return 0;
+
+    // parenthesized expression
+    if (*arith_p == '(') {
+        arith_p++;
+        long long val = arith_expr();
+        arith_skip_ws();
+        if (arith_p < arith_end && *arith_p == ')') arith_p++;
+        return val;
+    }
+
+    // unary +/-
+    if (*arith_p == '-') { arith_p++; return -arith_atom(); }
+    if (*arith_p == '+') { arith_p++; return arith_atom(); }
+
+    // integer literal
+    if (isdigit((unsigned char)*arith_p)) {
+        long long val = 0;
+        while (arith_p < arith_end && isdigit((unsigned char)*arith_p)) {
+            val = val * 10 + (*arith_p - '0');
+            arith_p++;
+        }
+        return val;
+    }
+
+    // variable name: bare identifier → look up bash variable
+    if (isalpha((unsigned char)*arith_p) || *arith_p == '_') {
+        const char* start = arith_p;
+        while (arith_p < arith_end && (isalnum((unsigned char)*arith_p) || *arith_p == '_'))
+            arith_p++;
+        int len = (int)(arith_p - start);
+        String* name = heap_create_name(start, len);
+        Item name_item = (Item){.item = s2it(name)};
+        Item var_val = bash_get_var(name_item);
+        // recursively evaluate the variable's value as arithmetic
+        String* vs = it2s(bash_to_string(var_val));
+        if (vs && vs->len > 0) {
+            const char* saved_p = arith_p;
+            const char* saved_end = arith_end;
+            arith_p = vs->chars;
+            arith_end = vs->chars + vs->len;
+            long long result = arith_expr();
+            arith_p = saved_p;
+            arith_end = saved_end;
+            return result;
+        }
+        return 0;
+    }
+
+    return 0;
+}
+
+static long long arith_factor(void) {
+    long long left = arith_atom();
+    arith_skip_ws();
+    while (arith_p < arith_end && (*arith_p == '*' || *arith_p == '/' || *arith_p == '%')) {
+        char op = *arith_p++;
+        long long right = arith_atom();
+        if (op == '*') left *= right;
+        else if (op == '/' && right != 0) left /= right;
+        else if (op == '%' && right != 0) left %= right;
+    }
+    return left;
+}
+
+static long long arith_expr(void) {
+    long long left = arith_factor();
+    arith_skip_ws();
+    while (arith_p < arith_end && (*arith_p == '+' || *arith_p == '-')) {
+        char op = *arith_p++;
+        long long right = arith_factor();
+        if (op == '+') left += right;
+        else left -= right;
+    }
+    return left;
+}
+
+// evaluate a string as an arithmetic expression (for declare -i / local -i)
+extern "C" Item bash_arith_eval_value(Item value) {
+    TypeId type = get_type_id(value);
+    if (type == LMD_TYPE_INT) return value;
+    if (type == LMD_TYPE_NULL) return (Item){.item = i2it(0)};
+
+    String* s = it2s(bash_to_string(value));
+    if (!s || s->len == 0) return (Item){.item = i2it(0)};
+
+    // simple numeric string → fast path
+    char* endptr;
+    long long v = strtoll(s->chars, &endptr, 10);
+    while (endptr < s->chars + s->len && (*endptr == ' ' || *endptr == '\t')) endptr++;
+    if (endptr == s->chars + s->len) return (Item){.item = i2it((int64_t)v)};
+
+    // evaluate as arithmetic expression
+    arith_p = s->chars;
+    arith_end = s->chars + s->len;
+    long long result = arith_expr();
+    return (Item){.item = i2it((int64_t)result)};
 }
 
 extern "C" Item bash_to_string(Item value) {
@@ -592,6 +733,17 @@ static bool bash_item_is_empty(Item val) {
     return false;
 }
 
+// check if variable is truly unset (null), not just empty
+static bool bash_item_is_unset(Item val) {
+    TypeId type = get_type_id(val);
+    if (type == LMD_TYPE_NULL) return true;
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(val);
+        return !s;
+    }
+    return false;
+}
+
 static Item bash_make_string(const char* str, size_t len) {
     return (Item){.item = s2it(heap_create_name(str, len))};
 }
@@ -618,6 +770,36 @@ extern "C" Item bash_expand_alt(Item val, Item alt) {
 // ${var:?msg} — error if unset or empty
 extern "C" Item bash_expand_error(Item val, Item msg) {
     if (bash_item_is_empty(val)) {
+        String* m = it2s(bash_to_string(msg));
+        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+    }
+    return val;
+}
+
+// --- nocolon variants: only trigger on truly unset, not empty ---
+
+// ${var-default} — return default only if var is unset
+extern "C" Item bash_expand_default_nocolon(Item val, Item def) {
+    return bash_item_is_unset(val) ? def : val;
+}
+
+// ${var=default} — assign default only if var is unset
+extern "C" Item bash_expand_assign_default_nocolon(Item var_name, Item val, Item def) {
+    if (bash_item_is_unset(val)) {
+        bash_set_var(var_name, def);
+        return def;
+    }
+    return val;
+}
+
+// ${var+alt} — return alt if var is set (even if empty)
+extern "C" Item bash_expand_alt_nocolon(Item val, Item alt) {
+    return bash_item_is_unset(val) ? (Item){.item = s2it(NULL)} : alt;
+}
+
+// ${var?msg} — error only if var is unset
+extern "C" Item bash_expand_error_nocolon(Item val, Item msg) {
+    if (bash_item_is_unset(val)) {
         String* m = it2s(bash_to_string(msg));
         log_error("bash: %s", m ? m->chars : "parameter null or not set");
     }
@@ -860,8 +1042,17 @@ extern "C" Item bash_expand_tilde(Item word) {
     const char* suffix = w + 1; // after ~
 
     if (*suffix == '\0' || *suffix == '/') {
-        // ~ or ~/path → use $HOME
-        home = getenv("HOME");
+        // ~ or ~/path → use $HOME from bash variable table first, then getenv
+        // look HOME up via bash_get_var (forward declared in bash_runtime.h)
+        Item home_name = (Item){.item = s2it(heap_create_name("HOME", 4))};
+        extern Item bash_get_var(Item name);
+        Item home_val = bash_get_var(home_name);
+        const char* bash_home = bash_item_to_cstr(home_val);
+        if (bash_home && *bash_home) {
+            home = bash_home;
+        } else {
+            home = getenv("HOME");
+        }
         if (!home) {
             struct passwd* pw = getpwuid(getuid());
             if (pw) home = pw->pw_dir;
@@ -1384,6 +1575,16 @@ extern "C" void bash_set_exit_code(int code) {
     bash_last_exit_code = code & 0xFF;
 }
 
+// Save exit code as plain Item int for later restoration (avoids Item vs int confusion)
+extern "C" Item bash_save_exit_code(void) {
+    return (Item){.item = i2it(bash_last_exit_code)};
+}
+
+// Restore exit code from a saved Item int (counterpart to bash_save_exit_code)
+extern "C" void bash_restore_exit_code(Item saved) {
+    bash_last_exit_code = (int)it2i(saved) & 0xFF;
+}
+
 extern "C" void bash_negate_exit_code(void) {
     bash_last_exit_code = (bash_last_exit_code == 0) ? 1 : 0;
 }
@@ -1675,6 +1876,11 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
 #define BASH_CAPTURE_STACK_MAX 32
 static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
 static int bash_capture_depth = 0;
+// tracks command-substitution nesting depth, for debug-trap suppression
+static int bash_cmd_sub_depth = 0;
+
+extern "C" void bash_cmd_sub_enter(void) { bash_cmd_sub_depth++; }
+extern "C" void bash_cmd_sub_exit(void)  { if (bash_cmd_sub_depth > 0) bash_cmd_sub_depth--; }
 
 // stdin item for pipeline stage passing (declared above, before bash_exec_external)
 
@@ -1707,6 +1913,36 @@ extern "C" Item bash_end_capture_raw(void) {
     bash_capture_depth--;
     StrBuf* buf = bash_capture_bufs[bash_capture_depth];
     Item result = (Item){.item = s2it(heap_create_name(buf->str, buf->length))};
+    strbuf_free(buf);
+    return result;
+}
+
+// apply IFS word-splitting to command substitution result:
+// replaces runs of IFS whitespace (space/tab/newline) with single spaces,
+// trims leading and trailing whitespace. Used for unquoted $(cmd) and `cmd`.
+extern "C" Item bash_cmd_sub_word_split(Item s) {
+    String* str = it2s(bash_to_string(s));
+    if (!str || str->len == 0) return s;
+    const char* src = str->chars;
+    int len = str->len;
+    StrBuf* buf = strbuf_new();
+    bool in_ws = true;  // start as true to trim leading whitespace
+    for (int i = 0; i < len; i++) {
+        char c = src[i];
+        bool is_ifs = (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+        if (is_ifs) {
+            if (!in_ws) {
+                strbuf_append_char(buf, ' ');
+                in_ws = true;
+            }
+        } else {
+            strbuf_append_char(buf, c);
+            in_ws = false;
+        }
+    }
+    // trim trailing space added above
+    if (buf->length > 0 && buf->str[buf->length - 1] == ' ') buf->length--;
+    Item result = {.item = s2it(heap_create_name(buf->str, (int)buf->length))};
     strbuf_free(buf);
     return result;
 }
@@ -1798,6 +2034,19 @@ extern "C" void bash_runtime_init(void) {
     bash_opt_nounset = false;
     bash_opt_xtrace = false;
     bash_opt_pipefail = false;
+    bash_opt_extdebug = false;
+    bash_opt_functrace = false;
+    bash_current_lineno = 0;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+    bash_funcname_depth = 0;
+    bash_source_depth = 0;
+    bash_call_frame_depth = 0;
+    bash_debug_trap_running = false;
+    bash_return_trap_running = false;
+    bash_return_trap_lineno = 0;
+    bash_return_trap_base_depth = 0;
+    bash_trap_nesting_depth = 0;
     // clear trap state
     for (int i = 0; i < BASH_TRAP_NUM; i++) {
         bash_trap_handlers[i] = NULL;
@@ -1842,6 +2091,15 @@ extern "C" void bash_runtime_cleanup(void) {
             bash_func_scope_stack[bash_func_scope_depth] = NULL;
         }
     }
+    bash_funcname_depth = 0;
+    bash_current_lineno = 0;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+    bash_source_depth = 0;
+    bash_call_frame_depth = 0;
+    bash_debug_trap_running = false;
+    bash_return_trap_running = false;
+    bash_trap_nesting_depth = 0;
     log_debug("bash: runtime cleanup");
 }
 
@@ -1895,7 +2153,7 @@ extern "C" void bash_set_var(Item name, Item value) {
             }
             int attrs = found->attributes;
             Item final_value = value;
-            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
             if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
             if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
             BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
@@ -1920,7 +2178,7 @@ extern "C" void bash_set_var(Item name, Item value) {
 
     // apply attribute transformations
     Item final_value = value;
-    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
     if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
     if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
 
@@ -1945,7 +2203,7 @@ extern "C" Item bash_get_var(Item name) {
     // fall through to global table
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->value;
-    return (Item){.item = s2it(heap_create_name("", 0))};  // unset = empty string
+    return (Item){.item = s2it(NULL)};  // unset = null (distinguishable from empty string)
 }
 
 extern "C" void bash_set_local_var(Item name, Item value) {
@@ -1960,7 +2218,7 @@ extern "C" void bash_set_local_var(Item name, Item value) {
         const BashRtVar* existing = (const BashRtVar*)hashmap_get(frame, &key);
         int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
         Item final_value = value;
-        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_to_int(value);
+        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
         if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
         if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
         BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
@@ -2042,6 +2300,30 @@ extern "C" void bash_declare_var(Item name, int flags) {
     }
     if (flags & BASH_ATTR_EXPORT) entry.is_export = true;
     hashmap_set(bash_var_table, &entry);
+}
+
+// declare attrs in the local scope frame (for local -i, local -l, etc.)
+extern "C" void bash_declare_local_var(Item name, int flags) {
+    if (bash_func_scope_depth <= 0) {
+        bash_declare_var(name, flags);
+        return;
+    }
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    struct hashmap* frame = bash_func_scope_stack[bash_func_scope_depth - 1];
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(frame, &key);
+    BashRtVar entry;
+    if (existing) {
+        entry = *existing;
+        entry.attributes |= flags;
+    } else {
+        entry = {.name = s->chars, .name_len = (size_t)s->len,
+                 .value = (Item){.item = s2it(heap_create_name("", 0))},
+                 .is_export = false, .attributes = flags};
+    }
+    hashmap_set(frame, &entry);
 }
 
 extern "C" int bash_get_var_attrs(Item name) {
@@ -2258,6 +2540,13 @@ extern "C" Item bash_get_script_name(void) {
     return (Item){.item = s2it(heap_create_name(bash_script_name))};
 }
 
+static String* bash_get_current_source_name(void) {
+    if (bash_source_depth > 0 && bash_source_stack[bash_source_depth - 1]) {
+        return bash_source_stack[bash_source_depth - 1];
+    }
+    return heap_create_name(bash_script_name ? bash_script_name : "", bash_script_name ? (int)strlen(bash_script_name) : 0);
+}
+
 // ============================================================================
 // Scope lifecycle (runtime — for JIT-emitted scope push/pop)
 // ============================================================================
@@ -2334,7 +2623,10 @@ extern "C" void bash_env_import(void) {
     static const char* env_names[] = {
         "PATH", "HOME", "USER", "PWD", "SHELL", "LANG", "TERM",
         "EDITOR", "HOSTNAME", "LOGNAME", "TMPDIR", "LC_ALL", "LC_CTYPE",
-        "OLDPWD", "SHLVL", "IFS", NULL
+        "OLDPWD", "SHLVL", "IFS",
+        // test harness variables — imported so bash tests can invoke sub-scripts
+        "THIS_SH", "TESTSHELL",
+        NULL
     };
     for (int i = 0; env_names[i]; i++) {
         const char* val = getenv(env_names[i]);
@@ -2460,7 +2752,10 @@ extern "C" Item bash_call_rt_func(Item name_item, Item* args, int argc) {
     key.name_len = len;
     const BashRtFuncEntry* found = (const BashRtFuncEntry*)hashmap_get(bash_rt_func_table, &key);
     if (found && found->ptr) {
-        return found->ptr(args, argc);
+        bash_push_call_frame();
+        Item result = found->ptr(args, argc);
+        bash_pop_call_frame();
+        return result;
     }
     log_debug("bash: runtime function '%.*s' not found", s->len, s->chars);
     bash_last_exit_code = 127;
@@ -2489,6 +2784,13 @@ extern "C" void bash_set_option(Item option, bool enable) {
     } else if (s->len == 8 && memcmp(s->chars, "pipefail", 8) == 0) {
         bash_opt_pipefail = enable;
         log_debug("bash: set pipefail=%s", enable ? "on" : "off");
+    } else if (s->len == 8 && memcmp(s->chars, "extdebug", 8) == 0) {
+        bash_opt_extdebug = enable;
+        log_debug("bash: set extdebug=%s", enable ? "on" : "off");
+    } else if ((s->len == 1 && s->chars[0] == 'T') ||
+               (s->len == 9 && memcmp(s->chars, "functrace", 9) == 0)) {
+        bash_opt_functrace = enable;
+        log_debug("bash: set functrace=%s", enable ? "on" : "off");
     } else {
         log_debug("bash: set: unknown option '%.*s'", s->len, s->chars);
     }
@@ -2510,6 +2812,136 @@ extern "C" bool bash_get_option_pipefail(void) {
     return bash_opt_pipefail;
 }
 
+extern "C" bool bash_get_option_extdebug(void) {
+    return bash_opt_extdebug;
+}
+
+extern "C" Item bash_get_lineno(void) {
+    if (bash_debug_trap_running && bash_funcname_depth <= bash_debug_trap_base_depth) {
+        return (Item){.item = i2it(bash_debug_trap_lineno)};
+    }
+    if (bash_return_trap_running && bash_funcname_depth <= bash_return_trap_base_depth) {
+        return (Item){.item = i2it(bash_return_trap_lineno)};
+    }
+    return (Item){.item = i2it(bash_current_lineno)};
+}
+
+extern "C" void bash_set_lineno(int line) {
+    bash_current_lineno = line;
+}
+
+// restore lineno from the top call frame (call site line)
+extern "C" void bash_restore_call_frame_lineno(void) {
+    if (bash_call_frame_depth > 0) {
+        bash_current_lineno = bash_call_frame_stack[bash_call_frame_depth - 1].line;
+    }
+}
+
+extern "C" void bash_push_funcname(Item name) {
+    if (bash_funcname_depth >= BASH_FUNCNAME_STACK_MAX) return;
+    String* s = it2s(name);
+    if (!s) s = heap_create_name("", 0);
+    bash_funcname_stack[bash_funcname_depth] = s;
+    bash_funcname_source_stack[bash_funcname_depth] = bash_get_current_source_name();
+    bash_funcname_depth++;
+}
+
+extern "C" void bash_pop_funcname(void) {
+    if (bash_funcname_depth > 0) bash_funcname_depth--;
+}
+
+extern "C" Item bash_get_funcname(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+
+    int stack_idx = bash_funcname_depth - 1 - idx;
+    if (stack_idx < 0 || stack_idx >= bash_funcname_depth) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    return (Item){.item = s2it(bash_funcname_stack[stack_idx])};
+}
+
+extern "C" Item bash_get_funcname_count(void) {
+    return (Item){.item = i2it(bash_funcname_depth)};
+}
+
+extern "C" Item bash_get_bash_source_count(void) {
+    // BASH_SOURCE has same depth as call frame stack, +1 for current file
+    int count = bash_call_frame_depth + 1;
+    return (Item){.item = i2it(count)};
+}
+
+extern "C" Item bash_get_bash_lineno_count(void) {
+    int count = bash_call_frame_depth + 1;
+    return (Item){.item = i2it(count)};
+}
+
+extern "C" Item bash_get_bash_source(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+
+    // BASH_SOURCE[i] = source file where FUNCNAME[i] is defined/running
+    int stack_idx = bash_funcname_depth - 1 - idx;
+    if (stack_idx < 0 || stack_idx >= bash_funcname_depth) {
+        // fallback: return the main script source (bottom of source stack)
+        if (bash_source_depth > 0) {
+            return (Item){.item = s2it(bash_source_stack[0])};
+        }
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    String* src = bash_funcname_source_stack[stack_idx];
+    if (src) return (Item){.item = s2it(src)};
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_get_bash_lineno(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+
+    int frame_idx = bash_call_frame_depth - 1 - idx;
+    if (frame_idx < 0 || frame_idx >= bash_call_frame_depth) {
+        return (Item){.item = i2it(0)};
+    }
+    return (Item){.item = i2it(bash_call_frame_stack[frame_idx].line)};
+}
+
+extern "C" void bash_push_source(Item name) {
+    if (bash_source_depth >= BASH_SOURCE_STACK_MAX) return;
+    String* s = it2s(name);
+    if (!s) s = heap_create_name("", 0);
+    bash_source_stack[bash_source_depth++] = s;
+}
+
+extern "C" void bash_pop_source(void) {
+    if (bash_source_depth > 0) bash_source_depth--;
+}
+
+extern "C" void bash_push_call_frame(void) {
+    if (bash_call_frame_depth >= BASH_SOURCE_STACK_MAX) return;
+    bash_call_frame_stack[bash_call_frame_depth].source = bash_get_current_source_name();
+    bash_call_frame_stack[bash_call_frame_depth].line = bash_current_lineno;
+    bash_call_frame_depth++;
+}
+
+extern "C" void bash_pop_call_frame(void) {
+    if (bash_call_frame_depth > 0) bash_call_frame_depth--;
+}
+
 // ============================================================================
 // Signal handling / trap (Phase 8)
 // ============================================================================
@@ -2525,8 +2957,9 @@ static int bash_signal_name_to_idx(const char* name, int len) {
     if (len == 6 && memcmp(name, "SIGINT", 6) == 0) return BASH_TRAP_IDX_INT;
     if (len == 4 && memcmp(name, "QUIT", 4) == 0)  return BASH_TRAP_IDX_QUIT;
     if (len == 7 && memcmp(name, "SIGQUIT", 7) == 0) return BASH_TRAP_IDX_QUIT;
-    if (len == 4 && memcmp(name, "TERM", 4) == 0)  return BASH_TRAP_IDX_TERM;
-    if (len == 7 && memcmp(name, "SIGTERM", 7) == 0) return BASH_TRAP_IDX_TERM;
+    if (len == 4 && memcmp(name, "TERM", 4) == 0)   return BASH_TRAP_IDX_TERM;
+    if (len == 7 && memcmp(name, "SIGTERM", 7) == 0)  return BASH_TRAP_IDX_TERM;
+    if (len == 6 && memcmp(name, "RETURN", 6) == 0)   return BASH_TRAP_IDX_RETURN;
     return -1;
 }
 
@@ -2605,6 +3038,80 @@ extern "C" void bash_trap_run_exit(void) {
     Item code_item = {.item = s2it(code_str)};
     bash_eval_string(code_item);
     free(code);
+}
+
+extern "C" Item bash_run_debug_trap(void) {
+    if (bash_debug_trap_running) {
+        return (Item){.item = i2it(0)};
+    }
+    if (!bash_trap_handlers[BASH_TRAP_IDX_DEBUG] || bash_trap_handlers[BASH_TRAP_IDX_DEBUG][0] == '\0') {
+        return (Item){.item = i2it(0)};
+    }
+    // when functrace is off, suppress debug trap inside functions (depth > 1 means inside a function)
+    if (!bash_opt_functrace && bash_funcname_depth > 1) {
+        return (Item){.item = i2it(0)};
+    }
+    // suppress debug trap inside command substitution bodies when functrace is off
+    // (bash doesn't inherit DEBUG trap into $() subshells without functrace)
+    if (!bash_opt_functrace && bash_cmd_sub_depth > 0) {
+        return (Item){.item = i2it(0)};
+    }
+    // suppress debug trap at the top level of a RETURN trap handler eval
+    // (allow it inside functions called from the handler)
+    if (bash_return_trap_running && bash_funcname_depth <= bash_return_trap_base_depth) {
+        return (Item){.item = i2it(0)};
+    }
+
+    bash_debug_trap_running = true;
+    bash_trap_nesting_depth++;
+    bash_debug_trap_lineno = bash_current_lineno;
+    bash_debug_trap_base_depth = bash_funcname_depth;
+    int saved_lineno = bash_current_lineno;
+    String* code_str = heap_create_name(bash_trap_handlers[BASH_TRAP_IDX_DEBUG],
+                                        (int)strlen(bash_trap_handlers[BASH_TRAP_IDX_DEBUG]));
+    Item code_item = {.item = s2it(code_str)};
+    bash_eval_string(code_item);
+    int trap_ec = bash_last_exit_code;
+    bash_debug_trap_running = false;
+    bash_trap_nesting_depth--;
+    bash_debug_trap_lineno = 0;
+    bash_debug_trap_base_depth = 0;
+    bash_current_lineno = saved_lineno;  // restore lineno after trap runs
+
+    if (bash_opt_extdebug && trap_ec == 2) {
+        bash_last_exit_code = 0;
+        return (Item){.item = i2it(2)};
+    }
+    return (Item){.item = i2it(0)};
+}
+
+extern "C" void bash_run_return_trap(void) {
+    if (bash_return_trap_running) return;
+    // suppress RETURN trap when already inside a trap handler (e.g. debug trap handler returning)
+    if (bash_trap_nesting_depth > 0) return;
+    if (!bash_trap_handlers[BASH_TRAP_IDX_RETURN] || bash_trap_handlers[BASH_TRAP_IDX_RETURN][0] == '\0') {
+        return;
+    }
+    // when functrace is off, suppress RETURN trap inside functions
+    if (!bash_opt_functrace && bash_funcname_depth > 1) return;
+    bash_return_trap_running = true;
+    bash_return_trap_lineno = bash_current_lineno;
+    bash_return_trap_base_depth = bash_funcname_depth;
+    bash_trap_nesting_depth++;
+    int saved_lineno = bash_current_lineno;
+    String* code_str = heap_create_name(bash_trap_handlers[BASH_TRAP_IDX_RETURN],
+                                        (int)strlen(bash_trap_handlers[BASH_TRAP_IDX_RETURN]));
+    Item code_item = {.item = s2it(code_str)};
+    bash_eval_string(code_item);
+    bash_current_lineno = saved_lineno;  // restore lineno after trap runs
+    bash_trap_nesting_depth--;
+    bash_return_trap_lineno = 0;
+    bash_return_trap_base_depth = 0;
+    bash_return_trap_running = false;
+}
+
+extern "C" bool bash_is_functrace(void) {
+    return bash_opt_functrace;
 }
 
 extern "C" void bash_trap_check(void) {

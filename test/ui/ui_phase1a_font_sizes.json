@@ -1,0 +1,19 @@
+{
+  "name": "Phase 1a: Layout verify - font sizes (baseline_201)",
+  "html": "test/layout/data/baseline/baseline_201_font_sizes.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 1a: assert_visible + assert_text on baseline_201_font_sizes ==="},
+    {"type": "log", "message": "No mouse interaction — pure layout verification."},
+    {"type": "wait", "ms": 300},
+
+    {"type": "assert_visible", "target": {"selector": "p.small-text"},  "visible": true},
+    {"type": "assert_visible", "target": {"selector": "p.medium-text"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "p.large-text"},  "visible": true},
+
+    {"type": "assert_text", "target": {"selector": "p.small-text"},  "contains": "Small text"},
+    {"type": "assert_text", "target": {"selector": "p.medium-text"}, "contains": "Medium text"},
+    {"type": "assert_text", "target": {"selector": "p.large-text"},  "contains": "Large text"},
+
+    {"type": "render", "file": "./temp/phase1a_font_sizes.png"}
+  ]
+}

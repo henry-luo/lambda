@@ -1,0 +1,53 @@
+{
+  "name": "Phase 1c: Click by pixel position - border and outside hit-test (baseline_809)",
+  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "description": "Tests hit-testing accuracy for the <p> inside .center container. Geometry: p x=32 y=104 w=300 h=18; body y=10 h=206 (bottom=216). Group A clicks inside the text element (border positions) and verifies the caret is set on text (view_type=1). Group B clicks outside the body (y=230 > body bottom 216) AFTER the caret is already set, and verifies that clicking outside correctly clears the caret (matching browser behavior).",
+  "events": [
+    {"type": "log", "message": "=== Phase 1c: pixel-position click tests ==="},
+    {"type": "log", "message": "Target: <p> inside .center  x=32 y=104 w=300 h=18"},
+    {"type": "log", "message": "  x range [32,331]  y range [104,121]"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Group A: Inside clicks on text element borders - caret must be text (view_type=1) ---"},
+
+    {"type": "log", "message": "--- A1. Center (182, 113) ---"},
+    {"type": "click", "x": 182, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A2. Left border (32, 113) ---"},
+    {"type": "click", "x": 32, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A3. Right border (331, 113) ---"},
+    {"type": "click", "x": 331, "y": 113},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A4. Top border (182, 104) ---"},
+    {"type": "click", "x": 182, "y": 104},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- A5. Bottom border (182, 121) ---"},
+    {"type": "click", "x": 182, "y": 121},
+    {"type": "assert_caret", "view_type": 1},
+
+    {"type": "log", "message": "--- Group B: Outside clicks (y=230, below body bottom=216) - must clear caret ---"},
+
+    {"type": "log", "message": "--- B1. Outside at left-edge x (32, 230) ---"},
+    {"type": "click", "x": 32, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "log", "message": "--- B2. Outside at center x (182, 230) ---"},
+    {"type": "click", "x": 182, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "log", "message": "--- B3. Outside at right-edge x (331, 230) ---"},
+    {"type": "click", "x": 331, "y": 230},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "assert_caret", "view_type_not": 1},
+
+    {"type": "render", "file": "./temp/phase1c_click_positions.png"}
+  ]
+}
+

@@ -993,11 +993,13 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     float css_width = rect ? rect->width : view->width;
     float css_height = rect ? rect->height : view->height;
 
-    // For the root <html> element, viewport clamping sets height to viewport size
-    // but browsers report the full content height. Use content_height when available.
+    // For the root <html> element with auto height, viewport clamping sets height
+    // to viewport size but browsers report the full content height.
+    // Only use content_height when the root has no explicit CSS height (CSS 2.1 §10.6.4).
     if (!rect && view->is_element() && !view->parent) {
         DomElement* elem = (DomElement*)view;
-        if (elem->content_height > css_height) {
+        bool has_explicit_height = (elem->blk && elem->blk->given_height >= 0);
+        if (!has_explicit_height && elem->content_height > css_height) {
             css_height = elem->content_height;
         }
     }

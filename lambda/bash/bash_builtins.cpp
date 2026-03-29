@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <unistd.h>
 #include <regex.h>
 
@@ -96,65 +97,297 @@ extern "C" Item bash_builtin_echo(Item* args, int argc) {
 // printf
 // ============================================================================
 
-extern "C" Item bash_builtin_printf(Item format, Item* args, int argc) {
-    // simplified printf: supports %s, %d, %f
-    String* fmt = it2s(bash_to_string(format));
+// helper: extract an integer argument value for printf format
+static int64_t printf_get_int(Item arg) {
+    TypeId type = get_type_id(arg);
+    if (type == LMD_TYPE_INT) return it2i(arg);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(arg);
+        if (s && s->len > 0) {
+            // bash supports 0x hex and 0 octal prefixes
+            if (s->len > 1 && s->chars[0] == '0' && (s->chars[1] == 'x' || s->chars[1] == 'X'))
+                return strtoll(s->chars, NULL, 16);
+            if (s->len > 1 && s->chars[0] == '0')
+                return strtoll(s->chars, NULL, 8);
+            // bash: leading quote/double-quote means character value
+            if (s->len >= 2 && (s->chars[0] == '\'' || s->chars[0] == '"'))
+                return (unsigned char)s->chars[1];
+            return strtoll(s->chars, NULL, 10);
+        }
+    }
+    return 0;
+}
+
+static double printf_get_float(Item arg) {
+    TypeId type = get_type_id(arg);
+    if (type == LMD_TYPE_INT) return (double)it2i(arg);
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(arg);
+        if (s && s->len > 0) return strtod(s->chars, NULL);
+    }
+    // try converting to string first
+    Item str = bash_to_string(arg);
+    String* s = it2s(str);
+    if (s && s->len > 0) return strtod(s->chars, NULL);
+    return 0.0;
+}
+
+// process a single pass of the format string, consuming args starting at arg_idx
+// returns updated arg_idx
+static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, StrBuf* out) {
+    for (int i = 0; i < (int)fmt->len; i++) {
+        if (fmt->chars[i] == '%' && i + 1 < (int)fmt->len) {
+            if (fmt->chars[i + 1] == '%') {
+                strbuf_append_char(out, '%');
+                i++;
+                continue;
+            }
+            // collect full format specifier: flags, width, precision, conversion
+            char spec[64];
+            int si = 0;
+            spec[si++] = '%';
+            i++;
+            // flags: -, +, space, 0, #
+            while (i < (int)fmt->len && si < 60 &&
+                   (fmt->chars[i] == '-' || fmt->chars[i] == '+' || fmt->chars[i] == ' ' ||
+                    fmt->chars[i] == '0' || fmt->chars[i] == '#')) {
+                spec[si++] = fmt->chars[i++];
+            }
+            // width (may be * for arg-supplied width)
+            if (i < (int)fmt->len && fmt->chars[i] == '*') {
+                int w = (arg_idx < argc) ? (int)printf_get_int(args[arg_idx++]) : 0;
+                si += snprintf(spec + si, sizeof(spec) - si, "%d", w);
+                i++;
+            } else {
+                while (i < (int)fmt->len && si < 60 && fmt->chars[i] >= '0' && fmt->chars[i] <= '9') {
+                    spec[si++] = fmt->chars[i++];
+                }
+            }
+            // precision
+            if (i < (int)fmt->len && fmt->chars[i] == '.') {
+                spec[si++] = '.';
+                i++;
+                if (i < (int)fmt->len && fmt->chars[i] == '*') {
+                    int p = (arg_idx < argc) ? (int)printf_get_int(args[arg_idx++]) : 0;
+                    si += snprintf(spec + si, sizeof(spec) - si, "%d", p);
+                    i++;
+                } else {
+                    while (i < (int)fmt->len && si < 60 && fmt->chars[i] >= '0' && fmt->chars[i] <= '9') {
+                        spec[si++] = fmt->chars[i++];
+                    }
+                }
+            }
+            // conversion character
+            if (i >= (int)fmt->len) break;
+            char conv = fmt->chars[i];
+            switch (conv) {
+            case 'd': case 'i': {
+                // replace with lld for 64-bit
+                spec[si++] = 'l';
+                spec[si++] = 'l';
+                spec[si++] = 'd';
+                spec[si] = '\0';
+                int64_t val = (arg_idx < argc) ? printf_get_int(args[arg_idx++]) : 0;
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), spec, (long long)val);
+                strbuf_append_str_n(out, buf, n);
+                break;
+            }
+            case 'o': {
+                spec[si++] = 'l';
+                spec[si++] = 'l';
+                spec[si++] = 'o';
+                spec[si] = '\0';
+                int64_t val = (arg_idx < argc) ? printf_get_int(args[arg_idx++]) : 0;
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), spec, (long long)val);
+                strbuf_append_str_n(out, buf, n);
+                break;
+            }
+            case 'u': {
+                spec[si++] = 'l';
+                spec[si++] = 'l';
+                spec[si++] = 'u';
+                spec[si] = '\0';
+                int64_t val = (arg_idx < argc) ? printf_get_int(args[arg_idx++]) : 0;
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), spec, (unsigned long long)val);
+                strbuf_append_str_n(out, buf, n);
+                break;
+            }
+            case 'x': case 'X': {
+                spec[si++] = 'l';
+                spec[si++] = 'l';
+                spec[si++] = conv;
+                spec[si] = '\0';
+                int64_t val = (arg_idx < argc) ? printf_get_int(args[arg_idx++]) : 0;
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf), spec, (unsigned long long)val);
+                strbuf_append_str_n(out, buf, n);
+                break;
+            }
+            case 'f': case 'F': case 'e': case 'E': case 'g': case 'G': {
+                spec[si++] = conv;
+                spec[si] = '\0';
+                double val = (arg_idx < argc) ? printf_get_float(args[arg_idx++]) : 0.0;
+                char buf[256];
+                int n = snprintf(buf, sizeof(buf), spec, val);
+                strbuf_append_str_n(out, buf, n);
+                break;
+            }
+            case 's': {
+                spec[si++] = 's';
+                spec[si] = '\0';
+                const char* str = "";
+                if (arg_idx < argc) {
+                    Item s = bash_to_string(args[arg_idx++]);
+                    String* ss = it2s(s);
+                    if (ss) str = ss->chars;
+                }
+                char buf[4096];
+                int n = snprintf(buf, sizeof(buf), spec, str);
+                strbuf_append_str_n(out, buf, n > (int)sizeof(buf) - 1 ? (int)sizeof(buf) - 1 : n);
+                break;
+            }
+            case 'c': {
+                char ch = ' ';
+                if (arg_idx < argc) {
+                    Item s = bash_to_string(args[arg_idx++]);
+                    String* ss = it2s(s);
+                    if (ss && ss->len > 0) ch = ss->chars[0];
+                }
+                strbuf_append_char(out, ch);
+                break;
+            }
+            case 'b': {
+                // %b: like %s but interpret backslash escapes
+                const char* str = "";
+                if (arg_idx < argc) {
+                    Item s = bash_to_string(args[arg_idx++]);
+                    String* ss = it2s(s);
+                    if (ss) str = ss->chars;
+                }
+                for (const char* p = str; *p; p++) {
+                    if (*p == '\\' && *(p + 1)) {
+                        p++;
+                        switch (*p) {
+                        case 'n': strbuf_append_char(out, '\n'); break;
+                        case 't': strbuf_append_char(out, '\t'); break;
+                        case 'r': strbuf_append_char(out, '\r'); break;
+                        case 'a': strbuf_append_char(out, '\a'); break;
+                        case 'b': strbuf_append_char(out, '\b'); break;
+                        case 'f': strbuf_append_char(out, '\f'); break;
+                        case 'v': strbuf_append_char(out, '\v'); break;
+                        case '\\': strbuf_append_char(out, '\\'); break;
+                        case '0': {
+                            // octal
+                            int val = 0;
+                            for (int j = 0; j < 3 && p[1] >= '0' && p[1] <= '7'; j++) {
+                                p++;
+                                val = val * 8 + (*p - '0');
+                            }
+                            strbuf_append_char(out, (char)val);
+                            break;
+                        }
+                        default: strbuf_append_char(out, '\\'); strbuf_append_char(out, *p); break;
+                        }
+                    } else {
+                        strbuf_append_char(out, *p);
+                    }
+                }
+                break;
+            }
+            default:
+                // unknown conversion: output literally
+                strbuf_append_str_n(out, spec, si);
+                strbuf_append_char(out, conv);
+                break;
+            }
+        } else if (fmt->chars[i] == '\\' && i + 1 < (int)fmt->len) {
+            switch (fmt->chars[i + 1]) {
+            case 'n': strbuf_append_char(out, '\n'); i++; break;
+            case 't': strbuf_append_char(out, '\t'); i++; break;
+            case 'r': strbuf_append_char(out, '\r'); i++; break;
+            case 'a': strbuf_append_char(out, '\a'); i++; break;
+            case 'b': strbuf_append_char(out, '\b'); i++; break;
+            case 'f': strbuf_append_char(out, '\f'); i++; break;
+            case 'v': strbuf_append_char(out, '\v'); i++; break;
+            case '\\': strbuf_append_char(out, '\\'); i++; break;
+            case '0': {
+                // octal escape \0NNN
+                int val = 0;
+                i++; // skip '0'
+                for (int j = 0; j < 3 && i + 1 < (int)fmt->len && fmt->chars[i + 1] >= '0' && fmt->chars[i + 1] <= '7'; j++) {
+                    i++;
+                    val = val * 8 + (fmt->chars[i] - '0');
+                }
+                strbuf_append_char(out, (char)val);
+                break;
+            }
+            default: strbuf_append_char(out, fmt->chars[i]); break;
+            }
+        } else {
+            strbuf_append_char(out, fmt->chars[i]);
+        }
+    }
+    return arg_idx;
+}
+
+extern "C" Item bash_builtin_printf(Item* all_args, int total_argc) {
+    if (total_argc == 0) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    int idx = 0;
+    // check for -v varname
+    bool assign_to_var = false;
+    String* var_name = NULL;
+    if (total_argc >= 3) {
+        String* first = it2s(bash_to_string(all_args[0]));
+        if (first && first->len == 2 && first->chars[0] == '-' && first->chars[1] == 'v') {
+            assign_to_var = true;
+            var_name = it2s(bash_to_string(all_args[1]));
+            idx = 2;
+        }
+    }
+
+    if (idx >= total_argc) {
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    // next arg is the format string
+    String* fmt = it2s(bash_to_string(all_args[idx]));
     if (!fmt) {
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
+    idx++;
 
+    Item* args = all_args + idx;
+    int argc = total_argc - idx;
+
+    StrBuf* out = strbuf_new();
+
+    // bash printf reuses format string if there are remaining args
     int arg_idx = 0;
-    for (int i = 0; i < (int)fmt->len; i++) {
-        if (fmt->chars[i] == '%' && i + 1 < (int)fmt->len) {
-            switch (fmt->chars[i + 1]) {
-            case 's': {
-                if (arg_idx < argc) {
-                    Item s = bash_to_string(args[arg_idx++]);
-                    String* str = it2s(s);
-                    if (str) bash_raw_write(str->chars, str->len);
-                }
-                i++;
-                break;
-            }
-            case 'd': {
-                if (arg_idx < argc) {
-                    int64_t val = 0;
-                    Item arg = args[arg_idx++];
-                    TypeId type = get_type_id(arg);
-                    if (type == LMD_TYPE_INT) val = it2i(arg);
-                    else if (type == LMD_TYPE_STRING) {
-                        String* s = it2s(arg);
-                        if (s) val = strtoll(s->chars, NULL, 10);
-                    }
-                    char buf[32];
-                    int n = snprintf(buf, sizeof(buf), "%lld", (long long)val);
-                    bash_raw_write(buf, n);
-                }
-                i++;
-                break;
-            }
-            case '%':
-                bash_raw_putc('%');
-                i++;
-                break;
-            default:
-                bash_raw_putc(fmt->chars[i]);
-                break;
-            }
-        } else if (fmt->chars[i] == '\\' && i + 1 < (int)fmt->len) {
-            // process escape sequences in format string
-            switch (fmt->chars[i + 1]) {
-            case 'n': bash_raw_putc('\n'); i++; break;
-            case 't': bash_raw_putc('\t'); i++; break;
-            case '\\': bash_raw_putc('\\'); i++; break;
-            default: bash_raw_putc(fmt->chars[i]); break;
-            }
-        } else {
-            bash_raw_putc(fmt->chars[i]);
+    do {
+        arg_idx = printf_format_pass(fmt, args, argc, arg_idx, out);
+    } while (arg_idx < argc && arg_idx > 0);
+
+    if (assign_to_var && var_name) {
+        Item name_item = (Item){.item = s2it(heap_create_name(var_name->chars, var_name->len))};
+        Item val_item = (Item){.item = s2it(heap_create_name(out->str, out->length))};
+        bash_set_var(name_item, val_item);
+    } else {
+        if (out->length > 0) {
+            bash_raw_write(out->str, (int)out->length);
         }
+        fflush(stdout);
     }
-    fflush(stdout);
+
+    strbuf_free(out);
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
 }
@@ -394,6 +627,75 @@ extern "C" Item bash_builtin_pwd(void) {
     }
     bash_set_exit_code(1);
     return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item bash_builtin_caller(Item* args, int argc) {
+    int frame = 0;
+    if (argc > 0) {
+        String* arg = it2s(bash_to_string(args[0]));
+        if (!arg || arg->len == 0) {
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        if (arg->chars[0] == '-' && !(arg->len > 1 && isdigit((unsigned char)arg->chars[1]))) {
+            String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: caller: %.*s: invalid option\n",
+                    src ? src->len : 0, src ? src->chars : "",
+                    (int)it2i(bash_get_lineno()), arg->len, arg->chars);
+            fprintf(stderr, "caller: usage: caller [expr]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+        char buf[64];
+        int copy_len = arg->len < (int)sizeof(buf) - 1 ? arg->len : (int)sizeof(buf) - 1;
+        memcpy(buf, arg->chars, copy_len);
+        buf[copy_len] = '\0';
+        char* end = NULL;
+        long parsed = strtol(buf, &end, 10);
+        if (!end || *end != '\0' || parsed < 0) {
+            String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: caller: %.*s: invalid number\n",
+                    src ? src->len : 0, src ? src->chars : "",
+                    (int)it2i(bash_get_lineno()), arg->len, arg->chars);
+            fprintf(stderr, "caller: usage: caller [expr]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+        frame = (int)parsed;
+    }
+
+    Item line_item = bash_get_bash_lineno((Item){.item = i2it(frame)});
+    int line = (int)it2i(line_item);
+    String* src = it2s(bash_get_bash_source((Item){.item = i2it(frame + 1)}));
+    String* func = it2s(bash_get_funcname((Item){.item = i2it(frame + 1)}));
+
+    if (argc == 0 && line == 0) {
+        bash_raw_write("0 NULL\n", 7);
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    if (line == 0 || !src || src->len == 0) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    char buf[1024];
+    if (argc == 0) {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s\n", line, src->len, src->chars);
+        bash_raw_write(buf, n);
+    } else if (func && func->len > 0) {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s %.*s\n", line, func->len, func->chars, src->len, src->chars);
+        bash_raw_write(buf, n);
+    } else {
+        int n = snprintf(buf, sizeof(buf), "%d %.*s\n", line, src->len, src->chars);
+        bash_raw_write(buf, n);
+    }
+
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
 }
 
 // ============================================================================
@@ -830,4 +1132,402 @@ extern "C" Item bash_builtin_cut(Item* args, int argc) {
     }
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
+}
+
+// ============================================================================
+// let — evaluate arithmetic expressions
+// ============================================================================
+
+// mini recursive-descent parser for bash arithmetic expressions
+// supports: =, +=, -=, *=, /=, %=, +, -, *, /, %, ( ), variable refs, integers
+
+struct LetParser {
+    const char* src;
+    int pos;
+    int len;
+};
+
+static void let_skip_ws(LetParser* p) {
+    while (p->pos < p->len && (p->src[p->pos] == ' ' || p->src[p->pos] == '\t'))
+        p->pos++;
+}
+
+static int64_t let_parse_expr(LetParser* p);
+static int64_t let_parse_assign(LetParser* p);
+
+static int64_t let_get_var_value(const char* name, int name_len) {
+    String* s = heap_create_name(name, name_len);
+    Item name_item = (Item){.item = s2it(s)};
+    Item val = bash_get_var(name_item);
+    TypeId t = get_type_id(val);
+    if (t == LMD_TYPE_INT) return it2i(val);
+    if (t == LMD_TYPE_STRING) {
+        String* vs = it2s(val);
+        if (!vs || vs->len == 0) return 0;
+        // try recursive variable reference: if the string is a variable name
+        char* endptr;
+        long long v = strtoll(vs->chars, &endptr, 10);
+        if (endptr != vs->chars) return (int64_t)v;
+        // might be a variable name reference (bash allows var indirection in arithmetic)
+        return let_get_var_value(vs->chars, vs->len);
+    }
+    return 0;
+}
+
+static void let_set_var_value(const char* name, int name_len, int64_t value) {
+    String* s = heap_create_name(name, name_len);
+    Item name_item = (Item){.item = s2it(s)};
+    Item val_item = (Item){.item = i2it(value)};
+    bash_set_var(name_item, val_item);
+}
+
+static int64_t let_parse_primary(LetParser* p) {
+    let_skip_ws(p);
+    if (p->pos >= p->len) return 0;
+
+    char c = p->src[p->pos];
+
+    // parenthesized expression
+    if (c == '(') {
+        p->pos++;
+        int64_t val = let_parse_expr(p);
+        let_skip_ws(p);
+        if (p->pos < p->len && p->src[p->pos] == ')') p->pos++;
+        return val;
+    }
+
+    // unary minus
+    if (c == '-') {
+        p->pos++;
+        return -let_parse_primary(p);
+    }
+
+    // unary plus
+    if (c == '+' && (p->pos + 1 >= p->len || p->src[p->pos+1] != '=')) {
+        p->pos++;
+        return let_parse_primary(p);
+    }
+
+    // logical not
+    if (c == '!') {
+        p->pos++;
+        return !let_parse_primary(p);
+    }
+
+    // bitwise not
+    if (c == '~') {
+        p->pos++;
+        return ~let_parse_primary(p);
+    }
+
+    // number
+    if (c >= '0' && c <= '9') {
+        int64_t val = 0;
+        // handle base prefixes
+        if (c == '0' && p->pos + 1 < p->len) {
+            char next = p->src[p->pos + 1];
+            if (next == 'x' || next == 'X') {
+                p->pos += 2;
+                while (p->pos < p->len) {
+                    char h = p->src[p->pos];
+                    if (h >= '0' && h <= '9') val = val * 16 + (h - '0');
+                    else if (h >= 'a' && h <= 'f') val = val * 16 + (h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F') val = val * 16 + (h - 'A' + 10);
+                    else break;
+                    p->pos++;
+                }
+                return val;
+            }
+        }
+        while (p->pos < p->len && p->src[p->pos] >= '0' && p->src[p->pos] <= '9') {
+            val = val * 10 + (p->src[p->pos] - '0');
+            p->pos++;
+        }
+        return val;
+    }
+
+    // variable name (or variable reference with $)
+    bool has_dollar = false;
+    if (c == '$') { has_dollar = true; p->pos++; let_skip_ws(p); }
+
+    if (p->pos < p->len && (p->src[p->pos] == '_' ||
+        (p->src[p->pos] >= 'a' && p->src[p->pos] <= 'z') ||
+        (p->src[p->pos] >= 'A' && p->src[p->pos] <= 'Z'))) {
+        int start = p->pos;
+        while (p->pos < p->len && (p->src[p->pos] == '_' ||
+               (p->src[p->pos] >= 'a' && p->src[p->pos] <= 'z') ||
+               (p->src[p->pos] >= 'A' && p->src[p->pos] <= 'Z') ||
+               (p->src[p->pos] >= '0' && p->src[p->pos] <= '9'))) {
+            p->pos++;
+        }
+        int name_len = p->pos - start;
+
+        // check for assignment operators (only if no $)
+        if (!has_dollar) {
+            let_skip_ws(p);
+            if (p->pos < p->len) {
+                char op = p->src[p->pos];
+                char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+
+                if (op == '=' && op2 != '=') {
+                    p->pos++;
+                    int64_t rhs = let_parse_expr(p);
+                    let_set_var_value(p->src + start, name_len, rhs);
+                    return rhs;
+                }
+                if (op2 == '=' && (op == '+' || op == '-' || op == '*' || op == '/' || op == '%' ||
+                                   op == '&' || op == '|' || op == '^')) {
+                    p->pos += 2;
+                    int64_t cur = let_get_var_value(p->src + start, name_len);
+                    int64_t rhs = let_parse_expr(p);
+                    int64_t result;
+                    switch (op) {
+                    case '+': result = cur + rhs; break;
+                    case '-': result = cur - rhs; break;
+                    case '*': result = cur * rhs; break;
+                    case '/': result = rhs != 0 ? cur / rhs : 0; break;
+                    case '%': result = rhs != 0 ? cur % rhs : 0; break;
+                    case '&': result = cur & rhs; break;
+                    case '|': result = cur | rhs; break;
+                    case '^': result = cur ^ rhs; break;
+                    default: result = rhs; break;
+                    }
+                    let_set_var_value(p->src + start, name_len, result);
+                    return result;
+                }
+                // <<= and >>= 
+                if (op == '<' && op2 == '<' && p->pos + 2 < p->len && p->src[p->pos + 2] == '=') {
+                    p->pos += 3;
+                    int64_t cur = let_get_var_value(p->src + start, name_len);
+                    int64_t rhs = let_parse_expr(p);
+                    int64_t result = cur << rhs;
+                    let_set_var_value(p->src + start, name_len, result);
+                    return result;
+                }
+                if (op == '>' && op2 == '>' && p->pos + 2 < p->len && p->src[p->pos + 2] == '=') {
+                    p->pos += 3;
+                    int64_t cur = let_get_var_value(p->src + start, name_len);
+                    int64_t rhs = let_parse_expr(p);
+                    int64_t result = cur >> rhs;
+                    let_set_var_value(p->src + start, name_len, result);
+                    return result;
+                }
+                // pre-increment/decrement (++ or --)
+                if (op == '+' && op2 == '+') {
+                    p->pos += 2;
+                    int64_t cur = let_get_var_value(p->src + start, name_len);
+                    let_set_var_value(p->src + start, name_len, cur + 1);
+                    return cur + 1;
+                }
+                if (op == '-' && op2 == '-') {
+                    p->pos += 2;
+                    int64_t cur = let_get_var_value(p->src + start, name_len);
+                    let_set_var_value(p->src + start, name_len, cur - 1);
+                    return cur - 1;
+                }
+            }
+        }
+
+        return let_get_var_value(p->src + start, name_len);
+    }
+
+    return 0;
+}
+
+static int64_t let_parse_mul(LetParser* p) {
+    int64_t left = let_parse_primary(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        if (op == '*' && (p->pos + 1 >= p->len || p->src[p->pos + 1] != '=')) {
+            p->pos++; left *= let_parse_primary(p);
+        } else if (op == '/' && (p->pos + 1 >= p->len || p->src[p->pos + 1] != '=')) {
+            p->pos++; int64_t r = let_parse_primary(p); left = r ? left / r : 0;
+        } else if (op == '%' && (p->pos + 1 >= p->len || p->src[p->pos + 1] != '=')) {
+            p->pos++; int64_t r = let_parse_primary(p); left = r ? left % r : 0;
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_add(LetParser* p) {
+    int64_t left = let_parse_mul(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+        if (op == '+' && op2 != '=' && op2 != '+') {
+            p->pos++; left += let_parse_mul(p);
+        } else if (op == '-' && op2 != '=' && op2 != '-') {
+            p->pos++; left -= let_parse_mul(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_shift(LetParser* p) {
+    int64_t left = let_parse_add(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos + 1 >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = p->src[p->pos + 1];
+        char op3 = (p->pos + 2 < p->len) ? p->src[p->pos + 2] : 0;
+        if (op == '<' && op2 == '<' && op3 != '=') {
+            p->pos += 2; left <<= let_parse_add(p);
+        } else if (op == '>' && op2 == '>' && op3 != '=') {
+            p->pos += 2; left >>= let_parse_add(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_relational(LetParser* p) {
+    int64_t left = let_parse_shift(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+        if (op == '<' && op2 == '=') {
+            p->pos += 2; left = left <= let_parse_shift(p);
+        } else if (op == '>' && op2 == '=') {
+            p->pos += 2; left = left >= let_parse_shift(p);
+        } else if (op == '<' && op2 != '<') {
+            p->pos++; left = left < let_parse_shift(p);
+        } else if (op == '>' && op2 != '>') {
+            p->pos++; left = left > let_parse_shift(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_equality(LetParser* p) {
+    int64_t left = let_parse_relational(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos + 1 >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = p->src[p->pos + 1];
+        if (op == '=' && op2 == '=') {
+            p->pos += 2; left = left == let_parse_relational(p);
+        } else if (op == '!' && op2 == '=') {
+            p->pos += 2; left = left != let_parse_relational(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_bitand(LetParser* p) {
+    int64_t left = let_parse_equality(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+        if (op == '&' && op2 != '&' && op2 != '=') {
+            p->pos++; left &= let_parse_equality(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_bitxor(LetParser* p) {
+    int64_t left = let_parse_bitand(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+        if (op == '^' && op2 != '=') {
+            p->pos++; left ^= let_parse_bitand(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_bitor(LetParser* p) {
+    int64_t left = let_parse_bitxor(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos >= p->len) break;
+        char op = p->src[p->pos];
+        char op2 = (p->pos + 1 < p->len) ? p->src[p->pos + 1] : 0;
+        if (op == '|' && op2 != '|' && op2 != '=') {
+            p->pos++; left |= let_parse_bitxor(p);
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_logand(LetParser* p) {
+    int64_t left = let_parse_bitor(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos + 1 >= p->len) break;
+        if (p->src[p->pos] == '&' && p->src[p->pos + 1] == '&') {
+            p->pos += 2;
+            int64_t right = let_parse_bitor(p);
+            left = (left && right) ? 1 : 0;
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_logor(LetParser* p) {
+    int64_t left = let_parse_logand(p);
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos + 1 >= p->len) break;
+        if (p->src[p->pos] == '|' && p->src[p->pos + 1] == '|') {
+            p->pos += 2;
+            int64_t right = let_parse_logand(p);
+            left = (left || right) ? 1 : 0;
+        } else break;
+    }
+    return left;
+}
+
+static int64_t let_parse_ternary(LetParser* p) {
+    int64_t cond = let_parse_logor(p);
+    let_skip_ws(p);
+    if (p->pos < p->len && p->src[p->pos] == '?') {
+        p->pos++;
+        int64_t then_val = let_parse_expr(p);
+        let_skip_ws(p);
+        if (p->pos < p->len && p->src[p->pos] == ':') p->pos++;
+        int64_t else_val = let_parse_expr(p);
+        return cond ? then_val : else_val;
+    }
+    return cond;
+}
+
+static int64_t let_parse_expr(LetParser* p) {
+    int64_t val = let_parse_ternary(p);
+    // handle comma operator
+    while (true) {
+        let_skip_ws(p);
+        if (p->pos < p->len && p->src[p->pos] == ',') {
+            p->pos++;
+            val = let_parse_ternary(p);
+        } else break;
+    }
+    return val;
+}
+
+extern "C" Item bash_builtin_let(Item* args, int argc) {
+    int64_t last_val = 0;
+    for (int i = 0; i < argc; i++) {
+        Item arg_str = bash_to_string(args[i]);
+        String* s = it2s(arg_str);
+        if (!s || s->len == 0) continue;
+        LetParser parser = {s->chars, 0, s->len};
+        last_val = let_parse_expr(&parser);
+    }
+    // let returns 1 (failure) if last expression is 0, 0 (success) otherwise
+    int exit_code = (last_val == 0) ? 1 : 0;
+    bash_set_exit_code(exit_code);
+    return (Item){.item = i2it(exit_code)};
 }

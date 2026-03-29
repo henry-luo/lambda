@@ -1,0 +1,9 @@
+true
+3
+"Widget"
+9.99
+"Novel"
+14.99
+"Cable"
+4.99
+["Widget", "Novel", "Cable"]

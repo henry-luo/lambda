@@ -145,6 +145,11 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node);
 static MIR_op_t bm_transpile_string(BashMirTranspiler* mt, BashStringNode* node);
 static MIR_op_t bm_transpile_concat(BashMirTranspiler* mt, BashConcatNode* node);
+static MIR_label_t bm_new_label(BashMirTranspiler* mt);
+static MIR_reg_t bm_emit_call_0(BashMirTranspiler* mt, const char* fn_name);
+static void bm_emit_call_void_1(BashMirTranspiler* mt, const char* fn_name, MIR_op_t arg1);
+static bool bm_statement_needs_debug_trap(BashAstNodeType node_type);
+static bool bm_emit_statement_debug_prelude(BashMirTranspiler* mt, BashAstNode* node, MIR_label_t* skip_label);
 
 // ============================================================================
 // Helpers
@@ -173,6 +178,46 @@ static MIR_reg_t bm_new_temp(BashMirTranspiler* mt) {
     char name[32];
     snprintf(name, sizeof(name), "_bt%d", mt->tp->temp_var_counter++);
     return MIR_new_func_reg(mt->ctx, mt->current_func, MIR_T_I64, name);
+}
+
+static bool bm_statement_needs_debug_trap(BashAstNodeType node_type) {
+    switch (node_type) {
+    case BASH_AST_NODE_PROGRAM:
+    case BASH_AST_NODE_FUNCTION_DEF:
+    case BASH_AST_NODE_PIPELINE:
+    case BASH_AST_NODE_LIST:
+    case BASH_AST_NODE_BLOCK:
+    case BASH_AST_NODE_COMPOUND_STATEMENT:
+    case BASH_AST_NODE_REDIRECTED:
+    // if/while/until: debug trap fires for their condition command, not the compound itself
+    case BASH_AST_NODE_IF:
+    case BASH_AST_NODE_WHILE:
+    case BASH_AST_NODE_UNTIL:
+    // for loops: debug trap is emitted per-iteration inside bm_transpile_for
+    case BASH_AST_NODE_FOR:
+    case BASH_AST_NODE_FOR_ARITHMETIC:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool bm_emit_statement_debug_prelude(BashMirTranspiler* mt, BashAstNode* node, MIR_label_t* skip_label) {
+    if (!node) return false;
+
+    TSPoint start = ts_node_start_point(node->node);
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+
+    if (!bm_statement_needs_debug_trap(node->node_type)) return false;
+
+    *skip_label = bm_new_label(mt);
+    MIR_reg_t debug_result = bm_emit_call_0(mt, "bash_run_debug_trap");
+    MIR_append_insn(mt->ctx, mt->current_func_item,
+        MIR_new_insn(mt->ctx, MIR_BEQ,
+                     MIR_new_label_op(mt->ctx, *skip_label),
+                     MIR_new_reg_op(mt->ctx, debug_result),
+                     MIR_new_uint_op(mt->ctx, i2it(2))));
+    return true;
 }
 
 static MIR_label_t bm_new_label(BashMirTranspiler* mt) {
@@ -428,6 +473,9 @@ static MIR_op_t bm_emit_int_literal(BashMirTranspiler* mt, int64_t value) {
 static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     if (!node) return;
 
+    MIR_label_t debug_skip = NULL;
+    bool has_debug_skip = bm_emit_statement_debug_prelude(mt, node, &debug_skip);
+
     switch (node->node_type) {
     case BASH_AST_NODE_COMMAND: {
         BashCommandNode* cmd = (BashCommandNode*)node;
@@ -490,6 +538,61 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             }
         } else {
             bm_transpile_command(mt, cmd);
+        }
+        break;
+    }
+    case BASH_AST_NODE_REDIRECTED: {
+        // redirected wrapper: a pipeline/subshell/compound with outer file redirects
+        BashRedirectedNode* red = (BashRedirectedNode*)node;
+        bool has_stdout_redir = false;
+        bool has_stdin_redir = false;
+        BashRedirectNode* stdout_redir = NULL;
+        BashRedirectNode* stdin_redir = NULL;
+
+        BashAstNode* redir = red->redirects;
+        while (redir) {
+            if (redir->node_type == BASH_AST_NODE_REDIRECT) {
+                BashRedirectNode* r = (BashRedirectNode*)redir;
+                if ((r->fd == 1 || r->fd == -1) &&
+                    (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+                    has_stdout_redir = true;
+                    stdout_redir = r;
+                } else if (r->fd == 0 && r->mode == BASH_REDIR_READ) {
+                    has_stdin_redir = true;
+                    stdin_redir = r;
+                }
+                // stderr redirect and fd dup (2>&1) are treated as no-ops for now
+            }
+            redir = redir->next;
+        }
+
+        if (has_stdin_redir && stdin_redir->target) {
+            MIR_op_t filename = bm_transpile_node(mt, stdin_redir->target);
+            MIR_reg_t content = bm_emit_call_1(mt, "bash_redirect_read", filename);
+            bm_emit_call_void_1(mt, "bash_set_stdin_item",
+                MIR_new_reg_op(mt->ctx, content));
+        }
+
+        if (has_stdout_redir) {
+            bm_emit_call_void_0(mt, "bash_begin_capture");
+        }
+
+        bm_transpile_statement(mt, red->inner);
+
+        if (has_stdout_redir && stdout_redir->target) {
+            // save exit code from inner statement before redirect_write overwrites it
+            MIR_reg_t saved_ec = bm_emit_call_0(mt, "bash_save_exit_code");
+            MIR_reg_t captured = bm_emit_call_0(mt, "bash_end_capture_raw");
+            MIR_op_t filename = bm_transpile_node(mt, stdout_redir->target);
+            const char* func = (stdout_redir->mode == BASH_REDIR_APPEND)
+                ? "bash_redirect_append" : "bash_redirect_write";
+            bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->ctx, captured));
+            // restore exit code so the redirected statement's exit code is preserved
+            bm_emit_call_void_1(mt, "bash_restore_exit_code", MIR_new_reg_op(mt->ctx, saved_ec));
+        }
+
+        if (has_stdin_redir) {
+            bm_emit_call_void_0(mt, "bash_clear_stdin_item");
         }
         break;
     }
@@ -623,6 +726,8 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             ret_val = MIR_new_uint_op(mt->ctx, i2it(0));
         }
         // pop scope frame before leaving the function
+        bm_emit_call_void_0(mt, "bash_run_return_trap");
+        bm_emit_call_void_0(mt, "bash_pop_funcname");
         bm_emit_call_void_0(mt, "bash_scope_pop");
         bm_emit_call_void_0(mt, "bash_pop_positional");
         MIR_append_insn(mt->ctx, mt->current_func_item,
@@ -637,6 +742,7 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         }
         // run EXIT trap before terminating
         bm_emit_call_void_0(mt, "bash_trap_run_exit");
+        bm_emit_call_void_0(mt, "bash_pop_funcname");
         MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
         MIR_append_insn(mt->ctx, mt->current_func_item,
             MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, final_ec)));
@@ -682,6 +788,10 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
     default:
         log_debug("bash-mir: unhandled statement type %d", node->node_type);
         break;
+    }
+
+    if (has_debug_skip) {
+        MIR_append_insn(mt->ctx, mt->current_func_item, debug_skip);
     }
 }
 
@@ -749,6 +859,8 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     case BASH_AST_NODE_COMMAND_SUB: {
         BashCommandSubNode* cmd_sub = (BashCommandSubNode*)node;
         // begin capture → execute body → end capture (returns captured string)
+        // cmd_sub_enter/exit: suppress debug trap inside $() when functrace is off
+        bm_emit_call_void_0(mt, "bash_cmd_sub_enter");
         bm_emit_call_void_0(mt, "bash_begin_capture");
         BashAstNode* stmt = cmd_sub->body;
         while (stmt) {
@@ -756,6 +868,7 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
             stmt = stmt->next;
         }
         MIR_reg_t result = bm_emit_call_0(mt, "bash_end_capture");
+        bm_emit_call_void_0(mt, "bash_cmd_sub_exit");
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_AST_NODE_COMMAND: {
@@ -847,6 +960,21 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_ACCESS: {
         BashArrayAccessNode* access = (BashArrayAccessNode*)node;
+        if (access->name && access->name->len == 8 && memcmp(access->name->chars, "FUNCNAME", 8) == 0) {
+            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_funcname", idx_val);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (access->name && access->name->len == 11 && memcmp(access->name->chars, "BASH_SOURCE", 11) == 0) {
+            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_source", idx_val);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (access->name && access->name->len == 11 && memcmp(access->name->chars, "BASH_LINENO", 11) == 0) {
+            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_lineno", idx_val);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
         MIR_op_t arr_val = bm_emit_get_var(mt, access->name->chars);
         MIR_op_t idx_val = bm_transpile_node(mt, access->index);
         const char* fn = bm_is_assoc_var(mt, access->name->chars)
@@ -870,6 +998,18 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_LENGTH: {
         BashArrayLengthNode* len_node = (BashArrayLengthNode*)node;
+        if (len_node->name && len_node->name->len == 8 && memcmp(len_node->name->chars, "FUNCNAME", 8) == 0) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_funcname_count");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (len_node->name && len_node->name->len == 11 && memcmp(len_node->name->chars, "BASH_SOURCE", 11) == 0) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_source_count");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (len_node->name && len_node->name->len == 11 && memcmp(len_node->name->chars, "BASH_LINENO", 11) == 0) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_lineno_count");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
         MIR_op_t arr_val = bm_emit_get_var(mt, len_node->name->chars);
         const char* fn = bm_is_assoc_var(mt, len_node->name->chars)
                          ? "bash_assoc_length" : "bash_array_length";
@@ -972,11 +1112,21 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
             }
         }
     }
+    // unquoted command substitution: apply IFS word-splitting to result
+    if (node->node_type == BASH_AST_NODE_COMMAND_SUB) {
+        MIR_op_t raw = bm_transpile_node(mt, node);
+        MIR_reg_t split = bm_emit_call_1(mt, "bash_cmd_sub_word_split", raw);
+        return MIR_new_reg_op(mt->ctx, split);
+    }
     return bm_transpile_node(mt, node);
 }
 
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node) {
     if (node->name) {
+        if (node->name->len == 6 && memcmp(node->name->chars, "LINENO", 6) == 0) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_lineno");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
         return bm_emit_get_var(mt, node->name->chars);
     }
     return bm_emit_string_literal(mt, "", 0);
@@ -1039,21 +1189,24 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
     case BASH_EXPAND_DEFAULT: {
         MIR_op_t def_val = exp->argument ? bm_transpile_node(mt, exp->argument)
                                          : bm_emit_string_literal(mt, "", 0);
-        MIR_reg_t result = bm_emit_call_2(mt, "bash_expand_default", var_val, def_val);
+        const char* func = exp->has_colon ? "bash_expand_default" : "bash_expand_default_nocolon";
+        MIR_reg_t result = bm_emit_call_2(mt, func, var_val, def_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_EXPAND_ASSIGN_DEFAULT: {
         MIR_op_t def_val = exp->argument ? bm_transpile_node(mt, exp->argument)
                                          : bm_emit_string_literal(mt, "", 0);
         MIR_op_t var_name = bm_emit_string_literal(mt, exp->variable->chars, exp->variable->len);
-        MIR_reg_t result = bm_emit_call_3(mt, "bash_expand_assign_default",
+        const char* func = exp->has_colon ? "bash_expand_assign_default" : "bash_expand_assign_default_nocolon";
+        MIR_reg_t result = bm_emit_call_3(mt, func,
             var_name, var_val, def_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_EXPAND_ALT: {
         MIR_op_t alt_val = exp->argument ? bm_transpile_node(mt, exp->argument)
                                          : bm_emit_string_literal(mt, "", 0);
-        MIR_reg_t result = bm_emit_call_2(mt, "bash_expand_alt", var_val, alt_val);
+        const char* func = exp->has_colon ? "bash_expand_alt" : "bash_expand_alt_nocolon";
+        MIR_reg_t result = bm_emit_call_2(mt, func, var_val, alt_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_EXPAND_TRIM_PREFIX:
@@ -1170,39 +1323,42 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     }
 
     if (cmd_len == 6 && memcmp(cmd_name, "printf", 6) == 0) {
-        // printf format [args...]
+        // printf [-v var] format [args...]
         if (cmd->arg_count == 0) return bm_emit_int_literal(mt, 0);
 
-        // first arg is format string
-        MIR_op_t format_val = bm_transpile_node(mt, cmd->args);
-        int extra_argc = cmd->arg_count - 1;
-
+        int total_argc = cmd->arg_count;
         MIR_reg_t args_ptr = bm_new_temp(mt);
-        if (extra_argc > 0) {
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
+                         MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(total_argc * sizeof(Item)))));
+        int i = 0;
+        BashAstNode* arg = cmd->args;
+        while (arg && i < total_argc) {
+            MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
             MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, (uint64_t)(uintptr_t)malloc(extra_argc * sizeof(Item)))));
-            int i = 0;
-            BashAstNode* arg = cmd->args->next;
-            while (arg && i < extra_argc) {
-                MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
-                MIR_append_insn(mt->ctx, mt->current_func_item,
-                    MIR_new_insn(mt->ctx, MIR_MOV,
-                        MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
-                                       args_ptr, 0, 1),
-                        arg_val));
-                arg = arg->next;
-                i++;
-            }
-        } else {
-            MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, args_ptr),
-                             MIR_new_uint_op(mt->ctx, 0)));
+                MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                   args_ptr, 0, 1),
+                    arg_val));
+            arg = arg->next;
+            i++;
         }
 
-        MIR_reg_t result = bm_emit_call_3(mt, "bash_builtin_printf",
-            format_val, MIR_new_reg_op(mt->ctx, args_ptr),
-            MIR_new_int_op(mt->ctx, extra_argc));
+        MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_printf",
+            MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_new_int_op(mt->ctx, total_argc));
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+
+    // : (colon) — no-op, always returns 0
+    if (cmd_len == 1 && cmd_name[0] == ':') {
+        // evaluate args (for side effects like ${var:=default}) but discard
+        BashAstNode* arg = cmd->args;
+        while (arg) {
+            bm_transpile_cmd_arg(mt, arg);
+            arg = arg->next;
+        }
+        MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_true");
         return MIR_new_reg_op(mt->ctx, result);
     }
 
@@ -1213,6 +1369,29 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
 
     if (cmd_len == 5 && memcmp(cmd_name, "false", 5) == 0) {
         MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_false");
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+
+    // eval — concatenate args with spaces and evaluate as bash code
+    if (cmd_len == 4 && memcmp(cmd_name, "eval", 4) == 0) {
+        if (!cmd->args) {
+            MIR_reg_t result = bm_emit_call_0(mt, "bash_builtin_true");
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        // build concatenated string from args
+        MIR_op_t combined = bm_transpile_cmd_arg(mt, cmd->args);
+        BashAstNode* arg = cmd->args->next;
+        while (arg) {
+            // add space separator
+            MIR_op_t space = bm_emit_string_literal(mt, " ", 1);
+            MIR_reg_t with_space = bm_emit_call_2(mt, "bash_string_concat", combined, space);
+            MIR_op_t next_val = bm_transpile_cmd_arg(mt, arg);
+            MIR_reg_t concatenated = bm_emit_call_2(mt, "bash_string_concat",
+                MIR_new_reg_op(mt->ctx, with_space), next_val);
+            combined = MIR_new_reg_op(mt->ctx, concatenated);
+            arg = arg->next;
+        }
+        MIR_reg_t result = bm_emit_call_1(mt, "bash_eval_string", combined);
         return MIR_new_reg_op(mt->ctx, result);
     }
 
@@ -1229,6 +1408,10 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         MIR_reg_t result = bm_emit_call_1(mt, "bash_shift_args",
             MIR_new_int_op(mt->ctx, shift_n));
         return MIR_new_reg_op(mt->ctx, result);
+    }
+
+    if (cmd_len == 6 && memcmp(cmd_name, "caller", 6) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_caller", cmd);
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "local", 5) == 0) {
@@ -1258,10 +1441,46 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     }
 
     if (cmd_len == 5 && memcmp(cmd_name, "unset", 5) == 0) {
+        if (!cmd->args) return bm_emit_int_literal(mt, 0);
+
+        BashAstNode* arg = cmd->args;
+
+        // check for -f flag (unset function)
+        bool is_func_unset = false;
+        if (arg->node_type == BASH_AST_NODE_RAW_STRING) {
+            BashRawStringNode* rs = (BashRawStringNode*)arg;
+            if (rs->text && rs->text->len == 2 && memcmp(rs->text->chars, "-f", 2) == 0) {
+                is_func_unset = true;
+                arg = arg->next; // skip -f
+            }
+        }
+
+        if (is_func_unset) {
+            // unset -f funcname — remove from user_funcs so future calls fall through
+            while (arg) {
+                const char* text = NULL; int text_len = 0;
+                if (arg->node_type == BASH_AST_NODE_WORD) {
+                    text = ((BashWordNode*)arg)->text->chars;
+                    text_len = ((BashWordNode*)arg)->text->len;
+                } else if (arg->node_type == BASH_AST_NODE_RAW_STRING) {
+                    text = ((BashRawStringNode*)arg)->text->chars;
+                    text_len = ((BashRawStringNode*)arg)->text->len;
+                }
+                if (text && text_len > 0) {
+                    BashMirUserFunc del_key;
+                    memset(&del_key, 0, sizeof(del_key));
+                    int copy = text_len < (int)(sizeof(del_key.name) - 1) ? text_len : (int)(sizeof(del_key.name) - 1);
+                    memcpy(del_key.name, text, copy);
+                    del_key.name[copy] = '\0';
+                    hashmap_delete(mt->user_funcs, &del_key);
+                }
+                arg = arg->next;
+            }
+            return bm_emit_int_literal(mt, 0);
+        }
+
         // unset 'arr[idx]' or unset var
-        if (cmd->args) {
-            BashAstNode* arg = cmd->args;
-            if (arg->node_type == BASH_AST_NODE_WORD || arg->node_type == BASH_AST_NODE_RAW_STRING) {
+        if (arg->node_type == BASH_AST_NODE_WORD || arg->node_type == BASH_AST_NODE_RAW_STRING) {
                 // parse "arr[idx]" from the raw string
                 const char* text;
                 int text_len;
@@ -1300,7 +1519,6 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                     // unset plain variable
                     bm_emit_set_var(mt, text, bm_emit_string_literal(mt, "", 0));
                 }
-            }
         }
         return bm_emit_int_literal(mt, 0);
     }
@@ -1363,6 +1581,70 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     // set — shell options
     if (cmd_len == 3 && memcmp(cmd_name, "set", 3) == 0) {
         BashAstNode* arg = cmd->args;
+
+        // check for set -- arg1 arg2 ... (set positional parameters)
+        // or set x arg1 arg2 ... (where x is first positional)
+        bool is_set_positional = false;
+        BashAstNode* pos_args = NULL;
+        if (arg && arg->node_type == BASH_AST_NODE_WORD) {
+            BashWordNode* w = (BashWordNode*)arg;
+            if (w->text && w->text->len == 2 && memcmp(w->text->chars, "--", 2) == 0) {
+                is_set_positional = true;
+                pos_args = arg->next;
+            }
+        }
+        // also handle: set x y z (non-flag first arg sets positionals)
+        if (!is_set_positional && arg && arg->node_type == BASH_AST_NODE_WORD) {
+            BashWordNode* w = (BashWordNode*)arg;
+            if (w->text && w->text->len > 0 &&
+                w->text->chars[0] != '-' && w->text->chars[0] != '+') {
+                is_set_positional = true;
+                pos_args = arg; // include the first arg
+            }
+        }
+
+        if (is_set_positional) {
+            // count positional args
+            int argc = 0;
+            BashAstNode* p = pos_args;
+            while (p) { argc++; p = p->next; }
+
+            if (argc > 0) {
+                MIR_reg_t args_ptr = bm_new_temp(mt);
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, args_ptr),
+                                 MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+                int i = 0;
+                p = pos_args;
+                while (p && i < argc) {
+                    MIR_op_t val = bm_transpile_cmd_arg(mt, p);
+                    MIR_append_insn(mt->ctx, mt->current_func_item,
+                        MIR_new_insn(mt->ctx, MIR_MOV,
+                                     MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                         i * (int)sizeof(Item), args_ptr, 0, 1),
+                                     val));
+                    p = p->next;
+                    i++;
+                }
+                bm_emit_call_void_2(mt, "bash_set_positional",
+                    MIR_new_reg_op(mt->ctx, args_ptr),
+                    MIR_new_int_op(mt->ctx, argc));
+            } else {
+                // set -- with no args: clear positional params
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, bm_new_temp(mt)),
+                                 MIR_new_uint_op(mt->ctx, 0)));
+                MIR_reg_t zero = bm_new_temp(mt);
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, zero),
+                                 MIR_new_uint_op(mt->ctx, 0)));
+                bm_emit_call_void_2(mt, "bash_set_positional",
+                    MIR_new_reg_op(mt->ctx, zero),
+                    MIR_new_int_op(mt->ctx, 0));
+            }
+            return bm_emit_int_literal(mt, 0);
+        }
+
         while (arg) {
             if (arg->node_type == BASH_AST_NODE_WORD) {
                 BashWordNode* w = (BashWordNode*)arg;
@@ -1415,6 +1697,54 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         return bm_emit_int_literal(mt, 0);
     }
 
+    // shopt -s extdebug / shopt -u extdebug
+    if (cmd_len == 5 && memcmp(cmd_name, "shopt", 5) == 0) {
+        BashAstNode* first = cmd->args;
+        BashAstNode* second = first ? first->next : NULL;
+        if (first && second && first->node_type == BASH_AST_NODE_WORD && second->node_type == BASH_AST_NODE_WORD) {
+            BashWordNode* op = (BashWordNode*)first;
+            BashWordNode* opt = (BashWordNode*)second;
+            if (op->text && opt->text && opt->text->len == 8 && memcmp(opt->text->chars, "extdebug", 8) == 0) {
+                bool enable = (op->text->len == 2 && memcmp(op->text->chars, "-s", 2) == 0);
+                bool disable = (op->text->len == 2 && memcmp(op->text->chars, "-u", 2) == 0);
+                if (enable || disable) {
+                    MIR_op_t opt_val = bm_emit_string_literal(mt, "extdebug", 8);
+                    bm_emit_call_void_2(mt, "bash_set_option", opt_val,
+                        MIR_new_int_op(mt->ctx, enable ? 1 : 0));
+                    return bm_emit_int_literal(mt, 0);
+                }
+            }
+        }
+        return bm_emit_int_literal(mt, 0);
+    }
+
+    // let — evaluate arithmetic expressions
+    if (cmd_len == 3 && memcmp(cmd_name, "let", 3) == 0) {
+        int argc = cmd->arg_count;
+        if (argc == 0) return bm_emit_int_literal(mt, 0);
+
+        MIR_reg_t args_ptr = bm_new_temp(mt);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_ALLOCA, MIR_new_reg_op(mt->ctx, args_ptr),
+                         MIR_new_int_op(mt->ctx, argc * (int)sizeof(Item))));
+        int i = 0;
+        BashAstNode* arg = cmd->args;
+        while (arg && i < argc) {
+            MIR_op_t arg_val = bm_transpile_cmd_arg(mt, arg);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, i * (int)sizeof(Item),
+                                   args_ptr, 0, 1),
+                    arg_val));
+            arg = arg->next;
+            i++;
+        }
+        MIR_reg_t result = bm_emit_call_2(mt, "bash_builtin_let",
+            MIR_new_reg_op(mt->ctx, args_ptr),
+            MIR_new_int_op(mt->ctx, argc));
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+
     // check for user-defined function call
     BashMirUserFunc key;
     memset(&key, 0, sizeof(key));
@@ -1462,6 +1792,8 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
         };
         MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &res_type, 2, call_params);
 
+        bm_emit_call_void_0(mt, "bash_push_call_frame");
+
         MIR_reg_t result = bm_new_temp(mt);
         MIR_append_insn(mt->ctx, mt->current_func_item,
             MIR_new_call_insn(mt->ctx, 5,
@@ -1470,6 +1802,8 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                 MIR_new_reg_op(mt->ctx, result),
                 MIR_new_reg_op(mt->ctx, args_ptr),
                 MIR_new_int_op(mt->ctx, argc)));
+
+            bm_emit_call_void_0(mt, "bash_pop_call_frame");
 
         return MIR_new_reg_op(mt->ctx, result);
     }
@@ -1581,6 +1915,8 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     // handle declare flags: declare -A creates assoc array, declare -i/-r/-l/-u sets attrs
     if (node->declare_flags) {
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+        // use local-scope declare for local variables
+        const char* declare_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
 
         // for declare-with-value, set non-readonly attrs first (for -i/-l/-u coercions),
         // then assign value, then add readonly after (so initial assignment isn't blocked)
@@ -1590,13 +1926,13 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         if (has_value) {
             int attrs_first = node->declare_flags & ~BASH_ATTR_READONLY;
             if (attrs_first) {
-                bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+                bm_emit_call_void_2(mt, declare_fn, name_op,
                     MIR_new_int_op(mt->ctx, attrs_first));
             }
             // readonly will be added after value assignment (see below)
         } else {
             // no value: set all attrs including readonly
-            bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+            bm_emit_call_void_2(mt, declare_fn, name_op,
                 MIR_new_int_op(mt->ctx, node->declare_flags));
         }
 
@@ -1651,7 +1987,7 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     } else if (node->is_append) {
         // var+=val → string append
         MIR_op_t old_val = bm_emit_get_var(mt, node->name->chars);
-        MIR_reg_t result = bm_emit_call_2(mt, "bash_concat", old_val, value);
+        MIR_reg_t result = bm_emit_call_2(mt, "bash_string_concat", old_val, value);
         if (node->is_local)
             bm_emit_set_local_var(mt, node->name->chars, MIR_new_reg_op(mt->ctx, result));
         else
@@ -1672,7 +2008,8 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     // add readonly AFTER value assignment (so initial declare -r var=val works)
     if (node->declare_flags && (node->declare_flags & BASH_ATTR_READONLY)) {
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
-        bm_emit_call_void_2(mt, "bash_declare_var", name_op,
+        const char* readonly_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
+        bm_emit_call_void_2(mt, readonly_fn, name_op,
             MIR_new_int_op(mt->ctx, BASH_ATTR_READONLY));
     }
 }
@@ -1848,6 +2185,20 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
                          MIR_new_reg_op(mt->ctx, idx_reg),
                          MIR_new_reg_op(mt->ctx, count_reg)));
 
+        // debug trap: fires at for statement line before each iteration
+        {
+            TSPoint start = ts_node_start_point(node->base.node);
+            bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+            MIR_label_t skip_iter = bm_new_label(mt);
+            MIR_reg_t dbg_res = bm_emit_call_0(mt, "bash_run_debug_trap");
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_BEQ,
+                             MIR_new_label_op(mt->ctx, loop_continue),
+                             MIR_new_reg_op(mt->ctx, dbg_res),
+                             MIR_new_uint_op(mt->ctx, i2it(2))));
+            (void)skip_iter;
+        }
+
         // elem = bash_array_get(arr, i2it(idx))
         MIR_reg_t idx_item_reg = bm_emit_call_1(mt, "bash_int_to_item",
             MIR_new_reg_op(mt->ctx, idx_reg));
@@ -1879,6 +2230,20 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         // compile-time unrolled iteration over word list
         word = node->words;
         while (word) {
+            // debug trap: fires at for statement line before each iteration
+            {
+                TSPoint start = ts_node_start_point(node->base.node);
+                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+                MIR_label_t iter_skip = bm_new_label(mt);
+                MIR_reg_t dbg_res = bm_emit_call_0(mt, "bash_run_debug_trap");
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_BEQ,
+                                 MIR_new_label_op(mt->ctx, loop_end),
+                                 MIR_new_reg_op(mt->ctx, dbg_res),
+                                 MIR_new_uint_op(mt->ctx, i2it(2))));
+                (void)iter_skip;
+            }
+
             MIR_op_t word_val = bm_transpile_node(mt, word);
             bm_emit_set_var(mt, node->variable->chars, word_val);
 
@@ -1912,14 +2277,20 @@ static void bm_transpile_for_arith(BashMirTranspiler* mt, BashForArithNode* node
     mt->loop_continue_label = loop_continue;
     mt->loop_depth++;
 
+    // line number of the for statement for debug preludes
+    int for_line = (int)ts_node_start_point(node->base.node).row + 1;
+
     // init
     if (node->init) bm_transpile_arith(mt, node->init);
 
     // loop start
     MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
 
-    // condition
+    // condition — emit debug prelude for condition check
     if (node->condition) {
+        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, for_line));
+        bm_emit_call_0(mt, "bash_run_debug_trap");
+
         MIR_op_t cond = bm_transpile_arith(mt, node->condition);
         // if condition is 0, exit loop
         MIR_append_insn(mt->ctx, mt->current_func_item,
@@ -1935,8 +2306,12 @@ static void bm_transpile_for_arith(BashMirTranspiler* mt, BashForArithNode* node
     // continue point
     MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
 
-    // step
-    if (node->step) bm_transpile_arith(mt, node->step);
+    // step — emit debug prelude for step expression
+    if (node->step) {
+        bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, for_line));
+        bm_emit_call_0(mt, "bash_run_debug_trap");
+        bm_transpile_arith(mt, node->step);
+    }
 
     // jump back
     MIR_append_insn(mt->ctx, mt->current_func_item,
@@ -2020,14 +2395,26 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
     MIR_op_t value = bm_transpile_node(mt, node->word);
     MIR_label_t end_label = bm_new_label(mt);
 
+    // first pass: create one label per case item (for fallthrough targets)
+    // count items
+    int item_count = 0;
+    { BashAstNode* it = node->items; while (it) { item_count++; it = it->next; } }
+
+    // allocate body labels (one per item) for ;& fallthrough
+    MIR_label_t* body_labels = (MIR_label_t*)alloca(item_count * sizeof(MIR_label_t));
+    MIR_label_t* next_labels = (MIR_label_t*)alloca(item_count * sizeof(MIR_label_t));
+    for (int k = 0; k < item_count; k++) {
+        body_labels[k] = bm_new_label(mt);
+        next_labels[k] = bm_new_label(mt);
+    }
+
     BashAstNode* item = node->items;
+    int idx = 0;
     while (item) {
         BashCaseItemNode* case_item = (BashCaseItemNode*)item;
-        MIR_label_t next_item = bm_new_label(mt);
 
         // check each pattern
         BashAstNode* pattern = case_item->patterns;
-        MIR_label_t match_label = bm_new_label(mt);
         bool has_wildcard = false;
 
         while (pattern) {
@@ -2044,7 +2431,7 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
             // if match, jump to match body
             MIR_append_insn(mt->ctx, mt->current_func_item,
                 MIR_new_insn(mt->ctx, MIR_BNE,
-                             MIR_new_label_op(mt->ctx, match_label),
+                             MIR_new_label_op(mt->ctx, body_labels[idx]),
                              MIR_new_reg_op(mt->ctx, cmp_result),
                              MIR_new_uint_op(mt->ctx, b2it(false))));
 
@@ -2054,17 +2441,41 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
         if (!has_wildcard) {
             // no match — skip to next item
             MIR_append_insn(mt->ctx, mt->current_func_item,
-                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, next_item)));
+                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, next_labels[idx])));
         }
 
         // match body
-        MIR_append_insn(mt->ctx, mt->current_func_item, match_label);
+        MIR_append_insn(mt->ctx, mt->current_func_item, body_labels[idx]);
         bm_transpile_statement(mt, case_item->body);
-        MIR_append_insn(mt->ctx, mt->current_func_item,
-            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
 
-        MIR_append_insn(mt->ctx, mt->current_func_item, next_item);
+        // handle terminator
+        if (case_item->terminator == 1) {
+            // ;& — fall through to next item's body directly (skip pattern check)
+            if (item->next) {
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, body_labels[idx + 1])));
+            } else {
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+            }
+        } else if (case_item->terminator == 2) {
+            // ;;& — continue testing next patterns
+            if (item->next) {
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, next_labels[idx])));
+            } else {
+                MIR_append_insn(mt->ctx, mt->current_func_item,
+                    MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+            }
+        } else {
+            // ;; — done, jump to end
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+        }
+
+        MIR_append_insn(mt->ctx, mt->current_func_item, next_labels[idx]);
         item = item->next;
+        idx++;
     }
 
     MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
@@ -2077,8 +2488,18 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
 static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode* node) {
     if (!node->name) return;
 
-    char func_name[140];
-    snprintf(func_name, sizeof(func_name), "bash_uf_%.*s", (int)node->name->len, node->name->chars);
+    // if this function name already exists, use a versioned MIR name to avoid
+    // "Repeated item declaration" — calls after this point will use the new version
+    char func_name[160];
+    BashMirUserFunc lookup_key;
+    memset(&lookup_key, 0, sizeof(lookup_key));
+    snprintf(lookup_key.name, sizeof(lookup_key.name), "%.*s", (int)node->name->len, node->name->chars);
+    if (hashmap_get(mt->user_funcs, &lookup_key)) {
+        snprintf(func_name, sizeof(func_name), "bash_uf_%.*s_r%d",
+                 (int)node->name->len, node->name->chars, mt->label_counter++);
+    } else {
+        snprintf(func_name, sizeof(func_name), "bash_uf_%.*s", (int)node->name->len, node->name->chars);
+    }
 
     // save current function context
     MIR_item_t saved_func_item = mt->current_func_item;
@@ -2121,11 +2542,24 @@ static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode
         MIR_new_reg_op(mt->ctx, args_reg), MIR_new_reg_op(mt->ctx, argc_reg));
     // push a new dynamic scope frame for local variables
     bm_emit_call_void_0(mt, "bash_scope_push");
+    MIR_op_t func_name_val = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+    bm_emit_call_void_1(mt, "bash_push_funcname", func_name_val);
+
+    // function-entry debug trap: fire with LINENO = function def start line
+    int func_start_line = (int)ts_node_start_point(node->base.node).row + 1;
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, func_start_line));
+    bm_emit_call_0(mt, "bash_run_debug_trap");
 
     // transpile function body
     bm_transpile_statement(mt, node->body);
 
+    // function-exit debug trap: fire with LINENO = function def start line
+    bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, func_start_line));
+    bm_emit_call_0(mt, "bash_run_debug_trap");
+
     // pop scope frame and restore positional params
+    bm_emit_call_void_0(mt, "bash_run_return_trap");
+    bm_emit_call_void_0(mt, "bash_pop_funcname");
     bm_emit_call_void_0(mt, "bash_scope_pop");
     bm_emit_call_void_0(mt, "bash_pop_positional");
 
@@ -2433,7 +2867,21 @@ extern "C" Item bash_source_file(Item filename) {
 
     Item result = {.item = i2it(0)};
     if (entry) {
+        bash_push_call_frame();
+        // push source BEFORE funcname so that BASH_SOURCE for "source" entry = sourced file
+        String* src_path = heap_create_name(path_buf, (int)strlen(path_buf));
+        bash_push_source((Item){.item = s2it(src_path)});
+        String* source_name = heap_create_name("source", 6);
+        bash_push_funcname((Item){.item = s2it(source_name)});
         result = entry();
+        // restore lineno to the call site, pop source context, then run traps in caller context
+        bash_restore_call_frame_lineno();
+        bash_pop_funcname();
+        bash_pop_source();
+        // source exit debug trap only fires with functrace on (set -T)
+        if (bash_is_functrace()) bash_run_debug_trap();
+        bash_run_return_trap();
+        bash_pop_call_frame();
     } else {
         log_error("bash: source: failed to find bash_source_entry");
     }
@@ -2599,17 +3047,8 @@ extern "C" Item bash_eval_string(Item code) {
     MIR_load_module(ctx, mt->module);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
-    typedef Item (*eval_entry_t)(void);
-    eval_entry_t entry = (eval_entry_t)find_func(ctx, func_name);
-
-    Item result = {.item = i2it(0)};
-    if (entry) {
-        result = entry();
-    } else {
-        log_error("bash: eval: failed to find entry function '%s'", func_name);
-    }
-
-    // register any user functions so they're callable from outer script
+    // register eval-local user functions before executing entry so trap/eval code
+    // can call functions defined earlier in the same snippet
     size_t iter = 0;
     void* item_ptr;
     while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
@@ -2622,9 +3061,26 @@ extern "C" Item bash_eval_string(Item code) {
         }
     }
 
-    // save ctx to keep function pointers valid
-    if (bash_source_ctx_count < BASH_SOURCE_CTX_MAX) {
-        bash_source_ctx_list[bash_source_ctx_count++] = ctx;
+    typedef Item (*eval_entry_t)(void);
+    eval_entry_t entry = (eval_entry_t)find_func(ctx, func_name);
+
+    Item result = {.item = i2it(0)};
+    if (entry) {
+        result = entry();
+    } else {
+        log_error("bash: eval: failed to find entry function '%s'", func_name);
+    }
+
+    // only keep the MIR context alive if it registered user functions whose
+    // pointers must remain valid.  Trap-handler evals (the vast majority) have
+    // no user functions and can be freed immediately, preventing exhaustion of
+    // the limited bash_source_ctx_list slots.
+    if (hashmap_count(mt->user_funcs) > 0) {
+        if (bash_source_ctx_count < BASH_SOURCE_CTX_MAX) {
+            bash_source_ctx_list[bash_source_ctx_count++] = ctx;
+        } else {
+            MIR_finish(ctx);
+        }
     } else {
         MIR_finish(ctx);
     }
@@ -2754,6 +3210,9 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     mt->current_func_item = MIR_new_func(ctx, "bash_main", 1, &ret_type, 0);
     mt->current_func = mt->current_func_item->u.func;
     mt->result_reg = bm_new_temp(mt);
+    bm_emit_call_void_1(mt, "bash_push_source",
+        bm_emit_string_literal(mt, filename ? filename : "", filename ? (int)strlen(filename) : 0));
+    bm_emit_call_void_1(mt, "bash_push_funcname", bm_emit_string_literal(mt, "main", 4));
 
     stmt = program->body;
     while (stmt) {
@@ -2763,6 +3222,8 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 
     // run EXIT trap before returning from main script
     bm_emit_call_void_0(mt, "bash_trap_run_exit");
+    bm_emit_call_void_0(mt, "bash_pop_funcname");
+    bm_emit_call_void_0(mt, "bash_pop_source");
 
     // return exit code
     MIR_reg_t final_ec = bm_emit_call_0(mt, "bash_get_exit_code");
@@ -2786,13 +3247,27 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
 
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
+    // register top-level user functions before executing main so eval/trap code
+    // can resolve functions defined in the script body
+    size_t iter = 0;
+    void* item_ptr;
+    while (hashmap_iter(mt->user_funcs, &iter, &item_ptr)) {
+        BashMirUserFunc* uf = (BashMirUserFunc*)item_ptr;
+        char full_name[160];
+        snprintf(full_name, sizeof(full_name), "bash_uf_%s", uf->name);
+        BashRtFuncPtr func_ptr = (BashRtFuncPtr)find_func(ctx, full_name);
+        if (func_ptr) {
+            bash_register_rt_func(uf->name, func_ptr);
+        }
+    }
+
     // find and execute bash_main
     typedef Item (*bash_main_func_t)(void);
     bash_main_func_t bash_main = (bash_main_func_t)find_func(ctx, "bash_main");
 
     Item result = {.item = ITEM_ERROR};
     if (bash_main) {
-        log_notice("bash-mir: executing JIT compiled Bash script");
+        log_debug("bash-mir: executing JIT compiled Bash script");
         result = bash_main();
     } else {
         log_error("bash-mir: failed to find bash_main");

@@ -24,6 +24,13 @@ void parse_yaml(Input* input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_css(Input* input, const char* css_string);
 
+// ── Relational database (C++ linkage) ──────────────────────────────
+
+// open a database file and produce a <db> element
+Input* input_rdb_from_path(const char* pathname, const char* type);
+// detect whether a path/type should be handled as RDB; returns driver name or NULL
+const char* rdb_detect_format(const char* pathname, const char* type);
+
 // ── Document parsers (C++ linkage) ─────────────────────────────────
 
 Element* html5_parse(Input* input, const char* html);

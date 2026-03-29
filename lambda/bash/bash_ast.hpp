@@ -95,6 +95,9 @@ typedef enum BashAstNodeType {
     // block of statements (body of if/for/while/function)
     BASH_AST_NODE_BLOCK,
 
+    // redirected wrapper (for pipelines/compounds with file redirects)
+    BASH_AST_NODE_REDIRECTED,
+
     BASH_AST_NODE_COUNT
 } BashAstNodeType;
 
@@ -259,6 +262,13 @@ typedef struct BashPipelineNode {
     bool negated;                   // ! pipeline
 } BashPipelineNode;
 
+// Redirected wrapper: wraps any statement (pipeline, etc.) with file redirects
+typedef struct BashRedirectedNode {
+    BashAstNode base;
+    BashAstNode* inner;             // wrapped statement (pipeline, compound, etc.)
+    BashAstNode* redirects;         // linked list of BashRedirectNode
+} BashRedirectedNode;
+
 // List: cmd1 && cmd2 || cmd3 ; cmd4
 typedef struct BashListNode {
     BashAstNode base;
@@ -338,6 +348,7 @@ typedef struct BashCaseItemNode {
     BashAstNode base;
     BashAstNode* patterns;          // linked list of pattern words
     BashAstNode* body;              // commands
+    int terminator;                 // 0=;;  1=;&  2=;;&
 } BashCaseItemNode;
 
 // Function definition
@@ -434,6 +445,7 @@ typedef struct BashExpansionNode {
     BashExpansionType expand_type;
     BashAstNode* argument;          // default/pattern/replacement
     BashAstNode* replacement;       // for ${var/pat/str}: the replacement string
+    bool has_colon;                 // true for :- := :+ :?, false for - = + ?
 } BashExpansionNode;
 
 // Command substitution: $(command) or `command`

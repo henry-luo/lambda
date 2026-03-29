@@ -2608,7 +2608,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
               parent ? parent->tag_name : "none", (long long)elem->length);
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
-    if (strcmp(tag_name, "!--") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
+    // HTML5 parser uses "#comment", CSS/older parsers use "!--"
+    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_const(tag_name, strlen(tag_name), "!DOCTYPE")) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -2701,13 +2702,12 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             dom_element_set_attribute(dom_elem, "name", name_value);
         }
         // checked attribute sets :checked pseudo-state (for checkbox/radio)
-        const char* checked_value = extract_element_attribute(elem, "checked", doc->arena);
-        if (checked_value) {
+        // Use has_attr() since boolean attributes have no string value (stored as ITEM_NULL)
+        if (elem->has_attr("checked")) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_CHECKED);
         }
         // disabled attribute sets :disabled pseudo-state
-        const char* disabled_value = extract_element_attribute(elem, "disabled", doc->arena);
-        if (disabled_value) {
+        if (elem->has_attr("disabled")) {
             dom_element_set_pseudo_state(dom_elem, PSEUDO_STATE_DISABLED);
         }
     }
@@ -2734,7 +2734,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             const char* child_tag_name = child_elem_type ? child_elem_type->name.str : "unknown";
 
             // Check if this is a comment or DOCTYPE
-            if (strcmp(child_tag_name, "!--") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
+            // HTML5 parser uses "#comment", CSS/older parsers use "!--"
+            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_const(child_tag_name, strlen(child_tag_name), "!DOCTYPE")) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = dom_comment_create(child_elem, dom_elem);
                 if (comment_node) {

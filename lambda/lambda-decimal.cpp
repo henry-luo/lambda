@@ -185,6 +185,97 @@ Item decimal_deep_copy(Item item, void* arena_ptr, bool is_unlimited) {
     return result;
 }
 
+// Create a fixed-precision Decimal from a string, arena-allocated.
+// The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
+// (not GC-managed). Safe to use from input parsers where GC heap allocation
+// would cause the object to be collected before it can be traced.
+Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+    if (!str || !arena_ptr) return ItemNull;
+    
+    Arena* arena = (Arena*)arena_ptr;
+    mpd_context_t* ctx = decimal_fixed_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemNull;
+    
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str, ctx, &status);
+    if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+    
+    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
+    if (!dec) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+    
+    dec->unlimited = 0;
+    dec->dec_val = dec_val;
+    
+    Item result;
+    result.item = c2it(dec);
+    return result;
+}
+
+// Create a fixed-precision Decimal from a double, arena-allocated.
+Item decimal_from_double_arena(double val, void* arena_ptr) {
+    if (!arena_ptr) return ItemNull;
+    
+    Arena* arena = (Arena*)arena_ptr;
+    mpd_context_t* ctx = decimal_fixed_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemNull;
+    
+    char str_buf[64];
+    snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+    
+    uint32_t status = 0;
+    mpd_qset_string(dec_val, str_buf, ctx, &status);
+    if (status != 0) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+    
+    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
+    if (!dec) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+    
+    dec->unlimited = 0;
+    dec->dec_val = dec_val;
+    
+    Item result;
+    result.item = c2it(dec);
+    return result;
+}
+
+// Create a fixed-precision Decimal from an int64, arena-allocated.
+Item decimal_from_int64_arena(int64_t val, void* arena_ptr) {
+    if (!arena_ptr) return ItemNull;
+    
+    Arena* arena = (Arena*)arena_ptr;
+    mpd_context_t* ctx = decimal_fixed_context();
+    mpd_t* dec_val = mpd_new(ctx);
+    if (!dec_val) return ItemNull;
+    
+    mpd_set_ssize(dec_val, (mpd_ssize_t)val, ctx);
+    
+    Decimal* dec = (Decimal*)arena_alloc(arena, sizeof(Decimal));
+    if (!dec) {
+        mpd_del(dec_val);
+        return ItemNull;
+    }
+    
+    dec->unlimited = 0;
+    dec->dec_val = dec_val;
+    
+    Item result;
+    result.item = c2it(dec);
+    return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Formatting
 // ─────────────────────────────────────────────────────────────────────

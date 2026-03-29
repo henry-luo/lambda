@@ -1,0 +1,30 @@
+{
+  "name": "Text selection - double-click and click",
+  "html": "test/ui/test_text_selection.html",
+  "description": "Test double-click word selection and single-click to collapse",
+  "events": [
+    {"type": "log", "message": "=== Text selection test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Click on text to place caret"},
+    {"type": "click", "target": {"text": "Hello"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_caret", "view_type": 1, "char_offset": -1},
+    {"type": "assert_selection", "is_collapsed": true},
+
+    {"type": "log", "message": "Step 2: Double-click to select word"},
+    {"type": "dblclick", "target": {"text": "World"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 3: Click elsewhere to deselect"},
+    {"type": "click", "target": {"text": "Another"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_selection", "is_collapsed": true},
+
+    {"type": "log", "message": "Step 4: Verify paragraph text content"},
+    {"type": "assert_text", "target": {"selector": "#p1"}, "contains": "Hello World"},
+
+    {"type": "log", "message": "=== Text selection test complete ==="},
+    {"type": "wait", "ms": 100}
+  ]
+}

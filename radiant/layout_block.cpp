@@ -2308,6 +2308,13 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
     if (!parent || !pseudo) return;
 
+    // Guard against re-insertion during reflow: if pseudo is already a child
+    // of parent, skip insertion to prevent creating circular sibling links
+    // (e.g., marker->next_sibling = marker) which cause infinite loops.
+    for (DomNode* c = parent->first_child; c; c = c->next_sibling) {
+        if (c == (DomNode*)pseudo) return;
+    }
+
     if (is_before) {
         // Insert as first child
         DomNode* old_first = parent->first_child;
@@ -4188,10 +4195,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("image dimensions: %f x %f", lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            // use html width/height attributes if specified, otherwise use placeholder size
-            if (lycon->block.given_width <= 0) lycon->block.given_width = 40;
-            if (lycon->block.given_height <= 0) lycon->block.given_height = 30;
-            // todo: use a placeholder
+            // CSS Images 3 + browser behavior: broken images have no intrinsic
+            // dimensions. Leave width as auto so CSS layout determines it:
+            //   - display:block → fills containing block (like non-replaced elements)
+            //   - display:inline-block → shrink-to-fit using intrinsic sizing (16px)
+            // HTML width/height attributes, if present, are already in given_width/
+            // given_height from CSS resolution — only override if truly unset.
+            // Height: Chrome renders broken image icon at 16px height.
+            if (lycon->block.given_height <= 0) lycon->block.given_height = 16;
+            log_debug("broken image fallback: given_width=%.1f, given_height=%.1f",
+                lycon->block.given_width, lycon->block.given_height);
         }
     }
 
@@ -5722,8 +5735,27 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // offset recomputed below (and in view_vertical_align's second pass)
                 // is non-negative, making the max(offset,0) clamp a no-op.
                 if (has_explicit_valign && valign != CSS_VALUE_TOP && valign != CSS_VALUE_BOTTOM) {
-                    float asc_contribution = item_baseline + valign_offset;
-                    float desc_contribution = item_height - item_baseline - valign_offset;
+                    float asc_contribution, desc_contribution;
+                    if (valign == CSS_VALUE_MIDDLE) {
+                        // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with
+                        // the baseline of the parent box plus half the x-height of the parent."
+                        // Image midpoint at: baseline - x_height/2  (above baseline)
+                        // Ascender = item_height/2 + x_height/2 (amount above baseline)
+                        // Descender = item_height/2 - x_height/2 (amount below baseline)
+                        float x_height_half;
+                        if (lycon->font.font_handle) {
+                            float x_ratio = font_get_x_height_ratio(lycon->font.font_handle);
+                            x_height_half = lycon->font.current_font_size * x_ratio / 2.0f;
+                        } else {
+                            x_height_half = lycon->font.current_font_size * 0.25f;
+                        }
+                        asc_contribution = item_height / 2.0f + x_height_half;
+                        desc_contribution = item_height / 2.0f - x_height_half;
+                    } else {
+                        // For baseline, sub, super, length/percentage offsets
+                        asc_contribution = item_baseline + valign_offset;
+                        desc_contribution = item_height - item_baseline - valign_offset;
+                    }
                     lycon->line.max_ascender = max(lycon->line.max_ascender, asc_contribution);
                     lycon->line.max_descender = max(lycon->line.max_descender, desc_contribution);
                     // Recompute offset with updated baseline so clamp is harmless
@@ -5986,6 +6018,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                              vb->position->clear == CSS_VALUE_BOTH);
                         if (has_clear_prop) {
                             log_debug("not skipping zero-height block with clear property for margin collapsing");
+                            break;
+                        }
+                        // CSS 2.1 §17 + §8.3.1: Tables and other BFC-establishing elements
+                        // are never self-collapsing, even with zero height. They act as
+                        // margin-collapse barriers between parent and subsequent children.
+                        // Only truly self-collapsing blocks can be skipped.
+                        if (!is_block_self_collapsing(vb)) {
+                            log_debug("not skipping zero-height non-self-collapsing block (table/BFC) for margin collapsing");
                             break;
                         }
                         float border_top = vb->bound && vb->bound->border ? vb->bound->border->width.top : 0;

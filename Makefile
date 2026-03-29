@@ -352,7 +352,8 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    generate-premake clean-premake build-test build-test-linux \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
-	    test-fuzzy test-fuzzy-extended test-c2mir type-chart
+	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
+	    test-ui-automation
 
 # Help target - shows available commands
 help:
@@ -884,6 +885,16 @@ test-layout-baseline: build-test
 		echo "=============================================================="; \
 		node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
 			| node test/layout/save_suite_snapshot.js --check page; \
+	fi
+
+test-ui-automation: build-test
+	@echo "Running UI Automation test suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_ui_automation_gtest.exe" ]; then \
+		./test/test_ui_automation_gtest.exe; \
+	else \
+		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
+		exit 1; \
 	fi
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline

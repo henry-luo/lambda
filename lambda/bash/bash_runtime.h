@@ -15,6 +15,7 @@ extern "C" {
 // Type conversion (Bash string-first semantics)
 // ========================================================================
 Item bash_to_int(Item value);               // coerce to integer (atoi semantics)
+Item bash_arith_eval_value(Item value);     // evaluate as arithmetic expression (for declare -i)
 Item bash_to_string(Item value);            // coerce to string (all values)
 bool bash_is_truthy(Item value);            // Bash truthiness: non-empty string
 int  bash_exit_code(Item value);            // Item → exit code (0/1)
@@ -106,6 +107,10 @@ Item bash_expand_default(Item value, Item default_val);     // ${var:-default}
 Item bash_expand_assign_default(Item var_name, Item value, Item default_val); // ${var:=default}
 Item bash_expand_alt(Item value, Item alt_val);             // ${var:+alt}
 Item bash_expand_error(Item value, Item msg);               // ${var:?msg}
+Item bash_expand_default_nocolon(Item value, Item default_val);     // ${var-default}
+Item bash_expand_assign_default_nocolon(Item var_name, Item value, Item default_val); // ${var=default}
+Item bash_expand_alt_nocolon(Item value, Item alt_val);             // ${var+alt}
+Item bash_expand_error_nocolon(Item value, Item msg);               // ${var?msg}
 Item bash_expand_trim_prefix(Item val, Item pat);           // ${var#pat}
 Item bash_expand_trim_prefix_long(Item val, Item pat);      // ${var##pat}
 Item bash_expand_trim_suffix(Item val, Item pat);           // ${var%pat}
@@ -155,6 +160,7 @@ void bash_unset_var(Item name);                     // unset var
 
 // Variable attributes (declare/typeset)
 void bash_declare_var(Item name, int flags);        // set variable attributes
+void bash_declare_local_var(Item name, int flags);  // set variable attributes in local scope
 int  bash_get_var_attrs(Item name);                 // get variable attribute flags
 bool bash_is_assoc(Item name);                      // check if variable is assoc array
 
@@ -171,9 +177,26 @@ Item bash_shift_args(int n);                        // shift [n]
 // Special variables
 Item bash_get_exit_code(void);                      // $?
 void bash_set_exit_code(int code);
+Item bash_save_exit_code(void);                     // save exit code as Item for restoration
+void bash_restore_exit_code(Item saved);            // restore exit code from saved Item
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_return_with_code(Item val);               // set exit code from value
 Item bash_get_script_name(void);                    // $0
+Item bash_get_lineno(void);                         // $LINENO
+void bash_set_lineno(int line);                     // update current statement line
+Item bash_get_funcname(Item index);                 // ${FUNCNAME[n]}
+Item bash_get_funcname_count(void);                 // ${#FUNCNAME[@]}
+Item bash_get_bash_source(Item index);              // ${BASH_SOURCE[n]}
+Item bash_get_bash_lineno(Item index);              // ${BASH_LINENO[n]}
+Item bash_get_bash_source_count(void);              // ${#BASH_SOURCE[@]}
+Item bash_get_bash_lineno_count(void);              // ${#BASH_LINENO[@]}
+void bash_push_funcname(Item name);                 // enter function/debug frame
+void bash_pop_funcname(void);                       // leave function/debug frame
+void bash_push_source(Item name);                   // enter source file context
+void bash_pop_source(void);                         // leave source file context
+void bash_push_call_frame(void);                    // record current call site
+void bash_pop_call_frame(void);                     // remove current call site
+void bash_restore_call_frame_lineno(void);          // restore lineno from top call frame
 
 // ========================================================================
 // Scope lifecycle
@@ -187,7 +210,8 @@ void bash_scope_pop_subshell(void);                 // restore after subshell
 // Built-in commands
 // ========================================================================
 Item bash_builtin_echo(Item* args, int argc);
-Item bash_builtin_printf(Item format, Item* args, int argc);
+Item bash_builtin_printf(Item* all_args, int total_argc);
+Item bash_builtin_let(Item* args, int argc);
 Item bash_builtin_test(Item* args, int argc);       // test / [ ]
 Item bash_builtin_true(void);
 Item bash_builtin_false(void);
@@ -200,6 +224,7 @@ Item bash_builtin_export(Item name, Item value);
 Item bash_builtin_unset(Item name);
 Item bash_builtin_cd(Item dir);
 Item bash_builtin_pwd(void);
+Item bash_builtin_caller(Item* args, int argc);
 Item bash_builtin_cat(Item* args, int argc);
 Item bash_builtin_wc(Item* args, int argc);
 Item bash_builtin_head(Item* args, int argc);
@@ -259,6 +284,9 @@ void bash_raw_putc(char c);                         // write single char (captur
 void bash_begin_capture(void);                      // start capturing stdout
 Item bash_end_capture(void);                        // stop capturing, return string (strips trailing newlines)
 Item bash_end_capture_raw(void);                    // stop capturing, return string (preserves trailing newlines)
+Item bash_cmd_sub_word_split(Item s);               // apply IFS word-splitting to unquoted command substitution result
+void bash_cmd_sub_enter(void);                      // enter command substitution context (suppresses debug trap without functrace)
+void bash_cmd_sub_exit(void);                       // exit command substitution context
 
 // ========================================================================
 // Environment variable integration
@@ -287,6 +315,7 @@ bool bash_get_option_errexit(void);                  // -e: exit on error
 bool bash_get_option_nounset(void);                  // -u: error on undefined var
 bool bash_get_option_xtrace(void);                   // -x: trace commands
 bool bash_get_option_pipefail(void);                 // -o pipefail
+bool bash_get_option_extdebug(void);                 // shopt -s extdebug
 
 // ========================================================================
 // Signal handling / trap (Phase 8)
@@ -294,6 +323,9 @@ bool bash_get_option_pipefail(void);                 // -o pipefail
 void bash_trap_set(Item handler, Item signal_name);  // register trap handler string
 void bash_trap_run_exit(void);                       // run EXIT trap (idempotent)
 void bash_trap_check(void);                          // check and run pending signal traps
+Item bash_run_debug_trap(void);                      // run DEBUG trap before a command
+void bash_run_return_trap(void);                     // run RETURN trap on function exit
+bool bash_is_functrace(void);                        // check if functrace (set -T) is enabled
 Item bash_eval_string(Item code);                    // evaluate bash code string in current scope
 
 // ========================================================================

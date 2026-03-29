@@ -339,6 +339,7 @@ void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool*
                 size_t ctn_len = strlen(ctn);
                 bool is_dom_absent =
                     strcmp(ctn, "!--") == 0 ||
+                    strcmp(ctn, "#comment") == 0 ||
                     str_ieq_const(ctn, ctn_len, "!DOCTYPE") ||
                     str_ieq_const(ctn, ctn_len, "script") ||
                     (ctn_len > 0 && ctn[0] == '?');  // XML declarations
@@ -1299,12 +1300,23 @@ static SelectorIndex* build_selector_index(CssStylesheet* stylesheet, Pool* pool
         CssSelectorGroup* group = rule->data.style_rule.selector_group;
         CssSelector* single = rule->data.style_rule.selector;
 
-        // Collect selectors to index (use fixed array instead of std::vector)
-        CssSelector* selectors_to_index[64];
+        // Collect selectors to index
+        // CSS reset stylesheets often have 80+ comma-separated selectors
+        CssSelector* selectors_buf[128];
+        CssSelector** selectors_to_index = selectors_buf;
         int selector_count = 0;
+        int selector_capacity = 128;
 
         if (group && group->selector_count > 0) {
-            for (size_t i = 0; i < group->selector_count && selector_count < 64; i++) {
+            if (group->selector_count > 128) {
+                selector_capacity = (int)group->selector_count;
+                selectors_to_index = (CssSelector**)pool_calloc(pool, selector_capacity * sizeof(CssSelector*));
+                if (!selectors_to_index) {
+                    selectors_to_index = selectors_buf;
+                    selector_capacity = 128;
+                }
+            }
+            for (size_t i = 0; i < group->selector_count && selector_count < selector_capacity; i++) {
                 if (group->selectors[i]) {
                     selectors_to_index[selector_count++] = group->selectors[i];
                 }

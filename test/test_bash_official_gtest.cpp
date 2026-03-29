@@ -69,6 +69,27 @@ static bool file_exists(const std::string& path) {
     return false;
 }
 
+#ifndef _WIN32
+static bool ensure_test_shell_wrapper(const std::string& tests_dir, const std::string& abs_lambda, std::string* wrapper_path) {
+    *wrapper_path = tests_dir + "/lambda-test-shell";
+
+    struct stat st;
+    if (stat(wrapper_path->c_str(), &st) == 0) {
+        return true;
+    }
+
+    FILE* f = fopen(wrapper_path->c_str(), "w");
+    if (!f) return false;
+    fprintf(f, "#!/bin/sh\nexec \"%s\" bash \"$@\"\n", abs_lambda.c_str());
+    fclose(f);
+
+    if (chmod(wrapper_path->c_str(), 0755) != 0) {
+        return false;
+    }
+    return true;
+}
+#endif
+
 static char* read_file_contents(const char* path) {
     FILE* file = fopen(path, "r");
     if (!file) return nullptr;
@@ -231,6 +252,12 @@ static std::string execute_bash_test(const std::string& tests_path) {
     std::string abs_tests_dir = std::string(cwd) + "/" + BASH_TESTS_DIR;
     std::string abs_lambda = std::string(cwd) + "/" + LAMBDA_EXE;
     std::string script_name = tests_path.substr(tests_path.find_last_of('/') + 1);
+#ifndef _WIN32
+    std::string shell_wrapper;
+    if (!ensure_test_shell_wrapper(abs_tests_dir, abs_lambda, &shell_wrapper)) {
+        return "";
+    }
+#endif
 
     // Use fork/exec with a timeout to prevent hanging tests
     int pipefd[2];
@@ -262,8 +289,13 @@ static std::string execute_bash_test(const std::string& tests_path) {
 
         chdir(abs_tests_dir.c_str());
 
-        std::string this_sh = abs_lambda + " bash";
-        setenv("THIS_SH", this_sh.c_str(), 1);
+        setenv("THIS_SH", shell_wrapper.c_str(), 1);
+        setenv("TESTSHELL", shell_wrapper.c_str(), 1);
+
+        // Add tests directory to PATH so recho, printenv, zecho etc. are found
+        const char* old_path = getenv("PATH");
+        std::string new_path = abs_tests_dir + ":" + (old_path ? old_path : "/usr/bin:/bin");
+        setenv("PATH", new_path.c_str(), 1);
 
         std::string script = "./" + script_name;
         execl(abs_lambda.c_str(), abs_lambda.c_str(), "bash", script.c_str(), nullptr);

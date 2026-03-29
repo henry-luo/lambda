@@ -1,0 +1,24 @@
+int
+1
+string
+float
+9.99
+decimal
+0.25
+type.null
+bool
+true
+false
+datetime
+type.null
+type.null
+array
+["sale", "popular"]
+map
+{
+  color: "blue"
+}
+int
+1
+string
+type.null

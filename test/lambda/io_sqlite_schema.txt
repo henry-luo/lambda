@@ -1,0 +1,14 @@
+3
+3
+["id", true]
+["name", false]
+["description", true]
+8
+["weight", "DECIMAL(10,3)", true]
+["price", false]
+["created_at", "DATETIME"]
+["tags", "JSON"]
+1
+["category_id", "categories", "id"]
+[4, "price"]
+true
