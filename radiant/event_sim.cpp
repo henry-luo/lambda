@@ -432,6 +432,11 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->expected_char_offset = reader.get("char_offset").asInt32();
         if (ev->expected_view_type == 0) ev->expected_view_type = -1;  // treat 0 as "don't check"
         if (ev->expected_char_offset == 0 && !reader.has("char_offset")) ev->expected_char_offset = -1;
+        int not_type = reader.get("view_type_not").asInt32();
+        if (not_type > 0) {
+            ev->expected_view_type = not_type;
+            ev->negate_view_type = true;
+        }
     }
     else if (strcmp(type_str, "assert_selection") == 0) {
         ev->type = SIM_EVENT_ASSERT_SELECTION;
@@ -705,16 +710,26 @@ static bool assert_caret(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     bool passed = true;
 
     if (ev->expected_view_type >= 0) {
-        // Check view type of caret view
-        if (!caret || !caret->view) {
-            log_error("event_sim: assert_caret - no caret view");
-            passed = false;
-        } else {
-            ViewType actual_type = caret->view->view_type;
-            if (actual_type != ev->expected_view_type) {
-                log_error("event_sim: assert_caret - view_type mismatch: expected %d, got %d",
-                         ev->expected_view_type, actual_type);
+        if (ev->negate_view_type) {
+            // pass if there is no caret, or caret view type is not the rejected type
+            bool has_forbidden = caret && caret->view && caret->view->view_type == ev->expected_view_type;
+            if (has_forbidden) {
+                log_error("event_sim: assert_caret - view_type should NOT be %d, but it is",
+                         ev->expected_view_type);
                 passed = false;
+            }
+        } else {
+            // Check view type of caret view
+            if (!caret || !caret->view) {
+                log_error("event_sim: assert_caret - no caret view");
+                passed = false;
+            } else {
+                ViewType actual_type = caret->view->view_type;
+                if (actual_type != ev->expected_view_type) {
+                    log_error("event_sim: assert_caret - view_type mismatch: expected %d, got %d",
+                             ev->expected_view_type, actual_type);
+                    passed = false;
+                }
             }
         }
     }

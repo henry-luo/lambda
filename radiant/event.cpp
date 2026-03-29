@@ -1978,6 +1978,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
             }
+        } else if (event->type == RDT_EVENT_MOUSE_DOWN && !evcon.target) {
+            // Click outside all content (e.g., below body) — clear caret and selection
+            // In browsers, clicking outside the document body clears the text caret
+            if (state) {
+                caret_clear(state);
+                selection_clear(state);
+                evcon.need_repaint = true;
+            }
         } else if (event->type == RDT_EVENT_MOUSE_UP) {
             // Clear :active state
             update_active_state(&evcon, NULL, false);
