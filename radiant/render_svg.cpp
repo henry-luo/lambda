@@ -274,6 +274,146 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (text_rect) { goto NEXT_RECT; }
 }
 
+// ── SVG border style helpers ─────────────────────────────────────────────────
+
+/**
+ * Build SVG polygon point-string for one border side trapezoid.
+ * Corners are miter-cut so adjacent sides share the diagonal corner region.
+ *   side 0=top, 1=right, 2=bottom, 3=left
+ */
+static void svg_border_poly(char* buf, int buf_size, int side,
+    float x, float y, float W, float H,
+    float bwt, float bwr, float bwb, float bwl) {
+    switch (side) {
+        case 0: // top outer-edge TL→TR → inner-edge (TR-bwr,bwt)→(TL+bwl,bwt)
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x, y, x+W, y, x+W-bwr, y+bwt, x+bwl, y+bwt);
+            break;
+        case 1: // right
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x+W-bwr, y+bwt, x+W, y, x+W, y+H, x+W-bwr, y+H-bwb);
+            break;
+        case 2: // bottom
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x+bwl, y+H-bwb, x+W-bwr, y+H-bwb, x+W, y+H, x, y+H);
+            break;
+        case 3: // left
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x, y, x+bwl, y+bwt, x+bwl, y+H-bwb, x, y+H);
+            break;
+        default: buf[0] = '\0'; break;
+    }
+}
+
+static Color svg_darken(Color c, float f) {
+    Color out; out.r = (uint8_t)(c.r*f); out.g = (uint8_t)(c.g*f); out.b = (uint8_t)(c.b*f); out.a = c.a;
+    return out;
+}
+static Color svg_lighten(Color c, float f) {
+    Color out;
+    out.r = (uint8_t)(c.r + (255-c.r)*f < 255 ? (int)(c.r + (255-c.r)*f) : 255);
+    out.g = (uint8_t)(c.g + (255-c.g)*f < 255 ? (int)(c.g + (255-c.g)*f) : 255);
+    out.b = (uint8_t)(c.b + (255-c.b)*f < 255 ? (int)(c.b + (255-c.b)*f) : 255);
+    out.a = c.a;
+    return out;
+}
+
+/**
+ * Emit one or two SVG <polygon> elements for a single border side, handling
+ * solid, double, groove, ridge, inset, and outset styles.
+ */
+static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
+    float x, float y, float W, float H,
+    float bwt, float bwr, float bwb, float bwl,
+    int side) {  // 0=top, 1=right, 2=bottom, 3=left
+
+    if (style == CSS_VALUE_NONE || style == CSS_VALUE_HIDDEN || c.a == 0) return;
+    float bw = (side == 0) ? bwt : (side == 1) ? bwr : (side == 2) ? bwb : bwl;
+    if (bw <= 0) return;
+
+    char pts[256], col[32];
+    svg_border_poly(pts, sizeof(pts), side, x, y, W, H, bwt, bwr, bwb, bwl);
+
+    if (style == CSS_VALUE_DOUBLE && bw >= 3) {
+        // Two thin fills with a gap: outer (at edge, thickness = floor(bw/3))
+        // and inner (inset by bw - floor(bw/3) from outer edge)
+        float lw = floorf(bw / 3.0f);
+        if (lw < 1) lw = 1;
+
+        char opts[256];
+        svg_border_poly(opts, sizeof(opts), side, x, y, W, H,
+            (side == 0) ? lw : bwt, (side == 1) ? lw : bwr,
+            (side == 2) ? lw : bwb, (side == 3) ? lw : bwl);
+        svg_color_to_string(c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", opts, col);
+
+        // Inner fill (inset the border box by bw-lw on this side)
+        float offset = bw - lw;
+        float ix = x + (side == 3 ? offset : 0);
+        float iy = y + (side == 0 ? offset : 0);
+        float iW = W - (side == 1 ? offset : 0) - (side == 3 ? offset : 0);
+        float iH = H - (side == 0 ? offset : 0) - (side == 2 ? offset : 0);
+        char ipts[256];
+        svg_border_poly(ipts, sizeof(ipts), side, ix, iy, iW, iH,
+            (side == 0) ? lw : bwt, (side == 1) ? lw : bwr,
+            (side == 2) ? lw : bwb, (side == 3) ? lw : bwl);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", ipts, col);
+
+    } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
+        Color dark  = svg_darken(c, 0.5f);
+        Color light = svg_lighten(c, 0.35f);
+        Color outer_c = (style == CSS_VALUE_GROOVE) ? dark : light;
+        Color inner_c = (style == CSS_VALUE_GROOVE) ? light : dark;
+        float hw = bw / 2.0f;
+
+        // Outer half (at edge, thickness = hw)
+        char outer_pts[256];
+        svg_border_poly(outer_pts, sizeof(outer_pts), side, x, y, W, H,
+            (side == 0) ? hw : bwt, (side == 1) ? hw : bwr,
+            (side == 2) ? hw : bwb, (side == 3) ? hw : bwl);
+        svg_color_to_string(outer_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", outer_pts, col);
+
+        // Inner half (inset by hw on this side)
+        float ix = x + (side == 3 ? hw : 0);
+        float iy = y + (side == 0 ? hw : 0);
+        float iW = W - (side == 1 ? hw : 0) - (side == 3 ? hw : 0);
+        float iH = H - (side == 0 ? hw : 0) - (side == 2 ? hw : 0);
+        char inner_pts[256];
+        svg_border_poly(inner_pts, sizeof(inner_pts), side, ix, iy, iW, iH,
+            (side == 0) ? hw : bwt, (side == 1) ? hw : bwr,
+            (side == 2) ? hw : bwb, (side == 3) ? hw : bwl);
+        svg_color_to_string(inner_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", inner_pts, col);
+
+    } else if (style == CSS_VALUE_INSET || style == CSS_VALUE_OUTSET) {
+        // inset: top+left dark, bottom+right light; outset: opposite
+        Color dark  = svg_darken(c, 0.5f);
+        Color light = svg_lighten(c, 0.35f);
+        Color side_c;
+        if (style == CSS_VALUE_INSET)
+            side_c = (side == 0 || side == 3) ? dark : light;
+        else
+            side_c = (side == 0 || side == 3) ? light : dark;
+        svg_color_to_string(side_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", pts, col);
+
+    } else {
+        // solid / dotted / dashed — render as filled trapezoid
+        // (dash patterns are a raster-only feature; SVG uses fill for correctness)
+        svg_color_to_string(c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", pts, col);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (!view->bound) return;
 
@@ -393,49 +533,24 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         }
     }
 
-    // Render borders
+    // Render borders with style-aware per-side SVG polygons
     if (view->bound->border) {
         BorderProp* border = view->bound->border;
+        float bwt = border->width.top, bwr = border->width.right;
+        float bwb = border->width.bottom, bwl = border->width.left;
 
-        // Left border
-        if (border->width.left > 0 && border->left_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->left_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
-                x, y, border->width.left, height, border_color);
-        }
-
-        // Right border
-        if (border->width.right > 0 && border->right_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->right_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
-                x + width - border->width.right, y, border->width.right, height, border_color);
-        }
-
-        // Top border
-        if (border->width.top > 0 && border->top_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->top_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
-                x, y, width, border->width.top, border_color);
-        }
-
-        // Bottom border
-        if (border->width.bottom > 0 && border->bottom_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->bottom_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
-                x, y + height - border->width.bottom, width, border->width.bottom, border_color);
-        }
+        // Top
+        svg_emit_border_side(ctx, border->top_style, border->top_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 0);
+        // Right
+        svg_emit_border_side(ctx, border->right_style, border->right_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 1);
+        // Bottom
+        svg_emit_border_side(ctx, border->bottom_style, border->bottom_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 2);
+        // Left
+        svg_emit_border_side(ctx, border->left_style, border->left_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 3);
     }
 
     // Render outline (outside border-box)
