@@ -235,6 +235,8 @@ Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
 Item js_date_new(void);
+Item js_date_new_from(Item value);
+Item js_date_utc(Item args_array);
 Item js_date_method(Item date_obj, int method_id);
 Item js_map_collection_new(void);
 Item js_map_collection_new_from(Item iterable);

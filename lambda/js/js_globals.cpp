@@ -132,7 +132,105 @@ extern "C" Item js_date_new(void) {
     Item time_val = js_date_now();
     Item key = (Item){.item = s2it(heap_create_name("_time"))};
     js_property_set(obj, key, time_val);
+    // mark as Date for instanceof
+    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
     return obj;
+}
+
+// new Date(value) — accepts a numeric timestamp (ms since epoch) or a date string
+extern "C" Item js_date_new_from(Item value) {
+    Item obj = js_new_object();
+    Item key = (Item){.item = s2it(heap_create_name("_time"))};
+    TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT) {
+        double ms;
+        if (tid == LMD_TYPE_FLOAT) ms = it2d(value);
+        else ms = (double)it2i(value);
+        static double date_buf[16];
+        static int date_idx = 0;
+        double* fp = &date_buf[date_idx++ % 16];
+        *fp = ms;
+        js_property_set(obj, key, (Item){.item = d2it(fp)});
+    } else if (tid == LMD_TYPE_STRING) {
+        // parse date string — try ISO 8601 format
+        String* s = it2s(value);
+        if (s) {
+            struct tm tm = {};
+            if (strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm) ||
+                strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
+                strptime(s->chars, "%c", &tm)) {
+                time_t t = timegm(&tm);
+                double ms = (double)t * 1000.0;
+                static double date_buf2[16];
+                static int date_idx2 = 0;
+                double* fp = &date_buf2[date_idx2++ % 16];
+                *fp = ms;
+                js_property_set(obj, key, (Item){.item = d2it(fp)});
+            } else {
+                // fallback: try mktime (local time)
+                struct tm tm2 = {};
+                if (sscanf(s->chars, "%d-%d-%d", &tm2.tm_year, &tm2.tm_mon, &tm2.tm_mday) == 3) {
+                    tm2.tm_year -= 1900;
+                    tm2.tm_mon -= 1;
+                    time_t t = mktime(&tm2);
+                    double ms = (double)t * 1000.0;
+                    static double date_buf3[16];
+                    static int date_idx3 = 0;
+                    double* fp = &date_buf3[date_idx3++ % 16];
+                    *fp = ms;
+                    js_property_set(obj, key, (Item){.item = d2it(fp)});
+                } else {
+                    // If unparseable, set NaN
+                    js_property_set(obj, key, js_date_now());
+                }
+            }
+        } else {
+            js_property_set(obj, key, js_date_now());
+        }
+    } else {
+        js_property_set(obj, key, js_date_now());
+    }
+    Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
+    js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
+    return obj;
+}
+
+// Date.UTC(year, month[, day[, hour[, min[, sec[, ms]]]]]) — returns ms since epoch
+extern "C" Item js_date_utc(Item args_array) {
+    // args_array is a JS array
+    int len = (int)js_array_length(args_array);
+    int year = 0, month = 0, day = 1, hour = 0, min = 0, sec = 0, millis = 0;
+    auto get_arg_int = [&](int idx) -> int {
+        Item val = js_array_get_int(args_array, idx);
+        TypeId t = get_type_id(val);
+        if (t == LMD_TYPE_INT) return (int)it2i(val);
+        if (t == LMD_TYPE_FLOAT) return (int)it2d(val);
+        return 0;
+    };
+    if (len > 0) year = get_arg_int(0);
+    if (len > 1) month = get_arg_int(1);
+    if (len > 2) day = get_arg_int(2);
+    if (len > 3) hour = get_arg_int(3);
+    if (len > 4) min = get_arg_int(4);
+    if (len > 5) sec = get_arg_int(5);
+    if (len > 6) millis = get_arg_int(6);
+
+    struct tm tm = {};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month;       // 0-based
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = min;
+    tm.tm_sec = sec;
+
+    time_t t = timegm(&tm);
+    double ms = (double)t * 1000.0 + (double)millis;
+    static double utc_buf[16];
+    static int utc_idx = 0;
+    double* fp = &utc_buf[utc_idx++ % 16];
+    *fp = ms;
+    return (Item){.item = d2it(fp)};
 }
 
 // v11: Date instance method dispatch
@@ -181,8 +279,40 @@ extern "C" Item js_date_method(Item date_obj, int method_id) {
                 tm.tm_mon + 1, tm.tm_mday, tm.tm_year + 1900);
             return (Item){.item = s2it(heap_create_name(buf))};
         }
-        default: return ItemNull;
+        default: break;
     }
+    // UTC variants: use gmtime_r
+    if (method_id >= 10 && method_id <= 16) {
+        struct tm utc;
+        gmtime_r(&secs, &utc);
+        switch (method_id) {
+            case 10: return (Item){.item = i2it(utc.tm_year + 1900)}; // getUTCFullYear
+            case 11: return (Item){.item = i2it(utc.tm_mon)};         // getUTCMonth (0-based)
+            case 12: return (Item){.item = i2it(utc.tm_mday)};        // getUTCDate
+            case 13: return (Item){.item = i2it(utc.tm_hour)};        // getUTCHours
+            case 14: return (Item){.item = i2it(utc.tm_min)};         // getUTCMinutes
+            case 15: return (Item){.item = i2it(utc.tm_sec)};         // getUTCSeconds
+            case 16: {                                                 // getUTCMilliseconds
+                int millis = (int)(ms - (double)secs * 1000.0);
+                return (Item){.item = i2it(millis)};
+            }
+            default: break;
+        }
+    }
+    // toString: produce a human-readable date string parseable by new Date(str)
+    if (method_id == 17) {
+        struct tm utc;
+        gmtime_r(&secs, &utc);
+        // JS-style: "Thu Jun 09 3141 02:06:53 GMT+0000"
+        static const char* wday[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+        static const char* mon[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s %s %02d %04d %02d:%02d:%02d GMT+0000",
+            wday[utc.tm_wday], mon[utc.tm_mon], utc.tm_mday,
+            utc.tm_year + 1900, utc.tm_hour, utc.tm_min, utc.tm_sec);
+        return (Item){.item = s2it(heap_create_name(buf))};
+    }
+    return ItemNull;
 }
 
 // Process argv storage
@@ -725,6 +855,16 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_MAP) {
+        // JS semantics: numeric keys are coerced to strings (17 in obj === "17" in obj)
+        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+            char buf[64];
+            if (get_type_id(key) == LMD_TYPE_INT) {
+                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+            } else {
+                snprintf(buf, sizeof(buf), "%g", it2d(key));
+            }
+            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
         // check if property exists on map (including prototype chain)
         // MUST NOT trigger getters — use js_map_get_fast for data-only lookup,
         // then check for __get_<key> getter presence without invoking it.
