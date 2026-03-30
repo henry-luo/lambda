@@ -745,7 +745,27 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // contains right's prototype. For our implementation, we check if right has
     // a __class_name__ marker that matches any __class_name__ in left's proto chain.
     if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
-    if (get_type_id(right) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+
+    // If right is a function (IIFE-returned constructor), walk the __proto__ chain
+    // and check for __ctor__ (function identity) match, stored at object creation time.
+    TypeId right_type = get_type_id(right);
+    if (right_type == LMD_TYPE_FUNC) {
+        Item obj = left;
+        int depth = 0;
+        Item ctor_key = (Item){.item = s2it(heap_create_name("__ctor__", 8))};
+        Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
+            Item ctor_val = map_get(obj.map, ctor_key);
+            if (ctor_val.item != 0 && get_type_id(ctor_val) == LMD_TYPE_FUNC) {
+                if (ctor_val.item == right.item) return (Item){.item = b2it(true)};
+            }
+            obj = map_get(obj.map, proto_key_item);
+            depth++;
+        }
+        return (Item){.item = b2it(false)};
+    }
+
+    if (right_type != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
     // Get the class name from right (constructor's __class_name__)
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};

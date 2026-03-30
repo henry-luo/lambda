@@ -132,6 +132,7 @@ extern "C" Item js_typed_array_new(int type_id, int length) {
     ta->byte_offset = 0;
     ta->data = calloc(length > 0 ? length : 1, elem_size);
     ta->buffer = NULL;
+    ta->buffer_item = 0;
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -179,6 +180,7 @@ extern "C" Item js_typed_array_new_from_buffer(int type_id, Item buffer_item, in
     ta->byte_offset = byte_offset;
     ta->data = (char*)ab->data + byte_offset;  // direct pointer into buffer
     ta->buffer = ab;
+    ta->buffer_item = buffer_item.item;  // preserve original Item for identity-preserving .buffer
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
@@ -426,6 +428,7 @@ extern "C" Item js_typed_array_subarray(Item ta_item, int start, int end) {
     sub->byte_offset = ta->byte_offset + start * elem_size;
     sub->data = (char*)ta->data + start * elem_size;
     sub->buffer = ta->buffer;  // share the backing buffer
+    sub->buffer_item = ta->buffer_item;  // preserve buffer identity
 
     Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     m->type_id = LMD_TYPE_MAP;
