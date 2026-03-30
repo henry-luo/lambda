@@ -49,3 +49,11 @@ len(db.schema.products.triggers)
 
 // categories has no triggers
 type(db.schema.categories.triggers)
+
+// database-level SQL functions
+type(db.functions)
+(len(db.functions) > 0)
+
+// verify function entry structure (first function has expected fields)
+let f0 = db.functions[0]
+[type(f0.name), type(f0.type), type(f0.narg), type(f0.builtin)]

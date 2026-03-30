@@ -1677,3 +1677,56 @@ TEST_F(RdbTest, TriggerDetails) {
     EXPECT_STREQ(books->triggers[1].event, "UPDATE");
     rdb_close(conn);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §24 Function Schema
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(RdbTest, FunctionCount) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    rdb_load_schema(conn);
+    // SQLite always exposes built-in + extension functions
+    EXPECT_GT(conn->schema.function_count, 0);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, FunctionDetails) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    rdb_load_schema(conn);
+    ASSERT_GT(conn->schema.function_count, 0);
+
+    // find a well-known built-in function: 'abs'
+    bool found_abs = false;
+    for (int i = 0; i < conn->schema.function_count; i++) {
+        RdbFunction* fn = &conn->schema.functions[i];
+        if (strcmp(fn->name, "abs") == 0 && fn->narg == 1) {
+            found_abs = true;
+            EXPECT_TRUE(fn->builtin);
+            EXPECT_STREQ(fn->type, "scalar");
+            EXPECT_EQ(fn->narg, 1);
+            break;
+        }
+    }
+    EXPECT_TRUE(found_abs) << "expected to find built-in 'abs' function";
+
+    // find a well-known aggregate: 'sum'
+    bool found_sum = false;
+    for (int i = 0; i < conn->schema.function_count; i++) {
+        RdbFunction* fn = &conn->schema.functions[i];
+        if (strcmp(fn->name, "sum") == 0) {
+            found_sum = true;
+            EXPECT_STREQ(fn->type, "window");  // sum is a window function in SQLite
+            break;
+        }
+    }
+    EXPECT_TRUE(found_sum) << "expected to find 'sum' function";
+
+    // all functions have non-empty names
+    for (int i = 0; i < conn->schema.function_count; i++) {
+        EXPECT_NE(conn->schema.functions[i].name, nullptr);
+        EXPECT_GT(strlen(conn->schema.functions[i].name), (size_t)0);
+    }
+    rdb_close(conn);
+}

@@ -9,6 +9,9 @@ db.name
 // table count
 db.table_count
 
+// table_names — array of all table/view names
+db.table_names
+
 // data access — first user
 db.data.users[0].name
 db.data.users[0].age

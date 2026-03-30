@@ -819,6 +819,28 @@ Input* input_rdb_from_path(const char* pathname, const char* type) {
     db_el.attr("data", data_map.final());
     db_el.attr("table_count", (int64_t)conn->schema.table_count);
 
+    // table_names: array of all table/view names for programmatic enumeration
+    ArrayBuilder tbl_names = builder.array();
+    for (int t = 0; t < table_count; t++) {
+        tbl_names.append(conn->schema.tables[t].name);
+    }
+    db_el.attr("table_names", tbl_names.final());
+
+    // functions: database-level SQL function metadata
+    if (conn->schema.function_count > 0) {
+        ArrayBuilder func_arr = builder.array();
+        for (int f = 0; f < conn->schema.function_count; f++) {
+            RdbFunction* fn = &conn->schema.functions[f];
+            MapBuilder func_map = builder.map();
+            func_map.put("name", fn->name);
+            func_map.put("type", fn->type);
+            func_map.put("narg", (int64_t)fn->narg);
+            func_map.put("builtin", fn->builtin);
+            func_arr.append(func_map.final());
+        }
+        db_el.attr("functions", func_arr.final());
+    }
+
     input->root = db_el.final();
 
     // close connection — all data has been materialized into arena

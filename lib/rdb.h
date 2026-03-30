@@ -77,6 +77,14 @@ typedef struct {
     const char* event;          /* "INSERT", "UPDATE", or "DELETE" */
 } RdbTrigger;
 
+/** SQL function metadata (database-level, not per-table) */
+typedef struct {
+    const char* name;           /* function name */
+    const char* type;           /* "scalar", "aggregate", or "window" */
+    int         narg;           /* number of arguments (-1 = variadic) */
+    bool        builtin;        /* true for built-in functions */
+} RdbFunction;
+
 /** foreign key metadata */
 typedef struct {
     const char* column;         /* FK column in this table */
@@ -105,6 +113,8 @@ typedef struct {
 typedef struct {
     int         table_count;
     RdbTable*   tables;         /* array (pool-owned) */
+    int         function_count;
+    RdbFunction* functions;     /* array (pool-owned), database-level */
 } RdbSchema;
 
 /* ══════════════════════════════════════════════════════════════════════
