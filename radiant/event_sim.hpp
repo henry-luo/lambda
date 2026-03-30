@@ -44,6 +44,8 @@
  *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
  *     {"type": "assert_position", "element_a": {"selector": "#header"}, "element_b": {"selector": "#content"}, "relation": "above"},
  *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
+ *     {"type": "switch_frame", "selector": "iframe#myframe"},
+ *     {"type": "switch_frame"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
@@ -99,6 +101,8 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     // Navigation
     SIM_EVENT_NAVIGATE,        // load a new HTML document
+    // Frame switching
+    SIM_EVENT_SWITCH_FRAME,    // switch to iframe document (or back to main)
     // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
@@ -159,6 +163,11 @@ struct SimEvent {
     char* expected_at_selector;  // expected element selector at coords
     char* expected_at_tag;       // expected tag name at coords
     int at_x, at_y;             // coordinates to test
+    // Phase 5c: auto-waiting on assertions
+    int assert_timeout;          // max wait time in ms (0 = no retry, default)
+    int assert_interval;         // retry interval in ms (default 100)
+    // Phase 5f: switch_frame fields
+    char* frame_selector;        // CSS selector for iframe element (NULL = switch to main)
 };
 
 // Event simulation context
@@ -174,6 +183,11 @@ struct EventSimContext {
     char* test_name;             // optional test name from JSON
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
+    int default_timeout;         // default assertion timeout in ms (0 = no retry)
+    // Phase 5f: iframe frame stack
+    void* original_document;     // main document (DomDocument*) before any switch_frame
+    void* frame_stack[8];        // stack of DomDocument* for nested switch_frame
+    int frame_stack_depth;       // current depth in frame_stack
 };
 
 // Load events from JSON file

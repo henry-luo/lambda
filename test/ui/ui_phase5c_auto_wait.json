@@ -1,0 +1,22 @@
+{
+  "name": "Phase 5c: Auto-waiting test",
+  "html": "test/ui/test_phase5g_transform.html",
+  "viewport": { "width": 800, "height": 600 },
+  "default_timeout": 500,
+  "events": [
+    { "type": "log", "message": "=== Phase 5c: Auto-waiting assertions ===" },
+
+    { "type": "log", "message": "--- Test 1: assert_rect with default_timeout ---" },
+    { "type": "assert_rect", "target": { "selector": "#box" },
+      "x": 0, "y": 0, "width": 100, "height": 100, "tolerance": 2 },
+
+    { "type": "log", "message": "--- Test 2: assert_style with per-event timeout ---" },
+    { "type": "assert_style", "target": { "selector": "#box" },
+      "property": "background-color", "equals": "rgb(231, 76, 60)",
+      "timeout": 200, "interval": 50 },
+
+    { "type": "log", "message": "--- Test 3: assert_rect with no timeout override ---" },
+    { "type": "assert_rect", "target": { "selector": "#box" },
+      "width": 100, "height": 100, "timeout": 0 }
+  ]
+}

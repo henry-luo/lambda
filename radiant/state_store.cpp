@@ -3,9 +3,13 @@
 #include "../lib/memtrack.h"
 // str.h included via view.hpp
 #include "view.hpp"
+#include "../lib/arraylist.h"
 
 #include <string.h>
 #include <stdlib.h>
+
+// Declared in event.cpp
+extern bool is_view_focusable(View* view);
 
 // ============================================================================
 // Hash and Compare Functions for StateKey
@@ -1991,6 +1995,11 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
     if (focus->previous && focus->previous != view) {
         state_set_bool(state, focus->previous, STATE_FOCUS, false);
         state_set_bool(state, focus->previous, STATE_FOCUS_VISIBLE, false);
+        // also update the DomElement pseudo_state bitfield
+        if (focus->previous->is_element()) {
+            dom_element_clear_pseudo_state((DomElement*)focus->previous, PSEUDO_STATE_FOCUS);
+            dom_element_clear_pseudo_state((DomElement*)focus->previous, PSEUDO_STATE_FOCUS_VISIBLE);
+        }
 
         // Clear :focus-within on ancestors
         View* node = (View*)focus->previous->parent;
@@ -2005,6 +2014,13 @@ void focus_set(RadiantState* state, View* view, bool from_keyboard) {
         state_set_bool(state, view, STATE_FOCUS, true);
         if (from_keyboard) {
             state_set_bool(state, view, STATE_FOCUS_VISIBLE, true);
+        }
+        // also update the DomElement pseudo_state bitfield
+        if (view->is_element()) {
+            dom_element_set_pseudo_state((DomElement*)view, PSEUDO_STATE_FOCUS);
+            if (from_keyboard) {
+                dom_element_set_pseudo_state((DomElement*)view, PSEUDO_STATE_FOCUS_VISIBLE);
+            }
         }
 
         // Set :focus-within on ancestors
@@ -2050,18 +2066,65 @@ void focus_clear(RadiantState* state) {
     log_debug("focus_clear");
 }
 
+// collect focusable elements from view tree in DOM order
+static void collect_focusable(View* view, ArrayList* list) {
+    if (!view) return;
+    if (is_view_focusable(view)) {
+        arraylist_append(list, view);
+    }
+    // recurse into children (only element nodes have children)
+    if (view->is_element()) {
+        DomElement* elem = (DomElement*)view;
+        DomNode* child = elem->first_child;
+        while (child) {
+            collect_focusable((View*)child, list);
+            child = child->next_sibling;
+        }
+    }
+}
+
 bool focus_move(RadiantState* state, View* root, bool forward) {
     if (!state || !root) return false;
 
-    // TODO: implement tab order navigation
-    // This requires:
-    // 1. Building list of focusable elements
-    // 2. Sorting by tabindex
-    // 3. Finding current position
-    // 4. Moving to next/previous
+    // build list of focusable elements in DOM order
+    ArrayList* focusable = arraylist_new(32);
+    collect_focusable(root, focusable);
 
-    log_debug("focus_move: forward=%d (not yet implemented)", forward);
-    return false;
+    if (focusable->length == 0) {
+        arraylist_free(focusable);
+        log_debug("focus_move: no focusable elements found");
+        return false;
+    }
+
+    // find current focus position in the list
+    View* current = state->focus ? state->focus->current : NULL;
+    int current_idx = -1;
+    for (int i = 0; i < focusable->length; i++) {
+        if ((View*)focusable->data[i] == current) {
+            current_idx = i;
+            break;
+        }
+    }
+
+    // compute next index
+    int next_idx;
+    if (current_idx < 0) {
+        // no current focus — go to first or last
+        next_idx = forward ? 0 : focusable->length - 1;
+    } else if (forward) {
+        next_idx = (current_idx + 1) % focusable->length;
+    } else {
+        next_idx = (current_idx - 1 + focusable->length) % focusable->length;
+    }
+
+    View* next_view = (View*)focusable->data[next_idx];
+    focus_set(state, next_view, true);  // from_keyboard=true
+
+    log_debug("focus_move: %s to index %d/%d", forward ? "forward" : "backward",
+              next_idx, focusable->length);
+
+    arraylist_free(focusable);
+    return true;
 }
 
 bool focus_restore(RadiantState* state) {
