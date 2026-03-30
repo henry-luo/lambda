@@ -1,0 +1,47 @@
+{
+  "name": "Phase 3: Form controls - check and select_option",
+  "html": "test/ui/test_form_controls.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 3: Form Controls Test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Checkbox: check unchecked -> checked ---"},
+    {"type": "assert_checked", "target": {"selector": "input#cb-terms"}, "checked": false},
+    {"type": "check", "target": {"selector": "input#cb-terms"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#cb-terms"}, "checked": true},
+
+    {"type": "log", "message": "--- Checkbox: uncheck checked -> unchecked ---"},
+    {"type": "assert_checked", "target": {"selector": "input#cb-news"}, "checked": true},
+    {"type": "check", "target": {"selector": "input#cb-news"}, "checked": false},
+    {"type": "assert_checked", "target": {"selector": "input#cb-news"}, "checked": false},
+
+    {"type": "log", "message": "--- Checkbox: check already checked (no-op) ---"},
+    {"type": "check", "target": {"selector": "input#cb-terms"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#cb-terms"}, "checked": true},
+
+    {"type": "log", "message": "--- Radio: switch from medium to small ---"},
+    {"type": "assert_checked", "target": {"selector": "input#radio-md"}, "checked": true},
+    {"type": "check", "target": {"selector": "input#radio-sm"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#radio-sm"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#radio-md"}, "checked": false},
+
+    {"type": "log", "message": "--- Radio: switch to large ---"},
+    {"type": "check", "target": {"selector": "input#radio-lg"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#radio-lg"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#radio-sm"}, "checked": false},
+
+    {"type": "log", "message": "--- Select: select by value ---"},
+    {"type": "select_option", "target": {"selector": "select#color"}, "value": "red"},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "--- Select: select by label ---"},
+    {"type": "select_option", "target": {"selector": "select#country"}, "label": "Germany"},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "--- Select: change selection by value ---"},
+    {"type": "select_option", "target": {"selector": "select#color"}, "value": "green"},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "=== Phase 3: Form Controls Test COMPLETE ==="}
+  ]
+}

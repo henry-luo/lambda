@@ -635,6 +635,15 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         int css_width = (int)(width / ui_context.pixel_ratio);
         int css_height = (int)(height / ui_context.pixel_ratio);
 
+        // Apply viewport override from event simulation if specified
+        if (sim_ctx && sim_ctx->viewport_width > 0 && sim_ctx->viewport_height > 0) {
+            css_width = sim_ctx->viewport_width;
+            css_height = sim_ctx->viewport_height;
+            ui_context.viewport_width = css_width;
+            ui_context.viewport_height = css_height;
+            log_info("event_sim: viewport override to %dx%d CSS pixels", css_width, css_height);
+        }
+
         // Load document based on file extension
         log_notice("view: loading document...");
         DomDocument* doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool);

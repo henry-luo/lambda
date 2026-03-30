@@ -1,0 +1,19 @@
+{
+  "name": "Phase 3: Viewport configuration test",
+  "viewport": {"width": 800, "height": 600},
+  "html": "test/ui/test_form_controls.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 3: Viewport Config Test (800x600) ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Basic checkbox check with custom viewport ---"},
+    {"type": "check", "target": {"selector": "input#cb-terms"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "input#cb-terms"}, "checked": true},
+
+    {"type": "log", "message": "--- Basic select with custom viewport ---"},
+    {"type": "select_option", "target": {"selector": "select#color"}, "value": "green"},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "=== Viewport Config Test COMPLETE ==="}
+  ]
+}
