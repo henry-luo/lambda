@@ -1302,9 +1302,20 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     if (!marker_prop->is_outside) {
                         // Inside markers contribute to line height and mark the line as non-empty
                         // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
-                        float ascender = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_ascender : 12.0f;
-                        float descender = lycon->font.font_handle ? -(font_get_metrics(lycon->font.font_handle)->hhea_descender) : 4.0f;
-                        if (!lycon->block.line_height_is_normal) {
+                        float ascender = 0, descender = 0;
+                        if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
+                            font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
+                        } else {
+                            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+                            if (typo.valid && typo.use_typo_metrics) {
+                                ascender = typo.ascender;
+                                descender = typo.descender;
+                            } else if (lycon->font.font_handle) {
+                                ascender = font_get_metrics(lycon->font.font_handle)->hhea_ascender;
+                                descender = -(font_get_metrics(lycon->font.font_handle)->hhea_descender);
+                            } else {
+                                ascender = 12.0f; descender = 4.0f;
+                            }
                             float content_height = ascender + descender;
                             float half_leading = (lycon->block.line_height - content_height) / 2.0f;
                             ascender += half_leading;
@@ -1608,17 +1619,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-    if (typo.valid && typo.use_typo_metrics) {
-        lycon->block.init_ascender = typo.ascender;
-        lycon->block.init_descender = typo.descender;
-    } else if (lycon->font.font_handle) {
-        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-        if (m) {
-            lycon->block.init_ascender = m->hhea_ascender;
-            lycon->block.init_descender = -(m->hhea_descender);
-        }
+    // Use platform-aware split for normal line-height to match browser behavior
+    // font_get_normal_lh_split handles USE_TYPO_METRICS, CoreText, and hhea fallback
+    if (lycon->font.font_handle) {
+        float split_asc = 0, split_desc = 0;
+        font_get_normal_lh_split(lycon->font.font_handle, &split_asc, &split_desc);
+        lycon->block.init_ascender = split_asc;
+        lycon->block.init_descender = split_desc;
     } else {
         // Fallback when no font face is available - use reasonable defaults
         log_error("No font face available for layout, using fallback metrics");

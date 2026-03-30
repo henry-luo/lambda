@@ -659,7 +659,8 @@ void render_form_control(RenderContext* rdcon, ViewBlock* block) {
         break;
 
     case FORM_CONTROL_HIDDEN:
-        // No rendering for hidden inputs
+    case FORM_CONTROL_IMAGE:
+        // No rendering for hidden inputs and broken image buttons
         break;
 
     default:

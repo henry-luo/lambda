@@ -803,7 +803,10 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
     if (view->is_element()) {
         DomElement* elem = (DomElement*)view;
-        if (elem->display.outer == CSS_VALUE_CONTENTS) {
+        // display:contents elements don't generate a box → (0,0,0,0)
+        // option/optgroup are not rendered → getBoundingClientRect returns (0,0,0,0)
+        if (elem->display.outer == CSS_VALUE_CONTENTS ||
+            elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);

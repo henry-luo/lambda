@@ -193,6 +193,8 @@ typedef struct LoadedGlyph {
     float        font_cell_height;      // cell height of actual font used (primary or fallback), in CSS px
     float        font_ascender;         // hhea ascender of actual font used, in CSS px (positive up)
     float        font_descender;        // hhea |descender| of actual font used, in CSS px (positive)
+    float        font_normal_ascender;  // platform-split ascender for line-height:normal, in CSS px
+    float        font_normal_descender; // platform-split descender for line-height:normal, in CSS px
     float        font_normal_line_height; // normal line-height of actual font used, in CSS px
 } LoadedGlyph;
 
@@ -272,6 +274,14 @@ float font_get_x_height_ratio(FontHandle* handle);
 //   3. HHEA fallback with font-unit scaling and individual rounding
 // Returns the line-height in CSS pixels.
 float font_calc_normal_line_height(FontHandle* handle);
+
+// Get the normal line-height split into ascender and descender components.
+// Chrome/Blink splits the normal line-height as:
+//   ascender = asc + desc (content height above baseline)
+//   descender = leading (extra spacing below baseline)
+// This matches Chrome's strut/baseline behavior for inline formatting contexts.
+// Out parameters: *out_ascender and *out_descender (both positive values).
+void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* out_descender);
 
 // Get the font cell height for text rect height computation.
 // Matches browser's Range.getClientRects() which uses font metrics, not CSS line-height.

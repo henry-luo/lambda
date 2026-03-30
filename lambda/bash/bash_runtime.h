@@ -93,6 +93,7 @@ Item bash_test_glob(Item string, Item pattern);
 // ========================================================================
 Item bash_string_length(Item str);          // ${#var}
 Item bash_string_concat(Item left, Item right);
+Item bash_var_append(Item var_name, Item old_val, Item append_val); // var+=val (integer-aware)
 Item bash_string_substring(Item str, Item offset, Item length); // ${var:off:len}
 Item bash_string_trim_prefix(Item str, Item pattern, bool greedy);  // ${var#pat} / ${var##pat}
 Item bash_string_trim_suffix(Item str, Item pattern, bool greedy);  // ${var%pat} / ${var%%pat}
@@ -128,6 +129,7 @@ Item bash_expand_lower_all(Item val);                       // ${var,,}
 // ========================================================================
 Item bash_int_to_item(int64_t n);                   // convert int64 to Item
 Item bash_array_new(void);                          // create empty array
+Item bash_ensure_array(Item name);                  // ensure var is array, create if needed
 Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
@@ -141,6 +143,7 @@ Item bash_array_slice(Item arr, Item offset, Item length); // ${arr[@]:off:len}
 // Associative array operations (maps)
 // ========================================================================
 Item bash_assoc_new(void);                          // create empty associative array
+Item bash_ensure_assoc(Item name);                  // ensure var is assoc array, create if needed
 Item bash_assoc_set(Item map, Item key, Item value);// map[key]=value
 Item bash_assoc_get(Item map, Item key);            // ${map[key]}
 Item bash_assoc_keys(Item map);                     // ${!map[@]} — return keys as array
@@ -182,8 +185,13 @@ void bash_restore_exit_code(Item saved);            // restore exit code from sa
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_return_with_code(Item val);               // set exit code from value
 Item bash_get_script_name(void);                    // $0
+void bash_set_script_name(Item name);              // update $0 / BASH_ARGV0
+Item bash_get_pid(void);                           // $$
+Item bash_get_last_bg_pid(void);                   // $!
+Item bash_get_shell_flags(void);                   // $-
 Item bash_get_lineno(void);                         // $LINENO
 void bash_set_lineno(int line);                     // update current statement line
+void bash_set_arith_context(Item expr_text);        // set arithmetic expression text for error messages
 Item bash_get_funcname(Item index);                 // ${FUNCNAME[n]}
 Item bash_get_funcname_count(void);                 // ${#FUNCNAME[@]}
 Item bash_get_bash_source(Item index);              // ${BASH_SOURCE[n]}
@@ -273,6 +281,8 @@ Item bash_redirect_read(Item filename);                  // < file
 // Expansions (tilde, glob, brace)
 // ========================================================================
 Item bash_expand_tilde(Item word);                       // ~ → $HOME
+Item bash_expand_tilde_assign(Item word);                // ~ after : in assignments
+Item bash_expand_tilde_assign_arg(Item word);            // ~ after = or : in cmd args
 Item bash_glob_expand(Item pattern);                     // *.txt → matching paths
 Item bash_expand_brace(Item word);                       // {a,b,c} → "a b c"
 
