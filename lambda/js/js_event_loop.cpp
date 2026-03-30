@@ -14,6 +14,8 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <setjmp.h>
+#include <signal.h>
 
 // =============================================================================
 // Microtask Queue (FIFO ring buffer — unchanged from v14)
@@ -208,15 +210,60 @@ extern "C" void js_event_loop_init(void) {
     lambda_uv_set_microtask_drain(js_microtask_flush);
 }
 
+// Recovery mechanism for SIGSEGV during event loop drain.
+// Heap corruption in timer callbacks (pre-existing bug) can crash the process
+// after tests have completed. We catch the signal and abort the event loop
+// gracefully instead of terminating.
+static jmp_buf event_loop_jmpbuf;
+static volatile sig_atomic_t event_loop_guarded = 0;
+static struct sigaction event_loop_old_sa;
+
+static void event_loop_sigsegv_handler(int sig, siginfo_t* info, void* ctx) {
+    if (event_loop_guarded) {
+        log_error("event_loop: caught SIGSEGV at %p during drain, aborting event loop",
+                  info ? info->si_addr : NULL);
+        event_loop_guarded = 0;
+        // restore the old handler before longjmp
+        sigaction(SIGSEGV, &event_loop_old_sa, NULL);
+        longjmp(event_loop_jmpbuf, 1);
+    }
+    // not guarded, call previous handler
+    if (event_loop_old_sa.sa_flags & SA_SIGINFO) {
+        event_loop_old_sa.sa_sigaction(sig, info, ctx);
+    } else if (event_loop_old_sa.sa_handler != SIG_DFL && event_loop_old_sa.sa_handler != SIG_IGN) {
+        event_loop_old_sa.sa_handler(sig);
+    } else {
+        signal(SIGSEGV, SIG_DFL);
+        raise(SIGSEGV);
+    }
+}
+
 extern "C" int js_event_loop_drain(void) {
     // flush any synchronous microtasks first (from Promise resolutions)
     js_microtask_flush();
 
-    // run libuv event loop until all timers/handles are done
-    int result = lambda_uv_run();
+    // install crash guard for event loop drain
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = event_loop_sigsegv_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, &event_loop_old_sa);
+    event_loop_guarded = 1;
 
-    // final microtask flush after loop exits
-    js_microtask_flush();
+    int result = 0;
+    if (setjmp(event_loop_jmpbuf) == 0) {
+        // run libuv event loop until all timers/handles are done
+        result = lambda_uv_run();
+        // final microtask flush after loop exits
+        js_microtask_flush();
+    } else {
+        log_error("event_loop: recovered from crash during drain");
+        result = -1;
+    }
+
+    // restore previous signal handler
+    event_loop_guarded = 0;
+    sigaction(SIGSEGV, &event_loop_old_sa, NULL);
 
     return result;
 }

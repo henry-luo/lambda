@@ -1112,6 +1112,7 @@ JitImport jit_runtime_imports[] = {
     {"js_math_apply", FPTR(js_math_apply)},
     {"js_method_call_apply", FPTR(js_method_call_apply)},
     {"js_math_property", FPTR(js_math_property)},
+    {"js_math_set_property", FPTR(js_math_set_property)},
     {"js_number_method", FPTR(js_number_method)},
     {"js_get_length", FPTR(js_get_length)},
     // DOM API
@@ -1234,6 +1235,7 @@ JitImport jit_runtime_imports[] = {
     {"js_symbol_for", FPTR(js_symbol_for)},
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},
     {"js_symbol_to_string", FPTR(js_symbol_to_string)},
+    {"js_symbol_well_known", FPTR(js_symbol_well_known)},
     // v12: DOM extensions
     {"js_classlist_method", FPTR(js_classlist_method)},
     {"js_classlist_get_property", FPTR(js_classlist_get_property)},

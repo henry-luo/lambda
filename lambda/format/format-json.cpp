@@ -22,6 +22,8 @@ static void format_map_reader_contents(JsonContext& ctx, const MapReader& map_re
     while (iter.next(&key, &value)) {
         // Skip function-valued properties (like JSON.stringify)
         if (value.getType() == LMD_TYPE_FUNC) continue;
+        // Skip deleted properties (JS delete operator sentinel: tagged INT with 0x00DEAD00DEAD00)
+        if (value.item().item == ((3ULL << 56) | 0x00DEAD00DEAD00ULL)) continue;
 
         if (!first) {
             ctx.write_text(",\n");

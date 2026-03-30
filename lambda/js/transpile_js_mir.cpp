@@ -5305,6 +5305,22 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
             }
         }
 
+        // Math.xxx = expr → store on Math backing object
+        if (!member->computed && asgn->op == JS_OP_ASSIGN &&
+            member->object && member->object->node_type == JS_AST_NODE_IDENTIFIER &&
+            member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* obj_id = (JsIdentifierNode*)member->object;
+            if (obj_id->name && obj_id->name->len == 4 &&
+                strncmp(obj_id->name->chars, "Math", 4) == 0) {
+                JsIdentifierNode* prop_id = (JsIdentifierNode*)member->property;
+                MIR_reg_t key = jm_box_string_literal(mt, prop_id->name->chars, prop_id->name->len);
+                MIR_reg_t val = jm_transpile_box_item(mt, asgn->right);
+                return jm_call_2(mt, "js_math_set_property", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
+        }
+
         // General member assignment
         MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
         MIR_reg_t key;
@@ -5380,6 +5396,27 @@ static MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* 
                         MIR_new_reg_op(mt->ctx, var->reg),
                         MIR_new_reg_op(mt->ctx, val)));
                 }
+            } else if (elem->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+                // member expression target: [this.a, this.b] = arr
+                JsMemberNode* member = (JsMemberNode*)elem;
+                MIR_reg_t arr_key = jm_box_int_const(mt, idx);
+                MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_key));
+                MIR_reg_t obj = jm_transpile_box_item(mt, member->object);
+                MIR_reg_t prop_key;
+                if (member->computed) {
+                    prop_key = jm_transpile_box_item(mt, member->property);
+                } else if (member->property && member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                    JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+                    prop_key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+                } else {
+                    prop_key = jm_transpile_box_item(mt, member->property);
+                }
+                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
             idx++;
             elem = elem->next;
@@ -8067,7 +8104,8 @@ static MIR_reg_t jm_transpile_typed_array_get(JsMirTranspiler* mt, MIR_reg_t arr
             MIR_new_reg_op(mt->ctx, jm_box_int_reg(mt, raw))));
         break;
     }
-    case JS_TYPED_UINT8: {
+    case JS_TYPED_UINT8:
+    case JS_TYPED_UINT8_CLAMPED: {
         MIR_reg_t raw = jm_new_reg(mt, "ta_u8", MIR_T_I64);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
             MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, elem_addr, 0, 1)));
@@ -8337,10 +8375,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
 
-        // v12: Symbol.iterator, Symbol.toPrimitive, etc. → js_symbol_create(name)
+        // v12: Symbol.iterator, Symbol.toPrimitive, etc. → js_symbol_well_known(name)
+        // These are well-known symbols — always return the same pre-defined symbol item.
+        // Unlike js_symbol_create(), this DOES NOT create a new unique symbol each time.
         if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Symbol", 6) == 0) {
             MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
-            return jm_call_1(mt, "js_symbol_create", MIR_T_I64,
+            return jm_call_1(mt, "js_symbol_well_known", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
 

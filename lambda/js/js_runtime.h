@@ -12,6 +12,11 @@ extern "C" {
 
 #include "../lambda.h"
 
+// Sentinel value for deleted properties (used by delete operator).
+// Encoded as a tagged INT (LMD_TYPE_INT=3) with a unique payload 0x00DEAD00DEAD00.
+// This roundtrips correctly through map_field_store/map_read_field for INT fields.
+#define JS_DELETED_SENTINEL_VAL ((3ULL << 56) | 0x00DEAD00DEAD00ULL)
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -157,6 +162,7 @@ Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 Item js_math_method(Item method_name, Item* args, int argc);
 Item js_math_apply(Item method_name, Item args_array);
 Item js_math_property(Item prop_name);
+Item js_math_set_property(Item key, Item value);
 
 // =============================================================================
 // v5: Process I/O
@@ -383,10 +389,15 @@ Item js_url_parse(Item input, Item base);
 Item js_url_can_parse(Item input);
 
 // Symbol API
+// Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
+// Base must be beyond int32 range to avoid collision with bitwise op results.
+#define JS_SYMBOL_BASE (1LL << 40)
+
 Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
 Item js_symbol_to_string(Item sym);
+Item js_symbol_well_known(Item name);
 
 // =============================================================================
 // v14: Generator Runtime

@@ -80,6 +80,13 @@ typedef void (*gc_vmap_destroy_fn)(void* data);
 // Maximum number of registered root slots
 #define GC_MAX_ROOT_SLOTS 256
 
+// Root range: contiguous array of Items to scan as GC roots.
+// Used for JS closure environment arrays (pool-allocated, invisible to GC).
+typedef struct gc_root_range {
+    uint64_t* base;
+    int count;
+} gc_root_range_t;
+
 /**
  * GCHeap - manages all GC-tracked allocations.
  *
@@ -135,6 +142,12 @@ typedef struct gc_heap {
     // Collection statistics
     size_t collections;             // number of GC collections performed
     size_t bytes_collected;         // total bytes reclaimed across all collections
+
+    // Root ranges: dynamically growing array of (base, count) pairs.
+    // Each range is a pool-allocated Item[] array (e.g., JS closure envs).
+    gc_root_range_t* root_ranges;
+    int root_range_count;
+    int root_range_capacity;
 
     // VMap tracing/finalization callbacks (set by runtime, called from GC)
     gc_vmap_trace_fn vmap_trace;    // traces Item keys/values in VMap's HashMap
@@ -253,6 +266,15 @@ void gc_register_root(gc_heap_t* gc, uint64_t* slot);
  * @param slot pointer previously registered with gc_register_root
  */
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+
+/**
+ * Register a contiguous range of Items as GC roots.
+ * Used for JS closure environment arrays that are pool-allocated.
+ * @param gc    heap to register with
+ * @param base  pointer to first Item in the range
+ * @param count number of Items in the range
+ */
+void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count);
 
 /**
  * Run a full garbage collection cycle:
