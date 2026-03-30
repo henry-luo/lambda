@@ -106,6 +106,55 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
 }
 
 // ============================================================================
+// Variable font axis selection (opsz, wght)
+// ============================================================================
+
+static void apply_variable_font_axes(FT_Face face, FT_Library library,
+                                     float size_px, FontWeight weight) {
+    if (!face || !(face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) return;
+
+    FT_MM_Var* mm = NULL;
+    if (FT_Get_MM_Var(face, &mm) != 0 || !mm) return;
+
+    // read current design coordinates
+    FT_Fixed* coords = (FT_Fixed*)malloc(mm->num_axis * sizeof(FT_Fixed));
+    if (!coords) { FT_Done_MM_Var(library, mm); return; }
+
+    FT_Get_Var_Design_Coordinates(face, mm->num_axis, coords);
+
+    bool changed = false;
+    for (FT_UInt i = 0; i < mm->num_axis; i++) {
+        FT_ULong tag = mm->axis[i].tag;
+        if (tag == FT_MAKE_TAG('o','p','s','z')) {
+            // set optical size to font size (clamped to axis range)
+            FT_Fixed min_val = mm->axis[i].minimum;
+            FT_Fixed max_val = mm->axis[i].maximum;
+            FT_Fixed target = (FT_Fixed)(size_px * 65536.0f);
+            if (target < min_val) target = min_val;
+            if (target > max_val) target = max_val;
+            coords[i] = target;
+            changed = true;
+        } else if (tag == FT_MAKE_TAG('w','g','h','t')) {
+            // set weight axis
+            FT_Fixed min_val = mm->axis[i].minimum;
+            FT_Fixed max_val = mm->axis[i].maximum;
+            FT_Fixed target = (FT_Fixed)((float)weight * 65536.0f);
+            if (target < min_val) target = min_val;
+            if (target > max_val) target = max_val;
+            coords[i] = target;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        FT_Set_Var_Design_Coordinates(face, mm->num_axis, coords);
+    }
+
+    free(coords);
+    FT_Done_MM_Var(library, mm);
+}
+
+// ============================================================================
 // Load face from file path
 // ============================================================================
 
@@ -194,6 +243,7 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         return NULL;
     }
 
+    apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
     set_face_size(face, physical_size);
 
     FontHandle* handle = create_handle(ctx, face, NULL, 0,
@@ -254,6 +304,7 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
         return NULL;
     }
 
+    apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
     set_face_size(face, physical_size);
 
     FontHandle* handle = create_handle(ctx, face, buf, sfnt_len,
