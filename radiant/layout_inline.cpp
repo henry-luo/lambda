@@ -125,10 +125,30 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return;
     }
 
-    // Initialize bounds with first non-nil child
-    int min_x = child->x;
+    // Initialize bounds with first non-nil child.
+    // CSS 2.1 §8.3: For inline-block children, the span's bounding box must include
+    // the inline-block's margin box (margin.left/right), since those margins are part
+    // of the inline flow and contribute to the containing inline span's width.
+    // child->x is the border-box position (margin already added to the x coordinate),
+    // so the outer-left = child->x - margin.left, outer-right = child->x + width + margin.right.
+    auto get_child_outer_left = [](View* c) -> int {
+        if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
+            ViewBlock* vb = (ViewBlock*)c;
+            if (vb->bound) return (int)(c->x - vb->bound->margin.left);
+        }
+        return c->x;
+    };
+    auto get_child_outer_right = [](View* c) -> int {
+        if (c->view_type == RDT_VIEW_INLINE_BLOCK) {
+            ViewBlock* vb = (ViewBlock*)c;
+            if (vb->bound) return (int)(c->x + c->width + vb->bound->margin.right);
+        }
+        return c->x + c->width;
+    };
+
+    int min_x = get_child_outer_left(child);
     int min_y = child->y;
-    int max_x = child->x + child->width;
+    int max_x = get_child_outer_right(child);
     int max_y = child->y + child->height;
 
     // Iterate through remaining children to find union
@@ -139,9 +159,9 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             child = child->next();
             continue;
         }
-        int child_min_x = child->x;
+        int child_min_x = get_child_outer_left(child);
         int child_min_y = child->y;
-        int child_max_x = child->x + child->width;
+        int child_max_x = get_child_outer_right(child);
         int child_max_y = child->y + child->height;
 
         // Expand bounding box to include this child
@@ -895,25 +915,27 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // When children produce text output, output_text() applies the half-leading;
     // for empty inlines (no children at all), we must apply it here explicitly.
     if (!had_children && lycon->font.font_handle) {
-        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
         float ascender = 0, descender = 0;
-        if (typo.valid && typo.use_typo_metrics) {
-            ascender = typo.ascender;
-            descender = typo.descender;
+        if (lycon->block.line_height_is_normal) {
+            font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
         } else {
-            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-            if (m) {
-                ascender = m->hhea_ascender;
-                descender = -(m->hhea_descender);
+            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+            if (typo.valid && typo.use_typo_metrics) {
+                ascender = typo.ascender;
+                descender = typo.descender;
+            } else {
+                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+                if (m) {
+                    ascender = m->hhea_ascender;
+                    descender = -(m->hhea_descender);
+                }
             }
+            float content_height = ascender + descender;
+            float half_leading = (lycon->block.line_height - content_height) / 2.0f;
+            ascender += half_leading;
+            descender += half_leading;
         }
         if (ascender > 0 || descender > 0) {
-            if (!lycon->block.line_height_is_normal) {
-                float content_height = ascender + descender;
-                float half_leading = (lycon->block.line_height - content_height) / 2.0f;
-                ascender += half_leading;
-                descender += half_leading;
-            }
             float va_offset = lycon->line.vertical_align_offset;
             if (va_offset != 0) {
                 ascender += va_offset;
@@ -1079,10 +1101,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (c->view_type) last_child_for_trim = c;
                 c = c->next();
             }
-            if (last_child_for_trim && last_child_for_trim->view_type != RDT_VIEW_INLINE) {
-                // Only trim non-span children (text rects, inline-blocks, etc.).
-                // Inline spans already handled their own trailing space trim
-                // during their own layout pass — trimming again would double-count.
+            if (last_child_for_trim && last_child_for_trim->view_type == RDT_VIEW_TEXT) {
+                // Only trim text children — they carry trailing space in their width.
+                // Inline spans handle their own trim; inline-blocks/tables don't have
+                // trailing space embedded in their width.
                 saved_trailing = lycon->line.trailing_space_width;
                 last_child_for_trim->width -= saved_trailing;
             }
@@ -1117,8 +1139,25 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             int expected_height = (int)(content_area + bt + pt_val + pb_val + bb);
             if (!span_is_multi_line && span->height > expected_height) {
-                span->height = expected_height;
-                log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+                // CSS 2.1 §10.6.1: For inline non-replaced elements, the inline box
+                // height = content_area + own border + own padding. Children's borders
+                // don't increase this. However, getBoundingClientRect reflects the
+                // visual extent: if a child inline span's border expands beyond this
+                // span's own border box, the bbox should encompass the child.
+                // Check if any child inline span overflows the expected_height.
+                bool child_overflows = false;
+                View* ch = span->first_placed_child();
+                while (ch) {
+                    if (ch->view_type == RDT_VIEW_INLINE && ch->height > expected_height) {
+                        child_overflows = true;
+                        break;
+                    }
+                    ch = (View*)ch->next_sibling;
+                }
+                if (!child_overflows) {
+                    span->height = expected_height;
+                    log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+                }
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
             // and negative half-leading (line-height < font content area), position

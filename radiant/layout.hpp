@@ -394,6 +394,7 @@ void block_context_calc_bfc_offset(ViewElement* view, BlockContext* bfc, float* 
 // ============================================================================
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
+InlineProp* alloc_inline_prop(LayoutContext* lycon);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 BlockProp* alloc_block_prop(LayoutContext* lycon);
 ScrollProp* alloc_scroll_prop(LayoutContext* lycon);

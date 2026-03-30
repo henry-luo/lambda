@@ -387,6 +387,7 @@ typedef struct BashAssignmentNode {
 typedef struct BashWordNode {
     BashAstNode base;
     String* text;
+    bool no_backslash_escape;   // true if text has already been processed (e.g. from string fragments)
 } BashWordNode;
 
 // String: "double quoted" (with expansion)
@@ -446,6 +447,7 @@ typedef struct BashExpansionNode {
     BashAstNode* argument;          // default/pattern/replacement
     BashAstNode* replacement;       // for ${var/pat/str}: the replacement string
     bool has_colon;                 // true for :- := :+ :?, false for - = + ?
+    BashAstNode* inner_expr;        // if set, evaluate this instead of bash_get_var(variable)
 } BashExpansionNode;
 
 // Command substitution: $(command) or `command`

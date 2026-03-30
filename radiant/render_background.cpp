@@ -241,8 +241,8 @@ void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color,
     // Also need ThorVG if parent has rounded clip
     bool needs_rounded_clip = rdcon->block.has_clip_radius;
 
-    if (has_radius || needs_rounded_clip) {
-        // Use ThorVG for rounded background or rounded clipping
+    if (has_radius || needs_rounded_clip || rdcon->has_transform) {
+        // Use ThorVG for rounded background, rounded clipping, or transformed elements
         Tvg_Canvas canvas = rdcon->canvas;
         Tvg_Paint shape = tvg_shape_new();
 
@@ -1086,127 +1086,88 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                   s->offset_x, s->offset_y, s->blur_radius, s->spread_radius,
                   s->color.r, s->color.g, s->color.b, s->color.a);
 
-        // Build the outer path (element border-box) — this is the clip boundary
-        // Build the inner path (shadow cutout) — the "hole" where no shadow is painted
-        // We need a shape that fills the area between outer and inner paths.
+        // Use even-odd fill rule with outer rect (clockwise) + inner rect (counter-clockwise)
+        // to render a ring-shaped shadow that only fills the border area.
+        Tvg_Paint shadow_shape = tvg_shape_new();
 
-        // Strategy: Create a large filled rect, then mask with the inner cutout.
-        // The outer clipping is handled by the element's border-box clip.
-
-        // Step 1: Create a filled rect covering the element area (with shadow color)
-        Tvg_Paint shadow_fill = tvg_shape_new();
-        // Extend the fill beyond the element rect to account for blur bleeding
-        float extend = s->blur_radius * 2;
-        tvg_shape_append_rect(shadow_fill,
-            rect.x - extend, rect.y - extend,
-            rect.width + extend * 2, rect.height + extend * 2,
-            0, 0, true);
-        tvg_shape_set_fill_color(shadow_fill, s->color.r, s->color.g, s->color.b, s->color.a);
-
-        // Step 2: Clip to element border-box (with border radius)
-        Tvg_Paint outer_clip = tvg_shape_new();
+        // Outer path (clockwise): element border-box
         if (r_tl > 0 || r_tr > 0 || r_br > 0 || r_bl > 0) {
             #define KAPPA_INSET 0.5522847498f
-            tvg_shape_move_to(outer_clip, rect.x + r_tl, rect.y);
-            tvg_shape_line_to(outer_clip, rect.x + rect.width - r_tr, rect.y);
-            if (r_tr > 0) tvg_shape_cubic_to(outer_clip,
+            tvg_shape_move_to(shadow_shape, rect.x + r_tl, rect.y);
+            tvg_shape_line_to(shadow_shape, rect.x + rect.width - r_tr, rect.y);
+            if (r_tr > 0) tvg_shape_cubic_to(shadow_shape,
                 rect.x + rect.width - r_tr + r_tr * KAPPA_INSET, rect.y,
                 rect.x + rect.width, rect.y + r_tr - r_tr * KAPPA_INSET,
                 rect.x + rect.width, rect.y + r_tr);
-            tvg_shape_line_to(outer_clip, rect.x + rect.width, rect.y + rect.height - r_br);
-            if (r_br > 0) tvg_shape_cubic_to(outer_clip,
+            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y + rect.height - r_br);
+            if (r_br > 0) tvg_shape_cubic_to(shadow_shape,
                 rect.x + rect.width, rect.y + rect.height - r_br + r_br * KAPPA_INSET,
                 rect.x + rect.width - r_br + r_br * KAPPA_INSET, rect.y + rect.height,
                 rect.x + rect.width - r_br, rect.y + rect.height);
-            tvg_shape_line_to(outer_clip, rect.x + r_bl, rect.y + rect.height);
-            if (r_bl > 0) tvg_shape_cubic_to(outer_clip,
+            tvg_shape_line_to(shadow_shape, rect.x + r_bl, rect.y + rect.height);
+            if (r_bl > 0) tvg_shape_cubic_to(shadow_shape,
                 rect.x + r_bl - r_bl * KAPPA_INSET, rect.y + rect.height,
                 rect.x, rect.y + rect.height - r_bl + r_bl * KAPPA_INSET,
                 rect.x, rect.y + rect.height - r_bl);
-            tvg_shape_line_to(outer_clip, rect.x, rect.y + r_tl);
-            if (r_tl > 0) tvg_shape_cubic_to(outer_clip,
+            tvg_shape_line_to(shadow_shape, rect.x, rect.y + r_tl);
+            if (r_tl > 0) tvg_shape_cubic_to(shadow_shape,
                 rect.x, rect.y + r_tl - r_tl * KAPPA_INSET,
                 rect.x + r_tl - r_tl * KAPPA_INSET, rect.y,
                 rect.x + r_tl, rect.y);
-            tvg_shape_close(outer_clip);
+            tvg_shape_close(shadow_shape);
             #undef KAPPA_INSET
         } else {
-            tvg_shape_append_rect(outer_clip, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
+            tvg_shape_move_to(shadow_shape, rect.x, rect.y);
+            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y);
+            tvg_shape_line_to(shadow_shape, rect.x + rect.width, rect.y + rect.height);
+            tvg_shape_line_to(shadow_shape, rect.x, rect.y + rect.height);
+            tvg_shape_close(shadow_shape);
         }
-        tvg_shape_set_fill_color(outer_clip, 0, 0, 0, 255);
-        tvg_paint_set_mask_method(shadow_fill, outer_clip, TVG_MASK_METHOD_ALPHA);
 
-        // Render the shadow fill (clipped to element border-box)
-        tvg_canvas_remove(canvas, NULL);
-        push_with_transform(rdcon, shadow_fill);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);
-
-        // Step 3: Cut out the inner region by rendering a shape in the inner area
-        // using inverse alpha masking (draw background color over the non-shadow area)
-        // For inset shadow, we need the inner cutout to be transparent.
-        // We achieve this by rendering the inner shape with inverse-alpha compositing.
-        Tvg_Paint inner_cutout = tvg_shape_new();
+        // Inner path (counter-clockwise): the cutout hole
         if (ir_tl > 0 || ir_tr > 0 || ir_br > 0 || ir_bl > 0) {
             #define KAPPA_INNER 0.5522847498f
-            tvg_shape_move_to(inner_cutout, inner_x + ir_tl, inner_y);
-            tvg_shape_line_to(inner_cutout, inner_x + inner_w - ir_tr, inner_y);
-            if (ir_tr > 0) tvg_shape_cubic_to(inner_cutout,
-                inner_x + inner_w - ir_tr + ir_tr * KAPPA_INNER, inner_y,
-                inner_x + inner_w, inner_y + ir_tr - ir_tr * KAPPA_INNER,
-                inner_x + inner_w, inner_y + ir_tr);
-            tvg_shape_line_to(inner_cutout, inner_x + inner_w, inner_y + inner_h - ir_br);
-            if (ir_br > 0) tvg_shape_cubic_to(inner_cutout,
-                inner_x + inner_w, inner_y + inner_h - ir_br + ir_br * KAPPA_INNER,
-                inner_x + inner_w - ir_br + ir_br * KAPPA_INNER, inner_y + inner_h,
-                inner_x + inner_w - ir_br, inner_y + inner_h);
-            tvg_shape_line_to(inner_cutout, inner_x + ir_bl, inner_y + inner_h);
-            if (ir_bl > 0) tvg_shape_cubic_to(inner_cutout,
-                inner_x + ir_bl - ir_bl * KAPPA_INNER, inner_y + inner_h,
-                inner_x, inner_y + inner_h - ir_bl + ir_bl * KAPPA_INNER,
-                inner_x, inner_y + inner_h - ir_bl);
-            tvg_shape_line_to(inner_cutout, inner_x, inner_y + ir_tl);
-            if (ir_tl > 0) tvg_shape_cubic_to(inner_cutout,
+            tvg_shape_move_to(shadow_shape, inner_x + ir_tl, inner_y);
+            tvg_shape_line_to(shadow_shape, inner_x, inner_y + ir_tl);
+            if (ir_tl > 0) tvg_shape_cubic_to(shadow_shape,
                 inner_x, inner_y + ir_tl - ir_tl * KAPPA_INNER,
                 inner_x + ir_tl - ir_tl * KAPPA_INNER, inner_y,
                 inner_x + ir_tl, inner_y);
-            tvg_shape_close(inner_cutout);
+            tvg_shape_line_to(shadow_shape, inner_x, inner_y + inner_h - ir_bl);
+            if (ir_bl > 0) tvg_shape_cubic_to(shadow_shape,
+                inner_x, inner_y + inner_h - ir_bl + ir_bl * KAPPA_INNER,
+                inner_x + ir_bl - ir_bl * KAPPA_INNER, inner_y + inner_h,
+                inner_x + ir_bl, inner_y + inner_h);
+            tvg_shape_line_to(shadow_shape, inner_x + inner_w - ir_br, inner_y + inner_h);
+            if (ir_br > 0) tvg_shape_cubic_to(shadow_shape,
+                inner_x + inner_w - ir_br + ir_br * KAPPA_INNER, inner_y + inner_h,
+                inner_x + inner_w, inner_y + inner_h - ir_br + ir_br * KAPPA_INNER,
+                inner_x + inner_w, inner_y + inner_h - ir_br);
+            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y + ir_tr);
+            if (ir_tr > 0) tvg_shape_cubic_to(shadow_shape,
+                inner_x + inner_w, inner_y + ir_tr - ir_tr * KAPPA_INNER,
+                inner_x + inner_w - ir_tr + ir_tr * KAPPA_INNER, inner_y,
+                inner_x + inner_w - ir_tr, inner_y);
+            tvg_shape_close(shadow_shape);
             #undef KAPPA_INNER
         } else {
-            tvg_shape_append_rect(inner_cutout, inner_x, inner_y, inner_w, inner_h, 0, 0, true);
+            tvg_shape_move_to(shadow_shape, inner_x, inner_y);
+            tvg_shape_line_to(shadow_shape, inner_x, inner_y + inner_h);
+            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y + inner_h);
+            tvg_shape_line_to(shadow_shape, inner_x + inner_w, inner_y);
+            tvg_shape_close(shadow_shape);
         }
-        // Use inverse alpha to erase the inner region from the shadow
-        tvg_shape_set_fill_color(inner_cutout, 0, 0, 0, 255);
 
-        // Clip inner cutout to element rect as well
-        Tvg_Paint inner_clip = tvg_shape_new();
-        tvg_shape_append_rect(inner_clip, rect.x, rect.y, rect.width, rect.height, 0, 0, true);
-        tvg_shape_set_fill_color(inner_clip, 0, 0, 0, 255);
-        tvg_paint_set_mask_method(inner_cutout, inner_clip, TVG_MASK_METHOD_ALPHA);
+        tvg_shape_set_fill_rule(shadow_shape, TVG_FILL_RULE_EVEN_ODD);
+        tvg_shape_set_fill_color(shadow_shape, s->color.r, s->color.g, s->color.b, s->color.a);
+
+        // Clip to element border-box
+        Tvg_Paint clip_shape = create_clip_shape(rdcon);
+        tvg_paint_set_mask_method(shadow_shape, clip_shape, TVG_MASK_METHOD_ALPHA);
 
         tvg_canvas_remove(canvas, NULL);
-        push_with_transform(rdcon, inner_cutout);
-        // Use inverse alpha to subtract the inner shape from what's on the surface
+        push_with_transform(rdcon, shadow_shape);
         tvg_canvas_reset_and_draw(rdcon, false);
-
-        // Now erase the inner area from the surface pixels directly
-        // (since ThorVG C API doesn't support subtract compositing directly)
-        if (rdcon->ui_context->surface) {
-            ImageSurface* surface = rdcon->ui_context->surface;
-            uint32_t* pixels = (uint32_t*)surface->pixels;
-            int stride = surface->pitch / 4;
-
-            int cx1 = max(0, (int)floorf(inner_x));
-            int cy1 = max(0, (int)floorf(inner_y));
-            int cx2 = min(surface->width, (int)ceilf(inner_x + inner_w));
-            int cy2 = min(surface->height, (int)ceilf(inner_y + inner_h));
-
-            // Save the pixels that were under the inner area before we drew the shadow
-            // We can't easily undo the draw, so instead we restore from a saved snapshot.
-            // Alternative approach: render shadow only in the border ring area.
-            // For now, let's just clear the inner area alpha by blending.
-        }
-
         tvg_canvas_remove(canvas, NULL);
 
         // Apply software box blur if blur radius > 0

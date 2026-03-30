@@ -1127,13 +1127,25 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
         lambda_stack_init();
 
-        // scan for --posix flag and find the script file argument
+        // scan for --posix flag, -c flag, and find the script file argument
         bool bash_posix = false;
         const char* bash_file = NULL;
+        const char* bash_inline_cmd = NULL;  // -c 'command string'
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--posix") == 0) {
                 bash_posix = true;
-            } else {
+            } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+                bash_inline_cmd = argv[++i];
+            } else if (argv[i][0] == '-' && argv[i][1] != '-' && strchr(argv[i], 'c') != NULL && i + 1 < argc) {
+                // combined flags like -ce, -xc, -ec: extract non-c flags and set them
+                const char* flags = argv[i] + 1; // skip leading -
+                for (const char* f = flags; *f; f++) {
+                    if (*f == 'e') bash_set_option_flag('e', true);
+                    else if (*f == 'x') bash_set_option_flag('x', true);
+                    // 'c' is handled by taking the next arg as inline cmd
+                }
+                bash_inline_cmd = argv[++i];
+            } else if (bash_inline_cmd == NULL && bash_file == NULL) {
                 bash_file = argv[i];
             }
         }
@@ -1142,7 +1154,15 @@ int main(int argc, char *argv[]) {
             bash_set_posix_mode(true);
         }
 
-        if (bash_file) {
+        if (bash_inline_cmd) {
+            // -c 'command string' — run inline command string
+            // set BASH_COMMAND to the full -c string (real bash sets it to current command)
+            setenv("BASH_COMMAND", bash_inline_cmd, 1);
+            char* bash_source = strdup(bash_inline_cmd);
+            Item result = transpile_bash_to_mir(&runtime, bash_source, "-c");
+            (void)result;
+            free(bash_source);
+        } else if (bash_file) {
             char* bash_source = read_text_file(bash_file);
             if (!bash_source) {
                 printf("Error: Could not read file '%s'\n", bash_file);

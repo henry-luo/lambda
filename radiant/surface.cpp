@@ -3,6 +3,7 @@
 #include "../lib/image.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/base64.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
 #include <algorithm>  // for std::max, std::min
 typedef struct ImageEntry {
@@ -53,6 +54,57 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->document == NULL || uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
         return NULL;
+    }
+
+    // Handle data: URIs
+    if (strncmp(img_url, "data:", 5) == 0) {
+        const char* comma = strchr(img_url, ',');
+        if (!comma) {
+            log_error("[BG-IMAGE] Invalid data URI (no comma)");
+            return NULL;
+        }
+        size_t decoded_len = 0;
+        uint8_t* decoded = base64_decode(comma + 1, 0, &decoded_len);
+        if (!decoded || decoded_len == 0) {
+            log_error("[BG-IMAGE] Failed to decode data URI base64");
+            return NULL;
+        }
+        // Detect format from MIME type or content
+        bool is_svg = is_svg_content(decoded, decoded_len);
+        ImageSurface* surface;
+        if (is_svg) {
+            surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+            surface->format = IMAGE_FORMAT_SVG;
+            surface->pic = tvg_picture_new();
+            Tvg_Result ret = tvg_picture_load_data(surface->pic, (const char*)decoded, (uint32_t)decoded_len, "svg", NULL, false);
+            free(decoded);
+            if (ret != TVG_RESULT_SUCCESS) {
+                tvg_paint_unref(surface->pic, true);
+                mem_free(surface);
+                return NULL;
+            }
+            float svg_w, svg_h;
+            tvg_picture_get_size(surface->pic, &svg_w, &svg_h);
+            surface->width = svg_w;
+            surface->height = svg_h;
+        } else {
+            int width, height, channels;
+            unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
+            free(decoded);
+            if (!data) {
+                log_error("[BG-IMAGE] Failed to decode data URI image");
+                return NULL;
+            }
+            surface = image_surface_create_from(width, height, data);
+            if (!surface) { image_free(data); return NULL; }
+            // Detect format from MIME
+            if (strstr(img_url, "image/png")) surface->format = IMAGE_FORMAT_PNG;
+            else if (strstr(img_url, "image/jpeg") || strstr(img_url, "image/jpg")) surface->format = IMAGE_FORMAT_JPEG;
+            else if (strstr(img_url, "image/gif")) surface->format = IMAGE_FORMAT_GIF;
+            else if (strstr(img_url, "image/svg")) surface->format = IMAGE_FORMAT_SVG;
+        }
+        log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
+        return surface;
     }
     Url* abs_url = parse_url(uicon->document->url, img_url);
     if (!abs_url) {

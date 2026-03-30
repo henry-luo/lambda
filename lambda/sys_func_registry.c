@@ -1537,6 +1537,7 @@ JitImport jit_runtime_imports[] = {
     // string operations
     {"bash_string_length", FPTR(bash_string_length)},
     {"bash_string_concat", FPTR(bash_string_concat)},
+    {"bash_var_append", FPTR(bash_var_append)},
     {"bash_string_substring", FPTR(bash_string_substring)},
     {"bash_string_trim_prefix", FPTR(bash_string_trim_prefix)},
     {"bash_string_trim_suffix", FPTR(bash_string_trim_suffix)},
@@ -1566,6 +1567,7 @@ JitImport jit_runtime_imports[] = {
     // array operations
     {"bash_int_to_item", FPTR(bash_int_to_item)},
     {"bash_array_new", FPTR(bash_array_new)},
+    {"bash_ensure_array", FPTR(bash_ensure_array)},
     {"bash_array_set", FPTR(bash_array_set)},
     {"bash_array_get", FPTR(bash_array_get)},
     {"bash_array_append", FPTR(bash_array_append)},
@@ -1576,6 +1578,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_array_slice", FPTR(bash_array_slice)},
     // associative array operations
     {"bash_assoc_new", FPTR(bash_assoc_new)},
+    {"bash_ensure_assoc", FPTR(bash_ensure_assoc)},
     {"bash_assoc_set", FPTR(bash_assoc_set)},
     {"bash_assoc_get", FPTR(bash_assoc_get)},
     {"bash_assoc_keys", FPTR(bash_assoc_keys)},
@@ -1609,8 +1612,13 @@ JitImport jit_runtime_imports[] = {
     {"bash_negate_exit_code", FPTR(bash_negate_exit_code)},
     {"bash_return_with_code", FPTR(bash_return_with_code)},
     {"bash_get_script_name", FPTR(bash_get_script_name)},
+    {"bash_set_script_name", FPTR(bash_set_script_name)},
+    {"bash_get_pid", FPTR(bash_get_pid)},
+    {"bash_get_last_bg_pid", FPTR(bash_get_last_bg_pid)},
+    {"bash_get_shell_flags", FPTR(bash_get_shell_flags)},
     {"bash_get_lineno", FPTR(bash_get_lineno)},
     {"bash_set_lineno", FPTR(bash_set_lineno)},
+    {"bash_set_arith_context", FPTR(bash_set_arith_context)},
     {"bash_get_funcname", FPTR(bash_get_funcname)},
     {"bash_get_funcname_count", FPTR(bash_get_funcname_count)},
     {"bash_get_bash_source", FPTR(bash_get_bash_source)},
@@ -1653,8 +1661,11 @@ JitImport jit_runtime_imports[] = {
     {"bash_exec_external", FPTR(bash_exec_external)},
     // expansions (tilde, glob, brace)
     {"bash_expand_tilde", FPTR(bash_expand_tilde)},
+    {"bash_expand_tilde_assign", FPTR(bash_expand_tilde_assign)},
+    {"bash_expand_tilde_assign_arg", FPTR(bash_expand_tilde_assign_arg)},
     {"bash_glob_expand", FPTR(bash_glob_expand)},
     {"bash_expand_brace", FPTR(bash_expand_brace)},
+    {"bash_words_split_into", FPTR(bash_words_split_into)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},

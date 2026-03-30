@@ -3490,16 +3490,29 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     setup_line_height(lycon, block);
 
     // setup initial ascender and descender
-    // Use OS/2 sTypo metrics only when USE_TYPO_METRICS flag is set (Chrome behavior)
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-    if (typo.valid && typo.use_typo_metrics) {
-        lycon->block.init_ascender = typo.ascender;
-        lycon->block.init_descender = typo.descender;
-    } else if (lycon->font.font_handle) {
-        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-        if (m) {
-            lycon->block.init_ascender = m->hhea_ascender;
-            lycon->block.init_descender = -(m->hhea_descender);
+    // For line-height:normal, use Chrome/Blink split: asc+desc above baseline, leading below.
+    // For explicit line-height, the half-leading model adjusts per-box in output_text.
+    if (lycon->font.font_handle) {
+        if (lycon->block.line_height_is_normal) {
+            float split_asc = 0, split_desc = 0;
+            font_get_normal_lh_split(lycon->font.font_handle, &split_asc, &split_desc);
+            lycon->block.init_ascender = split_asc;
+            lycon->block.init_descender = split_desc;
+            log_debug("init_metrics (normal, split): asc=%f, desc=%f", split_asc, split_desc);
+        } else {
+            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+            if (typo.valid && typo.use_typo_metrics) {
+                lycon->block.init_ascender = typo.ascender;
+                lycon->block.init_descender = typo.descender;
+                log_debug("init_metrics (typo): asc=%f, desc=%f", typo.ascender, typo.descender);
+            } else {
+                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+                if (m) {
+                    lycon->block.init_ascender = m->hhea_ascender;
+                    lycon->block.init_descender = -(m->hhea_descender);
+                    log_debug("init_metrics (hhea): asc=%f, desc=%f", m->hhea_ascender, -(m->hhea_descender));
+                }
+            }
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -5687,7 +5700,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // CSS 2.1 §17.5.1: inline-table baseline = baseline of the first row
             float table_baseline = -1;
             if (is_inline_table) {
-                table_baseline = find_first_baseline_recursive(lycon, (View*)block, 0);
+                table_baseline = find_first_baseline_recursive(lycon, (View*)block, 0, true);
                 log_debug("inline-table baseline lookup for positioning: table_baseline=%.1f, block_h=%.1f",
                     table_baseline, block->height);
             }
@@ -5836,7 +5849,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
                      block->scroller->overflow_y == CSS_VALUE_VISIBLE);
 
+                // Form controls with text always report an internal text baseline,
+                // regardless of overflow setting (they set last_line_ascender in layout_form_control)
+                bool is_form_text_control = (block->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                    block->form && block->form->control_type != FORM_CONTROL_HIDDEN &&
+                    block->form->control_type != FORM_CONTROL_IMAGE);
+
                 bool uses_content_baseline = (content_has_line_boxes && overflow_visible) ||
+                    (content_has_line_boxes && is_form_text_control) ||
                     (is_inline_table && table_baseline >= 0);
 
                 float effective_baseline = content_last_line_ascender;
@@ -6157,9 +6177,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
                             if (!parent_has_clearance) {
                                 parent->y += margin_top - parent_margin_top - sibling_collapse;
-                                if (parent->bound) {
-                                    parent->bound->margin.top = margin_top - sibling_collapse;
+                                // CSS 2.1 §8.3.1: Ensure parent->bound exists so margin.top
+                                // can be stored. Without this, the "unified margin chain"
+                                // code in finalize sees margin.top=0 and double-adjusts y.
+                                if (!parent->bound) {
+                                    parent->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+                                    memset(parent->bound, 0, sizeof(BoundaryProp));
                                 }
+                                parent->bound->margin.top = margin_top - sibling_collapse;
                             } else {
                                 log_debug("[CLEARANCE] Parent has clearance — skipping y adjustment (margin would be %f)", margin_top);
                             }
