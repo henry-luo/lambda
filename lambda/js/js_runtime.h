@@ -219,8 +219,11 @@ Item js_nullish_coalesce(Item left, Item right);
 // =============================================================================
 
 Item js_object_keys(Item object);
+Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
+Item js_make_getter_key(Item key);
+Item js_make_setter_key(Item key);
 
 // =============================================================================
 // v8: Object & Global extensions
@@ -243,7 +246,10 @@ Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 Item js_get_prototype(Item object);
+Item js_get_prototype_of(Item object);
+Item js_reflect_construct(Item target, Item args_array);
 Item js_prototype_lookup(Item object, Item property);
+Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // =============================================================================
 // v9: Object extensions
@@ -360,6 +366,7 @@ Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
 // URI encoding/decoding
 Item js_encodeURIComponent(Item str_item);
 Item js_decodeURIComponent(Item str_item);
+Item js_unescape(Item str_item);
 
 // globalThis
 Item js_get_global_this(void);
@@ -408,6 +415,7 @@ Item js_generator_throw(Item generator, Item error);
  * Called from MIR-compiled generator state machine functions at each yield point.
  */
 Item js_gen_yield_result(Item value, int64_t next_state);
+Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
 
 /**
  * v15: Convert an iterable to an array. Drains generators, passes arrays through.
@@ -444,7 +452,7 @@ Item js_async_get_promise(Item ctx_idx);          // get result promise for asyn
 
 Item js_text_encoder_new(void);
 Item js_text_encoder_encode(Item encoder, Item str);
-Item js_text_decoder_new(void);
+Item js_text_decoder_new(Item encoding);
 Item js_text_decoder_decode(Item decoder, Item input);
 
 // =============================================================================
@@ -453,6 +461,10 @@ Item js_text_decoder_decode(Item decoder, Item input);
 
 Item js_weakmap_new(void);
 Item js_weakset_new(void);
+
+// Public collection type checks (for instanceof)
+bool js_is_map_instance(Item obj);
+bool js_is_set_instance(Item obj);
 
 // =============================================================================
 // v14: Event Loop & Timers

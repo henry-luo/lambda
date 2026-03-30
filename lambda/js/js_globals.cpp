@@ -33,6 +33,7 @@ extern void* heap_alloc(int size, TypeId type_id);
 extern void fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_prototype(Item object);
+extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 // =============================================================================
 // Process I/O
@@ -591,7 +592,7 @@ extern "C" Item js_array_fill(Item arr_item, Item value) {
 
     // Check if typed array first
     if (type == LMD_TYPE_MAP && js_is_typed_array(arr_item)) {
-        return js_typed_array_fill(arr_item, value);
+        return js_typed_array_fill(arr_item, value, 0, INT_MAX);
     }
 
     if (type != LMD_TYPE_ARRAY) return arr_item;
@@ -628,11 +629,73 @@ extern "C" Item js_instanceof(Item left, Item right) {
 
 // instanceof check by class name string — walks prototype chain checking __class_name__
 extern "C" Item js_instanceof_classname(Item left, Item classname) {
-    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     if (get_type_id(classname) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
 
     String* rn = it2s(classname);
     if (!rn) return (Item){.item = b2it(false)};
+
+    // Check built-in types that don't use __class_name__ prototype chain
+    TypeId lt = get_type_id(left);
+
+    // Array check
+    if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
+        return (Item){.item = b2it(lt == LMD_TYPE_ARRAY)};
+    }
+    // RegExp check
+    if (rn->len == 6 && strncmp(rn->chars, "RegExp", 6) == 0) {
+        // RegExp objects are stored as maps with a regex handle — check for __regex__ property
+        if (lt == LMD_TYPE_MAP) {
+            Item rkey = (Item){.item = s2it(heap_create_name("__regex__", 9))};
+            Item rval = map_get(left.map, rkey);
+            return (Item){.item = b2it(rval.item != 0 && get_type_id(rval) != LMD_TYPE_NULL)};
+        }
+        return (Item){.item = b2it(false)};
+    }
+
+    if (lt == LMD_TYPE_MAP) {
+        // Collection types: WeakSet, WeakMap, Map, Set
+        if ((rn->len == 3 && strncmp(rn->chars, "Map", 3) == 0) ||
+            (rn->len == 7 && strncmp(rn->chars, "WeakMap", 7) == 0)) {
+            return (Item){.item = b2it(js_is_map_instance(left))};
+        }
+        if ((rn->len == 3 && strncmp(rn->chars, "Set", 3) == 0) ||
+            (rn->len == 7 && strncmp(rn->chars, "WeakSet", 7) == 0)) {
+            return (Item){.item = b2it(js_is_set_instance(left))};
+        }
+
+        // TypedArray types
+        if (js_is_typed_array(left)) {
+            JsTypedArray* ta = (JsTypedArray*)left.map->data;
+            if (rn->len == 10 && strncmp(rn->chars, "Uint8Array", 10) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8)};
+            if (rn->len == 17 && strncmp(rn->chars, "Uint8ClampedArray", 17) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT8_CLAMPED)};
+            if (rn->len == 11 && strncmp(rn->chars, "Uint16Array", 11) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT16)};
+            if (rn->len == 11 && strncmp(rn->chars, "Uint32Array", 11) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_UINT32)};
+            if (rn->len == 9 && strncmp(rn->chars, "Int8Array", 9) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT8)};
+            if (rn->len == 10 && strncmp(rn->chars, "Int16Array", 10) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT16)};
+            if (rn->len == 10 && strncmp(rn->chars, "Int32Array", 10) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_INT32)};
+            if (rn->len == 12 && strncmp(rn->chars, "Float32Array", 12) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT32)};
+            if (rn->len == 12 && strncmp(rn->chars, "Float64Array", 12) == 0)
+                return (Item){.item = b2it(ta->element_type == JS_TYPED_FLOAT64)};
+            // BigInt64Array/BigUint64Array — not supported, always false
+            if (rn->len >= 12 && strncmp(rn->chars, "Big", 3) == 0)
+                return (Item){.item = b2it(false)};
+        }
+
+        // ArrayBuffer check
+        if (rn->len == 11 && strncmp(rn->chars, "ArrayBuffer", 11) == 0) {
+            return (Item){.item = b2it(js_is_arraybuffer(left))};
+        }
+    }
+
+    if (lt != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
     Item class_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
 
@@ -663,9 +726,82 @@ extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_MAP) {
         // check if property exists on map (including prototype chain)
-        // js_property_get returns make_js_undefined() for missing properties
-        Item result = js_property_get(object, key);
-        return (Item){.item = b2it(get_type_id(result) != LMD_TYPE_UNDEFINED)};
+        // MUST NOT trigger getters — use js_map_get_fast for data-only lookup,
+        // then check for __get_<key> getter presence without invoking it.
+
+        // Convert symbol keys (negative ints <= -1000000) to __sym_NNN string form
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -1000000) {
+            int64_t id = -(it2i(key) + 1000000);
+            char sym_buf[32];
+            snprintf(sym_buf, sizeof(sym_buf), "__sym_%lld", (long long)id);
+            int sym_len = (int)strlen(sym_buf);
+            // check own data property
+            bool own_found = false;
+            js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
+            if (own_found) return (Item){.item = b2it(true)};
+            // check getter property (__get___sym_NNN)
+            char getter_key[64];
+            snprintf(getter_key, sizeof(getter_key), "__get_%s", sym_buf);
+            int gk_len = (int)strlen(getter_key);
+            bool getter_found = false;
+            js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
+            if (getter_found) return (Item){.item = b2it(true)};
+            // walk prototype chain
+            Item proto = js_get_prototype(object);
+            int depth = 0;
+            while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                bool found = false;
+                js_map_get_fast_ext(proto.map, sym_buf, sym_len, &found);
+                if (found) return (Item){.item = b2it(true)};
+                bool gfound = false;
+                js_map_get_fast_ext(proto.map, getter_key, gk_len, &gfound);
+                if (gfound) return (Item){.item = b2it(true)};
+                proto = js_get_prototype(proto);
+                depth++;
+            }
+            return (Item){.item = b2it(false)};
+        }
+
+        if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
+            const char* key_str = key.get_chars();
+            int key_len = (int)key.get_len();
+            // 1. check own data property
+            bool own_found = false;
+            js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
+            if (own_found) return (Item){.item = b2it(true)};
+            // 2. check getter property (__get_<key>)
+            if (key_len < 200 && key_len > 0) {
+                char getter_key[256];
+                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
+                int gk_len = key_len + 6;
+                bool getter_found = false;
+                js_map_get_fast_ext(object.map, getter_key, gk_len, &getter_found);
+                if (getter_found) return (Item){.item = b2it(true)};
+            }
+            // 3. walk prototype chain (data properties + getters)
+            Item proto = js_get_prototype(object);
+            int depth = 0;
+            while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
+                bool found = false;
+                js_map_get_fast_ext(proto.map, key_str, key_len, &found);
+                if (found) return (Item){.item = b2it(true)};
+                if (key_len < 200 && key_len > 0) {
+                    char getter_key[256];
+                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
+                    int gk_len = key_len + 6;
+                    bool getter_found = false;
+                    js_map_get_fast_ext(proto.map, getter_key, gk_len, &getter_found);
+                    if (getter_found) return (Item){.item = b2it(true)};
+                }
+                proto = js_get_prototype(proto);
+                depth++;
+            }
+        } else {
+            // non-string key: fall back to map_get
+            Item result = map_get(object.map, key);
+            if (result.item != ItemNull.item) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
     }
     if (type == LMD_TYPE_ARRAY) {
         // check if index is valid
@@ -696,6 +832,109 @@ extern "C" Item js_object_create(Item proto) {
         js_set_prototype(obj, proto);
     }
     return obj;
+}
+
+// =============================================================================
+// Object.getPrototypeOf — returns enriched prototype with methods/getters
+// =============================================================================
+// In standard JS, class methods and getters live on the prototype object.
+// In our engine, they live on each instance. To support $clone() patterns like
+// Object.create(Object.getPrototypeOf(this)), we create a rich prototype that
+// includes __class_name__, __get_*, __set_*, and function-valued entries from
+// the source instance, chained to the original __proto__ for instanceof support.
+
+extern "C" Item js_get_prototype_of(Item object) {
+    if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
+    Map* m = object.map;
+    if (!m || !m->type) return js_get_prototype(object);
+    TypeMap* tm = (TypeMap*)m->type;
+    if (!tm->shape) return js_get_prototype(object);
+
+    // Get the raw __proto__
+    Item raw_proto = js_get_prototype(object);
+
+    // Create a new "rich" prototype object with methods and getters
+    Item rich_proto = js_new_object();
+
+    // Walk shape entries and copy __class_name__, __get_*, __set_*, and
+    // function-valued entries (methods) to the rich prototype
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+
+        bool copy = false;
+        if (len == 14 && memcmp(s, "__class_name__", 14) == 0) {
+            copy = true;
+        } else if (len > 6 && strncmp(s, "__get_", 6) == 0) {
+            copy = true;
+        } else if (len > 6 && strncmp(s, "__set_", 6) == 0) {
+            copy = true;
+        } else if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
+            // Check if the symbol-keyed entry is a function (getter/method)
+            Item val = _map_read_field(e, m->data);
+            if (get_type_id(val) == LMD_TYPE_FUNC) {
+                copy = true;
+            }
+        } else if (len >= 2 && s[0] != '_') {
+            // Non-underscore-prefixed entry: check if it's a function (regular method)
+            Item val = _map_read_field(e, m->data);
+            if (get_type_id(val) == LMD_TYPE_FUNC) {
+                copy = true;
+            }
+        }
+
+        if (copy) {
+            Item val = _map_read_field(e, m->data);
+            Item key = (Item){.item = s2it(heap_create_name(s, len))};
+            js_property_set(rich_proto, key, val);
+        }
+
+        e = e->next;
+    }
+
+    // Chain the rich prototype to the original __proto__ for instanceof support
+    if (raw_proto.item != ItemNull.item && get_type_id(raw_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(rich_proto, raw_proto);
+    }
+
+    return rich_proto;
+}
+
+// =============================================================================
+// Reflect.construct(target, argumentsList[, newTarget])
+// Equivalent to: new target(...argumentsList)
+// =============================================================================
+
+extern Item js_constructor_create_object(Item callee);
+extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+extern Item js_array_get(Item array, Item index);
+extern int64_t js_array_length(Item array);
+
+extern "C" Item js_reflect_construct(Item target, Item args_array) {
+    if (get_type_id(target) != LMD_TYPE_FUNC) return ItemNull;
+    // create new object inheriting from target's prototype
+    Item new_obj = js_constructor_create_object(target);
+    // extract args from array
+    int argc = 0;
+    Item* args = NULL;
+    if (get_type_id(args_array) == LMD_TYPE_ARRAY) {
+        argc = (int)js_array_length(args_array);
+        if (argc > 0) {
+            args = (Item*)alloca(argc * sizeof(Item));
+            for (int i = 0; i < argc; i++) {
+                Item idx = {.item = i2it(i)};
+                args[i] = js_array_get(args_array, idx);
+            }
+        }
+    }
+    Item result = js_call_function(target, new_obj, args, argc);
+    // if constructor returned an object, use it; otherwise return new_obj
+    TypeId rt = get_type_id(result);
+    if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ELEMENT || rt == LMD_TYPE_OBJECT) {
+        return result;
+    }
+    return new_obj;
 }
 
 // =============================================================================
@@ -769,22 +1008,48 @@ extern "C" Item js_object_keys(Item object) {
     if (!m || !m->type) return js_array_new(0);
 
     TypeMap* tm = (TypeMap*)m->type;
+
+    // first pass: count visible entries (skip engine-internal properties)
     int count = 0;
     ShapeEntry* e = tm->shape;
-    while (e) { count++; e = e->next; }
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        // skip engine-internal properties:
+        // __class_name__, __proto__, __get_*, __set_*, __sym_*, constructor
+        bool skip = false;
+        if (len >= 2 && s[0] == '_' && s[1] == '_') {
+            // skip __class_name__, __proto__, __get_*, __set_*, __sym_*
+            skip = true;
+        } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
+            skip = true;
+        }
+        if (!skip) count++;
+        e = e->next;
+    }
 
     Item result = js_array_new(count);
     e = tm->shape;
     int i = 0;
     while (e) {
-        char nbuf[256];
-        int nlen = (int)e->name->length < 255 ? (int)e->name->length : 255;
-        memcpy(nbuf, e->name->str, nlen);
-        nbuf[nlen] = '\0';
-        Item key_str = (Item){.item = s2it(heap_create_name(nbuf))};
-        js_array_set(result, (Item){.item = i2it(i)}, key_str);
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        bool skip = false;
+        if (len >= 2 && s[0] == '_' && s[1] == '_') {
+            skip = true;
+        } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
+            skip = true;
+        }
+        if (!skip) {
+            char nbuf[256];
+            int nlen = len < 255 ? len : 255;
+            memcpy(nbuf, s, nlen);
+            nbuf[nlen] = '\0';
+            Item key_str = (Item){.item = s2it(heap_create_name(nbuf))};
+            js_array_set(result, (Item){.item = i2it(i)}, key_str);
+            i++;
+        }
         e = e->next;
-        i++;
     }
     return result;
 }
@@ -792,6 +1057,46 @@ extern "C" Item js_object_keys(Item object) {
 // =============================================================================
 // js_to_string_val — convert any value to string (returns Item)
 // =============================================================================
+
+extern "C" Item js_object_get_own_property_symbols(Item object) {
+    // Returns an array of all own Symbol keys of an object.
+    // In our engine, symbols are stored as string keys "__sym_<N>" in the shape.
+    // Walk shape entries, find __sym_* keys, convert back to symbol items.
+    if (get_type_id(object) != LMD_TYPE_MAP) return js_array_new(0);
+    Map* m = object.map;
+    if (!m || !m->type) return js_array_new(0);
+    TypeMap* tm = (TypeMap*)m->type;
+
+    // first pass: count __sym_* entries
+    int count = 0;
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
+            count++;
+        }
+        e = e->next;
+    }
+
+    Item result_arr = js_array_new(count);
+    e = tm->shape;
+    int i = 0;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
+            // parse the numeric id from "__sym_<N>"
+            long long id = atoll(s + 6);
+            // convert back to symbol: symbol value = -(id + 1000000)
+            int64_t sym_val = -(id + 1000000);
+            js_array_set(result_arr, (Item){.item = i2it(i)}, (Item){.item = i2it(sym_val)});
+            i++;
+        }
+        e = e->next;
+    }
+    return result_arr;
+}
 
 extern "C" Item js_to_string_val(Item value) {
     return js_to_string(value);
@@ -1072,6 +1377,18 @@ extern "C" Item js_array_from(Item iterable) {
         dst->length = src->length;
         return result;
     }
+    // TypedArray: convert each element to a JS number in a regular array
+    if (js_is_typed_array(iterable)) {
+        JsTypedArray* ta = (JsTypedArray*)iterable.map->data;
+        int len = ta->length;
+        Item result = js_array_new(0);
+        for (int i = 0; i < len; i++) {
+            Item idx = (Item){.item = i2it(i)};
+            Item val = js_typed_array_get(iterable, idx);
+            array_push(result.array, val);
+        }
+        return result;
+    }
     if (tid == LMD_TYPE_STRING) {
         // split string into array of single characters
         String* s = it2s(iterable);
@@ -1196,6 +1513,80 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
     String* result = heap_create_name(decoded, decoded_len);
     free(decoded);
+    return (Item){.item = s2it(result)};
+}
+
+// =============================================================================
+// unescape(string) — legacy percent-decoding (%XX and %uXXXX)
+// =============================================================================
+
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+extern "C" Item js_unescape(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    const char* src = s->chars;
+    int src_len = s->len;
+
+    // allocate output buffer (worst case: all %XX with values >= 0x80 → 2 bytes each,
+    // but that's still ≤ src_len since 3 input bytes → 2 output bytes)
+    char* buf = (char*)malloc(src_len * 2 + 1);
+    if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    int out = 0;
+    int i = 0;
+    while (i < src_len) {
+        if (src[i] == '%' && i + 2 < src_len) {
+            if (src[i + 1] == 'u' && i + 5 < src_len) {
+                // %uXXXX
+                int d0 = hex_digit_value(src[i + 2]);
+                int d1 = hex_digit_value(src[i + 3]);
+                int d2 = hex_digit_value(src[i + 4]);
+                int d3 = hex_digit_value(src[i + 5]);
+                if (d0 >= 0 && d1 >= 0 && d2 >= 0 && d3 >= 0) {
+                    int cp = (d0 << 12) | (d1 << 8) | (d2 << 4) | d3;
+                    if (cp <= 0x7F) {
+                        buf[out++] = (char)cp;
+                    } else if (cp <= 0x7FF) {
+                        buf[out++] = (char)(0xC0 | (cp >> 6));
+                        buf[out++] = (char)(0x80 | (cp & 0x3F));
+                    } else {
+                        buf[out++] = (char)(0xE0 | (cp >> 12));
+                        buf[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                        buf[out++] = (char)(0x80 | (cp & 0x3F));
+                    }
+                    i += 6;
+                    continue;
+                }
+            }
+            // %XX
+            int d0 = hex_digit_value(src[i + 1]);
+            int d1 = hex_digit_value(src[i + 2]);
+            if (d0 >= 0 && d1 >= 0) {
+                int cp = (d0 << 4) | d1;
+                if (cp <= 0x7F) {
+                    buf[out++] = (char)cp;
+                } else {
+                    // UTF-8 encode values 0x80-0xFF as 2-byte sequences
+                    buf[out++] = (char)(0xC0 | (cp >> 6));
+                    buf[out++] = (char)(0x80 | (cp & 0x3F));
+                }
+                i += 3;
+                continue;
+            }
+        }
+        buf[out++] = src[i++];
+    }
+
+    String* result = heap_create_name(buf, out);
+    free(buf);
     return (Item){.item = s2it(result)};
 }
 

@@ -1149,8 +1149,13 @@ JitImport jit_runtime_imports[] = {
     {"js_nullish_coalesce", FPTR(js_nullish_coalesce)},
     // object utilities
     {"js_object_keys", FPTR(js_object_keys)},
+    {"js_object_get_own_property_symbols", FPTR(js_object_get_own_property_symbols)},
     {"js_object_create", FPTR(js_object_create)},
     {"js_object_define_property", FPTR(js_object_define_property)},
+    {"js_get_prototype_of", FPTR(js_get_prototype_of)},
+    {"js_reflect_construct", FPTR(js_reflect_construct)},
+    {"js_make_getter_key", FPTR(js_make_getter_key)},
+    {"js_make_setter_key", FPTR(js_make_setter_key)},
     {"js_array_is_array", FPTR(js_array_is_array)},
     {"js_to_string_val", FPTR(js_to_string_val)},
     {"js_number_property", FPTR(js_number_property)},
@@ -1218,6 +1223,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
     {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
+    {"js_unescape", FPTR(js_unescape)},
     {"js_get_global_this", FPTR(js_get_global_this)},
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
@@ -1239,6 +1245,7 @@ JitImport jit_runtime_imports[] = {
     {"js_generator_throw", FPTR(js_generator_throw)},
     // v15: Generator state machine helper
     {"js_gen_yield_result", FPTR(js_gen_yield_result)},
+    {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
     {"js_iterable_to_array", FPTR(js_iterable_to_array)},
     // v14: Promise runtime
     {"js_promise_create", FPTR(js_promise_create)},
