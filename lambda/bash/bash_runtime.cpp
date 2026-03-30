@@ -1698,6 +1698,27 @@ extern "C" Item bash_array_append(Item arr, Item value) {
     return arr;
 }
 
+// append all words from a space-separated expanded string (e.g. from brace/glob expansion)
+extern "C" Item bash_words_split_into(Item arr, Item words_str) {
+    const char* s = bash_item_to_cstr(words_str);
+    if (!s || !*s) return arr;
+    const char* p = s;
+    while (*p) {
+        // skip leading spaces
+        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+        if (!*p) break;
+        const char* start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+        int wlen = (int)(p - start);
+        if (wlen > 0) {
+            String* ws = heap_create_name(start, wlen);
+            Item word_item = (Item){.item = s2it(ws)};
+            bash_array_append(arr, word_item);
+        }
+    }
+    return arr;
+}
+
 extern "C" Item bash_array_length(Item arr) {
     List* list = it2list(arr);
     if (!list) return (Item){.item = i2it(0)};
@@ -3089,6 +3110,16 @@ extern "C" Item bash_call_rt_func(Item name_item, Item* args, int argc) {
 // ============================================================================
 // Shell options (set -e, set -u, set -x, set -o pipefail)
 // ============================================================================
+
+extern "C" void bash_set_option_flag(char flag, bool enable) {
+    switch (flag) {
+        case 'e': bash_opt_errexit = enable; break;
+        case 'u': bash_opt_nounset = enable; break;
+        case 'x': bash_opt_xtrace = enable; break;
+        case 'T': bash_opt_functrace = enable; break;
+        default: log_debug("bash: set_option_flag: unknown flag '%c'", flag); break;
+    }
+}
 
 extern "C" void bash_set_option(Item option, bool enable) {
     String* s = it2s(option);

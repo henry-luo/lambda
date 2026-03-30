@@ -2653,6 +2653,119 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
     } else {
         // compile-time unrolled iteration over word list
+        // but if any word requires brace/glob expansion (which produces multiple words),
+        // build a runtime array first and use array iteration.
+        word = node->words;
+        bool needs_runtime_array = false;
+        for (BashAstNode* w = word; w; w = w->next) {
+            if (w->node_type == BASH_AST_NODE_WORD) {
+                BashWordNode* wn = (BashWordNode*)w;
+                if (wn->text) {
+                    const char* ch = wn->text->chars;
+                    int wlen = wn->text->len;
+                    if (word_is_brace(ch, wlen) || word_has_glob(ch, wlen)) {
+                        needs_runtime_array = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (needs_runtime_array) {
+            // build a runtime array of all expanded words, then do array iteration
+            char arr_var[64];
+            snprintf(arr_var, sizeof(arr_var), "__for_words_%d", mt->label_counter++);
+
+            MIR_reg_t new_arr_reg = bm_emit_call_0(mt, "bash_array_new");
+            MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, new_arr_reg);
+            bm_emit_set_var(mt, arr_var, arr_val);
+
+            for (BashAstNode* w = word; w; w = w->next) {
+                MIR_op_t cur_arr = bm_emit_get_var(mt, arr_var);
+                bool is_expand_word = false;
+                bool is_brace = false;
+                if (w->node_type == BASH_AST_NODE_WORD) {
+                    BashWordNode* wn = (BashWordNode*)w;
+                    if (wn->text) {
+                        const char* ch = wn->text->chars;
+                        int wlen = wn->text->len;
+                        if (word_is_brace(ch, wlen)) { is_expand_word = true; is_brace = true; }
+                        else if (word_has_glob(ch, wlen)) { is_expand_word = true; }
+                    }
+                }
+                if (is_expand_word) {
+                    BashWordNode* wn = (BashWordNode*)w;
+                    MIR_op_t pat_val = bm_emit_string_literal(mt, wn->text->chars, wn->text->len);
+                    MIR_reg_t expanded_reg;
+                    if (is_brace) {
+                        expanded_reg = bm_emit_call_1(mt, "bash_expand_brace", pat_val);
+                    } else {
+                        expanded_reg = bm_emit_call_1(mt, "bash_glob_expand", pat_val);
+                    }
+                    bm_emit_call_2(mt, "bash_words_split_into", cur_arr,
+                        MIR_new_reg_op(mt->ctx, expanded_reg));
+                } else {
+                    MIR_op_t wval = bm_transpile_cmd_arg(mt, w);
+                    bm_emit_call_2(mt, "bash_array_append", cur_arr, wval);
+                }
+            }
+
+            // now iterate the runtime array (same as the array_name=set path)
+            MIR_op_t arr_val2 = bm_emit_get_var(mt, arr_var);
+
+            char count_proto_name2[64];
+            snprintf(count_proto_name2, sizeof(count_proto_name2), "p_array_count_%d", mt->label_counter++);
+            MIR_type_t count_res_type2 = MIR_T_I64;
+            MIR_var_t count_params2[1] = {{MIR_T_I64, "a", 0}};
+            MIR_item_t count_proto2 = MIR_new_proto_arr(mt->ctx, count_proto_name2, 1, &count_res_type2, 1, count_params2);
+            MIR_item_t count_import2 = MIR_new_import(mt->ctx, "bash_array_count");
+            MIR_reg_t count_reg2 = bm_new_temp(mt);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_call_insn(mt->ctx, 4,
+                    MIR_new_ref_op(mt->ctx, count_proto2),
+                    MIR_new_ref_op(mt->ctx, count_import2),
+                    MIR_new_reg_op(mt->ctx, count_reg2),
+                    arr_val2));
+
+            MIR_reg_t idx_reg2 = bm_new_temp(mt);
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx_reg2),
+                             MIR_new_int_op(mt->ctx, 0)));
+
+            MIR_append_insn(mt->ctx, mt->current_func_item, loop_start);
+
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_BGE,
+                             MIR_new_label_op(mt->ctx, loop_end),
+                             MIR_new_reg_op(mt->ctx, idx_reg2),
+                             MIR_new_reg_op(mt->ctx, count_reg2)));
+
+            // debug trap
+            {
+                TSPoint start = ts_node_start_point(node->base.node);
+                bm_emit_call_void_1(mt, "bash_set_lineno", MIR_new_int_op(mt->ctx, (int)start.row + 1));
+                bm_emit_call_0(mt, "bash_run_debug_trap");
+            }
+
+            MIR_reg_t idx_item_reg2 = bm_emit_call_1(mt, "bash_int_to_item",
+                MIR_new_reg_op(mt->ctx, idx_reg2));
+            MIR_op_t arr_val3 = bm_emit_get_var(mt, arr_var);
+            MIR_reg_t elem_reg2 = bm_emit_call_2(mt, "bash_array_get",
+                arr_val3, MIR_new_reg_op(mt->ctx, idx_item_reg2));
+            bm_emit_set_var(mt, node->variable->chars, MIR_new_reg_op(mt->ctx, elem_reg2));
+
+            bm_transpile_statement(mt, node->body);
+
+            MIR_append_insn(mt->ctx, mt->current_func_item, loop_continue);
+
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx_reg2),
+                             MIR_new_reg_op(mt->ctx, idx_reg2),
+                             MIR_new_int_op(mt->ctx, 1)));
+            MIR_append_insn(mt->ctx, mt->current_func_item,
+                MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, loop_start)));
+
+        } else {
         word = node->words;
         while (word) {
             // debug trap: fires at for statement line before each iteration
@@ -2681,6 +2794,7 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
 
             word = word->next;
         }
+        } // end needs_runtime_array else
 
         MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
     }

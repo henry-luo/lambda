@@ -1136,6 +1136,15 @@ int main(int argc, char *argv[]) {
                 bash_posix = true;
             } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
                 bash_inline_cmd = argv[++i];
+            } else if (argv[i][0] == '-' && argv[i][1] != '-' && strchr(argv[i], 'c') != NULL && i + 1 < argc) {
+                // combined flags like -ce, -xc, -ec: extract non-c flags and set them
+                const char* flags = argv[i] + 1; // skip leading -
+                for (const char* f = flags; *f; f++) {
+                    if (*f == 'e') bash_set_option_flag('e', true);
+                    else if (*f == 'x') bash_set_option_flag('x', true);
+                    // 'c' is handled by taking the next arg as inline cmd
+                }
+                bash_inline_cmd = argv[++i];
             } else if (bash_inline_cmd == NULL && bash_file == NULL) {
                 bash_file = argv[i];
             }

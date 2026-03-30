@@ -1663,6 +1663,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_tilde_assign_arg", FPTR(bash_expand_tilde_assign_arg)},
     {"bash_glob_expand", FPTR(bash_glob_expand)},
     {"bash_expand_brace", FPTR(bash_expand_brace)},
+    {"bash_words_split_into", FPTR(bash_words_split_into)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
