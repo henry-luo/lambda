@@ -1,0 +1,4 @@
+["category_id", "categories", "id", "category"]
+1
+["products", "category_id", "id", "products"]
+type.null

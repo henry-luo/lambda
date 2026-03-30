@@ -549,6 +549,24 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         const char* child_type = ts_node_type(property_node);
         if (strcmp(child_type, "comment") == 0) continue;
 
+        // Handle spread element: { ...expr } in object literal
+        if (strcmp(child_type, "spread_element") == 0) {
+            JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_SPREAD_ELEMENT, property_node, sizeof(JsSpreadElementNode));
+            TSNode inner = ts_node_named_child(property_node, 0);
+            if (!ts_node_is_null(inner)) {
+                spread->argument = build_js_expression(tp, inner);
+            }
+            spread->base.type = &TYPE_ANY;
+            if (!prev_property) {
+                object->properties = (JsAstNode*)spread;
+            } else {
+                prev_property->next = (JsAstNode*)spread;
+            }
+            prev_property = (JsAstNode*)spread;
+            continue;
+        }
+
         // Handle shorthand_property_identifier: { Vector } -> { Vector: Vector }
         if (strcmp(child_type, "shorthand_property_identifier") == 0) {
             JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
@@ -608,11 +626,18 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                 }
                 property->value = (JsAstNode*)func;
             } else if (!ts_node_is_null(name_node)) {
-                // Regular method: method_definition without get/set prefix
-                StrView method_name = js_node_source(tp, name_node);
-                JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                key_id->name = name_pool_create_strview(tp->name_pool, method_name);
-                property->key = (JsAstNode*)key_id;
+                const char* name_type = ts_node_type(name_node);
+                if (strcmp(name_type, "computed_property_name") == 0) {
+                    // Computed method: { [$sym](args) { } } — key is the expression inside [...]
+                    property->computed = true;
+                    property->key = build_js_expression(tp, name_node); // unwraps computed_property_name
+                } else {
+                    // Regular method: method_definition without get/set prefix
+                    StrView method_name = js_node_source(tp, name_node);
+                    JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                    key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                    property->key = (JsAstNode*)key_id;
+                }
                 // Build the full method as a function expression
                 property->value = build_js_function(tp, property_node);
             }
@@ -661,6 +686,18 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     bool is_arrow = (strcmp(node_type, "arrow_function") == 0);
     bool is_generator = (strcmp(node_type, "generator_function") == 0 ||
                          strcmp(node_type, "generator_function_declaration") == 0);
+    // For method_definition, check for "*" child indicating a generator method
+    if (strcmp(node_type, "method_definition") == 0 && !is_generator) {
+        uint32_t ccount = ts_node_child_count(func_node);
+        for (uint32_t ci = 0; ci < ccount; ci++) {
+            TSNode child = ts_node_child(func_node, ci);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "*") == 0) { is_generator = true; break; }
+            // stop once we hit the parameters or body
+            if (strcmp(ctype, "formal_parameters") == 0 || strcmp(ctype, "statement_block") == 0) break;
+        }
+    }
+
     bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0) ||
                          strcmp(node_type, "generator_function") == 0;
 
@@ -1259,14 +1296,36 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         assign_pat->base.type = &TYPE_ANY;
         return (JsAstNode*)assign_pat;
     } else if (strcmp(node_type, "array_pattern") == 0) {
-        // destructuring pattern: [a, b, ...rest]
+        // destructuring pattern: [a, b, ...rest] or [, b] (with elisions)
         JsArrayPatternNode* pattern = (JsArrayPatternNode*)alloc_js_ast_node(
             tp, JS_AST_NODE_ARRAY_PATTERN, expr_node, sizeof(JsArrayPatternNode));
-        uint32_t count = ts_node_named_child_count(expr_node);
+        // Use all children (including unnamed) to correctly track elisions like [, b]
+        uint32_t count = ts_node_child_count(expr_node);
         JsAstNode* prev = NULL;
+        bool expect_elem = true; // true = next non-comma is an element; after comma, elision if another comma
         for (uint32_t i = 0; i < count; i++) {
-            TSNode child = ts_node_named_child(expr_node, i);
+            TSNode child = ts_node_child(expr_node, i);
             const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) {
+                continue;
+            }
+            if (strcmp(child_type, ",") == 0) {
+                if (expect_elem) {
+                    // consecutive comma (or leading comma) = elision: insert null node
+                    JsAstNode* elision = (JsAstNode*)alloc_js_ast_node(
+                        tp, JS_AST_NODE_NULL, child, sizeof(JsAstNode));
+                    elision->type = &TYPE_ANY;
+                    if (!prev) pattern->elements = elision;
+                    else prev->next = elision;
+                    prev = elision;
+                } else {
+                    // normal comma separator after an element — next expected is an element or elision
+                    expect_elem = true;
+                }
+                continue;
+            }
+            // Real element
+            expect_elem = false;
             JsAstNode* elem = NULL;
             if (strcmp(child_type, "identifier") == 0) {
                 elem = build_js_identifier(tp, child);

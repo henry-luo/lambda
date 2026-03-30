@@ -21,7 +21,8 @@ char js_typed_array_marker = 'T';
 static int typed_array_element_size(JsTypedArrayType type) {
     switch (type) {
     case JS_TYPED_INT8:
-    case JS_TYPED_UINT8:    return 1;
+    case JS_TYPED_UINT8:
+    case JS_TYPED_UINT8_CLAMPED: return 1;
     case JS_TYPED_INT16:
     case JS_TYPED_UINT16:   return 2;
     case JS_TYPED_INT32:
@@ -262,6 +263,7 @@ extern "C" Item js_typed_array_get(Item ta_item, Item index) {
     case JS_TYPED_INT8:
         return (Item){.item = i2it((int64_t)((int8_t*)ta->data)[idx])};
     case JS_TYPED_UINT8:
+    case JS_TYPED_UINT8_CLAMPED:
         return (Item){.item = i2it((int64_t)((uint8_t*)ta->data)[idx])};
     case JS_TYPED_INT16:
         return (Item){.item = i2it((int64_t)((int16_t*)ta->data)[idx])};
@@ -308,6 +310,12 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     switch (ta->element_type) {
     case JS_TYPED_INT8:    ((int8_t*)ta->data)[idx] = (int8_t)(int32_t)num_val; break;
     case JS_TYPED_UINT8:   ((uint8_t*)ta->data)[idx] = (uint8_t)(uint32_t)num_val; break;
+    case JS_TYPED_UINT8_CLAMPED: {
+        int v = (int)num_val;
+        if (v < 0) v = 0; else if (v > 255) v = 255;
+        ((uint8_t*)ta->data)[idx] = (uint8_t)v;
+        break;
+    }
     case JS_TYPED_INT16:   ((int16_t*)ta->data)[idx] = (int16_t)(int32_t)num_val; break;
     case JS_TYPED_UINT16:  ((uint16_t*)ta->data)[idx] = (uint16_t)(uint32_t)num_val; break;
     case JS_TYPED_INT32:   ((int32_t*)ta->data)[idx] = (int32_t)num_val; break;
@@ -326,13 +334,20 @@ extern "C" int js_typed_array_length(Item ta_item) {
     return ta->length;
 }
 
-extern "C" Item js_typed_array_fill(Item ta_item, Item value) {
+extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end) {
     if (!js_is_typed_array(ta_item)) return ta_item;
 
     Map* m = ta_item.map;
     JsTypedArray* ta = (JsTypedArray*)m->data;
 
-    for (int i = 0; i < ta->length; i++) {
+    if (start < 0) start = ta->length + start;
+    if (start < 0) start = 0;
+    if (end == INT_MAX || end > ta->length) end = ta->length;
+    else if (end < 0) end = ta->length + end;
+    if (end < 0) end = 0;
+    if (start >= end) return ta_item;
+
+    for (int i = start; i < end; i++) {
         Item idx = (Item){.item = i2it(i)};
         js_typed_array_set(ta_item, idx, value);
     }

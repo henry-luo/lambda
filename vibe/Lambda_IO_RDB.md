@@ -1429,36 +1429,36 @@ Status reflects the current repository state, not the intended end-state of the 
 
 | Feature | Priority | Complexity | Status |
 |---------|----------|-----------|--------|
-| Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium | Implemented |
-| SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium | Implemented |
-| RDB connection via `input()` | P0 | Low | Implemented |
-| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs, datetime, JSON, and decimal typing are exposed; triggers and functions are not |
+| Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium | ✅ Implemented |
+| SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium | ✅ Implemented |
+| RDB connection via `input()` | P0 | Low | ✅ Implemented |
+| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs (with `link_name` and `reverse_fks`), datetime, JSON, and decimal typing are exposed; triggers and functions are not |
 | Table element structure | P0 | Medium | Partial: `db.data.<table>` is exposed, but rows are eagerly materialized arrays rather than lazy table proxies |
 | Basic `for` → `SELECT * FROM table` | P0 | Medium | Partial: table rows are loaded with `SELECT *` during `input()`, but `for` clauses are not lowered to SQL |
-| `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium | Not implemented |
-| `order by` → `ORDER BY` | P0 | Low | Not implemented |
-| `limit` / `offset` → `LIMIT` / `OFFSET` | P0 | Low | Not implemented |
-| Parameterized SQL (injection prevention) | P0 | Low | Not implemented |
+| `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium | Partial: SQL query builder (`rdb_query.h/cpp`) generates parameterized WHERE with `=`, `!=`, `<`, `<=`, `>`, `>=`, AND/OR/NOT; not yet wired to Lambda `for`-clause evaluator |
+| `order by` → `ORDER BY` | P0 | Low | Partial: query builder generates `ORDER BY` with ASC/DESC and multi-column support; not yet wired to evaluator |
+| `limit` / `offset` → `LIMIT` / `OFFSET` | P0 | Low | Partial: query builder generates `LIMIT`/`OFFSET` clauses; not yet wired to evaluator |
+| Parameterized SQL (injection prevention) | P0 | Low | ✅ Implemented: `rdb_query_build()` emits `?N` positional placeholders; `rdb_query_exec()` binds via `rdb_bind_*` API; schema validation rejects unknown columns |
 | Lazy loading (cursor-based iteration) | P0 | Medium | Not implemented |
-| FK introspection (`RdbForeignKey` structs) | P0 | Medium | Implemented |
-| FK auto-navigation (many-to-one, lazy) | P0 | Medium | Not implemented |
-| FK reverse navigation (one-to-many, lazy) | P1 | Medium | Not implemented |
+| FK introspection (`RdbForeignKey` structs) | P0 | Medium | ✅ Implemented: includes `link_name` derivation (singular form of FK column minus `_id` suffix) |
+| FK auto-navigation (many-to-one, lazy) | P0 | Medium | ✅ Implemented: eager forward FK resolution — `product.category` auto-resolved to referenced row map at load time |
+| FK reverse navigation (one-to-many, lazy) | P1 | Medium | ✅ Implemented: reverse FK arrays — `category.products` auto-built as array of related rows at load time |
 | FK JOIN batching inside `for` clauses | P1 | High | Not implemented |
 | Aggregate pushdown (`count`, `sum`, `avg`, `min`, `max`) | P1 | Medium | Not implemented |
-| Datetime column → Lambda `datetime` | P0 | Medium | Implemented |
-| JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | Implemented |
-| Views exposed as table elements | P0 | Low | Implemented |
-| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed; triggers and SQL functions are not |
-| `db.schema` / `db.data` namespace structure | P0 | Medium | Implemented |
+| Datetime column → Lambda `datetime` | P0 | Medium | ✅ Implemented |
+| JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | ✅ Implemented |
+| Views exposed as table elements | P0 | Low | ✅ Implemented |
+| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed with `name`, `unique`, and `columns` fields and have integration test coverage (`io_sqlite_schema.ls`); triggers and SQL functions are not |
+| `db.schema` / `db.data` namespace structure | P0 | Medium | ✅ Implemented |
 | Result caching (LRU by query) | P1 | Medium | Not implemented |
-| `in` list → `IN (...)` | P1 | Low | Not implemented |
-| String functions → `LIKE` | P1 | Low | Not implemented |
-| Null checks → `IS NULL` / `IS NOT NULL` | P1 | Low | Not implemented |
+| `in` list → `IN (...)` | P1 | Low | Partial: query builder generates parameterized `IN (?1, ?2, ...)` clauses; not yet wired to evaluator |
+| String functions → `LIKE` | P1 | Low | Partial: query builder generates `LIKE` with `starts_with`/`ends_with`/`contains` patterns; not yet wired to evaluator |
+| Null checks → `IS NULL` / `IS NOT NULL` | P1 | Low | Partial: query builder generates `IS NULL`/`IS NOT NULL`; not yet wired to evaluator |
 | `len(db.data.table)` → `SELECT COUNT(*)` | P1 | Low | Not implemented |
 | Index access `db.data.table[n]` → `LIMIT 1 OFFSET n` | P1 | Low | Not implemented |
-| Vendor SQLite amalgamation in `lib/` | P0 | Low | Implemented |
-| GTest unit tests (generic + SQLite) | P0 | Medium | Implemented |
-| Lambda integration test scripts (.ls + .txt) | P0 | Medium | Partial: core read-path coverage exists, but SQL pushdown and lazy-loading scenarios are still absent |
+| Vendor SQLite amalgamation in `lib/` | P0 | Low | ✅ Implemented |
+| GTest unit tests (generic + SQLite) | P0 | Medium | ✅ Implemented: RDB driver (60 tests), input plugin (50 tests), query builder (34 tests) |
+| Lambda integration test scripts (.ls + .txt) | P0 | Medium | ✅ Implemented: 8 scripts covering basic access, schema, types, views, data, autodetect, FK metadata, and FK navigation (forward/reverse/null); SQL pushdown and lazy-loading scenarios are still absent |
 
 ### Phase 2: Advanced Queries (Future)
 
@@ -1513,101 +1513,101 @@ Adding a new backend requires only implementing the `RdbDriver` vtable — no ch
 
 ### Unit Tests
 
-**Generic RDB API** (`test/test_rdb.cpp`):
+**Generic RDB API + SQLite Driver** (`test/test_rdb_gtest.cpp`, 60 tests):
 ```
-TestRdb.DriverRegistration
-TestRdb.DriverLookup
-TestRdb.DriverAutoDetect_Sqlite
-TestRdb.DriverAutoDetect_Postgres
-TestRdb.OpenUnknownDriver
-```
-
-**SQLite Driver** (`test/test_rdb_sqlite.cpp`):
-```
-TestRdbSqlite.OpenValidDatabase
-TestRdbSqlite.OpenNonexistentFile
-TestRdbSqlite.OpenInvalidFile
-TestRdbSqlite.SchemaIntrospection
-TestRdbSqlite.SchemaIntrospection_View
-TestRdbSqlite.TableAccess
-TestRdbSqlite.RowCount
-TestRdbSqlite.IndexAccess
-TestRdbSqlite.TypeMapping_Integer
-TestRdbSqlite.TypeMapping_Real
-TestRdbSqlite.TypeMapping_Text
-TestRdbSqlite.TypeMapping_Datetime
-TestRdbSqlite.TypeMapping_Json_Object
-TestRdbSqlite.TypeMapping_Json_Array
-TestRdbSqlite.TypeMapping_Json_Nested
-TestRdbSqlite.TypeMapping_Null
-TestRdbSqlite.NullableColumn
-TestRdbSqlite.PrepareAndStep
-TestRdbSqlite.BindParameters
-TestRdbSqlite.ColumnValue
-```
-
-**Lambda Input Plugin** (`test/test_input_rdb.cpp`):
-```
-TestInputRdb.SchemaNamespace
-TestInputRdb.DataNamespace
-TestInputRdb.ViewAccess
-TestInputRdb.ValueConversion_Int
-TestInputRdb.ValueConversion_Float
-TestInputRdb.ValueConversion_Datetime
-TestInputRdb.ValueConversion_Json
-TestInputRdb.ValueConversion_Null
+RdbTest.DriverRegistration          RdbTest.ColumnMetadata_Active
+RdbTest.DriverLookupUnknown         RdbTest.ColumnMetadata_Metadata
+RdbTest.DriverLookupNull            RdbTest.ColumnMetadata_Cover
+RdbTest.DetectDriver_SqliteExtDb    RdbTest.ColumnMetadata_Price
+RdbTest.DetectDriver_SqliteExtSqlite RdbTest.GetColumn_NotFound
+RdbTest.DetectDriver_SqliteExtSqlite3 RdbTest.IndexCount
+RdbTest.DetectDriver_PostgresScheme RdbTest.IndexDetails
+RdbTest.DetectDriver_PostgresShortScheme RdbTest.ForeignKeys
+RdbTest.DetectDriver_MysqlScheme    RdbTest.ReverseForeignKeys
+RdbTest.DetectDriver_DuckdbScheme   RdbTest.NoForeignKeys
+RdbTest.DetectDriver_DuckdbExtDdb   RdbTest.PrepareAndStep
+RdbTest.DetectDriver_DuckdbExtDuckdb RdbTest.ColumnCount
+RdbTest.DetectDriver_Unknown        RdbTest.PrepareBadSql
+RdbTest.DetectDriver_Null           RdbTest.PrepareNull
+RdbTest.OpenClose                   RdbTest.BindInt
+RdbTest.OpenAutoDetect              RdbTest.BindFloat
+RdbTest.OpenNonexistentFile         RdbTest.BindString
+RdbTest.OpenUnknownDriver           RdbTest.BindNull
+RdbTest.OpenNullDetect              RdbTest.ValueType_Integer
+RdbTest.CloseNull                   RdbTest.ValueType_Float
+RdbTest.SchemaLoadSuccess           RdbTest.ValueType_Text
+RdbTest.SchemaEmptyDb               RdbTest.ValueType_Null
+RdbTest.GetTable_Authors            RdbTest.ValueType_JsonStored
+RdbTest.GetTable_Books              RdbTest.RowCount
+RdbTest.GetTable_View               RdbTest.RowCountUnknownTable
+RdbTest.GetTable_NotFound           RdbTest.ErrorMsg
+RdbTest.GetTable_Null               RdbTest.ErrorMsgNull
+RdbTest.ColumnMetadata_Id           RdbTest.FinalizeNull
+RdbTest.ColumnMetadata_Name         RdbTest.StepNull
+RdbTest.ColumnMetadata_Rating       RdbTest.ColumnValueNull
+RdbTest.ColumnMetadata_Born
 ```
 
-**Query Compiler** (tested via SQLite backend):
+**Lambda Input Plugin** (`test/test_input_rdb_gtest.cpp`, 39 tests):
 ```
-TestRdbQuery.SelectAll
-TestRdbQuery.WhereEqual
-TestRdbQuery.WhereComparison
-TestRdbQuery.WhereAnd
-TestRdbQuery.WhereOr
-TestRdbQuery.WhereNot
-TestRdbQuery.WhereIn
-TestRdbQuery.WhereNull
-TestRdbQuery.WhereLike
-TestRdbQuery.OrderByAsc
-TestRdbQuery.OrderByDesc
-TestRdbQuery.OrderByMultiple
-TestRdbQuery.LimitOffset
-TestRdbQuery.ParameterBinding
-TestRdbQuery.CacheHit
-TestRdbQuery.MixedPushdown
+InputRdbTest.DetectSqliteDb         InputRdbTest.ValueConversion_Null
+InputRdbTest.DetectSqliteExplicit   InputRdbTest.ValueConversion_Datetime
+InputRdbTest.DetectNotRdb           InputRdbTest.ValueConversion_Decimal
+InputRdbTest.DetectNullPath         InputRdbTest.ValueConversion_JsonArray
+InputRdbTest.ReturnsValidInput      InputRdbTest.ValueConversion_JsonObject
+InputRdbTest.RootIsDbElement        InputRdbTest.ViewDataAccessible
+InputRdbTest.DbElementName          InputRdbTest.ViewRowContent
+InputRdbTest.DbTableCount           InputRdbTest.EmptyDatabase
+InputRdbTest.SchemaIsMap            InputRdbTest.AllCategoryRows
+InputRdbTest.SchemaHasTables        InputRdbTest.AllProductRows
+InputRdbTest.SchemaColumnsArray     InputRdbTest.NullPathname
+InputRdbTest.SchemaColumnDetails    InputRdbTest.NonexistentFile
+InputRdbTest.SchemaForeignKeys      InputRdbTest.SecondProductPrice
+InputRdbTest.SchemaViewFlag         InputRdbTest.ThirdProductCategoryId
+InputRdbTest.SchemaTableNoViewFlag
+InputRdbTest.SchemaIndexes
+InputRdbTest.DataIsMap
+InputRdbTest.DataHasTables
+InputRdbTest.DataCategoriesRowCount
+InputRdbTest.DataProductsRowCount
+InputRdbTest.DataRowIsMap
+InputRdbTest.ValueConversion_Int
+InputRdbTest.ValueConversion_String
+InputRdbTest.ValueConversion_Float
+InputRdbTest.ValueConversion_Bool
 ```
 
-### Integration Tests (`test/lambda/io_sqlite_*.ls`)
+**Query Builder** (`test/test_rdb_query_gtest.cpp`, 34 tests):
+```
+RdbQueryTest.SelectAll              RdbQueryTest.OrderByMultiple
+RdbQueryTest.WhereEqual             RdbQueryTest.LimitOnly
+RdbQueryTest.WhereComparison        RdbQueryTest.LimitOffset
+RdbQueryTest.WhereLessThan          RdbQueryTest.OffsetWithoutLimit
+RdbQueryTest.WhereNotEqual          RdbQueryTest.WhereOrderByLimitOffset
+RdbQueryTest.WhereAnd               RdbQueryTest.UnknownTable
+RdbQueryTest.WhereOr                RdbQueryTest.UnknownColumnInWhere
+RdbQueryTest.WhereNot               RdbQueryTest.UnknownColumnInOrderBy
+RdbQueryTest.WhereIn                RdbQueryTest.ExecSelectAll
+RdbQueryTest.WhereInEmpty           RdbQueryTest.ExecWhereGenre
+RdbQueryTest.WhereIsNull            RdbQueryTest.ExecWhereYearRange
+RdbQueryTest.WhereIsNotNull         RdbQueryTest.ExecWhereIsNull
+RdbQueryTest.WhereLikeStartsWith    RdbQueryTest.ExecWhereIn
+RdbQueryTest.WhereLikeEndsWith      RdbQueryTest.ExecLikeContains
+RdbQueryTest.WhereLikeContains      RdbQueryTest.ExecLimit
+RdbQueryTest.OrderByAsc             RdbQueryTest.ExecLimitOffset
+RdbQueryTest.OrderByDesc            RdbQueryTest.ExecWithCallback
+```
 
-```lambda
-// io_sqlite_basic.ls — basic access
-let db = input(@./test/data/library.db)
-db.data.book[0].title
-len(db.data.book)
-db.schema.book.columns
+### Integration Tests (`test/lambda/io_sqlite_*.ls`, 7 scripts)
 
-// io_sqlite_query.ls — for-clause queries
-let db = input(@./test/data/library.db)
-for (b in db.data.book where b.year >= 2000 order by b.title) b.title
-for (b in db.data.book where b.genre == "sci-fi" limit 5) {title: b.title, year: b.year}
-
-// io_sqlite_transform.ls — post-query transformation
-let db = input(@./test/data/library.db)
-for (b in db.data.book where b.year >= 2000)
-    <book title: b.title, decade: (b.year / 10) * 10>
-
-// io_sqlite_json.ls — JSON column access
-let db = input(@./test/data/library.db)
-for (b in db.data.book) {title: b.title, tags: b.metadata.tags}
-
-// io_sqlite_datetime.ls — datetime column
-let db = input(@./test/data/library.db)
-for (b in db.data.book where b.year >= 2000) {title: b.title, created: b.created_at}
-
-// io_sqlite_view.ls — view access
-let db = input(@./test/data/library.db)
-for (s in db.data.book_stats) s
+```
+io_sqlite_basic.ls       — basic access and row retrieval
+io_sqlite_schema.ls      — schema introspection (columns, types, FKs)
+io_sqlite_types.ls       — type mapping (int, float, string, datetime, JSON, null)
+io_sqlite_view.ls        — view access
+io_sqlite_data.ls        — data namespace and row content
+io_sqlite_autodetect.ls  — driver auto-detection from file extension
+io_sqlite_fk.ls          — FK metadata (link_name, reverse_fks)
 ```
 
 Each `.ls` file paired with a `.txt` expected-output file.

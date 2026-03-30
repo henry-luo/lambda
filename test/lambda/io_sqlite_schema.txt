@@ -10,5 +10,14 @@
 ["tags", "JSON"]
 1
 ["category_id", "categories", "id"]
+1
+"idx_categories_name"
+true
+["name"]
+1
+"idx_products_price"
+false
+["price"]
+type.null
 [4, "price"]
 true

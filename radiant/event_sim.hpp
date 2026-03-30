@@ -19,6 +19,7 @@
  *     {"type": "mouse_down", "target_text": "Click here"},
  *     {"type": "mouse_up", "x": 100, "y": 200, "button": 0, "mods": 0},
  *     {"type": "mouse_drag", "from_x": 100, "from_y": 200, "to_x": 200, "to_y": 200},
+ *     {"type": "mouse_drag", "target": {"selector": "#start"}, "to_target": {"selector": "#end"}},
  *     {"type": "key_press", "key": "a"},
  *     {"type": "key_down", "key": "Control"},
  *     {"type": "key_up", "key": "Control"},
@@ -28,9 +29,21 @@
  *     {"type": "assert_selection", "is_collapsed": false},
  *     {"type": "assert_target", "view_type": 1},
  *     {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Hello"},
+ *     {"type": "assert_value", "target": {"selector": "input#email"}, "equals": "user@test.com"},
+ *     {"type": "assert_checked", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "assert_visible", "target": {"selector": ".modal"}, "visible": true},
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
+ *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
+ *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
+ *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
+ *     {"type": "select_option", "target": {"selector": "select#color"}, "label": "Blue"},
+ *     {"type": "resize", "width": 800, "height": 600},
+ *     {"type": "navigate", "url": "test/ui/page2.html"},
+ *     {"type": "assert_rect", "target": {"selector": "#box"}, "x": 0, "y": 0, "width": 200, "height": 100, "tolerance": 2},
+ *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
+ *     {"type": "assert_position", "element_a": {"selector": "#header"}, "element_b": {"selector": "#content"}, "relation": "above"},
+ *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
@@ -66,14 +79,26 @@ enum SimEventType {
     SIM_EVENT_DBLCLICK,        // double-click
     SIM_EVENT_TYPE,            // type text into focused element
     SIM_EVENT_FOCUS,           // focus an element (via click)
+    SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
+    SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
+    SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
     SIM_EVENT_ASSERT_TARGET,
     SIM_EVENT_ASSERT_TEXT,     // verify element text content
+    SIM_EVENT_ASSERT_VALUE,    // verify form field value
+    SIM_EVENT_ASSERT_CHECKED,  // verify checkbox/radio state
     SIM_EVENT_ASSERT_VISIBLE,  // verify element visibility
     SIM_EVENT_ASSERT_FOCUS,    // verify focused element
+    SIM_EVENT_ASSERT_STATE,    // verify pseudo-state (:hover, :active, etc.)
     SIM_EVENT_ASSERT_SCROLL,   // verify scroll position
+    SIM_EVENT_ASSERT_RECT,     // verify element bounding box (x, y, width, height)
+    SIM_EVENT_ASSERT_STYLE,    // verify computed CSS property value
+    SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
+    SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
+    // Navigation
+    SIM_EVENT_NAVIGATE,        // load a new HTML document
     // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
@@ -98,14 +123,42 @@ struct SimEvent {
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
+    char* to_target_selector;    // for mouse_drag: destination CSS selector
+    char* to_target_text;        // for mouse_drag: destination text target
     char* input_text;            // for type action: text to type
     bool clear_first;            // for type action: select-all + delete before typing
     char* assert_contains;       // for assert_text: substring match
     char* assert_equals;         // for assert_text: exact match
     bool expected_visible;       // for assert_visible
+    bool expected_checked;       // for assert_checked
+    char* state_name;            // for assert_state: e.g. ":hover", ":active"
+    bool expected_state_value;   // for assert_state: expected boolean
     float expected_scroll_x;     // for assert_scroll
     float expected_scroll_y;     // for assert_scroll
     float scroll_tolerance;      // for assert_scroll
+    char* option_value;          // for select_option: match by value attribute
+    char* option_label;          // for select_option: match by visible text
+    // Phase 5: assert_rect fields
+    float expected_rect_x, expected_rect_y;     // expected position
+    float expected_rect_w, expected_rect_h;     // expected size
+    float rect_tolerance;                       // allowed deviation (default 1px)
+    bool has_rect_x, has_rect_y, has_rect_w, has_rect_h; // which fields to check
+    // Phase 5: assert_style fields
+    char* style_property;        // CSS property name
+    // Phase 5: assert_position fields
+    char* element_a_selector;    // first element selector
+    char* element_a_text;        // first element text target
+    char* element_b_selector;    // second element selector
+    char* element_b_text;        // second element text target
+    char* position_relation;     // "above", "below", "left_of", "right_of", "overlaps", "contains", "inside"
+    float position_gap;          // expected minimum gap between elements
+    float position_tolerance;    // allowed deviation (default 1px)
+    // Phase 5: navigate fields
+    char* navigate_url;          // path to HTML file
+    // Phase 5: assert_element_at fields
+    char* expected_at_selector;  // expected element selector at coords
+    char* expected_at_tag;       // expected tag name at coords
+    int at_x, at_y;             // coordinates to test
 };
 
 // Event simulation context
@@ -119,6 +172,8 @@ struct EventSimContext {
     int fail_count;              // assertions failed
     FILE* result_file;           // optional result output file
     char* test_name;             // optional test name from JSON
+    int viewport_width;          // 0 = use default (1200)
+    int viewport_height;         // 0 = use default (800)
 };
 
 // Load events from JSON file
