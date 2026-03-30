@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: sans-serif; font-size: 16px; }
+  #header {
+    background-color: rgb(50, 50, 200);
+    color: rgb(255, 255, 255);
+    padding: 10px;
+    height: 60px;
+    font-size: 24px;
+    font-weight: 700;
+    text-align: center;
+  }
+  #sidebar {
+    background-color: rgb(240, 240, 240);
+    width: 200px;
+    height: 300px;
+    padding: 20px;
+    float: left;
+  }
+  #content {
+    margin-left: 200px;
+    padding: 15px;
+    min-height: 300px;
+  }
+  .box {
+    width: 100px;
+    height: 100px;
+    background-color: rgb(255, 0, 0);
+    margin: 10px;
+    border: 2px solid rgb(0, 0, 0);
+    opacity: 0.8;
+  }
+  .hidden-box {
+    display: none;
+  }
+  #footer {
+    clear: both;
+    background-color: rgb(100, 100, 100);
+    color: rgb(255, 255, 255);
+    padding: 10px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div id="header">Page Header</div>
+  <div id="sidebar">
+    <p>Sidebar</p>
+  </div>
+  <div id="content">
+    <div class="box" id="box1"></div>
+    <p id="text1">Content area text</p>
+  </div>
+  <div id="footer">Footer</div>
+</body>
+</html>

@@ -1,0 +1,8 @@
+["Widget", "Novel", "Cable"]
+[1, 2, 4, 5]
+["Cable", "Widget", "Novel", "Gadget", "Textbook"]
+["Textbook", "Gadget", "Novel", "Widget", "Cable"]
+["Cable", "Widget", "Novel"]
+["Cable", "Widget"]
+["Widget", "Cable"]
+["Electronics", "Books", "Electronics"]

@@ -1,0 +1,30 @@
+{
+  "name": "Phase 4b - Keyboard shortcuts (Cmd+A select all)",
+  "html": "test/ui/test_keyboard.html",
+  "description": "Test Cmd+A to select all text, verify selection is non-collapsed",
+  "events": [
+    {"type": "log", "message": "=== Phase 4b: Keyboard Shortcuts ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Click on text to place caret"},
+    {"type": "click", "target": {"text": "Left aligned"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 2: Verify caret is placed (selection collapsed)"},
+    {"type": "assert_selection", "is_collapsed": true},
+
+    {"type": "log", "message": "Step 3: Cmd+A to select all"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 4: Verify selection is non-collapsed (text selected)"},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "log", "message": "Step 5: Verify text content is still present"},
+    {"type": "assert_text", "target": {"selector": "#p1"}, "contains": "Left aligned"},
+    {"type": "assert_text", "target": {"selector": "#p2"}, "contains": "Center aligned"},
+    {"type": "assert_text", "target": {"selector": "#p3"}, "contains": "Right aligned"},
+
+    {"type": "log", "message": "=== Phase 4b complete ==="}
+  ]
+}

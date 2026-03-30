@@ -340,6 +340,7 @@
                 "lambda/parse.c",
                 "lambda/path.c",
                 "lambda/input/parse_error.cpp",
+                "lambda/input/rdb_query.cpp",
                 "lambda/input/source_tracker.cpp",
                 "lambda/input/input-context.cpp",
                 "lambda/input/html_entities.cpp",
@@ -1180,6 +1181,20 @@
                         ],
                         "binary": "test_rdb_gtest.exe",
                         "icon": "🗄️"
+                    },
+                    {
+                        "source": "test_rdb_query_gtest.cpp",
+                        "name": "RDB Query Builder Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_rdb_query_gtest.exe",
+                        "icon": "🔍"
                     },
                     {
                         "source": "test_str_gtest.cpp",

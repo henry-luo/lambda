@@ -23,6 +23,21 @@ len(db.schema.products.columns)
 len(db.schema.products.foreign_keys)
 [db.schema.products.foreign_keys[0].column, db.schema.products.foreign_keys[0].ref_table, db.schema.products.foreign_keys[0].ref_column]
 
+// categories index (unique name index)
+len(db.schema.categories.indexes)
+db.schema.categories.indexes[0].name
+db.schema.categories.indexes[0].unique
+db.schema.categories.indexes[0].columns
+
+// products index (non-unique price index)
+len(db.schema.products.indexes)
+db.schema.products.indexes[0].name
+db.schema.products.indexes[0].unique
+db.schema.products.indexes[0].columns
+
+// views have no indexes
+type(db.schema.cheap_products.indexes)
+
 // view schema metadata
 [len(db.schema.cheap_products.columns), db.schema.cheap_products.columns[2].name]
 db.schema.cheap_products.view
