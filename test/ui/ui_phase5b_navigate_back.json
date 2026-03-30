@@ -1,0 +1,39 @@
+{
+  "name": "Phase 5b: navigate_back history",
+  "html": "test/ui/test_phase5b_page1.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 5b: navigate_back ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify starting on page 1 ---"},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},
+
+    {"type": "log", "message": "--- Navigate to page 2 ---"},
+    {"type": "navigate", "url": "test_phase5b_page2.html"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page Two"},
+
+    {"type": "log", "message": "--- Navigate to page 3 ---"},
+    {"type": "navigate", "url": "test_phase5b_page3.html"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page Three"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "color", "equals": "rgb(0, 128, 0)"},
+
+    {"type": "log", "message": "--- Navigate back to page 2 ---"},
+    {"type": "navigate_back"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page Two"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "color", "equals": "rgb(200, 0, 0)"},
+
+    {"type": "log", "message": "--- Navigate back to page 1 ---"},
+    {"type": "navigate_back"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "color", "equals": "rgb(0, 0, 200)"},
+
+    {"type": "render", "file": "./temp/phase5b_navigate_back.png"}
+  ]
+}

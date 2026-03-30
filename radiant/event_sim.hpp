@@ -101,6 +101,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     // Navigation
     SIM_EVENT_NAVIGATE,        // load a new HTML document
+    SIM_EVENT_NAVIGATE_BACK,   // go back to previous document
     // Frame switching
     SIM_EVENT_SWITCH_FRAME,    // switch to iframe document (or back to main)
     // Utilities
@@ -184,6 +185,9 @@ struct EventSimContext {
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
+    // Phase 5b: navigation history stack
+    void* nav_history[16];       // stack of DomDocument* for navigate_back
+    int nav_history_depth;       // current depth in nav_history
     // Phase 5f: iframe frame stack
     void* original_document;     // main document (DomDocument*) before any switch_frame
     void* frame_stack[8];        // stack of DomDocument* for nested switch_frame

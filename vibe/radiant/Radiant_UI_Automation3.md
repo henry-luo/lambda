@@ -1,8 +1,8 @@
 # Radiant UI Automation — Phase 5+ Enhancement Proposal
 
-> **Status (2026-03-31):** All phases (5a–5h) are **implemented and
-> passing**. 8 test files, 30 total tests, 0 failures. Includes:
-> `assert_rect`/`assert_style`/`assert_position` (5a), `navigate` (5b),
+> **Status (2026-03-30):** All phases (5a–5h) are **implemented and
+> passing**. 9 test files, 31 total tests, 0 failures. Includes:
+> `assert_rect`/`assert_style`/`assert_position` (5a), `navigate`/`navigate_back` (5b),
 > auto-waiting (5c), hover pseudo-state (5d), focus/tab navigation (5e),
 > `switch_frame` iframe interaction (5f), transform/geometry (5g),
 > `assert_element_at` (5h).
@@ -636,7 +636,7 @@ that Radiant should support. Each references the event types needed.
 | 5h    | `assert_element_at`     | Small  | Medium | **P2**   | ✅ Done                  |
 | 5f    | `switch_frame` (iframe) | Large  | Low    | **P3**   | ✅ Done                  |
 | 5g    | Zoom/transform tests    | None   | Low    | **P3**   | ✅ Done                  |
-| 5b    | `navigate_back`         | Small  | Low    | **P3**   | Not started             |
+| 5b    | `navigate_back`         | Small  | Low    | **P3**   | ✅ Done                  |
 
 ### New SimEventType values
 
@@ -645,6 +645,7 @@ SIM_EVENT_ASSERT_RECT,        // Phase 5a
 SIM_EVENT_ASSERT_STYLE,       // Phase 5a
 SIM_EVENT_ASSERT_POSITION,    // Phase 5a
 SIM_EVENT_NAVIGATE,           // Phase 5b
+SIM_EVENT_NAVIGATE_BACK,      // Phase 5b
 SIM_EVENT_ASSERT_URL,         // Phase 5b
 SIM_EVENT_ASSERT_ELEMENT_AT,  // Phase 5h
 SIM_EVENT_SWITCH_FRAME,       // Phase 5f
@@ -710,6 +711,7 @@ int default_timeout;             // from JSON "default_timeout"
 |-------|------|------------|--------|-------------|
 | 5a | `test_phase5a_geometry.html` | `ui_phase5a_geometry.json` | ✅ Passing | `assert_rect` (3), `assert_style` (12 properties), `assert_position` (4 relations) |
 | 5b | `test_phase5b_page1.html` + `test_phase5b_page2.html` | `ui_phase5b_navigate.json` | ✅ Passing | Navigate page1→page2→page1, verify content + styles |
+| 5b | `test_phase5b_page1.html` + `page2` + `page3` | `ui_phase5b_navigate_back.json` | ✅ Passing | Navigate page1→page2→page3, `navigate_back`×2 to page1 |
 | 5c (hit-test) | `test_phase5a_geometry.html` | `ui_phase5c_element_at.json` | ✅ Passing | `assert_element_at` hit-testing at coordinates |
 | 5c (auto-wait) | `test_phase5g_transform.html` | `ui_phase5c_auto_wait.json` | ✅ Passing | Assert with `default_timeout`, per-event `timeout`/`interval` |
 | 5d | `test_phase5d_hover.html` | `ui_phase5d_hover.json` | ✅ Passing | Hover set/transfer between elements via `assert_state :hover` |
@@ -738,7 +740,7 @@ int default_timeout;             // from JSON "default_timeout"
 7. ✅ `assert_element_at` correctly identifies the topmost element at a
    given coordinate after z-index stacking.
 8. ✅ All existing tests continue to pass (backward compatible).
-   *Total: 30 tests, 30 passing, 0 failing.*
+   *Total: 31 tests, 31 passing, 0 failing.*
 9. ✅ Focus/tab navigation via `focus_move()` with DOM-order traversal.
    Tab and Shift+Tab cycle through focusable elements (`<input>`, `<button>`,
    `<select>`, `<textarea>`, `<a>`). `assert_focus` verifies focused element;
@@ -747,4 +749,6 @@ int default_timeout;             // from JSON "default_timeout"
    bitfield update in `focus_set()` for keyboard-triggered focus.
 10. ✅ `switch_frame` pushes/pops iframe documents on a frame stack,
     enabling event dispatch and assertions within iframe content.
-11. Animation testing remains deferred.
+11. ✅ `navigate_back` pops from a navigation history stack (max 16 deep),
+    restoring the previous document with relayout and re-render.
+12. Animation testing remains deferred.

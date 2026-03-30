@@ -1034,6 +1034,9 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "navigate_back") == 0) {
+        ev->type = SIM_EVENT_NAVIGATE_BACK;
+    }
     else if (strcmp(type_str, "switch_frame") == 0) {
         ev->type = SIM_EVENT_SWITCH_FRAME;
         const char* sel = reader.get("selector").cstring();
@@ -2215,10 +2218,30 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
+            // push current document onto navigation history
+            if (uicon->document && ctx->nav_history_depth < 16) {
+                ctx->nav_history[ctx->nav_history_depth++] = uicon->document;
+            }
             uicon->document = new_doc;
             layout_html_doc(uicon, new_doc, false);
             render_html_doc(uicon, new_doc->view_tree, nullptr);
             log_info("event_sim: navigated to '%s'", ev->navigate_url);
+            break;
+        }
+
+        case SIM_EVENT_NAVIGATE_BACK: {
+            if (ctx->nav_history_depth <= 0) {
+                log_error("event_sim: navigate_back FAIL - no previous page in history");
+                ctx->fail_count++;
+                break;
+            }
+            extern void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+            extern void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
+            DomDocument* prev_doc = (DomDocument*)ctx->nav_history[--ctx->nav_history_depth];
+            uicon->document = prev_doc;
+            layout_html_doc(uicon, prev_doc, false);
+            render_html_doc(uicon, prev_doc->view_tree, nullptr);
+            log_info("event_sim: navigate_back to previous page (history depth now %d)", ctx->nav_history_depth);
             break;
         }
 
