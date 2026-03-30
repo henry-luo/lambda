@@ -395,7 +395,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Get color attribute using DomNode interface
         const char* color_attr = span->get_attribute("color");
         if (color_attr) {
-            if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+            if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
             span->in_line->color = parse_html_color(color_attr);
             log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
                       span->in_line->color.r, span->in_line->color.g, span->in_line->color.b);
@@ -460,7 +460,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_A: {
         // anchor style
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->cursor = CSS_VALUE_POINTER;
         span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
         span->font = alloc_font_prop(lycon);
@@ -511,7 +511,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
         span->font->font_size_from_medium = false;
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->vertical_align = CSS_VALUE_SUB;
         break;
     case HTM_TAG_SUP:
@@ -519,7 +519,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
         span->font->font_size_from_medium = false;
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->vertical_align = CSS_VALUE_SUPER;
         break;
     case HTM_TAG_DEL:  case HTM_TAG_STRIKE:
@@ -734,7 +734,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->font->font_weight_numeric = 700;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
-        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
         // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
@@ -818,7 +818,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_TD: {
         // TD defaults to vertical-align: middle (CSS 2.1), text-align: start
-        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
         // Set default text-align to left (start) - table cells don't inherit text-align from outside
