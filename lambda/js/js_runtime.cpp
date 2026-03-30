@@ -800,6 +800,40 @@ extern "C" Item js_constructor_create_object(Item callee) {
     return obj;
 }
 
+// Dynamic class instantiation: new Type() where Type is a runtime variable.
+// Handles both function constructors and class objects (MAPs with __ctor__).
+extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
+    // Case 1: callee is a function — standard constructor call
+    if (get_type_id(callee) == LMD_TYPE_FUNC) {
+        Item obj = js_constructor_create_object(callee);
+        js_call_function(callee, obj, args, argc);
+        return obj;
+    }
+    // Case 2: callee is a class object (MAP with __ctor__ and __instance_proto__)
+    if (get_type_id(callee) == LMD_TYPE_MAP) {
+        Item obj = js_new_object();
+        // Copy __class_name__ from the class object
+        bool own;
+        Item class_name = js_map_get_fast(callee.map, "__class_name__", 14, &own);
+        if (class_name.item != ItemNull.item) {
+            Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
+            js_property_set(obj, cn_key, class_name);
+        }
+        // Set __proto__ so instance methods are accessible via prototype chain
+        Item instance_proto = js_map_get_fast(callee.map, "__instance_proto__", 18, &own);
+        if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
+            js_set_prototype(obj, instance_proto);
+        }
+        // Call the constructor (__ctor__ property on the class object)
+        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
+        if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
+            js_call_function(ctor, obj, args, argc);
+        }
+        return obj;
+    }
+    return js_new_object();
+}
+
 // A5: Create a new object with pre-built shape for constructor optimization.
 // All property slots are pre-allocated as LMD_TYPE_NULL (8-byte pointer-sized)
 // and initialized to null. When the constructor body sets this.prop = val,
@@ -4445,6 +4479,17 @@ extern "C" bool js_is_generator(Item obj) {
 // If it's already an array, return it as-is.
 extern "C" Item js_iterable_to_array(Item iterable) {
     if (get_type_id(iterable) == LMD_TYPE_ARRAY) return iterable;
+
+    // Typed arrays (Uint8Array, Int32Array, etc.): convert to plain array of boxed numbers
+    if (js_is_typed_array(iterable)) {
+        int len = js_typed_array_length(iterable);
+        Item arr = js_array_new(0);
+        for (int i = 0; i < len; i++) {
+            Item elem = js_typed_array_get(iterable, (Item){.item = i2it(i)});
+            array_push(arr.array, elem);
+        }
+        return arr;
+    }
 
     // Check if it's a generator object
     if (js_is_generator(iterable)) {
