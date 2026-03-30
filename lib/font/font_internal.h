@@ -31,6 +31,7 @@
 #include FT_LCD_FILTER_H
 #include FT_SIZES_H
 #include FT_MODULE_H
+#include FT_MULTIPLE_MASTERS_H
 
 #include <time.h>
 #include <string.h>

@@ -73,8 +73,8 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
         0.0f, 0.0f, 1.0f
     };
 
-    // Apply transformations in reverse order (to_origin, transforms..., from_origin)
-    result = to_origin;
+    // CSS: translate(origin) * transform * translate(-origin)
+    result = from_origin;
 
     for (TransformFunction* tf = functions; tf; tf = tf->next) {
         Tvg_Matrix m = {
@@ -220,8 +220,8 @@ inline Tvg_Matrix compute_transform_matrix(TransformFunction* functions,
         result = matrix_multiply(result, m);
     }
 
-    // Apply from_origin translation
-    result = matrix_multiply(result, from_origin);
+    // Apply to_origin (translate back by -origin)
+    result = matrix_multiply(result, to_origin);
 
     return result;
 }

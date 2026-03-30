@@ -18,49 +18,66 @@ enum FormControlType {
     FORM_CONTROL_SELECT,
     FORM_CONTROL_TEXTAREA,
     FORM_CONTROL_RANGE,
+    FORM_CONTROL_IMAGE,         // type="image" - replaced element (image button)
     FORM_CONTROL_HIDDEN,        // type="hidden" - no visual
 };
 
-// Default intrinsic sizes (CSS pixels - multiply by pixel_ratio)
-// These match Chrome/Firefox UA defaults
+// Default intrinsic sizes (CSS pixels at 1x pixel ratio)
+// All dimensions are border-box values matching Chrome UA defaults
 namespace FormDefaults {
     // Text input: ~20 characters wide
-    // Browser shows ~153px for default text input (Chrome/Safari)
-    constexpr float TEXT_WIDTH = 149.0f;  // 153 - 2*border(1) - 2*padding(2) = 149
-    constexpr float TEXT_HEIGHT = 19.0f;  // 21 - 2*border(1) = 19
+    // Chrome default: 153x21 border-box (1px border, 1px padding top/bottom, 2px padding left/right)
+    constexpr float TEXT_WIDTH = 153.0f;   // border-box width
+    constexpr float TEXT_HEIGHT = 21.0f;   // border-box height
     constexpr float TEXT_PADDING_H = 2.0f;
     constexpr float TEXT_PADDING_V = 1.0f;
+    constexpr float TEXT_BORDER = 1.0f;
     constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
 
     // Checkbox/Radio: square controls
     constexpr float CHECK_SIZE = 13.0f;
     constexpr float CHECK_MARGIN = 3.0f;
 
-    // Button: content-based + padding
-    constexpr float BUTTON_PADDING_H = 8.0f;
+    // Button: content-based + padding + 2px border
+    constexpr float BUTTON_PADDING_H = 6.0f;
     constexpr float BUTTON_PADDING_V = 1.0f;
+    constexpr float BUTTON_BORDER = 2.0f;   // Chrome: 2px outset border
     constexpr float BUTTON_MIN_WIDTH = 52.0f;  // minimum button width
 
     // Select dropdown
-    // Browser shows ~73px for select with short options
-    constexpr float SELECT_WIDTH = 70.0f;  // 73 - 2*border(1) - arrow = ~70 content
-    constexpr float SELECT_HEIGHT = 17.0f;  // 19 - 2*border(1) = 17
+    // Chrome default: height=19 border-box, width depends on content
+    constexpr float SELECT_WIDTH = 57.0f;  // typical default for short options
+    constexpr float SELECT_HEIGHT = 19.0f; // border-box height
     constexpr float SELECT_ARROW_WIDTH = 16.0f;
 
     // Textarea: default cols/rows
+    // Chrome default: 182x36 border-box (20 cols, 2 rows)
     constexpr int   TEXTAREA_COLS = 20;
     constexpr int   TEXTAREA_ROWS = 2;
     constexpr float TEXTAREA_PADDING = 2.0f;
+    constexpr float TEXTAREA_BORDER = 1.0f;
 
     // Range slider
     constexpr float RANGE_WIDTH = 129.0f;
-    constexpr float RANGE_HEIGHT = 21.0f;
+    constexpr float RANGE_HEIGHT = 16.0f;  // Chrome: 16px
     constexpr float RANGE_TRACK_HEIGHT = 5.0f;
     constexpr float RANGE_THUMB_SIZE = 13.0f;
+
+    // Meter: Chrome default 80x16
+    constexpr float METER_WIDTH = 80.0f;
+    constexpr float METER_HEIGHT = 16.0f;
+
+    // Progress: Chrome default 160x16
+    constexpr float PROGRESS_WIDTH = 160.0f;
+    constexpr float PROGRESS_HEIGHT = 16.0f;
 
     // Fieldset
     constexpr float FIELDSET_PADDING = 10.0f;
     constexpr float FIELDSET_BORDER_WIDTH = 2.0f;
+
+    // Image input (broken image fallback): Chrome shows ~57.5x16
+    constexpr float IMAGE_INPUT_WIDTH = 57.5f;
+    constexpr float IMAGE_INPUT_HEIGHT = 16.0f;
 
     // Common border colors (3D effect)
     constexpr uint32_t BORDER_LIGHT = 0xFFFFFFFF;   // white highlight
@@ -156,10 +173,12 @@ inline FormControlType get_input_control_type(const char* type) {
     // Button types
     if (strcmp(type, "submit") == 0 ||
         strcmp(type, "reset") == 0 ||
-        strcmp(type, "button") == 0 ||
-        strcmp(type, "image") == 0) {
+        strcmp(type, "button") == 0) {
         return FORM_CONTROL_BUTTON;
     }
+
+    // Image button - replaced element with image dimensions
+    if (strcmp(type, "image") == 0) return FORM_CONTROL_IMAGE;
 
     // Special types
     if (strcmp(type, "hidden") == 0) return FORM_CONTROL_HIDDEN;

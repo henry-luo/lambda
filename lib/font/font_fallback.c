@@ -45,7 +45,7 @@ static const char* ui_monospace_fonts[] = {
     "Courier New", NULL
 };
 static const char* system_ui_fonts[] = {
-    "SF Pro Display", "SF Pro", ".AppleSystemUIFont", "Segoe UI",
+    "System Font", "SF Pro Display", "SF Pro", ".AppleSystemUIFont", "Segoe UI",
     "Roboto", "Liberation Sans", "Arial", NULL
 };
 

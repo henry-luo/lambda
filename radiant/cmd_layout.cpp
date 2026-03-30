@@ -4555,16 +4555,22 @@ int cmd_layout(int argc, char** argv) {
             output_path = opts.view_output_file;
         }
 
-        bool success = layout_single_file(
-            input_file,
-            output_path,
-            opts.css_file,
-            opts.viewport_width,
-            opts.viewport_height,
-            &ui_context,
-            cwd,
-            opts.debug
-        );
+        bool success = false;
+        try {
+            success = layout_single_file(
+                input_file,
+                output_path,
+                opts.css_file,
+                opts.viewport_width,
+                opts.viewport_height,
+                &ui_context,
+                cwd,
+                opts.debug
+            );
+        } catch (...) {
+            log_error("batch layout: uncaught exception processing %s", input_file);
+            success = false;
+        }
 
         if (success) {
             success_count++;

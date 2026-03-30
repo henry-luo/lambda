@@ -185,6 +185,12 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
     }
 }
 
+InlineProp* alloc_inline_prop(LayoutContext* lycon) {
+    InlineProp* prop = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+    prop->opacity = 1.0f;  // CSS default: fully opaque (pool_calloc zeros to 0.0f)
+    return prop;
+}
+
 ScrollProp* alloc_scroll_prop(LayoutContext* lycon) {
     ScrollProp* prop = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
     prop->overflow_x = prop->overflow_y = CSS_VALUE_VISIBLE;   // initial value
@@ -803,7 +809,10 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // They report (0, 0, 0, 0) in getComputedStyle/getBoundingClientRect
     if (view->is_element()) {
         DomElement* elem = (DomElement*)view;
-        if (elem->display.outer == CSS_VALUE_CONTENTS) {
+        // display:contents elements don't generate a box → (0,0,0,0)
+        // option/optgroup are not rendered → getBoundingClientRect returns (0,0,0,0)
+        if (elem->display.outer == CSS_VALUE_CONTENTS ||
+            elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);

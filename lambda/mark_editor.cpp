@@ -1,5 +1,6 @@
 #include "mark_editor.hpp"
 #include "../lib/log.h"
+#include "../lib/arena.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -1288,12 +1289,24 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
         if (new_length > elmt->capacity) {
             // Resize children array
             int64_t new_capacity = elmt->capacity ? elmt->capacity * 2 : 8;
-            Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
-            if (!new_items) {
-                log_error("elmt_insert_child: realloc failed");
-                return ItemError;
+            bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
+            if (use_arena) {
+                if (elmt->items == nullptr) {
+                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                } else {
+                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
+                                                       elmt->capacity * sizeof(Item),
+                                                       new_capacity * sizeof(Item));
+                }
+            } else {
+                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                if (!new_items) {
+                    log_error("elmt_insert_child: realloc failed");
+                    return ItemError;
+                }
+                elmt->items = new_items;
             }
-            elmt->items = new_items;
+            if (!elmt->items) return ItemError;
             elmt->capacity = new_capacity;
         }
 
@@ -1378,9 +1391,21 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
             while (new_capacity < new_length) {
                 new_capacity *= 2;
             }
-            Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
-            if (!new_items) return ItemError;
-            elmt->items = new_items;
+            bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
+            if (use_arena) {
+                if (elmt->items == nullptr) {
+                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                } else {
+                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
+                                                       elmt->capacity * sizeof(Item),
+                                                       new_capacity * sizeof(Item));
+                }
+            } else {
+                Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
+                if (!new_items) return ItemError;
+                elmt->items = new_items;
+            }
+            if (!elmt->items) return ItemError;
             elmt->capacity = new_capacity;
         }
 
@@ -1681,9 +1706,22 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
 
             if (new_length > arr->capacity) {
                 int64_t new_capacity = arr->capacity ? arr->capacity * 2 : 8;
-                Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
-                if (!new_items) return ItemError;
-                arr->items = new_items;
+                // Check if items are arena-allocated to avoid realloc on arena pointers
+                bool use_arena = (arena_ != nullptr && (arr->items == nullptr || arena_owns(arena_, arr->items)));
+                if (use_arena) {
+                    if (arr->items == nullptr) {
+                        arr->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                    } else {
+                        arr->items = (Item*)arena_realloc(arena_, arr->items,
+                                                          arr->capacity * sizeof(Item),
+                                                          new_capacity * sizeof(Item));
+                    }
+                } else {
+                    Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
+                    if (!new_items) return ItemError;
+                    arr->items = new_items;
+                }
+                if (!arr->items) return ItemError;
                 arr->capacity = new_capacity;
             }
 

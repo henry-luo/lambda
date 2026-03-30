@@ -579,7 +579,7 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // or the first in-flow table-row in the cell, whichever comes first. If a cell has
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
-float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y) {
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh) {
     for (View* child = ((ViewElement*)parent)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
 
@@ -591,12 +591,18 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
                 FontBox fbox = {};
                 setup_font(lycon->ui_context, &fbox, text->font);
                 if (fbox.font_handle) {
-                    TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
-                    if (typo.valid && typo.use_typo_metrics) {
-                        ascent = typo.ascender;
+                    if (use_normal_lh) {
+                        float split_asc = 0, split_desc = 0;
+                        font_get_normal_lh_split(fbox.font_handle, &split_asc, &split_desc);
+                        ascent = split_asc;
                     } else {
-                        const FontMetrics* m = font_get_metrics(fbox.font_handle);
-                        if (m) ascent = m->hhea_ascender;
+                        TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+                        if (typo.valid && typo.use_typo_metrics) {
+                            ascent = typo.ascender;
+                        } else {
+                            const FontMetrics* m = font_get_metrics(fbox.font_handle);
+                            if (m) ascent = m->hhea_ascender;
+                        }
                     }
                 }
             }
@@ -620,13 +626,13 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 
         if (is_table_structure) {
             // always recurse into table structure for baseline search
-            float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+            float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y, use_normal_lh);
             if (result >= 0) return result;
         } else if (is_block_like) {
             // recurse into blocks, but skip blocks inside tables (those are captions)
             bool parent_is_table = (parent->view_type == RDT_VIEW_TABLE);
             if (!parent_is_table) {
-                float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+                float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y, use_normal_lh);
                 if (result >= 0) return result;
             }
         }
@@ -3676,15 +3682,21 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             }
             setup_line_height(lycon, caption);
             // Recalculate init_ascender/init_descender/lead_y for caption's font
-            TypoMetrics typo_c = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo_c.valid && typo_c.use_typo_metrics) {
-                lycon->block.init_ascender = typo_c.ascender;
-                lycon->block.init_descender = typo_c.descender;
-            } else if (lycon->font.font_handle) {
-                const FontMetrics* mc = font_get_metrics(lycon->font.font_handle);
-                if (mc) {
-                    lycon->block.init_ascender = mc->hhea_ascender;
-                    lycon->block.init_descender = -(mc->hhea_descender);
+            if (lycon->font.font_handle) {
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    TypoMetrics typo_c = get_os2_typo_metrics(lycon->font.font_handle);
+                    if (typo_c.valid && typo_c.use_typo_metrics) {
+                        lycon->block.init_ascender = typo_c.ascender;
+                        lycon->block.init_descender = typo_c.descender;
+                    } else {
+                        const FontMetrics* mc = font_get_metrics(lycon->font.font_handle);
+                        if (mc) {
+                            lycon->block.init_ascender = mc->hhea_ascender;
+                            lycon->block.init_descender = -(mc->hhea_descender);
+                        }
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -4148,15 +4160,21 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     // CSS 2.1 §10.8.1: Recalculate init_ascender/init_descender/lead_y for the cell's
     // font and line-height. Without this, stale parent values cause incorrect half-leading
     // placement for text in cells with explicit line-height (e.g., line-height: 2in).
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
-    if (typo.valid && typo.use_typo_metrics) {
-        lycon->block.init_ascender = typo.ascender;
-        lycon->block.init_descender = typo.descender;
-    } else if (lycon->font.font_handle) {
-        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-        if (m) {
-            lycon->block.init_ascender = m->hhea_ascender;
-            lycon->block.init_descender = -(m->hhea_descender);
+    if (lycon->font.font_handle) {
+        if (lycon->block.line_height_is_normal) {
+            font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+        } else {
+            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+            if (typo.valid && typo.use_typo_metrics) {
+                lycon->block.init_ascender = typo.ascender;
+                lycon->block.init_descender = typo.descender;
+            } else {
+                const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+                if (m) {
+                    lycon->block.init_ascender = m->hhea_ascender;
+                    lycon->block.init_descender = -(m->hhea_descender);
+                }
+            }
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -6793,15 +6811,21 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 setup_font(lycon->ui_context, &lycon->font, caption->font);
             }
             setup_line_height(lycon, caption);
-            TypoMetrics typo_c2 = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo_c2.valid && typo_c2.use_typo_metrics) {
-                lycon->block.init_ascender = typo_c2.ascender;
-                lycon->block.init_descender = typo_c2.descender;
-            } else if (lycon->font.font_handle) {
-                const FontMetrics* mc2 = font_get_metrics(lycon->font.font_handle);
-                if (mc2) {
-                    lycon->block.init_ascender = mc2->hhea_ascender;
-                    lycon->block.init_descender = -(mc2->hhea_descender);
+            if (lycon->font.font_handle) {
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    TypoMetrics typo_c2 = get_os2_typo_metrics(lycon->font.font_handle);
+                    if (typo_c2.valid && typo_c2.use_typo_metrics) {
+                        lycon->block.init_ascender = typo_c2.ascender;
+                        lycon->block.init_descender = typo_c2.descender;
+                    } else {
+                        const FontMetrics* mc2 = font_get_metrics(lycon->font.font_handle);
+                        if (mc2) {
+                            lycon->block.init_ascender = mc2->hhea_ascender;
+                            lycon->block.init_descender = -(mc2->hhea_descender);
+                        }
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -8148,15 +8172,21 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 setup_font(lycon->ui_context, &lycon->font, caption->font);
             }
             setup_line_height(lycon, caption);
-            TypoMetrics typo_c3 = get_os2_typo_metrics(lycon->font.font_handle);
-            if (typo_c3.valid && typo_c3.use_typo_metrics) {
-                lycon->block.init_ascender = typo_c3.ascender;
-                lycon->block.init_descender = typo_c3.descender;
-            } else if (lycon->font.font_handle) {
-                const FontMetrics* mc3 = font_get_metrics(lycon->font.font_handle);
-                if (mc3) {
-                    lycon->block.init_ascender = mc3->hhea_ascender;
-                    lycon->block.init_descender = -(mc3->hhea_descender);
+            if (lycon->font.font_handle) {
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    TypoMetrics typo_c3 = get_os2_typo_metrics(lycon->font.font_handle);
+                    if (typo_c3.valid && typo_c3.use_typo_metrics) {
+                        lycon->block.init_ascender = typo_c3.ascender;
+                        lycon->block.init_descender = typo_c3.descender;
+                    } else {
+                        const FontMetrics* mc3 = font_get_metrics(lycon->font.font_handle);
+                        if (mc3) {
+                            lycon->block.init_ascender = mc3->hhea_ascender;
+                            lycon->block.init_descender = -(mc3->hhea_descender);
+                        }
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);

@@ -101,7 +101,7 @@ static const char* priority_font_families[] = {
     "Courier", "Courier New", "Verdana", "Georgia",
     "Trebuchet MS", "Comic Sans MS", "Impact",
     "Helvetica Neue", "Monaco", "Menlo",
-    "San Francisco", "SF Pro Display", "SF Pro Text",
+    "SFNS", "System Font", "San Francisco", "SF Pro Display", "SF Pro Text",
     "DejaVu Sans", "DejaVu Serif", "Liberation Sans", "Liberation Serif",
     NULL
 };
@@ -270,8 +270,12 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
     bool found_family = false;
     bool found_subfamily = false;
     bool found_postscript = false;
+    bool found_family_english = false;
+    bool found_subfamily_english = false;
+    bool found_postscript_english = false;
 
-    for (int i = 0; i < count && !(found_family && found_subfamily && found_postscript); i++) {
+    for (int i = 0; i < count &&
+         !(found_family_english && found_subfamily_english && found_postscript_english); i++) {
         uint16_t platform_id, encoding_id, language_id, name_id, length, offset;
         if (fread(&platform_id, 2, 1, file) != 1) break;
         if (fread(&encoding_id, 2, 1, file) != 1) break;
@@ -292,13 +296,17 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
             name_id != NAME_ID_SUBFAMILY_NAME &&
             name_id != NAME_ID_POSTSCRIPT_NAME) continue;
 
-        // skip if already found this name
-        if (name_id == NAME_ID_FAMILY_NAME && found_family) continue;
-        if (name_id == NAME_ID_SUBFAMILY_NAME && found_subfamily) continue;
-        if (name_id == NAME_ID_POSTSCRIPT_NAME && found_postscript) continue;
+        // skip if already found English name for this name ID
+        if (name_id == NAME_ID_FAMILY_NAME && found_family_english) continue;
+        if (name_id == NAME_ID_SUBFAMILY_NAME && found_subfamily_english) continue;
+        if (name_id == NAME_ID_POSTSCRIPT_NAME && found_postscript_english) continue;
 
         // Platform 1 (Mac) or Platform 3 (Windows)
         if (platform_id != 1 && platform_id != 3) continue;
+
+        // prefer English: Mac langID=0, Windows langID=0x0409
+        bool is_english = (platform_id == 1 && language_id == 0) ||
+                          (platform_id == 3 && language_id == 0x0409);
 
         // save position, read string, restore
         long saved_pos = ftell(file);
@@ -337,16 +345,19 @@ static bool parse_name_table(FILE* file, TTF_Table_Dir* name_table, FontEntry* e
 
         if (name_buf[0] == '\0') continue;
 
-        // assign to appropriate field
-        if (name_id == NAME_ID_FAMILY_NAME && !found_family) {
+        // assign to appropriate field (prefer English over localized names)
+        if (name_id == NAME_ID_FAMILY_NAME && (!found_family || is_english)) {
             entry->family_name = arena_strdup(arena, name_buf);
             found_family = true;
-        } else if (name_id == NAME_ID_SUBFAMILY_NAME && !found_subfamily) {
+            if (is_english) found_family_english = true;
+        } else if (name_id == NAME_ID_SUBFAMILY_NAME && (!found_subfamily || is_english)) {
             entry->subfamily_name = arena_strdup(arena, name_buf);
             found_subfamily = true;
-        } else if (name_id == NAME_ID_POSTSCRIPT_NAME && !found_postscript) {
+            if (is_english) found_subfamily_english = true;
+        } else if (name_id == NAME_ID_POSTSCRIPT_NAME && (!found_postscript || is_english)) {
             entry->postscript_name = arena_strdup(arena, name_buf);
             found_postscript = true;
+            if (is_english) found_postscript_english = true;
         }
     }
 

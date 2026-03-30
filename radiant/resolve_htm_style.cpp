@@ -395,7 +395,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // Get color attribute using DomNode interface
         const char* color_attr = span->get_attribute("color");
         if (color_attr) {
-            if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+            if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
             span->in_line->color = parse_html_color(color_attr);
             log_debug("HTM_TAG_FONT color: %s -> rgb(%d,%d,%d)", color_attr,
                       span->in_line->color.r, span->in_line->color.g, span->in_line->color.b);
@@ -460,7 +460,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_A: {
         // anchor style
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->cursor = CSS_VALUE_POINTER;
         span->in_line->color = color_name_to_rgb(CSS_VALUE_BLUE);
         span->font = alloc_font_prop(lycon);
@@ -511,7 +511,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
         span->font->font_size_from_medium = false;
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->vertical_align = CSS_VALUE_SUB;
         break;
     case HTM_TAG_SUP:
@@ -519,7 +519,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.style->font_size * 0.83;
         span->font->font_size_from_medium = false;
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!span->in_line) { span->in_line = alloc_inline_prop(lycon); }
         span->in_line->vertical_align = CSS_VALUE_SUPER;
         break;
     case HTM_TAG_DEL:  case HTM_TAG_STRIKE:
@@ -734,7 +734,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->font->font_weight_numeric = 700;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;  // TH defaults to center
-        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
         // Per HTML spec (WHATWG 15.3.8): td, th { padding: 1px; }
@@ -818,7 +818,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     }
     case HTM_TAG_TD: {
         // TD defaults to vertical-align: middle (CSS 2.1), text-align: start
-        if (!block->in_line) { block->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
+        if (!block->in_line) { block->in_line = alloc_inline_prop(lycon); }
         block->in_line->vertical_align = CSS_VALUE_MIDDLE;
 
         // Set default text-align to left (start) - table cells don't inherit text-align from outside
@@ -919,7 +919,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->bound->border->width.bottom = block->bound->border->width.left = 2;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
-        block->bound->padding.top = block->bound->padding.bottom = 0.35 * lycon->font.style->font_size;
+        // Chrome uses groove style with gray color for fieldset borders
+        block->bound->border->top_style = block->bound->border->right_style =
+            block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_GROOVE;
+        block->bound->border->top_color.r = block->bound->border->right_color.r =
+            block->bound->border->bottom_color.r = block->bound->border->left_color.r = 192;
+        block->bound->border->top_color.g = block->bound->border->right_color.g =
+            block->bound->border->bottom_color.g = block->bound->border->left_color.g = 192;
+        block->bound->border->top_color.b = block->bound->border->right_color.b =
+            block->bound->border->bottom_color.b = block->bound->border->left_color.b = 192;
+        block->bound->border->top_color.a = block->bound->border->right_color.a =
+            block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
+        block->bound->padding.top = 0.35 * lycon->font.style->font_size;
+        block->bound->padding.bottom = 0.625 * lycon->font.style->font_size;
         block->bound->padding.left = block->bound->padding.right = 0.75 * lycon->font.style->font_size;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
@@ -950,9 +962,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
+        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->padding.top = block->bound->padding.bottom = 1;
-        block->bound->padding.left = block->bound->padding.right = 6;
+        block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
+        block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
         break;
@@ -997,6 +1010,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
 
         // Set display and intrinsic size based on control type
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+
         switch (block->form->control_type) {
         case FORM_CONTROL_HIDDEN:
             block->display.outer = CSS_VALUE_NONE;
@@ -1004,21 +1019,53 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_CHECKBOX:
         case FORM_CONTROL_RADIO:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             block->form->intrinsic_width = FormDefaults::CHECK_SIZE;
             block->form->intrinsic_height = FormDefaults::CHECK_SIZE;
             // Set given_width/height so layout algorithm uses intrinsic size
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
+            // Default margin: 3px 3px 3px 4px (Chrome UA stylesheet)
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->margin.top = 3; block->bound->margin.right = 3;
+            block->bound->margin.bottom = 3; block->bound->margin.left = 4;
+            block->bound->margin.top_specificity = block->bound->margin.right_specificity =
+                block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
             break;
         case FORM_CONTROL_BUTTON:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             // Button intrinsic size depends on value text - computed in layout
+            // Default padding: 1px 6px (Chrome UA stylesheet)
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
+            block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
+            block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
+                block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+            // Default border: 2px outset (Chrome UA stylesheet)
+            if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+            block->bound->border->width.top = block->bound->border->width.bottom =
+                block->bound->border->width.left = block->bound->border->width.right = FormDefaults::BUTTON_BORDER;
+            block->bound->border->width.top_specificity = block->bound->border->width.bottom_specificity =
+                block->bound->border->width.left_specificity = block->bound->border->width.right_specificity = -1;
+            block->bound->border->top_style = block->bound->border->bottom_style =
+                block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_OUTSET;
+            break;
+        case FORM_CONTROL_IMAGE:
+            block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+            // Image button is a replaced element; use broken-image fallback dimensions
+            block->form->intrinsic_width = FormDefaults::IMAGE_INPUT_WIDTH;
+            block->form->intrinsic_height = FormDefaults::IMAGE_INPUT_HEIGHT;
+            lycon->block.given_width = block->form->intrinsic_width;
+            lycon->block.given_height = block->form->intrinsic_height;
             break;
         case FORM_CONTROL_RANGE: {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             block->form->intrinsic_width = FormDefaults::RANGE_WIDTH;
             block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT;
-            // Set given_width/height so layout algorithm uses intrinsic size
+            // Set given_width/height so layout algorithm uses intrinsic size (border-box)
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
             // Parse range attributes
@@ -1037,16 +1084,24 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         default:  // FORM_CONTROL_TEXT
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
-            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
-            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
-            // Set given_width/height so layout algorithm uses intrinsic size
-            lycon->block.given_width = block->form->intrinsic_width;
-            lycon->block.given_height = block->form->intrinsic_height;
+            // File inputs are wider than text inputs (Chrome: ~253px border-box)
+            if (block->form->input_type && strcmp(block->form->input_type, "file") == 0) {
+                block->form->intrinsic_width = 253.0f;
+                block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+                if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+                block->blk->given_width = 253.0f;
+                block->blk->given_height = FormDefaults::TEXT_HEIGHT;
+            } else {
+                block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
+                block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+            }
+            // Don't set given_width/given_height — layout_form_control computes
+            // intrinsic size dynamically from size attribute and font metrics
             // Default border for text inputs (CSS logical pixels)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
             block->bound->border->width.top = block->bound->border->width.right =
-                block->bound->border->width.bottom = block->bound->border->width.left = 1;
+                block->bound->border->width.bottom = block->bound->border->width.left = FormDefaults::TEXT_BORDER;
             block->bound->border->top_style = block->bound->border->right_style =
                 block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
             block->bound->border->top_color.r = block->bound->border->right_color.r =
@@ -1110,10 +1165,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->selected_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
-        // Set given_width/height so layout algorithm uses intrinsic size
-        lycon->block.given_width = block->form->intrinsic_width;
+        // Don't set given_width — let CSS cascade or calc_select_size set it
+        // Set given_height so layout uses intrinsic height (border-box)
         lycon->block.given_height = block->form->intrinsic_height;
         // Default border
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -1141,19 +1198,48 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (rows_attr) block->form->rows = (int)str_to_int64_default(rows_attr, strlen(rows_attr), 0);
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
-        // Intrinsic size based on cols/rows - computed in layout with font metrics
-        block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;  // placeholder
-        block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT * 2;  // 2 rows default
-        // Set given_width/height so layout algorithm uses intrinsic size
-        lycon->block.given_width = block->form->intrinsic_width;
-        lycon->block.given_height = block->form->intrinsic_height;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        // Note: textarea uses content-box (CSS default), same as Chrome UA
+        // Intrinsic size: Chrome default 182x36 border-box (20 cols, 2 rows)
+        block->form->intrinsic_width = 182.0f;
+        block->form->intrinsic_height = 36.0f;
+        // Don't set given_width/given_height — layout_form_control computes
+        // intrinsic size dynamically from cols/rows and font metrics
         // Default border and padding
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 1;
+            block->bound->border->width.bottom = block->bound->border->width.left = FormDefaults::TEXTAREA_BORDER;
+        block->bound->border->top_style = block->bound->border->right_style =
+            block->bound->border->bottom_style = block->bound->border->left_style = CSS_VALUE_SOLID;
+        block->bound->border->top_color.r = block->bound->border->right_color.r =
+            block->bound->border->bottom_color.r = block->bound->border->left_color.r = 118;
+        block->bound->border->top_color.g = block->bound->border->right_color.g =
+            block->bound->border->bottom_color.g = block->bound->border->left_color.g = 118;
+        block->bound->border->top_color.b = block->bound->border->right_color.b =
+            block->bound->border->bottom_color.b = block->bound->border->left_color.b = 118;
+        block->bound->border->top_color.a = block->bound->border->right_color.a =
+            block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
         block->bound->padding.top = block->bound->padding.bottom =
             block->bound->padding.left = block->bound->padding.right = FormDefaults::TEXTAREA_PADDING;
+        break;
+    }
+    case HTM_TAG_METER: {
+        // Meter: inline-block replaced element, Chrome default 80x16
+        block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        lycon->block.given_width = FormDefaults::METER_WIDTH;
+        lycon->block.given_height = FormDefaults::METER_HEIGHT;
+        break;
+    }
+    case HTM_TAG_PROGRESS: {
+        // Progress: inline-block replaced element, Chrome default 160x16
+        block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        lycon->block.given_width = FormDefaults::PROGRESS_WIDTH;
+        lycon->block.given_height = FormDefaults::PROGRESS_HEIGHT;
         break;
     }
     case HTM_TAG_LABEL:
@@ -1161,8 +1247,15 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     case HTM_TAG_OPTION:
     case HTM_TAG_OPTGROUP:
-        // Option and optgroup elements inside <select> should not participate in normal layout
-        // Browsers don't lay these out - the select renders its dropdown internally
+        // Keep option/optgroup in layout tree as 0×0 blocks (Chrome reports 0x0 dimensions)
+        block->display.outer = CSS_VALUE_BLOCK;
+        block->display.inner = CSS_VALUE_FLOW;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->given_width = 0;
+        block->blk->given_height = 0;
+        break;
+    case HTM_TAG_DATALIST:
+        // Datalist should be completely hidden (display:none)
         block->display.outer = CSS_VALUE_NONE;
         block->display.inner = CSS_VALUE_NONE;
         break;
