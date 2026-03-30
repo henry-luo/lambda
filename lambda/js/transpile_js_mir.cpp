@@ -6577,6 +6577,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "now", 3) == 0) {
                 return jm_call_0(mt, "js_date_now", MIR_T_I64);
             }
+            // Date.UTC(year, month, day, hour, min, sec, ms)
+            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Date", 4) == 0 &&
+                prop->name && prop->name->len == 3 && strncmp(prop->name->chars, "UTC", 3) == 0) {
+                // Build a proper JS array and pass to js_date_utc
+                MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+                return jm_call_1(mt, "js_date_utc", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+            }
             // Array.isArray(x)
             if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
                 prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "isArray", 7) == 0) {
@@ -7108,6 +7116,14 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 else if (plen == 15 && strncmp(pname, "getMilliseconds", 15) == 0) date_method_id = 7;
                 else if (plen == 11 && strncmp(pname, "toISOString", 11) == 0) date_method_id = 8;
                 else if (plen == 17 && strncmp(pname, "toLocaleDateString", 17) == 0) date_method_id = 9;
+                // UTC variants (10-16)
+                else if (plen == 14 && strncmp(pname, "getUTCFullYear", 14) == 0) date_method_id = 10;
+                else if (plen == 11 && strncmp(pname, "getUTCMonth", 11) == 0) date_method_id = 11;
+                else if (plen == 10 && strncmp(pname, "getUTCDate", 10) == 0) date_method_id = 12;
+                else if (plen == 11 && strncmp(pname, "getUTCHours", 11) == 0) date_method_id = 13;
+                else if (plen == 13 && strncmp(pname, "getUTCMinutes", 13) == 0) date_method_id = 14;
+                else if (plen == 13 && strncmp(pname, "getUTCSeconds", 13) == 0) date_method_id = 15;
+                else if (plen == 18 && strncmp(pname, "getUTCMilliseconds", 18) == 0) date_method_id = 16;
                 if (date_method_id >= 0) {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
                     return jm_call_2(mt, "js_date_method", MIR_T_I64,
@@ -9550,8 +9566,62 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, cn_val));
-            // Register static getter/setter names for 'in' operator
+            // Inherit static methods from parent classes (base-first, then own overrides)
             if (ce) {
+                {
+                    JsClassEntry* s_chain[32];
+                    int s_chain_len = 0;
+                    {
+                        JsClassEntry* p = ce->superclass;
+                        while (p && s_chain_len < 32) {
+                            s_chain[s_chain_len++] = p;
+                            p = p->superclass;
+                        }
+                    }
+                    for (int ci = s_chain_len - 1; ci >= 0; ci--) {
+                        JsClassEntry* parent = s_chain[ci];
+                        for (int mi = 0; mi < parent->method_count; mi++) {
+                            JsClassMethodEntry* me = &parent->methods[mi];
+                            if (!me->is_static || me->is_constructor) continue;
+                            if (!me->fc || !me->fc->func_item) continue;
+                            if (!me->name && !(me->computed && me->key_expr)) continue;
+                            MIR_reg_t fn_item;
+                            if (me->fc->capture_count > 0) {
+                                fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
+                            } else {
+                                fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
+                            }
+                            MIR_reg_t mk;
+                            if (me->computed && me->key_expr) {
+                                mk = jm_transpile_box_item(mt, me->key_expr);
+                                if (me->is_getter) {
+                                    mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                } else if (me->is_setter) {
+                                    mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                }
+                            } else if (me->is_getter) {
+                                char getter_key[128];
+                                snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)me->name->len, me->name->chars);
+                                mk = jm_box_string_literal(mt, getter_key, strlen(getter_key));
+                            } else if (me->is_setter) {
+                                char setter_key[128];
+                                snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)me->name->len, me->name->chars);
+                                mk = jm_box_string_literal(mt, setter_key, strlen(setter_key));
+                            } else {
+                                mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
+                            }
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                        }
+                    }
+                }
+                // Register own static methods as properties on the class object
                 for (int mi = 0; mi < ce->method_count; mi++) {
                     JsClassMethodEntry* me = &ce->methods[mi];
                     if (!me->is_static || me->is_constructor) continue;
@@ -10663,6 +10733,8 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     else if (ctor_len == 6 && strncmp(ctor_name, "RegExp", 6) == 0) is_builtin = true;
     // URL constructor
     else if (ctor_len == 3 && strncmp(ctor_name, "URL", 3) == 0) is_builtin = true;
+    // Date constructor
+    else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) is_builtin = true;
 
     // Only evaluate first arg eagerly for built-in types
     MIR_reg_t first_arg = 0;
@@ -10779,6 +10851,10 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new Date() — returns a Date object with getTime() method
     // Used by raytrace3d: var startDate = new Date().getTime();
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) {
+        if (first_arg) {
+            return jm_call_1(mt, "js_date_new_from", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
+        }
         return jm_call_0(mt, "js_date_new", MIR_T_I64);
     }
 
@@ -11879,7 +11955,61 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
-                    // Register static methods as properties on the class object
+                    // Inherit static methods from parent classes (base-first, then own overrides)
+                    {
+                        JsClassEntry* s_chain[32];
+                        int s_chain_len = 0;
+                        {
+                            JsClassEntry* p = ce->superclass;
+                            while (p && s_chain_len < 32) {
+                                s_chain[s_chain_len++] = p;
+                                p = p->superclass;
+                            }
+                        }
+                        for (int ci = s_chain_len - 1; ci >= 0; ci--) {
+                            JsClassEntry* parent = s_chain[ci];
+                            for (int mi = 0; mi < parent->method_count; mi++) {
+                                JsClassMethodEntry* me = &parent->methods[mi];
+                                if (!me->is_static || me->is_constructor) continue;
+                                if (!me->fc || !me->fc->func_item) continue;
+                                if (!me->name && !(me->computed && me->key_expr)) continue;
+                                MIR_reg_t fn_item;
+                                if (me->fc->capture_count > 0) {
+                                    fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
+                                } else {
+                                    fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
+                                }
+                                MIR_reg_t mk;
+                                if (me->computed && me->key_expr) {
+                                    mk = jm_transpile_box_item(mt, me->key_expr);
+                                    if (me->is_getter) {
+                                        mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                    } else if (me->is_setter) {
+                                        mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                    }
+                                } else if (me->is_getter) {
+                                    char getter_key[128];
+                                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)me->name->len, me->name->chars);
+                                    mk = jm_box_string_literal(mt, getter_key, strlen(getter_key));
+                                } else if (me->is_setter) {
+                                    char setter_key[128];
+                                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)me->name->len, me->name->chars);
+                                    mk = jm_box_string_literal(mt, setter_key, strlen(setter_key));
+                                } else {
+                                    mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
+                                }
+                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                            }
+                        }
+                    }
+                    // Register own static methods as properties on the class object (overrides parents)
                     for (int mi = 0; mi < ce->method_count; mi++) {
                         JsClassMethodEntry* me = &ce->methods[mi];
                         if (!me->is_static || me->is_constructor) continue;
@@ -15100,7 +15230,62 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
                     }
 
-                    // Register static methods as properties on the class object
+                    // Inherit static methods from parent classes (base-first, then own overrides)
+                    {
+                        JsClassEntry* s_chain[32];
+                        int s_chain_len = 0;
+                        {
+                            JsClassEntry* p = ce->superclass;
+                            while (p && s_chain_len < 32) {
+                                s_chain[s_chain_len++] = p;
+                                p = p->superclass;
+                            }
+                        }
+                        for (int ci = s_chain_len - 1; ci >= 0; ci--) {
+                            JsClassEntry* parent = s_chain[ci];
+                            for (int mi = 0; mi < parent->method_count; mi++) {
+                                JsClassMethodEntry* me = &parent->methods[mi];
+                                if (!me->is_static || me->is_constructor) continue;
+                                if (!me->fc || !me->fc->func_item) continue;
+                                if (!me->name && !(me->computed && me->key_expr)) continue;
+                                MIR_reg_t fn_item;
+                                if (me->fc->capture_count > 0) {
+                                    fn_item = jm_build_closure_for_method(mt, me->fc, me->param_count);
+                                } else {
+                                    fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
+                                        MIR_T_I64, MIR_new_int_op(mt->ctx, me->param_count));
+                                }
+                                MIR_reg_t mk;
+                                if (me->computed && me->key_expr) {
+                                    mk = jm_transpile_box_item(mt, me->key_expr);
+                                    if (me->is_getter) {
+                                        mk = jm_call_1(mt, "js_make_getter_key", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                    } else if (me->is_setter) {
+                                        mk = jm_call_1(mt, "js_make_setter_key", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mk));
+                                    }
+                                } else if (me->is_getter) {
+                                    char getter_key[128];
+                                    snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)me->name->len, me->name->chars);
+                                    mk = jm_box_string_literal(mt, getter_key, strlen(getter_key));
+                                } else if (me->is_setter) {
+                                    char setter_key[128];
+                                    snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)me->name->len, me->name->chars);
+                                    mk = jm_box_string_literal(mt, setter_key, strlen(setter_key));
+                                } else {
+                                    mk = jm_box_string_literal(mt, me->name->chars, (int)me->name->len);
+                                }
+                                jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, mk),
+                                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                            }
+                        }
+                    }
+
+                    // Register own static methods as properties on the class object
                     // so they can be called dynamically (e.g., ns[$buildXFAObject](name, attrs))
                     for (int mi = 0; mi < ce->method_count; mi++) {
                         JsClassMethodEntry* me = &ce->methods[mi];

@@ -22,6 +22,7 @@
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
@@ -1033,6 +1034,12 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "switch_frame") == 0) {
+        ev->type = SIM_EVENT_SWITCH_FRAME;
+        const char* sel = reader.get("selector").cstring();
+        if (sel) ev->frame_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+        // NULL selector means switch back to main frame
+    }
     else if (strcmp(type_str, "log") == 0) {
         ev->type = SIM_EVENT_LOG;
         const char* msg = reader.get("message").cstring();
@@ -1058,6 +1065,13 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         log_error("event_sim: unknown event type '%s'", type_str);
         mem_free(ev);
         return NULL;
+    }
+
+    // Parse optional auto-waiting fields for assertion events
+    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_ELEMENT_AT) {
+        ev->assert_timeout = reader.get("timeout").asInt32();
+        ev->assert_interval = reader.get("interval").asInt32();
+        if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
     }
 
     return ev;
@@ -1132,6 +1146,12 @@ EventSimContext* event_sim_load(const char* json_file) {
         ctx->viewport_width = vp.get("width").asInt32();
         ctx->viewport_height = vp.get("height").asInt32();
         log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
+    }
+
+    // Parse optional default_timeout (ms) for auto-waiting assertions
+    ctx->default_timeout = root_map.get("default_timeout").asInt32();
+    if (ctx->default_timeout > 0) {
+        log_info("event_sim: default_timeout %dms", ctx->default_timeout);
     }
 
     // Parse each event
@@ -1902,12 +1922,27 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (!expected) {
                 log_error("event_sim: assert_focus - target element not found");
                 ctx->fail_count++;
-            } else if (actual != expected) {
-                log_error("event_sim: assert_focus FAIL - focus not on expected element");
-                ctx->fail_count++;
-            } else {
+            } else if (actual == expected) {
                 log_info("event_sim: assert_focus PASS");
                 ctx->pass_count++;
+            } else {
+                // for replaced elements (input, textarea, etc.), focus may be on
+                // an internal child view; check if actual is a descendant of expected
+                bool match = false;
+                if (actual) {
+                    View* p = actual->parent;
+                    while (p) {
+                        if (p == expected) { match = true; break; }
+                        p = p->parent;
+                    }
+                }
+                if (match) {
+                    log_info("event_sim: assert_focus PASS (child of expected)");
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_focus FAIL - focus not on expected element");
+                    ctx->fail_count++;
+                }
             }
             break;
         }
@@ -2187,6 +2222,48 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_SWITCH_FRAME: {
+            if (!ev->frame_selector) {
+                // switch back to main frame
+                if (ctx->original_document) {
+                    uicon->document = (DomDocument*)ctx->original_document;
+                    ctx->frame_stack_depth = 0;
+                    log_info("event_sim: switch_frame back to main");
+                } else {
+                    log_error("event_sim: switch_frame to main but no original document saved");
+                    ctx->fail_count++;
+                }
+                break;
+            }
+            // save original document on first switch
+            if (!ctx->original_document) {
+                ctx->original_document = uicon->document;
+            }
+            // find iframe element in current document
+            DomDocument* cur_doc = uicon->document;
+            View* iframe_view = find_element_by_selector(cur_doc, ev->frame_selector);
+            if (!iframe_view || !iframe_view->is_element()) {
+                log_error("event_sim: switch_frame - iframe '%s' not found", ev->frame_selector);
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* iframe_elem = (DomElement*)iframe_view;
+            if (!iframe_elem->embed || !iframe_elem->embed->doc) {
+                log_error("event_sim: switch_frame - '%s' has no embedded document", ev->frame_selector);
+                ctx->fail_count++;
+                break;
+            }
+            if (ctx->frame_stack_depth >= 8) {
+                log_error("event_sim: switch_frame - frame stack overflow");
+                ctx->fail_count++;
+                break;
+            }
+            ctx->frame_stack[ctx->frame_stack_depth++] = cur_doc;
+            uicon->document = iframe_elem->embed->doc;
+            log_info("event_sim: switch_frame to '%s'", ev->frame_selector);
+            break;
+        }
+
         // ===== Utilities =====
 
         case SIM_EVENT_LOG:
@@ -2227,6 +2304,54 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
     }
 }
 
+// Auto-waiting wrapper: retries assertion events until they pass or timeout expires
+static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
+    // Non-assertion events execute directly
+    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_ELEMENT_AT) {
+        process_sim_event(ctx, ev, uicon, window);
+        return;
+    }
+
+    // Determine effective timeout
+    int timeout = ev->assert_timeout > 0 ? ev->assert_timeout : ctx->default_timeout;
+    if (timeout <= 0) {
+        process_sim_event(ctx, ev, uicon, window);
+        return;
+    }
+
+    int interval = ev->assert_interval > 0 ? ev->assert_interval : 100;
+    int elapsed = 0;
+
+    while (true) {
+        int saved_pass = ctx->pass_count;
+        int saved_fail = ctx->fail_count;
+
+        process_sim_event(ctx, ev, uicon, window);
+
+        // Passed if pass_count increased without fail_count increasing
+        if (ctx->pass_count > saved_pass && ctx->fail_count == saved_fail) {
+            return;
+        }
+
+        // Timeout expired — keep the failure
+        if (elapsed >= timeout) {
+            return;
+        }
+
+        // Restore counts and retry after sleeping
+        ctx->pass_count = saved_pass;
+        ctx->fail_count = saved_fail;
+
+        struct timespec ts;
+        ts.tv_sec = interval / 1000;
+        ts.tv_nsec = (interval % 1000) * 1000000L;
+        nanosleep(&ts, NULL);
+        elapsed += interval;
+
+        log_info("event_sim: auto-wait retry after %dms (timeout=%dms)", elapsed, timeout);
+    }
+}
+
 bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window, double current_time) {
     UiContext* uicon = (UiContext*)uicon_ptr;
     if (!ctx || !ctx->is_running) return false;
@@ -2240,9 +2365,9 @@ bool event_sim_update(EventSimContext* ctx, void* uicon_ptr, GLFWwindow* window,
         return true;  // Still running, waiting
     }
 
-    // Process current event
+    // Process current event (with auto-wait retry for assertions)
     SimEvent* ev = (SimEvent*)ctx->events->data[ctx->current_index];
-    process_sim_event(ctx, ev, uicon, window);
+    process_sim_event_with_retry(ctx, ev, uicon, window);
 
     // Calculate wait time for next event
     int wait_ms = 50;  // default 50ms between events

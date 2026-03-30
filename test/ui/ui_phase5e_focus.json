@@ -1,0 +1,43 @@
+{
+  "name": "Phase 5e: Focus and tab order tests",
+  "html": "test/ui/test_phase5e_focus.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== Phase 5e: Focus and tab order ===" },
+
+    { "type": "log", "message": "--- Test 1: click to focus #name ---" },
+    { "type": "click", "target": { "selector": "#name" } },
+    { "type": "assert_focus", "target": { "selector": "#name" } },
+    { "type": "assert_state", "target": { "selector": "#name" }, "state": ":focus", "value": true },
+
+    { "type": "log", "message": "--- Test 2: Tab to #email ---" },
+    { "type": "key_press", "key": "tab" },
+    { "type": "assert_focus", "target": { "selector": "#email" } },
+    { "type": "assert_state", "target": { "selector": "#name" }, "state": ":focus", "value": false },
+    { "type": "assert_state", "target": { "selector": "#email" }, "state": ":focus", "value": true },
+
+    { "type": "log", "message": "--- Test 3: Tab to #btn ---" },
+    { "type": "key_press", "key": "tab" },
+    { "type": "assert_focus", "target": { "selector": "#btn" } },
+
+    { "type": "log", "message": "--- Test 4: Tab to #sel ---" },
+    { "type": "key_press", "key": "tab" },
+    { "type": "assert_focus", "target": { "selector": "#sel" } },
+
+    { "type": "log", "message": "--- Test 5: Tab to #ta ---" },
+    { "type": "key_press", "key": "tab" },
+    { "type": "assert_focus", "target": { "selector": "#ta" } },
+
+    { "type": "log", "message": "--- Test 6: Tab to #link ---" },
+    { "type": "key_press", "key": "tab" },
+    { "type": "assert_focus", "target": { "selector": "#link" } },
+
+    { "type": "log", "message": "--- Test 7: Shift+Tab back to #ta ---" },
+    { "type": "key_press", "key": "tab", "mods_str": "shift" },
+    { "type": "assert_focus", "target": { "selector": "#ta" } },
+
+    { "type": "log", "message": "--- Test 8: Shift+Tab back to #sel ---" },
+    { "type": "key_press", "key": "tab", "mods_str": "shift" },
+    { "type": "assert_focus", "target": { "selector": "#sel" } }
+  ]
+}

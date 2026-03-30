@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { margin: 0; padding: 20px; font-family: sans-serif; }
+#btn { width: 200px; height: 50px; background: #3498db; color: white; text-align: center; line-height: 50px; cursor: pointer; }
+#btn:hover { background: #2980b9; }
+#link { display: inline-block; margin-top: 20px; color: blue; }
+#link:hover { color: red; }
+#nested { margin-top: 20px; padding: 20px; background: #eee; }
+#nested .inner { padding: 10px; background: #ddd; }
+#nested .inner:hover { background: #ccc; }
+</style>
+</head>
+<body>
+<div id="btn">Hover Me</div>
+<a id="link" href="#">Link</a>
+<div id="nested">
+  <div class="inner">Nested hover</div>
+</div>
+</body>
+</html>

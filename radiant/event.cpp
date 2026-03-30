@@ -175,16 +175,18 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     evcon->font = pa_font;
 
     if (!evcon->target) { // check the block itself
-        float x = evcon->block.x, y = evcon->block.y;
+        // use the block's own accumulated position (parent + block offset),
+        // not the restored parent position
+        float x = evcon->block.x + block->x, y = evcon->block.y + block->y;
         if (x <= event->x && event->x < x + block->width &&
             y <= event->y && event->y < y + block->height) {
             log_debug("hit on block: %s", block->node_name());
             evcon->target = (View*)block;
-            evcon->offset_x = event->x - evcon->block.x;
-            evcon->offset_y = event->y - evcon->block.y;
+            evcon->offset_x = event->x - x;
+            evcon->offset_y = event->y - y;
         }
         else {
-            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %.1f, ey: %.1f, right: %.1f, bottom: %.1f",
+            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %d, ey: %d, right: %.1f, bottom: %.1f",
                 block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }

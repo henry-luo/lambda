@@ -28,6 +28,8 @@ Input* js_input = NULL;
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
+// Forward declaration for js_map_get_fast (defined later in this file)
+static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_found);
 
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
@@ -279,8 +281,38 @@ extern "C" Item js_to_string(Item value) {
         return (Item){.item = s2it(result)};
     }
 
-    case LMD_TYPE_MAP:
+    case LMD_TYPE_MAP: {
+        // Check for Date objects (have __class_name__ == "Date")
+        bool own_cls = false;
+        Item cls_val = js_map_get_fast(value.map, "__class_name__", 14, &own_cls);
+        if (own_cls && get_type_id(cls_val) == LMD_TYPE_STRING) {
+            String* cls_s = it2s(cls_val);
+            if (cls_s && cls_s->len == 4 && strncmp(cls_s->chars, "Date", 4) == 0) {
+                // delegate to js_date_method(obj, 17=toString)
+                return js_date_method(value, 17);
+            }
+        }
+        // Check for Error-like objects (have 'name' and 'message' properties)
+        // JS: String(new Error("msg")) => "Error: msg"
+        bool own_name = false, own_msg = false;
+        Item name_val = js_map_get_fast(value.map, "name", 4, &own_name);
+        Item msg_val = js_map_get_fast(value.map, "message", 7, &own_msg);
+        if (own_name && get_type_id(name_val) == LMD_TYPE_STRING) {
+            String* name_s = it2s(name_val);
+            String* msg_s = (own_msg && get_type_id(msg_val) == LMD_TYPE_STRING) ? it2s(msg_val) : NULL;
+            if (msg_s && msg_s->len > 0) {
+                StrBuf* sb = strbuf_new();
+                strbuf_append_str_n(sb, name_s->chars, (int)name_s->len);
+                strbuf_append_str_n(sb, ": ", 2);
+                strbuf_append_str_n(sb, msg_s->chars, (int)msg_s->len);
+                String* result = heap_create_name(sb->str, sb->length);
+                strbuf_free(sb);
+                return (Item){.item = s2it(result)};
+            }
+            return name_val;
+        }
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
+    }
 
     case LMD_TYPE_FUNC:
         return (Item){.item = s2it(heap_create_name("[object Function]"))};
@@ -1105,6 +1137,16 @@ extern "C" Item js_property_get(Item object, Item key) {
         }
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
+        // JS semantics: numeric keys are coerced to strings (obj[17] === obj["17"])
+        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+            char buf[64];
+            if (get_type_id(key) == LMD_TYPE_INT) {
+                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+            } else {
+                snprintf(buf, sizeof(buf), "%g", it2d(key));
+            }
+            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
         Item result = ItemNull;
         bool own_found = false;
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
@@ -1255,6 +1297,16 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
 
     if (type == LMD_TYPE_MAP) {
         Map* m = object.map;
+        // JS semantics: numeric keys are coerced to strings (obj[17] === obj["17"])
+        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+            char buf[64];
+            if (get_type_id(key) == LMD_TYPE_INT) {
+                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+            } else {
+                snprintf(buf, sizeof(buf), "%g", it2d(key));
+            }
+            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
             return js_dom_set_property(object, key, value);
@@ -2621,6 +2673,33 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         }
     }
 
+    // Built-in object method fallbacks (before property access)
+    {
+        String* method = it2s(method_name);
+        if (method) {
+            if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
+                // Try property access first (user-defined toString)
+                Item fn = js_property_access(obj, method_name);
+                if (get_type_id(fn) == LMD_TYPE_FUNC) {
+                    return js_call_function(fn, obj, args, argc);
+                }
+                // Built-in fallback: use js_to_string (handles Error, plain objects)
+                return js_to_string(obj);
+            }
+            if (method->len == 14 && strncmp(method->chars, "hasOwnProperty", 14) == 0) {
+                if (argc > 0) {
+                    String* prop = it2s(js_to_string(args[0]));
+                    if (prop) {
+                        bool own = false;
+                        js_map_get_fast(obj.map, prop->chars, prop->len, &own);
+                        return own ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
+                    }
+                }
+                return (Item){.item = ITEM_FALSE};
+            }
+        }
+    }
+
     // Fallback: property access + call
     Item fn = js_property_access(obj, method_name);
     return js_call_function(fn, obj, args, argc);
@@ -2719,18 +2798,31 @@ static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_repla
     }
     if (!replacement_is_func) {
         if (is_replace_all) {
-            // simple string replaceAll via loop
-            Item result = str;
-            int max_iter = 10000;
-            while (max_iter-- > 0) {
-                Item replaced = fn_replace(result, args[0], args[1]);
-                String* r = it2s(replaced);
-                String* prev_s = it2s(result);
-                if (r && prev_s && r->len == prev_s->len && strncmp(r->chars, prev_s->chars, r->len) == 0)
-                    break;
-                result = replaced;
+            // linear scan replaceAll: find each occurrence and build result
+            String* repl = it2s(js_to_string(args[1]));
+            if (!repl) return str;
+            StrBuf* buf = strbuf_new();
+            int pos = 0;
+            bool found_any = false;
+            while (pos <= (int)s->len - (int)search->len) {
+                const char* found = (const char*)memmem(s->chars + pos, s->len - pos, search->chars, search->len);
+                if (!found) break;
+                found_any = true;
+                int match_start = (int)(found - s->chars);
+                if (match_start > pos)
+                    strbuf_append_str_n(buf, s->chars + pos, match_start - pos);
+                strbuf_append_str_n(buf, repl->chars, repl->len);
+                pos = match_start + (int)search->len;
             }
-            return result;
+            if (found_any) {
+                if (pos < (int)s->len)
+                    strbuf_append_str_n(buf, s->chars + pos, (int)s->len - pos);
+                String* result_str = heap_strcpy(buf->str, buf->length);
+                strbuf_free(buf);
+                return (Item){.item = s2it(result_str)};
+            }
+            strbuf_free(buf);
+            return str;
         }
         return fn_replace(str, args[0], args[1]);
     }

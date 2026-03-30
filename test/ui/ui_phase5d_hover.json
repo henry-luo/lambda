@@ -1,0 +1,25 @@
+{
+  "name": "Phase 5d: Hover pseudo-state tests",
+  "html": "test/ui/test_phase5d_hover.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== Phase 5d: Hover state tests ===" },
+
+    { "type": "log", "message": "--- Test 1: hover on #btn ---" },
+    { "type": "mouse_move", "target": { "selector": "#btn" } },
+    { "type": "wait", "ms": 50 },
+    { "type": "assert_state", "target": { "selector": "#btn" }, "state": ":hover", "value": true },
+
+    { "type": "log", "message": "--- Test 2: hover transfers from #btn to #link ---" },
+    { "type": "mouse_move", "target": { "selector": "#link" } },
+    { "type": "wait", "ms": 50 },
+    { "type": "assert_state", "target": { "selector": "#link" }, "state": ":hover", "value": true },
+    { "type": "assert_state", "target": { "selector": "#btn" }, "state": ":hover", "value": false },
+
+    { "type": "log", "message": "--- Test 3: hover transfers back to #btn ---" },
+    { "type": "mouse_move", "target": { "selector": "#btn" } },
+    { "type": "wait", "ms": 50 },
+    { "type": "assert_state", "target": { "selector": "#btn" }, "state": ":hover", "value": true },
+    { "type": "assert_state", "target": { "selector": "#link" }, "state": ":hover", "value": false }
+  ]
+}
