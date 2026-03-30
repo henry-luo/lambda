@@ -2914,7 +2914,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_COLOR: {
             log_debug("[CSS] Processing color property");
             if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+                span->in_line = alloc_inline_prop(lycon);
             }
             span->in_line->color = resolve_color_value(lycon, value);
             break;
@@ -3603,7 +3603,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_VERTICAL_ALIGN: {
             log_debug("[CSS] Processing vertical-align property");
             if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+                span->in_line = alloc_inline_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -3640,7 +3640,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_CURSOR: {
             log_debug("[CSS] Processing cursor property");
             if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+                span->in_line = alloc_inline_prop(lycon);
             }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum cursor_value = value->data.keyword;
@@ -7451,7 +7451,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_VISIBILITY: {
             log_debug("[CSS] Processing visibility property");
             if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+                span->in_line = alloc_inline_prop(lycon);
             }
             // Visibility applies to all elements, stored in ViewSpan
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
@@ -7472,7 +7472,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
         case CSS_PROPERTY_OPACITY: {
             log_debug("[CSS] Processing opacity property");
             if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+                span->in_line = alloc_inline_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_TYPE_NUMBER) {

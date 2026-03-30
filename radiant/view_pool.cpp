@@ -185,6 +185,12 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
     }
 }
 
+InlineProp* alloc_inline_prop(LayoutContext* lycon) {
+    InlineProp* prop = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+    prop->opacity = 1.0f;  // CSS default: fully opaque (pool_calloc zeros to 0.0f)
+    return prop;
+}
+
 ScrollProp* alloc_scroll_prop(LayoutContext* lycon) {
     ScrollProp* prop = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
     prop->overflow_x = prop->overflow_y = CSS_VALUE_VISIBLE;   // initial value
