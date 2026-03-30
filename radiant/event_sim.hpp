@@ -19,6 +19,7 @@
  *     {"type": "mouse_down", "target_text": "Click here"},
  *     {"type": "mouse_up", "x": 100, "y": 200, "button": 0, "mods": 0},
  *     {"type": "mouse_drag", "from_x": 100, "from_y": 200, "to_x": 200, "to_y": 200},
+ *     {"type": "mouse_drag", "target": {"selector": "#start"}, "to_target": {"selector": "#end"}},
  *     {"type": "key_press", "key": "a"},
  *     {"type": "key_down", "key": "Control"},
  *     {"type": "key_up", "key": "Control"},
@@ -109,6 +110,8 @@ struct SimEvent {
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
+    char* to_target_selector;    // for mouse_drag: destination CSS selector
+    char* to_target_text;        // for mouse_drag: destination text target
     char* input_text;            // for type action: text to type
     bool clear_first;            // for type action: select-all + delete before typing
     char* assert_contains;       // for assert_text: substring match

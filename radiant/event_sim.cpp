@@ -462,6 +462,16 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->to_x = reader.get("to_x").asInt32();
         ev->to_y = reader.get("to_y").asInt32();
         ev->button = reader.get("button").asInt32();
+        parse_target(reader, ev);
+        // Parse to_target for destination selector/text
+        ItemReader to_target_item = reader.get("to_target");
+        if (to_target_item.isMap()) {
+            MapReader to_map = to_target_item.asMap();
+            const char* sel = to_map.get("selector").cstring();
+            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+            const char* txt = to_map.get("text").cstring();
+            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
+        }
     }
     else if (strcmp(type_str, "key_press") == 0) {
         ev->type = SIM_EVENT_KEY_PRESS;
@@ -738,6 +748,8 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->file_path) mem_free(ev->file_path);
             if (ev->target_text) mem_free(ev->target_text);
             if (ev->target_selector) mem_free(ev->target_selector);
+            if (ev->to_target_selector) mem_free(ev->to_target_selector);
+            if (ev->to_target_text) mem_free(ev->to_target_text);
             if (ev->input_text) mem_free(ev->input_text);
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
@@ -953,16 +965,47 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
-        case SIM_EVENT_MOUSE_DRAG:
-            log_info("event_sim: mouse_drag from (%d, %d) to (%d, %d)", ev->x, ev->y, ev->to_x, ev->to_y);
-            sim_mouse_button(uicon, ev->x, ev->y, ev->button, ev->mods, true);
+        case SIM_EVENT_MOUSE_DRAG: {
+            // Resolve start position from target selector/text or raw from_x/from_y
+            int drag_x = ev->x, drag_y = ev->y;
+            if (ev->target_selector || ev->target_text) {
+                if (!resolve_target(ev, uicon->document, &drag_x, &drag_y)) break;
+            }
+            // Resolve end position from to_target or raw to_x/to_y
+            int drag_to_x = ev->to_x, drag_to_y = ev->to_y;
+            if (ev->to_target_selector && uicon->document) {
+                View* to_elem = find_element_by_selector(uicon->document, ev->to_target_selector);
+                if (to_elem) {
+                    float fx, fy;
+                    get_element_center_abs(to_elem, &fx, &fy);
+                    drag_to_x = (int)fx;
+                    drag_to_y = (int)fy;
+                    log_info("event_sim: resolved to_target selector '%s' to (%d, %d)", ev->to_target_selector, drag_to_x, drag_to_y);
+                } else {
+                    log_error("event_sim: to_target selector '%s' not found", ev->to_target_selector);
+                    break;
+                }
+            } else if (ev->to_target_text && uicon->document) {
+                float fx, fy;
+                if (find_text_position(uicon->document, ev->to_target_text, &fx, &fy)) {
+                    drag_to_x = (int)fx;
+                    drag_to_y = (int)fy;
+                    log_info("event_sim: resolved to_target text '%s' to (%d, %d)", ev->to_target_text, drag_to_x, drag_to_y);
+                } else {
+                    log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
+                    break;
+                }
+            }
+            log_info("event_sim: mouse_drag from (%d, %d) to (%d, %d)", drag_x, drag_y, drag_to_x, drag_to_y);
+            sim_mouse_button(uicon, drag_x, drag_y, ev->button, ev->mods, true);
             for (int step = 1; step <= 5; step++) {
-                int px = ev->x + (ev->to_x - ev->x) * step / 5;
-                int py = ev->y + (ev->to_y - ev->y) * step / 5;
+                int px = drag_x + (drag_to_x - drag_x) * step / 5;
+                int py = drag_y + (drag_to_y - drag_y) * step / 5;
                 sim_mouse_move(uicon, px, py);
             }
-            sim_mouse_button(uicon, ev->to_x, ev->to_y, ev->button, ev->mods, false);
+            sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
             break;
+        }
 
         case SIM_EVENT_KEY_PRESS:
             log_info("event_sim: key_press key=%d mods=%d", ev->key, ev->mods);

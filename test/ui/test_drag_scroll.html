@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Drag Scroll Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 20px; height: 3000px; }
+        h2 { margin-bottom: 10px; }
+        .section { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; }
+        #top-section { background: #f0f8ff; }
+        #mid-section { margin-top: 500px; background: #fff0f0; }
+        #bottom-section { margin-top: 500px; background: #f0fff0; }
+        #drag-start { display: inline; background: #ffe0e0; }
+        #drag-end { display: inline; background: #e0ffe0; }
+        .spacer { height: 40px; }
+    </style>
+</head>
+<body>
+    <h2>Drag & Scroll Test</h2>
+    <div class="section" id="top-section">
+        <p>This is the top section. <span id="drag-start">Start here</span> and drag to <span id="drag-end">end here</span> to select text.</p>
+        <div class="spacer"></div>
+        <p>More content in the top section for padding.</p>
+    </div>
+    <div class="section" id="mid-section">
+        <p>This is the middle section, visible after scrolling ~500px.</p>
+    </div>
+    <div class="section" id="bottom-section">
+        <p>This is the bottom section, very far down the page.</p>
+    </div>
+</body>
+</html>
