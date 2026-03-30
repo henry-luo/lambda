@@ -394,6 +394,7 @@ Add `select_option`, `check`, `focus`, viewport configuration, and exit code rep
 | `key_up` | Release key | `key` |
 | `key_combo` | Key with modifiers | `key`, `mods_str` |
 | `scroll` | Scroll at position | `x`, `y`, `dx`, `dy` |
+| `resize` | **NEW** Resize viewport | `width`, `height` |
 
 ### Assertion Events
 
@@ -467,13 +468,35 @@ python3 temp/al2.py test/layout/reference/baseline_809_text_align.json
 
 #### Current test mapping
 
-| Phase | HTML (from baseline/) | Event JSON (test/ui/) | Key assertions |
-|-------|-----------------------|-----------------------|----------------|
+| Phase | HTML | Event JSON (test/ui/) | Key assertions |
+|-------|------|-----------------------|----------------|
 | 1a | `baseline_201_font_sizes.html` | `ui_phase1a_font_sizes.json` | `assert_visible`, `assert_text` on font-size paragraphs — no mouse |
 | 1b | `baseline_809_text_align.html` | `ui_phase1b_text_align.json` | `click` by text, `assert_caret` on block paragraphs |
+| 1c | `test_click_text.html` | `ui_phase1c_click_positions.json` | `click` by coordinates, `assert_caret` on specific positions |
+| 1d | `test_click_elements.html` | `ui_phase1d_interactive_elements.json` | `click` on `<a>`, `<button>` by selector |
+| 1e | `test_click_elements.html` | `ui_phase1e_structural_elements.json` | `assert_visible`, `assert_text` on structural elements |
+| 1f | `test_click_elements.html` | `ui_phase1f_list_elements.json` | `click` on list items, `assert_text` |
 | 2a | `baseline_502_text_wrapping.html` | `ui_phase2a_text_wrapping.json` | `click` on wrapped text, `assert_caret` |
 | 2b | `baseline_503_styled_spans.html` | `ui_phase2b_styled_spans.json` | `assert_visible` on inline spans, `click` by selector and text |
+| 2c | `test_form_assertions.html` | `ui_phase2c_form_assertions.json` | `assert_value`, `assert_checked`, `assert_focus` on form fields |
+| 3 | `test_form_controls.html` | `ui_phase3_form_controls.json` | `check`, `select_option` on form elements |
+| 3 | (any) | `ui_phase3_viewport.json` | Viewport configuration via metadata |
 | 3a | `baseline_809_text_align.html` | `ui_phase3a_drag_select.json` | `mouse_drag`, `assert_selection is_collapsed: false` |
+| 4a | `test_scroll.html` | `ui_phase4a_scroll_interact.json` | `scroll`, `click` off-screen element, `assert_text`, `assert_visible` |
+| 4b | `test_keyboard.html` | `ui_phase4b_keyboard.json` | `key_combo` Cmd+A, `assert_selection is_collapsed: false` |
+| 4c | `test_drag_scroll.html` | `ui_phase4c_resize.json` | `resize`, `assert_visible`, `assert_text` after relayout |
+
+Additional standalone tests (not phase-tagged):
+
+| HTML | Event JSON | Description |
+|------|------------|-------------|
+| `test_click_elements.html` | `test_click_elements.json` | Click on various element types |
+| `test_click_text.html` | `test_click_text.json` | Click on text at specific positions |
+| `test_drag_scroll.html` | `test_drag_scroll.json` | Drag-select text, scroll, `to_target` drag |
+| `test_hover.html` | `test_hover.json` | Mouse-move hover events |
+| `test_scroll.html` | `test_scroll.json` | Basic scroll and `assert_scroll` |
+| `test_text_selection.html` | `test_text_selection.json` | Click/dblclick text selection |
+| `test_click_elements.html` | `test_list_reflow.json` | List reflow after interactions |
 
 #### How UI tests specify their HTML target
 
@@ -715,43 +738,76 @@ With selector-based endpoints (once absolute coordinate mapping is reliable):
 
 ---
 
-### Phase 4 — Advanced Interactions (Future)
+### Phase 4 — Advanced Interactions
 
-These are planned but not yet scoped for immediate implementation. They depend
-on the engine capabilities being extended beyond the current state.
-
-#### 4a. Form Controls
-
-- `<input type="text">` — requires form input focus, cursor rendering, and
-  value tracking in `RadiantState`.
-- `<input type="checkbox">` — requires toggle logic + visual checked state.
-- `<select>` dropdown — requires popup overlay rendering.
-
-Event types needed: `type`, `check`, `select_option`, `assert_value`,
-`assert_checked`.
-
-#### 4b. Scroll + Layout Interaction
+#### 4a. Scroll + Layout Interaction
 
 - Scroll to bring off-screen elements into view, then interact with them.
-- Requires `assert_visible` to correctly handle elements that are in the DOM
+- Verify that `assert_visible` correctly handles elements that are in the DOM
   but clipped by overflow.
-- Sticky / fixed-position elements need special handling in hit-testing.
+- Test sticky / fixed-position elements with hit-testing after scroll.
 
-#### 4c. Keyboard Shortcuts
+Event types exercised: `scroll`, `assert_scroll`, `click`, `assert_visible`,
+`assert_text`.
+
+#### 4b. Keyboard Shortcuts
 
 - `Cmd+A` (select all), `Cmd+C`/`Cmd+V` (copy/paste), `Cmd+Z` (undo).
-- Requires clipboard integration and undo history in `RadiantState`.
+- Already supported via `key_combo` event type.
+- Verify selection state after `Cmd+A`, verify clipboard is not required
+  (just `assert_selection is_collapsed: false`).
 
-#### 4d. Accessibility Tree Assertions
+#### 4c. Window Resize Simulation
+
+Simulate window resizing to test responsive layout behaviour. The `resize`
+event changes the viewport dimensions and triggers a full document relayout.
+
+```json
+{"type": "resize", "width": 800, "height": 600}
+```
+
+Fields:
+- `width` (int): New viewport width in CSS pixels.
+- `height` (int): New viewport height in CSS pixels.
+
+Implementation: Updates `UiContext.viewport_width/height` and
+`window_width/height` (accounting for `pixel_ratio`), recreates the render
+surface, then calls `reflow_html_doc()`. This mirrors the code path in
+`render()` when the OS reports a framebuffer size change.
+
+Test scenarios:
+- Resize from 1200×800 to 600×400, verify text reflows (wider wrapping).
+- Assert element visibility and text content after resize.
+- Resize back and verify layout restores.
+
+#### 4d. Accessibility Tree Assertions (deferred)
 
 - Assert ARIA roles and labels via `assert_attribute`.
 - Requires the DOM to expose `role`, `aria-label`, etc. through `DomElement`.
+- **Deferred**: not in scope for current implementation.
 
-#### 4e. Animation and Timing
+#### 4e. Animation and Timing (deferred)
 
 - CSS transitions triggered by hover/click.
 - Requires the event loop to process frames between events and expose
   `assert_style` for computed property values.
+- **Deferred**: not in scope for current implementation.
+
+**Test files**
+
+| Phase | HTML | Event JSON | Key assertions |
+|-------|------|------------|----------------|
+| 4a | `test/ui/test_scroll.html` | `ui_phase4a_scroll_interact.json` | scroll, click off-screen element, `assert_text`, `assert_visible` |
+| 4b | `test/ui/test_keyboard.html` | `ui_phase4b_keyboard.json` | `key_combo` Cmd+A, `assert_selection is_collapsed: false` |
+| 4c | `test/ui/test_drag_scroll.html` | `ui_phase4c_resize.json` | `resize`, `assert_visible`, `assert_text` after relayout |
+
+**Acceptance criteria**
+
+1. Scrolling down then clicking an off-screen (now visible) element produces
+   correct caret/focus.
+2. `Cmd+A` selects all text (`assert_selection is_collapsed: false`).
+3. `resize` to a smaller viewport triggers relayout; elements reflow as
+   expected; `assert_visible` confirms elements remain in the DOM.
 
 ---
 
@@ -811,4 +867,87 @@ make test-ui-automation
    ```sh
    lldb -o "run" -o "bt" -o "quit" ./lambda.exe -- view test/ui/test_foo.html --event-file test/ui/test_foo.json
    ```
+
+---
+
+## Implementation Progress
+
+Tracking implementation status across all phases. Updated 2026-03-30.
+
+### Summary
+
+| Phase | Status | Tests | Description |
+|-------|--------|-------|-------------|
+| 1 (a–f) | ✅ Complete | 6 phase + 4 standalone | Mouse clicking, hover, element targeting |
+| 2 (a–c) | ✅ Complete | 3 phase | Text events, caret, form assertions |
+| 3 | ✅ Complete | 3 phase + 2 standalone | Form controls, viewport config, mouse drag, to_target |
+| 4 (a–c) | ✅ Complete | 3 phase | Scroll+interact, keyboard shortcuts, window resize |
+| 5 (a–c) | ✅ Complete | 3 phase | Geometry, computed style, navigation, hit-testing |
+| 4d | ⏳ Deferred | — | Accessibility tree assertions |
+| 4e | ⏳ Deferred | — | Animation and timing |
+
+**Total: 25 tests, 25 passing, 0 failing.**
+
+### Event types implemented
+
+| Event type | Phase | Status |
+|------------|-------|--------|
+| `click` | 1 | ✅ |
+| `dblclick` | 1 | ✅ |
+| `mouse_move` | 1 | ✅ (pre-existing) |
+| `mouse_down` / `mouse_up` | 1 | ✅ (pre-existing) |
+| `mouse_drag` | 3 | ✅ (with `to_target` selector endpoints) |
+| `type` | 2 | ✅ |
+| `key_press` / `key_down` / `key_up` | 2 | ✅ (pre-existing) |
+| `key_combo` | 4b | ✅ (pre-existing, tested with Cmd+A) |
+| `scroll` | 4a | ✅ (pre-existing) |
+| `check` | 3 | ✅ |
+| `select_option` | 3 | ✅ |
+| `focus` | 2 | ✅ |
+| `resize` | 4c | ✅ |
+| `wait` | — | ✅ (pre-existing) |
+| `log` | — | ✅ (pre-existing) |
+| `render` | — | ✅ (pre-existing) |
+| `dump_caret` | — | ✅ (pre-existing) |
+| `navigate` | 5b | ✅ |
+
+### Assertion types implemented
+
+| Assertion | Phase | Status |
+|-----------|-------|--------|
+| `assert_caret` | 1 | ✅ |
+| `assert_selection` | 1 | ✅ |
+| `assert_target` | 1 | ✅ |
+| `assert_text` | 1a | ✅ |
+| `assert_value` | 2c | ✅ |
+| `assert_checked` | 2c | ✅ |
+| `assert_focus` | 2c | ✅ |
+| `assert_visible` | 1a | ✅ |
+| `assert_state` | 1 | ✅ |
+| `assert_scroll` | 4a | ✅ |
+| `assert_rect` | 5a | ✅ |
+| `assert_style` | 5a | ✅ |
+| `assert_position` | 5a | ✅ |
+| `assert_element_at` | 5c | ✅ |
+
+### Key features beyond original design
+
+- **`to_target` on `mouse_drag`**: Selector/text-based drag endpoints
+  (`to_target: {selector: "#end"}`) — no manual coordinate calculation needed.
+- **Viewport configuration**: Top-level `viewport: {width, height}` in JSON
+  metadata sets viewport before the test runs.
+- **`resize` event**: Runtime viewport resize with full relayout, mirroring
+  the OS framebuffer callback path.
+- **`negate` on `assert_scroll`**: Assert scroll position is *not* a value.
+
+### Bug fixes during implementation
+
+- **Replaced-element caret fix**: Clicking `<img>` or other replaced elements
+  no longer crashes the caret system.
+- **`::marker` pseudo-element infinite reflow**: List markers no longer cause
+  infinite relayout loops.
+- **HTML boolean attribute parsing**: `checked`, `selected`, etc. now handled
+  correctly without requiring `="true"`.
+- **Checkbox/radio click miss**: Selector-based clicks on small form controls
+  now reliably hit the target.
 

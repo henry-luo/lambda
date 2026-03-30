@@ -1,0 +1,37 @@
+{
+  "name": "Phase 5b: navigate between pages",
+  "html": "test/ui/test_phase5b_page1.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 5b: Page navigation ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify page 1 content ---"},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},
+    {"type": "assert_text", "target": {"selector": "#intro"}, "contains": "first page"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "font-size", "equals": "32px"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "color", "equals": "rgb(0, 0, 200)"},
+
+    {"type": "log", "message": "--- Navigate to page 2 ---"},
+    {"type": "navigate", "url": "test_phase5b_page2.html"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify page 2 content ---"},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page Two"},
+    {"type": "assert_text", "target": {"selector": "#intro"}, "contains": "second page"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "font-size", "equals": "28px"},
+    {"type": "assert_style", "target": {"selector": "h1"},
+     "property": "color", "equals": "rgb(200, 0, 0)"},
+
+    {"type": "log", "message": "--- Navigate back to page 1 ---"},
+    {"type": "navigate", "url": "test_phase5b_page1.html"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify back on page 1 ---"},
+    {"type": "assert_text", "target": {"selector": "h1"}, "contains": "Page One"},
+
+    {"type": "render", "file": "./temp/phase5b_navigate.png"}
+  ]
+}

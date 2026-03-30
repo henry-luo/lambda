@@ -1,0 +1,80 @@
+{
+  "name": "Phase 5a: assert_rect, assert_style, assert_position",
+  "html": "test/ui/test_phase5a_geometry.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 5a: Geometry and style assertions ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- assert_rect: header position and size ---"},
+    {"type": "assert_rect", "target": {"selector": "#header"},
+     "y": 0, "width": 1200, "height": 60, "tolerance": 2},
+
+    {"type": "log", "message": "--- assert_rect: sidebar width ---"},
+    {"type": "assert_rect", "target": {"selector": "#sidebar"},
+     "width": 200, "height": 300, "tolerance": 2},
+
+    {"type": "log", "message": "--- assert_rect: box1 size ---"},
+    {"type": "assert_rect", "target": {"selector": "#box1"},
+     "width": 100, "height": 100, "tolerance": 2},
+
+    {"type": "log", "message": "--- assert_style: header font properties ---"},
+    {"type": "assert_style", "target": {"selector": "#header"},
+     "property": "font-size", "equals": "24px"},
+    {"type": "assert_style", "target": {"selector": "#header"},
+     "property": "font-weight", "equals": "700"},
+    {"type": "assert_style", "target": {"selector": "#header"},
+     "property": "text-align", "equals": "center"},
+    {"type": "assert_style", "target": {"selector": "#header"},
+     "property": "color", "equals": "rgb(255, 255, 255)"},
+    {"type": "assert_style", "target": {"selector": "#header"},
+     "property": "background-color", "equals": "rgb(50, 50, 200)"},
+
+    {"type": "log", "message": "--- assert_style: box1 styles ---"},
+    {"type": "assert_style", "target": {"selector": "#box1"},
+     "property": "background-color", "equals": "rgb(255, 0, 0)"},
+    {"type": "assert_style", "target": {"selector": "#box1"},
+     "property": "opacity", "equals": "0.8"},
+    {"type": "assert_style", "target": {"selector": "#box1"},
+     "property": "border-top-width", "equals": "2px"},
+    {"type": "assert_style", "target": {"selector": "#box1"},
+     "property": "width", "equals": "100px"},
+    {"type": "assert_style", "target": {"selector": "#box1"},
+     "property": "height", "equals": "100px"},
+
+    {"type": "log", "message": "--- assert_style: sidebar padding ---"},
+    {"type": "assert_style", "target": {"selector": "#sidebar"},
+     "property": "padding-top", "equals": "20px"},
+    {"type": "assert_style", "target": {"selector": "#sidebar"},
+     "property": "padding-left", "equals": "20px"},
+
+    {"type": "log", "message": "--- assert_style: content margin ---"},
+    {"type": "assert_style", "target": {"selector": "#content"},
+     "property": "margin-left", "equals": "200px"},
+
+    {"type": "log", "message": "--- assert_position: header above sidebar ---"},
+    {"type": "assert_position",
+     "element_a": {"selector": "#header"},
+     "element_b": {"selector": "#sidebar"},
+     "relation": "above"},
+
+    {"type": "log", "message": "--- assert_position: header above content ---"},
+    {"type": "assert_position",
+     "element_a": {"selector": "#header"},
+     "element_b": {"selector": "#content"},
+     "relation": "above"},
+
+    {"type": "log", "message": "--- assert_position: sidebar left_of content ---"},
+    {"type": "assert_position",
+     "element_a": {"selector": "#sidebar"},
+     "element_b": {"selector": "#content"},
+     "relation": "left_of"},
+
+    {"type": "log", "message": "--- assert_position: footer below content ---"},
+    {"type": "assert_position",
+     "element_a": {"selector": "#footer"},
+     "element_b": {"selector": "#content"},
+     "relation": "below"},
+
+    {"type": "render", "file": "./temp/phase5a_geometry.png"}
+  ]
+}

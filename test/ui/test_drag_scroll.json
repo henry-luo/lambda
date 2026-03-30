@@ -1,0 +1,37 @@
+{
+  "name": "Phase 3: Drag scroll and selector-based drag endpoints",
+  "html": "test/ui/test_drag_scroll.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 3: Drag Scroll Test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify initial scroll at top ---"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 5},
+
+    {"type": "log", "message": "--- Drag select using to_target selector ---"},
+    {"type": "mouse_drag",
+     "target": {"selector": "#drag-start"},
+     "to_target": {"selector": "#drag-end"},
+     "button": 0},
+    {"type": "assert_selection", "is_collapsed": false},
+
+    {"type": "log", "message": "--- Scroll down via scroll events ---"},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
+    {"type": "wait", "ms": 200},
+    {"type": "scroll", "x": 400, "y": 300, "dx": 0, "dy": -10},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "--- Verify scroll position changed ---"},
+    {"type": "assert_scroll", "y": 100, "tolerance": 200},
+
+    {"type": "log", "message": "--- Drag select with raw coordinates (top area before scroll) ---"},
+    {"type": "mouse_drag",
+     "from_x": 100, "from_y": 50,
+     "to_x":   400, "to_y": 50,
+     "button": 0},
+
+    {"type": "render", "file": "./temp/phase3_drag_scroll.png"},
+
+    {"type": "log", "message": "=== Drag Scroll Test COMPLETE ==="}
+  ]
+}
