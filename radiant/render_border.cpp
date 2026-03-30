@@ -37,11 +37,15 @@ static void inset_outset_side_colors(Color base, CssEnum style,
     Color dark  = color_darken(base, 0.5f);
     Color light = color_lighten(base, 0.35f);
     if (style == CSS_VALUE_INSET) {
-        *out_top = dark;  *out_left = dark;
-        *out_bottom = light; *out_right = light;
+        if (out_top) *out_top = dark;
+        if (out_left) *out_left = dark;
+        if (out_bottom) *out_bottom = light;
+        if (out_right) *out_right = light;
     } else { // CSS_VALUE_OUTSET
-        *out_top = light; *out_left = light;
-        *out_bottom = dark;  *out_right = dark;
+        if (out_top) *out_top = light;
+        if (out_left) *out_left = light;
+        if (out_bottom) *out_bottom = dark;
+        if (out_right) *out_right = dark;
     }
 }
 
