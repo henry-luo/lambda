@@ -2,6 +2,8 @@
 #include "render_border.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
+#include "../lib/str.h"
+#include "../lambda/input/css/css_value.hpp"
 #include <math.h>
 
 /**
@@ -30,6 +32,11 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     // Render base color first (if any)
     if (bg->color.a > 0) {
         render_background_color(rdcon, view, bg->color, rect);
+    }
+
+    // Render background image (before gradients, after color)
+    if (bg->image) {
+        render_background_image(rdcon, view, bg, rect);
     }
 
     // Render all radial gradient layers (stacked bottom-to-top)
@@ -938,4 +945,252 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
+}
+
+/**
+ * Compute background image dimensions based on background-size property.
+ * Returns the computed width and height of the background image in physical pixels.
+ */
+static void compute_bg_image_size(BackgroundProp* bg, float img_w, float img_h,
+                                   float box_w, float box_h, float* out_w, float* out_h) {
+    float aspect = (img_h > 0) ? img_w / img_h : 1.0f;
+
+    if (bg->bg_size_type == CSS_VALUE_COVER) {
+        // Scale to cover the entire box, preserving aspect ratio
+        float scale_x = box_w / img_w;
+        float scale_y = box_h / img_h;
+        float scale = (scale_x > scale_y) ? scale_x : scale_y;
+        *out_w = img_w * scale;
+        *out_h = img_h * scale;
+    } else if (bg->bg_size_type == CSS_VALUE_CONTAIN) {
+        // Scale to fit within the box, preserving aspect ratio
+        float scale_x = box_w / img_w;
+        float scale_y = box_h / img_h;
+        float scale = (scale_x < scale_y) ? scale_x : scale_y;
+        *out_w = img_w * scale;
+        *out_h = img_h * scale;
+    } else if (bg->bg_size_type == CSS_VALUE_AUTO ||
+               (bg->bg_size_width_auto && bg->bg_size_height_auto)) {
+        // auto auto: use intrinsic size
+        *out_w = img_w;
+        *out_h = img_h;
+    } else {
+        // Explicit size values
+        float w, h;
+        bool w_auto = bg->bg_size_width_auto;
+        bool h_auto = bg->bg_size_height_auto;
+
+        if (!w_auto) {
+            w = bg->bg_size_width_is_percent ? (bg->bg_size_width / 100.0f) * box_w : bg->bg_size_width;
+        }
+        if (!h_auto) {
+            h = bg->bg_size_height_is_percent ? (bg->bg_size_height / 100.0f) * box_h : bg->bg_size_height;
+        }
+
+        if (w_auto && !h_auto) {
+            // auto <height>: width scales proportionally
+            *out_h = h;
+            *out_w = h * aspect;
+        } else if (!w_auto && h_auto) {
+            // <width> auto: height scales proportionally
+            *out_w = w;
+            *out_h = w / aspect;
+        } else {
+            // Both explicit
+            *out_w = w;
+            *out_h = h;
+        }
+    }
+}
+
+/**
+ * Compute background image position based on background-position property.
+ * Per CSS spec: percentage position = (container_size - image_size) * percentage / 100
+ */
+static void compute_bg_image_position(BackgroundProp* bg, float img_w, float img_h,
+                                       float box_w, float box_h, float* out_x, float* out_y) {
+    if (!bg->bg_position_set) {
+        // Default: 0% 0% (top-left)
+        *out_x = 0.0f;
+        *out_y = 0.0f;
+        return;
+    }
+
+    if (bg->bg_position_x_is_percent) {
+        *out_x = (box_w - img_w) * bg->bg_position_x / 100.0f;
+    } else {
+        *out_x = bg->bg_position_x;
+    }
+
+    if (bg->bg_position_y_is_percent) {
+        *out_y = (box_h - img_h) * bg->bg_position_y / 100.0f;
+    } else {
+        *out_y = bg->bg_position_y;
+    }
+}
+
+/**
+ * Render a single tile of a background image using the raster blit path.
+ */
+static void blit_bg_tile(ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip) {
+    blit_surface_scaled(img, NULL, dst, tile_rect, clip, SCALE_MODE_LINEAR);
+}
+
+/**
+ * Render a single tile of a background image using ThorVG (for SVG images).
+ */
+static void render_bg_tile_tvg(RenderContext* rdcon, ImageSurface* img, Rect* tile_rect) {
+    Tvg_Paint pic = create_tvg_picture_from_surface(img);
+    if (!pic) return;
+
+    tvg_canvas_remove(rdcon->canvas, NULL);
+    tvg_picture_set_size(pic, tile_rect->width, tile_rect->height);
+    tvg_paint_translate(pic, tile_rect->x, tile_rect->y);
+
+    // Apply clipping
+    Tvg_Paint clip_rect = tvg_shape_new();
+    Bound* clip = &rdcon->block.clip;
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top,
+                          clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
+    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
+    tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+    tvg_canvas_push(rdcon->canvas, pic);
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(rdcon->canvas, NULL);
+}
+
+/**
+ * Render background image with background-size, background-position, and background-repeat.
+ */
+void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+    const char* image_url = bg->image;
+    log_debug("[BG-IMAGE] Rendering background-image '%s' on <%s> (%.0fx%.0f)",
+              image_url, view->node_name(), rect.width, rect.height);
+
+    // Load image via the image cache
+    ImageSurface* img = load_image(rdcon->ui_context, image_url);
+    if (!img) {
+        log_error("[BG-IMAGE] Failed to load image '%s'", image_url);
+        return;
+    }
+
+    float img_w = (float)img->width;
+    float img_h = (float)img->height;
+    if (img_w <= 0 || img_h <= 0) {
+        log_error("[BG-IMAGE] Image has zero dimensions");
+        return;
+    }
+
+    float s = rdcon->scale;
+
+    // Compute rendered image size (in physical pixels)
+    float render_w, render_h;
+    compute_bg_image_size(bg, img_w * s, img_h * s, rect.width, rect.height, &render_w, &render_h);
+
+    // Compute position offset (in physical pixels)
+    float pos_x, pos_y;
+    compute_bg_image_position(bg, render_w, render_h, rect.width, rect.height, &pos_x, &pos_y);
+
+    // Determine repeat mode (default: repeat in both axes)
+    CssEnum repeat_x = bg->bg_repeat_x ? bg->bg_repeat_x : CSS_VALUE_REPEAT;
+    CssEnum repeat_y = bg->bg_repeat_y ? bg->bg_repeat_y : CSS_VALUE_REPEAT;
+
+    log_debug("[BG-IMAGE] size=%.0fx%.0f pos=(%.0f,%.0f) repeat=(%d,%d)",
+              render_w, render_h, pos_x, pos_y, repeat_x, repeat_y);
+
+    // Compute tiling origin and iteration bounds
+    float origin_x = rect.x + pos_x;
+    float origin_y = rect.y + pos_y;
+
+    float tile_w = render_w;
+    float tile_h = render_h;
+
+    // For 'round' mode: adjust tile size to fit evenly
+    if (repeat_x == CSS_VALUE_ROUND && tile_w > 0) {
+        int count = (int)(rect.width / tile_w + 0.5f);
+        if (count < 1) count = 1;
+        tile_w = rect.width / count;
+    }
+    if (repeat_y == CSS_VALUE_ROUND && tile_h > 0) {
+        int count = (int)(rect.height / tile_h + 0.5f);
+        if (count < 1) count = 1;
+        tile_h = rect.height / count;
+    }
+
+    // Compute start and end tile indices
+    int start_col = 0, end_col = 0;
+    int start_row = 0, end_row = 0;
+
+    if (repeat_x == CSS_VALUE_NO_REPEAT) {
+        start_col = 0; end_col = 0;
+    } else if (repeat_x == CSS_VALUE_SPACE) {
+        // 'space': tile count fits without scaling, distribute gaps evenly
+        start_col = 0;
+        end_col = (tile_w > 0) ? (int)(rect.width / tile_w) - 1 : 0;
+        if (end_col < 0) end_col = 0;
+    } else {
+        // repeat or round: tile from before the box to after
+        if (tile_w > 0) {
+            start_col = (int)floorf((rect.x - origin_x) / tile_w);
+            end_col = (int)ceilf((rect.x + rect.width - origin_x) / tile_w) - 1;
+        }
+    }
+
+    if (repeat_y == CSS_VALUE_NO_REPEAT) {
+        start_row = 0; end_row = 0;
+    } else if (repeat_y == CSS_VALUE_SPACE) {
+        start_row = 0;
+        end_row = (tile_h > 0) ? (int)(rect.height / tile_h) - 1 : 0;
+        if (end_row < 0) end_row = 0;
+    } else {
+        if (tile_h > 0) {
+            start_row = (int)floorf((rect.y - origin_y) / tile_h);
+            end_row = (int)ceilf((rect.y + rect.height - origin_y) / tile_h) - 1;
+        }
+    }
+
+    // Compute 'space' gaps if needed
+    float space_gap_x = 0, space_gap_y = 0;
+    if (repeat_x == CSS_VALUE_SPACE && end_col > 0) {
+        space_gap_x = (rect.width - tile_w * (end_col + 1)) / end_col;
+    }
+    if (repeat_y == CSS_VALUE_SPACE && end_row > 0) {
+        space_gap_y = (rect.height - tile_h * (end_row + 1)) / end_row;
+    }
+
+    // Render tiles
+    bool is_svg = (img->format == IMAGE_FORMAT_SVG);
+    for (int row = start_row; row <= end_row; row++) {
+        for (int col = start_col; col <= end_col; col++) {
+            Rect tile_rect;
+            if (repeat_x == CSS_VALUE_SPACE) {
+                tile_rect.x = rect.x + col * (tile_w + space_gap_x);
+            } else {
+                tile_rect.x = origin_x + col * tile_w;
+            }
+            if (repeat_y == CSS_VALUE_SPACE) {
+                tile_rect.y = rect.y + row * (tile_h + space_gap_y);
+            } else {
+                tile_rect.y = origin_y + row * tile_h;
+            }
+            tile_rect.width = tile_w;
+            tile_rect.height = tile_h;
+
+            // Skip tiles completely outside the element rect
+            if (tile_rect.x + tile_rect.width <= rect.x || tile_rect.x >= rect.x + rect.width ||
+                tile_rect.y + tile_rect.height <= rect.y || tile_rect.y >= rect.y + rect.height) {
+                continue;
+            }
+
+            if (is_svg) {
+                render_bg_tile_tvg(rdcon, img, &tile_rect);
+            } else {
+                blit_bg_tile(img, rdcon->ui_context->surface, &tile_rect, &rdcon->block.clip);
+            }
+        }
+    }
+
+    log_debug("[BG-IMAGE] Rendered background-image '%s' tiles=(%d-%d)x(%d-%d)",
+              image_url, start_col, end_col, start_row, end_row);
 }

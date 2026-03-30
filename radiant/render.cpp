@@ -1237,76 +1237,9 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         render_box_shadow(rdcon, view, rect);
     }
 
-    // Render background (gradient or solid color) using new rendering system
+    // Render background (gradient, solid color, and background-image) using new rendering system
     if (view->bound->background) {
         render_background(rdcon, view, rect);
-    }
-
-    // Load background image if specified
-    if (view->bound->background && view->bound->background->image) {
-        const char* image_url = view->bound->background->image;
-        log_debug("[RENDER] background-image on %s: loading '%s' (size: %.0fx%.0f) bg_ptr=%p",
-                  view->node_name(), image_url, rect.width, rect.height, view->bound->background);
-
-        // Use proper URL resolution
-        if (!rdcon->ui_context->document || !rdcon->ui_context->document->url) {
-            log_error("[RENDER] background-image: missing document URL context");
-        } else {
-            Url* abs_url = parse_url(rdcon->ui_context->document->url, image_url);
-            if (!abs_url) {
-                log_error("[RENDER] background-image: failed to parse URL '%s'", image_url);
-            } else {
-                char* file_path = url_to_local_path(abs_url);
-                if (!file_path) {
-                    log_error("[RENDER] background-image: invalid local URL '%s'", image_url);
-                } else {
-                    // Try loading the image
-                    Tvg_Paint pic = tvg_picture_new();
-                    Tvg_Result result = tvg_picture_load(pic, file_path);
-
-                    // If loading failed and URL starts with "./", try prepending "res/"
-                    // (workaround for CSS-relative URLs that need res/ subdirectory)
-                    if (result != TVG_RESULT_SUCCESS && image_url[0] == '.' && image_url[1] == '/') {
-                        log_debug("[RENDER] background-image: trying with res/ prefix");
-                        size_t res_url_cap = strlen(image_url) + 5;
-                        char* res_url = (char*)mem_alloc(res_url_cap, MEM_CAT_RENDER);
-                        str_fmt(res_url, res_url_cap, "./res/%s", image_url + 2);
-                        url_destroy(abs_url);
-                        abs_url = parse_url(rdcon->ui_context->document->url, res_url);
-                        mem_free(res_url);
-                        if (abs_url) {
-                            char* new_file_path = url_to_local_path(abs_url);
-                            if (new_file_path) {
-                                file_path = new_file_path;
-                                result = tvg_picture_load(pic, file_path);
-                            }
-                        }
-                    }
-
-                    if (result == TVG_RESULT_SUCCESS) {
-                        log_debug("[RENDER] background-image: loaded successfully from '%s'", file_path);
-                        tvg_canvas_remove(rdcon->canvas, NULL);
-                        tvg_picture_set_size(pic, rect.width, rect.height);
-                        tvg_paint_translate(pic, rect.x, rect.y);
-
-                        // Apply clipping
-                        Tvg_Paint clip_rect = tvg_shape_new();
-                        Bound* clip = &rdcon->block.clip;
-                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-                        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-                        tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-                        tvg_canvas_push(rdcon->canvas, pic);
-                        tvg_canvas_reset_and_draw(rdcon, false);
-                        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
-                    } else {
-                        log_error("[RENDER] background-image: failed to load '%s'", file_path);
-                        tvg_paint_unref(pic, true);
-                    }
-                }
-                url_destroy(abs_url);
-            }
-        }
     }
 
     // Render borders using new rendering system
@@ -1617,6 +1550,39 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
         // Apply the filter chain to the rendered pixels
         apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+    }
+
+    // Apply CSS opacity: multiply alpha of all pixels in the element's region
+    if (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f) {
+        // Flush any pending ThorVG shapes to the surface before modifying pixels
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(rdcon->canvas, NULL);
+
+        float opacity = block->in_line->opacity;
+        float s = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            int x0 = (int)(pa_block.x + block->x * s);
+            int y0 = (int)(pa_block.y + block->y * s);
+            int x1 = x0 + (int)(block->width * s);
+            int y1 = y0 + (int)(block->height * s);
+            // Clamp to surface dimensions
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > surface->width) x1 = surface->width;
+            if (y1 > surface->height) y1 = surface->height;
+
+            for (int y = y0; y < y1; y++) {
+                uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
+                for (int x = x0; x < x1; x++) {
+                    uint8_t* pixel = row + x * 4;
+                    // Multiply alpha channel by opacity
+                    pixel[3] = (uint8_t)(pixel[3] * opacity + 0.5f);
+                }
+            }
+            log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
+                      opacity, block->node_name(), x0, y0, x1, y1);
+        }
     }
 
     // Restore transform state

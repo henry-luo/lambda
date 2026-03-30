@@ -24,6 +24,26 @@
 #include <cstring>
 #include <ctime>
 
+// Portable monotonic time (works without GLFW initialization)
+static double get_monotonic_time() {
+#if defined(__APPLE__)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#elif defined(_WIN32)
+    // Windows: use QueryPerformanceCounter
+    static LARGE_INTEGER freq = {0};
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return (double)counter.QuadPart / (double)freq.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
+}
+
 // Forward declarations for callbacks (defined in window.cpp)
 extern void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 
@@ -1255,7 +1275,7 @@ void event_sim_free(EventSimContext* ctx) {
 static void sim_mouse_move(UiContext* uicon, int x, int y) {
     RdtEvent event;
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
-    event.mouse_position.timestamp = glfwGetTime();
+    event.mouse_position.timestamp = get_monotonic_time();
     event.mouse_position.x = x;
     event.mouse_position.y = y;
     handle_event(uicon, uicon->document, &event);
@@ -1269,7 +1289,7 @@ static void sim_mouse_button(UiContext* uicon, int x, int y, int button, int mod
     // Then press/release
     RdtEvent event;
     event.mouse_button.type = is_down ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
-    event.mouse_button.timestamp = glfwGetTime();
+    event.mouse_button.timestamp = get_monotonic_time();
     event.mouse_button.x = x;
     event.mouse_button.y = y;
     event.mouse_button.button = button;
@@ -1282,7 +1302,7 @@ static void sim_mouse_button(UiContext* uicon, int x, int y, int button, int mod
 static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
     RdtEvent event;
     event.key.type = is_down ? RDT_EVENT_KEY_DOWN : RDT_EVENT_KEY_UP;
-    event.key.timestamp = glfwGetTime();
+    event.key.timestamp = get_monotonic_time();
     event.key.key = key;
     event.key.scancode = 0;
     event.key.mods = mods;
@@ -1293,7 +1313,7 @@ static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
 static void sim_scroll(UiContext* uicon, int x, int y, float dx, float dy) {
     RdtEvent event;
     event.scroll.type = RDT_EVENT_SCROLL;
-    event.scroll.timestamp = glfwGetTime();
+    event.scroll.timestamp = get_monotonic_time();
     event.scroll.x = x;
     event.scroll.y = y;
     event.scroll.xoffset = dx;
@@ -1305,7 +1325,7 @@ static void sim_scroll(UiContext* uicon, int x, int y, float dx, float dy) {
 static void sim_text_input(UiContext* uicon, uint32_t codepoint) {
     RdtEvent event;
     event.text_input.type = RDT_EVENT_TEXT_INPUT;
-    event.text_input.timestamp = glfwGetTime();
+    event.text_input.timestamp = get_monotonic_time();
     event.text_input.codepoint = codepoint;
     handle_event(uicon, uicon->document, &event);
 }
@@ -1640,7 +1660,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             {
                 RdtEvent event;
                 event.mouse_button.type = RDT_EVENT_MOUSE_DOWN;
-                event.mouse_button.timestamp = glfwGetTime();
+                event.mouse_button.timestamp = get_monotonic_time();
                 event.mouse_button.x = x;
                 event.mouse_button.y = y;
                 event.mouse_button.button = ev->button;

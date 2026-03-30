@@ -558,15 +558,16 @@ int run_layout(const char* html_file) {
 
 // Unified document viewer supporting multiple formats (HTML, Markdown, XML, RST, etc.)
 // event_file: optional JSON file with simulated events for automated testing
-int view_doc_in_window_with_events(const char* doc_file, const char* event_file) {
+// headless: if true, run without creating a window (for CI/automated testing)
+int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless) {
     log_init_wrapper();
-    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s",
-             doc_file ? doc_file : "NULL", event_file ? event_file : "NULL");
-    ui_context_init(&ui_context, false);
+    log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, event_file: %s, headless: %d",
+             doc_file ? doc_file : "NULL", event_file ? event_file : "NULL", headless);
+    ui_context_init(&ui_context, headless);
     log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
               ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
     GLFWwindow* window = ui_context.window;
-    if (!window) {
+    if (!headless && !window) {
         ui_context_cleanup(&ui_context);
         return -1;
     }
@@ -583,34 +584,41 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         }
     }
 
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);  // enable vsync
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
-
-    glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
-    glfwSetKeyCallback(window, key_callback);  // receive raw keyboard input
-    glfwSetCharCallback(window, character_callback);  // receive character input
-    glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
-    glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
-    log_info("Mouse button callback registered: %p", mouse_button_callback);
-    glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetWindowRefreshCallback(window, window_refresh_callback);
-
-    glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
-
     int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
-    framebuffer_size_callback(window, width, height);
 
-    // CRITICAL: Update ui_context dimensions to match actual framebuffer size
-    // This ensures the initial layout uses the correct viewport dimensions
-    ui_context.window_width = width;
-    ui_context.window_height = height;
-    ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
-    ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
-    log_debug("view_doc_in_window: updated viewport to %dx%d CSS pixels (framebuffer %dx%d)",
-              (int)ui_context.viewport_width, (int)ui_context.viewport_height, width, height);
+    if (!headless) {
+        glfwMakeContextCurrent(window);
+        glfwSwapInterval(1);  // enable vsync
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
+
+        glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
+        glfwSetKeyCallback(window, key_callback);  // receive raw keyboard input
+        glfwSetCharCallback(window, character_callback);  // receive character input
+        glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
+        glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
+        log_info("Mouse button callback registered: %p", mouse_button_callback);
+        glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
+        glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+        glfwSetWindowRefreshCallback(window, window_refresh_callback);
+
+        glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
+
+        glfwGetFramebufferSize(window, &width, &height);
+        framebuffer_size_callback(window, width, height);
+
+        // CRITICAL: Update ui_context dimensions to match actual framebuffer size
+        // This ensures the initial layout uses the correct viewport dimensions
+        ui_context.window_width = width;
+        ui_context.window_height = height;
+        ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
+        ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
+        log_debug("view_doc_in_window: updated viewport to %dx%d CSS pixels (framebuffer %dx%d)",
+                  (int)ui_context.viewport_width, (int)ui_context.viewport_height, width, height);
+    } else {
+        // Headless mode: use default dimensions from ui_context_init
+        width = (int)ui_context.window_width;
+        height = (int)ui_context.window_height;
+    }
 
     // Recreate surface with correct dimensions
     ui_context_create_surface(&ui_context, width, height);
@@ -693,13 +701,41 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
         url_destroy(cwd);
 
         // Set custom window title with format name
-        if (doc_file) {
+        if (!headless && doc_file) {
             char title[512];
             const char* format_name = get_format_name(file_to_load);
             snprintf(title, sizeof(title), "Lambda %s Viewer - %s", format_name, file_to_load);
             glfwSetWindowTitle(window, title);
         }
     }
+
+    // --- Headless mode: run events synchronously without a window ---
+    if (headless) {
+        if (sim_ctx && sim_ctx->is_running) {
+            double current_time = 0.0;
+            while (sim_ctx->is_running) {
+                bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
+                if (!running) break;
+                // Advance time by event interval
+                SimEvent* ev = (sim_ctx->current_index > 0 && sim_ctx->current_index <= sim_ctx->events->length)
+                    ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index - 1] : NULL;
+                int wait_ms = 50;
+                if (ev && ev->type == SIM_EVENT_WAIT) wait_ms = ev->wait_ms;
+                current_time += wait_ms / 1000.0;
+            }
+        }
+        int sim_fail_count = 0;
+        if (sim_ctx) {
+            sim_fail_count = sim_ctx->fail_count;
+            event_sim_free(sim_ctx);
+        }
+        log_info("End of headless document viewer");
+        ui_context_cleanup(&ui_context);
+        log_cleanup();
+        return sim_fail_count > 0 ? 1 : 0;
+    }
+
+    // --- GUI mode: full window event loop ---
 
     // Check for auto-close after initial render (for testing/benchmarking)
     bool auto_close_enabled = (shell_getenv("LAMBDA_AUTO_CLOSE") != NULL);
@@ -782,7 +818,7 @@ int view_doc_in_window_with_events(const char* doc_file, const char* event_file)
 
 // Wrapper for backward compatibility
 int view_doc_in_window(const char* doc_file) {
-    return view_doc_in_window_with_events(doc_file, NULL);
+    return view_doc_in_window_with_events(doc_file, NULL, false);
 }
 
 int window_main(int argc, char* argv[]) {

@@ -19,6 +19,7 @@ HTML/CSS → DOM Parse → Style Resolution → Layout → View Tree → Renderi
 ```
 
 **Output backends:**
+
 | Backend | File | Quality |
 |---------|------|---------|
 | Raster (ThorVG canvas) | `render.cpp` | Primary, most complete |
@@ -312,6 +313,7 @@ Current `render_bound_svg()` only emits:
 - Border widths (as filled rects, not strokes)
 
 **Missing in SVG output:**
+
 | Feature | Raster | SVG |
 |---------|--------|-----|
 | Gradients (linear/radial/conic) | ✅ | ❌ |

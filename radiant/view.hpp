@@ -604,8 +604,25 @@ typedef struct {
 typedef struct {
     Color color; // background color
     char* image; // background image path
-    char* repeat; // repeat behavior
-    char* position; // positioning of background image
+    char* repeat; // repeat behavior (legacy string, use repeat_x/repeat_y when set)
+    char* position; // positioning of background image (legacy string)
+    // Background-size: auto | <length> | <percentage> | cover | contain
+    CssEnum bg_size_type;   // CSS_VALUE_AUTO (default), CSS_VALUE_COVER, CSS_VALUE_CONTAIN, or 0 for explicit
+    float bg_size_width;    // explicit width (px or %)
+    float bg_size_height;   // explicit height (px or %)
+    int bg_size_width_is_percent : 1;
+    int bg_size_height_is_percent : 1;
+    int bg_size_width_auto : 1;   // true if width component is 'auto'
+    int bg_size_height_auto : 1;  // true if height component is 'auto'
+    // Background-position: <length> | <percentage> | left | center | right | top | bottom
+    float bg_position_x;   // x offset (px or %)
+    float bg_position_y;   // y offset (px or %)
+    int bg_position_x_is_percent : 1;
+    int bg_position_y_is_percent : 1;
+    int bg_position_set : 1;  // true if position was explicitly set
+    // Background-repeat: repeat | no-repeat | round | space (per axis)
+    CssEnum bg_repeat_x;   // CSS_VALUE_REPEAT (default), CSS_VALUE_NO_REPEAT, CSS_VALUE_ROUND, CSS_VALUE_SPACE
+    CssEnum bg_repeat_y;
     // Gradient support
     GradientType gradient_type;
     LinearGradient* linear_gradient;
