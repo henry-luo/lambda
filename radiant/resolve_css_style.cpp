@@ -4355,8 +4355,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: scroll, fixed, local
+                span->bound->background->bg_attachment = value->data.keyword;
                 log_debug("[CSS] background-attachment: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store attachment value when BackgroundProp is extended
             }
             break;
         }
@@ -4372,8 +4372,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
+                span->bound->background->bg_origin = value->data.keyword;
                 log_debug("[CSS] background-origin: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store origin value when BackgroundProp is extended
             }
             break;
         }
@@ -4389,8 +4389,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
+                span->bound->background->bg_clip = value->data.keyword;
                 log_debug("[CSS] background-clip: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store clip value when BackgroundProp is extended
             }
             break;
         }
@@ -4406,16 +4406,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float pos_x = resolve_length_value(lycon, prop_id, value);
+                span->bound->background->bg_position_x = pos_x;
+                span->bound->background->bg_position_x_is_percent = 0;
+                span->bound->background->bg_position_set = 1;
                 log_debug("[CSS] background-position-x: %.2fpx", pos_x);
-                // TODO: Store position-x when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float pos_x_percent = value->data.percentage.value;
+                span->bound->background->bg_position_x = pos_x_percent;
+                span->bound->background->bg_position_x_is_percent = 1;
+                span->bound->background->bg_position_set = 1;
                 log_debug("[CSS] background-position-x: %.2f%%", pos_x_percent);
-                // TODO: Store position-x percentage when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: left, center, right
-                log_debug("[CSS] background-position-x: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store position-x keyword when BackgroundProp is extended
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_LEFT) {
+                    span->bound->background->bg_position_x = 0.0f;
+                    span->bound->background->bg_position_x_is_percent = 1;
+                } else if (kw == CSS_VALUE_CENTER) {
+                    span->bound->background->bg_position_x = 50.0f;
+                    span->bound->background->bg_position_x_is_percent = 1;
+                } else if (kw == CSS_VALUE_RIGHT) {
+                    span->bound->background->bg_position_x = 100.0f;
+                    span->bound->background->bg_position_x_is_percent = 1;
+                }
+                span->bound->background->bg_position_set = 1;
+                log_debug("[CSS] background-position-x: %s", css_enum_info(kw)->name);
             }
             break;
         }
@@ -4431,16 +4445,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float pos_y = resolve_length_value(lycon, prop_id, value);
+                span->bound->background->bg_position_y = pos_y;
+                span->bound->background->bg_position_y_is_percent = 0;
+                span->bound->background->bg_position_set = 1;
                 log_debug("[CSS] background-position-y: %.2fpx", pos_y);
-                // TODO: Store position-y when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
                 float pos_y_percent = value->data.percentage.value;
+                span->bound->background->bg_position_y = pos_y_percent;
+                span->bound->background->bg_position_y_is_percent = 1;
+                span->bound->background->bg_position_set = 1;
                 log_debug("[CSS] background-position-y: %.2f%%", pos_y_percent);
-                // TODO: Store position-y percentage when BackgroundProp is extended
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: top, center, bottom
-                log_debug("[CSS] background-position-y: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store position-y keyword when BackgroundProp is extended
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_TOP) {
+                    span->bound->background->bg_position_y = 0.0f;
+                    span->bound->background->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_CENTER) {
+                    span->bound->background->bg_position_y = 50.0f;
+                    span->bound->background->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_BOTTOM) {
+                    span->bound->background->bg_position_y = 100.0f;
+                    span->bound->background->bg_position_y_is_percent = 1;
+                }
+                span->bound->background->bg_position_set = 1;
+                log_debug("[CSS] background-position-y: %s", css_enum_info(kw)->name);
             }
             break;
         }
@@ -4458,6 +4486,187 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 // Values: normal, multiply, screen, overlay, darken, lighten, etc.
                 log_debug("[CSS] background-blend-mode: %s", css_enum_info(value->data.keyword)->name);
                 // TODO: Store blend mode when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_SIZE: {
+            log_debug("[CSS] Processing background-size property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+            BackgroundProp* bg = span->bound->background;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_COVER || kw == CSS_VALUE_CONTAIN) {
+                    bg->bg_size_type = kw;
+                    log_debug("[CSS] background-size: %s", css_enum_info(kw)->name);
+                } else if (kw == CSS_VALUE_AUTO) {
+                    bg->bg_size_type = CSS_VALUE_AUTO;
+                    bg->bg_size_width_auto = 1;
+                    bg->bg_size_height_auto = 1;
+                    log_debug("[CSS] background-size: auto");
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                bg->bg_size_type = (CssEnum)0;
+                bg->bg_size_width = resolve_length_value(lycon, prop_id, value);
+                bg->bg_size_width_is_percent = 0;
+                bg->bg_size_width_auto = 0;
+                bg->bg_size_height_auto = 1;  // second value defaults to auto
+                log_debug("[CSS] background-size: %.2fpx auto", bg->bg_size_width);
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                bg->bg_size_type = (CssEnum)0;
+                bg->bg_size_width = value->data.percentage.value;
+                bg->bg_size_width_is_percent = 1;
+                bg->bg_size_width_auto = 0;
+                bg->bg_size_height_auto = 1;
+                log_debug("[CSS] background-size: %.2f%% auto", bg->bg_size_width);
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Two-value form: <width> <height>
+                if (value->data.list.count >= 2) {
+                    bg->bg_size_type = (CssEnum)0;
+                    CssValue* w = value->data.list.values[0];
+                    CssValue* h = value->data.list.values[1];
+                    // Width
+                    if (w->type == CSS_VALUE_TYPE_KEYWORD && w->data.keyword == CSS_VALUE_AUTO) {
+                        bg->bg_size_width_auto = 1;
+                    } else if (w->type == CSS_VALUE_TYPE_LENGTH) {
+                        bg->bg_size_width = resolve_length_value(lycon, prop_id, w);
+                        bg->bg_size_width_is_percent = 0;
+                        bg->bg_size_width_auto = 0;
+                    } else if (w->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        bg->bg_size_width = w->data.percentage.value;
+                        bg->bg_size_width_is_percent = 1;
+                        bg->bg_size_width_auto = 0;
+                    }
+                    // Height
+                    if (h->type == CSS_VALUE_TYPE_KEYWORD && h->data.keyword == CSS_VALUE_AUTO) {
+                        bg->bg_size_height_auto = 1;
+                    } else if (h->type == CSS_VALUE_TYPE_LENGTH) {
+                        bg->bg_size_height = resolve_length_value(lycon, prop_id, h);
+                        bg->bg_size_height_is_percent = 0;
+                        bg->bg_size_height_auto = 0;
+                    } else if (h->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        bg->bg_size_height = h->data.percentage.value;
+                        bg->bg_size_height_is_percent = 1;
+                        bg->bg_size_height_auto = 0;
+                    }
+                    log_debug("[CSS] background-size: two-value form");
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_REPEAT: {
+            log_debug("[CSS] Processing background-repeat property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+            BackgroundProp* bg = span->bound->background;
+
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                if (kw == CSS_VALUE_REPEAT || kw == CSS_VALUE_NO_REPEAT ||
+                    kw == CSS_VALUE_ROUND || kw == CSS_VALUE_SPACE) {
+                    bg->bg_repeat_x = kw;
+                    bg->bg_repeat_y = kw;
+                    log_debug("[CSS] background-repeat: %s", css_enum_info(kw)->name);
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // Two-value form: <repeat-x> <repeat-y>
+                if (value->data.list.count >= 2) {
+                    if (value->data.list.values[0]->type == CSS_VALUE_TYPE_KEYWORD)
+                        bg->bg_repeat_x = value->data.list.values[0]->data.keyword;
+                    if (value->data.list.values[1]->type == CSS_VALUE_TYPE_KEYWORD)
+                        bg->bg_repeat_y = value->data.list.values[1]->data.keyword;
+                    log_debug("[CSS] background-repeat: %s %s",
+                              css_enum_info(bg->bg_repeat_x)->name,
+                              css_enum_info(bg->bg_repeat_y)->name);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_POSITION: {
+            log_debug("[CSS] Processing background-position property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+            BackgroundProp* bg = span->bound->background;
+            bg->bg_position_set = 1;
+
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                bg->bg_position_x = resolve_length_value(lycon, prop_id, value);
+                bg->bg_position_x_is_percent = 0;
+                bg->bg_position_y = 50.0f;
+                bg->bg_position_y_is_percent = 1;
+                log_debug("[CSS] background-position: %.2fpx 50%%", bg->bg_position_x);
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                bg->bg_position_x = value->data.percentage.value;
+                bg->bg_position_x_is_percent = 1;
+                bg->bg_position_y = 50.0f;
+                bg->bg_position_y_is_percent = 1;
+                log_debug("[CSS] background-position: %.2f%% 50%%", bg->bg_position_x);
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum kw = value->data.keyword;
+                // Single keyword: center, left, right, top, bottom
+                if (kw == CSS_VALUE_CENTER) {
+                    bg->bg_position_x = 50.0f; bg->bg_position_x_is_percent = 1;
+                    bg->bg_position_y = 50.0f; bg->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_LEFT) {
+                    bg->bg_position_x = 0.0f; bg->bg_position_x_is_percent = 1;
+                    bg->bg_position_y = 50.0f; bg->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_RIGHT) {
+                    bg->bg_position_x = 100.0f; bg->bg_position_x_is_percent = 1;
+                    bg->bg_position_y = 50.0f; bg->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_TOP) {
+                    bg->bg_position_x = 50.0f; bg->bg_position_x_is_percent = 1;
+                    bg->bg_position_y = 0.0f; bg->bg_position_y_is_percent = 1;
+                } else if (kw == CSS_VALUE_BOTTOM) {
+                    bg->bg_position_x = 50.0f; bg->bg_position_x_is_percent = 1;
+                    bg->bg_position_y = 100.0f; bg->bg_position_y_is_percent = 1;
+                }
+                log_debug("[CSS] background-position: %s", css_enum_info(kw)->name);
+            } else if (value->type == CSS_VALUE_TYPE_LIST) {
+                if (value->data.list.count >= 2) {
+                    CssValue* vx = value->data.list.values[0];
+                    CssValue* vy = value->data.list.values[1];
+                    if (vx->type == CSS_VALUE_TYPE_LENGTH) {
+                        bg->bg_position_x = resolve_length_value(lycon, prop_id, vx);
+                        bg->bg_position_x_is_percent = 0;
+                    } else if (vx->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        bg->bg_position_x = vx->data.percentage.value;
+                        bg->bg_position_x_is_percent = 1;
+                    } else if (vx->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = vx->data.keyword;
+                        bg->bg_position_x_is_percent = 1;
+                        bg->bg_position_x = (kw == CSS_VALUE_RIGHT) ? 100.0f :
+                                            (kw == CSS_VALUE_CENTER) ? 50.0f : 0.0f;
+                    }
+                    if (vy->type == CSS_VALUE_TYPE_LENGTH) {
+                        bg->bg_position_y = resolve_length_value(lycon, prop_id, vy);
+                        bg->bg_position_y_is_percent = 0;
+                    } else if (vy->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        bg->bg_position_y = vy->data.percentage.value;
+                        bg->bg_position_y_is_percent = 1;
+                    } else if (vy->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = vy->data.keyword;
+                        bg->bg_position_y_is_percent = 1;
+                        bg->bg_position_y = (kw == CSS_VALUE_BOTTOM) ? 100.0f :
+                                            (kw == CSS_VALUE_CENTER) ? 50.0f : 0.0f;
+                    }
+                    log_debug("[CSS] background-position: two-value form");
+                }
             }
             break;
         }

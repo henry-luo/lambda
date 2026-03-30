@@ -1,5 +1,7 @@
 #include "render_filter.hpp"
+#include "render_background.hpp"
 #include "../lib/log.h"
+#include "../lib/memtrack.h"
 #include <math.h>
 #include <algorithm>
 
@@ -267,12 +269,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                         break;
 
                     case FILTER_BLUR:
-                        // Blur requires ThorVG C++ API (SceneEffect::GaussianBlur)
-                        // Log and skip
-                        if (x == left && y == top) {
-                            log_debug("[FILTER] blur(%.1fpx) not supported (requires ThorVG C++ API)",
-                                      func->params.blur_radius);
-                        }
+                        // Blur is handled as a post-processing step below (not per-pixel)
                         break;
 
                     case FILTER_DROP_SHADOW:
@@ -302,4 +299,112 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
     }
 
     log_debug("[FILTER] Applied filters to %d pixels", (right - left) * (bottom - top));
+
+    // Apply blur filter as a post-processing step (operates on entire region, not per-pixel)
+    FilterFunction* blur_func = filter->functions;
+    while (blur_func) {
+        if (blur_func->type == FILTER_BLUR && blur_func->params.blur_radius > 0) {
+            box_blur_region(surface, left, top, right - left, bottom - top, blur_func->params.blur_radius);
+            log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
+                      blur_func->params.blur_radius, left, top, right - left, bottom - top);
+        }
+        blur_func = blur_func->next;
+    }
+
+    // Apply drop-shadow filter as a post-processing step.
+    // Algorithm:
+    //  1. Extract the element's alpha channel into a shadow buffer, scaled by shadow color alpha.
+    //  2. Box-blur the shadow buffer to simulate the blur radius.
+    //  3. Composite the blurred shadow onto the main surface at (elem_x + offset_x, elem_y + offset_y)
+    //     using destination-over blending (shadow placed behind existing content).
+    FilterFunction* ds_func = filter->functions;
+    while (ds_func) {
+        if (ds_func->type == FILTER_DROP_SHADOW) {
+            Color sc = ds_func->params.drop_shadow.color;
+            int dx  = (int)ds_func->params.drop_shadow.offset_x;
+            int dy  = (int)ds_func->params.drop_shadow.offset_y;
+            float blur_r = ds_func->params.drop_shadow.blur_radius;
+
+            if (sc.a == 0) { ds_func = ds_func->next; continue; }
+
+            int ew = right - left;
+            int eh = bottom - top;
+            if (ew <= 0 || eh <= 0) { ds_func = ds_func->next; continue; }
+
+            // Allocate shadow buffer same size as element region (ABGR pixel format)
+            uint32_t* shadow_px = (uint32_t*)mem_alloc((size_t)ew * eh * sizeof(uint32_t), MEM_CAT_RENDER);
+            if (!shadow_px) { ds_func = ds_func->next; continue; }
+
+            // Fill shadow buffer: shadow color with alpha = elem_alpha * color.a / 255
+            // ABGR layout: A=bits24-31, B=bits16-23, G=bits8-15, R=bits0-7
+            for (int row = 0; row < eh; row++) {
+                for (int col = 0; col < ew; col++) {
+                    uint32_t ep = pixels[(top + row) * pitch + (left + col)];
+                    uint8_t elem_a = (ep >> 24) & 0xFF;
+                    uint8_t sha = (uint8_t)((int)elem_a * sc.a / 255);
+                    shadow_px[row * ew + col] = ((uint32_t)sha  << 24)
+                                              | ((uint32_t)sc.b << 16)
+                                              | ((uint32_t)sc.g <<  8)
+                                              |  (uint32_t)sc.r;
+                }
+            }
+
+            // Blur the shadow alpha (and RGB, though RGB is constant across the shadow)
+            if (blur_r > 0) {
+                ImageSurface shadow_surf;
+                memset(&shadow_surf, 0, sizeof(shadow_surf));
+                shadow_surf.width  = ew;
+                shadow_surf.height = eh;
+                shadow_surf.pitch  = ew * 4;
+                shadow_surf.pixels = shadow_px;
+                box_blur_region(&shadow_surf, 0, 0, ew, eh, blur_r);
+            }
+
+            // Composite blurred shadow onto main surface at (left+dx, top+dy), destination-over
+            for (int row = 0; row < eh; row++) {
+                int sy = top + dy + row;
+                if (sy < 0 || sy >= surface->height) continue;
+                if ((float)sy < clip->top || (float)sy >= clip->bottom) continue;
+                for (int col = 0; col < ew; col++) {
+                    int sx = left + dx + col;
+                    if (sx < 0 || sx >= surface->width) continue;
+                    if ((float)sx < clip->left || (float)sx >= clip->right) continue;
+
+                    uint32_t sp = shadow_px[row * ew + col];
+                    uint8_t sa = (sp >> 24) & 0xFF;
+                    if (sa == 0) continue;
+
+                    uint32_t* dst = &pixels[sy * pitch + sx];
+                    uint32_t ep = *dst;
+                    uint8_t ea = (ep >> 24) & 0xFF;
+                    if (ea == 255) continue;  // fully opaque existing pixel hides shadow
+
+                    // Porter-Duff destination-over: src=shadow (behind), dst=existing (in front)
+                    // result.a = dst.a + src.a * (1 - dst.a)
+                    // result.rgb = (dst.rgb * dst.a + src.rgb * src.a * (1 - dst.a)) / result.a
+                    float fa  = ea  / 255.0f;
+                    float fsa = sa  / 255.0f;
+                    float res_af = fa + fsa * (1.0f - fa);
+                    uint8_t new_a = (uint8_t)(res_af * 255.0f + 0.5f);
+                    if (new_a == 0) continue;
+
+                    float sc_contrib = fsa * (1.0f - fa);
+                    uint8_t er = ep & 0xFF,          sr = sp & 0xFF;
+                    uint8_t eg = (ep >> 8) & 0xFF,   sg = (sp >> 8) & 0xFF;
+                    uint8_t eb = (ep >> 16) & 0xFF,  sb = (sp >> 16) & 0xFF;
+
+                    uint8_t new_r = (uint8_t)(((float)er * fa + (float)sr * sc_contrib) / res_af + 0.5f);
+                    uint8_t new_g = (uint8_t)(((float)eg * fa + (float)sg * sc_contrib) / res_af + 0.5f);
+                    uint8_t new_b = (uint8_t)(((float)eb * fa + (float)sb * sc_contrib) / res_af + 0.5f);
+
+                    *dst = ((uint32_t)new_a << 24) | ((uint32_t)new_b << 16) | ((uint32_t)new_g << 8) | new_r;
+                }
+            }
+
+            mem_free(shadow_px);
+            log_debug("[FILTER] Applied drop-shadow(%d,%d,%.1fpx rgba(%d,%d,%d,%d)) to region (%d,%d,%d,%d)",
+                      dx, dy, blur_r, sc.r, sc.g, sc.b, sc.a, left, top, ew, eh);
+        }
+        ds_func = ds_func->next;
+    }
 }

@@ -8,9 +8,7 @@
  * Implements CSS filter effects that can be applied to elements.
  * Color manipulation filters (grayscale, brightness, contrast, etc.) are applied
  * to the rendered pixel data after the element and its children are rendered.
- *
- * Note: blur() filter requires ThorVG C++ API (SceneEffect::GaussianBlur) which
- * is not available in the C API. Blur is logged but not applied.
+ * The blur() filter uses a software 3-pass box blur approximation of Gaussian blur.
  */
 
 /**
