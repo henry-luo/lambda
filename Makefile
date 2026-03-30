@@ -1781,7 +1781,7 @@ test-layout:
 				*.html|*.htm) TEST_FILE="$$TEST_VAR" ;; \
 				*) \
 					TEST_FILE=""; \
-					for dir in basic baseline css2.1 flex grid yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline; do \
+					for dir in basic baseline css2.1 flex grid yoga form wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-inline; do \
 						if [ -f "test/layout/data/$$dir/$${TEST_VAR}.htm" ]; then \
 							TEST_FILE="$${TEST_VAR}.htm"; \
 							break; \
