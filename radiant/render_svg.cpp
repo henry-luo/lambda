@@ -249,6 +249,24 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
 
+    // Add text-shadow as CSS style attribute
+    DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
+    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+        strbuf_append_str(ctx->svg_content, " style=\"text-shadow:");
+        TextShadow* ts = parent_elem->font->text_shadow;
+        bool first = true;
+        while (ts) {
+            if (!first) strbuf_append_char(ctx->svg_content, ',');
+            char ts_color[32];
+            svg_color_to_string(ts->color, ts_color);
+            strbuf_append_format(ctx->svg_content, " %.1fpx %.1fpx %.1fpx %s",
+                ts->offset_x, ts->offset_y, ts->blur_radius, ts_color);
+            first = false;
+            ts = ts->next;
+        }
+        strbuf_append_char(ctx->svg_content, '"');
+    }
+
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
     mem_free(text_content);  strbuf_free(escaped_text);
@@ -331,6 +349,51 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
             strbuf_append_format(ctx->svg_content,
                 "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
                 x, y + height - border->width.bottom, width, border->width.bottom, border_color);
+        }
+    }
+
+    // Render outline (outside border-box)
+    if (view->bound->outline) {
+        OutlineProp* outline = view->bound->outline;
+        if (outline->width > 0 && outline->style != CSS_VALUE_NONE &&
+            outline->style != CSS_VALUE_HIDDEN && outline->color.a > 0) {
+
+            float expand = outline->width * 0.5f + outline->offset;
+            float ox = x - expand;
+            float oy = y - expand;
+            float ow = width + expand * 2;
+            float oh = height + expand * 2;
+
+            char outline_color[32];
+            svg_color_to_string(outline->color, outline_color);
+
+            const char* dash_attr = "";
+            char dash_buf[64] = {0};
+            if (outline->style == CSS_VALUE_DOTTED) {
+                str_fmt(dash_buf, sizeof(dash_buf),
+                    " stroke-dasharray=\"%.1f,%.1f\"", outline->width, outline->width * 2);
+                dash_attr = dash_buf;
+            } else if (outline->style == CSS_VALUE_DASHED) {
+                str_fmt(dash_buf, sizeof(dash_buf),
+                    " stroke-dasharray=\"%.1f,%.1f\"", outline->width * 3, outline->width * 3);
+                dash_attr = dash_buf;
+            }
+
+            svg_indent(ctx);
+            // Use rounded rect if border has radius
+            if (view->bound->border && view->bound->border->radius.top_left > 0) {
+                float rx = view->bound->border->radius.top_left + expand;
+                if (rx < 0) rx = 0;
+                strbuf_append_format(ctx->svg_content,
+                    "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
+                    "fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
+                    ox, oy, ow, oh, rx, rx, outline_color, outline->width, dash_attr);
+            } else {
+                strbuf_append_format(ctx->svg_content,
+                    "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                    "fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
+                    ox, oy, ow, oh, outline_color, outline->width, dash_attr);
+            }
         }
     }
 }

@@ -414,6 +414,16 @@ static bool is_view_in_selection(SelectionState* sel, View* view) {
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
+
+    // CSS 2.1 §11.2: text inherits visibility from parent element
+    if (text_view->parent && text_view->parent->is_element()) {
+        DomElement* parent_elem = (DomElement*)text_view->parent;
+        if (parent_elem->in_line && parent_elem->in_line->visibility == VIS_HIDDEN) {
+            log_debug("text hidden by parent visibility:hidden");
+            return;
+        }
+    }
+
     if (!rdcon->font.font_handle) {
         log_debug("font face is null");
         return;
@@ -499,6 +509,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
         parent_elem->bound->background->color.a > 0) {
         bg_color = &parent_elem->bound->background->color;
+    }
+
+    // Get text-shadow from parent element's font property
+    TextShadow* text_shadow = nullptr;
+    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+        text_shadow = parent_elem->font->text_shadow;
     }
 
     while (text_rect) {
@@ -686,6 +702,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     }
 
                     auto t3 = std::chrono::high_resolution_clock::now();
+
+                    // Render text-shadow glyphs BEFORE the main glyph
+                    if (text_shadow) {
+                        Color saved_shadow_color = rdcon->color;
+                        TextShadow* ts = text_shadow;
+                        while (ts) {
+                            rdcon->color = ts->color;
+                            float sx = x + glyph->bitmap.bearing_x + ts->offset_x * s;
+                            float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * s;
+                            draw_glyph(rdcon, &glyph->bitmap, sx, sy);
+                            ts = ts->next;
+                        }
+                        rdcon->color = saved_shadow_color;
+                    }
+
                     draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
                     auto t4 = std::chrono::high_resolution_clock::now();
                     g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
@@ -1330,6 +1361,11 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             render_border(rdcon, view, rect);
         }
     }
+
+    // Render outline AFTER borders (drawn on top, outside border-box)
+    if (view->bound->outline) {
+        render_outline(rdcon, view, rect);
+    }
 }
 
 void draw_debug_rect(Tvg_Canvas canvas, Rect rect, Bound* clip) {
@@ -1419,6 +1455,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
 
+    // CSS 2.1 §11.2: visibility:hidden — suppress own rendering but still render children
+    // (children with visibility:visible should still appear)
+    bool self_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
+
     // Save transform state and apply element's transform
     Tvg_Matrix pa_transform = rdcon->transform;
     bool pa_has_transform = rdcon->has_transform;
@@ -1476,13 +1516,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
     // Skip legacy render_list_bullet when a ::marker pseudo-element exists,
     // since render_marker_view will handle it during child traversal.
-    if (block->view_type == RDT_VIEW_LIST_ITEM) {
+    if (!self_hidden && block->view_type == RDT_VIEW_LIST_ITEM) {
         DomElement* li_elem = (DomElement*)block;
         if (!li_elem->pseudo || !li_elem->pseudo->marker) {
             render_list_bullet(rdcon, block);
         }
     }
-    if (block->bound) {
+    if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
         if (block->view_type == RDT_VIEW_TABLE_CELL) {
@@ -1834,8 +1874,10 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
 
+    bool self_hidden = view_span->in_line && view_span->in_line->visibility == VIS_HIDDEN;
+
     // Render border/background for inline elements (e.g. <span> with border)
-    if (view_span->bound) {
+    if (!self_hidden && view_span->bound) {
         render_bound(rdcon, (ViewBlock*)view_span);
     }
 

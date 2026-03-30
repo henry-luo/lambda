@@ -114,6 +114,33 @@ static double resolve_color_component(const CssValue* v, bool is_alpha = false) 
     }
 }
 
+// CSS Color Level 4 §4.2.4: Convert HSL to RGB
+// h: hue in degrees [0,360), s: saturation [0,1], l: lightness [0,1]
+static Color hsl_to_rgb(float h, float s, float l, float a) {
+    // normalize hue to [0,360)
+    h = fmodf(h, 360.0f);
+    if (h < 0) h += 360.0f;
+
+    float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float m = l - c / 2.0f;
+
+    float r1, g1, b1;
+    if (h < 60)       { r1 = c; g1 = x; b1 = 0; }
+    else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
+    else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
+    else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
+    else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
+    else              { r1 = c; g1 = 0; b1 = x; }
+
+    Color result;
+    result.r = (uint8_t)((r1 + m) * 255.0f + 0.5f);
+    result.g = (uint8_t)((g1 + m) * 255.0f + 0.5f);
+    result.b = (uint8_t)((b1 + m) * 255.0f + 0.5f);
+    result.a = (uint8_t)(a * 255.0f + 0.5f);
+    return result;
+}
+
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
     Color result;
     result.r = 0;
@@ -134,10 +161,15 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
         case CSS_COLOR_HEX:  case CSS_COLOR_RGB:
             result = value->data.color.data.color;
             break;
-        case CSS_COLOR_HSL:
-            // TODO: convert HSL to RGB
-            // for now, leave as black
+        case CSS_COLOR_HSL: {
+            // HSL stored as color with h in r (scaled), s in g, l in b
+            Color hsl = value->data.color.data.color;
+            result = hsl_to_rgb((float)hsl.r * 360.0f / 255.0f,
+                                (float)hsl.g / 255.0f,
+                                (float)hsl.b / 255.0f,
+                                (float)hsl.a / 255.0f);
             break;
+        }
         default:
             break;
         }
@@ -235,10 +267,66 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                 log_debug("[CSS] resolve_color_value: rgb legacy syntax -> (%d, %d, %d, %d)", result.r, result.g, result.b, result.a);
             }
         }
-        // hsl() and hsla() functions - TODO: implement HSL to RGB conversion
+        // hsl() and hsla() functions
         else if (str_ieq_const(func->name, strlen(func->name), "hsl") || str_ieq_const(func->name, strlen(func->name), "hsla")) {
-            // TODO: implement HSL to RGB conversion
-            log_debug("[CSS] resolve_color_value: hsl() not yet implemented");
+            // hsl(h, s%, l%) or hsl(h s% l% / alpha) — same modern/legacy pattern as rgb()
+            double h = 0, s = 0, l = 0, a = 1.0;
+
+            if (func->arg_count == 1 && func->args[0] && func->args[0]->type == CSS_VALUE_TYPE_LIST) {
+                // modern space-separated syntax
+                const CssValue* list = func->args[0];
+                int num_idx = 0;
+                bool found_slash = false;
+
+                for (size_t i = 0; i < list->data.list.count && num_idx < 4; i++) {
+                    const CssValue* v = list->data.list.values[i];
+                    if (!v) continue;
+                    if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                        strcmp(v->data.custom_property.name, "/") == 0) {
+                        found_slash = true;
+                        continue;
+                    }
+                    if (v->type == CSS_VALUE_TYPE_FUNCTION || v->type == CSS_VALUE_TYPE_VAR) continue;
+
+                    double val = 0;
+                    if (v->type == CSS_VALUE_TYPE_NUMBER) val = v->data.number.value;
+                    else if (v->type == CSS_VALUE_TYPE_PERCENTAGE) val = v->data.percentage.value;
+                    else if (v->type == CSS_VALUE_TYPE_LENGTH) val = v->data.length.value;
+
+                    if (num_idx == 0) h = val;                    // hue in degrees
+                    else if (num_idx == 1) s = val / 100.0;       // saturation percentage
+                    else if (num_idx == 2) l = val / 100.0;       // lightness percentage
+                    else if (num_idx == 3) {
+                        a = (v->type == CSS_VALUE_TYPE_PERCENTAGE) ? val / 100.0 : val;
+                    }
+                    num_idx++;
+                }
+            } else if (func->arg_count >= 3) {
+                // legacy comma-separated syntax: hsl(h, s%, l%) or hsla(h, s%, l%, a)
+                if (func->args[0]) {
+                    if (func->args[0]->type == CSS_VALUE_TYPE_NUMBER) h = func->args[0]->data.number.value;
+                    else if (func->args[0]->type == CSS_VALUE_TYPE_LENGTH) h = func->args[0]->data.length.value;
+                }
+                if (func->args[1] && func->args[1]->type == CSS_VALUE_TYPE_PERCENTAGE)
+                    s = func->args[1]->data.percentage.value / 100.0;
+                if (func->args[2] && func->args[2]->type == CSS_VALUE_TYPE_PERCENTAGE)
+                    l = func->args[2]->data.percentage.value / 100.0;
+                if (func->arg_count >= 4 && func->args[3]) {
+                    if (func->args[3]->type == CSS_VALUE_TYPE_NUMBER)
+                        a = func->args[3]->data.number.value;
+                    else if (func->args[3]->type == CSS_VALUE_TYPE_PERCENTAGE)
+                        a = func->args[3]->data.percentage.value / 100.0;
+                }
+            }
+
+            // clamp
+            if (s < 0) s = 0; if (s > 1) s = 1;
+            if (l < 0) l = 0; if (l > 1) l = 1;
+            if (a < 0) a = 0; if (a > 1) a = 1;
+
+            result = hsl_to_rgb((float)h, (float)s, (float)l, (float)a);
+            log_debug("[CSS] resolve_color_value: hsl(%g, %g%%, %g%%) -> (%d, %d, %d, %d)",
+                      h, s * 100, l * 100, result.r, result.g, result.b, result.a);
         }
         break;
     }
@@ -7512,12 +7600,70 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                log_debug("[CSS] text-shadow: none (field not yet added to FontProp)");
-            } else {
-                // TODO: Parse shadow offset, blur, and color
-                // For now, just log that shadow is set
-                log_debug("[CSS] text-shadow: complex value (needs full shadow parsing and field not yet added)");
+                span->font->text_shadow = nullptr;
+                log_debug("[CSS] text-shadow: none");
+                break;
             }
+
+            // text-shadow: offset-x offset-y [blur-radius] [color] [, ...]
+            auto parse_single_text_shadow = [&](const CssValue* sv) -> TextShadow* {
+                TextShadow* ts = (TextShadow*)alloc_prop(lycon, sizeof(TextShadow));
+                memset(ts, 0, sizeof(TextShadow));
+                ts->color.a = 255;  // default opaque black
+
+                if (sv->type == CSS_VALUE_TYPE_LIST) {
+                    int length_count = 0;
+                    for (size_t i = 0; i < sv->data.list.count; i++) {
+                        const CssValue* v = sv->data.list.values[i];
+                        if (!v) continue;
+                        if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            ts->color = color_name_to_rgb(v->data.keyword);
+                        } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
+                            float val = (v->type == CSS_VALUE_TYPE_LENGTH)
+                                ? resolve_length_value(lycon, prop_id, v)
+                                : v->data.number.value;
+                            switch (length_count) {
+                                case 0: ts->offset_x = val; break;
+                                case 1: ts->offset_y = val; break;
+                                case 2: ts->blur_radius = val; break;
+                            }
+                            length_count++;
+                        } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
+                            ts->color = resolve_color_value(lycon, v);
+                        }
+                    }
+                }
+                return ts;
+            };
+
+            TextShadow* ts_head = nullptr;
+            TextShadow* ts_tail = nullptr;
+
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                bool is_multi = false;
+                for (size_t i = 0; i < value->data.list.count && !is_multi; i++) {
+                    if (value->data.list.values[i] &&
+                        value->data.list.values[i]->type == CSS_VALUE_TYPE_LIST) {
+                        is_multi = true;
+                    }
+                }
+                if (is_multi) {
+                    for (size_t i = 0; i < value->data.list.count; i++) {
+                        const CssValue* sv = value->data.list.values[i];
+                        if (!sv) continue;
+                        TextShadow* ts = parse_single_text_shadow(sv);
+                        if (ts) {
+                            if (!ts_head) { ts_head = ts; ts_tail = ts; }
+                            else { ts_tail->next = ts; ts_tail = ts; }
+                        }
+                    }
+                } else {
+                    ts_head = parse_single_text_shadow(value);
+                }
+            }
+
+            span->font->text_shadow = ts_head;
+            log_debug("[CSS] text-shadow parsed: %s", ts_head ? "shadow(s) set" : "none");
             break;
         }
 
@@ -10541,6 +10687,85 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                         css_enum_info(val)->name, val);
                 }
             }
+            break;
+        }
+
+        // ===== Outline Properties =====
+        case CSS_PROPERTY_OUTLINE_STYLE: {
+            log_debug("[CSS] Processing outline-style property");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                span->bound->outline->style = value->data.keyword;
+                log_debug("[CSS] outline-style: %s", css_enum_info(value->data.keyword)->name);
+            }
+            break;
+        }
+        case CSS_PROPERTY_OUTLINE_WIDTH: {
+            log_debug("[CSS] Processing outline-width property");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            float width = resolve_length_value(lycon, prop_id, value);
+            span->bound->outline->width = width;
+            log_debug("[CSS] outline-width: %.1fpx", width);
+            break;
+        }
+        case CSS_PROPERTY_OUTLINE_COLOR: {
+            log_debug("[CSS] Processing outline-color property");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            span->bound->outline->color = resolve_color_value(lycon, value);
+            log_debug("[CSS] outline-color: #%02x%02x%02x%02x",
+                      span->bound->outline->color.r, span->bound->outline->color.g,
+                      span->bound->outline->color.b, span->bound->outline->color.a);
+            break;
+        }
+        case CSS_PROPERTY_OUTLINE_OFFSET: {
+            log_debug("[CSS] Processing outline-offset property");
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            span->bound->outline->offset = resolve_length_value(lycon, prop_id, value);
+            log_debug("[CSS] outline-offset: %.1fpx", span->bound->outline->offset);
+            break;
+        }
+        case CSS_PROPERTY_OUTLINE: {
+            log_debug("[CSS] Processing outline shorthand property");
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
+                if (span->bound && span->bound->outline) {
+                    span->bound->outline->style = CSS_VALUE_NONE;
+                    span->bound->outline->width = 0;
+                }
+                break;
+            }
+            if (!span->bound) { span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            if (!span->bound->outline) { span->bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)); }
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                for (size_t i = 0; i < value->data.list.count; i++) {
+                    const CssValue* v = value->data.list.values[i];
+                    if (!v) continue;
+                    if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = v->data.keyword;
+                        if (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED ||
+                            kw == CSS_VALUE_DOUBLE || kw == CSS_VALUE_GROOVE || kw == CSS_VALUE_RIDGE ||
+                            kw == CSS_VALUE_INSET || kw == CSS_VALUE_OUTSET || kw == CSS_VALUE_NONE) {
+                            span->bound->outline->style = kw;
+                        } else {
+                            span->bound->outline->color = color_name_to_rgb(kw);
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_NUMBER) {
+                        span->bound->outline->width = resolve_length_value(lycon, prop_id, v);
+                    } else if (v->type == CSS_VALUE_TYPE_COLOR || v->type == CSS_VALUE_TYPE_FUNCTION) {
+                        span->bound->outline->color = resolve_color_value(lycon, v);
+                    }
+                }
+            } else if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
+                span->bound->outline->width = resolve_length_value(lycon, prop_id, value);
+                span->bound->outline->style = CSS_VALUE_SOLID;
+            }
+            log_debug("[CSS] outline: width=%.1f style=%d color=#%02x%02x%02x%02x",
+                      span->bound->outline->width, span->bound->outline->style,
+                      span->bound->outline->color.r, span->bound->outline->color.g,
+                      span->bound->outline->color.b, span->bound->outline->color.a);
             break;
         }
 
