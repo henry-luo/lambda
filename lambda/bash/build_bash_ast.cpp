@@ -1499,6 +1499,22 @@ static BashAstNode* build_subshell(BashTranspiler* tp, TSNode node) {
 }
 
 static BashAstNode* build_compound_statement(BashTranspiler* tp, TSNode node) {
+    // detect (( ... )) arithmetic compound statement vs { ... } brace group
+    TSNode first_anon = ts_node_child(node, 0);
+    if (!ts_node_is_null(first_anon)) {
+        StrView tok = bash_node_source(tp, first_anon);
+        if (tok.length == 2 && tok.str[0] == '(' && tok.str[1] == '(') {
+            // (( expr )) — build as arithmetic expression
+            BashArithExprNode* arith = (BashArithExprNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_ARITHMETIC_EXPR, node, sizeof(BashArithExprNode));
+            uint32_t nc = ts_node_named_child_count(node);
+            for (uint32_t i = 0; i < nc; i++) {
+                TSNode child = ts_node_named_child(node, i);
+                arith->expression = build_arith_expression(tp, child);
+            }
+            return (BashAstNode*)arith;
+        }
+    }
     BashCompoundNode* compound = (BashCompoundNode*)alloc_bash_ast_node(
         tp, BASH_AST_NODE_COMPOUND_STATEMENT, node, sizeof(BashCompoundNode));
     compound->body = build_block(tp, node);
@@ -1728,16 +1744,53 @@ static BashAstNode* build_arith_expression(BashTranspiler* tp, TSNode node) {
         return (BashAstNode*)unary;
     }
     if (strcmp(node_type, "binary_expression") == 0) {
-        BashArithBinaryNode* bin = (BashArithBinaryNode*)alloc_bash_ast_node(
-            tp, BASH_AST_NODE_ARITH_BINARY, node, sizeof(BashArithBinaryNode));
+        // first pass: find the operator to determine if this is an assignment
         uint32_t bin_children = ts_node_child_count(node);
-        int operand_idx = 0;
+        BashOperator op = BASH_OP_ADD;
         for (uint32_t j = 0; j < bin_children; j++) {
             TSNode bc = ts_node_child(node, j);
             if (!ts_node_is_named(bc)) {
                 StrView op_src = bash_node_source(tp, bc);
-                bin->op = bash_operator_from_string(op_src.str, op_src.length);
-            } else {
+                op = bash_operator_from_string(op_src.str, op_src.length);
+                break;
+            }
+        }
+        // if the operator is assignment-like, create an ARITH_ASSIGN node
+        if (op == BASH_OP_ASSIGN || op == BASH_OP_ADD_ASSIGN || op == BASH_OP_SUB_ASSIGN ||
+            op == BASH_OP_MUL_ASSIGN || op == BASH_OP_DIV_ASSIGN || op == BASH_OP_MOD_ASSIGN) {
+            BashArithAssignNode* assign = (BashArithAssignNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_ARITH_ASSIGN, node, sizeof(BashArithAssignNode));
+            assign->op = op;
+            int operand_idx = 0;
+            for (uint32_t j = 0; j < bin_children; j++) {
+                TSNode c = ts_node_child(node, j);
+                if (ts_node_is_named(c)) {
+                    if (operand_idx == 0) {
+                        // left side: variable name
+                        const char* ct = ts_node_type(c);
+                        if (strcmp(ct, "simple_expansion") == 0) {
+                            uint32_t nc = ts_node_named_child_count(c);
+                            if (nc > 0) assign->name = node_text(tp, ts_node_named_child(c, 0));
+                            else assign->name = node_text(tp, c);
+                        } else {
+                            assign->name = node_text(tp, c);
+                        }
+                        operand_idx++;
+                    } else {
+                        assign->value = build_arith_expression(tp, c);
+                    }
+                }
+            }
+            return (BashAstNode*)assign;
+        }
+        // normal binary arithmetic/comparison
+        BashArithBinaryNode* bin = (BashArithBinaryNode*)alloc_bash_ast_node(
+            tp, BASH_AST_NODE_ARITH_BINARY, node, sizeof(BashArithBinaryNode));
+        bin->op = op;
+        int operand_idx = 0;
+        for (uint32_t j = 0; j < bin_children; j++) {
+            TSNode bc = ts_node_child(node, j);
+            if (ts_node_is_named(bc)) {
                 if (operand_idx == 0) {
                     bin->left = build_arith_expression(tp, bc);
                     operand_idx++;

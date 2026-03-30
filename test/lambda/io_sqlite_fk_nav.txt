@@ -1,0 +1,11 @@
+map
+"Electronics"
+["Electronics", "Electronics", "Books", "Books", "Electronics"]
+array
+3
+["Widget", "Gadget", "Cable"]
+2
+["Novel", "Textbook"]
+0
+true
+2

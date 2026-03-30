@@ -192,6 +192,14 @@ Item bash_get_bash_source_count(void);              // ${#BASH_SOURCE[@]}
 Item bash_get_bash_lineno_count(void);              // ${#BASH_LINENO[@]}
 void bash_push_funcname(Item name);                 // enter function/debug frame
 void bash_pop_funcname(void);                       // leave function/debug frame
+Item bash_get_funcname_all(void);                   // ${FUNCNAME[@]}
+void bash_push_argv_frame(Item* args, int count);   // push args onto BASH_ARGV
+void bash_pop_bash_argv(void);                      // pop top frame from BASH_ARGV
+Item bash_get_bash_argv(Item index);                // ${BASH_ARGV[n]}
+Item bash_get_bash_argv_count(void);                // ${#BASH_ARGV[@]}
+Item bash_get_bash_argv_all(void);                  // ${BASH_ARGV[@]}
+Item bash_get_bash_argc(Item index);                // ${BASH_ARGC[n]}
+Item bash_get_bash_argc_count(void);                // ${#BASH_ARGC[@]}
 void bash_push_source(Item name);                   // enter source file context
 void bash_pop_source(void);                         // leave source file context
 void bash_push_call_frame(void);                    // record current call site
