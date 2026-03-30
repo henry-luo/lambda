@@ -70,6 +70,21 @@ typedef struct {
     const char** columns;       /* column names (array, pool-owned) */
 } RdbIndex;
 
+/** trigger metadata */
+typedef struct {
+    const char* name;           /* trigger name */
+    const char* timing;         /* "BEFORE", "AFTER", or "INSTEAD OF" */
+    const char* event;          /* "INSERT", "UPDATE", or "DELETE" */
+} RdbTrigger;
+
+/** SQL function metadata (database-level, not per-table) */
+typedef struct {
+    const char* name;           /* function name */
+    const char* type;           /* "scalar", "aggregate", or "window" */
+    int         narg;           /* number of arguments (-1 = variadic) */
+    bool        builtin;        /* true for built-in functions */
+} RdbFunction;
+
 /** foreign key metadata */
 typedef struct {
     const char* column;         /* FK column in this table */
@@ -90,12 +105,16 @@ typedef struct {
     RdbForeignKey* foreign_keys;    /* outgoing FKs (pool-owned) */
     int         reverse_fk_count;
     RdbForeignKey* reverse_fks;     /* incoming FKs from other tables (pool-owned) */
+    int         trigger_count;
+    RdbTrigger* triggers;           /* array (pool-owned) */
 } RdbTable;
 
 /** database schema (all tables + views) */
 typedef struct {
     int         table_count;
     RdbTable*   tables;         /* array (pool-owned) */
+    int         function_count;
+    RdbFunction* functions;     /* array (pool-owned), database-level */
 } RdbSchema;
 
 /* ══════════════════════════════════════════════════════════════════════

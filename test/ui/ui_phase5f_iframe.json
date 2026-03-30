@@ -1,0 +1,22 @@
+{
+  "name": "Phase 5f: iframe switch_frame tests",
+  "html": "test/ui/test_phase5f_iframe.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== Phase 5f: iframe switch_frame ===" },
+
+    { "type": "log", "message": "--- Test 1: verify parent page element ---" },
+    { "type": "assert_text", "target": { "selector": "#title" }, "contains": "Parent Page" },
+
+    { "type": "log", "message": "--- Test 2: switch to iframe ---" },
+    { "type": "switch_frame", "selector": "#frame1" },
+    { "type": "assert_text", "target": { "selector": "#inner-text" }, "contains": "Hello from iframe" },
+
+    { "type": "log", "message": "--- Test 3: verify iframe button exists ---" },
+    { "type": "assert_visible", "target": { "selector": "#inner-btn" }, "visible": true },
+
+    { "type": "log", "message": "--- Test 4: switch back to main ---" },
+    { "type": "switch_frame" },
+    { "type": "assert_text", "target": { "selector": "#title" }, "contains": "Parent Page" }
+  ]
+}

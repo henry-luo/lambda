@@ -311,9 +311,16 @@ extern "C" Item js_typed_array_set(Item ta_item, Item index, Item value) {
     case JS_TYPED_INT8:    ((int8_t*)ta->data)[idx] = (int8_t)(int32_t)num_val; break;
     case JS_TYPED_UINT8:   ((uint8_t*)ta->data)[idx] = (uint8_t)(uint32_t)num_val; break;
     case JS_TYPED_UINT8_CLAMPED: {
-        int v = (int)num_val;
-        if (v < 0) v = 0; else if (v > 255) v = 255;
-        ((uint8_t*)ta->data)[idx] = (uint8_t)v;
+        // ECMAScript ToUint8Clamp: NaN→0, clamp to [0,255], then round-half-to-even
+        if (isnan(num_val) || num_val <= 0.0) { ((uint8_t*)ta->data)[idx] = 0; break; }
+        if (num_val >= 255.0) { ((uint8_t*)ta->data)[idx] = 255; break; }
+        int f = (int)num_val;  // floor
+        double fmod = num_val - f;
+        uint8_t v;
+        if (fmod < 0.5) v = (uint8_t)f;
+        else if (fmod > 0.5) v = (uint8_t)(f + 1);
+        else v = (f & 1) ? (uint8_t)(f + 1) : (uint8_t)f;  // ties to even
+        ((uint8_t*)ta->data)[idx] = v;
         break;
     }
     case JS_TYPED_INT16:   ((int16_t*)ta->data)[idx] = (int16_t)(int32_t)num_val; break;

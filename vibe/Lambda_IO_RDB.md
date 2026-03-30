@@ -1432,7 +1432,7 @@ Status reflects the current repository state, not the intended end-state of the 
 | Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium | ✅ Implemented |
 | SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium | ✅ Implemented |
 | RDB connection via `input()` | P0 | Low | ✅ Implemented |
-| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs (with `link_name` and `reverse_fks`), datetime, JSON, and decimal typing are exposed; triggers and functions are not |
+| Schema introspection → Lambda types | P0 | Medium | ✅ Implemented: columns, views, indexes, FKs (with `link_name` and `reverse_fks`), triggers (`name`, `timing`, `event`), SQL functions (`name`, `type`, `narg`, `builtin`), datetime, JSON, and decimal typing are all exposed |
 | Table element structure | P0 | Medium | Partial: `db.data.<table>` is exposed, but rows are eagerly materialized arrays rather than lazy table proxies |
 | Basic `for` → `SELECT * FROM table` | P0 | Medium | Partial: table rows are loaded with `SELECT *` during `input()`, but `for` clauses are not lowered to SQL |
 | `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium | Partial: SQL query builder (`rdb_query.h/cpp`) generates parameterized WHERE with `=`, `!=`, `<`, `<=`, `>`, `>=`, AND/OR/NOT; not yet wired to Lambda `for`-clause evaluator |
@@ -1448,7 +1448,7 @@ Status reflects the current repository state, not the intended end-state of the 
 | Datetime column → Lambda `datetime` | P0 | Medium | ✅ Implemented |
 | JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | ✅ Implemented |
 | Views exposed as table elements | P0 | Low | ✅ Implemented |
-| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed with `name`, `unique`, and `columns` fields and have integration test coverage (`io_sqlite_schema.ls`); triggers and SQL functions are not |
+| Schema introspection (indexes, triggers, functions) | P0 | Medium | ✅ Implemented: indexes (`name`, `unique`, `columns`), triggers (`name`, `timing`, `event`), and SQL functions (`name`, `type` scalar/aggregate/window, `narg`, `builtin`) are all exposed with GTest and integration test coverage |
 | `db.schema` / `db.data` namespace structure | P0 | Medium | ✅ Implemented |
 | Result caching (LRU by query) | P1 | Medium | Not implemented |
 | `in` list → `IN (...)` | P1 | Low | Partial: query builder generates parameterized `IN (?1, ?2, ...)` clauses; not yet wired to evaluator |
@@ -1457,8 +1457,8 @@ Status reflects the current repository state, not the intended end-state of the 
 | `len(db.data.table)` → `SELECT COUNT(*)` | P1 | Low | Not implemented |
 | Index access `db.data.table[n]` → `LIMIT 1 OFFSET n` | P1 | Low | Not implemented |
 | Vendor SQLite amalgamation in `lib/` | P0 | Low | ✅ Implemented |
-| GTest unit tests (generic + SQLite) | P0 | Medium | ✅ Implemented: RDB driver (60 tests), input plugin (50 tests), query builder (34 tests) |
-| Lambda integration test scripts (.ls + .txt) | P0 | Medium | ✅ Implemented: 8 scripts covering basic access, schema, types, views, data, autodetect, FK metadata, and FK navigation (forward/reverse/null); SQL pushdown and lazy-loading scenarios are still absent |
+| GTest unit tests (generic + SQLite) | P0 | Medium | ✅ Implemented: RDB driver (126 tests), input plugin (56 tests), query builder (34 tests) |
+| Lambda integration test scripts (.ls + .txt) | P0 | Medium | ✅ Implemented: 9 scripts covering basic access, schema (columns, indexes, triggers, functions), types, views, data, autodetect, FK metadata, FK navigation (forward/reverse/null), and for-clause filtering/sorting (in-memory); SQL pushdown and lazy-loading scenarios are still absent |
 
 ### Phase 2: Advanced Queries (Future)
 
@@ -1513,68 +1513,51 @@ Adding a new backend requires only implementing the `RdbDriver` vtable — no ch
 
 ### Unit Tests
 
-**Generic RDB API + SQLite Driver** (`test/test_rdb_gtest.cpp`, 60 tests):
+**Generic RDB API + SQLite Driver** (`test/test_rdb_gtest.cpp`, 126 tests):
 ```
-RdbTest.DriverRegistration          RdbTest.ColumnMetadata_Active
-RdbTest.DriverLookupUnknown         RdbTest.ColumnMetadata_Metadata
-RdbTest.DriverLookupNull            RdbTest.ColumnMetadata_Cover
-RdbTest.DetectDriver_SqliteExtDb    RdbTest.ColumnMetadata_Price
-RdbTest.DetectDriver_SqliteExtSqlite RdbTest.GetColumn_NotFound
-RdbTest.DetectDriver_SqliteExtSqlite3 RdbTest.IndexCount
-RdbTest.DetectDriver_PostgresScheme RdbTest.IndexDetails
-RdbTest.DetectDriver_PostgresShortScheme RdbTest.ForeignKeys
-RdbTest.DetectDriver_MysqlScheme    RdbTest.ReverseForeignKeys
-RdbTest.DetectDriver_DuckdbScheme   RdbTest.NoForeignKeys
-RdbTest.DetectDriver_DuckdbExtDdb   RdbTest.PrepareAndStep
-RdbTest.DetectDriver_DuckdbExtDuckdb RdbTest.ColumnCount
-RdbTest.DetectDriver_Unknown        RdbTest.PrepareBadSql
-RdbTest.DetectDriver_Null           RdbTest.PrepareNull
-RdbTest.OpenClose                   RdbTest.BindInt
-RdbTest.OpenAutoDetect              RdbTest.BindFloat
-RdbTest.OpenNonexistentFile         RdbTest.BindString
-RdbTest.OpenUnknownDriver           RdbTest.BindNull
-RdbTest.OpenNullDetect              RdbTest.ValueType_Integer
-RdbTest.CloseNull                   RdbTest.ValueType_Float
-RdbTest.SchemaLoadSuccess           RdbTest.ValueType_Text
-RdbTest.SchemaEmptyDb               RdbTest.ValueType_Null
-RdbTest.GetTable_Authors            RdbTest.ValueType_JsonStored
-RdbTest.GetTable_Books              RdbTest.RowCount
-RdbTest.GetTable_View               RdbTest.RowCountUnknownTable
-RdbTest.GetTable_NotFound           RdbTest.ErrorMsg
-RdbTest.GetTable_Null               RdbTest.ErrorMsgNull
-RdbTest.ColumnMetadata_Id           RdbTest.FinalizeNull
-RdbTest.ColumnMetadata_Name         RdbTest.StepNull
-RdbTest.ColumnMetadata_Rating       RdbTest.ColumnValueNull
-RdbTest.ColumnMetadata_Born
+§1  Driver Registration & Detection  (14 tests)
+§2  Open/Close                       (6 tests)
+§3  Schema Loading                   (2 tests)
+§4  Table Lookup                     (5 tests)
+§5  Index Metadata                   (2 tests)
+§6  FK Metadata                      (3 tests)
+§7  Prepare/Execute                  (4 tests)
+§8  Column Count                     (2 tests)
+§9  Bind Parameters                  (4 tests)
+§10 Value Types                      (5 tests)
+§11 Row Count                        (2 tests)
+§12 Error Handling                   (5 tests)
+§13 Iteration                        (3 tests)
+§14 Advanced Queries                 (5 tests)
+§15 Schema Reload                    (1 test)
+§16 Column Metadata                  (12 tests)
+§17 Type Mapping                     (18 tests)
+§18 Value Reading                    (6 tests)
+§19 FK Advanced                      (8 tests)
+§20 Edge Cases                       (11 tests)
+§21 Column Metadata Null             (1 test)
+§22 Error After Bad Prepare          (1 test)
+§23 Trigger Schema                   (2 tests)
+§24 Function Schema                  (2 tests)
 ```
 
-**Lambda Input Plugin** (`test/test_input_rdb_gtest.cpp`, 39 tests):
+**Lambda Input Plugin** (`test/test_input_rdb_gtest.cpp`, 56 tests):
 ```
-InputRdbTest.DetectSqliteDb         InputRdbTest.ValueConversion_Null
-InputRdbTest.DetectSqliteExplicit   InputRdbTest.ValueConversion_Datetime
-InputRdbTest.DetectNotRdb           InputRdbTest.ValueConversion_Decimal
-InputRdbTest.DetectNullPath         InputRdbTest.ValueConversion_JsonArray
-InputRdbTest.ReturnsValidInput      InputRdbTest.ValueConversion_JsonObject
-InputRdbTest.RootIsDbElement        InputRdbTest.ViewDataAccessible
-InputRdbTest.DbElementName          InputRdbTest.ViewRowContent
-InputRdbTest.DbTableCount           InputRdbTest.EmptyDatabase
-InputRdbTest.SchemaIsMap            InputRdbTest.AllCategoryRows
-InputRdbTest.SchemaHasTables        InputRdbTest.AllProductRows
-InputRdbTest.SchemaColumnsArray     InputRdbTest.NullPathname
-InputRdbTest.SchemaColumnDetails    InputRdbTest.NonexistentFile
-InputRdbTest.SchemaForeignKeys      InputRdbTest.SecondProductPrice
-InputRdbTest.SchemaViewFlag         InputRdbTest.ThirdProductCategoryId
-InputRdbTest.SchemaTableNoViewFlag
-InputRdbTest.SchemaIndexes
-InputRdbTest.DataIsMap
-InputRdbTest.DataHasTables
-InputRdbTest.DataCategoriesRowCount
-InputRdbTest.DataProductsRowCount
-InputRdbTest.DataRowIsMap
-InputRdbTest.ValueConversion_Int
-InputRdbTest.ValueConversion_String
-InputRdbTest.ValueConversion_Float
-InputRdbTest.ValueConversion_Bool
+§1  Format Detection               (4 tests)
+§2  Basic Element Structure        (4 tests)
+§3  Schema Namespace               (8 tests — columns, FK, view flag, indexes, triggers)
+§4  Data Namespace                 (5 tests)
+§5  Value Conversion               (8 tests — int, string, float, bool, null, datetime, decimal, JSON)
+§6  View Data                      (2 tests)
+§7  Empty Database                 (1 test)
+§8  Data Integrity                 (2 tests)
+§9  Error Handling                 (2 tests)
+§10 Second Row Field Access        (2 tests)
+§11 FK Forward Navigation          (5 tests)
+§12 FK Reverse Navigation          (4 tests)
+§13 Null FK Handling               (2 tests)
+§14 Trigger Schema                 (3 tests)
+§15 Function Schema                (2 tests)
 ```
 
 **Query Builder** (`test/test_rdb_query_gtest.cpp`, 34 tests):
@@ -1598,16 +1581,18 @@ RdbQueryTest.OrderByAsc             RdbQueryTest.ExecLimitOffset
 RdbQueryTest.OrderByDesc            RdbQueryTest.ExecWithCallback
 ```
 
-### Integration Tests (`test/lambda/io_sqlite_*.ls`, 7 scripts)
+### Integration Tests (`test/lambda/io_sqlite_*.ls`, 9 scripts)
 
 ```
 io_sqlite_basic.ls       — basic access and row retrieval
-io_sqlite_schema.ls      — schema introspection (columns, types, FKs)
+io_sqlite_schema.ls      — schema introspection (columns, types, indexes, triggers, functions, FKs, views)
 io_sqlite_types.ls       — type mapping (int, float, string, datetime, JSON, null)
 io_sqlite_view.ls        — view access
 io_sqlite_data.ls        — data namespace and row content
 io_sqlite_autodetect.ls  — driver auto-detection from file extension
 io_sqlite_fk.ls          — FK metadata (link_name, reverse_fks)
+io_sqlite_fk_nav.ls      — FK navigation (forward many-to-one, reverse one-to-many, null FK)
+io_sqlite_for_clauses.ls — for-clause with where/order-by/limit (in-memory evaluation)
 ```
 
 Each `.ls` file paired with a `.txt` expected-output file.

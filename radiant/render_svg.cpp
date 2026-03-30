@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_backend.h"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -34,15 +35,14 @@ typedef struct {
     BlockBlot block;
     Color color;
     UiContext* ui_context;
+    bool _transform_emitted;  // tracks begin/end_transform pairing
 } SvgRenderContext;
 
 // Forward declarations
-void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* view_block);
-void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span);
-void render_children_svg(SvgRenderContext* ctx, View* view);
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
 void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
 void calculate_content_bounds(View* view, int* max_x, int* max_y);
+static RenderBackend svg_make_backend(SvgRenderContext* ctx);
 
 // Helper functions for SVG output
 void svg_indent(SvgRenderContext* ctx) {
@@ -249,12 +249,170 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
 
+    // Add text-shadow as CSS style attribute
+    DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
+    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+        strbuf_append_str(ctx->svg_content, " style=\"text-shadow:");
+        TextShadow* ts = parent_elem->font->text_shadow;
+        bool first = true;
+        while (ts) {
+            if (!first) strbuf_append_char(ctx->svg_content, ',');
+            char ts_color[32];
+            svg_color_to_string(ts->color, ts_color);
+            strbuf_append_format(ctx->svg_content, " %.1fpx %.1fpx %.1fpx %s",
+                ts->offset_x, ts->offset_y, ts->blur_radius, ts_color);
+            first = false;
+            ts = ts->next;
+        }
+        strbuf_append_char(ctx->svg_content, '"');
+    }
+
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
     mem_free(text_content);  strbuf_free(escaped_text);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
+
+// ── SVG border style helpers ─────────────────────────────────────────────────
+
+/**
+ * Build SVG polygon point-string for one border side trapezoid.
+ * Corners are miter-cut so adjacent sides share the diagonal corner region.
+ *   side 0=top, 1=right, 2=bottom, 3=left
+ */
+static void svg_border_poly(char* buf, int buf_size, int side,
+    float x, float y, float W, float H,
+    float bwt, float bwr, float bwb, float bwl) {
+    switch (side) {
+        case 0: // top outer-edge TL→TR → inner-edge (TR-bwr,bwt)→(TL+bwl,bwt)
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x, y, x+W, y, x+W-bwr, y+bwt, x+bwl, y+bwt);
+            break;
+        case 1: // right
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x+W-bwr, y+bwt, x+W, y, x+W, y+H, x+W-bwr, y+H-bwb);
+            break;
+        case 2: // bottom
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x+bwl, y+H-bwb, x+W-bwr, y+H-bwb, x+W, y+H, x, y+H);
+            break;
+        case 3: // left
+            str_fmt(buf, buf_size, "%.2f,%.2f %.2f,%.2f %.2f,%.2f %.2f,%.2f",
+                x, y, x+bwl, y+bwt, x+bwl, y+H-bwb, x, y+H);
+            break;
+        default: buf[0] = '\0'; break;
+    }
+}
+
+static Color svg_darken(Color c, float f) {
+    Color out; out.r = (uint8_t)(c.r*f); out.g = (uint8_t)(c.g*f); out.b = (uint8_t)(c.b*f); out.a = c.a;
+    return out;
+}
+static Color svg_lighten(Color c, float f) {
+    Color out;
+    out.r = (uint8_t)(c.r + (255-c.r)*f < 255 ? (int)(c.r + (255-c.r)*f) : 255);
+    out.g = (uint8_t)(c.g + (255-c.g)*f < 255 ? (int)(c.g + (255-c.g)*f) : 255);
+    out.b = (uint8_t)(c.b + (255-c.b)*f < 255 ? (int)(c.b + (255-c.b)*f) : 255);
+    out.a = c.a;
+    return out;
+}
+
+/**
+ * Emit one or two SVG <polygon> elements for a single border side, handling
+ * solid, double, groove, ridge, inset, and outset styles.
+ */
+static void svg_emit_border_side(SvgRenderContext* ctx, CssEnum style, Color c,
+    float x, float y, float W, float H,
+    float bwt, float bwr, float bwb, float bwl,
+    int side) {  // 0=top, 1=right, 2=bottom, 3=left
+
+    if (style == CSS_VALUE_NONE || style == CSS_VALUE_HIDDEN || c.a == 0) return;
+    float bw = (side == 0) ? bwt : (side == 1) ? bwr : (side == 2) ? bwb : bwl;
+    if (bw <= 0) return;
+
+    char pts[256], col[32];
+    svg_border_poly(pts, sizeof(pts), side, x, y, W, H, bwt, bwr, bwb, bwl);
+
+    if (style == CSS_VALUE_DOUBLE && bw >= 3) {
+        // Two thin fills with a gap: outer (at edge, thickness = floor(bw/3))
+        // and inner (inset by bw - floor(bw/3) from outer edge)
+        float lw = floorf(bw / 3.0f);
+        if (lw < 1) lw = 1;
+
+        char opts[256];
+        svg_border_poly(opts, sizeof(opts), side, x, y, W, H,
+            (side == 0) ? lw : bwt, (side == 1) ? lw : bwr,
+            (side == 2) ? lw : bwb, (side == 3) ? lw : bwl);
+        svg_color_to_string(c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", opts, col);
+
+        // Inner fill (inset the border box by bw-lw on this side)
+        float offset = bw - lw;
+        float ix = x + (side == 3 ? offset : 0);
+        float iy = y + (side == 0 ? offset : 0);
+        float iW = W - (side == 1 ? offset : 0) - (side == 3 ? offset : 0);
+        float iH = H - (side == 0 ? offset : 0) - (side == 2 ? offset : 0);
+        char ipts[256];
+        svg_border_poly(ipts, sizeof(ipts), side, ix, iy, iW, iH,
+            (side == 0) ? lw : bwt, (side == 1) ? lw : bwr,
+            (side == 2) ? lw : bwb, (side == 3) ? lw : bwl);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", ipts, col);
+
+    } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
+        Color dark  = svg_darken(c, 0.5f);
+        Color light = svg_lighten(c, 0.35f);
+        Color outer_c = (style == CSS_VALUE_GROOVE) ? dark : light;
+        Color inner_c = (style == CSS_VALUE_GROOVE) ? light : dark;
+        float hw = bw / 2.0f;
+
+        // Outer half (at edge, thickness = hw)
+        char outer_pts[256];
+        svg_border_poly(outer_pts, sizeof(outer_pts), side, x, y, W, H,
+            (side == 0) ? hw : bwt, (side == 1) ? hw : bwr,
+            (side == 2) ? hw : bwb, (side == 3) ? hw : bwl);
+        svg_color_to_string(outer_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", outer_pts, col);
+
+        // Inner half (inset by hw on this side)
+        float ix = x + (side == 3 ? hw : 0);
+        float iy = y + (side == 0 ? hw : 0);
+        float iW = W - (side == 1 ? hw : 0) - (side == 3 ? hw : 0);
+        float iH = H - (side == 0 ? hw : 0) - (side == 2 ? hw : 0);
+        char inner_pts[256];
+        svg_border_poly(inner_pts, sizeof(inner_pts), side, ix, iy, iW, iH,
+            (side == 0) ? hw : bwt, (side == 1) ? hw : bwr,
+            (side == 2) ? hw : bwb, (side == 3) ? hw : bwl);
+        svg_color_to_string(inner_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", inner_pts, col);
+
+    } else if (style == CSS_VALUE_INSET || style == CSS_VALUE_OUTSET) {
+        // inset: top+left dark, bottom+right light; outset: opposite
+        Color dark  = svg_darken(c, 0.5f);
+        Color light = svg_lighten(c, 0.35f);
+        Color side_c;
+        if (style == CSS_VALUE_INSET)
+            side_c = (side == 0 || side == 3) ? dark : light;
+        else
+            side_c = (side == 0 || side == 3) ? light : dark;
+        svg_color_to_string(side_c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", pts, col);
+
+    } else {
+        // solid / dotted / dashed — render as filled trapezoid
+        // (dash patterns are a raster-only feature; SVG uses fill for correctness)
+        svg_color_to_string(c, col);
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<polygon points=\"%s\" fill=\"%s\" />\n", pts, col);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     if (!view->bound) return;
@@ -263,6 +421,92 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     float y = ctx->block.y + view->y;
     float width = view->width;
     float height = view->height;
+
+    // Render box-shadow as SVG filter
+    if (view->bound->box_shadow) {
+        // Generate unique filter IDs for each shadow
+        BoxShadow* shadow = view->bound->box_shadow;
+        int shadow_idx = 0;
+        // Use pointer value as part of ID for uniqueness
+        uintptr_t view_id = (uintptr_t)view;
+
+        while (shadow) {
+            if (!shadow->inset) {
+                // Outer shadow: use SVG filter with feGaussianBlur + feOffset
+                char filter_id[64];
+                str_fmt(filter_id, sizeof(filter_id), "shadow-%lx-%d", (unsigned long)view_id, shadow_idx);
+
+                // Emit filter definition
+                svg_indent(ctx);
+                float blur_std = shadow->blur_radius * 0.5f;
+                // Filter region must be large enough to contain the blur + offset
+                float filter_margin = shadow->blur_radius + fabsf(shadow->offset_x) + fabsf(shadow->offset_y) + fabsf(shadow->spread_radius);
+                float fx = -filter_margin / width;
+                float fy = -filter_margin / height;
+                float fw = 1.0f + 2.0f * filter_margin / width;
+                float fh = 1.0f + 2.0f * filter_margin / height;
+
+                strbuf_append_format(ctx->svg_content,
+                    "<defs><filter id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\">\n",
+                    filter_id, fx, fy, fw, fh);
+
+                // feGaussianBlur on SourceAlpha
+                ctx->indent_level++;
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"%.1f\" result=\"blur\" />\n",
+                    blur_std > 0 ? blur_std : 0.001f);
+
+                // feOffset
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feOffset in=\"blur\" dx=\"%.1f\" dy=\"%.1f\" result=\"offset\" />\n",
+                    shadow->offset_x, shadow->offset_y);
+
+                // feColorMatrix to apply shadow color
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feColorMatrix in=\"offset\" type=\"matrix\" "
+                    "values=\"0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 %.4f 0\" result=\"color\" />\n",
+                    shadow->color.r / 255.0f, shadow->color.g / 255.0f,
+                    shadow->color.b / 255.0f, shadow->color.a / 255.0f);
+
+                // feMerge: shadow underneath, source graphic on top
+                svg_indent(ctx);
+                strbuf_append_str(ctx->svg_content,
+                    "<feMerge><feMergeNode in=\"color\" /><feMergeNode in=\"SourceGraphic\" /></feMerge>\n");
+
+                ctx->indent_level--;
+                svg_indent(ctx);
+                strbuf_append_str(ctx->svg_content, "</filter></defs>\n");
+
+                // Render shadow rect with the filter applied
+                char shadow_color[32];
+                svg_color_to_string(shadow->color, shadow_color);
+                float shadow_x = x + shadow->offset_x - shadow->spread_radius;
+                float shadow_y = y + shadow->offset_y - shadow->spread_radius;
+                float shadow_w = width + 2 * shadow->spread_radius;
+                float shadow_h = height + 2 * shadow->spread_radius;
+
+                svg_indent(ctx);
+                if (view->bound->border && view->bound->border->radius.top_left > 0) {
+                    float rx = view->bound->border->radius.top_left + shadow->spread_radius;
+                    if (rx < 0) rx = 0;
+                    strbuf_append_format(ctx->svg_content,
+                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
+                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
+                        shadow_x, shadow_y, shadow_w, shadow_h, rx, rx, shadow_color, filter_id);
+                } else {
+                    strbuf_append_format(ctx->svg_content,
+                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
+                        shadow_x, shadow_y, shadow_w, shadow_h, shadow_color, filter_id);
+                }
+            }
+            shadow = shadow->next;
+            shadow_idx++;
+        }
+    }
 
     // Render background
     if (view->bound->background && view->bound->background->color.a > 0) {
@@ -289,48 +533,270 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         }
     }
 
-    // Render borders
+    // Render background gradient (linear or radial)
+    if (view->bound->background && view->bound->background->gradient_type != GRADIENT_NONE) {
+        BackgroundProp* bg = view->bound->background;
+        uintptr_t view_id  = (uintptr_t)view;
+
+        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient && bg->linear_gradient->stop_count >= 2) {
+            LinearGradient* lg = bg->linear_gradient;
+            // CSS angle: 0 = to top, 90 = to right. Convert to direction vector.
+            float angle_rad = lg->angle * (float)M_PI / 180.0f;
+            float dx =  sinf(angle_rad);
+            float dy = -cosf(angle_rad);
+            // Extend from center to bounding-box edges (matches CSS gradient geometry)
+            float half_w = width * 0.5f, half_h = height * 0.5f;
+            float bcx = x + half_w, bcy = y + half_h;
+            float abs_dx = fabsf(dx), abs_dy = fabsf(dy);
+            float dist = (abs_dx * height < abs_dy * width)
+                ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+                : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+            float gx1 = bcx - dx * dist, gy1 = bcy - dy * dist;
+            float gx2 = bcx + dx * dist, gy2 = bcy + dy * dist;
+
+            char grad_id[64];
+            str_fmt(grad_id, sizeof(grad_id), "lingrad-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><linearGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
+                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\">\n",
+                grad_id, gx1, gy1, gx2, gy2);
+            ctx->indent_level++;
+            for (int i = 0; i < lg->stop_count; i++) {
+                GradientStop* stop = &lg->stops[i];
+                float pos = stop->position >= 0 ? stop->position
+                                                : (lg->stop_count > 1 ? (float)i / (lg->stop_count - 1) : 0.0f);
+                char sc[32];
+                svg_color_to_string(stop->color, sc);
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
+                if (stop->color.a < 255) {
+                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+                }
+                strbuf_append_str(ctx->svg_content, " />\n");
+            }
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</linearGradient></defs>\n");
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
+                x, y, width, height, grad_id);
+
+        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient && bg->radial_gradient->stop_count >= 2) {
+            RadialGradient* rg = bg->radial_gradient;
+            float gcx = x + (rg->cx_set ? rg->cx * width  : width  * 0.5f);
+            float gcy = y + (rg->cy_set ? rg->cy * height : height * 0.5f);
+            float r   = (width < height ? width : height) * 0.5f; // farthest-corner simplification
+
+            char grad_id[64];
+            str_fmt(grad_id, sizeof(grad_id), "radgrad-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><radialGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
+                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\">\n",
+                grad_id, gcx, gcy, r);
+            ctx->indent_level++;
+            for (int i = 0; i < rg->stop_count; i++) {
+                GradientStop* stop = &rg->stops[i];
+                float pos = stop->position >= 0 ? stop->position
+                                                : (rg->stop_count > 1 ? (float)i / (rg->stop_count - 1) : 0.0f);
+                char sc[32];
+                svg_color_to_string(stop->color, sc);
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
+                if (stop->color.a < 255) {
+                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+                }
+                strbuf_append_str(ctx->svg_content, " />\n");
+            }
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</radialGradient></defs>\n");
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
+                x, y, width, height, grad_id);
+        }
+    }
+
+    // Render background image (background-image, background-size, background-position, background-repeat)
+    if (view->bound->background && view->bound->background->image) {
+        BackgroundProp* bg = view->bound->background;
+        const char* img_url = bg->image;
+
+        // Border widths and padding in CSS px (same coordinate space as x/y/width/height in SVG path)
+        float bwt = 0, bwr = 0, bwb = 0, bwl = 0;
+        float pt = 0, pr = 0, pb = 0, pl = 0;
+        if (view->bound->border) {
+            bwt = view->bound->border->width.top;
+            bwr = view->bound->border->width.right;
+            bwb = view->bound->border->width.bottom;
+            bwl = view->bound->border->width.left;
+        }
+        pt = view->bound->padding.top;
+        pr = view->bound->padding.right;
+        pb = view->bound->padding.bottom;
+        pl = view->bound->padding.left;
+
+        // Compute positioning area (background-origin, default: padding-box)
+        CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
+        float ox = x, oy = y, ow = width, oh = height;
+        if (origin == CSS_VALUE_PADDING_BOX || origin == CSS_VALUE_CONTENT_BOX) {
+            ox += bwl; oy += bwt; ow -= bwl + bwr; oh -= bwt + bwb;
+        }
+        if (origin == CSS_VALUE_CONTENT_BOX) {
+            ox += pl; oy += pt; ow -= pl + pr; oh -= pt + pb;
+        }
+        if (ow < 0) ow = 0;
+        if (oh < 0) oh = 0;
+
+        // Compute paint area (background-clip, default: border-box)
+        CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+        float cx = x, cy = y, cw = width, ch = height;
+        if (clip_box == CSS_VALUE_PADDING_BOX || clip_box == CSS_VALUE_CONTENT_BOX) {
+            cx += bwl; cy += bwt; cw -= bwl + bwr; ch -= bwt + bwb;
+        }
+        if (clip_box == CSS_VALUE_CONTENT_BOX) {
+            cx += pl; cy += pt; cw -= pl + pr; ch -= pt + pb;
+        }
+        if (cw < 0) cw = 0;
+        if (ch < 0) ch = 0;
+
+        // Compute rendered image size
+        float img_w = ow, img_h = oh;
+        const char* preserve_ratio = "none";
+        if (bg->bg_size_type == CSS_VALUE_COVER) {
+            img_w = ow; img_h = oh;
+            preserve_ratio = "xMidYMid slice";
+        } else if (bg->bg_size_type == CSS_VALUE_CONTAIN) {
+            img_w = ow; img_h = oh;
+            preserve_ratio = "xMidYMid meet";
+        } else if (bg->bg_size_type == (CssEnum)0) {
+            // Explicit dimensions
+            if (!bg->bg_size_width_auto) {
+                img_w = bg->bg_size_width_is_percent ? ow * bg->bg_size_width / 100.0f : bg->bg_size_width;
+            }
+            if (!bg->bg_size_height_auto) {
+                img_h = bg->bg_size_height_is_percent ? oh * bg->bg_size_height / 100.0f : bg->bg_size_height;
+            }
+            preserve_ratio = "none";
+        }
+
+        // Compute image position within origin box
+        float pos_x = ox, pos_y = oy;
+        if (bg->bg_position_set) {
+            pos_x = bg->bg_position_x_is_percent
+                ? ox + (ow - img_w) * bg->bg_position_x / 100.0f
+                : ox + bg->bg_position_x;
+            pos_y = bg->bg_position_y_is_percent
+                ? oy + (oh - img_h) * bg->bg_position_y / 100.0f
+                : oy + bg->bg_position_y;
+        }
+
+        bool no_repeat = (bg->bg_repeat_x == CSS_VALUE_NO_REPEAT && bg->bg_repeat_y == CSS_VALUE_NO_REPEAT);
+        uintptr_t view_id = (uintptr_t)view;
+
+        if (no_repeat) {
+            // Single image with a clip-path limited to the paint area
+            char clip_id[64];
+            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath></defs>\n",
+                clip_id, cx, cy, cw, ch);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                "preserveAspectRatio=\"%s\" href=\"%s\" clip-path=\"url(#%s)\" />\n",
+                pos_x, pos_y, img_w, img_h, preserve_ratio, img_url, clip_id);
+        } else {
+            // Tiled image via SVG <pattern>
+            char pat_id[64], clip_id[64];
+            str_fmt(pat_id,  sizeof(pat_id),  "bgpat-%lx",  (unsigned long)view_id);
+            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            // pattern origin at pos_x/pos_y so tiling is offset correctly
+            strbuf_append_format(ctx->svg_content,
+                "<defs>"
+                "<clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath>"
+                "<pattern id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" patternUnits=\"userSpaceOnUse\">"
+                "<image x=\"0\" y=\"0\" width=\"%.2f\" height=\"%.2f\" preserveAspectRatio=\"%s\" href=\"%s\"/>"
+                "</pattern>"
+                "</defs>\n",
+                clip_id, cx, cy, cw, ch,
+                pat_id, pos_x, pos_y, img_w, img_h,
+                img_w, img_h, preserve_ratio, img_url);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                "fill=\"url(#%s)\" clip-path=\"url(#%s)\" />\n",
+                cx, cy, cw, ch, pat_id, clip_id);
+        }
+    }
+
+    // Render borders with style-aware per-side SVG polygons
     if (view->bound->border) {
         BorderProp* border = view->bound->border;
+        float bwt = border->width.top, bwr = border->width.right;
+        float bwb = border->width.bottom, bwl = border->width.left;
 
-        // Left border
-        if (border->width.left > 0 && border->left_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->left_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
-                x, y, border->width.left, height, border_color);
-        }
+        // Top
+        svg_emit_border_side(ctx, border->top_style, border->top_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 0);
+        // Right
+        svg_emit_border_side(ctx, border->right_style, border->right_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 1);
+        // Bottom
+        svg_emit_border_side(ctx, border->bottom_style, border->bottom_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 2);
+        // Left
+        svg_emit_border_side(ctx, border->left_style, border->left_color,
+            x, y, width, height, bwt, bwr, bwb, bwl, 3);
+    }
 
-        // Right border
-        if (border->width.right > 0 && border->right_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->right_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"%.2f\" fill=\"%s\" />\n",
-                x + width - border->width.right, y, border->width.right, height, border_color);
-        }
+    // Render outline (outside border-box)
+    if (view->bound->outline) {
+        OutlineProp* outline = view->bound->outline;
+        if (outline->width > 0 && outline->style != CSS_VALUE_NONE &&
+            outline->style != CSS_VALUE_HIDDEN && outline->color.a > 0) {
 
-        // Top border
-        if (border->width.top > 0 && border->top_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->top_color, border_color);
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
-                x, y, width, border->width.top, border_color);
-        }
+            float expand = outline->width * 0.5f + outline->offset;
+            float ox = x - expand;
+            float oy = y - expand;
+            float ow = width + expand * 2;
+            float oh = height + expand * 2;
 
-        // Bottom border
-        if (border->width.bottom > 0 && border->bottom_color.a > 0) {
-            char border_color[32];
-            svg_color_to_string(border->bottom_color, border_color);
+            char outline_color[32];
+            svg_color_to_string(outline->color, outline_color);
+
+            const char* dash_attr = "";
+            char dash_buf[64] = {0};
+            if (outline->style == CSS_VALUE_DOTTED) {
+                str_fmt(dash_buf, sizeof(dash_buf),
+                    " stroke-dasharray=\"%.1f,%.1f\"", outline->width, outline->width * 2);
+                dash_attr = dash_buf;
+            } else if (outline->style == CSS_VALUE_DASHED) {
+                str_fmt(dash_buf, sizeof(dash_buf),
+                    " stroke-dasharray=\"%.1f,%.1f\"", outline->width * 3, outline->width * 3);
+                dash_attr = dash_buf;
+            }
+
             svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.0f\" fill=\"%s\" />\n",
-                x, y + height - border->width.bottom, width, border->width.bottom, border_color);
+            // Use rounded rect if border has radius
+            if (view->bound->border && view->bound->border->radius.top_left > 0) {
+                float rx = view->bound->border->radius.top_left + expand;
+                if (rx < 0) rx = 0;
+                strbuf_append_format(ctx->svg_content,
+                    "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
+                    "fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
+                    ox, oy, ow, oh, rx, rx, outline_color, outline->width, dash_attr);
+            } else {
+                strbuf_append_format(ctx->svg_content,
+                    "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                    "fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
+                    ox, oy, ow, oh, outline_color, outline->width, dash_attr);
+            }
         }
     }
 }
@@ -566,157 +1032,238 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
               svg_x, svg_y, block->width, block->height);
 }
 
-void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
-    // Save parent context
-    BlockBlot pa_block = ctx->block;
-    FontBox pa_font = ctx->font;
-    Color pa_color = ctx->color;
+// Build an SVG transform attribute value from a CSS TransformProp.
+// Returns true if a non-identity transform was written to out_buf.
+// out_buf must be at least 256 bytes.
+static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, float elem_y,
+                                     float elem_w, float elem_h, char* out_buf, int buf_size) {
+    if (!tp || !tp->functions) return false;
 
-    // Update font if specified
-    if (block->font) {
-        setup_font(ctx->ui_context, &ctx->font, block->font);
-    }
+    // Compose 2D affine matrix: [a c e; b d f; 0 0 1]
+    // Identity:
+    double ma = 1, mb = 0, mc = 0, md = 1, me = 0, mf = 0;
 
-    // Render background and borders
-    if (block->bound) {
-        render_bound_svg(ctx, block);
-    }
+    // Resolve transform-origin
+    float ox = tp->origin_x_percent ? elem_x + elem_w * tp->origin_x / 100.0f : elem_x + tp->origin_x;
+    float oy = tp->origin_y_percent ? elem_y + elem_h * tp->origin_y / 100.0f : elem_y + tp->origin_y;
 
-    // Update position context
-    ctx->block.x = pa_block.x + block->x;
-    ctx->block.y = pa_block.y + block->y;
+    // Pre-translate for transform-origin
+    me += ox; mf += oy;
 
-    // Update color context
-    if (block->in_line && block->in_line->color.c) {
-        ctx->color = block->in_line->color;
-    }
-
-    // Inline SVG — serialize original SVG markup directly instead of
-    // traversing the HTML view tree (SVG children are not HTML views)
-    if (block->tag_id == HTM_TAG_SVG) {
-        render_inline_svg_passthrough(ctx, block);
-        ctx->block = pa_block;
-        ctx->font = pa_font;
-        ctx->color = pa_color;
-        return;
-    }
-
-    // Render embedded image if present
-    if (block->embed && block->embed->img) {
-        ImageSurface* img = block->embed->img;
-        float img_x = ctx->block.x + block->x;
-        float img_y = ctx->block.y + block->y;
-        float img_width = block->width;
-        float img_height = block->height;
-
-        log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
-                  img->url && img->url->href ? img->url->href->chars : "unknown",
-                  img->format, img->width, img->height,
-                  img_width, img_height, img_x, img_y);
-
-        if (img->url && img->url->href) {
-            // Convert local file path to href for SVG
-            const char* href = img->url->href->chars;
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
-                "preserveAspectRatio=\"none\" />\n",
-                img_x, img_y, img_width, img_height, href);
-        }
-    }
-
-    // Render children
-    if (block->first_child) {
-        svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n", block->node_name());
-        ctx->indent_level++;
-        render_children_svg(ctx, block->first_child);
-        ctx->indent_level--;
-        svg_indent(ctx);
-        strbuf_append_str(ctx->svg_content, "</g>\n");
-    }
-
-    // Render multi-column rules between columns
-    if (block->multicol && block->multicol->computed_column_count > 1) {
-        render_column_rules_svg(ctx, block);
-    }
-
-    // Restore context
-    ctx->block = pa_block;
-    ctx->font = pa_font;
-    ctx->color = pa_color;
-}
-
-void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
-    // Save parent context
-    FontBox pa_font = ctx->font;
-    Color pa_color = ctx->color;
-
-    // Update font and color if specified
-    if (view_span->font) {
-        setup_font(ctx->ui_context, &ctx->font, view_span->font);
-    }
-
-    if (view_span->in_line && view_span->in_line->color.c) {
-        log_debug("[SVG COLOR] element=%s has color set: #%02x%02x%02x (was #%02x%02x%02x from parent)",
-                  view_span->node_name(),
-                  view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
-                  pa_color.r, pa_color.g, pa_color.b);
-        ctx->color = view_span->in_line->color;
-    } else {
-        log_debug("[SVG COLOR] element=%s inheriting color #%02x%02x%02x from parent (in_line=%p, color.c=%u)",
-                  view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
-                  view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
-    }
-
-    // Render children
-    if (view_span->first_child) {
-        svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n", view_span->node_name());
-        ctx->indent_level++;
-        render_children_svg(ctx, view_span->first_child);
-        ctx->indent_level--;
-        svg_indent(ctx);
-        strbuf_append_str(ctx->svg_content, "</g>\n");
-    }
-
-    // Restore context
-    ctx->font = pa_font;
-    ctx->color = pa_color;
-}
-
-void render_children_svg(SvgRenderContext* ctx, View* view) {
-    while (view) {
-        switch (view->view_type) {
-            case RDT_VIEW_BLOCK:
-            case RDT_VIEW_INLINE_BLOCK:
-            case RDT_VIEW_TABLE:
-            case RDT_VIEW_TABLE_ROW_GROUP:
-            case RDT_VIEW_TABLE_ROW:
-            case RDT_VIEW_TABLE_CELL:
-            case RDT_VIEW_LIST_ITEM:
-                render_block_view_svg(ctx, (ViewBlock*)view);
+    for (TransformFunction* tf = tp->functions; tf; tf = tf->next) {
+        // accumulate: result = result * local
+        double la=1, lb=0, lc=0, ld=1, le=0, lf=0;
+        switch (tf->type) {
+            case TRANSFORM_TRANSLATE:
+            case TRANSFORM_TRANSLATEX:
+            case TRANSFORM_TRANSLATEY: {
+                float tx = tf->params.translate.x, ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
+                if (!std::isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
+                le = tx; lf = ty;
                 break;
-
-            case RDT_VIEW_INLINE:
-                render_inline_view_svg(ctx, (ViewSpan*)view);
+            }
+            case TRANSFORM_TRANSLATE3D:
+            case TRANSFORM_TRANSLATEZ:
+                le = tf->params.translate3d.x; lf = tf->params.translate3d.y;
                 break;
-
-            case RDT_VIEW_TEXT:
-                render_text_view_svg(ctx, (ViewText*)view);
+            case TRANSFORM_SCALE:
+            case TRANSFORM_SCALEX:
+            case TRANSFORM_SCALEY:
+                la = tf->params.scale.x > 0 ? tf->params.scale.x : 1.0;
+                ld = tf->params.scale.y > 0 ? tf->params.scale.y : 1.0;
                 break;
-
-            case RDT_VIEW_MATH:
-                // MathBox rendering removed - use RDT_VIEW_TEXNODE instead
-                log_debug("render_children_svg: RDT_VIEW_MATH deprecated, skipping");
+            case TRANSFORM_ROTATE:
+            case TRANSFORM_ROTATEZ: {
+                double ang = tf->params.angle;  // radians
+                la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
                 break;
-
+            }
+            case TRANSFORM_SKEWX:
+                lc = tan((double)tf->params.angle);
+                break;
+            case TRANSFORM_SKEWY:
+                lb = tan((double)tf->params.angle);
+                break;
+            case TRANSFORM_MATRIX:
+                la = tf->params.matrix.a; lb = tf->params.matrix.b;
+                lc = tf->params.matrix.c; ld = tf->params.matrix.d;
+                le = tf->params.matrix.e; lf = tf->params.matrix.f;
+                break;
             default:
-                log_debug("Unknown view type in SVG rendering: %d", view->view_type);
                 break;
         }
-        view = view->next();
+        // result = result * L
+        double na = ma*la + mc*lb, nb = mb*la + md*lb;
+        double nc = ma*lc + mc*ld, nd = mb*lc + md*ld;
+        double ne = ma*le + mc*lf + me, nf = mb*le + md*lf + mf;
+        ma=na; mb=nb; mc=nc; md=nd; me=ne; mf=nf;
     }
+
+    // Post-translate: undo transform-origin shift
+    me -= ox; mf -= oy;
+
+    // Skip if effectively identity
+    bool is_identity = (fabs(ma-1)<1e-5 && fabs(mb)<1e-5 && fabs(mc)<1e-5
+                     && fabs(md-1)<1e-5 && fabs(me)<1e-5 && fabs(mf)<1e-5);
+    if (is_identity) return false;
+
+    str_fmt(out_buf, buf_size, "matrix(%.6g,%.6g,%.6g,%.6g,%.6g,%.6g)",
+            ma, mb, mc, md, me, mf);
+    return true;
+}
+
+// ============================================================================
+// SVG RenderBackend vtable callbacks
+// ============================================================================
+
+static void svg_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_bound_svg reads ctx->block.{x,y} + view->{x,y}
+    ctx->block.x = abs_x - view->x;
+    ctx->block.y = abs_y - view->y;
+    render_bound_svg(ctx, view);
+}
+
+static void svg_cb_render_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+                               FontBox* font, Color color) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->block.x = abs_x;
+    ctx->block.y = abs_y;
+    ctx->font = *font;
+    ctx->color = color;
+    render_text_view_svg(ctx, text);
+}
+
+static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (!block->embed || !block->embed->img) return;
+    ImageSurface* img = block->embed->img;
+
+    float img_width = block->width;
+    float img_height = block->height;
+
+    log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
+              img->url && img->url->href ? img->url->href->chars : "unknown",
+              img->format, img->width, img->height,
+              img_width, img_height, abs_x, abs_y);
+
+    if (img->url && img->url->href) {
+        const char* href = img->url->href->chars;
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content,
+            "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
+            "preserveAspectRatio=\"none\" />\n",
+            abs_x, abs_y, img_width, img_height, href);
+    }
+}
+
+static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_inline_svg_passthrough reads ctx->block.{x,y} + block->{x,y}
+    ctx->block.x = abs_x - block->x;
+    ctx->block.y = abs_y - block->y;
+    render_inline_svg_passthrough(ctx, block);
+}
+
+static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n",
+                         block->node_name());
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_block_children(void* vctx, ViewBlock* block) {
+    (void)block;
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_inline_children(void* vctx, ViewSpan* span) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n",
+                         span->node_name());
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
+    (void)span;
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_opacity(void* vctx, float opacity) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", opacity);
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_opacity(void* vctx) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    char transform_buf[256] = {};
+    bool has = svg_build_transform_attr(
+        block->transform,
+        abs_x, abs_y,
+        block->width, block->height,
+        transform_buf, sizeof(transform_buf));
+    ctx->_transform_emitted = has;
+    if (has) {
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<g transform=\"%s\">\n", transform_buf);
+        ctx->indent_level++;
+    }
+}
+
+static void svg_cb_end_transform(void* vctx) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (ctx->_transform_emitted) {
+        ctx->indent_level--;
+        svg_indent(ctx);
+        strbuf_append_str(ctx->svg_content, "</g>\n");
+        ctx->_transform_emitted = false;
+    }
+}
+
+static void svg_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_column_rules_svg reads ctx->block.{x,y} + block->{x,y}
+    ctx->block.x = abs_x - block->x;
+    ctx->block.y = abs_y - block->y;
+    render_column_rules_svg(ctx, block);
+}
+
+static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
+    RenderBackend b = {};
+    b.ctx                   = ctx;
+    b.render_bound          = svg_cb_render_bound;
+    b.render_text           = svg_cb_render_text;
+    b.render_image          = svg_cb_render_image;
+    b.render_inline_svg     = svg_cb_render_inline_svg;
+    b.begin_block_children  = svg_cb_begin_block_children;
+    b.end_block_children    = svg_cb_end_block_children;
+    b.begin_inline_children = svg_cb_begin_inline_children;
+    b.end_inline_children   = svg_cb_end_inline_children;
+    b.begin_opacity         = svg_cb_begin_opacity;
+    b.end_opacity           = svg_cb_end_opacity;
+    b.begin_transform       = svg_cb_begin_transform;
+    b.end_transform         = svg_cb_end_transform;
+    b.render_column_rules   = svg_cb_render_column_rules;
+    b.on_font_change        = NULL;
+    return b;
 }
 
 // Calculate the actual content bounds recursively
@@ -825,11 +1372,19 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         "<rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"white\" />\n",
         width, height);
 
-    // Render the root view
+    // Render the root view via shared tree walker
+    RenderBackend backend = svg_make_backend(&ctx);
+    RenderWalkState walk_state = {};
+    walk_state.x = 0;
+    walk_state.y = 0;
+    walk_state.font = ctx.font;
+    walk_state.color = ctx.color;
+    walk_state.ui_context = uicon;
+
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_block_view_svg(&ctx, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
     } else {
-        render_children_svg(&ctx, root_view);
+        render_walk_children(&backend, &walk_state, root_view);
     }
 
     // Render caret if present

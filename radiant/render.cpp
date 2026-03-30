@@ -414,6 +414,16 @@ static bool is_view_in_selection(SelectionState* sel, View* view) {
 void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     log_debug("render_text_view clip:[%.0f,%.0f,%.0f,%.0f]",
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
+
+    // CSS 2.1 §11.2: text inherits visibility from parent element
+    if (text_view->parent && text_view->parent->is_element()) {
+        DomElement* parent_elem = (DomElement*)text_view->parent;
+        if (parent_elem->in_line && parent_elem->in_line->visibility == VIS_HIDDEN) {
+            log_debug("text hidden by parent visibility:hidden");
+            return;
+        }
+    }
+
     if (!rdcon->font.font_handle) {
         log_debug("font face is null");
         return;
@@ -499,6 +509,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
         parent_elem->bound->background->color.a > 0) {
         bg_color = &parent_elem->bound->background->color;
+    }
+
+    // Get text-shadow from parent element's font property
+    TextShadow* text_shadow = nullptr;
+    if (parent_elem && parent_elem->font && parent_elem->font->text_shadow) {
+        text_shadow = parent_elem->font->text_shadow;
     }
 
     while (text_rect) {
@@ -587,6 +603,90 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
         // Track cumulative position for debugging
         float debug_start_x = x;
+
+        // Check if any text-shadow needs blur
+        bool shadow_needs_blur = false;
+        float max_shadow_blur = 0;
+        if (text_shadow) {
+            TextShadow* ts = text_shadow;
+            while (ts) {
+                if (ts->blur_radius > 0) {
+                    shadow_needs_blur = true;
+                    if (ts->blur_radius > max_shadow_blur) max_shadow_blur = ts->blur_radius;
+                }
+                ts = ts->next;
+            }
+        }
+
+        // If text-shadow has blur, do a pre-pass rendering only shadow glyphs,
+        // then apply box blur, then the main loop skips shadow rendering.
+        if (shadow_needs_blur) {
+            unsigned char* sp = str + text_rect->start_index;
+            unsigned char* s_end = end;
+            float sx_pos = x;
+            bool s_has_space = false;
+            FontStyleDesc _sd_s = font_style_desc_from_prop(rdcon->font.style);
+            bool s_word_start = true;
+
+            // Shadow-only glyph pass
+            while (sp < s_end) {
+                if (is_space(*sp)) {
+                    if (preserve_spaces || !s_has_space) {
+                        s_has_space = true;
+                        sx_pos += space_width;
+                    }
+                    s_word_start = true;
+                    sp++;
+                } else {
+                    s_has_space = false;
+                    uint32_t s_cp;
+                    int s_bytes = str_utf8_decode((const char*)sp, (size_t)(s_end - sp), &s_cp);
+                    if (s_bytes <= 0) { sp++; continue; }
+                    sp += s_bytes;
+
+                    s_cp = apply_text_transform(s_cp, text_transform, s_word_start);
+                    s_word_start = false;
+
+                    LoadedGlyph* s_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_s, s_cp, true);
+                    if (!s_glyph) {
+                        sx_pos += scaled_space_width;
+                        continue;
+                    }
+
+                    float s_ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    Color saved_color = rdcon->color;
+                    TextShadow* ts = text_shadow;
+                    while (ts) {
+                        rdcon->color = ts->color;
+                        float gsx = sx_pos + s_glyph->bitmap.bearing_x + ts->offset_x * s;
+                        float gsy = y + s_ascend - s_glyph->bitmap.bearing_y + ts->offset_y * s;
+                        draw_glyph(rdcon, &s_glyph->bitmap, gsx, gsy);
+                        ts = ts->next;
+                    }
+                    rdcon->color = saved_color;
+                    sx_pos += s_glyph->advance_x;
+                }
+            }
+
+            // Apply box blur to the shadow region
+            if (rdcon->ui_context->surface) {
+                float blur_extend = max_shadow_blur * 2;
+                // Compute shadow bounding box (text rect expanded by max shadow offsets + blur)
+                float shadow_max_ox = 0, shadow_max_oy = 0;
+                TextShadow* ts = text_shadow;
+                while (ts) {
+                    if (fabsf(ts->offset_x) > shadow_max_ox) shadow_max_ox = fabsf(ts->offset_x);
+                    if (fabsf(ts->offset_y) > shadow_max_oy) shadow_max_oy = fabsf(ts->offset_y);
+                    ts = ts->next;
+                }
+                int bx = (int)floorf(x - blur_extend - shadow_max_ox * s);
+                int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
+                int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
+                int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
+                box_blur_region(rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
+                log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d)", max_shadow_blur, bx, by, bw, bh);
+            }
+        }
 
         while (p < end) {
             // Check if current character is in selection range
@@ -686,6 +786,22 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     }
 
                     auto t3 = std::chrono::high_resolution_clock::now();
+
+                    // Render text-shadow glyphs BEFORE the main glyph
+                    // Skip if blur pre-pass already rendered shadows
+                    if (text_shadow && !shadow_needs_blur) {
+                        Color saved_shadow_color = rdcon->color;
+                        TextShadow* ts = text_shadow;
+                        while (ts) {
+                            rdcon->color = ts->color;
+                            float sx = x + glyph->bitmap.bearing_x + ts->offset_x * s;
+                            float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * s;
+                            draw_glyph(rdcon, &glyph->bitmap, sx, sy);
+                            ts = ts->next;
+                        }
+                        rdcon->color = saved_shadow_color;
+                    }
+
                     draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
                     auto t4 = std::chrono::high_resolution_clock::now();
                     g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
@@ -1206,76 +1322,14 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
         render_box_shadow(rdcon, view, rect);
     }
 
-    // Render background (gradient or solid color) using new rendering system
+    // Render background (gradient, solid color, and background-image) using new rendering system
     if (view->bound->background) {
         render_background(rdcon, view, rect);
     }
 
-    // Load background image if specified
-    if (view->bound->background && view->bound->background->image) {
-        const char* image_url = view->bound->background->image;
-        log_debug("[RENDER] background-image on %s: loading '%s' (size: %.0fx%.0f) bg_ptr=%p",
-                  view->node_name(), image_url, rect.width, rect.height, view->bound->background);
-
-        // Use proper URL resolution
-        if (!rdcon->ui_context->document || !rdcon->ui_context->document->url) {
-            log_error("[RENDER] background-image: missing document URL context");
-        } else {
-            Url* abs_url = parse_url(rdcon->ui_context->document->url, image_url);
-            if (!abs_url) {
-                log_error("[RENDER] background-image: failed to parse URL '%s'", image_url);
-            } else {
-                char* file_path = url_to_local_path(abs_url);
-                if (!file_path) {
-                    log_error("[RENDER] background-image: invalid local URL '%s'", image_url);
-                } else {
-                    // Try loading the image
-                    Tvg_Paint pic = tvg_picture_new();
-                    Tvg_Result result = tvg_picture_load(pic, file_path);
-
-                    // If loading failed and URL starts with "./", try prepending "res/"
-                    // (workaround for CSS-relative URLs that need res/ subdirectory)
-                    if (result != TVG_RESULT_SUCCESS && image_url[0] == '.' && image_url[1] == '/') {
-                        log_debug("[RENDER] background-image: trying with res/ prefix");
-                        size_t res_url_cap = strlen(image_url) + 5;
-                        char* res_url = (char*)mem_alloc(res_url_cap, MEM_CAT_RENDER);
-                        str_fmt(res_url, res_url_cap, "./res/%s", image_url + 2);
-                        url_destroy(abs_url);
-                        abs_url = parse_url(rdcon->ui_context->document->url, res_url);
-                        mem_free(res_url);
-                        if (abs_url) {
-                            char* new_file_path = url_to_local_path(abs_url);
-                            if (new_file_path) {
-                                file_path = new_file_path;
-                                result = tvg_picture_load(pic, file_path);
-                            }
-                        }
-                    }
-
-                    if (result == TVG_RESULT_SUCCESS) {
-                        log_debug("[RENDER] background-image: loaded successfully from '%s'", file_path);
-                        tvg_canvas_remove(rdcon->canvas, NULL);
-                        tvg_picture_set_size(pic, rect.width, rect.height);
-                        tvg_paint_translate(pic, rect.x, rect.y);
-
-                        // Apply clipping
-                        Tvg_Paint clip_rect = tvg_shape_new();
-                        Bound* clip = &rdcon->block.clip;
-                        tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0, true);
-                        tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
-                        tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
-
-                        tvg_canvas_push(rdcon->canvas, pic);
-                        tvg_canvas_reset_and_draw(rdcon, false);
-                        tvg_canvas_remove(rdcon->canvas, NULL);  // IMPORTANT: clear shapes after rendering
-                    } else {
-                        log_error("[RENDER] background-image: failed to load '%s'", file_path);
-                        tvg_paint_unref(pic, true);
-                    }
-                }
-                url_destroy(abs_url);
-            }
-        }
+    // Render inset box-shadow AFTER background (inside the element)
+    if (view->bound->box_shadow) {
+        render_box_shadow_inset(rdcon, view, rect);
     }
 
     // Render borders using new rendering system
@@ -1329,6 +1383,11 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             // Use new comprehensive border rendering
             render_border(rdcon, view, rect);
         }
+    }
+
+    // Render outline AFTER borders (drawn on top, outside border-box)
+    if (view->bound->outline) {
+        render_outline(rdcon, view, rect);
     }
 }
 
@@ -1419,6 +1478,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
 
+    // CSS 2.1 §11.2: visibility:hidden — suppress own rendering but still render children
+    // (children with visibility:visible should still appear)
+    bool self_hidden = block->in_line && block->in_line->visibility == VIS_HIDDEN;
+
     // Save transform state and apply element's transform
     Tvg_Matrix pa_transform = rdcon->transform;
     bool pa_has_transform = rdcon->has_transform;
@@ -1476,13 +1539,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
     // Skip legacy render_list_bullet when a ::marker pseudo-element exists,
     // since render_marker_view will handle it during child traversal.
-    if (block->view_type == RDT_VIEW_LIST_ITEM) {
+    if (!self_hidden && block->view_type == RDT_VIEW_LIST_ITEM) {
         DomElement* li_elem = (DomElement*)block;
         if (!li_elem->pseudo || !li_elem->pseudo->marker) {
             render_list_bullet(rdcon, block);
         }
     }
-    if (block->bound) {
+    if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
         if (block->view_type == RDT_VIEW_TABLE_CELL) {
@@ -1577,6 +1640,39 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
         // Apply the filter chain to the rendered pixels
         apply_css_filters(rdcon->ui_context->surface, block->filter, &filter_rect, &rdcon->block.clip);
+    }
+
+    // Apply CSS opacity: multiply alpha of all pixels in the element's region
+    if (block->in_line && block->in_line->opacity < 1.0f && block->in_line->opacity >= 0.0f) {
+        // Flush any pending ThorVG shapes to the surface before modifying pixels
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(rdcon->canvas, NULL);
+
+        float opacity = block->in_line->opacity;
+        float s = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            int x0 = (int)(pa_block.x + block->x * s);
+            int y0 = (int)(pa_block.y + block->y * s);
+            int x1 = x0 + (int)(block->width * s);
+            int y1 = y0 + (int)(block->height * s);
+            // Clamp to surface dimensions
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > surface->width) x1 = surface->width;
+            if (y1 > surface->height) y1 = surface->height;
+
+            for (int y = y0; y < y1; y++) {
+                uint8_t* row = (uint8_t*)surface->pixels + y * surface->pitch;
+                for (int x = x0; x < x1; x++) {
+                    uint8_t* pixel = row + x * 4;
+                    // Multiply alpha channel by opacity
+                    pixel[3] = (uint8_t)(pixel[3] * opacity + 0.5f);
+                }
+            }
+            log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
+                      opacity, block->node_name(), x0, y0, x1, y1);
+        }
     }
 
     // Restore transform state
@@ -1834,8 +1930,10 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     log_debug("render inline view");
 
+    bool self_hidden = view_span->in_line && view_span->in_line->visibility == VIS_HIDDEN;
+
     // Render border/background for inline elements (e.g. <span> with border)
-    if (view_span->bound) {
+    if (!self_hidden && view_span->bound) {
         render_bound(rdcon, (ViewBlock*)view_span);
     }
 

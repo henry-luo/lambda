@@ -343,6 +343,165 @@ static void sqlite_build_reverse_fks(Pool* pool, RdbSchema* schema) {
     }
 }
 
+/**
+ * Parse trigger timing from CREATE TRIGGER DDL text.
+ * Returns a pool-owned string "BEFORE", "AFTER", or "INSTEAD OF".
+ */
+static const char* trigger_parse_timing(const char* sql, Pool* pool) {
+    if (!sql) return pool_strdup(pool, "AFTER");
+    // "INSTEAD OF" must be checked before "AFTER" to avoid false positives
+    char upper[32];
+    const char* p = sql;
+    // scan for timing keyword; it always appears in the preamble before "ON"
+    while (*p) {
+        // check INSTEAD OF (case-insensitive, length 10)
+        if ((p[0]=='I'||p[0]=='i') && (p[1]=='N'||p[1]=='n') &&
+            (p[2]=='S'||p[2]=='s') && (p[3]=='T'||p[3]=='t') &&
+            (p[4]=='E'||p[4]=='e') && (p[5]=='A'||p[5]=='a') &&
+            (p[6]=='D'||p[6]=='d')) {
+            return pool_strdup(pool, "INSTEAD OF");
+        }
+        // check BEFORE (length 6)
+        if ((p[0]=='B'||p[0]=='b') && (p[1]=='E'||p[1]=='e') &&
+            (p[2]=='F'||p[2]=='f') && (p[3]=='O'||p[3]=='o') &&
+            (p[4]=='R'||p[4]=='r') && (p[5]=='E'||p[5]=='e')) {
+            return pool_strdup(pool, "BEFORE");
+        }
+        // check AFTER (length 5)
+        if ((p[0]=='A'||p[0]=='a') && (p[1]=='F'||p[1]=='f') &&
+            (p[2]=='T'||p[2]=='t') && (p[3]=='E'||p[3]=='e') &&
+            (p[4]=='R'||p[4]=='r')) {
+            return pool_strdup(pool, "AFTER");
+        }
+        p++;
+    }
+    (void)upper;
+    return pool_strdup(pool, "AFTER");
+}
+
+/**
+ * Parse trigger event from CREATE TRIGGER DDL text.
+ * Returns a pool-owned string "INSERT", "UPDATE", or "DELETE".
+ */
+static const char* trigger_parse_event(const char* sql, Pool* pool) {
+    if (!sql) return pool_strdup(pool, "INSERT");
+    const char* p = sql;
+    while (*p) {
+        if ((p[0]=='I'||p[0]=='i') && (p[1]=='N'||p[1]=='n') &&
+            (p[2]=='S'||p[2]=='s') && (p[3]=='E'||p[3]=='e') &&
+            (p[4]=='R'||p[4]=='r') && (p[5]=='T'||p[5]=='t')) {
+            return pool_strdup(pool, "INSERT");
+        }
+        if ((p[0]=='D'||p[0]=='d') && (p[1]=='E'||p[1]=='e') &&
+            (p[2]=='L'||p[2]=='l') && (p[3]=='E'||p[3]=='e') &&
+            (p[4]=='T'||p[4]=='t') && (p[5]=='E'||p[5]=='e')) {
+            return pool_strdup(pool, "DELETE");
+        }
+        if ((p[0]=='U'||p[0]=='u') && (p[1]=='P'||p[1]=='p') &&
+            (p[2]=='D'||p[2]=='d') && (p[3]=='A'||p[3]=='a') &&
+            (p[4]=='T'||p[4]=='t') && (p[5]=='E'||p[5]=='e')) {
+            return pool_strdup(pool, "UPDATE");
+        }
+        p++;
+    }
+    return pool_strdup(pool, "INSERT");
+}
+
+/**
+ * Load trigger metadata for a table from sqlite_master.
+ */
+static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
+    const char* sql = "SELECT name, sql FROM sqlite_master "
+                      "WHERE type = 'trigger' AND tbl_name = ?1";
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return RDB_OK;  // triggers are optional
+    }
+    sqlite3_bind_text(stmt, 1, tbl->name, -1, SQLITE_STATIC);
+
+    // count triggers
+    int trig_count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) trig_count++;
+    sqlite3_reset(stmt);
+
+    if (trig_count == 0) {
+        sqlite3_finalize(stmt);
+        return RDB_OK;
+    }
+
+    tbl->triggers = (RdbTrigger*)pool_calloc(pool, (size_t)trig_count * sizeof(RdbTrigger));
+    tbl->trigger_count = trig_count;
+
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < trig_count) {
+        const char* name     = (const char*)sqlite3_column_text(stmt, 0);
+        const char* ddl_sql  = (const char*)sqlite3_column_text(stmt, 1);
+
+        tbl->triggers[i].name   = pool_strdup(pool, name ? name : "");
+        tbl->triggers[i].timing = trigger_parse_timing(ddl_sql, pool);
+        tbl->triggers[i].event  = trigger_parse_event(ddl_sql, pool);
+        i++;
+    }
+    sqlite3_finalize(stmt);
+    return RDB_OK;
+}
+
+/* ─── SQL function introspection (database-level) ─── */
+
+static const char* func_type_str(const char* type_code, Pool* pool) {
+    if (!type_code || !type_code[0]) return pool_strdup(pool, "scalar");
+    switch (type_code[0]) {
+        case 'w': return pool_strdup(pool, "window");
+        case 'a': return pool_strdup(pool, "aggregate");
+        default:  return pool_strdup(pool, "scalar");
+    }
+}
+
+static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
+    const char* sql = "SELECT name, builtin, type, narg FROM pragma_function_list "
+                      "ORDER BY name, narg";
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        log_debug("rdb sqlite: pragma_function_list not available");
+        schema->function_count = 0;
+        schema->functions = NULL;
+        return RDB_OK;  // functions are optional
+    }
+
+    // count functions
+    int func_count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) func_count++;
+    sqlite3_reset(stmt);
+
+    if (func_count == 0) {
+        sqlite3_finalize(stmt);
+        schema->function_count = 0;
+        schema->functions = NULL;
+        return RDB_OK;
+    }
+
+    schema->functions = (RdbFunction*)pool_calloc(pool, (size_t)func_count * sizeof(RdbFunction));
+    schema->function_count = func_count;
+
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < func_count) {
+        const char* name    = (const char*)sqlite3_column_text(stmt, 0);
+        int         builtin = sqlite3_column_int(stmt, 1);
+        const char* type    = (const char*)sqlite3_column_text(stmt, 2);
+        int         narg    = sqlite3_column_int(stmt, 3);
+
+        schema->functions[i].name    = pool_strdup(pool, name ? name : "");
+        schema->functions[i].builtin = (builtin != 0);
+        schema->functions[i].type    = func_type_str(type, pool);
+        schema->functions[i].narg    = narg;
+        i++;
+    }
+    sqlite3_finalize(stmt);
+
+    log_debug("rdb sqlite: loaded %d functions", schema->function_count);
+    return RDB_OK;
+}
+
 static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
     sqlite3* db = (sqlite3*)conn->handle;
     Pool* pool = conn->pool;
@@ -379,12 +538,14 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
         sqlite_load_columns(db, pool, &out_schema->tables[t]);
         sqlite_load_indexes(db, pool, &out_schema->tables[t]);
         sqlite_load_foreign_keys(db, pool, &out_schema->tables[t]);
+        sqlite_load_triggers(db, pool, &out_schema->tables[t]);
 
-        log_debug("rdb sqlite: table '%s' (%d cols, %d idx, %d fk, view=%d)",
+        log_debug("rdb sqlite: table '%s' (%d cols, %d idx, %d fk, %d trig, view=%d)",
                   out_schema->tables[t].name,
                   out_schema->tables[t].column_count,
                   out_schema->tables[t].index_count,
                   out_schema->tables[t].fk_count,
+                  out_schema->tables[t].trigger_count,
                   out_schema->tables[t].is_view);
         t++;
     }
@@ -393,7 +554,11 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
     // build reverse FK cross-references
     sqlite_build_reverse_fks(pool, out_schema);
 
-    log_debug("rdb sqlite: loaded schema with %d tables/views", out_schema->table_count);
+    // load database-level SQL functions
+    sqlite_load_functions(db, pool, out_schema);
+
+    log_debug("rdb sqlite: loaded schema with %d tables/views, %d functions",
+              out_schema->table_count, out_schema->function_count);
     return RDB_OK;
 }
 

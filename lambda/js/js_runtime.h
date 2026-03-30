@@ -12,6 +12,11 @@ extern "C" {
 
 #include "../lambda.h"
 
+// Sentinel value for deleted properties (used by delete operator).
+// Encoded as a tagged INT (LMD_TYPE_INT=3) with a unique payload 0x00DEAD00DEAD00.
+// This roundtrips correctly through map_field_store/map_read_field for INT fields.
+#define JS_DELETED_SENTINEL_VAL ((3ULL << 56) | 0x00DEAD00DEAD00ULL)
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -117,6 +122,7 @@ Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+Item js_new_function_from_string(Item* args, int argc);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
@@ -156,6 +162,7 @@ Item js_array_method(Item arr, Item method_name, Item* args, int argc);
 Item js_math_method(Item method_name, Item* args, int argc);
 Item js_math_apply(Item method_name, Item args_array);
 Item js_math_property(Item prop_name);
+Item js_math_set_property(Item key, Item value);
 
 // =============================================================================
 // v5: Process I/O
@@ -235,6 +242,8 @@ Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
 Item js_date_new(void);
+Item js_date_new_from(Item value);
+Item js_date_utc(Item args_array);
 Item js_date_method(Item date_obj, int method_id);
 Item js_map_collection_new(void);
 Item js_map_collection_new_from(Item iterable);
@@ -341,6 +350,7 @@ void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
 Item js_constructor_create_object(Item callee);
+Item js_new_from_class_object(Item callee, Item* args, int argc);
 
 // A5: Constructor shape pre-allocation
 // Creates a new object with pre-built shape: all property slots pre-allocated
@@ -379,10 +389,15 @@ Item js_url_parse(Item input, Item base);
 Item js_url_can_parse(Item input);
 
 // Symbol API
+// Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).
+// Base must be beyond int32 range to avoid collision with bitwise op results.
+#define JS_SYMBOL_BASE (1LL << 40)
+
 Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
 Item js_symbol_to_string(Item sym);
+Item js_symbol_well_known(Item name);
 
 // =============================================================================
 // v14: Generator Runtime

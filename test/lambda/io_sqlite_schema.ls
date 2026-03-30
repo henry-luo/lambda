@@ -41,3 +41,19 @@ type(db.schema.cheap_products.indexes)
 // view schema metadata
 [len(db.schema.cheap_products.columns), db.schema.cheap_products.columns[2].name]
 db.schema.cheap_products.view
+
+// triggers on products (2 triggers added)
+len(db.schema.products.triggers)
+[db.schema.products.triggers[0].name, db.schema.products.triggers[0].timing, db.schema.products.triggers[0].event]
+[db.schema.products.triggers[1].name, db.schema.products.triggers[1].timing, db.schema.products.triggers[1].event]
+
+// categories has no triggers
+type(db.schema.categories.triggers)
+
+// database-level SQL functions
+type(db.functions)
+(len(db.functions) > 0)
+
+// verify function entry structure (first function has expected fields)
+let f0 = db.functions[0]
+[type(f0.name), type(f0.type), type(f0.narg), type(f0.builtin)]

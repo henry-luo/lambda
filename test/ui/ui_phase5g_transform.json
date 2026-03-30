@@ -1,0 +1,30 @@
+{
+  "name": "Phase 5g: Transform and geometry tests",
+  "html": "test/ui/test_phase5g_transform.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== Phase 5g: Transform/zoom tests ===" },
+
+    { "type": "log", "message": "--- Test 1: untransformed box ---" },
+    { "type": "assert_rect", "target": { "selector": "#box" },
+      "x": 0, "y": 0, "width": 100, "height": 100, "tolerance": 2 },
+
+    { "type": "log", "message": "--- Test 2: untransformed box style ---" },
+    { "type": "assert_style", "target": { "selector": "#box" },
+      "property": "width", "equals": "100px" },
+    { "type": "assert_style", "target": { "selector": "#box" },
+      "property": "height", "equals": "100px" },
+    { "type": "assert_style", "target": { "selector": "#box" },
+      "property": "background-color", "equals": "rgb(231, 76, 60)" },
+
+    { "type": "log", "message": "--- Test 3: translated element position ---" },
+    { "type": "assert_style", "target": { "selector": "#translated" },
+      "property": "width", "equals": "80px" },
+    { "type": "assert_style", "target": { "selector": "#translated" },
+      "property": "height", "equals": "80px" },
+
+    { "type": "log", "message": "--- Test 4: relative positions ---" },
+    { "type": "assert_position", "element_a": { "selector": "#box" },
+      "element_b": { "selector": "#scaled" }, "relation": "above" }
+  ]
+}

@@ -109,7 +109,7 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
 // Document viewer function from radiant - unified viewer for all document types (HTML, PDF, Markdown, etc.)
 extern int view_doc_in_window(const char* doc_file);
-extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file);
+extern int view_doc_in_window_with_events(const char* doc_file, const char* event_file, bool headless);
 
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
@@ -1710,6 +1710,7 @@ int main(int argc, char *argv[]) {
             printf("  %s view architecture.d2          # View D2 diagram\n", argv[0]);
             printf("  %s view test/input/test.pdf     # View PDF with path\n", argv[0]);
             printf("  %s view page.html --event-file events.json  # Automated testing\n", argv[0]);
+            printf("  %s view page.html --event-file events.json --headless  # Headless testing (no window)\n", argv[0]);
             printf("\nKeyboard Controls:\n");
             printf("  ESC        Close window\n");
             printf("  Q          Quit viewer\n");
@@ -1720,10 +1721,13 @@ int main(int argc, char *argv[]) {
         // Parse arguments for view command
         const char* filename = NULL;
         const char* event_file = NULL;
+        bool headless = false;
 
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--event-file") == 0 && i + 1 < argc) {
                 event_file = argv[++i];
+            } else if (strcmp(argv[i], "--headless") == 0) {
+                headless = true;
             } else if (argv[i][0] != '-' && filename == NULL) {
                 filename = argv[i];
             }
@@ -1911,7 +1915,7 @@ int main(int argc, char *argv[]) {
 
             // View the temp SVG file
             log_info("Opening graph SVG in viewer: %s", temp_svg);
-            exit_code = view_doc_in_window_with_events(temp_svg, event_file);
+            exit_code = view_doc_in_window_with_events(temp_svg, event_file, headless);
 
             // Clean up temp file after viewing
             file_delete(temp_svg);
@@ -1937,7 +1941,7 @@ int main(int argc, char *argv[]) {
                     strcmp(ext, ".cfg") == 0 || strcmp(ext, ".log") == 0)) {
             // Use unified document viewer for all document types including PDF
             log_info("Opening document file: %s (event_file: %s)", filename, event_file ? event_file : "none");
-            exit_code = view_doc_in_window_with_events(filename, event_file);
+            exit_code = view_doc_in_window_with_events(filename, event_file, headless);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
             printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");

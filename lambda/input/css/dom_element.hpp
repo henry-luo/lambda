@@ -284,6 +284,8 @@ struct DomElement : DomNode {
 #define PSEUDO_STATE_SELECTED       (1 << 20)  // option/selection state
 #define PSEUDO_STATE_TARGET         (1 << 21)  // URL fragment target
 #define PSEUDO_STATE_PLACEHOLDER_SHOWN (1 << 22)  // input showing placeholder
+#define PSEUDO_STATE_DRAG           (1 << 23)  // element being dragged
+#define PSEUDO_STATE_DRAG_OVER      (1 << 24)  // element is a drag-over target
 
 // ============================================================================
 // DOM Document Creation and Destruction
