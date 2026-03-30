@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_backend.h"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -34,15 +35,14 @@ typedef struct {
     BlockBlot block;
     Color color;
     UiContext* ui_context;
+    bool _transform_emitted;  // tracks begin/end_transform pairing
 } SvgRenderContext;
 
 // Forward declarations
-void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* view_block);
-void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span);
-void render_children_svg(SvgRenderContext* ctx, View* view);
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
 void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block);
 void calculate_content_bounds(View* view, int* max_x, int* max_y);
+static RenderBackend svg_make_backend(SvgRenderContext* ctx);
 
 // Helper functions for SVG output
 void svg_indent(SvgRenderContext* ctx) {
@@ -1113,204 +1113,157 @@ static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, floa
     return true;
 }
 
-void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
-    // Save parent context
-    BlockBlot pa_block = ctx->block;
-    FontBox pa_font = ctx->font;
-    Color pa_color = ctx->color;
+// ============================================================================
+// SVG RenderBackend vtable callbacks
+// ============================================================================
 
-    // Update font if specified
-    if (block->font) {
-        setup_font(ctx->ui_context, &ctx->font, block->font);
-    }
+static void svg_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_bound_svg reads ctx->block.{x,y} + view->{x,y}
+    ctx->block.x = abs_x - view->x;
+    ctx->block.y = abs_y - view->y;
+    render_bound_svg(ctx, view);
+}
 
-    // Render background and borders
-    if (block->bound) {
-        render_bound_svg(ctx, block);
-    }
+static void svg_cb_render_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+                               FontBox* font, Color color) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->block.x = abs_x;
+    ctx->block.y = abs_y;
+    ctx->font = *font;
+    ctx->color = color;
+    render_text_view_svg(ctx, text);
+}
 
-    // Update position context
-    ctx->block.x = pa_block.x + block->x;
-    ctx->block.y = pa_block.y + block->y;
+static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (!block->embed || !block->embed->img) return;
+    ImageSurface* img = block->embed->img;
 
-    // Update color context
-    if (block->in_line && block->in_line->color.c) {
-        ctx->color = block->in_line->color;
-    }
+    float img_width = block->width;
+    float img_height = block->height;
 
-    // Inline SVG — serialize original SVG markup directly instead of
-    // traversing the HTML view tree (SVG children are not HTML views)
-    if (block->tag_id == HTM_TAG_SVG) {
-        render_inline_svg_passthrough(ctx, block);
-        ctx->block = pa_block;
-        ctx->font = pa_font;
-        ctx->color = pa_color;
-        return;
-    }
+    log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
+              img->url && img->url->href ? img->url->href->chars : "unknown",
+              img->format, img->width, img->height,
+              img_width, img_height, abs_x, abs_y);
 
-    // Render embedded image if present
-    if (block->embed && block->embed->img) {
-        ImageSurface* img = block->embed->img;
-        float img_x = ctx->block.x + block->x;
-        float img_y = ctx->block.y + block->y;
-        float img_width = block->width;
-        float img_height = block->height;
-
-        log_debug("[SVG IMAGE RENDER] url=%s, format=%d, img_size=%dx%d, view_size=%.0fx%.0f, pos=(%.0f,%.0f)",
-                  img->url && img->url->href ? img->url->href->chars : "unknown",
-                  img->format, img->width, img->height,
-                  img_width, img_height, img_x, img_y);
-
-        if (img->url && img->url->href) {
-            // Convert local file path to href for SVG
-            const char* href = img->url->href->chars;
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content,
-                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
-                "preserveAspectRatio=\"none\" />\n",
-                img_x, img_y, img_width, img_height, href);
-        }
-    }
-
-    // Render children (wrapped in optional opacity + transform groups)
-    if (block->first_child) {
-        float elem_opacity = (block->in_line && block->in_line->opacity > 0) ? block->in_line->opacity : 1.0f;
-        bool has_opacity   = elem_opacity < 0.9995f;
-
-        char transform_buf[256] = {};
-        bool has_transform = svg_build_transform_attr(
-            block->transform,
-            ctx->block.x + block->x, ctx->block.y + block->y,
-            block->width, block->height,
-            transform_buf, sizeof(transform_buf));
-
-        if (has_opacity) {
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", elem_opacity);
-            ctx->indent_level++;
-        }
-        if (has_transform) {
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content, "<g transform=\"%s\">\n", transform_buf);
-            ctx->indent_level++;
-        }
-
+    if (img->url && img->url->href) {
+        const char* href = img->url->href->chars;
         svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n", block->node_name());
+        strbuf_append_format(ctx->svg_content,
+            "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"%s\" "
+            "preserveAspectRatio=\"none\" />\n",
+            abs_x, abs_y, img_width, img_height, href);
+    }
+}
+
+static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_inline_svg_passthrough reads ctx->block.{x,y} + block->{x,y}
+    ctx->block.x = abs_x - block->x;
+    ctx->block.y = abs_y - block->y;
+    render_inline_svg_passthrough(ctx, block);
+}
+
+static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n",
+                         block->node_name());
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_block_children(void* vctx, ViewBlock* block) {
+    (void)block;
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_inline_children(void* vctx, ViewSpan* span) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n",
+                         span->node_name());
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
+    (void)span;
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_opacity(void* vctx, float opacity) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    svg_indent(ctx);
+    strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", opacity);
+    ctx->indent_level++;
+}
+
+static void svg_cb_end_opacity(void* vctx) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    ctx->indent_level--;
+    svg_indent(ctx);
+    strbuf_append_str(ctx->svg_content, "</g>\n");
+}
+
+static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    char transform_buf[256] = {};
+    bool has = svg_build_transform_attr(
+        block->transform,
+        abs_x, abs_y,
+        block->width, block->height,
+        transform_buf, sizeof(transform_buf));
+    ctx->_transform_emitted = has;
+    if (has) {
+        svg_indent(ctx);
+        strbuf_append_format(ctx->svg_content, "<g transform=\"%s\">\n", transform_buf);
         ctx->indent_level++;
-        render_children_svg(ctx, block->first_child);
+    }
+}
+
+static void svg_cb_end_transform(void* vctx) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    if (ctx->_transform_emitted) {
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
-
-        if (has_transform) {
-            ctx->indent_level--;
-            svg_indent(ctx);
-            strbuf_append_str(ctx->svg_content, "</g>\n");
-        }
-        if (has_opacity) {
-            ctx->indent_level--;
-            svg_indent(ctx);
-            strbuf_append_str(ctx->svg_content, "</g>\n");
-        }
+        ctx->_transform_emitted = false;
     }
-
-    // Render multi-column rules between columns
-    if (block->multicol && block->multicol->computed_column_count > 1) {
-        render_column_rules_svg(ctx, block);
-    }
-
-    // Restore context
-    ctx->block = pa_block;
-    ctx->font = pa_font;
-    ctx->color = pa_color;
 }
 
-void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
-    // Save parent context
-    FontBox pa_font = ctx->font;
-    Color pa_color = ctx->color;
-
-    // Update font and color if specified
-    if (view_span->font) {
-        setup_font(ctx->ui_context, &ctx->font, view_span->font);
-    }
-
-    if (view_span->in_line && view_span->in_line->color.c) {
-        log_debug("[SVG COLOR] element=%s has color set: #%02x%02x%02x (was #%02x%02x%02x from parent)",
-                  view_span->node_name(),
-                  view_span->in_line->color.r, view_span->in_line->color.g, view_span->in_line->color.b,
-                  pa_color.r, pa_color.g, pa_color.b);
-        ctx->color = view_span->in_line->color;
-    } else {
-        log_debug("[SVG COLOR] element=%s inheriting color #%02x%02x%02x from parent (in_line=%p, color.c=%u)",
-                  view_span->node_name(), pa_color.r, pa_color.g, pa_color.b,
-                  view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
-    }
-
-    // Render children (wrapped in optional opacity group)
-    if (view_span->first_child) {
-        float elem_opacity = (view_span->in_line && view_span->in_line->opacity > 0) ? view_span->in_line->opacity : 1.0f;
-        bool has_opacity   = elem_opacity < 0.9995f;
-
-        if (has_opacity) {
-            svg_indent(ctx);
-            strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", elem_opacity);
-            ctx->indent_level++;
-        }
-
-        svg_indent(ctx);
-        strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n", view_span->node_name());
-        ctx->indent_level++;
-        render_children_svg(ctx, view_span->first_child);
-        ctx->indent_level--;
-        svg_indent(ctx);
-        strbuf_append_str(ctx->svg_content, "</g>\n");
-
-        if (has_opacity) {
-            ctx->indent_level--;
-            svg_indent(ctx);
-            strbuf_append_str(ctx->svg_content, "</g>\n");
-        }
-    }
-
-    // Restore context
-    ctx->font = pa_font;
-    ctx->color = pa_color;
+static void svg_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+    SvgRenderContext* ctx = (SvgRenderContext*)vctx;
+    // render_column_rules_svg reads ctx->block.{x,y} + block->{x,y}
+    ctx->block.x = abs_x - block->x;
+    ctx->block.y = abs_y - block->y;
+    render_column_rules_svg(ctx, block);
 }
 
-void render_children_svg(SvgRenderContext* ctx, View* view) {
-    while (view) {
-        switch (view->view_type) {
-            case RDT_VIEW_BLOCK:
-            case RDT_VIEW_INLINE_BLOCK:
-            case RDT_VIEW_TABLE:
-            case RDT_VIEW_TABLE_ROW_GROUP:
-            case RDT_VIEW_TABLE_ROW:
-            case RDT_VIEW_TABLE_CELL:
-            case RDT_VIEW_LIST_ITEM:
-                render_block_view_svg(ctx, (ViewBlock*)view);
-                break;
-
-            case RDT_VIEW_INLINE:
-                render_inline_view_svg(ctx, (ViewSpan*)view);
-                break;
-
-            case RDT_VIEW_TEXT:
-                render_text_view_svg(ctx, (ViewText*)view);
-                break;
-
-            case RDT_VIEW_MATH:
-                // MathBox rendering removed - use RDT_VIEW_TEXNODE instead
-                log_debug("render_children_svg: RDT_VIEW_MATH deprecated, skipping");
-                break;
-
-            default:
-                log_debug("Unknown view type in SVG rendering: %d", view->view_type);
-                break;
-        }
-        view = view->next();
-    }
+static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
+    RenderBackend b = {};
+    b.ctx                   = ctx;
+    b.render_bound          = svg_cb_render_bound;
+    b.render_text           = svg_cb_render_text;
+    b.render_image          = svg_cb_render_image;
+    b.render_inline_svg     = svg_cb_render_inline_svg;
+    b.begin_block_children  = svg_cb_begin_block_children;
+    b.end_block_children    = svg_cb_end_block_children;
+    b.begin_inline_children = svg_cb_begin_inline_children;
+    b.end_inline_children   = svg_cb_end_inline_children;
+    b.begin_opacity         = svg_cb_begin_opacity;
+    b.end_opacity           = svg_cb_end_opacity;
+    b.begin_transform       = svg_cb_begin_transform;
+    b.end_transform         = svg_cb_end_transform;
+    b.render_column_rules   = svg_cb_render_column_rules;
+    b.on_font_change        = NULL;
+    return b;
 }
 
 // Calculate the actual content bounds recursively
@@ -1419,11 +1372,19 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
         "<rect x=\"0\" y=\"0\" width=\"%d\" height=\"%d\" fill=\"white\" />\n",
         width, height);
 
-    // Render the root view
+    // Render the root view via shared tree walker
+    RenderBackend backend = svg_make_backend(&ctx);
+    RenderWalkState walk_state = {};
+    walk_state.x = 0;
+    walk_state.y = 0;
+    walk_state.font = ctx.font;
+    walk_state.color = ctx.color;
+    walk_state.ui_context = uicon;
+
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_block_view_svg(&ctx, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
     } else {
-        render_children_svg(&ctx, root_view);
+        render_walk_children(&backend, &walk_state, root_view);
     }
 
     // Render caret if present
