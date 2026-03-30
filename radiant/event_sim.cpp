@@ -5,6 +5,7 @@
 #include "event_sim.hpp"
 #include "event.hpp"
 #include "state_store.hpp"
+#include "form_control.hpp"
 #include "view.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
@@ -545,6 +546,19 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->type = SIM_EVENT_FOCUS;
         parse_target(reader, ev);
     }
+    else if (strcmp(type_str, "check") == 0) {
+        ev->type = SIM_EVENT_CHECK;
+        ev->expected_checked = reader.get("checked").asBool();
+        parse_target(reader, ev);
+    }
+    else if (strcmp(type_str, "select_option") == 0) {
+        ev->type = SIM_EVENT_SELECT_OPTION;
+        const char* val = reader.get("value").cstring();
+        if (val) ev->option_value = mem_strdup(val, MEM_CAT_LAYOUT);
+        const char* label = reader.get("label").cstring();
+        if (label) ev->option_label = mem_strdup(label, MEM_CAT_LAYOUT);
+        parse_target(reader, ev);
+    }
     else if (strcmp(type_str, "assert_text") == 0) {
         ev->type = SIM_EVENT_ASSERT_TEXT;
         const char* contains = reader.get("contains").cstring();
@@ -683,6 +697,15 @@ EventSimContext* event_sim_load(const char* json_file) {
     const char* name = root_map.get("name").cstring();
     if (name) ctx->test_name = mem_strdup(name, MEM_CAT_LAYOUT);
 
+    // Parse optional viewport
+    ItemReader viewport_item = root_map.get("viewport");
+    if (viewport_item.isMap()) {
+        MapReader vp = viewport_item.asMap();
+        ctx->viewport_width = vp.get("width").asInt32();
+        ctx->viewport_height = vp.get("height").asInt32();
+        log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
+    }
+
     // Parse each event
     int count = (int)events_arr.length();
     log_info("event_sim: parsing %d events", count);
@@ -718,6 +741,8 @@ void event_sim_free(EventSimContext* ctx) {
             if (ev->input_text) mem_free(ev->input_text);
             if (ev->assert_contains) mem_free(ev->assert_contains);
             if (ev->assert_equals) mem_free(ev->assert_equals);
+            if (ev->option_value) mem_free(ev->option_value);
+            if (ev->option_label) mem_free(ev->option_label);
             mem_free(ev);
         }
         arraylist_free(ctx->events);
@@ -1069,6 +1094,144 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             log_info("event_sim: focus via click at (%d, %d)", x, y);
             sim_mouse_button(uicon, x, y, 0, 0, true);
             sim_mouse_button(uicon, x, y, 0, 0, false);
+            break;
+        }
+
+        case SIM_EVENT_CHECK: {
+            // Set checkbox/radio to the desired checked state
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem) {
+                log_error("event_sim: check - target element not found");
+                break;
+            }
+            if (!sim_is_checkbox_or_radio(elem)) {
+                log_error("event_sim: check - target is not a checkbox or radio");
+                break;
+            }
+            bool is_checked = dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_CHECKED);
+            if (is_checked != ev->expected_checked) {
+                RadiantState* state = (RadiantState*)doc->state;
+                if (state && !dom_element_has_pseudo_state((DomElement*)elem, PSEUDO_STATE_DISABLED)) {
+                    sim_toggle_checkbox_radio(elem, state);
+                    log_info("event_sim: check - toggled to %s", ev->expected_checked ? "checked" : "unchecked");
+                }
+            } else {
+                log_info("event_sim: check - already %s, no action needed", is_checked ? "checked" : "unchecked");
+            }
+            break;
+        }
+
+        case SIM_EVENT_SELECT_OPTION: {
+            // Select an option from a <select> dropdown by value or label
+            DomDocument* doc = uicon->document;
+            View* elem = resolve_target_element(ev, doc);
+            if (!elem) {
+                log_error("event_sim: select_option - target element not found");
+                break;
+            }
+            // Walk up to find the <select> element
+            View* select_view = elem;
+            while (select_view && select_view->is_element() &&
+                   ((ViewElement*)select_view)->tag() != HTM_TAG_SELECT) {
+                select_view = select_view->parent;
+            }
+            if (!select_view || !select_view->is_element() ||
+                ((ViewElement*)select_view)->tag() != HTM_TAG_SELECT) {
+                log_error("event_sim: select_option - target is not a <select> element");
+                break;
+            }
+            ViewBlock* select = (ViewBlock*)select_view;
+            if (!select->form) {
+                log_error("event_sim: select_option - select has no form control prop");
+                break;
+            }
+            // Find matching option by value or label
+            int match_index = -1;
+            int idx = 0;
+            DomNode* child = select->first_child;
+            while (child) {
+                if (child->is_element()) {
+                    DomElement* child_elem = (DomElement*)child;
+                    if (child_elem->tag() == HTM_TAG_OPTION) {
+                        if (ev->option_value) {
+                            const char* val = dom_element_get_attribute(child_elem, "value");
+                            if (val && strcmp(val, ev->option_value) == 0) {
+                                match_index = idx;
+                                break;
+                            }
+                        }
+                        if (ev->option_label) {
+                            // Match by visible text content
+                            DomNode* text_child = child_elem->first_child;
+                            while (text_child) {
+                                if (text_child->is_text()) {
+                                    DomText* text = (DomText*)text_child;
+                                    if (text->text && strcmp(text->text, ev->option_label) == 0) {
+                                        match_index = idx;
+                                        break;
+                                    }
+                                }
+                                text_child = text_child->next_sibling;
+                            }
+                            if (match_index >= 0) break;
+                        }
+                        idx++;
+                    } else if (child_elem->tag() == HTM_TAG_OPTGROUP) {
+                        // Search options inside optgroup
+                        DomNode* opt_child = child_elem->first_child;
+                        while (opt_child) {
+                            if (opt_child->is_element()) {
+                                DomElement* opt_elem = (DomElement*)opt_child;
+                                if (opt_elem->tag() == HTM_TAG_OPTION) {
+                                    if (ev->option_value) {
+                                        const char* val = dom_element_get_attribute(opt_elem, "value");
+                                        if (val && strcmp(val, ev->option_value) == 0) {
+                                            match_index = idx;
+                                            break;
+                                        }
+                                    }
+                                    if (ev->option_label) {
+                                        DomNode* text_child = opt_elem->first_child;
+                                        while (text_child) {
+                                            if (text_child->is_text()) {
+                                                DomText* text = (DomText*)text_child;
+                                                if (text->text && strcmp(text->text, ev->option_label) == 0) {
+                                                    match_index = idx;
+                                                    break;
+                                                }
+                                            }
+                                            text_child = text_child->next_sibling;
+                                        }
+                                        if (match_index >= 0) break;
+                                    }
+                                    idx++;
+                                }
+                            }
+                            opt_child = opt_child->next_sibling;
+                        }
+                        if (match_index >= 0) break;
+                    }
+                }
+                child = child->next_sibling;
+            }
+            if (match_index < 0) {
+                log_error("event_sim: select_option - no matching option found (value='%s', label='%s')",
+                         ev->option_value ? ev->option_value : "(null)",
+                         ev->option_label ? ev->option_label : "(null)");
+                break;
+            }
+            select->form->selected_index = match_index;
+            RadiantState* state = (RadiantState*)doc->state;
+            if (state) {
+                // Close dropdown if open
+                if (state->open_dropdown == select_view) {
+                    state->open_dropdown = nullptr;
+                    select->form->dropdown_open = 0;
+                }
+                state->needs_repaint = true;
+            }
+            log_info("event_sim: select_option - selected index %d", match_index);
             break;
         }
 

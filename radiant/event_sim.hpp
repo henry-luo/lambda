@@ -34,6 +34,9 @@
  *     {"type": "assert_focus", "target": {"selector": "input#email"}},
  *     {"type": "assert_state", "target": {"selector": "button"}, "state": ":hover", "value": true},
  *     {"type": "assert_scroll", "y": 500, "tolerance": 10},
+ *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
+ *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
+ *     {"type": "select_option", "target": {"selector": "select#color"}, "label": "Blue"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
@@ -69,6 +72,8 @@ enum SimEventType {
     SIM_EVENT_DBLCLICK,        // double-click
     SIM_EVENT_TYPE,            // type text into focused element
     SIM_EVENT_FOCUS,           // focus an element (via click)
+    SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
+    SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -115,6 +120,8 @@ struct SimEvent {
     float expected_scroll_x;     // for assert_scroll
     float expected_scroll_y;     // for assert_scroll
     float scroll_tolerance;      // for assert_scroll
+    char* option_value;          // for select_option: match by value attribute
+    char* option_label;          // for select_option: match by visible text
 };
 
 // Event simulation context
@@ -128,6 +135,8 @@ struct EventSimContext {
     int fail_count;              // assertions failed
     FILE* result_file;           // optional result output file
     char* test_name;             // optional test name from JSON
+    int viewport_width;          // 0 = use default (1200)
+    int viewport_height;         // 0 = use default (800)
 };
 
 // Load events from JSON file
