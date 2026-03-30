@@ -3681,10 +3681,14 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                 lycon->block.init_ascender = typo_c.ascender;
                 lycon->block.init_descender = typo_c.descender;
             } else if (lycon->font.font_handle) {
-                const FontMetrics* mc = font_get_metrics(lycon->font.font_handle);
-                if (mc) {
-                    lycon->block.init_ascender = mc->hhea_ascender;
-                    lycon->block.init_descender = -(mc->hhea_descender);
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    const FontMetrics* mc = font_get_metrics(lycon->font.font_handle);
+                    if (mc) {
+                        lycon->block.init_ascender = mc->hhea_ascender;
+                        lycon->block.init_descender = -(mc->hhea_descender);
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -4153,10 +4157,14 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         lycon->block.init_ascender = typo.ascender;
         lycon->block.init_descender = typo.descender;
     } else if (lycon->font.font_handle) {
-        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-        if (m) {
-            lycon->block.init_ascender = m->hhea_ascender;
-            lycon->block.init_descender = -(m->hhea_descender);
+        if (lycon->block.line_height_is_normal) {
+            font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+        } else {
+            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+            if (m) {
+                lycon->block.init_ascender = m->hhea_ascender;
+                lycon->block.init_descender = -(m->hhea_descender);
+            }
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -6798,10 +6806,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 lycon->block.init_ascender = typo_c2.ascender;
                 lycon->block.init_descender = typo_c2.descender;
             } else if (lycon->font.font_handle) {
-                const FontMetrics* mc2 = font_get_metrics(lycon->font.font_handle);
-                if (mc2) {
-                    lycon->block.init_ascender = mc2->hhea_ascender;
-                    lycon->block.init_descender = -(mc2->hhea_descender);
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    const FontMetrics* mc2 = font_get_metrics(lycon->font.font_handle);
+                    if (mc2) {
+                        lycon->block.init_ascender = mc2->hhea_ascender;
+                        lycon->block.init_descender = -(mc2->hhea_descender);
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
@@ -8153,10 +8165,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 lycon->block.init_ascender = typo_c3.ascender;
                 lycon->block.init_descender = typo_c3.descender;
             } else if (lycon->font.font_handle) {
-                const FontMetrics* mc3 = font_get_metrics(lycon->font.font_handle);
-                if (mc3) {
-                    lycon->block.init_ascender = mc3->hhea_ascender;
-                    lycon->block.init_descender = -(mc3->hhea_descender);
+                if (lycon->block.line_height_is_normal) {
+                    font_get_normal_lh_split(lycon->font.font_handle, &lycon->block.init_ascender, &lycon->block.init_descender);
+                } else {
+                    const FontMetrics* mc3 = font_get_metrics(lycon->font.font_handle);
+                    if (mc3) {
+                        lycon->block.init_ascender = mc3->hhea_ascender;
+                        lycon->block.init_descender = -(mc3->hhea_descender);
+                    }
                 }
             }
             lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);

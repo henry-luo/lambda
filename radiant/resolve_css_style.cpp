@@ -617,6 +617,14 @@ DisplayValue resolve_display_value(void* child) {
 
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout
+        // when display:none is set by UA defaults for hidden inputs, respect it
+        if (dom_elem && tag_id == HTM_TAG_INPUT) {
+            const char* type_attr = dom_elem->get_attribute("type");
+            if (type_attr && (strcmp(type_attr, "hidden") == 0)) {
+                DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+                return none_display;
+            }
+        }
         if (dom_elem && dom_elem->display.inner != CSS_VALUE_NONE &&
             dom_elem->display.inner != 0 && dom_elem->styles_resolved) {
             log_debug("[CSS] Using pre-set display from element: outer=%d, inner=%d",
@@ -632,7 +640,8 @@ DisplayValue resolve_display_value(void* child) {
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
                             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
-                            tag_id == HTM_TAG_SVG);
+                            tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
+                            tag_id == HTM_TAG_PROGRESS);
 
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
@@ -930,11 +939,13 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_HEAD || tag_id == HTM_TAG_TITLE || tag_id == HTM_TAG_META ||
             tag_id == HTM_TAG_LINK || tag_id == HTM_TAG_BASE || tag_id == HTM_TAG_NOSCRIPT ||
             tag_id == HTM_TAG_TEMPLATE || tag_id == HTM_TAG_MAP || tag_id == HTM_TAG_AREA ||
-            tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
-            // Option/optgroup elements inside <select> are rendered by the select control itself,
-            // not as normal DOM layout elements. Browsers report 0x0 dimensions for them.
+            tag_id == HTM_TAG_DATALIST) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
+        } else if (tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
+            // Option/optgroup: keep in tree as 0x0 blocks (browsers report 0x0)
+            display.outer = CSS_VALUE_BLOCK;
+            display.inner = CSS_VALUE_FLOW;
         } else if (tag_id == HTM_TAG_TABLE) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_TABLE;

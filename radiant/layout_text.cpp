@@ -612,15 +612,29 @@ void line_break(LayoutContext* lycon) {
     // When line-height is explicitly set, the inline box height equals line-height,
     // but inline-blocks and other replaced elements may extend the line box further.
     // Use max(css_line_height, font_line_height) to accommodate all inline content.
-    bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
+    //
+    // CSS 2.1 §10.8.1: For lines with inline-blocks/replaced elements, always use
+    // max(css_lh, font_lh) when font_lh > css_lh, regardless of the difference.
+    // The 2px tolerance only applies to text-only content where FreeType rounding
+    // can inflate font metrics by 1-2px beyond the CSS line-height.
+    bool has_mixed_fonts;
+    if (lycon->line.has_replaced_content && font_line_height > css_line_height) {
+        // Inline-block/replaced element expands the line box: always respect it.
+        has_mixed_fonts = true;
+    } else {
+        // Text-only: apply 2px tolerance for FreeType rounding artifacts.
+        has_mixed_fonts = (font_line_height > css_line_height + 2);
+    }
     float used_line_height;
 
     // CSS 2.1 §10.8.1: FreeType rounds font metrics (ascender/descender) to integer
     // pixels, which may inflate their sum beyond the normal line-height by 1-2px.
     // When vertical-align offsets expand the line box, this rounding error propagates.
     // Correct by subtracting the small excess from the base font metrics.
+    // Only apply this correction for text-only lines (not when replaced content expands).
     float base_metric_excess = (lycon->block.init_ascender + lycon->block.init_descender) - css_line_height;
-    if (base_metric_excess > 0 && base_metric_excess <= 2 && font_line_height > css_line_height + 2) {
+    if (base_metric_excess > 0 && base_metric_excess <= 2 && !lycon->line.has_replaced_content &&
+        font_line_height > css_line_height + 2) {
         font_line_height -= base_metric_excess;
         // Recheck has_mixed_fonts after correction
         has_mixed_fonts = (font_line_height > css_line_height + 2);
@@ -879,17 +893,21 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     // CSS 2.1 10.8.1: Half-leading model for text inline boxes
     // When line-height is explicitly set, the inline box height equals line-height.
     // Leading = line-height - content_height is split half above and half below.
-    // When line-height is 'normal', use raw font metrics directly.
-    TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+    // When line-height is 'normal', use Chrome/Blink split: asc+desc above, leading below.
     float ascender = 0, descender = 0;
-    if (typo.valid && typo.use_typo_metrics) {
-        ascender = typo.ascender;
-        descender = typo.descender;
-    } else if (lycon->font.font_handle) {
-        const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
-        if (m) {
-            ascender = m->hhea_ascender;
-            descender = -(m->hhea_descender);
+    if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
+        font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
+    } else {
+        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+        if (typo.valid && typo.use_typo_metrics) {
+            ascender = typo.ascender;
+            descender = typo.descender;
+        } else if (lycon->font.font_handle) {
+            const FontMetrics* m = font_get_metrics(lycon->font.font_handle);
+            if (m) {
+                ascender = m->hhea_ascender;
+                descender = -(m->hhea_descender);
+            }
         }
     }
     if (ascender > 0 || descender > 0) {
@@ -908,6 +926,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             ascender += va_offset;
             descender -= va_offset;
         }
+        log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f",
+            lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset);
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
         log_debug("output_text: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",

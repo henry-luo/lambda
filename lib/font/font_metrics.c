@@ -313,6 +313,90 @@ float font_calc_normal_line_height(FontHandle* handle) {
 }
 
 /**
+ * Get normal line-height split into ascender/descender following Chrome/Blink:
+ *   - On macOS (CoreText): ascender = asc + desc, descender = leading
+ *   - USE_TYPO_METRICS path: ascender = typo_asc + typo_desc, descender = typo_line_gap
+ *   - HHEA fallback: ascender = hhea_asc + |hhea_desc|, descender = hhea_line_gap
+ * Both *out_ascender and *out_descender are positive values (above/below baseline).
+ */
+void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* out_descender) {
+    if (!handle || !handle->ft_face || !out_ascender || !out_descender) {
+        if (out_ascender) *out_ascender = 0;
+        if (out_descender) *out_descender = 0;
+        return;
+    }
+
+    FT_Face face = handle->ft_face;
+    FontContext* ctx = handle->ctx;
+    float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                            ? ctx->config.pixel_ratio : 1.0f;
+
+    const char* family = face->family_name;
+
+    float font_size;
+    if (face->size && face->size->metrics.y_ppem != 0) {
+        font_size = (float)face->size->metrics.y_ppem * handle->bitmap_scale / pixel_ratio;
+    } else {
+        font_size = handle->size_px;
+        if (font_size <= 0) {
+            float height_px = face->size ? (face->size->metrics.height / 64.0f) : 0;
+            font_size = height_px / 1.2f / pixel_ratio;
+        }
+    }
+
+    // 1. try platform-specific metrics (CoreText on macOS)
+    // Chrome/Blink split: ascender = asc + desc (content), descender = leading
+    float ascent, descent, line_height;
+    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+        *out_ascender = ascent + descent;
+        *out_descender = line_height - (ascent + descent);
+        if (*out_descender < 0) *out_descender = 0;
+        log_debug("font_get_normal_lh_split (platform): asc+desc=%f lead=%f for %s@%.1f",
+                  *out_ascender, *out_descender, family, font_size);
+        return;
+    }
+
+    // 2. OS/2 USE_TYPO_METRICS path
+    const FontMetrics* m = font_get_metrics(handle);
+    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+    bool use_typo = os2 && (os2->fsSelection & 0x0080);
+
+    if (use_typo && m) {
+        float ra = roundf(m->typo_ascender);
+        float rd = roundf(m->typo_descender);  // positive
+        float rl = roundf(m->typo_line_gap);
+        *out_ascender = ra + rd;
+        *out_descender = rl;
+        return;
+    }
+
+    // 3. HHEA fallback
+    if (m) {
+        if (m->em_size <= 0) {
+            *out_ascender = m->hhea_ascender + (-m->hhea_descender);
+            *out_descender = m->hhea_line_height - *out_ascender;
+            if (*out_descender < 0) *out_descender = 0;
+        } else {
+            float scale = font_size / m->em_size;
+            float raw_ascent  = (float)face->ascender * scale;
+            float raw_descent = -(float)face->descender * scale;
+            int hhea_line_gap = face->height - face->ascender + face->descender;
+            float raw_leading = (float)hhea_line_gap * scale;
+
+            float ra = roundf(raw_ascent);
+            float rd = roundf(raw_descent);
+            float rl = roundf(raw_leading);
+            *out_ascender = ra + rd;
+            *out_descender = rl;
+        }
+    } else {
+        *out_ascender = 0;
+        *out_descender = 0;
+    }
+}
+
+
+/**
  * Get font cell height for text rect height computation.
  *
  * Matches browser's Range.getClientRects() which uses font metrics,
