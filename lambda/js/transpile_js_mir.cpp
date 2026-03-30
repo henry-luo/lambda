@@ -6163,7 +6163,31 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                         MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
                 } else {
-                    log_debug("js-mir: super() but parent class '%.*s' has no constructor",
+                    // Parent class has no explicit constructor — walk up the superclass chain
+                    // to find the nearest ancestor with a constructor (implicit default constructor
+                    // forwards super() call with all arguments)
+                    JsClassEntry* ancestor = parent->superclass;
+                    while (ancestor) {
+                        if (ancestor->constructor && ancestor->constructor->fc && ancestor->constructor->fc->func_item) {
+                            MIR_reg_t this_val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                            MIR_reg_t ctor_fn;
+                            if (ancestor->constructor->fc->capture_count > 0) {
+                                ctor_fn = jm_build_closure_for_method(mt, ancestor->constructor->fc, ancestor->constructor->param_count);
+                            } else {
+                                ctor_fn = jm_call_2(mt, "js_new_function", MIR_T_I64,
+                                    MIR_T_I64, MIR_new_ref_op(mt->ctx, ancestor->constructor->fc->func_item),
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, ancestor->constructor->param_count));
+                            }
+                            MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+                            return jm_call_4(mt, "js_call_function", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_fn),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, this_val),
+                                MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
+                        }
+                        ancestor = ancestor->superclass;
+                    }
+                    log_debug("js-mir: super() but no constructor found in class '%.*s' or its ancestors",
                         (int)parent->name->len, parent->name->chars);
                     return jm_emit_null(mt);
                 }
@@ -8703,6 +8727,13 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        } else if (prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+            // Object spread: { ...source } — copy all own properties from source into target
+            JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
+            MIR_reg_t source = jm_transpile_box_item(mt, sp->argument);
+            jm_call_2(mt, "js_object_spread_into", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, object),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, source));
         }
         prop = prop->next;
     }

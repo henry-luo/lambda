@@ -1110,35 +1110,6 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (key._type_id == LMD_TYPE_STRING || key._type_id == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
-            // DBG: trace typeface reads
-            if (key_len == 8 && memcmp(key_str, "typeface", 8) == 0) {
-                TypeMap* dbg_tm = (TypeMap*)object.map->type;
-                int dbg_fc = dbg_tm ? dbg_tm->field_count : -1;
-                int dbg_total = 0, dbg_dup = 0, dbg_vis = 0;
-                ShapeEntry* dbg_e = dbg_tm && dbg_tm->shape ? dbg_tm->shape : NULL;
-                char dbg_buf[2048] = {0};
-                int dbg_pos = 0;
-                while (dbg_e) {
-                    dbg_total++;
-                    if (dbg_e->name) {
-                        const char* s = dbg_e->name->str;
-                        int slen = (int)dbg_e->name->length;
-                        bool skip = (slen >= 2 && s[0] == '_' && s[1] == '_') ||
-                                    (slen == 11 && memcmp(s, "constructor", 11) == 0);
-                        if (!skip) {
-                            dbg_vis++;
-                            if (dbg_pos < 1900) {
-                                dbg_pos += snprintf(dbg_buf + dbg_pos, sizeof(dbg_buf) - dbg_pos,
-                                    "%.*s,", slen < 20 ? slen : 20, s);
-                            }
-                        }
-                        if (slen == 8 && memcmp(s, "typeface", 8) == 0) dbg_dup++;
-                    }
-                    dbg_e = dbg_e->next;
-                }
-                log_debug("DBG_GET typeface: fc=%d total=%d vis=%d tf=%d map=%p keys=%s",
-                    dbg_fc, dbg_total, dbg_vis, dbg_dup, (void*)object.map, dbg_buf);
-            }
             result = js_map_get_fast(object.map, key_str, key_len, &own_found);
         } else {
             result = map_get(object.map, key);  // fallback for non-string keys
@@ -2901,7 +2872,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 // regex split
                 String* s = it2s(str);
                 if (!s || s->len == 0) {
-                    Item result = js_array_new(1);
+                    Item result = js_array_new(0);
                     js_array_push(result, (Item){.item = s2it(heap_create_name(""))});
                     return result;
                 }

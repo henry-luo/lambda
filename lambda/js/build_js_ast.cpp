@@ -549,6 +549,24 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         const char* child_type = ts_node_type(property_node);
         if (strcmp(child_type, "comment") == 0) continue;
 
+        // Handle spread element: { ...expr } in object literal
+        if (strcmp(child_type, "spread_element") == 0) {
+            JsSpreadElementNode* spread = (JsSpreadElementNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_SPREAD_ELEMENT, property_node, sizeof(JsSpreadElementNode));
+            TSNode inner = ts_node_named_child(property_node, 0);
+            if (!ts_node_is_null(inner)) {
+                spread->argument = build_js_expression(tp, inner);
+            }
+            spread->base.type = &TYPE_ANY;
+            if (!prev_property) {
+                object->properties = (JsAstNode*)spread;
+            } else {
+                prev_property->next = (JsAstNode*)spread;
+            }
+            prev_property = (JsAstNode*)spread;
+            continue;
+        }
+
         // Handle shorthand_property_identifier: { Vector } -> { Vector: Vector }
         if (strcmp(child_type, "shorthand_property_identifier") == 0) {
             JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));

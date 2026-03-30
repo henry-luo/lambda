@@ -260,6 +260,7 @@ Item js_object_entries(Item object);
 Item js_object_from_entries(Item iterable);
 Item js_object_is(Item left, Item right);
 Item js_object_assign(Item target, Item* sources, int count);
+Item js_object_spread_into(Item target, Item source);
 Item js_has_own_property(Item obj, Item key);
 Item js_object_freeze(Item obj);
 Item js_object_is_frozen(Item obj);

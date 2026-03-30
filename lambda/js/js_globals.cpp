@@ -1267,6 +1267,26 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
     return target;
 }
 
+// Object spread: copy all own enumerable properties from source into target
+// Used for { ...source } in object literals
+extern "C" Item js_object_spread_into(Item target, Item source) {
+    if (get_type_id(target) != LMD_TYPE_MAP) return target;
+    if (get_type_id(source) != LMD_TYPE_MAP) return target;
+    Map* m = source.map;
+    if (!m || !m->type) return target;
+    TypeMap* tm = (TypeMap*)m->type;
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        if (e->name) {
+            Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
+            Item val = map_get(m, key);
+            js_property_set(target, key, val);
+        }
+        e = e->next;
+    }
+    return target;
+}
+
 // =============================================================================
 // obj.hasOwnProperty(key) / Object.hasOwn(obj, key)
 // =============================================================================
