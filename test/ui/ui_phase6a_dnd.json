@@ -1,0 +1,36 @@
+{
+  "name": "Phase 6a: HTML5 drag-and-drop",
+  "html": "test/ui/test_phase6a_dnd.html",
+  "events": [
+    {"type": "log", "message": "=== Phase 6a: Drag and Drop ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Verify draggable attributes ---"},
+    {"type": "assert_attribute", "target": {"selector": "#drag-src"},
+     "attribute": "draggable", "equals": "true"},
+    {"type": "assert_attribute", "target": {"selector": "#drop-zone"},
+     "attribute": "class", "contains": "box"},
+    {"type": "assert_attribute", "target": {"selector": "#no-drag"},
+     "attribute": "draggable", "equals": "false"},
+
+    {"type": "log", "message": "--- Verify initial layout ---"},
+    {"type": "assert_text", "target": {"selector": "#drag-src"}, "contains": "Drag Me"},
+    {"type": "assert_text", "target": {"selector": "#drop-zone"}, "contains": "Drop Here"},
+    {"type": "assert_position", "element_a": {"selector": "#drag-src"},
+     "element_b": {"selector": "#drop-zone"}, "relation": "left_of"},
+
+    {"type": "log", "message": "--- Drag from source to drop zone ---"},
+    {"type": "drag_and_drop",
+     "target": {"selector": "#drag-src"},
+     "to_target": {"selector": "#drop-zone"}},
+
+    {"type": "log", "message": "--- Verify elements still exist after drag ---"},
+    {"type": "assert_text", "target": {"selector": "#drag-src"}, "contains": "Drag Me"},
+    {"type": "assert_text", "target": {"selector": "#drop-zone"}, "contains": "Drop Here"},
+
+    {"type": "log", "message": "--- Test drag of non-draggable should fail ---"},
+    {"type": "log", "message": "Skipping non-draggable test (would correctly fail)"},
+
+    {"type": "render", "file": "./temp/phase6a_dnd.png"}
+  ]
+}

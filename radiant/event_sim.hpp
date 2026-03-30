@@ -46,6 +46,8 @@
  *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
  *     {"type": "switch_frame", "selector": "iframe#myframe"},
  *     {"type": "switch_frame"},
+ *     {"type": "drag_and_drop", "target": {"selector": "#src"}, "to_target": {"selector": "#dest"}},
+ *     {"type": "assert_attribute", "target": {"selector": "#box"}, "attribute": "draggable", "equals": "true"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
@@ -84,6 +86,7 @@ enum SimEventType {
     SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
+    SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -99,6 +102,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_STYLE,    // verify computed CSS property value
     SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
+    SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     // Navigation
     SIM_EVENT_NAVIGATE,        // load a new HTML document
     SIM_EVENT_NAVIGATE_BACK,   // go back to previous document
@@ -169,6 +173,9 @@ struct SimEvent {
     int assert_interval;         // retry interval in ms (default 100)
     // Phase 5f: switch_frame fields
     char* frame_selector;        // CSS selector for iframe element (NULL = switch to main)
+    // drag_and_drop / assert_attribute fields
+    char* attribute_name;        // HTML attribute name (for assert_attribute)
+    int drag_steps;              // number of intermediate mouse_move steps (default 5)
 };
 
 // Event simulation context

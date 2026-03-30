@@ -873,7 +873,7 @@ test-input-baseline: build-test
 	fi; \
 	echo "=============================================================="
 
-test-radiant-baseline: test-layout-baseline
+test-radiant-baseline: test-layout-baseline test-ui-automation
 
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."

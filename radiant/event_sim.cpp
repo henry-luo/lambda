@@ -810,6 +810,31 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
         }
     }
+    else if (strcmp(type_str, "drag_and_drop") == 0) {
+        ev->type = SIM_EVENT_DRAG_AND_DROP;
+        parse_target(reader, ev);
+        // Parse to_target for drop destination
+        ItemReader to_target_item = reader.get("to_target");
+        if (to_target_item.isMap()) {
+            MapReader to_map = to_target_item.asMap();
+            const char* sel = to_map.get("selector").cstring();
+            if (sel) ev->to_target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
+            const char* txt = to_map.get("text").cstring();
+            if (txt) ev->to_target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
+        }
+        int steps = reader.get("steps").asInt32();
+        ev->drag_steps = steps > 0 ? steps : 5;
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: drag_and_drop missing 'target' (drag source)");
+            mem_free(ev);
+            return NULL;
+        }
+        if (!ev->to_target_selector && !ev->to_target_text) {
+            log_error("event_sim: drag_and_drop missing 'to_target' (drop target)");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "key_press") == 0) {
         ev->type = SIM_EVENT_KEY_PRESS;
         const char* key_str = reader.get("key").cstring();
@@ -1024,6 +1049,26 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         const char* tag = reader.get("expected_tag").cstring();
         if (tag) ev->expected_at_tag = mem_strdup(tag, MEM_CAT_LAYOUT);
     }
+    else if (strcmp(type_str, "assert_attribute") == 0) {
+        ev->type = SIM_EVENT_ASSERT_ATTRIBUTE;
+        parse_target(reader, ev);
+        const char* attr = reader.get("attribute").cstring();
+        if (attr) ev->attribute_name = mem_strdup(attr, MEM_CAT_LAYOUT);
+        const char* eq = reader.get("equals").cstring();
+        if (eq) ev->assert_equals = mem_strdup(eq, MEM_CAT_LAYOUT);
+        const char* cont = reader.get("contains").cstring();
+        if (cont) ev->assert_contains = mem_strdup(cont, MEM_CAT_LAYOUT);
+        if (!ev->target_selector && !ev->target_text) {
+            log_error("event_sim: assert_attribute missing 'target'");
+            mem_free(ev);
+            return NULL;
+        }
+        if (!attr) {
+            log_error("event_sim: assert_attribute missing 'attribute' field");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -1071,7 +1116,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
 
     // Parse optional auto-waiting fields for assertion events
-    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_ELEMENT_AT) {
+    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_ATTRIBUTE) {
         ev->assert_timeout = reader.get("timeout").asInt32();
         ev->assert_interval = reader.get("interval").asInt32();
         if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
@@ -1445,6 +1490,77 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_mouse_move(uicon, px, py);
             }
             sim_mouse_button(uicon, drag_to_x, drag_to_y, ev->button, ev->mods, false);
+            break;
+        }
+
+        case SIM_EVENT_DRAG_AND_DROP: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: drag_and_drop - no document");
+                ctx->fail_count++;
+                break;
+            }
+            // Resolve drag source element
+            View* src_view = nullptr;
+            if (ev->target_selector) {
+                src_view = find_element_by_selector(doc, ev->target_selector);
+            }
+            if (!src_view) {
+                log_error("event_sim: drag_and_drop - source element '%s' not found",
+                    ev->target_selector ? ev->target_selector : "(null)");
+                ctx->fail_count++;
+                break;
+            }
+            // Verify draggable attribute
+            DomElement* src_dom = src_view->as_element();
+            if (src_dom) {
+                const char* draggable = dom_element_get_attribute(src_dom, "draggable");
+                if (!draggable || strcmp(draggable, "true") != 0) {
+                    log_error("event_sim: drag_and_drop - source '%s' is not draggable (draggable='%s')",
+                        ev->target_selector, draggable ? draggable : "null");
+                    ctx->fail_count++;
+                    break;
+                }
+            }
+            // Resolve drop target element
+            View* dst_view = nullptr;
+            if (ev->to_target_selector) {
+                dst_view = find_element_by_selector(doc, ev->to_target_selector);
+            }
+            if (!dst_view) {
+                log_error("event_sim: drag_and_drop - drop target '%s' not found",
+                    ev->to_target_selector ? ev->to_target_selector : "(null)");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dst_dom = dst_view->as_element();
+            // Get source and destination centers
+            float src_fx, src_fy, dst_fx, dst_fy;
+            get_element_center_abs(src_view, &src_fx, &src_fy);
+            get_element_center_abs(dst_view, &dst_fx, &dst_fy);
+            int src_x = (int)src_fx, src_y = (int)src_fy;
+            int dst_x = (int)dst_fx, dst_y = (int)dst_fy;
+            log_info("event_sim: drag_and_drop from '%s' (%d,%d) to '%s' (%d,%d)",
+                ev->target_selector, src_x, src_y, ev->to_target_selector, dst_x, dst_y);
+            // Set drag pseudo-state on source
+            if (src_dom) dom_element_set_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
+            // Dispatch: mouse_down on source
+            sim_mouse_button(uicon, src_x, src_y, 0, 0, true);
+            // Intermediate mouse_move steps
+            int steps = ev->drag_steps > 0 ? ev->drag_steps : 5;
+            for (int step = 1; step <= steps; step++) {
+                int px = src_x + (dst_x - src_x) * step / steps;
+                int py = src_y + (dst_y - src_y) * step / steps;
+                sim_mouse_move(uicon, px, py);
+            }
+            // Set drag-over on destination
+            if (dst_dom) dom_element_set_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
+            // Drop: mouse_up on destination
+            sim_mouse_button(uicon, dst_x, dst_y, 0, 0, false);
+            // Clear drag pseudo-states
+            if (src_dom) dom_element_clear_pseudo_state(src_dom, PSEUDO_STATE_DRAG);
+            if (dst_dom) dom_element_clear_pseudo_state(dst_dom, PSEUDO_STATE_DRAG_OVER);
+            log_info("event_sim: drag_and_drop completed");
             break;
         }
 
@@ -2197,6 +2313,66 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_ASSERT_ATTRIBUTE: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: assert_attribute - no document");
+                ctx->fail_count++;
+                break;
+            }
+            View* elem = nullptr;
+            if (ev->target_selector)
+                elem = find_element_by_selector(doc, ev->target_selector);
+            if (!elem) {
+                log_error("event_sim: assert_attribute FAIL - target '%s' not found",
+                    ev->target_selector ? ev->target_selector : "(null)");
+                ctx->fail_count++;
+                break;
+            }
+            DomElement* dom_elem = elem->as_element();
+            if (!dom_elem) {
+                log_error("event_sim: assert_attribute FAIL - target is not a DomElement");
+                ctx->fail_count++;
+                break;
+            }
+            const char* actual = dom_element_get_attribute(dom_elem, ev->attribute_name);
+            if (ev->assert_equals) {
+                if (actual && strcmp(actual, ev->assert_equals) == 0) {
+                    log_info("event_sim: assert_attribute PASS '%s'='%s' on '%s'",
+                        ev->attribute_name, ev->assert_equals, ev->target_selector);
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_attribute FAIL '%s' expected='%s', actual='%s' on '%s'",
+                        ev->attribute_name, ev->assert_equals,
+                        actual ? actual : "(null)", ev->target_selector);
+                    ctx->fail_count++;
+                }
+            } else if (ev->assert_contains) {
+                if (actual && strstr(actual, ev->assert_contains)) {
+                    log_info("event_sim: assert_attribute PASS '%s' contains '%s' on '%s'",
+                        ev->attribute_name, ev->assert_contains, ev->target_selector);
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_attribute FAIL '%s' does not contain '%s', actual='%s' on '%s'",
+                        ev->attribute_name, ev->assert_contains,
+                        actual ? actual : "(null)", ev->target_selector);
+                    ctx->fail_count++;
+                }
+            } else {
+                // Just check attribute exists
+                if (actual) {
+                    log_info("event_sim: assert_attribute PASS '%s' exists (='%s') on '%s'",
+                        ev->attribute_name, actual, ev->target_selector);
+                    ctx->pass_count++;
+                } else {
+                    log_error("event_sim: assert_attribute FAIL '%s' not found on '%s'",
+                        ev->attribute_name, ev->target_selector);
+                    ctx->fail_count++;
+                }
+            }
+            break;
+        }
+
         // ===== Navigation =====
 
         case SIM_EVENT_NAVIGATE: {
@@ -2330,7 +2506,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 // Auto-waiting wrapper: retries assertion events until they pass or timeout expires
 static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     // Non-assertion events execute directly
-    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_ELEMENT_AT) {
+    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_ATTRIBUTE) {
         process_sim_event(ctx, ev, uicon, window);
         return;
     }
