@@ -1,0 +1,38 @@
+{
+  "name": "Phase 4c - Window resize simulation",
+  "html": "test/ui/test_drag_scroll.html",
+  "description": "Resize viewport to smaller dimensions, verify relayout, resize back",
+  "events": [
+    {"type": "log", "message": "=== Phase 4c: Window Resize Simulation ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "Step 1: Verify elements visible at default viewport"},
+    {"type": "assert_visible", "target": {"selector": "#top-section"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#top-section p"}, "contains": "top section"},
+
+    {"type": "log", "message": "Step 2: Resize to smaller viewport (600x400)"},
+    {"type": "resize", "width": 600, "height": 400},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 3: Verify elements still visible after resize"},
+    {"type": "assert_visible", "target": {"selector": "#top-section"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#top-section p"}, "contains": "top section"},
+
+    {"type": "log", "message": "Step 4: Verify drag-start span text survived relayout"},
+    {"type": "assert_text", "target": {"selector": "#drag-start"}, "contains": "Start here"},
+
+    {"type": "log", "message": "Step 5: Resize back to larger viewport (1200x800)"},
+    {"type": "resize", "width": 1200, "height": 800},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 6: Verify elements after restoring viewport"},
+    {"type": "assert_visible", "target": {"selector": "#top-section"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#drag-end"}, "contains": "end here"},
+
+    {"type": "log", "message": "Step 7: Click after resize to verify hit-testing works"},
+    {"type": "click", "target": {"selector": "#drag-start"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "=== Phase 4c complete ==="}
+  ]
+}

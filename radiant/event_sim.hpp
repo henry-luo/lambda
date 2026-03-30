@@ -38,6 +38,12 @@
  *     {"type": "check", "target": {"selector": "input#agree"}, "checked": true},
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
  *     {"type": "select_option", "target": {"selector": "select#color"}, "label": "Blue"},
+ *     {"type": "resize", "width": 800, "height": 600},
+ *     {"type": "navigate", "url": "test/ui/page2.html"},
+ *     {"type": "assert_rect", "target": {"selector": "#box"}, "x": 0, "y": 0, "width": 200, "height": 100, "tolerance": 2},
+ *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
+ *     {"type": "assert_position", "element_a": {"selector": "#header"}, "element_b": {"selector": "#content"}, "relation": "above"},
+ *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
  *     {"type": "log", "message": "Test step completed"},
  *     {"type": "render", "file": "./temp/output.png"},
  *     {"type": "dump_caret", "file": "./caret_state.txt"}
@@ -75,6 +81,7 @@ enum SimEventType {
     SIM_EVENT_FOCUS,           // focus an element (via click)
     SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
+    SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
     // Assertions
     SIM_EVENT_ASSERT_CARET,
     SIM_EVENT_ASSERT_SELECTION,
@@ -86,6 +93,12 @@ enum SimEventType {
     SIM_EVENT_ASSERT_FOCUS,    // verify focused element
     SIM_EVENT_ASSERT_STATE,    // verify pseudo-state (:hover, :active, etc.)
     SIM_EVENT_ASSERT_SCROLL,   // verify scroll position
+    SIM_EVENT_ASSERT_RECT,     // verify element bounding box (x, y, width, height)
+    SIM_EVENT_ASSERT_STYLE,    // verify computed CSS property value
+    SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
+    SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
+    // Navigation
+    SIM_EVENT_NAVIGATE,        // load a new HTML document
     // Utilities
     SIM_EVENT_LOG,
     SIM_EVENT_RENDER,          // render current view to PNG/SVG
@@ -125,6 +138,27 @@ struct SimEvent {
     float scroll_tolerance;      // for assert_scroll
     char* option_value;          // for select_option: match by value attribute
     char* option_label;          // for select_option: match by visible text
+    // Phase 5: assert_rect fields
+    float expected_rect_x, expected_rect_y;     // expected position
+    float expected_rect_w, expected_rect_h;     // expected size
+    float rect_tolerance;                       // allowed deviation (default 1px)
+    bool has_rect_x, has_rect_y, has_rect_w, has_rect_h; // which fields to check
+    // Phase 5: assert_style fields
+    char* style_property;        // CSS property name
+    // Phase 5: assert_position fields
+    char* element_a_selector;    // first element selector
+    char* element_a_text;        // first element text target
+    char* element_b_selector;    // second element selector
+    char* element_b_text;        // second element text target
+    char* position_relation;     // "above", "below", "left_of", "right_of", "overlaps", "contains", "inside"
+    float position_gap;          // expected minimum gap between elements
+    float position_tolerance;    // allowed deviation (default 1px)
+    // Phase 5: navigate fields
+    char* navigate_url;          // path to HTML file
+    // Phase 5: assert_element_at fields
+    char* expected_at_selector;  // expected element selector at coords
+    char* expected_at_tag;       // expected tag name at coords
+    int at_x, at_y;             // coordinates to test
 };
 
 // Event simulation context
