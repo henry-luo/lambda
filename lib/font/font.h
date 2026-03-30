@@ -193,6 +193,8 @@ typedef struct LoadedGlyph {
     float        font_cell_height;      // cell height of actual font used (primary or fallback), in CSS px
     float        font_ascender;         // hhea ascender of actual font used, in CSS px (positive up)
     float        font_descender;        // hhea |descender| of actual font used, in CSS px (positive)
+    float        font_normal_ascender;  // platform-split ascender for line-height:normal, in CSS px
+    float        font_normal_descender; // platform-split descender for line-height:normal, in CSS px
     float        font_normal_line_height; // normal line-height of actual font used, in CSS px
 } LoadedGlyph;
 

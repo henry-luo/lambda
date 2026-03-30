@@ -344,19 +344,7 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         }
     }
 
-    // 1. try platform-specific metrics (CoreText on macOS)
-    // Chrome/Blink split: ascender = asc + desc (content), descender = leading
-    float ascent, descent, line_height;
-    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-        *out_ascender = ascent + descent;
-        *out_descender = line_height - (ascent + descent);
-        if (*out_descender < 0) *out_descender = 0;
-        log_debug("font_get_normal_lh_split (platform): asc+desc=%f lead=%f for %s@%.1f",
-                  *out_ascender, *out_descender, family, font_size);
-        return;
-    }
-
-    // 2. OS/2 USE_TYPO_METRICS path
+    // 1. OS/2 USE_TYPO_METRICS fonts: Chrome uses sTypo metrics regardless of platform
     const FontMetrics* m = font_get_metrics(handle);
     TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
     bool use_typo = os2 && (os2->fsSelection & 0x0080);
@@ -367,6 +355,20 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
         float rl = roundf(m->typo_line_gap);
         *out_ascender = ra + rd;
         *out_descender = rl;
+        log_debug("font_get_normal_lh_split (typo): asc=%f desc=%f for %s@%.1f",
+                  *out_ascender, *out_descender, family, font_size);
+        return;
+    }
+
+    // 2. Platform-specific metrics (CoreText on macOS) for non-USE_TYPO_METRICS fonts
+    // Chrome/Blink split: ascender = asc + desc (content), descender = leading
+    float ascent, descent, line_height;
+    if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
+        *out_ascender = ascent + descent;
+        *out_descender = line_height - (ascent + descent);
+        if (*out_descender < 0) *out_descender = 0;
+        log_debug("font_get_normal_lh_split (platform): asc+desc=%f lead=%f for %s@%.1f",
+                  *out_ascender, *out_descender, family, font_size);
         return;
     }
 

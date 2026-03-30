@@ -1296,9 +1296,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // update the line ascender/descender (but NOT the text rect height,
                 // which uses primary font metrics per browser behavior)
                 if (glyph && glyph->font_ascender > 0) {
-                    float fb_asc = glyph->font_ascender;
-                    float fb_desc = glyph->font_descender;
-                    if (!lycon->block.line_height_is_normal) {
+                    float fb_asc, fb_desc;
+                    if (lycon->block.line_height_is_normal) {
+                        // normal line-height: use platform-aware split from glyph
+                        fb_asc = glyph->font_normal_ascender;
+                        fb_desc = glyph->font_normal_descender;
+                    } else {
+                        // explicit line-height: use hhea metrics with half-leading
+                        fb_asc = glyph->font_ascender;
+                        fb_desc = glyph->font_descender;
                         float content_height = fb_asc + fb_desc;
                         float half_leading = (lycon->block.line_height - content_height) / 2.0f;
                         fb_asc += half_leading;

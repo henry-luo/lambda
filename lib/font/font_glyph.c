@@ -339,11 +339,17 @@ static void fill_loaded_glyph_font_metrics(FontHandle* h) {
     float normal_lh = font_calc_normal_line_height(h);
     s_loaded_glyph.font_cell_height = cell_height;
     s_loaded_glyph.font_normal_line_height = normal_lh;
-    // use platform-aware split so glyph metrics match browser behavior
+    // hhea metrics for explicit line-height half-leading calculations
+    const FontMetrics* m = font_get_metrics(h);
+    if (m) {
+        s_loaded_glyph.font_ascender = m->hhea_ascender;
+        s_loaded_glyph.font_descender = -(m->hhea_descender);
+    }
+    // platform-aware split for line-height:normal (matches browser behavior)
     float split_asc = 0, split_desc = 0;
     font_get_normal_lh_split(h, &split_asc, &split_desc);
-    s_loaded_glyph.font_ascender = split_asc;
-    s_loaded_glyph.font_descender = split_desc;
+    s_loaded_glyph.font_normal_ascender = split_asc;
+    s_loaded_glyph.font_normal_descender = split_desc;
 }
 
 LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
