@@ -20,6 +20,38 @@ static void push_with_transform(RenderContext* rdcon, Tvg_Paint paint) {
 /**
  * Main background rendering dispatch
  */
+
+/**
+ * Shrink a border-box rect to the padding-box or content-box area, in physical pixels.
+ * Used to implement background-origin and background-clip.
+ *   CSS_VALUE_BORDER_BOX  → rect unchanged
+ *   CSS_VALUE_PADDING_BOX → shrink by border widths
+ *   CSS_VALUE_CONTENT_BOX → shrink by border widths + padding
+ */
+static Rect compute_adjusted_rect(Rect rect, CssEnum box, float s,
+                                   BorderProp* border, Spacing* padding) {
+    Rect r = rect;
+    if (box == CSS_VALUE_PADDING_BOX || box == CSS_VALUE_CONTENT_BOX) {
+        float bwt = border ? border->width.top * s : 0.0f;
+        float bwr = border ? border->width.right * s : 0.0f;
+        float bwb = border ? border->width.bottom * s : 0.0f;
+        float bwl = border ? border->width.left * s : 0.0f;
+        r.x += bwl;  r.y += bwt;
+        r.width  -= bwl + bwr;
+        r.height -= bwt + bwb;
+    }
+    if (box == CSS_VALUE_CONTENT_BOX && padding) {
+        float pt = padding->top * s,  pr = padding->right * s;
+        float pb = padding->bottom * s, pl = padding->left * s;
+        r.x += pl;  r.y += pt;
+        r.width  -= pl + pr;
+        r.height -= pt + pb;
+    }
+    if (r.width  < 0) r.width  = 0;
+    if (r.height < 0) r.height = 0;
+    return r;
+}
+
 void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->bound->background) return;
 
@@ -29,14 +61,35 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
               view->node_name(), bg->color.c, bg->gradient_type,
               (void*)bg->linear_gradient, (void*)bg->radial_gradient);
 
-    // Render base color first (if any)
+    float s = rdcon->scale;
+    BorderProp* border  = view->bound->border;
+    Spacing*    padding = &view->bound->padding;
+
+    // Determine positioning area (bg-origin, default: padding-box)
+    // Controls where background-position and background-size are calculated relative to.
+    CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
+    Rect pos_rect = compute_adjusted_rect(rect, origin, s, border, padding);
+
+    // Determine paint area (bg-clip, default: border-box)
+    // Controls where the background is visually clipped.
+    CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+    Rect paint_rect = compute_adjusted_rect(rect, clip_box, s, border, padding);
+
+    // Narrow the active clip to the paint area (intersect with existing viewport clip)
+    Bound orig_clip = rdcon->block.clip;
+    rdcon->block.clip.left   = max(orig_clip.left,   paint_rect.x);
+    rdcon->block.clip.top    = max(orig_clip.top,    paint_rect.y);
+    rdcon->block.clip.right  = min(orig_clip.right,  paint_rect.x + paint_rect.width);
+    rdcon->block.clip.bottom = min(orig_clip.bottom, paint_rect.y + paint_rect.height);
+
+    // Render base color first (if any), clipped to paint area
     if (bg->color.a > 0) {
         render_background_color(rdcon, view, bg->color, rect);
     }
 
-    // Render background image (before gradients, after color)
+    // Render background image positioned within pos_rect, painted within paint_rect (via clip)
     if (bg->image) {
-        render_background_image(rdcon, view, bg, rect);
+        render_background_image(rdcon, view, bg, pos_rect);
     }
 
     // Render all radial gradient layers (stacked bottom-to-top)
@@ -44,17 +97,20 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         for (int i = 0; i < bg->radial_layer_count; i++) {
             if (bg->radial_layers[i]) {
                 log_debug("[GRADIENT] Rendering radial gradient layer %d/%d", i + 1, bg->radial_layer_count);
-                render_radial_gradient(rdcon, view, bg->radial_layers[i], rect);
+                render_radial_gradient(rdcon, view, bg->radial_layers[i], paint_rect);
             }
         }
     }
 
-    // Render main gradient (if any)
+    // Render main gradient (if any), clipped to paint area
     if (bg->gradient_type != GRADIENT_NONE &&
         (bg->linear_gradient || bg->radial_gradient || bg->conic_gradient)) {
         log_debug("[GRADIENT] Rendering gradient type=%d", bg->gradient_type);
-        render_background_gradient(rdcon, view, bg, rect);
+        render_background_gradient(rdcon, view, bg, paint_rect);
     }
+
+    // Restore original clip
+    rdcon->block.clip = orig_clip;
 }
 
 /**

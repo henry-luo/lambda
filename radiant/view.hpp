@@ -623,6 +623,10 @@ typedef struct {
     // Background-repeat: repeat | no-repeat | round | space (per axis)
     CssEnum bg_repeat_x;   // CSS_VALUE_REPEAT (default), CSS_VALUE_NO_REPEAT, CSS_VALUE_ROUND, CSS_VALUE_SPACE
     CssEnum bg_repeat_y;
+    // Background attachment, origin, and clip (CSS Backgrounds Level 3)
+    CssEnum bg_attachment;  // CSS_VALUE_SCROLL (default) | CSS_VALUE_FIXED | CSS_VALUE_LOCAL
+    CssEnum bg_origin;      // CSS_VALUE_PADDING_BOX (default) | CSS_VALUE_BORDER_BOX | CSS_VALUE_CONTENT_BOX
+    CssEnum bg_clip;        // CSS_VALUE_BORDER_BOX (default) | CSS_VALUE_PADDING_BOX | CSS_VALUE_CONTENT_BOX
     // Gradient support
     GradientType gradient_type;
     LinearGradient* linear_gradient;

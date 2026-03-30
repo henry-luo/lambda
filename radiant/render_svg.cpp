@@ -533,6 +533,121 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         }
     }
 
+    // Render background image (background-image, background-size, background-position, background-repeat)
+    if (view->bound->background && view->bound->background->image) {
+        BackgroundProp* bg = view->bound->background;
+        const char* img_url = bg->image;
+
+        // Border widths and padding in CSS px (same coordinate space as x/y/width/height in SVG path)
+        float bwt = 0, bwr = 0, bwb = 0, bwl = 0;
+        float pt = 0, pr = 0, pb = 0, pl = 0;
+        if (view->bound->border) {
+            bwt = view->bound->border->width.top;
+            bwr = view->bound->border->width.right;
+            bwb = view->bound->border->width.bottom;
+            bwl = view->bound->border->width.left;
+        }
+        pt = view->bound->padding.top;
+        pr = view->bound->padding.right;
+        pb = view->bound->padding.bottom;
+        pl = view->bound->padding.left;
+
+        // Compute positioning area (background-origin, default: padding-box)
+        CssEnum origin = bg->bg_origin ? bg->bg_origin : CSS_VALUE_PADDING_BOX;
+        float ox = x, oy = y, ow = width, oh = height;
+        if (origin == CSS_VALUE_PADDING_BOX || origin == CSS_VALUE_CONTENT_BOX) {
+            ox += bwl; oy += bwt; ow -= bwl + bwr; oh -= bwt + bwb;
+        }
+        if (origin == CSS_VALUE_CONTENT_BOX) {
+            ox += pl; oy += pt; ow -= pl + pr; oh -= pt + pb;
+        }
+        if (ow < 0) ow = 0;
+        if (oh < 0) oh = 0;
+
+        // Compute paint area (background-clip, default: border-box)
+        CssEnum clip_box = bg->bg_clip ? bg->bg_clip : CSS_VALUE_BORDER_BOX;
+        float cx = x, cy = y, cw = width, ch = height;
+        if (clip_box == CSS_VALUE_PADDING_BOX || clip_box == CSS_VALUE_CONTENT_BOX) {
+            cx += bwl; cy += bwt; cw -= bwl + bwr; ch -= bwt + bwb;
+        }
+        if (clip_box == CSS_VALUE_CONTENT_BOX) {
+            cx += pl; cy += pt; cw -= pl + pr; ch -= pt + pb;
+        }
+        if (cw < 0) cw = 0;
+        if (ch < 0) ch = 0;
+
+        // Compute rendered image size
+        float img_w = ow, img_h = oh;
+        const char* preserve_ratio = "none";
+        if (bg->bg_size_type == CSS_VALUE_COVER) {
+            img_w = ow; img_h = oh;
+            preserve_ratio = "xMidYMid slice";
+        } else if (bg->bg_size_type == CSS_VALUE_CONTAIN) {
+            img_w = ow; img_h = oh;
+            preserve_ratio = "xMidYMid meet";
+        } else if (bg->bg_size_type == (CssEnum)0) {
+            // Explicit dimensions
+            if (!bg->bg_size_width_auto) {
+                img_w = bg->bg_size_width_is_percent ? ow * bg->bg_size_width / 100.0f : bg->bg_size_width;
+            }
+            if (!bg->bg_size_height_auto) {
+                img_h = bg->bg_size_height_is_percent ? oh * bg->bg_size_height / 100.0f : bg->bg_size_height;
+            }
+            preserve_ratio = "none";
+        }
+
+        // Compute image position within origin box
+        float pos_x = ox, pos_y = oy;
+        if (bg->bg_position_set) {
+            pos_x = bg->bg_position_x_is_percent
+                ? ox + (ow - img_w) * bg->bg_position_x / 100.0f
+                : ox + bg->bg_position_x;
+            pos_y = bg->bg_position_y_is_percent
+                ? oy + (oh - img_h) * bg->bg_position_y / 100.0f
+                : oy + bg->bg_position_y;
+        }
+
+        bool no_repeat = (bg->bg_repeat_x == CSS_VALUE_NO_REPEAT && bg->bg_repeat_y == CSS_VALUE_NO_REPEAT);
+        uintptr_t view_id = (uintptr_t)view;
+
+        if (no_repeat) {
+            // Single image with a clip-path limited to the paint area
+            char clip_id[64];
+            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath></defs>\n",
+                clip_id, cx, cy, cw, ch);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<image x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                "preserveAspectRatio=\"%s\" href=\"%s\" clip-path=\"url(#%s)\" />\n",
+                pos_x, pos_y, img_w, img_h, preserve_ratio, img_url, clip_id);
+        } else {
+            // Tiled image via SVG <pattern>
+            char pat_id[64], clip_id[64];
+            str_fmt(pat_id,  sizeof(pat_id),  "bgpat-%lx",  (unsigned long)view_id);
+            str_fmt(clip_id, sizeof(clip_id), "bgclip-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            // pattern origin at pos_x/pos_y so tiling is offset correctly
+            strbuf_append_format(ctx->svg_content,
+                "<defs>"
+                "<clipPath id=\"%s\"><rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\"/></clipPath>"
+                "<pattern id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" patternUnits=\"userSpaceOnUse\">"
+                "<image x=\"0\" y=\"0\" width=\"%.2f\" height=\"%.2f\" preserveAspectRatio=\"%s\" href=\"%s\"/>"
+                "</pattern>"
+                "</defs>\n",
+                clip_id, cx, cy, cw, ch,
+                pat_id, pos_x, pos_y, img_w, img_h,
+                img_w, img_h, preserve_ratio, img_url);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                "fill=\"url(#%s)\" clip-path=\"url(#%s)\" />\n",
+                cx, cy, cw, ch, pat_id, clip_id);
+        }
+    }
+
     // Render borders with style-aware per-side SVG polygons
     if (view->bound->border) {
         BorderProp* border = view->bound->border;

@@ -11,6 +11,22 @@ This document organizes the gaps by priority tier and proposes implementation st
 
 ---
 
+## Implementation Progress
+
+| Phase | Features | Status |
+|-------|----------|--------|
+| **Phase 1** | HSL colors, `visibility:hidden`, `outline` | ✅ Complete |
+| **Phase 2** | Box-shadow blur (software kernel), text-shadow, `filter:blur()` | ✅ Complete |
+| **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete |
+| **Phase 4** | Background-image + position/size/repeat | 🔲 Not started |
+| **Phase 5** | `filter:drop-shadow()` | 🔲 Not started |
+| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started |
+| **Phase 7** | SVG output parity (gradients, shadows, transforms) | 🔲 Not started |
+| **Phase 8** | Render backend abstraction | 🔲 Not started |
+| **Phase 9** | PDF enhancements (fonts, gradients, images) | 🔲 Not started |
+
+---
+
 ## Current Architecture Summary
 
 **Rendering pipeline:**
@@ -38,122 +54,55 @@ HTML/CSS → DOM Parse → Style Resolution → Layout → View Tree → Renderi
 
 ## Tier 1 — High Priority (Core Visual Gaps)
 
-### 1.1 `outline` Property
+### 1.1 `outline` Property ✅
 
-**Status:** Not implemented. `resolve_css_style.cpp` does not parse `outline-*`. No `OutlineProp` struct exists.
+**Status:** **Complete (Phase 1).** `OutlineProp` added to `view.hpp`, parsed in `resolve_css_style.cpp`, `render_outline()` implemented in `render_border.cpp` (ThorVG stroke, outside border-box, respects `outline-offset`), SVG `<rect stroke>` with `stroke-dasharray` emitted in `render_bound_svg()`.
 
 **Spec:** CSS UI Level 3 — `outline-style`, `outline-width`, `outline-color`, `outline-offset`.
 
 **Impact:** Outlines are used extensively for focus indicators and decorative borders that don't affect layout.
 
-**Implementation plan:**
-1. **Data model** — Add `OutlineProp` to `view.hpp`:
-   ```c
-   typedef struct OutlineProp {
-       float width;
-       float offset;         // outline-offset (can be negative)
-       CssEnum style;        // solid, dashed, dotted, double, etc.
-       Color color;
-   } OutlineProp;
-   ```
-   Add `OutlineProp* outline;` to `BoundaryProp`.
-2. **Style resolution** — Parse `outline`, `outline-width`, `outline-color`, `outline-style`, `outline-offset` in `resolve_css_style.cpp`.
-3. **Raster rendering** — Add `render_outline()` in `render_border.cpp`. Render after box-shadow and border, offset outward from border-box by `outline-offset`. Use ThorVG stroke operations (similar to border rendering but outside the box model).
-4. **SVG output** — Emit `<rect>` with `stroke` + `stroke-dasharray` in `render_bound_svg()`.
-
-**Files to modify:** `view.hpp`, `resolve_css_style.cpp`, `render_border.cpp`, `render_svg.cpp`
+**Files modified:** `view.hpp`, `resolve_css_style.cpp`, `render_border.cpp`, `render_svg.cpp`
 
 ---
 
-### 1.2 `box-shadow` Blur (Proper Gaussian Blur)
+### 1.2 `box-shadow` Blur (Proper Gaussian Blur) ✅
 
-**Status:** Shadow offset and spread work. Blur is faked via alpha reduction (`render_background.cpp:780`). Inset shadows are skipped entirely.
+**Status:** **Complete (Phase 2).** Real blur implemented via a 3-pass box-blur approximation of Gaussian. `box_blur_region()` exported from `render_background.hpp` and shared with `filter:blur()`. Inset shadows fully implemented via `render_box_shadow_inset()` (ThorVG path + clip + blur). SVG output uses `<filter>` with `feGaussianBlur`/`feOffset`/`feColorMatrix`/`feMerge`.
 
-**Current approach (`render_background.cpp:778-782`):**
-```c
-float alpha_factor = 0.7f;
-uint8_t blurred_alpha = (uint8_t)(s->color.a * alpha_factor);
-```
-This produces no actual blur — just a dimmer shadow.
-
-**Implementation plan:**
-1. **Software Gaussian blur kernel** — Implement a box-blur approximation (3-pass box blur ≈ Gaussian, per W3C recommendation). Operate on the raster surface pixels within the shadow bounding rect.
-   - Allocate a temp buffer for the shadow region.
-   - Render the shadow shape to the temp buffer.
-   - Apply 3-pass horizontal+vertical box blur.
-   - Composit the blurred result onto the main surface.
-2. **Inset shadows** — Render inside the element's border-box using inverted clipping (fill the interior, clip to the element rect, mask out the element shape).
-3. **SVG output** — Use SVG `<filter>` with `<feGaussianBlur>` and `<feOffset>`:
-   ```xml
-   <defs>
-     <filter id="shadow-1">
-       <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
-       <feOffset dx="2" dy="2"/>
-       <feColorMatrix type="matrix" values="..."/>
-       <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-     </filter>
-   </defs>
-   ```
-
-**Files to modify:** `render_background.cpp`, `render_svg.cpp`
+**Files modified:** `render_background.cpp`, `render_background.hpp`, `render.cpp`, `render_svg.cpp`
+**Test:** `test/layout/data/box/box_shadow_01.html`, `box_shadow_02_text_filter.html`
 
 ---
 
-### 1.3 `text-shadow`
+### 1.3 `text-shadow` ✅
 
-**Status:** Parsed in `resolve_css_style.cpp:7507-7519` but logged as "field not yet added to FontProp". No rendering code.
+**Status:** **Complete (Phase 2).** `TextShadow` struct added to `view.hpp`, linked list stored in `FontProp.text_shadow`. Parsed in `resolve_css_style.cpp`. Raster rendering uses a blur pre-pass in `render.cpp`: each shadow is rendered to a temporary surface, `box_blur_region()` applied when `blur_radius > 0`, then composited under the glyph. SVG output references per-element `<feGaussianBlur>` filter defs.
 
-**Implementation plan:**
-1. **Data model** — Add `TextShadow` struct and field to `FontProp`:
-   ```c
-   typedef struct TextShadow {
-       float offset_x, offset_y, blur_radius;
-       Color color;
-       struct TextShadow* next;  // multiple shadows
-   } TextShadow;
-   ```
-2. **Style resolution** — Parse the text-shadow value list in `resolve_css_style.cpp`.
-3. **Raster rendering** — In `render.cpp`, before rendering each glyph, render shadow glyphs at the offset position with the shadow color. If blur > 0, render to a temp buffer and apply blur.
-4. **SVG output** — In `render_text_view_svg()`, add `filter` attribute referencing a `<feGaussianBlur>` filter, or apply inline `text-shadow` if the SVG consumer supports CSS.
-
-**Files to modify:** `view.hpp`, `resolve_css_style.cpp`, `render.cpp`, `render_svg.cpp`
+**Files modified:** `view.hpp`, `resolve_css_style.cpp`, `render.cpp`, `render_svg.cpp`
 
 ---
 
-### 1.4 HSL/HSLA Color Functions
+### 1.4 HSL/HSLA Color Functions ✅
 
-**Status:** Three TODO sites in `resolve_css_style.cpp` (lines 137-138, 238-241). `hsl()` returns transparent.
+**Status:** **Complete (Phase 1).** `hsl_to_rgb()` conversion function implemented in `resolve_css_style.cpp` per CSS Color Level 4 §4.2.4. Wired into `resolve_color_function()` and `resolve_color_value()`; `hsl()` and `hsla()` now produce correct RGB output.
 
 **Implementation plan:**
-Add `hsl_to_rgb()` conversion function:
-```c
-Color hsl_to_rgb(float h, float s, float l, float a) {
-    // CSS Color Level 4 §4.2.4 algorithm
-    float c = (1 - fabsf(2 * l - 1)) * s;
-    float x = c * (1 - fabsf(fmodf(h / 60, 2) - 1));
-    float m = l - c / 2;
-    // ... map to r,g,b based on hue sector
-}
-```
-Wire it into `resolve_color_function()` and `resolve_color_value()`.
-
-**Files to modify:** `resolve_css_style.cpp`
+**Files modified:** `resolve_css_style.cpp`
 
 ---
 
-### 1.5 Border Style Variants
+### 1.5 Border Style Variants ✅
 
-**Status:** `solid` fully works. `dashed`/`dotted` partially work via ThorVG dash patterns. `double`, `groove`, `ridge`, `inset`, `outset` are not rendered.
+**Status:** **Complete (Phase 3).** All six decorative border styles now render correctly:
+- **`double`** — two ThorVG trapezoid fills with a `width/3` gap, both raster and SVG
+- **`groove`/`ridge`** — two half-width trapezoid fills, outer darker / inner lighter (groove) or reversed (ridge)
+- **`inset`/`outset`** — two-polygon trapezoid approach (top+left vs bottom+right) so each side gets the correct 3-D shade; straight borders use filled polygons, rounded borders fall back to a single tinted stroke
+- **Per-side non-uniform** — `render_per_side_borders()` handles each side independently with full style dispatch
+- **SVG** — `svg_emit_border_side()` emits `<polygon>` with miter-cut corners for all styles
 
-**Per-side borders:** Line 339 of `render_border.cpp`: "TODO: Implement per-side rendering with proper corner handling."
-
-**Implementation plan:**
-1. **`double`** — Two parallel strokes with a gap of `width/3` between them.
-2. **`groove`/`ridge`** — Two half-width borders, one darker and one lighter than the specified color (3D effect using color lightening/darkening).
-3. **`inset`/`outset`** — Each side uses a different shade (top/left lighter for outset, darker for inset).
-4. **Per-side corner handling** — When adjacent sides have different styles, implement proper corner mitering using Bezier path construction (extend the existing `render_rounded_border()` approach).
-
-**Files to modify:** `render_border.cpp`, `render_svg.cpp`
+**Files modified:** `render_border.cpp`, `render_svg.cpp`
+**Test:** `test/layout/data/box/box_border_styles_01.html`
 
 ---
 
@@ -209,39 +158,22 @@ Wire it into `resolve_color_function()` and `resolve_color_value()`.
 
 ---
 
-### 2.4 `visibility: hidden`
+### 2.4 `visibility: hidden` ✅
 
-**Status:** Enum defined (`VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE`), stored in `InlineProp`, but rendering code does not check it.
+**Status:** **Complete (Phase 1).** Visibility check added at the top of `render_block_view()` and `render_inline_view()`. Layout space is still reserved; children with `visibility:visible` are still rendered. SVG output also skips hidden elements.
 
-**Implementation plan:**
-Add visibility check at the top of `render_block_view()` and `render_inline_view()`:
-```c
-if (block->in_line && block->in_line->visibility == VIS_HIDDEN) {
-    // Still layout space is reserved, but don't render content
-    // Children with visibility:visible should still render
-    ...
-}
-```
-
-**Files to modify:** `render.cpp`, `render_svg.cpp`
+**Files modified:** `render.cpp`, `render_svg.cpp`
 
 ---
 
 ## Tier 3 — Advanced Features
 
-### 3.1 `filter: blur()`
+### 3.1 `filter: blur()` ✅
 
-**Status:** Logged as "requires ThorVG C++ API" (`render_filter.cpp:273`). Color manipulation filters all work.
+**Status:** **Complete (Phase 2).** Implemented as a post-processing pass in `render_filter.cpp` using the shared `box_blur_region()` from `render_background.hpp`. Operates directly on the raster surface — no ThorVG C++ API required.
 
-**Implementation plan:**
-Use the same software box-blur approach proposed for box-shadow blur:
-1. After rendering the element and children to the surface, extract the region's pixels.
-2. Apply 3-pass box blur (horizontal + vertical, repeated 3x for Gaussian approximation).
-3. Write blurred pixels back.
-
-This is independent of ThorVG's C++ API and works on any raster surface.
-
-**Files to modify:** `render_filter.cpp`
+**Files modified:** `render_filter.cpp`, `render_background.hpp`
+**Test:** `test/layout/data/box/box_shadow_02_text_filter.html`
 
 ---
 
@@ -312,18 +244,20 @@ Current `render_bound_svg()` only emits:
 - Background color (solid rect)
 - Border widths (as filled rects, not strokes)
 
-**Missing in SVG output:**
+**Current SVG output status (updated):**
 
 | Feature | Raster | SVG |
 |---------|--------|-----|
 | Gradients (linear/radial/conic) | ✅ | ❌ |
-| Box-shadow | ✅ (partial) | ❌ |
+| Box-shadow (blur + inset) | ✅ | ✅ (`<filter>` + `feGaussianBlur`) |
 | Border-radius (correct per-corner) | ✅ | ⚠️ (uniform only) |
-| Border styles (dashed/dotted) | ✅ | ❌ |
+| Border styles (all variants) | ✅ | ✅ (`<polygon>` trapezoids) |
+| Outline | ✅ | ✅ (`<rect stroke>`) |
 | CSS transforms | ✅ | ❌ |
-| CSS filters | ✅ | ❌ |
+| CSS filters (`blur()`) | ✅ | ❌ |
 | Opacity | ⚠️ | ❌ |
 | Text decorations | ✅ | ❌ |
+| Text-shadow | ✅ | ✅ (`<filter>` + `feGaussianBlur`) |
 | Images | ✅ | ⚠️ (href only) |
 | Inline SVG | ✅ | ✅ (passthrough) |
 
@@ -396,17 +330,17 @@ Current PDF output (`render_pdf.cpp`) uses libharu with only:
 
 Recommended implementation sequence, ordered by impact and dependency:
 
-| Phase | Features | Estimated Complexity |
-|-------|----------|---------------------|
-| **Phase 1** | HSL colors, visibility:hidden, outline | Low |
-| **Phase 2** | Box-shadow blur (software kernel), text-shadow data model | Medium |
-| **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | Medium |
-| **Phase 4** | Background-image + position/size/repeat | Medium-High |
-| **Phase 5** | filter:blur(), filter:drop-shadow() | Medium |
-| **Phase 6** | SVG inline: defs, gradients, use, clipPath | Medium |
-| **Phase 7** | SVG output parity (gradients, shadows, transforms in SVG export) | High |
-| **Phase 8** | Render backend abstraction | High (refactor) |
-| **Phase 9** | PDF enhancements (fonts, gradients, images) | High |
+| Phase | Features | Status | Complexity |
+|-------|----------|--------|------------|
+| **Phase 1** | HSL colors, `visibility:hidden`, `outline` | ✅ Complete | Low |
+| **Phase 2** | Box-shadow blur, text-shadow, `filter:blur()` | ✅ Complete | Medium |
+| **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete | Medium |
+| **Phase 4** | Background-image + position/size/repeat | 🔲 Not started | Medium-High |
+| **Phase 5** | `filter:drop-shadow()` | 🔲 Not started | Medium |
+| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started | Medium |
+| **Phase 7** | SVG output parity (gradients, transforms in SVG export) | 🔲 Not started | High |
+| **Phase 8** | Render backend abstraction | 🔲 Not started | High (refactor) |
+| **Phase 9** | PDF enhancements (fonts, gradients, images) | 🔲 Not started | High |
 
 ---
 
@@ -438,12 +372,23 @@ void box_blur_rgba(uint32_t* pixels, int width, int height,
 
 ## Summary
 
-The most impactful gaps are:
-1. **`outline`** — missing entirely, trivial to add
-2. **`box-shadow` blur** — renders without blur, needs software Gaussian kernel
-3. **`text-shadow`** — parsed but no data model or rendering
-4. **HSL colors** — conversion function missing, many CSS designs use HSL
-5. **Border style variants** — `double`/`groove`/`ridge` missing
-6. **SVG output parity** — SVG export lacks gradients, shadows, transforms, filters
+### Completed
 
-The backend abstraction (Tier 4) is the most structurally significant change. It would eliminate the current drift between raster/SVG/PDF output quality and ensure every new CSS feature is available across all output formats from day one.
+- ✅ **`outline`** — `OutlineProp`, full raster + SVG rendering
+- ✅ **`visibility:hidden`** — layout preserved, rendering skipped
+- ✅ **HSL/HSLA colors** — `hsl_to_rgb()` per CSS Color Level 4
+- ✅ **`box-shadow` blur** — 3-pass box blur, inset shadows, SVG `<filter>` output
+- ✅ **`text-shadow`** — data model, blur pre-pass, SVG filter output
+- ✅ **`filter:blur()`** — software kernel, shares `box_blur_region()`
+- ✅ **Border style variants** — `double`/`groove`/`ridge`/`inset`/`outset`, per-side + SVG polygon output
+
+### Remaining priorities
+
+1. **`background-image`** — URL images not loaded or rendered as backgrounds
+2. **`filter:drop-shadow()`** — alpha-channel extraction + blur + colorize pipeline
+3. **SVG inline gaps** — `<defs>`, gradient `url(#id)` resolution, `<use>`, `<clipPath>`
+4. **SVG output parity** — gradients and CSS transforms missing from SVG export
+5. **Backend abstraction** — shared `RenderBackend` trait to prevent per-feature triplication
+6. **PDF enhancements** — fonts, gradients, rounded rects, images
+
+The backend abstraction (Tier 4) is the most structurally significant remaining change. It would eliminate the current drift between raster/SVG/PDF output quality and ensure every new CSS feature is available across all output formats from day one.

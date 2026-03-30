@@ -4355,8 +4355,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: scroll, fixed, local
+                span->bound->background->bg_attachment = value->data.keyword;
                 log_debug("[CSS] background-attachment: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store attachment value when BackgroundProp is extended
             }
             break;
         }
@@ -4372,8 +4372,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
+                span->bound->background->bg_origin = value->data.keyword;
                 log_debug("[CSS] background-origin: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store origin value when BackgroundProp is extended
             }
             break;
         }
@@ -4389,8 +4389,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Values: border-box, padding-box, content-box
+                span->bound->background->bg_clip = value->data.keyword;
                 log_debug("[CSS] background-clip: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store clip value when BackgroundProp is extended
             }
             break;
         }
