@@ -18,8 +18,8 @@ This document organizes the gaps by priority tier and proposes implementation st
 | **Phase 1** | HSL colors, `visibility:hidden`, `outline` | ✅ Complete |
 | **Phase 2** | Box-shadow blur (software kernel), text-shadow, `filter:blur()` | ✅ Complete |
 | **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete |
-| **Phase 4** | Background-image + position/size/repeat | 🔲 Not started |
-| **Phase 5** | `filter:drop-shadow()` | 🔲 Not started |
+| **Phase 4** | Background-image + position/size/repeat, `background-origin`, `background-clip`, `background-attachment` | ✅ Complete |
+| **Phase 5** | `filter:drop-shadow()` | ✅ Complete |
 | **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started |
 | **Phase 7** | SVG output parity (gradients, shadows, transforms) | 🔲 Not started |
 | **Phase 8** | Render backend abstraction | 🔲 Not started |
@@ -335,8 +335,8 @@ Recommended implementation sequence, ordered by impact and dependency:
 | **Phase 1** | HSL colors, `visibility:hidden`, `outline` | ✅ Complete | Low |
 | **Phase 2** | Box-shadow blur, text-shadow, `filter:blur()` | ✅ Complete | Medium |
 | **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete | Medium |
-| **Phase 4** | Background-image + position/size/repeat | 🔲 Not started | Medium-High |
-| **Phase 5** | `filter:drop-shadow()` | 🔲 Not started | Medium |
+| **Phase 4** | Background-image + position/size/repeat, `background-origin`, `background-clip`, `background-attachment` | ✅ Complete | Medium-High |
+| **Phase 5** | `filter:drop-shadow()` | ✅ Complete | Medium |
 | **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started | Medium |
 | **Phase 7** | SVG output parity (gradients, transforms in SVG export) | 🔲 Not started | High |
 | **Phase 8** | Render backend abstraction | 🔲 Not started | High (refactor) |
