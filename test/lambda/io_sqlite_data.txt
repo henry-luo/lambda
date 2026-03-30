@@ -5,17 +5,92 @@
 {
   id: 1,
   name: "Electronics",
-  description: "Electronic gadgets"
+  description: "Electronic gadgets",
+  products: [{
+      id: 1,
+      name: "Widget",
+      category_id: 1,
+      price: 9.99,
+      weight: 0.25,
+      in_stock: true,
+      created_at: t'2024-01-15 08:00:00',
+      tags: ["sale", "popular"],
+      category: {
+        id: 1,
+        name: "Electronics",
+        description: "Electronic gadgets"
+      }
+    }, {
+      id: 2,
+      name: "Gadget",
+      category_id: 1,
+      price: 49.99,
+      weight: 1.5,
+      in_stock: true,
+      created_at: t'2024-02-20 10:30:00',
+      tags: {
+        color: "blue"
+      },
+      category: {
+        id: 1,
+        name: "Electronics",
+        description: "Electronic gadgets"
+      }
+    }, {
+      id: 5,
+      name: "Cable",
+      category_id: 1,
+      price: 4.99,
+      weight: null,
+      in_stock: true,
+      created_at: null,
+      tags: null,
+      category: {
+        id: 1,
+        name: "Electronics",
+        description: "Electronic gadgets"
+      }
+    }]
 }
 {
   id: 2,
   name: "Books",
-  description: "Paper and digital books"
+  description: "Paper and digital books",
+  products: [{
+      id: 3,
+      name: "Novel",
+      category_id: 2,
+      price: 14.99,
+      weight: 0.34999999999999998,
+      in_stock: false,
+      created_at: t'2024-03-10 12:00:00',
+      tags: null,
+      category: {
+        id: 2,
+        name: "Books",
+        description: "Paper and digital books"
+      }
+    }, {
+      id: 4,
+      name: "Textbook",
+      category_id: 2,
+      price: 89.99,
+      weight: 2.1000000000000001,
+      in_stock: true,
+      created_at: t'2024-04-01 09:00:00',
+      tags: ["education"],
+      category: {
+        id: 2,
+        name: "Books",
+        description: "Paper and digital books"
+      }
+    }]
 }
 {
   id: 3,
   name: "Empty",
-  description: null
+  description: null,
+  products: []
 }
 ["Widget", "Gadget", "Novel", "Textbook", "Cable"]
 ["sale", "popular"]

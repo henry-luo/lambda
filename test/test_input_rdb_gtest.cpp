@@ -543,3 +543,136 @@ TEST_F(InputRdbTest, ThirdProductCategoryId) {
     MapReader prod2 = prods.get(2).asMap();
     EXPECT_EQ(prod2.get("category_id").asInt(), 2);
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §11 FK Forward Navigation (product → category)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+// product row has a "category" attribute (link_name from stripped _id suffix)
+TEST_F(InputRdbTest, FkForward_ProductHasCategoryAttr) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+    MapReader prod0 = prods.get(0).asMap();
+    EXPECT_TRUE(prod0.has("category"));
+}
+
+// product 0 (Widget, category_id=1) → category.name == "Electronics"
+TEST_F(InputRdbTest, FkForward_WidgetCategory) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+    MapReader prod0 = prods.get(0).asMap();
+
+    ItemReader cat_item = prod0.get("category");
+    EXPECT_TRUE(cat_item.isMap());
+
+    MapReader cat = cat_item.asMap();
+    EXPECT_STREQ(cat.get("name").cstring(), "Electronics");
+    EXPECT_EQ(cat.get("id").asInt(), 1);
+}
+
+// product 1 (Gadget, category_id=1) → same category "Electronics"
+TEST_F(InputRdbTest, FkForward_GadgetCategory) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+    MapReader prod1 = prods.get(1).asMap();
+
+    MapReader cat = prod1.get("category").asMap();
+    EXPECT_STREQ(cat.get("name").cstring(), "Electronics");
+}
+
+// product 2 (Novel, category_id=2) → category "Books"
+TEST_F(InputRdbTest, FkForward_NovelCategory) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+    MapReader prod2 = prods.get(2).asMap();
+
+    MapReader cat = prod2.get("category").asMap();
+    EXPECT_STREQ(cat.get("name").cstring(), "Books");
+    EXPECT_EQ(cat.get("id").asInt(), 2);
+}
+
+// original FK column is still present alongside the navigation attribute
+TEST_F(InputRdbTest, FkForward_OriginalColumnPreserved) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+    MapReader prod0 = prods.get(0).asMap();
+
+    // category_id column still present
+    EXPECT_EQ(prod0.get("category_id").asInt(), 1);
+    // and the FK navigation attribute too
+    EXPECT_TRUE(prod0.has("category"));
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §12 FK Reverse Navigation (category → products[])
+ * ══════════════════════════════════════════════════════════════════════ */
+
+// category row has a "products" attribute (reverse FK array)
+TEST_F(InputRdbTest, FkReverse_CategoryHasProductsAttr) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader cats = data.get("categories").asArray();
+    MapReader cat0 = cats.get(0).asMap();
+    EXPECT_TRUE(cat0.has("products"));
+}
+
+// Electronics (id=1) has 2 products: Widget and Gadget
+TEST_F(InputRdbTest, FkReverse_ElectronicsProducts) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader cats = data.get("categories").asArray();
+    MapReader cat0 = cats.get(0).asMap();
+
+    EXPECT_STREQ(cat0.get("name").cstring(), "Electronics");
+
+    ItemReader prods_item = cat0.get("products");
+    EXPECT_TRUE(prods_item.isArray());
+
+    ArrayReader prods = prods_item.asArray();
+    EXPECT_EQ(prods.length(), 2);
+
+    // verify product names (Widget and Gadget, category_id=1)
+    MapReader p0 = prods.get(0).asMap();
+    MapReader p1 = prods.get(1).asMap();
+    EXPECT_STREQ(p0.get("name").cstring(), "Widget");
+    EXPECT_STREQ(p1.get("name").cstring(), "Gadget");
+}
+
+// Books (id=2) has 1 product: Novel
+TEST_F(InputRdbTest, FkReverse_BooksProducts) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader cats = data.get("categories").asArray();
+    MapReader cat1 = cats.get(1).asMap();
+
+    EXPECT_STREQ(cat1.get("name").cstring(), "Books");
+
+    ArrayReader prods = cat1.get("products").asArray();
+    EXPECT_EQ(prods.length(), 1);
+    EXPECT_STREQ(prods.get(0).asMap().get("name").cstring(), "Novel");
+}
+
+// category original columns are preserved after reverse FK rebuild
+TEST_F(InputRdbTest, FkReverse_OriginalColumnsPreserved) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader cats = data.get("categories").asArray();
+    MapReader cat0 = cats.get(0).asMap();
+
+    EXPECT_EQ(cat0.get("id").asInt(), 1);
+    EXPECT_STREQ(cat0.get("name").cstring(), "Electronics");
+}
