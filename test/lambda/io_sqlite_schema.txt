@@ -21,3 +21,10 @@ false
 type.null
 [4, "price"]
 true
+2
+["trg_products_after_insert", "AFTER", "INSERT"]
+["trg_products_before_delete", "BEFORE", "DELETE"]
+type.null
+array
+true
+[string, string, int64, bool]

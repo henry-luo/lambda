@@ -377,6 +377,7 @@ extern bool can_break(char c);
 extern bool is_space(char c);
 
 typedef struct ViewBlock ViewBlock;
+typedef struct TextShadow TextShadow;
 
 struct FontProp {
     char* family;  // font family name
@@ -396,6 +397,7 @@ struct FontProp {
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
     struct FontHandle* font_handle; // unified font handle (populated by setup_font)
+    TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
 };
 
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
@@ -630,6 +632,29 @@ typedef struct BoxShadow {
 } BoxShadow;
 
 /**
+ * OutlineProp - CSS outline property (CSS UI Level 3)
+ * Outlines are drawn outside the border-box and don't affect layout.
+ */
+typedef struct OutlineProp {
+    float width;                 // outline-width in pixels
+    float offset;                // outline-offset in pixels (can be negative)
+    CssEnum style;               // outline-style: solid, dashed, dotted, double, etc.
+    Color color;                 // outline-color
+} OutlineProp;
+
+/**
+ * TextShadow - CSS text-shadow property
+ * Supports multiple shadows via linked list
+ */
+typedef struct TextShadow {
+    float offset_x;
+    float offset_y;
+    float blur_radius;
+    Color color;
+    struct TextShadow* next;
+} TextShadow;
+
+/**
  * TransformFunction - Individual CSS transform function
  * Forms a linked list for transform: translate() rotate() scale() etc.
  */
@@ -782,6 +807,7 @@ typedef struct BoundaryProp {
     BorderProp* border;
     BackgroundProp* background;
     BoxShadow* box_shadow;       // Linked list of box shadows
+    OutlineProp* outline;        // CSS outline property (outside border-box)
     float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via
                                  // parent-child bottom margin collapse (the inflated portion)
     bool has_clearance;              // CSS 2.1 §9.5.2: true if clearance was applied to this block.

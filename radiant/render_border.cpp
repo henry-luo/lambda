@@ -315,25 +315,144 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
     if (uniform_width && uniform_style && uniform_color && border->width.top > 0 &&
         border->top_style != CSS_VALUE_NONE && border->top_style != CSS_VALUE_HIDDEN) {
-        // Render as single stroke
-        Tvg_Paint shape = build_rounded_border_path(rect, border);
 
-        tvg_shape_set_stroke_width(shape, border->width.top);
-        tvg_shape_set_stroke_color(shape,
-            border->top_color.r, border->top_color.g,
-            border->top_color.b, border->top_color.a);
-        tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
+        CssEnum style = border->top_style;
+        float w = border->width.top;
+        Color c = border->top_color;
 
-        apply_dash_pattern(shape, border->top_style, border->width.top);
+        if (style == CSS_VALUE_DOUBLE && w >= 3) {
+            // CSS double border: two lines with a gap between them
+            // Outer line width = floor(w/3), inner line width = floor(w/3), gap = w - 2*line_w
+            float line_w = floorf(w / 3.0f);
+            if (line_w < 1) line_w = 1;
 
-        // Set clipping (may be rounded if parent has border-radius with overflow:hidden)
-        Tvg_Paint clip_rect = create_border_clip_shape(rdcon);
-        tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+            // Outer border (inset by half line width from the border rect)
+            Tvg_Paint outer = build_rounded_border_path(rect, border);
+            tvg_shape_set_stroke_width(outer, line_w);
+            tvg_shape_set_stroke_color(outer, c.r, c.g, c.b, c.a);
+            tvg_shape_set_stroke_join(outer, TVG_STROKE_JOIN_MITER);
 
-        tvg_canvas_remove(canvas, NULL);  // clear previous shapes
-        push_with_transform(rdcon, shape);
-        tvg_canvas_reset_and_draw(rdcon, false);
-        tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
+            // Inner border (inset by w - line_w/2 from rect)
+            float inset = w - line_w;
+            Rect inner_rect = {rect.x + inset, rect.y + inset,
+                               rect.width - inset * 2, rect.height - inset * 2};
+            // Build inner path using adjusted rect (radii shrink by inset)
+            Corner orig_r = border->radius;
+            border->radius.top_left = max(0.0f, orig_r.top_left - inset);
+            border->radius.top_right = max(0.0f, orig_r.top_right - inset);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inset);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
+            Tvg_Paint inner = build_rounded_border_path(inner_rect, border);
+            border->radius = orig_r;
+            tvg_shape_set_stroke_width(inner, line_w);
+            tvg_shape_set_stroke_color(inner, c.r, c.g, c.b, c.a);
+            tvg_shape_set_stroke_join(inner, TVG_STROKE_JOIN_MITER);
+
+            Tvg_Paint clip1 = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(outer, clip1, TVG_MASK_METHOD_ALPHA);
+            Tvg_Paint clip2 = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(inner, clip2, TVG_MASK_METHOD_ALPHA);
+
+            tvg_canvas_remove(canvas, NULL);
+            push_with_transform(rdcon, outer);
+            push_with_transform(rdcon, inner);
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(canvas, NULL);
+
+        } else if (style == CSS_VALUE_GROOVE || style == CSS_VALUE_RIDGE) {
+            // Groove: outer half dark, inner half light (3D effect)
+            // Ridge: outer half light, inner half dark (opposite of groove)
+            float half_w = w / 2.0f;
+
+            // Calculate light and dark colors
+            uint8_t dark_r = (uint8_t)(c.r * 0.5f);
+            uint8_t dark_g = (uint8_t)(c.g * 0.5f);
+            uint8_t dark_b = (uint8_t)(c.b * 0.5f);
+            uint8_t light_r = (uint8_t)min(255.0f, c.r * 1.5f);
+            uint8_t light_g = (uint8_t)min(255.0f, c.g * 1.5f);
+            uint8_t light_b = (uint8_t)min(255.0f, c.b * 1.5f);
+
+            bool groove = (style == CSS_VALUE_GROOVE);
+
+            // Outer half
+            Tvg_Paint outer = build_rounded_border_path(rect, border);
+            tvg_shape_set_stroke_width(outer, half_w);
+            if (groove)
+                tvg_shape_set_stroke_color(outer, dark_r, dark_g, dark_b, c.a);
+            else
+                tvg_shape_set_stroke_color(outer, light_r, light_g, light_b, c.a);
+            tvg_shape_set_stroke_join(outer, TVG_STROKE_JOIN_MITER);
+
+            // Inner half
+            float inset = half_w;
+            Rect inner_rect = {rect.x + inset, rect.y + inset,
+                               rect.width - inset * 2, rect.height - inset * 2};
+            Corner orig_r = border->radius;
+            border->radius.top_left = max(0.0f, orig_r.top_left - inset);
+            border->radius.top_right = max(0.0f, orig_r.top_right - inset);
+            border->radius.bottom_right = max(0.0f, orig_r.bottom_right - inset);
+            border->radius.bottom_left = max(0.0f, orig_r.bottom_left - inset);
+            Tvg_Paint inner = build_rounded_border_path(inner_rect, border);
+            border->radius = orig_r;
+            tvg_shape_set_stroke_width(inner, half_w);
+            if (groove)
+                tvg_shape_set_stroke_color(inner, light_r, light_g, light_b, c.a);
+            else
+                tvg_shape_set_stroke_color(inner, dark_r, dark_g, dark_b, c.a);
+            tvg_shape_set_stroke_join(inner, TVG_STROKE_JOIN_MITER);
+
+            Tvg_Paint clip1 = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(outer, clip1, TVG_MASK_METHOD_ALPHA);
+            Tvg_Paint clip2 = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(inner, clip2, TVG_MASK_METHOD_ALPHA);
+
+            tvg_canvas_remove(canvas, NULL);
+            push_with_transform(rdcon, outer);
+            push_with_transform(rdcon, inner);
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(canvas, NULL);
+
+        } else if (style == CSS_VALUE_INSET || style == CSS_VALUE_OUTSET) {
+            // Inset: top+left dark, bottom+right light (pressed appearance)
+            // Outset: top+left light, bottom+right dark (raised appearance)
+            // Rendered as a single stroke with the base color
+            // (full per-side coloring requires non-uniform border path)
+            uint8_t dark_r = (uint8_t)(c.r * 0.6f);
+            uint8_t dark_g = (uint8_t)(c.g * 0.6f);
+            uint8_t dark_b = (uint8_t)(c.b * 0.6f);
+
+            Tvg_Paint shape = build_rounded_border_path(rect, border);
+            tvg_shape_set_stroke_width(shape, w);
+            if (style == CSS_VALUE_INSET)
+                tvg_shape_set_stroke_color(shape, dark_r, dark_g, dark_b, c.a);
+            else
+                tvg_shape_set_stroke_color(shape, c.r, c.g, c.b, c.a);
+            tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
+
+            Tvg_Paint clip_rect = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+            tvg_canvas_remove(canvas, NULL);
+            push_with_transform(rdcon, shape);
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(canvas, NULL);
+
+        } else {
+            // Default: solid, dotted, dashed
+            Tvg_Paint shape = build_rounded_border_path(rect, border);
+            tvg_shape_set_stroke_width(shape, w);
+            tvg_shape_set_stroke_color(shape, c.r, c.g, c.b, c.a);
+            tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
+            apply_dash_pattern(shape, style, w);
+
+            Tvg_Paint clip_rect = create_border_clip_shape(rdcon);
+            tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+            tvg_canvas_remove(canvas, NULL);
+            push_with_transform(rdcon, shape);
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(canvas, NULL);
+        }
     } else {
         // Render each side separately for non-uniform borders
         // TODO: Implement per-side rendering with proper corner handling
@@ -342,4 +461,108 @@ void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         // Fall back to straight border rendering for now
         render_straight_border(rdcon, view, rect);
     }
+}
+
+/**
+ * Render CSS outline (CSS UI Level 3)
+ * Outline is drawn outside the border-box, offset by outline-offset.
+ * Does not affect layout. Uses border-radius if present.
+ */
+void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+    if (!view->bound || !view->bound->outline) return;
+
+    OutlineProp* outline = view->bound->outline;
+    if (outline->width <= 0 || outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return;
+    if (outline->color.a == 0) return;
+
+    float s = rdcon->scale;
+    float w = outline->width * s;
+    float offset = outline->offset * s;
+
+    // Outline rect is expanded outward from border-box by (outline-width/2 + outline-offset)
+    float expand = w * 0.5f + offset;
+    Rect outline_rect;
+    outline_rect.x = rect.x - expand;
+    outline_rect.y = rect.y - expand;
+    outline_rect.width = rect.width + expand * 2;
+    outline_rect.height = rect.height + expand * 2;
+
+    Tvg_Paint shape = tvg_shape_new();
+
+    // If border-radius exists, use rounded outline path
+    bool has_radius = view->bound->border &&
+        (view->bound->border->radius.top_left > 0 || view->bound->border->radius.top_right > 0 ||
+         view->bound->border->radius.bottom_right > 0 || view->bound->border->radius.bottom_left > 0);
+
+    if (has_radius) {
+        BorderProp* border = view->bound->border;
+        // Expand radii by the offset + half width to follow curvature
+        float r_tl = (border->radius.top_left * s + expand);
+        float r_tr = (border->radius.top_right * s + expand);
+        float r_br = (border->radius.bottom_right * s + expand);
+        float r_bl = (border->radius.bottom_left * s + expand);
+        if (r_tl < 0) r_tl = 0;
+        if (r_tr < 0) r_tr = 0;
+        if (r_br < 0) r_br = 0;
+        if (r_bl < 0) r_bl = 0;
+
+        float x = outline_rect.x, y = outline_rect.y;
+        float ow = outline_rect.width, oh = outline_rect.height;
+
+        tvg_shape_move_to(shape, x + r_tl, y);
+        tvg_shape_line_to(shape, x + ow - r_tr, y);
+        if (r_tr > 0) {
+            tvg_shape_cubic_to(shape,
+                x + ow - r_tr + r_tr * KAPPA, y,
+                x + ow, y + r_tr - r_tr * KAPPA,
+                x + ow, y + r_tr);
+        }
+        tvg_shape_line_to(shape, x + ow, y + oh - r_br);
+        if (r_br > 0) {
+            tvg_shape_cubic_to(shape,
+                x + ow, y + oh - r_br + r_br * KAPPA,
+                x + ow - r_br + r_br * KAPPA, y + oh,
+                x + ow - r_br, y + oh);
+        }
+        tvg_shape_line_to(shape, x + r_bl, y + oh);
+        if (r_bl > 0) {
+            tvg_shape_cubic_to(shape,
+                x + r_bl - r_bl * KAPPA, y + oh,
+                x, y + oh - r_bl + r_bl * KAPPA,
+                x, y + oh - r_bl);
+        }
+        tvg_shape_line_to(shape, x, y + r_tl);
+        if (r_tl > 0) {
+            tvg_shape_cubic_to(shape,
+                x, y + r_tl - r_tl * KAPPA,
+                x + r_tl - r_tl * KAPPA, y,
+                x + r_tl, y);
+        }
+        tvg_shape_close(shape);
+    } else {
+        tvg_shape_append_rect(shape,
+            outline_rect.x, outline_rect.y,
+            outline_rect.width, outline_rect.height,
+            0, 0, true);
+    }
+
+    tvg_shape_set_stroke_width(shape, w);
+    tvg_shape_set_stroke_color(shape,
+        outline->color.r, outline->color.g,
+        outline->color.b, outline->color.a);
+    tvg_shape_set_stroke_join(shape, TVG_STROKE_JOIN_MITER);
+
+    apply_dash_pattern(shape, outline->style, w);
+
+    Tvg_Paint clip_rect = create_border_clip_shape(rdcon);
+    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+
+    tvg_canvas_remove(rdcon->canvas, NULL);
+    push_with_transform(rdcon, shape);
+    tvg_canvas_reset_and_draw(rdcon, false);
+    tvg_canvas_remove(rdcon->canvas, NULL);
+
+    log_debug("[OUTLINE] Rendered outline: width=%.1f offset=%.1f style=%d color=#%02x%02x%02x%02x",
+              outline->width, outline->offset, outline->style,
+              outline->color.r, outline->color.g, outline->color.b, outline->color.a);
 }

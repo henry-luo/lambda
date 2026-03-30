@@ -1,5 +1,6 @@
 "test_rdb.db"
 1
+["users"]
 "Alice"
 30
 "Bob"

@@ -652,12 +652,157 @@ void render_background_gradient(RenderContext* rdcon, ViewBlock* view, Backgroun
  * Render CSS box-shadow for an element
  *
  * Box shadows are rendered BEFORE the background (underneath the element).
+/**
+ * Apply a 3-pass box blur on a region of the surface pixels.
+ * 3 passes of box blur approximate Gaussian blur (per W3C CSS Backgrounds Level 3).
+ * The blur_radius is the CSS blur radius (σ); box size = ceil(σ * 2 / 3) * 2 + 1.
+ * Operates on pre-multiplied RGBA pixels in-place.
+ */
+static void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius) {
+    if (blur_radius <= 0 || rw <= 0 || rh <= 0 || !surface || !surface->pixels) return;
+
+    // Clamp region to surface bounds
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (ry < 0) { rh += ry; ry = 0; }
+    if (rx + rw > surface->width) rw = surface->width - rx;
+    if (ry + rh > surface->height) rh = surface->height - ry;
+    if (rw <= 0 || rh <= 0) return;
+
+    // Calculate box sizes for 3-pass approximation of Gaussian
+    // Per CSS spec, blur radius maps to standard deviation σ
+    // Box blur radius: ideal_w = sqrt(12*σ²/3 + 1)
+    int box_r = (int)ceilf(blur_radius * 0.5f);
+    if (box_r < 1) box_r = 1;
+    int box_w = box_r * 2 + 1;
+
+    uint32_t* pixels = (uint32_t*)surface->pixels;
+    int stride = surface->pitch / 4;  // pitch is in bytes, pixels are 4 bytes
+
+    // Allocate temporary buffer for one pass
+    size_t buf_size = (size_t)rw * rh;
+    uint32_t* temp = (uint32_t*)mem_alloc(buf_size * sizeof(uint32_t), MEM_CAT_RENDER);
+    if (!temp) return;
+
+    // 3-pass box blur (horizontal then vertical each pass)
+    for (int pass = 0; pass < 3; pass++) {
+        // Horizontal pass: read from surface, write to temp
+        for (int row = 0; row < rh; row++) {
+            int sy = ry + row;
+            uint32_t* src_row = pixels + sy * stride;
+
+            // Running sums for each channel
+            uint32_t sum_r = 0, sum_g = 0, sum_b = 0, sum_a = 0;
+            int count = 0;
+
+            // Initialize window for first pixel
+            for (int k = -box_r; k <= box_r; k++) {
+                int sx = rx + 0 + k;
+                if (sx >= rx && sx < rx + rw) {
+                    uint32_t p = src_row[sx];
+                    sum_r += (p >> 24) & 0xFF;
+                    sum_g += (p >> 16) & 0xFF;
+                    sum_b += (p >> 8) & 0xFF;
+                    sum_a += p & 0xFF;
+                    count++;
+                }
+            }
+
+            for (int col = 0; col < rw; col++) {
+                if (count > 0) {
+                    uint32_t avg_r = sum_r / count;
+                    uint32_t avg_g = sum_g / count;
+                    uint32_t avg_b = sum_b / count;
+                    uint32_t avg_a = sum_a / count;
+                    temp[row * rw + col] = (avg_r << 24) | (avg_g << 16) | (avg_b << 8) | avg_a;
+                } else {
+                    temp[row * rw + col] = 0;
+                }
+
+                // Slide window: remove leftmost, add new rightmost
+                int remove_x = rx + col - box_r;
+                int add_x = rx + col + box_r + 1;
+
+                if (remove_x >= rx && remove_x < rx + rw) {
+                    uint32_t p = src_row[remove_x];
+                    sum_r -= (p >> 24) & 0xFF;
+                    sum_g -= (p >> 16) & 0xFF;
+                    sum_b -= (p >> 8) & 0xFF;
+                    sum_a -= p & 0xFF;
+                    count--;
+                }
+                if (add_x >= rx && add_x < rx + rw) {
+                    uint32_t p = src_row[add_x];
+                    sum_r += (p >> 24) & 0xFF;
+                    sum_g += (p >> 16) & 0xFF;
+                    sum_b += (p >> 8) & 0xFF;
+                    sum_a += p & 0xFF;
+                    count++;
+                }
+            }
+        }
+
+        // Vertical pass: read from temp, write to surface
+        for (int col = 0; col < rw; col++) {
+            uint32_t sum_r = 0, sum_g = 0, sum_b = 0, sum_a = 0;
+            int count = 0;
+
+            // Initialize window
+            for (int k = -box_r; k <= box_r; k++) {
+                int tr = 0 + k;
+                if (tr >= 0 && tr < rh) {
+                    uint32_t p = temp[tr * rw + col];
+                    sum_r += (p >> 24) & 0xFF;
+                    sum_g += (p >> 16) & 0xFF;
+                    sum_b += (p >> 8) & 0xFF;
+                    sum_a += p & 0xFF;
+                    count++;
+                }
+            }
+
+            for (int row = 0; row < rh; row++) {
+                if (count > 0) {
+                    uint32_t avg_r = sum_r / count;
+                    uint32_t avg_g = sum_g / count;
+                    uint32_t avg_b = sum_b / count;
+                    uint32_t avg_a = sum_a / count;
+                    pixels[(ry + row) * stride + (rx + col)] = (avg_r << 24) | (avg_g << 16) | (avg_b << 8) | avg_a;
+                }
+
+                int remove_r = row - box_r;
+                int add_r = row + box_r + 1;
+
+                if (remove_r >= 0 && remove_r < rh) {
+                    uint32_t p = temp[remove_r * rw + col];
+                    sum_r -= (p >> 24) & 0xFF;
+                    sum_g -= (p >> 16) & 0xFF;
+                    sum_b -= (p >> 8) & 0xFF;
+                    sum_a -= p & 0xFF;
+                    count--;
+                }
+                if (add_r >= 0 && add_r < rh) {
+                    uint32_t p = temp[add_r * rw + col];
+                    sum_r += (p >> 24) & 0xFF;
+                    sum_g += (p >> 16) & 0xFF;
+                    sum_b += (p >> 8) & 0xFF;
+                    sum_a += p & 0xFF;
+                    count++;
+                }
+            }
+        }
+    }
+
+    mem_free(temp);
+}
+
+/**
+ * Render box-shadow effects for an element (CSS Backgrounds Level 3 §7)
+ *
  * Multiple shadows are rendered in reverse order (last specified = bottommost).
  *
  * Algorithm:
  * 1. For each shadow (in reverse order for proper stacking):
  *    - Calculate shadow rectangle (element rect + offsets + spread)
- *    - If blur > 0: render blurred shadow using ThorVG gaussian blur
+ *    - If blur > 0: render shadow shape then apply 3-pass box blur
  *    - If blur == 0: render sharp shadow rectangle
  *    - Apply border-radius if the element has rounded corners
  * 2. Inset shadows are rendered after background (inside the element)
@@ -764,21 +909,6 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 
         tvg_shape_set_fill_color(shadow_shape, s->color.r, s->color.g, s->color.b, s->color.a);
 
-        // Apply blur if specified
-        if (s->blur_radius > 0) {
-            // ThorVG supports gaussian blur via scene effects
-            // For now, we approximate blur by rendering multiple layers with decreasing opacity
-            // A proper implementation would use tvg_paint_set_composite with blur
-
-            // Simple approximation: render shadow with reduced opacity
-            // The blur effect is approximated by expanding the shadow slightly
-            float alpha_factor = 0.7f;  // Reduce opacity for blur effect
-            uint8_t blurred_alpha = (uint8_t)(s->color.a * alpha_factor);
-            tvg_shape_set_fill_color(shadow_shape, s->color.r, s->color.g, s->color.b, blurred_alpha);
-
-            log_debug("[BOX-SHADOW] Applied blur approximation (factor=%.2f)", alpha_factor);
-        }
-
         // Apply clipping
         Tvg_Paint clip_rect = tvg_shape_new();
         Bound* clip = &rdcon->block.clip;
@@ -787,12 +917,25 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255);
         tvg_paint_set_mask_method(shadow_shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
+        // Render the shadow shape
+        tvg_canvas_remove(canvas, NULL);
         push_with_transform(rdcon, shadow_shape);
-    }
+        tvg_canvas_reset_and_draw(rdcon, false);
+        tvg_canvas_remove(canvas, NULL);
 
-    // Draw all shadows
-    tvg_canvas_reset_and_draw(rdcon, false);
-    tvg_canvas_remove(canvas, NULL);  // clear shapes after rendering
+        // Apply software box blur if blur radius > 0
+        if (s->blur_radius > 0 && rdcon->ui_context->surface) {
+            float blur_px = s->blur_radius;
+            // Blur region must cover the shadow plus the blur extent
+            int br_x = (int)floorf(shadow_x - blur_px);
+            int br_y = (int)floorf(shadow_y - blur_px);
+            int br_w = (int)ceilf(shadow_w + blur_px * 2);
+            int br_h = (int)ceilf(shadow_h + blur_px * 2);
+            box_blur_region(rdcon->ui_context->surface, br_x, br_y, br_w, br_h, blur_px);
+            log_debug("[BOX-SHADOW] Applied 3-pass box blur radius=%.1f on region (%d,%d,%d,%d)",
+                      blur_px, br_x, br_y, br_w, br_h);
+        }
+    }
 
     log_debug("[BOX-SHADOW] Rendered %d outer shadow(s)", shadow_count);
 }
