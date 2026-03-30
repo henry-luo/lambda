@@ -533,6 +533,93 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         }
     }
 
+    // Render background gradient (linear or radial)
+    if (view->bound->background && view->bound->background->gradient_type != GRADIENT_NONE) {
+        BackgroundProp* bg = view->bound->background;
+        uintptr_t view_id  = (uintptr_t)view;
+
+        if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient && bg->linear_gradient->stop_count >= 2) {
+            LinearGradient* lg = bg->linear_gradient;
+            // CSS angle: 0 = to top, 90 = to right. Convert to direction vector.
+            float angle_rad = lg->angle * (float)M_PI / 180.0f;
+            float dx =  sinf(angle_rad);
+            float dy = -cosf(angle_rad);
+            // Extend from center to bounding-box edges (matches CSS gradient geometry)
+            float half_w = width * 0.5f, half_h = height * 0.5f;
+            float bcx = x + half_w, bcy = y + half_h;
+            float abs_dx = fabsf(dx), abs_dy = fabsf(dy);
+            float dist = (abs_dx * height < abs_dy * width)
+                ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
+                : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+            float gx1 = bcx - dx * dist, gy1 = bcy - dy * dist;
+            float gx2 = bcx + dx * dist, gy2 = bcy + dy * dist;
+
+            char grad_id[64];
+            str_fmt(grad_id, sizeof(grad_id), "lingrad-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><linearGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
+                "x1=\"%.3f\" y1=\"%.3f\" x2=\"%.3f\" y2=\"%.3f\">\n",
+                grad_id, gx1, gy1, gx2, gy2);
+            ctx->indent_level++;
+            for (int i = 0; i < lg->stop_count; i++) {
+                GradientStop* stop = &lg->stops[i];
+                float pos = stop->position >= 0 ? stop->position
+                                                : (lg->stop_count > 1 ? (float)i / (lg->stop_count - 1) : 0.0f);
+                char sc[32];
+                svg_color_to_string(stop->color, sc);
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
+                if (stop->color.a < 255) {
+                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+                }
+                strbuf_append_str(ctx->svg_content, " />\n");
+            }
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</linearGradient></defs>\n");
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
+                x, y, width, height, grad_id);
+
+        } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient && bg->radial_gradient->stop_count >= 2) {
+            RadialGradient* rg = bg->radial_gradient;
+            float gcx = x + (rg->cx_set ? rg->cx * width  : width  * 0.5f);
+            float gcy = y + (rg->cy_set ? rg->cy * height : height * 0.5f);
+            float r   = (width < height ? width : height) * 0.5f; // farthest-corner simplification
+
+            char grad_id[64];
+            str_fmt(grad_id, sizeof(grad_id), "radgrad-%lx", (unsigned long)view_id);
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<defs><radialGradient id=\"%s\" gradientUnits=\"userSpaceOnUse\" "
+                "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\">\n",
+                grad_id, gcx, gcy, r);
+            ctx->indent_level++;
+            for (int i = 0; i < rg->stop_count; i++) {
+                GradientStop* stop = &rg->stops[i];
+                float pos = stop->position >= 0 ? stop->position
+                                                : (rg->stop_count > 1 ? (float)i / (rg->stop_count - 1) : 0.0f);
+                char sc[32];
+                svg_color_to_string(stop->color, sc);
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content, "<stop offset=\"%.4f\" stop-color=\"%s\"", pos, sc);
+                if (stop->color.a < 255) {
+                    strbuf_append_format(ctx->svg_content, " stop-opacity=\"%.4f\"", stop->color.a / 255.0f);
+                }
+                strbuf_append_str(ctx->svg_content, " />\n");
+            }
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</radialGradient></defs>\n");
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"url(#%s)\" />\n",
+                x, y, width, height, grad_id);
+        }
+    }
+
     // Render background image (background-image, background-size, background-position, background-repeat)
     if (view->bound->background && view->bound->background->image) {
         BackgroundProp* bg = view->bound->background;
@@ -945,6 +1032,87 @@ static void render_inline_svg_passthrough(SvgRenderContext* ctx, ViewBlock* bloc
               svg_x, svg_y, block->width, block->height);
 }
 
+// Build an SVG transform attribute value from a CSS TransformProp.
+// Returns true if a non-identity transform was written to out_buf.
+// out_buf must be at least 256 bytes.
+static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, float elem_y,
+                                     float elem_w, float elem_h, char* out_buf, int buf_size) {
+    if (!tp || !tp->functions) return false;
+
+    // Compose 2D affine matrix: [a c e; b d f; 0 0 1]
+    // Identity:
+    double ma = 1, mb = 0, mc = 0, md = 1, me = 0, mf = 0;
+
+    // Resolve transform-origin
+    float ox = tp->origin_x_percent ? elem_x + elem_w * tp->origin_x / 100.0f : elem_x + tp->origin_x;
+    float oy = tp->origin_y_percent ? elem_y + elem_h * tp->origin_y / 100.0f : elem_y + tp->origin_y;
+
+    // Pre-translate for transform-origin
+    me += ox; mf += oy;
+
+    for (TransformFunction* tf = tp->functions; tf; tf = tf->next) {
+        // accumulate: result = result * local
+        double la=1, lb=0, lc=0, ld=1, le=0, lf=0;
+        switch (tf->type) {
+            case TRANSFORM_TRANSLATE:
+            case TRANSFORM_TRANSLATEX:
+            case TRANSFORM_TRANSLATEY: {
+                float tx = tf->params.translate.x, ty = tf->params.translate.y;
+                if (!std::isnan(tf->translate_x_percent)) tx = tf->translate_x_percent * elem_w / 100.0f;
+                if (!std::isnan(tf->translate_y_percent)) ty = tf->translate_y_percent * elem_h / 100.0f;
+                le = tx; lf = ty;
+                break;
+            }
+            case TRANSFORM_TRANSLATE3D:
+            case TRANSFORM_TRANSLATEZ:
+                le = tf->params.translate3d.x; lf = tf->params.translate3d.y;
+                break;
+            case TRANSFORM_SCALE:
+            case TRANSFORM_SCALEX:
+            case TRANSFORM_SCALEY:
+                la = tf->params.scale.x > 0 ? tf->params.scale.x : 1.0;
+                ld = tf->params.scale.y > 0 ? tf->params.scale.y : 1.0;
+                break;
+            case TRANSFORM_ROTATE:
+            case TRANSFORM_ROTATEZ: {
+                double ang = tf->angle;  // radians
+                la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
+                break;
+            }
+            case TRANSFORM_SKEWX:
+                lc = tan((double)tf->angle);
+                break;
+            case TRANSFORM_SKEWY:
+                lb = tan((double)tf->angle);
+                break;
+            case TRANSFORM_MATRIX:
+                la = tf->params.matrix.a; lb = tf->params.matrix.b;
+                lc = tf->params.matrix.c; ld = tf->params.matrix.d;
+                le = tf->params.matrix.e; lf = tf->params.matrix.f;
+                break;
+            default:
+                break;
+        }
+        // result = result * L
+        double na = ma*la + mc*lb, nb = mb*la + md*lb;
+        double nc = ma*lc + mc*ld, nd = mb*lc + md*ld;
+        double ne = ma*le + mc*lf + me, nf = mb*le + md*lf + mf;
+        ma=na; mb=nb; mc=nc; md=nd; me=ne; mf=nf;
+    }
+
+    // Post-translate: undo transform-origin shift
+    me -= ox; mf -= oy;
+
+    // Skip if effectively identity
+    bool is_identity = (fabs(ma-1)<1e-5 && fabs(mb)<1e-5 && fabs(mc)<1e-5
+                     && fabs(md-1)<1e-5 && fabs(me)<1e-5 && fabs(mf)<1e-5);
+    if (is_identity) return false;
+
+    str_fmt(out_buf, buf_size, "matrix(%.6g,%.6g,%.6g,%.6g,%.6g,%.6g)",
+            ma, mb, mc, md, me, mf);
+    return true;
+}
+
 void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
     // Save parent context
     BlockBlot pa_block = ctx->block;
@@ -1004,8 +1172,29 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
         }
     }
 
-    // Render children
+    // Render children (wrapped in optional opacity + transform groups)
     if (block->first_child) {
+        float elem_opacity = (block->in_line && block->in_line->opacity > 0) ? block->in_line->opacity : 1.0f;
+        bool has_opacity   = elem_opacity < 0.9995f;
+
+        char transform_buf[256] = {};
+        bool has_transform = svg_build_transform_attr(
+            block->transform,
+            ctx->block.x + block->x, ctx->block.y + block->y,
+            block->width, block->height,
+            transform_buf, sizeof(transform_buf));
+
+        if (has_opacity) {
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", elem_opacity);
+            ctx->indent_level++;
+        }
+        if (has_transform) {
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content, "<g transform=\"%s\">\n", transform_buf);
+            ctx->indent_level++;
+        }
+
         svg_indent(ctx);
         strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\">\n", block->node_name());
         ctx->indent_level++;
@@ -1013,6 +1202,17 @@ void render_block_view_svg(SvgRenderContext* ctx, ViewBlock* block) {
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
+
+        if (has_transform) {
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</g>\n");
+        }
+        if (has_opacity) {
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</g>\n");
+        }
     }
 
     // Render multi-column rules between columns
@@ -1048,8 +1248,17 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
                   view_span->in_line, view_span->in_line ? view_span->in_line->color.c : 0);
     }
 
-    // Render children
+    // Render children (wrapped in optional opacity group)
     if (view_span->first_child) {
+        float elem_opacity = (view_span->in_line && view_span->in_line->opacity > 0) ? view_span->in_line->opacity : 1.0f;
+        bool has_opacity   = elem_opacity < 0.9995f;
+
+        if (has_opacity) {
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content, "<g opacity=\"%.4f\">\n", elem_opacity);
+            ctx->indent_level++;
+        }
+
         svg_indent(ctx);
         strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n", view_span->node_name());
         ctx->indent_level++;
@@ -1057,6 +1266,12 @@ void render_inline_view_svg(SvgRenderContext* ctx, ViewSpan* view_span) {
         ctx->indent_level--;
         svg_indent(ctx);
         strbuf_append_str(ctx->svg_content, "</g>\n");
+
+        if (has_opacity) {
+            ctx->indent_level--;
+            svg_indent(ctx);
+            strbuf_append_str(ctx->svg_content, "</g>\n");
+        }
     }
 
     // Restore context
