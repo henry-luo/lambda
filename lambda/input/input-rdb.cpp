@@ -632,6 +632,20 @@ static Item rdb_build_table_schema(MarkBuilder& builder, RdbTable* tbl) {
         tbl_schema.put("reverse_fks", rfks.final());
     }
 
+    // triggers
+    if (tbl->trigger_count > 0) {
+        ArrayBuilder trigs = builder.array();
+        for (int i = 0; i < tbl->trigger_count; i++) {
+            RdbTrigger* trig = &tbl->triggers[i];
+            MapBuilder trig_map = builder.map();
+            trig_map.put("name", trig->name);
+            trig_map.put("timing", trig->timing);
+            trig_map.put("event", trig->event);
+            trigs.append(trig_map.final());
+        }
+        tbl_schema.put("triggers", trigs.final());
+    }
+
     return tbl_schema.final();
 }
 
