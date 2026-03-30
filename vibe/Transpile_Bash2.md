@@ -6,7 +6,7 @@ This document covers the integration of the **GNU Bash official test suite** int
 
 ### Motivation
 
-The existing baseline tests (`test/bash/*.sh`, 31 pairs) are hand-written integration tests targeting specific features implemented in Phases 1–9a. They verify that what Lambda implements works correctly but don't reveal **what's missing**. The official Bash test suite fills this gap — it defines what a full Bash implementation must handle, making it a roadmap for remaining work.
+The existing baseline tests (`test/bash/*.sh`, 31 pairs) are hand-written integration tests targeting specific features implemented in Phases 1–9b. They verify that what Lambda implements works correctly but don't reveal **what's missing**. The official Bash test suite fills this gap — it defines what a full Bash implementation must handle, making it a roadmap for remaining work.
 
 ### Summary
 
@@ -22,8 +22,8 @@ The existing baseline tests (`test/bash/*.sh`, 31 pairs) are hand-written integr
 | Per-test timeout | 10 seconds |
 | Output cap | 1 MB |
 | Total runtime | ~21 seconds (debug build) |
-| **Current pass rate** | **1 / 82 (1.2%)** |
-| Passing test | `strip` |
+| **Current pass rate** | **5 / 82 (6.1%)** |
+| Passing tests | `dbg-support`, `dbg-support2`, `invert`, `nquote4`, `strip` |
 
 ---
 
@@ -140,18 +140,34 @@ The generated `premake5.mac.lua` includes the test project automatically via `ma
 
 ```
 [==========] Running 82 tests from 1 test suite.
-[==========] 82 tests from 1 test suite ran. (20734 ms total)
-[  PASSED  ] 1 test.
-81 FAILED TESTS
+[  PASSED  ] 5 tests.
+77 FAILED TESTS
 ```
 
-### Passing: 1 test
+### Passing: 5 tests
 
-| Test | Feature | Time |
-|------|---------|------|
-| `strip` | Parameter expansion `${var#pat}`, `${var%pat}`, `${var##pat}`, `${var%%pat}` | 28 ms |
+| Test | Feature | Time | Since |
+|------|---------|------|-------|
+| `dbg-support` | DEBUG trap, `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `BASH_ARGV`, `caller` | 113 ms | Phase 9b |
+| `dbg-support2` | Extended debug support (`extdebug`, debug trap return values) | 41 ms | Phase 9b |
+| `invert` | `!` command negation | 48 ms | Phase 9b |
+| `nquote4` | ANSI-C quoting edge cases | 65 ms | Phase 9b |
+| `strip` | Parameter expansion `${var#pat}`, `${var%pat}`, `${var##pat}`, `${var%%pat}` | 28 ms | Phase 5 |
 
-This passes because Lambda already implements all 16 forms of parameter expansion (Phase 5 in Transpile_Bash.md).
+#### What Enabled the New Passes (Phase 9b)
+
+The `dbg-support` and `dbg-support2` tests required a combination of features that were implemented together:
+
+- **`command_name` node handling**: Tree-sitter wraps command names in a `command_name` node; the transpiler now unwraps it to `build_expr_node(child)` instead of falling through to `build_word`.
+- **`((...))` as `compound_statement`**: In tree-sitter-bash, `((...))` is a `compound_statement` (not `arithmetic_expansion` which is `$((...))`). Added detection of `((` first child in `build_compound_statement`.
+- **Binary expression assignment in arithmetic**: Tree-sitter parses `x=5+3` inside `((...))` as `binary_expression` with `=` operator. Added first-pass operator scan to generate `ARITH_ASSIGN` instead of `ARITH_BINARY`.
+- **For-arithmetic initial debug prelude**: Added `bash_set_lineno` + `bash_run_debug_trap` before the init expression in `for ((...))` loops.
+- **Bare `$FUNCNAME`**: Special-cased in `bm_transpile_varref` to call `bash_get_funcname(0)` instead of `bash_get_var`.
+- **BASH_ARGV/BASH_ARGC stack**: Full stack implementation with push/pop around function calls, accessing args top-down (most recent frame first per bash spec).
+- **`${FUNCNAME[@]}` and `${BASH_ARGV[@]}`**: Implemented `bash_get_funcname_all()` and `bash_get_bash_argv_all()` returning arrays, with special iteration paths in `bm_transpile_for`.
+- **Dynamic command name execution**: When a command name is a variable expansion (e.g., `${THIS_SH}`), the transpiler now evaluates it at runtime and dispatches via `bash_call_rt_func` → `bash_exec_external` instead of silently returning 0.
+
+The `invert` and `nquote4` tests passed as side effects of general transpiler improvements (command execution and quoting fixes).
 
 ### Complete Test Inventory (82 tests)
 
@@ -206,7 +222,7 @@ Grouped by feature area with current status:
 |------|---------|--------|-------|
 | `cond` | `[[ ]]` conditional expressions | FAIL | |
 | `test` | `[ ]` / `test` builtin | FAIL | |
-| `invert` | `!` command negation | FAIL | |
+| `invert` | `!` command negation | **PASS** | ✅ |
 
 #### Builtins & Shell Options (5 tests)
 
@@ -231,7 +247,9 @@ Grouped by feature area with current status:
 | `quote` | Quoting rules | FAIL | |
 | `iquote` | `$'...'` and `$"..."` quoting | FAIL | |
 | `nquote` | ANSI-C quoting | FAIL | |
-| `nquote1`–`nquote5` | Extended quoting tests | FAIL | |
+| `nquote1`–`nquote3` | Extended quoting tests | FAIL | |
+| `nquote4` | Extended quoting test 4 | **PASS** | ✅ |
+| `nquote5` | Extended quoting test 5 | FAIL | |
 
 #### Functions (2 tests)
 
@@ -345,8 +363,8 @@ Grouped by feature area with current status:
 
 | Test | Feature | Status | Notes |
 |------|---------|--------|-------|
-| `dbg-support` | DEBUG trap, `BASH_SOURCE`, etc. | FAIL | |
-| `dbg-support2` | Extended debug support | FAIL | |
+| `dbg-support` | DEBUG trap, `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `BASH_ARGV`, `caller` | **PASS** | ✅ Full debug support |
+| `dbg-support2` | Extended debug: `extdebug`, debug trap return values | **PASS** | ✅ |
 
 #### Mapfile / Read (2 tests)
 
@@ -365,7 +383,18 @@ Grouped by feature area with current status:
 
 ## Feature Coverage Gap Analysis
 
-Comparing current Lambda Bash implementation (Transpile_Bash.md Phase 1–9a) against the official test suite reveals these priority areas:
+Comparing current Lambda Bash implementation (Transpile_Bash.md Phase 1–9b) against the official test suite reveals these priority areas:
+
+### Fully Passing
+
+These features pass the official test suite completely:
+
+| Feature | Official Tests | Notes |
+|---------|---------------|-------|
+| Parameter expansion strip | `strip` ✅ | All 16 forms of `${var#}`, `${var%}`, etc. |
+| Debug support | `dbg-support` ✅, `dbg-support2` ✅ | DEBUG trap, `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `BASH_ARGV`, `BASH_ARGC`, `caller`, `extdebug` |
+| Command negation | `invert` ✅ | `!` pipeline negation |
+| ANSI-C quoting (partial) | `nquote4` ✅ | `nquote1`–`3`, `nquote5` still fail |
 
 ### Already Implemented but Tests Still Fail
 
@@ -373,10 +402,10 @@ These features are implemented in Lambda but the official tests exercise edge ca
 
 | Feature | Lambda Status | Official Tests | Gap |
 |---------|--------------|----------------|-----|
-| Arithmetic | ✅ All operators | `arith`, `arith-for` | Sub-script invocation via `${THIS_SH}`, edge cases |
+| Arithmetic | ✅ All operators | `arith`, `arith-for` | Sub-script invocations, edge cases |
 | Arrays | ✅ Full indexed + assoc | `array`, `assoc`, `quotearray` | Complex sub-script patterns |
 | Parameter expansion | ✅ All 16 forms | `strip` ✅, `exp`, `more-exp`, `new-exp` | Only `strip` passes — others test combinations |
-| Control flow | ✅ All constructs | `case`, `cond`, `test`, `invert` | Edge cases, sub-scripts |
+| Control flow | ✅ All constructs | `case`, `cond`, `test`, `invert` ✅ | `invert` now passes; `case`/`cond`/`test` have edge cases |
 | Functions | ✅ Both syntaxes | `func` | Sub-script patterns |
 | Brace expansion | ✅ All forms | `braces` | Complex nesting |
 | Tilde expansion | ✅ `~`, `~/path` | `tilde`, `tilde2` | Sub-script interaction |

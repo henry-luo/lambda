@@ -53,6 +53,15 @@ static String* bash_funcname_stack[BASH_FUNCNAME_STACK_MAX];
 static String* bash_funcname_source_stack[BASH_FUNCNAME_STACK_MAX]; // parallel: source file for each funcname entry
 static int bash_funcname_depth = 0;
 
+// BASH_ARGV: flat stack of function arguments (pushed in reverse order per call frame)
+// BASH_ARGC: per-frame argument count
+#define BASH_ARGV_STACK_MAX 1024
+static String* bash_argv_stack[BASH_ARGV_STACK_MAX];
+static int bash_argv_depth = 0;               // total items on argv stack
+#define BASH_ARGC_STACK_MAX 256
+static int bash_argc_stack[BASH_ARGC_STACK_MAX]; // per-frame arg counts
+static int bash_argc_depth = 0;               // number of frames
+
 #define BASH_SOURCE_STACK_MAX 256
 static String* bash_source_stack[BASH_SOURCE_STACK_MAX];
 static int bash_source_depth = 0;
@@ -2868,6 +2877,99 @@ extern "C" Item bash_get_funcname(Item index) {
 
 extern "C" Item bash_get_funcname_count(void) {
     return (Item){.item = i2it(bash_funcname_depth)};
+}
+
+extern "C" Item bash_get_funcname_all(void) {
+    if (bash_funcname_depth == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    Item arr = bash_array_new();
+    for (int i = bash_funcname_depth - 1; i >= 0; i--) {
+        arr = bash_array_append(arr, (Item){.item = s2it(bash_funcname_stack[i])});
+    }
+    return arr;
+}
+
+// BASH_ARGV: push arguments for a function call (args pushed in reverse order)
+extern "C" void bash_push_bash_argv(Item arg) {
+    if (bash_argv_depth >= BASH_ARGV_STACK_MAX) return;
+    String* s = it2s(arg);
+    if (!s) s = heap_create_name("", 0);
+    bash_argv_stack[bash_argv_depth++] = s;
+}
+
+extern "C" void bash_push_bash_argc(int count) {
+    if (bash_argc_depth >= BASH_ARGC_STACK_MAX) return;
+    bash_argc_stack[bash_argc_depth++] = count;
+}
+
+extern "C" void bash_pop_bash_argv(void) {
+    // pop the top frame's args from BASH_ARGV
+    if (bash_argc_depth <= 0) return;
+    int count = bash_argc_stack[--bash_argc_depth];
+    bash_argv_depth -= count;
+    if (bash_argv_depth < 0) bash_argv_depth = 0;
+}
+
+extern "C" void bash_push_argv_frame(Item* args, int count) {
+    // push function arguments onto BASH_ARGV in forward order
+    // so that last arg ($N) ends up at top of stack (lowest BASH_ARGV index)
+    for (int i = 0; i < count; i++) {
+        if (bash_argv_depth >= BASH_ARGV_STACK_MAX) break;
+        String* s = it2s(args[i]);
+        if (!s) s = heap_create_name("", 0);
+        bash_argv_stack[bash_argv_depth++] = s;
+    }
+    if (bash_argc_depth < BASH_ARGC_STACK_MAX) {
+        bash_argc_stack[bash_argc_depth++] = count;
+    }
+}
+
+extern "C" Item bash_get_bash_argv(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+    if (idx < 0 || idx >= bash_argv_depth) {
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    // BASH_ARGV[0] is at top of stack (most recently pushed arg)
+    int stack_idx = bash_argv_depth - 1 - idx;
+    return (Item){.item = s2it(bash_argv_stack[stack_idx])};
+}
+
+extern "C" Item bash_get_bash_argv_count(void) {
+    return (Item){.item = i2it(bash_argv_depth)};
+}
+
+extern "C" Item bash_get_bash_argv_all(void) {
+    if (bash_argv_depth == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    Item arr = bash_array_new();
+    // iterate top-down: most recently pushed first
+    for (int i = bash_argv_depth - 1; i >= 0; i--) {
+        arr = bash_array_append(arr, (Item){.item = s2it(bash_argv_stack[i])});
+    }
+    return arr;
+}
+
+extern "C" Item bash_get_bash_argc(Item index) {
+    int idx = 0;
+    TypeId type = get_type_id(index);
+    if (type == LMD_TYPE_INT) idx = (int)it2i(index);
+    else if (type == LMD_TYPE_STRING) {
+        String* s = it2s(index);
+        if (s && s->len > 0) idx = atoi(s->chars);
+    }
+    int stack_idx = bash_argc_depth - 1 - idx;
+    if (stack_idx < 0 || stack_idx >= bash_argc_depth) {
+        return (Item){.item = i2it(0)};
+    }
+    return (Item){.item = i2it(bash_argc_stack[stack_idx])};
+}
+
+extern "C" Item bash_get_bash_argc_count(void) {
+    return (Item){.item = i2it(bash_argc_depth)};
 }
 
 extern "C" Item bash_get_bash_source_count(void) {
