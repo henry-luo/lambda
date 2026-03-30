@@ -76,7 +76,8 @@ static void create_plugin_test_db(const char* path) {
         "   '[\"sale\",\"popular\"]'),"
         "  (2, 'Gadget', 1, 49.99, 1.500, 1, '2024-02-20 10:30:00', "
         "   '{\"color\":\"blue\"}'),"
-        "  (3, 'Novel', 2, 14.99, NULL, 0, '2024-03-10 12:00:00', NULL);";
+        "  (3, 'Novel', 2, 14.99, NULL, 0, '2024-03-10 12:00:00', NULL),"
+        "  (4, 'Orphan', NULL, 5.99, NULL, 1, NULL, NULL);";
 
     sqlite3_exec(db, ddl, NULL, NULL, NULL);
     sqlite3_close(db);
@@ -290,7 +291,7 @@ TEST_F(InputRdbTest, DataProductsRowCount) {
     ElementReader el(input->root);
     MapReader data = el.get_attr("data").asMap();
     ArrayReader prods = data.get("products").asArray();
-    EXPECT_EQ(prods.length(), 3);
+    EXPECT_EQ(prods.length(), 4);  // Widget, Gadget, Novel, Orphan(null FK)
 }
 
 TEST_F(InputRdbTest, DataRowIsMap) {
@@ -444,8 +445,8 @@ TEST_F(InputRdbTest, ViewDataAccessible) {
     ElementReader el(input->root);
     MapReader data = el.get_attr("data").asMap();
     ArrayReader cheap = data.get("cheap_products").asArray();
-    // Widget (9.99) and Novel (14.99) are < 20.0
-    EXPECT_EQ(cheap.length(), 2);
+    // Widget (9.99), Orphan (5.99), and Novel (14.99) are < 20.0
+    EXPECT_EQ(cheap.length(), 3);
 }
 
 TEST_F(InputRdbTest, ViewRowContent) {
@@ -675,4 +676,38 @@ TEST_F(InputRdbTest, FkReverse_OriginalColumnsPreserved) {
 
     EXPECT_EQ(cat0.get("id").asInt(), 1);
     EXPECT_STREQ(cat0.get("name").cstring(), "Electronics");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §13 Null FK Handling
+ * ══════════════════════════════════════════════════════════════════════ */
+
+// product with NULL category_id has null for the forward FK navigation attr
+TEST_F(InputRdbTest, FkForward_NullFkIsNull) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader prods = data.get("products").asArray();
+
+    // product[3] is Orphan with category_id = NULL
+    MapReader orphan = prods.get(3).asMap();
+    EXPECT_STREQ(orphan.get("name").cstring(), "Orphan");
+    EXPECT_TRUE(orphan.get("category_id").isNull());
+    EXPECT_TRUE(orphan.get("category").isNull());
+}
+
+// orphan product does NOT appear in any category's reverse FK products array
+TEST_F(InputRdbTest, FkReverse_OrphanNotInAnyCategory) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader data = el.get_attr("data").asMap();
+    ArrayReader cats = data.get("categories").asArray();
+
+    // Electronics: Widget + Gadget (NOT Orphan)
+    ArrayReader elec_prods = cats.get(0).asMap().get("products").asArray();
+    EXPECT_EQ(elec_prods.length(), 2);
+
+    // Books: Novel only
+    ArrayReader books_prods = cats.get(1).asMap().get("products").asArray();
+    EXPECT_EQ(books_prods.length(), 1);
 }

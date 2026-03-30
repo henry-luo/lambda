@@ -1448,7 +1448,7 @@ Status reflects the current repository state, not the intended end-state of the 
 | Datetime column → Lambda `datetime` | P0 | Medium | ✅ Implemented |
 | JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | ✅ Implemented |
 | Views exposed as table elements | P0 | Low | ✅ Implemented |
-| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed; triggers and SQL functions are not |
+| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed with `name`, `unique`, and `columns` fields and have integration test coverage (`io_sqlite_schema.ls`); triggers and SQL functions are not |
 | `db.schema` / `db.data` namespace structure | P0 | Medium | ✅ Implemented |
 | Result caching (LRU by query) | P1 | Medium | Not implemented |
 | `in` list → `IN (...)` | P1 | Low | Partial: query builder generates parameterized `IN (?1, ?2, ...)` clauses; not yet wired to evaluator |
@@ -1457,8 +1457,8 @@ Status reflects the current repository state, not the intended end-state of the 
 | `len(db.data.table)` → `SELECT COUNT(*)` | P1 | Low | Not implemented |
 | Index access `db.data.table[n]` → `LIMIT 1 OFFSET n` | P1 | Low | Not implemented |
 | Vendor SQLite amalgamation in `lib/` | P0 | Low | ✅ Implemented |
-| GTest unit tests (generic + SQLite) | P0 | Medium | ✅ Implemented: RDB driver (60 tests), input plugin (48 tests), query builder (34 tests) |
-| Lambda integration test scripts (.ls + .txt) | P0 | Medium | Partial: 7 scripts covering basic access, schema, types, views, data, autodetect, and FK metadata; SQL pushdown and lazy-loading scenarios are still absent |
+| GTest unit tests (generic + SQLite) | P0 | Medium | ✅ Implemented: RDB driver (60 tests), input plugin (50 tests), query builder (34 tests) |
+| Lambda integration test scripts (.ls + .txt) | P0 | Medium | ✅ Implemented: 8 scripts covering basic access, schema, types, views, data, autodetect, FK metadata, and FK navigation (forward/reverse/null); SQL pushdown and lazy-loading scenarios are still absent |
 
 ### Phase 2: Advanced Queries (Future)
 

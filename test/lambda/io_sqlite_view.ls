@@ -6,7 +6,7 @@ let db = input('./test/input/test_rdb_full.db', 'sqlite')^
 // view flag in schema
 db.schema.cheap_products.view
 
-// view row count (Widget 9.99, Novel 14.99, Cable 4.99 → all < 20)
+// view row count (Cable 4.99, Widget 9.99, Novel 14.99 → all < 20; order by price via index)
 len(db.data.cheap_products)
 
 // view data access — first cheap product
