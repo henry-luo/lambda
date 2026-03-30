@@ -1432,7 +1432,7 @@ Status reflects the current repository state, not the intended end-state of the 
 | Generic RDB C+ API (`lib/rdb.h`) | P0 | Medium | ✅ Implemented |
 | SQLite driver (`lib/rdb_sqlite.c`) | P0 | Medium | ✅ Implemented |
 | RDB connection via `input()` | P0 | Low | ✅ Implemented |
-| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs (with `link_name` and `reverse_fks`), datetime, JSON, and decimal typing are exposed; triggers and functions are not |
+| Schema introspection → Lambda types | P0 | Medium | Partial: columns, views, indexes, FKs (with `link_name` and `reverse_fks`), triggers (`name`, `timing`, `event`), datetime, JSON, and decimal typing are exposed; SQL functions are not |
 | Table element structure | P0 | Medium | Partial: `db.data.<table>` is exposed, but rows are eagerly materialized arrays rather than lazy table proxies |
 | Basic `for` → `SELECT * FROM table` | P0 | Medium | Partial: table rows are loaded with `SELECT *` during `input()`, but `for` clauses are not lowered to SQL |
 | `where` → `WHERE` (comparisons, and/or/not) | P0 | Medium | Partial: SQL query builder (`rdb_query.h/cpp`) generates parameterized WHERE with `=`, `!=`, `<`, `<=`, `>`, `>=`, AND/OR/NOT; not yet wired to Lambda `for`-clause evaluator |
@@ -1448,7 +1448,7 @@ Status reflects the current repository state, not the intended end-state of the 
 | Datetime column → Lambda `datetime` | P0 | Medium | ✅ Implemented |
 | JSON column → Lambda `map`/`array` (auto-parse) | P0 | Medium | ✅ Implemented |
 | Views exposed as table elements | P0 | Low | ✅ Implemented |
-| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed with `name`, `unique`, and `columns` fields and have integration test coverage (`io_sqlite_schema.ls`); triggers and SQL functions are not |
+| Schema introspection (indexes, triggers, functions) | P0 | Medium | Partial: indexes are exposed with `name`, `unique`, and `columns` fields; triggers are exposed with `name`, `timing` (BEFORE/AFTER/INSTEAD OF), and `event` (INSERT/UPDATE/DELETE) fields; both have GTest and integration test coverage (`io_sqlite_schema.ls`); SQL functions are not |
 | `db.schema` / `db.data` namespace structure | P0 | Medium | ✅ Implemented |
 | Result caching (LRU by query) | P1 | Medium | Not implemented |
 | `in` list → `IN (...)` | P1 | Low | Partial: query builder generates parameterized `IN (?1, ?2, ...)` clauses; not yet wired to evaluator |

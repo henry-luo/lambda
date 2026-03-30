@@ -67,6 +67,8 @@ static void create_test_database(const char* path) {
         "CREATE INDEX idx_books_author ON books(author_id);"
         "CREATE UNIQUE INDEX idx_books_title ON books(title);"
         "CREATE VIEW active_authors AS SELECT * FROM authors WHERE active = 1;"
+        "CREATE TRIGGER trg_books_before_insert BEFORE INSERT ON books BEGIN SELECT 1; END;"
+        "CREATE TRIGGER trg_books_after_update AFTER UPDATE ON books BEGIN SELECT 1; END;"
         "INSERT INTO authors (id, name, born, rating, active) VALUES "
         "  (1, 'Alice', '1985-03-15', 4.8, 1),"
         "  (2, 'Bob', '1990-07-22', 3.5, 1),"
@@ -1638,5 +1640,40 @@ TEST_F(RdbTest, ErrorMsgAfterBadPrepare) {
     ASSERT_NE(msg, nullptr);
     // should mention the table
     EXPECT_NE(strstr(msg, "nonexistent_table"), nullptr);
+    rdb_close(conn);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §23 Trigger Schema
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(RdbTest, TriggerCount) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    rdb_load_schema(conn);
+    RdbTable* books = rdb_get_table(conn, "books");
+    ASSERT_NE(books, nullptr);
+    EXPECT_EQ(books->trigger_count, 2);
+    // authors table has no triggers
+    RdbTable* authors = rdb_get_table(conn, "authors");
+    ASSERT_NE(authors, nullptr);
+    EXPECT_EQ(authors->trigger_count, 0);
+    rdb_close(conn);
+}
+
+TEST_F(RdbTest, TriggerDetails) {
+    RdbConn* conn = rdb_open(pool, TEST_DB_PATH, "sqlite", true);
+    ASSERT_NE(conn, nullptr);
+    rdb_load_schema(conn);
+    RdbTable* books = rdb_get_table(conn, "books");
+    ASSERT_NE(books, nullptr);
+    ASSERT_EQ(books->trigger_count, 2);
+    // triggers are ordered as returned by sqlite_master (insertion order)
+    EXPECT_STREQ(books->triggers[0].name, "trg_books_before_insert");
+    EXPECT_STREQ(books->triggers[0].timing, "BEFORE");
+    EXPECT_STREQ(books->triggers[0].event, "INSERT");
+    EXPECT_STREQ(books->triggers[1].name, "trg_books_after_update");
+    EXPECT_STREQ(books->triggers[1].timing, "AFTER");
+    EXPECT_STREQ(books->triggers[1].event, "UPDATE");
     rdb_close(conn);
 }
