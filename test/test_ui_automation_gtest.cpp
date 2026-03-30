@@ -203,6 +203,7 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     std::string cmd = std::string(LAMBDA_EXE)
         + " view " + info.html_path
         + " --event-file " + info.json_path
+        + " --headless"
         + " 2>&1";
 
     FILE* pipe = popen(cmd.c_str(), "r");

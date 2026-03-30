@@ -179,6 +179,11 @@ gc_heap_t* gc_heap_create(void) {
     gc->root_slot_count = 0;
     memset(gc->root_slots, 0, sizeof(gc->root_slots));
 
+    // initialize root range registry (for JS closure env arrays)
+    gc->root_ranges = NULL;
+    gc->root_range_count = 0;
+    gc->root_range_capacity = 0;
+
     // collection trigger
     gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
     gc->collecting = 0;
@@ -212,6 +217,12 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->mark_stack) {
         free(gc->mark_stack);
         gc->mark_stack = NULL;
+    }
+
+    // free root ranges (C heap allocated)
+    if (gc->root_ranges) {
+        free(gc->root_ranges);
+        gc->root_ranges = NULL;
     }
 
     // free bump block metadata (block memory is pool-allocated)
@@ -441,6 +452,24 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
             return;
         }
     }
+}
+
+void gc_register_root_range(gc_heap_t* gc, uint64_t* base, int count) {
+    if (!gc || !base || count <= 0) return;
+    if (gc->root_range_count >= gc->root_range_capacity) {
+        int new_cap = gc->root_range_capacity ? gc->root_range_capacity * 2 : 256;
+        gc_root_range_t* new_arr = (gc_root_range_t*)realloc(gc->root_ranges,
+            new_cap * sizeof(gc_root_range_t));
+        if (!new_arr) {
+            log_error("gc_register_root_range: realloc failed for %d ranges", new_cap);
+            return;
+        }
+        gc->root_ranges = new_arr;
+        gc->root_range_capacity = new_cap;
+    }
+    gc->root_ranges[gc->root_range_count].base = base;
+    gc->root_ranges[gc->root_range_count].count = count;
+    gc->root_range_count++;
 }
 
 // ============================================================================
@@ -1117,6 +1146,17 @@ void gc_collect(gc_heap_t* gc, uint64_t* extra_roots, int extra_count,
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i]) {
             gc_mark_item(gc, *gc->root_slots[i]);
+        }
+    }
+
+    // Phase 1a2: Mark registered root ranges (JS closure env arrays)
+    for (int i = 0; i < gc->root_range_count; i++) {
+        uint64_t* base = gc->root_ranges[i].base;
+        int count = gc->root_ranges[i].count;
+        if (base) {
+            for (int j = 0; j < count; j++) {
+                gc_mark_item(gc, base[j]);
+            }
         }
     }
 

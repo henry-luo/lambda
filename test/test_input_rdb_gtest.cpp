@@ -70,6 +70,9 @@ static void create_plugin_test_db(const char* path) {
         ");"
         "CREATE VIEW cheap_products AS "
         "  SELECT * FROM products WHERE price < 20.0;"
+        "CREATE INDEX idx_products_name ON products(name);"
+        "CREATE TRIGGER trg_products_before_insert BEFORE INSERT ON products BEGIN SELECT 1; END;"
+        "CREATE TRIGGER trg_products_after_delete AFTER DELETE ON products BEGIN SELECT 1; END;"
         "INSERT INTO categories VALUES (1, 'Electronics'), (2, 'Books');"
         "INSERT INTO products VALUES "
         "  (1, 'Widget', 1, 9.99, 0.250, 1, '2024-01-15 08:00:00', "
@@ -162,6 +165,19 @@ TEST_F(InputRdbTest, DbTableCount) {
     EXPECT_EQ(count, 3);
 }
 
+TEST_F(InputRdbTest, DbTableNames) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    ItemReader names_item = el.get_attr("table_names");
+    EXPECT_TRUE(names_item.isArray());
+    ArrayReader names = names_item.asArray();
+    EXPECT_EQ(names.length(), 3);
+    // sorted alphabetically (SQLite ORDER BY name)
+    EXPECT_STREQ(names.get(0).cstring(), "categories");
+    EXPECT_STREQ(names.get(1).cstring(), "cheap_products");
+    EXPECT_STREQ(names.get(2).cstring(), "products");
+}
+
 /* ══════════════════════════════════════════════════════════════════════
  * §3 Schema Namespace
  * ══════════════════════════════════════════════════════════════════════ */
@@ -249,13 +265,28 @@ TEST_F(InputRdbTest, SchemaIndexes) {
     Input* input = input_rdb_from_path(TEST_DB, "sqlite");
     ElementReader el(input->root);
     MapReader schema = el.get_attr("schema").asMap();
+    MapReader prod_schema = schema.get("products").asMap();
+    // products has idx_products_name
+    ItemReader idx_item = prod_schema.get("indexes");
+    EXPECT_TRUE(idx_item.isArray());
+    ArrayReader idxs = idx_item.asArray();
+    EXPECT_GE(idxs.length(), 1);
+
+    // find idx_products_name
+    bool found = false;
+    for (int i = 0; i < (int)idxs.length(); i++) {
+        MapReader idx = idxs.get(i).asMap();
+        if (idx.get("name").cstring() &&
+            strcmp(idx.get("name").cstring(), "idx_products_name") == 0) {
+            EXPECT_FALSE(idx.get("unique").asBool());
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found) << "idx_products_name not found";
+
+    // categories has no explicit named indexes
     MapReader cat_schema = schema.get("categories").asMap();
-    // categories has no explicit indexes (only autoindex for PK)
-    // products has the FK-derived autoindex
-    // just verify the key exists or doesn't error
-    ItemReader idx = cat_schema.get("indexes");
-    // may or may not exist depending on autoindex visibility
-    (void)idx;
+    EXPECT_FALSE(cat_schema.has("indexes"));
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -710,4 +741,80 @@ TEST_F(InputRdbTest, FkReverse_OrphanNotInAnyCategory) {
     // Books: Novel only
     ArrayReader books_prods = cats.get(1).asMap().get("products").asArray();
     EXPECT_EQ(books_prods.length(), 1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §14 Trigger Schema
+ * ══════════════════════════════════════════════════════════════════════ */
+
+// products table has 2 triggers
+TEST_F(InputRdbTest, SchemaTriggerCount) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader schema = el.get_attr("schema").asMap();
+    MapReader prod_schema = schema.get("products").asMap();
+    ItemReader trigs_item = prod_schema.get("triggers");
+    EXPECT_TRUE(trigs_item.isArray());
+    ArrayReader trigs = trigs_item.asArray();
+    EXPECT_EQ(trigs.length(), 2);
+}
+
+TEST_F(InputRdbTest, SchemaTriggerDetails) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader schema = el.get_attr("schema").asMap();
+    MapReader prod_schema = schema.get("products").asMap();
+    ArrayReader trigs = prod_schema.get("triggers").asArray();
+
+    MapReader t0 = trigs.get(0).asMap();
+    EXPECT_STREQ(t0.get("name").cstring(), "trg_products_before_insert");
+    EXPECT_STREQ(t0.get("timing").cstring(), "BEFORE");
+    EXPECT_STREQ(t0.get("event").cstring(), "INSERT");
+
+    MapReader t1 = trigs.get(1).asMap();
+    EXPECT_STREQ(t1.get("name").cstring(), "trg_products_after_delete");
+    EXPECT_STREQ(t1.get("timing").cstring(), "AFTER");
+    EXPECT_STREQ(t1.get("event").cstring(), "DELETE");
+}
+
+// categories table has no triggers
+TEST_F(InputRdbTest, SchemaTriggerAbsent) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    MapReader schema = el.get_attr("schema").asMap();
+    MapReader cat_schema = schema.get("categories").asMap();
+    EXPECT_FALSE(cat_schema.has("triggers"));
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §15 Function Schema (database-level)
+ * ══════════════════════════════════════════════════════════════════════ */
+
+TEST_F(InputRdbTest, FunctionsPresent) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    ItemReader funcs_item = el.get_attr("functions");
+    EXPECT_TRUE(funcs_item.isArray());
+    ArrayReader funcs = funcs_item.asArray();
+    EXPECT_GT(funcs.length(), 0);
+}
+
+TEST_F(InputRdbTest, FunctionDetails) {
+    Input* input = input_rdb_from_path(TEST_DB, "sqlite");
+    ElementReader el(input->root);
+    ArrayReader funcs = el.get_attr("functions").asArray();
+
+    // find 'abs' — a well-known scalar built-in
+    bool found_abs = false;
+    for (int i = 0; i < funcs.length(); i++) {
+        MapReader fn = funcs.get(i).asMap();
+        if (strcmp(fn.get("name").cstring(), "abs") == 0
+            && fn.get("narg").asInt() == 1) {
+            found_abs = true;
+            EXPECT_STREQ(fn.get("type").cstring(), "scalar");
+            EXPECT_TRUE(fn.get("builtin").asBool());
+            break;
+        }
+    }
+    EXPECT_TRUE(found_abs) << "expected 'abs' function in db.functions";
 }

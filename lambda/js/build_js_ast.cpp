@@ -193,8 +193,37 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                     if (src[i] == '\\' && i + 1 < content_len) {
                         char next = src[i + 1];
                         if (next == 'u') {
-                            // Unicode escape: \uXXXX
-                            if (i + 5 < content_len && src[i + 2] != '{') {
+                            // Unicode escape: \uXXXX or \u{XXXXX}
+                            if (i + 2 < content_len && src[i + 2] == '{') {
+                                // \u{XXXXX} — braced Unicode code point
+                                size_t hex_start = i + 3;
+                                size_t hex_end = hex_start;
+                                while (hex_end < content_len && src[hex_end] != '}') hex_end++;
+                                size_t hex_len = hex_end - hex_start;
+                                if (hex_len > 0 && hex_len <= 6) {
+                                    char hex[7] = {0};
+                                    memcpy(hex, src + hex_start, hex_len);
+                                    uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
+                                    if (cp < 0x80) {
+                                        temp_str[out++] = (char)cp;
+                                    } else if (cp < 0x800) {
+                                        temp_str[out++] = (char)(0xC0 | (cp >> 6));
+                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                    } else if (cp <= 0xFFFF) {
+                                        temp_str[out++] = (char)(0xE0 | (cp >> 12));
+                                        temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                    } else if (cp <= 0x10FFFF) {
+                                        temp_str[out++] = (char)(0xF0 | (cp >> 18));
+                                        temp_str[out++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                                        temp_str[out++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                        temp_str[out++] = (char)(0x80 | (cp & 0x3F));
+                                    }
+                                    i = hex_end; // skip past closing }
+                                } else {
+                                    temp_str[out++] = src[i]; // keep as-is
+                                }
+                            } else if (i + 5 < content_len) {
                                 char hex[5] = {src[i+2], src[i+3], src[i+4], src[i+5], 0};
                                 uint32_t cp = (uint32_t)strtoul(hex, NULL, 16);
                                 if (cp < 0x80) {
@@ -1860,9 +1889,76 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
             // Decode escape sequence and append to current quasi buffer
             StrView source = js_node_source(tp, child);
             if (source.length >= 2 && source.str[0] == '\\') {
-                char decoded = js_decode_escape_char(source.str[1]);
-                if (quasi_len < (int)sizeof(quasi_buf) - 1) {
-                    quasi_buf[quasi_len++] = decoded;
+                char esc = source.str[1];
+                if (esc == 'u' && source.length >= 6 && source.str[2] != '{') {
+                    // \uXXXX — 4-hex-digit Unicode escape, encode as UTF-8
+                    char hex[5] = {source.str[2], source.str[3], source.str[4], source.str[5], 0};
+                    uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
+                    if (code <= 0x7F) {
+                        if (quasi_len < (int)sizeof(quasi_buf) - 1)
+                            quasi_buf[quasi_len++] = (char)code;
+                    } else if (code <= 0x7FF) {
+                        if (quasi_len < (int)sizeof(quasi_buf) - 2) {
+                            quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
+                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                        }
+                    } else {
+                        if (quasi_len < (int)sizeof(quasi_buf) - 3) {
+                            quasi_buf[quasi_len++] = (char)(0xE0 | (code >> 12));
+                            quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                        }
+                    }
+                } else if (esc == 'u' && source.length >= 4 && source.str[2] == '{') {
+                    // \u{XXXXX} — Unicode code point escape
+                    int hex_end = 3;
+                    while (hex_end < (int)source.length && source.str[hex_end] != '}') hex_end++;
+                    char hex[16] = {0};
+                    int hex_len = hex_end - 3;
+                    if (hex_len > 0 && hex_len < 16) {
+                        memcpy(hex, source.str + 3, hex_len);
+                        uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
+                        if (code <= 0x7F) {
+                            if (quasi_len < (int)sizeof(quasi_buf) - 1)
+                                quasi_buf[quasi_len++] = (char)code;
+                        } else if (code <= 0x7FF) {
+                            if (quasi_len < (int)sizeof(quasi_buf) - 2) {
+                                quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
+                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                            }
+                        } else if (code <= 0xFFFF) {
+                            if (quasi_len < (int)sizeof(quasi_buf) - 3) {
+                                quasi_buf[quasi_len++] = (char)(0xE0 | (code >> 12));
+                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                            }
+                        } else if (code <= 0x10FFFF) {
+                            if (quasi_len < (int)sizeof(quasi_buf) - 4) {
+                                quasi_buf[quasi_len++] = (char)(0xF0 | (code >> 18));
+                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 12) & 0x3F));
+                                quasi_buf[quasi_len++] = (char)(0x80 | ((code >> 6) & 0x3F));
+                                quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                            }
+                        }
+                    }
+                } else if (esc == 'x' && source.length >= 4) {
+                    // \xXX — 2-hex-digit escape
+                    char hex[3] = {source.str[2], source.str[3], 0};
+                    uint32_t code = (uint32_t)strtoul(hex, NULL, 16);
+                    if (code <= 0x7F) {
+                        if (quasi_len < (int)sizeof(quasi_buf) - 1)
+                            quasi_buf[quasi_len++] = (char)code;
+                    } else {
+                        if (quasi_len < (int)sizeof(quasi_buf) - 2) {
+                            quasi_buf[quasi_len++] = (char)(0xC0 | (code >> 6));
+                            quasi_buf[quasi_len++] = (char)(0x80 | (code & 0x3F));
+                        }
+                    }
+                } else {
+                    char decoded = js_decode_escape_char(esc);
+                    if (quasi_len < (int)sizeof(quasi_buf) - 1) {
+                        quasi_buf[quasi_len++] = decoded;
+                    }
                 }
             }
         } else if (strcmp(child_type, "template_substitution") == 0) {

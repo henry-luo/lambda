@@ -36,7 +36,8 @@ static Tvg_Paint render_svg_image(SvgRenderContext* ctx, Element* elem);
 static Tvg_Paint render_svg_group(SvgRenderContext* ctx, Element* elem);
 static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* elem);
 static void process_svg_defs(SvgRenderContext* ctx, Element* defs);
-static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem);
+static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem,
+                                   float bx = 0, float by = 0, float bw = 0, float bh = 0);
 static void apply_svg_transform(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem);
 
 // ============================================================================
@@ -530,10 +531,112 @@ bool is_inline_svg_element(DomElement* elem) {
 }
 
 // ============================================================================
+// SVG Defs: Gradient definitions and element refs
+// ============================================================================
+
+#define SVG_MAX_GRAD_DEFS  64
+#define SVG_MAX_GRAD_STOPS 64
+#define SVG_MAX_ELEM_DEFS  64
+
+struct SvgGradStop {
+    float   offset;
+    Color   color;
+};
+
+struct SvgGradDef {
+    char  id[128];
+    bool  is_radial;
+    bool  user_space;          // true = gradientUnits=userSpaceOnUse
+    float x1, y1, x2, y2;     // linear gradient endpoints
+    float cx, cy, r;           // radial gradient center + radius
+    SvgGradStop stops[SVG_MAX_GRAD_STOPS];
+    int   stop_count;
+};
+
+struct SvgElemDef {
+    char     id[128];
+    Element* elem;
+};
+
+struct SvgDefTable {
+    SvgGradDef grads[SVG_MAX_GRAD_DEFS];
+    int        grad_count;
+    SvgElemDef elems[SVG_MAX_ELEM_DEFS];
+    int        elem_count;
+};
+
+static float parse_svg_pct_or_num(const char* s, float fallback) {
+    if (!s || !*s) return fallback;
+    char* end;
+    float v = strtof(s, &end);
+    if (end == s) return fallback;
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end == '%') v /= 100.0f;
+    return v;
+}
+
+static SvgGradDef* lookup_grad_def(SvgDefTable* table, const char* id) {
+    if (!table || !id) return nullptr;
+    for (int i = 0; i < table->grad_count; i++) {
+        if (strcmp(table->grads[i].id, id) == 0) return &table->grads[i];
+    }
+    return nullptr;
+}
+
+static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
+    if (!table || !id) return nullptr;
+    for (int i = 0; i < table->elem_count; i++) {
+        if (strcmp(table->elems[i].id, id) == 0) return table->elems[i].elem;
+    }
+    return nullptr;
+}
+
+static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
+                                    float bx, float by, float bw, float bh) {
+    if (!shape || !def || def->stop_count < 2) return;
+
+    Tvg_Gradient grad;
+    if (def->is_radial) {
+        grad = tvg_radial_gradient_new();
+        float cx, cy, r;
+        if (def->user_space) {
+            cx = def->cx; cy = def->cy; r = def->r;
+        } else {
+            cx = bx + def->cx * bw;
+            cy = by + def->cy * bh;
+            r  = def->r * (bw < bh ? bw : bh);
+        }
+        tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
+    } else {
+        grad = tvg_linear_gradient_new();
+        float x1, y1, x2, y2;
+        if (def->user_space) {
+            x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
+        } else {
+            x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
+            x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
+        }
+        tvg_linear_gradient_set(grad, x1, y1, x2, y2);
+    }
+
+    Tvg_Color_Stop stops[SVG_MAX_GRAD_STOPS];
+    for (int i = 0; i < def->stop_count; i++) {
+        stops[i].offset = def->stops[i].offset;
+        stops[i].r = def->stops[i].color.r;
+        stops[i].g = def->stops[i].color.g;
+        stops[i].b = def->stops[i].color.b;
+        stops[i].a = def->stops[i].color.a;
+    }
+    tvg_gradient_set_color_stops(grad, stops, def->stop_count);
+    tvg_shape_set_gradient(shape, grad);
+}
+
+// ============================================================================
 // Apply Fill and Stroke to ThorVG Shape
 // ============================================================================
 
-static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem) {
+static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Element* elem,
+                                   float bx, float by, float bw, float bh) {
     if (!shape || !elem) return;
 
     // get fill attribute - inherit from context if not specified
@@ -548,9 +651,27 @@ static void apply_svg_fill_stroke(SvgRenderContext* ctx, Tvg_Paint shape, Elemen
         if (strcmp(fill, "none") == 0) {
             has_fill = false;
         } else if (strncmp(fill, "url(#", 5) == 0) {
-            // gradient reference - TODO: implement gradient lookup
-            log_debug("[SVG] gradient fill not yet implemented: %s", fill);
-            fc = ctx->fill_color;  // fallback to inherited
+            // gradient reference — look up in defs table
+            bool applied = false;
+            if (ctx->defs) {
+                const char* id_start = fill + 5;
+                const char* id_end   = strchr(id_start, ')');
+                char id_buf[128]     = {};
+                size_t id_len = id_end ? (size_t)(id_end - id_start) : strlen(id_start);
+                if (id_len < sizeof(id_buf)) {
+                    memcpy(id_buf, id_start, id_len);
+                    SvgGradDef* def = lookup_grad_def((SvgDefTable*)ctx->defs, id_buf);
+                    if (def && def->stop_count >= 2) {
+                        apply_svg_gradient_fill(shape, def, bx, by, bw, bh);
+                        has_fill = false;   // gradient applied, skip solid fill
+                        applied  = true;
+                    }
+                }
+            }
+            if (!applied) {
+                log_debug("[SVG] gradient fill not resolved: %s", fill);
+                fc = ctx->fill_color;   // fallback
+            }
         } else {
             fc = parse_svg_color(fill);
         }
@@ -692,7 +813,7 @@ static Tvg_Paint render_svg_rect(SvgRenderContext* ctx, Element* elem) {
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_rect(shape, x, y, width, height, rx, ry, true);
 
-    apply_svg_fill_stroke(ctx, shape, elem);
+    apply_svg_fill_stroke(ctx, shape, elem, x, y, width, height);
     apply_svg_transform(ctx, shape, elem);
 
     log_debug("[SVG] rect: x=%.1f y=%.1f w=%.1f h=%.1f rx=%.1f", x, y, width, height, rx);
@@ -709,7 +830,7 @@ static Tvg_Paint render_svg_circle(SvgRenderContext* ctx, Element* elem) {
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_circle(shape, cx, cy, r, r, true);
 
-    apply_svg_fill_stroke(ctx, shape, elem);
+    apply_svg_fill_stroke(ctx, shape, elem, cx - r, cy - r, 2 * r, 2 * r);
     apply_svg_transform(ctx, shape, elem);
 
     log_debug("[SVG] circle: cx=%.1f cy=%.1f r=%.1f", cx, cy, r);
@@ -727,7 +848,7 @@ static Tvg_Paint render_svg_ellipse(SvgRenderContext* ctx, Element* elem) {
     Tvg_Paint shape = tvg_shape_new();
     tvg_shape_append_circle(shape, cx, cy, rx, ry, true);
 
-    apply_svg_fill_stroke(ctx, shape, elem);
+    apply_svg_fill_stroke(ctx, shape, elem, cx - rx, cy - ry, 2 * rx, 2 * ry);
     apply_svg_transform(ctx, shape, elem);
 
     log_debug("[SVG] ellipse: cx=%.1f cy=%.1f rx=%.1f ry=%.1f", cx, cy, rx, ry);
@@ -1783,9 +1904,70 @@ static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* el
 // ============================================================================
 
 static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
-    // TODO: implement gradient and clipPath definitions
-    // For now, we skip <defs> processing
-    log_debug("[SVG] defs processing not yet implemented");
+    if (!defs) return;
+
+    if (!ctx->defs) {
+        SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
+        memset(table, 0, sizeof(SvgDefTable));
+        ctx->defs = (HashMap*)table;
+    }
+    SvgDefTable* table = (SvgDefTable*)ctx->defs;
+
+    for (int64_t i = 0; i < defs->length; i++) {
+        Element* child = get_child_element_at(defs, i);
+        if (!child) continue;
+
+        const char* tag = get_element_tag_name(child);
+        if (!tag) continue;
+        const char* id  = get_svg_attr(child, "id");
+
+        if (strcmp(tag, "linearGradient") == 0 || strcmp(tag, "radialGradient") == 0) {
+            if (table->grad_count >= SVG_MAX_GRAD_DEFS) continue;
+            SvgGradDef* def = &table->grads[table->grad_count++];
+            memset(def, 0, sizeof(SvgGradDef));
+            if (id) str_copy(def->id, sizeof(def->id), id, strlen(id));
+
+            def->is_radial = (strcmp(tag, "radialGradient") == 0);
+
+            const char* gu = get_svg_attr(child, "gradientUnits");
+            def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
+
+            def->x1 = parse_svg_pct_or_num(get_svg_attr(child, "x1"), 0.0f);
+            def->y1 = parse_svg_pct_or_num(get_svg_attr(child, "y1"), 0.0f);
+            def->x2 = parse_svg_pct_or_num(get_svg_attr(child, "x2"), 1.0f);
+            def->y2 = parse_svg_pct_or_num(get_svg_attr(child, "y2"), 0.0f);
+
+            def->cx = parse_svg_pct_or_num(get_svg_attr(child, "cx"), 0.5f);
+            def->cy = parse_svg_pct_or_num(get_svg_attr(child, "cy"), 0.5f);
+            def->r  = parse_svg_pct_or_num(get_svg_attr(child, "r"),  0.5f);
+
+            for (int64_t s = 0; s < child->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
+                Element* stop_elem = get_child_element_at(child, s);
+                if (!stop_elem) continue;
+                const char* stag = get_element_tag_name(stop_elem);
+                if (!stag || strcmp(stag, "stop") != 0) continue;
+
+                SvgGradStop* gs = &def->stops[def->stop_count++];
+                gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
+                const char* sc = get_svg_attr(stop_elem, "stop-color");
+                if (sc) {
+                    gs->color = parse_svg_color(sc);
+                } else {
+                    gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255;
+                }
+                const char* so = get_svg_attr(stop_elem, "stop-opacity");
+                if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
+            }
+            log_debug("[SVG] defs: %s id='%s' stops=%d", tag, id ? id : "", def->stop_count);
+
+        } else if (id) {
+            if (table->elem_count < SVG_MAX_ELEM_DEFS) {
+                SvgElemDef* ed = &table->elems[table->elem_count++];
+                str_copy(ed->id, sizeof(ed->id), id, strlen(id));
+                ed->elem = child;
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -1828,8 +2010,24 @@ static Tvg_Paint render_svg_element(SvgRenderContext* ctx, Element* elem) {
         // these are definitions, don't render directly
         return nullptr;
     } else if (strcmp(tag, "use") == 0) {
-        // TODO: implement use element (clone referenced element)
-        log_debug("[SVG] <use> element not yet implemented");
+        const char* href = get_svg_attr(elem, "href");
+        if (!href) href = get_svg_attr(elem, "xlink:href");
+        if (href && href[0] == '#' && ctx->defs) {
+            Element* ref = lookup_elem_def((SvgDefTable*)ctx->defs, href + 1);
+            if (ref) {
+                float ux = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
+                float uy = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
+                Tvg_Paint child = render_svg_element(ctx, ref);
+                if (child) {
+                    if (ux != 0.0f || uy != 0.0f) {
+                        Tvg_Matrix m = {1, 0, ux,  0, 1, uy,  0, 0, 1};
+                        tvg_paint_set_transform(child, &m);
+                    }
+                    return child;
+                }
+            }
+        }
+        log_debug("[SVG] <use> href='%s' not resolved", href ? href : "(none)");
         return nullptr;
     } else if (strcmp(tag, "text") == 0) {
         return render_svg_text(ctx, elem);
@@ -1874,11 +2072,31 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
         ctx.viewbox_height = vb.height;
         ctx.scale_x = viewport_width / vb.width;
         ctx.scale_y = viewport_height / vb.height;
-        // use uniform scale to preserve aspect ratio (TODO: handle preserveAspectRatio)
-        float scale = ctx.scale_x < ctx.scale_y ? ctx.scale_x : ctx.scale_y;
-        ctx.scale_x = ctx.scale_y = scale;
-        ctx.translate_x = -vb.min_x * scale;
-        ctx.translate_y = -vb.min_y * scale;
+        // handle preserveAspectRatio
+        const char* par = get_svg_attr(svg_element, "preserveAspectRatio");
+        bool par_none  = par && strcmp(par, "none") == 0;
+        bool par_slice = par && strstr(par, "slice") != nullptr;
+        if (par_none) {
+            // non-uniform stretch: each axis scales independently
+            ctx.translate_x = -vb.min_x * ctx.scale_x;
+            ctx.translate_y = -vb.min_y * ctx.scale_y;
+        } else {
+            // uniform scale
+            float scale = par_slice
+                ? (ctx.scale_x > ctx.scale_y ? ctx.scale_x : ctx.scale_y)
+                : (ctx.scale_x < ctx.scale_y ? ctx.scale_x : ctx.scale_y);
+            ctx.scale_x = ctx.scale_y = scale;
+            // alignment keyword (default: xMidYMid)
+            float align_x = 0.5f, align_y = 0.5f;
+            if (par) {
+                if      (strstr(par, "xMin")) align_x = 0.0f;
+                else if (strstr(par, "xMax")) align_x = 1.0f;
+                if      (strstr(par, "YMin")) align_y = 0.0f;
+                else if (strstr(par, "YMax")) align_y = 1.0f;
+            }
+            ctx.translate_x = -vb.min_x * scale + (viewport_width  - vb.width  * scale) * align_x;
+            ctx.translate_y = -vb.min_y * scale + (viewport_height - vb.height * scale) * align_y;
+        }
     } else {
         ctx.scale_x = ctx.scale_y = 1.0f;
         ctx.translate_x = ctx.translate_y = 0;
@@ -1895,6 +2113,16 @@ Tvg_Paint build_svg_scene(Element* svg_element, float viewport_width, float view
             0, 0, 1
         };
         tvg_paint_set_transform(scene, &matrix);
+    }
+
+    // pre-pass: process all <defs> so gradients and id refs are ready before rendering shapes
+    for (int64_t i = 0; i < svg_element->length; i++) {
+        Element* child = get_child_element_at(svg_element, i);
+        if (!child) continue;
+        const char* child_tag = get_element_tag_name(child);
+        if (child_tag && strcmp(child_tag, "defs") == 0) {
+            process_svg_defs(&ctx, child);
+        }
     }
 
     // render children

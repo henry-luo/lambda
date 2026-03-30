@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "render_backend.h"
 #include "view.hpp"
 #include "layout.hpp"
 #include "font_face.h"
@@ -38,10 +39,8 @@ typedef struct PdfRenderContext {
 } PdfRenderContext;
 
 // Forward declarations
-void render_block_view_pdf(PdfRenderContext* ctx, ViewBlock* view_block);
-void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span);
-void render_children_pdf(PdfRenderContext* ctx, View* view);
 void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text);
+static RenderBackend pdf_make_backend(PdfRenderContext* ctx);
 
 // External function from render_svg.cpp
 extern void calculate_content_bounds(View* view, int* max_x, int* max_y);
@@ -284,152 +283,72 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     if (text_rect) { goto NEXT_RECT; }
 }
 
-// Render block view with background and borders
-void render_block_view_pdf(PdfRenderContext* ctx, ViewBlock* view_block) {
-    if (!view_block) return;
+// ============================================================================
+// PDF RenderBackend vtable callbacks
+// ============================================================================
 
-    // Save parent context (like SVG renderer)
-    BlockBlot pa_block = ctx->block;
-    FontBox pa_font = ctx->font;
-    Color pa_color = ctx->color;
+static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    float width = view->width;
+    float height = view->height;
 
-    // Update font if specified
-    if (view_block->font) {
-        setup_font(ctx->ui_context, &ctx->font, view_block->font);
-        // Update PDF font
-        const char* pdf_font_name = get_pdf_font_name(view_block->font->family);
-        HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
-        if (font) {
-            ctx->current_font = font;
-            HPDF_Page_SetFontAndSize(ctx->current_page, font, view_block->font->font_size);
-        }
+    // Background
+    if (view->bound->background && view->bound->background->color.a > 0) {
+        pdf_render_rect(ctx, abs_x, abs_y, width, height, view->bound->background->color, true);
     }
 
-    // Update position context - add this block's offset to parent context
-    ctx->block.x = pa_block.x + (int)view_block->x;
-    ctx->block.y = pa_block.y + (int)view_block->y;
-
-    // Calculate absolute position for background/borders
-    float x = (float)ctx->block.x;
-    float y = (float)ctx->block.y;
-    float width = (float)view_block->width;
-    float height = (float)view_block->height;
-
-    // Render background if present
-    if (view_block->bound && view_block->bound->background && view_block->bound->background->color.a > 0) {
-        BackgroundProp* bg = view_block->bound->background;
-        pdf_render_rect(ctx, x, y, width, height, bg->color, true);
+    // Borders
+    if (view->bound->border) {
+        BorderProp* border = view->bound->border;
+        if (border->width.top > 0 && border->top_color.a > 0)
+            pdf_render_rect(ctx, abs_x, abs_y, width, (float)border->width.top, border->top_color, true);
+        if (border->width.right > 0 && border->right_color.a > 0)
+            pdf_render_rect(ctx, abs_x + width - border->width.right, abs_y, (float)border->width.right, height, border->right_color, true);
+        if (border->width.bottom > 0 && border->bottom_color.a > 0)
+            pdf_render_rect(ctx, abs_x, abs_y + height - border->width.bottom, width, (float)border->width.bottom, border->bottom_color, true);
+        if (border->width.left > 0 && border->left_color.a > 0)
+            pdf_render_rect(ctx, abs_x, abs_y, (float)border->width.left, height, border->left_color, true);
     }
-
-    // Update color context
-    if (view_block->in_line && view_block->in_line->color.c) {
-        ctx->color = view_block->in_line->color;
-    }
-
-    // Render borders if present
-    if (view_block->bound && view_block->bound->border) {
-        BorderProp* border = view_block->bound->border;
-
-        // Top border
-        if (border->width.top > 0 && border->top_color.a > 0) {
-            pdf_render_rect(ctx, x, y, width, (float)border->width.top, border->top_color, true);
-        }
-
-        // Right border
-        if (border->width.right > 0 && border->right_color.a > 0) {
-            pdf_render_rect(ctx, x + width - border->width.right, y, (float)border->width.right, height, border->right_color, true);
-        }
-
-        // Bottom border
-        if (border->width.bottom > 0 && border->bottom_color.a > 0) {
-            pdf_render_rect(ctx, x, y + height - border->width.bottom, width, (float)border->width.bottom, border->bottom_color, true);
-        }
-
-        // Left border
-        if (border->width.left > 0 && border->left_color.a > 0) {
-            pdf_render_rect(ctx, x, y, (float)border->width.left, height, border->left_color, true);
-        }
-    }
-
-    // Render children
-    render_children_pdf(ctx, (View*)view_block);
-
-    // Restore context (like SVG renderer)
-    ctx->block = pa_block;
-    ctx->font = pa_font;
-    ctx->color = pa_color;
 }
 
-// Render inline view (spans)
-void render_inline_view_pdf(PdfRenderContext* ctx, ViewSpan* view_span) {
-    if (!view_span) return;
-
-    // Save parent font context
-    FontBox pa_font = ctx->font;
-
-    // Set font if specified
-    if (view_span->font) {
-        setup_font(ctx->ui_context, &ctx->font, view_span->font);
-        // Update PDF font
-        const char* pdf_font_name = get_pdf_font_name(view_span->font->family);
-        HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
-        if (font) {
-            ctx->current_font = font;
-            HPDF_Page_SetFontAndSize(ctx->current_page, font, view_span->font->font_size);
-        }
-    }
-
-    // Set color if specified
-    if (view_span->in_line) {
-        ctx->color = view_span->in_line->color;
-    }
-
-    // Render children
-    render_children_pdf(ctx, (View*)view_span);
-
-    // Restore font context
-    ctx->font = pa_font;
+static void pdf_cb_render_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+                               FontBox* font, Color color) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    ctx->block.x = abs_x;
+    ctx->block.y = abs_y;
+    ctx->font = *font;
+    ctx->color = color;
+    render_text_view_pdf(ctx, text);
 }
 
-// Render children recursively
-void render_children_pdf(PdfRenderContext* ctx, View* view) {
-    if (!view || view->view_type < RDT_VIEW_INLINE) return;
-
-    ViewElement* group = (ViewElement*)view;
-    View* child = group->first_child;
-
-    while (child) {
-        switch (child->view_type) {
-            case RDT_VIEW_BLOCK:
-            case RDT_VIEW_LIST_ITEM:
-            case RDT_VIEW_TABLE:
-            case RDT_VIEW_TABLE_ROW_GROUP:
-            case RDT_VIEW_TABLE_ROW:
-            case RDT_VIEW_TABLE_CELL:
-                render_block_view_pdf(ctx, (ViewBlock*)child);
-                break;
-
-            case RDT_VIEW_INLINE:
-            case RDT_VIEW_INLINE_BLOCK:
-                render_inline_view_pdf(ctx, (ViewSpan*)child);
-                break;
-
-            case RDT_VIEW_TEXT:
-                render_text_view_pdf(ctx, (ViewText*)child);
-                break;
-
-            case RDT_VIEW_MATH:
-                // MathBox rendering removed - use RDT_VIEW_TEXNODE instead
-                log_debug("render_children_pdf: RDT_VIEW_MATH deprecated, skipping");
-                break;
-
-            default:
-                // Handle other view types if needed
-                break;
-        }
-
-        child = child->next();
+static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
+    PdfRenderContext* ctx = (PdfRenderContext*)vctx;
+    const char* pdf_font_name = get_pdf_font_name(font_prop->family);
+    HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
+    if (font) {
+        ctx->current_font = font;
+        HPDF_Page_SetFontAndSize(ctx->current_page, font, font_prop->font_size);
     }
+}
+
+static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
+    RenderBackend b = {};
+    b.ctx              = ctx;
+    b.render_bound     = pdf_cb_render_bound;
+    b.render_text      = pdf_cb_render_text;
+    b.render_image     = NULL;
+    b.render_inline_svg = NULL;
+    b.begin_block_children  = NULL;
+    b.end_block_children    = NULL;
+    b.begin_inline_children = NULL;
+    b.end_inline_children   = NULL;
+    b.begin_opacity    = NULL;
+    b.end_opacity      = NULL;
+    b.begin_transform  = NULL;
+    b.end_transform    = NULL;
+    b.render_column_rules = NULL;
+    b.on_font_change   = pdf_cb_on_font_change;
+    return b;
 }
 
 // Main PDF rendering function
@@ -488,11 +407,19 @@ HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width,
         HPDF_Page_SetFontAndSize(ctx.current_page, ctx.current_font, 16.0f);
     }
 
-    // Render the root view
+    // Render the root view via shared tree walker
+    RenderBackend backend = pdf_make_backend(&ctx);
+    RenderWalkState walk_state = {};
+    walk_state.x = 0;
+    walk_state.y = 0;
+    walk_state.font = ctx.font;
+    walk_state.color = ctx.color;
+    walk_state.ui_context = uicon;
+
     if (root_view->view_type == RDT_VIEW_BLOCK) {
-        render_block_view_pdf(&ctx, (ViewBlock*)root_view);
+        render_walk_block(&backend, &walk_state, (ViewBlock*)root_view);
     } else if (root_view->view_type >= RDT_VIEW_INLINE) {
-        render_children_pdf(&ctx, root_view);
+        render_walk_children(&backend, &walk_state, root_view);
     }
 
     return ctx.pdf_doc;

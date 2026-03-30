@@ -497,6 +497,9 @@ typedef enum CssEnum : int16_t {
     // text-box-edge values (reuse existing: CSS_VALUE_AUTO, CSS_VALUE_TEXT, CSS_VALUE_ALPHABETIC, CSS_VALUE_IDEOGRAPHIC)
     CSS_VALUE_CAP,
     CSS_VALUE_EX,
+    // Background repeat values
+    CSS_VALUE_REPEAT,      // background-repeat repeat
+    CSS_VALUE_NO_REPEAT,   // background-repeat no-repeat
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

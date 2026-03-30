@@ -57,8 +57,13 @@ extern "C" Item bash_builtin_echo(Item* args, int argc) {
         }
     }
 
+    bool first = true;
     for (int i = start; i < argc; i++) {
-        if (i > start) bash_raw_putc(' ');
+        // skip null args (from unquoted unset variable expansions)
+        if (get_type_id(args[i]) == LMD_TYPE_NULL) continue;
+        
+        if (!first) bash_raw_putc(' ');
+        first = false;
         Item str_val = bash_to_string(args[i]);
         String* s = it2s(str_val);
         if (!s) continue;
@@ -293,6 +298,57 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
                         }
                     } else {
                         strbuf_append_char(out, *p);
+                    }
+                }
+                break;
+            }
+            case 'q': {
+                // %q: shell-quote the argument (like bash's printf %q)
+                const char* str = "";
+                if (arg_idx < argc) {
+                    Item s = bash_to_string(args[arg_idx++]);
+                    String* ss = it2s(s);
+                    if (ss) str = ss->chars;
+                }
+                // check if needs quoting: chars that are special in shell
+                bool needs_quoting = (*str == '\0');
+                for (const char* p = str; *p && !needs_quoting; p++) {
+                    if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-' && *p != '.' && *p != '/' && *p != ':' && *p != '@' && *p != ',') {
+                        needs_quoting = true;
+                    }
+                }
+                if (!needs_quoting) {
+                    strbuf_append_str(out, str);
+                } else {
+                    // escape with backslashes or use $'...' form
+                    int has_nonprint = 0;
+                    for (const char* p2 = str; *p2; p2++) {
+                        if ((unsigned char)*p2 < 0x20 || (unsigned char)*p2 == 0x7f) {
+                            has_nonprint = 1; break;
+                        }
+                    }
+                    if (!has_nonprint) {
+                        static const char special_chars[] = " \t!\"#$&'()*;<=>?[\\]^`{|}~";
+                        for (const char* p2 = str; *p2; p2++) {
+                            if (strchr(special_chars, *p2)) strbuf_append_char(out, '\\');
+                            strbuf_append_char(out, *p2);
+                        }
+                    } else {
+                        // use $'...' form for non-printable chars
+                        strbuf_append_str(out, "$'");
+                        for (const char* p2 = str; *p2; p2++) {
+                            if (*p2 == '\\' || *p2 == '\'') {
+                                strbuf_append_char(out, '\\');
+                                strbuf_append_char(out, *p2);
+                            } else if ((unsigned char)*p2 < 0x20) {
+                                char esc[8];
+                                snprintf(esc, sizeof(esc), "\\x%02x", (unsigned char)*p2);
+                                strbuf_append_str(out, esc);
+                            } else {
+                                strbuf_append_char(out, *p2);
+                            }
+                        }
+                        strbuf_append_char(out, '\'');
                     }
                 }
                 break;
@@ -536,20 +592,144 @@ extern "C" Item bash_builtin_return(Item code) {
 // ============================================================================
 
 extern "C" Item bash_builtin_read(Item* args, int argc) {
-    // simplified read: reads a line from stdin
-    // read [-r] [-p prompt] var1 [var2 ...]
-    // For now, just read a line and assign to the first variable name
-    char buffer[4096];
-    if (fgets(buffer, sizeof(buffer), stdin)) {
-        // remove trailing newline
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len - 1] == '\n') buffer[--len] = '\0';
-        String* result = heap_create_name(buffer, len);
-        bash_set_exit_code(0);
-        return (Item){.item = s2it(result)};
+    // read [-r] [-p prompt] [-d delim] [-n nchars] [-t timeout] var1 [var2 ...]
+    // Reads a line from stdin_item (herestring/pipe) or real stdin, then
+    // splits by IFS and assigns to named variables.
+    bool raw_mode = false;  // -r: no backslash escaping
+    int var_start = 0;      // index of first variable name in args
+
+    // parse flags
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-') break;
+        if (arg->len == 2 && arg->chars[1] == 'r') {
+            raw_mode = true;
+            var_start = i + 1;
+        } else if (arg->len == 2 && (arg->chars[1] == 'p' || arg->chars[1] == 'd' ||
+                                      arg->chars[1] == 'n' || arg->chars[1] == 't' ||
+                                      arg->chars[1] == 'u' || arg->chars[1] == 'a')) {
+            // flags that take an argument: skip the next arg too
+            var_start = i + 2;
+            i++; // skip the argument to this flag
+        } else {
+            var_start = i + 1;
+        }
     }
-    bash_set_exit_code(1);
-    return (Item){.item = s2it(heap_create_name("", 0))};
+
+    // collect variable names
+    int num_vars = argc - var_start;
+    if (num_vars <= 0) {
+        // default variable is REPLY
+        num_vars = 0; // we'll handle it below
+    }
+
+    // read input line: prefer stdin_item (pipe/herestring), then real stdin
+    char buffer[4096];
+    const char* line = NULL;
+    int line_len = 0;
+
+    Item stdin_item = bash_get_stdin_item();
+    String* stdin_str = it2s(bash_to_string(stdin_item));
+    if (stdin_str && stdin_str->len > 0) {
+        // read first line from stdin_item
+        line = stdin_str->chars;
+        line_len = stdin_str->len;
+        // find end of first line
+        for (int i = 0; i < line_len; i++) {
+            if (line[i] == '\n') {
+                line_len = i;
+                break;
+            }
+        }
+    } else {
+        // read from real stdin
+        if (fgets(buffer, sizeof(buffer), stdin)) {
+            line_len = (int)strlen(buffer);
+            if (line_len > 0 && buffer[line_len - 1] == '\n') line_len--;
+            line = buffer;
+        } else {
+            // EOF: assign empty to all vars and return 1
+            Item empty = (Item){.item = s2it(heap_create_name("", 0))};
+            if (num_vars == 0) {
+                Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
+                bash_set_var(reply_name, empty);
+            } else {
+                for (int i = var_start; i < argc; i++) {
+                    bash_set_var(args[i], empty);
+                }
+            }
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    // strip trailing whitespace (bash strips trailing IFS whitespace)
+    while (line_len > 0 && (line[line_len - 1] == ' ' || line[line_len - 1] == '\t')) {
+        line_len--;
+    }
+
+    (void)raw_mode; // TODO: handle backslash escaping in non-raw mode
+
+    // if no variable names specified, assign whole line to REPLY
+    if (num_vars <= 0) {
+        Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
+        String* val = heap_create_name(line, line_len);
+        bash_set_var(reply_name, (Item){.item = s2it(val)});
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    // get IFS for splitting (default: space, tab, newline)
+    Item ifs_name = (Item){.item = s2it(heap_create_name("IFS", 3))};
+    Item ifs_item = bash_get_var(ifs_name);
+    String* ifs_str = it2s(bash_to_string(ifs_item));
+    const char* ifs = " \t\n";
+    int ifs_len = 3;
+    if (ifs_str && ifs_str->len > 0) {
+        ifs = ifs_str->chars;
+        ifs_len = ifs_str->len;
+    }
+
+    // split line by IFS and assign to variables
+    int pos = 0;
+    for (int vi = 0; vi < num_vars; vi++) {
+        int arg_idx = var_start + vi;
+        bool is_last = (vi == num_vars - 1);
+
+        // skip leading IFS whitespace
+        while (pos < line_len) {
+            bool is_ifs = false;
+            for (int k = 0; k < ifs_len; k++) {
+                if (line[pos] == ifs[k]) { is_ifs = true; break; }
+            }
+            if (!is_ifs) break;
+            pos++;
+        }
+
+        if (is_last) {
+            // last variable gets the rest of the line
+            String* val = heap_create_name(line + pos, line_len - pos);
+            bash_set_var(args[arg_idx], (Item){.item = s2it(val)});
+        } else {
+            // find next IFS delimiter
+            int word_start = pos;
+            while (pos < line_len) {
+                bool is_ifs = false;
+                for (int k = 0; k < ifs_len; k++) {
+                    if (line[pos] == ifs[k]) { is_ifs = true; break; }
+                }
+                if (is_ifs) break;
+                pos++;
+            }
+            String* val = heap_create_name(line + word_start, pos - word_start);
+            bash_set_var(args[arg_idx], (Item){.item = s2it(val)});
+            // skip trailing IFS delimiter(s)
+            if (pos < line_len) pos++;
+        }
+    }
+
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
 }
 
 // ============================================================================
@@ -598,7 +778,14 @@ extern "C" Item bash_builtin_cd(Item dir) {
 
     if (!dir_str || dir_str->len == 0) {
         // cd with no args: go to $HOME
-        path = getenv("HOME");
+        Item home_name = (Item){.item = s2it(heap_create_name("HOME", 4))};
+        Item home_val = bash_get_var(home_name);
+        String* home_str = it2s(bash_to_string(home_val));
+        if (home_str && home_str->len > 0) {
+            path = home_str->chars;
+        } else {
+            path = getenv("HOME");
+        }
         if (!path) {
             log_error("bash: cd: HOME not set");
             bash_set_exit_code(1);
@@ -608,11 +795,40 @@ extern "C" Item bash_builtin_cd(Item dir) {
         path = dir_str->chars;
     }
 
+    // get current logical PWD (to save as OLDPWD)
+    Item pwd_name = (Item){.item = s2it(heap_create_name("PWD", 3))};
+    Item cur_pwd = bash_get_var(pwd_name);
+    String* cur_pwd_str = it2s(bash_to_string(cur_pwd));
+    char old_pwd_buf[4096];
+    if (cur_pwd_str && cur_pwd_str->len > 0) {
+        snprintf(old_pwd_buf, sizeof(old_pwd_buf), "%s", cur_pwd_str->chars);
+    } else {
+        if (getcwd(old_pwd_buf, sizeof(old_pwd_buf)) == NULL) old_pwd_buf[0] = '\0';
+    }
+
     if (chdir(path) != 0) {
         log_error("bash: cd: %s: No such file or directory", path);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
     }
+
+    // update OLDPWD from logical PWD
+    Item oldpwd_name = (Item){.item = s2it(heap_create_name("OLDPWD", 6))};
+    Item oldpwd_val = (Item){.item = s2it(heap_create_name(old_pwd_buf, strlen(old_pwd_buf)))};
+    bash_set_var(oldpwd_name, oldpwd_val);
+
+    // update PWD: use path as-is if absolute, otherwise compute logical path
+    const char* new_pwd;
+    char new_pwd_buf[4096];
+    if (path[0] == '/') {
+        new_pwd = path;
+    } else {
+        // relative path: old_pwd + "/" + path
+        snprintf(new_pwd_buf, sizeof(new_pwd_buf), "%s/%s", old_pwd_buf, path);
+        new_pwd = new_pwd_buf;
+    }
+    Item pwd_val = (Item){.item = s2it(heap_create_name(new_pwd, strlen(new_pwd)))};
+    bash_set_var(pwd_name, pwd_val);
 
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};

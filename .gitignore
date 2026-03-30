@@ -133,6 +133,7 @@ test.history
 test_output/
 test/venv/
 test/layout
+test/render
 test/wpt
 test/pdf/output
 test/fuzzy/crashes/

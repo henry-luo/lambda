@@ -446,6 +446,62 @@ static int sqlite_load_triggers(sqlite3* db, Pool* pool, RdbTable* tbl) {
     return RDB_OK;
 }
 
+/* ─── SQL function introspection (database-level) ─── */
+
+static const char* func_type_str(const char* type_code, Pool* pool) {
+    if (!type_code || !type_code[0]) return pool_strdup(pool, "scalar");
+    switch (type_code[0]) {
+        case 'w': return pool_strdup(pool, "window");
+        case 'a': return pool_strdup(pool, "aggregate");
+        default:  return pool_strdup(pool, "scalar");
+    }
+}
+
+static int sqlite_load_functions(sqlite3* db, Pool* pool, RdbSchema* schema) {
+    const char* sql = "SELECT name, builtin, type, narg FROM pragma_function_list "
+                      "ORDER BY name, narg";
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        log_debug("rdb sqlite: pragma_function_list not available");
+        schema->function_count = 0;
+        schema->functions = NULL;
+        return RDB_OK;  // functions are optional
+    }
+
+    // count functions
+    int func_count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW) func_count++;
+    sqlite3_reset(stmt);
+
+    if (func_count == 0) {
+        sqlite3_finalize(stmt);
+        schema->function_count = 0;
+        schema->functions = NULL;
+        return RDB_OK;
+    }
+
+    schema->functions = (RdbFunction*)pool_calloc(pool, (size_t)func_count * sizeof(RdbFunction));
+    schema->function_count = func_count;
+
+    int i = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && i < func_count) {
+        const char* name    = (const char*)sqlite3_column_text(stmt, 0);
+        int         builtin = sqlite3_column_int(stmt, 1);
+        const char* type    = (const char*)sqlite3_column_text(stmt, 2);
+        int         narg    = sqlite3_column_int(stmt, 3);
+
+        schema->functions[i].name    = pool_strdup(pool, name ? name : "");
+        schema->functions[i].builtin = (builtin != 0);
+        schema->functions[i].type    = func_type_str(type, pool);
+        schema->functions[i].narg    = narg;
+        i++;
+    }
+    sqlite3_finalize(stmt);
+
+    log_debug("rdb sqlite: loaded %d functions", schema->function_count);
+    return RDB_OK;
+}
+
 static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
     sqlite3* db = (sqlite3*)conn->handle;
     Pool* pool = conn->pool;
@@ -498,7 +554,11 @@ static int sqlite_load_schema(RdbConn* conn, RdbSchema* out_schema) {
     // build reverse FK cross-references
     sqlite_build_reverse_fks(pool, out_schema);
 
-    log_debug("rdb sqlite: loaded schema with %d tables/views", out_schema->table_count);
+    // load database-level SQL functions
+    sqlite_load_functions(db, pool, out_schema);
+
+    log_debug("rdb sqlite: loaded schema with %d tables/views, %d functions",
+              out_schema->table_count, out_schema->function_count);
     return RDB_OK;
 }
 

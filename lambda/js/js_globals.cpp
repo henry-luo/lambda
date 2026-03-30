@@ -773,9 +773,9 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     }
     // RegExp check
     if (rn->len == 6 && strncmp(rn->chars, "RegExp", 6) == 0) {
-        // RegExp objects are stored as maps with a regex handle — check for __regex__ property
+        // RegExp objects are stored as maps with a regex data pointer — check for __rd property
         if (lt == LMD_TYPE_MAP) {
-            Item rkey = (Item){.item = s2it(heap_create_name("__regex__", 9))};
+            Item rkey = (Item){.item = s2it(heap_create_name("__rd", 4))};
             Item rval = map_get(left.map, rkey);
             return (Item){.item = b2it(rval.item != 0 && get_type_id(rval) != LMD_TYPE_NULL)};
         }
@@ -855,30 +855,17 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
 extern "C" Item js_in(Item key, Item object) {
     TypeId type = get_type_id(object);
     if (type == LMD_TYPE_MAP) {
-        // JS semantics: numeric keys are coerced to strings (17 in obj === "17" in obj)
-        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
-            char buf[64];
-            if (get_type_id(key) == LMD_TYPE_INT) {
-                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
-            } else {
-                snprintf(buf, sizeof(buf), "%g", it2d(key));
-            }
-            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
-        }
-        // check if property exists on map (including prototype chain)
-        // MUST NOT trigger getters — use js_map_get_fast for data-only lookup,
-        // then check for __get_<key> getter presence without invoking it.
-
-        // Convert symbol keys (negative ints <= -1000000) to __sym_NNN string form
-        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -1000000) {
-            int64_t id = -(it2i(key) + 1000000);
+        // Check for symbol keys FIRST (before any numeric coercion)
+        // Symbol items are encoded as negative ints <= -JS_SYMBOL_BASE
+        if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+            int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
             char sym_buf[32];
             snprintf(sym_buf, sizeof(sym_buf), "__sym_%lld", (long long)id);
             int sym_len = (int)strlen(sym_buf);
             // check own data property
             bool own_found = false;
-            js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
-            if (own_found) return (Item){.item = b2it(true)};
+            Item own_val = js_map_get_fast_ext(object.map, sym_buf, sym_len, &own_found);
+            if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
             // check getter property (__get___sym_NNN)
             char getter_key[64];
             snprintf(getter_key, sizeof(getter_key), "__get_%s", sym_buf);
@@ -891,8 +878,8 @@ extern "C" Item js_in(Item key, Item object) {
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                 bool found = false;
-                js_map_get_fast_ext(proto.map, sym_buf, sym_len, &found);
-                if (found) return (Item){.item = b2it(true)};
+                Item pval = js_map_get_fast_ext(proto.map, sym_buf, sym_len, &found);
+                if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
                 bool gfound = false;
                 js_map_get_fast_ext(proto.map, getter_key, gk_len, &gfound);
                 if (gfound) return (Item){.item = b2it(true)};
@@ -902,13 +889,24 @@ extern "C" Item js_in(Item key, Item object) {
             return (Item){.item = b2it(false)};
         }
 
+        // JS semantics: numeric keys are coerced to strings (17 in obj === "17" in obj)
+        if (get_type_id(key) == LMD_TYPE_INT || get_type_id(key) == LMD_TYPE_FLOAT) {
+            char buf[64];
+            if (get_type_id(key) == LMD_TYPE_INT) {
+                snprintf(buf, sizeof(buf), "%lld", (long long)it2i(key));
+            } else {
+                snprintf(buf, sizeof(buf), "%g", it2d(key));
+            }
+            key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
+
         if (get_type_id(key) == LMD_TYPE_STRING || get_type_id(key) == LMD_TYPE_SYMBOL) {
             const char* key_str = key.get_chars();
             int key_len = (int)key.get_len();
             // 1. check own data property
             bool own_found = false;
-            js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
-            if (own_found) return (Item){.item = b2it(true)};
+            Item own_val = js_map_get_fast_ext(object.map, key_str, key_len, &own_found);
+            if (own_found && own_val.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
             // 2. check getter property (__get_<key>)
             if (key_len < 200 && key_len > 0) {
                 char getter_key[256];
@@ -923,8 +921,8 @@ extern "C" Item js_in(Item key, Item object) {
             int depth = 0;
             while (proto.item != ItemNull.item && get_type_id(proto) == LMD_TYPE_MAP && depth < 32) {
                 bool found = false;
-                js_map_get_fast_ext(proto.map, key_str, key_len, &found);
-                if (found) return (Item){.item = b2it(true)};
+                Item pval = js_map_get_fast_ext(proto.map, key_str, key_len, &found);
+                if (found && pval.item != JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(true)};
                 if (key_len < 200 && key_len > 0) {
                     char getter_key[256];
                     snprintf(getter_key, sizeof(getter_key), "__get_%.*s", key_len, key_str);
@@ -1149,7 +1147,7 @@ extern "C" Item js_object_keys(Item object) {
 
     TypeMap* tm = (TypeMap*)m->type;
 
-    // first pass: count visible entries (skip engine-internal properties)
+    // first pass: count visible entries (skip engine-internal properties and deleted)
     int count = 0;
     ShapeEntry* e = tm->shape;
     while (e) {
@@ -1163,6 +1161,11 @@ extern "C" Item js_object_keys(Item object) {
             skip = true;
         } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
             skip = true;
+        }
+        // skip deleted properties (sentinel value)
+        if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
         }
         if (!skip) count++;
         e = e->next;
@@ -1181,6 +1184,8 @@ extern "C" Item js_object_keys(Item object) {
             skip = true;
         }
         if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
             char nbuf[256];
             int nlen = len < 255 ? len : 255;
             memcpy(nbuf, s, nlen);
@@ -1228,8 +1233,8 @@ extern "C" Item js_object_get_own_property_symbols(Item object) {
         if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
             // parse the numeric id from "__sym_<N>"
             long long id = atoll(s + 6);
-            // convert back to symbol: symbol value = -(id + 1000000)
-            int64_t sym_val = -(id + 1000000);
+            // convert back to symbol: symbol value = -(id + JS_SYMBOL_BASE)
+            int64_t sym_val = -(id + (int64_t)JS_SYMBOL_BASE);
             js_array_set(result_arr, (Item){.item = i2it(i)}, (Item){.item = i2it(sym_val)});
             i++;
         }
@@ -1292,8 +1297,8 @@ extern "C" Item js_object_values(Item object) {
             e = e->next;
             continue;
         }
-        Item key_str = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
-        Item val = map_get(m, key_str);
+        Item val = _map_read_field(e, m->data);
+        if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
         js_array_push(result, val);
         e = e->next;
     }
@@ -1320,6 +1325,8 @@ extern "C" Item js_object_entries(Item object) {
             e = e->next;
             continue;
         }
+        Item val = _map_read_field(e, m->data);
+        if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
         Item pair = js_array_new(2);
         char nbuf[256];
         int nlen = (int)e->name->length < 255 ? (int)e->name->length : 255;
@@ -1327,7 +1334,7 @@ extern "C" Item js_object_entries(Item object) {
         nbuf[nlen] = '\0';
         Item key_str = (Item){.item = s2it(heap_create_name(nbuf))};
         js_array_set(pair, (Item){.item = i2it(0)}, key_str);
-        js_array_set(pair, (Item){.item = i2it(1)}, map_get(m, key_str));
+        js_array_set(pair, (Item){.item = i2it(1)}, val);
         js_array_push(result, pair);
         e = e->next;
     }
@@ -1397,9 +1404,11 @@ extern "C" Item js_object_assign(Item target, Item* sources, int count) {
         ShapeEntry* e = tm->shape;
         while (e) {
             if (e->name) {
-                Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
-                Item val = map_get(m, key);
-                js_property_set(target, key, val);
+                Item val = _map_read_field(e, m->data);
+                if (val.item != JS_DELETED_SENTINEL_VAL) {
+                    Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
+                    js_property_set(target, key, val);
+                }
             }
             e = e->next;
         }
@@ -1418,9 +1427,11 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
     ShapeEntry* e = tm->shape;
     while (e) {
         if (e->name) {
-            Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
-            Item val = map_get(m, key);
-            js_property_set(target, key, val);
+            Item val = _map_read_field(e, m->data);
+            if (val.item != JS_DELETED_SENTINEL_VAL) {
+                Item key = (Item){.item = s2it(heap_create_name(e->name->str, (int)e->name->length))};
+                js_property_set(target, key, val);
+            }
         }
         e = e->next;
     }
@@ -1435,8 +1446,8 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     // Convert symbol keys to their internal string representation
     Item k;
-    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -1000000) {
-        int64_t id = -(it2i(key) + 1000000);
+    if (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE) {
+        int64_t id = -(it2i(key) + (int64_t)JS_SYMBOL_BASE);
         char buf[32];
         snprintf(buf, sizeof(buf), "__sym_%lld", (long long)id);
         k = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
@@ -1456,6 +1467,9 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     while (e) {
         if (e->name && e->name->length == (size_t)ks->len &&
             strncmp(e->name->str, ks->chars, ks->len) == 0) {
+            // Check for deleted sentinel — deleted properties are not "own"
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
             return (Item){.item = b2it(true)};
         }
         e = e->next;
@@ -1644,8 +1658,9 @@ extern "C" Item js_json_stringify(Item value) {
 
 extern "C" Item js_delete_property(Item obj, Item key) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
-    // set property to null (real deletion would require map_remove)
-    js_property_set(obj, key, ItemNull);
+    // Mark property as deleted using sentinel value.
+    // Object.keys, hasOwnProperty, in, and JSON.stringify skip sentinel entries.
+    js_property_set(obj, key, (Item){.item = JS_DELETED_SENTINEL_VAL});
     return (Item){.item = b2it(true)};
 }
 
@@ -1812,18 +1827,18 @@ static void js_symbol_init_registry() {
 // create Item encoding for a symbol: use LMD_TYPE_INT with a high-bit marker
 // symbol items are encoded as negative ints that won't collide with normal ints
 static Item js_make_symbol_item(uint64_t id) {
-    // encode as an int with a special range: -(id + 1000000)
-    return (Item){.item = i2it(-(int64_t)(id + 1000000))};
+    // encode as an int with a special range: -(id + JS_SYMBOL_BASE)
+    return (Item){.item = i2it(-(int64_t)(id + JS_SYMBOL_BASE))};
 }
 
 static bool js_is_symbol_item(Item item) {
     if (get_type_id(item) != LMD_TYPE_INT) return false;
     int64_t v = it2i(item);
-    return v <= -1000000;
+    return v <= -(int64_t)JS_SYMBOL_BASE;
 }
 
 static uint64_t js_symbol_item_id(Item item) {
-    return (uint64_t)(-(it2i(item) + 1000000));
+    return (uint64_t)(-(it2i(item) + (int64_t)JS_SYMBOL_BASE));
 }
 
 extern "C" Item js_symbol_create(Item description) {
@@ -1898,6 +1913,29 @@ extern "C" Item js_symbol_to_string(Item sym) {
     }
 
     return (Item){.item = s2it(heap_create_name("Symbol()", 8))};
+}
+
+// Return a well-known symbol by its property name on the Symbol constructor.
+// e.g. Symbol.iterator → fixed ID=1, Symbol.toPrimitive → fixed ID=2, etc.
+// Unlike js_symbol_create(), this always returns the SAME item for a given name.
+extern "C" Item js_symbol_well_known(Item name) {
+    String* s = it2s(name);
+    if (s) {
+        if (s->len == 8 && strncmp(s->chars, "iterator", 8) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_ITERATOR);
+        if (s->len == 11 && strncmp(s->chars, "toPrimitive", 11) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_TO_PRIMITIVE);
+        if (s->len == 11 && strncmp(s->chars, "hasInstance", 11) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_HAS_INSTANCE);
+        if (s->len == 11 && strncmp(s->chars, "toStringTag", 11) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_TO_STRING_TAG);
+        if (s->len == 7 && strncmp(s->chars, "asyncIterator", 7) == 0)
+            return js_make_symbol_item(5);
+        if (s->len == 7 && strncmp(s->chars, "species", 7) == 0)
+            return js_make_symbol_item(6);
+    }
+    // Unknown well-known symbol — create a stable entry via Symbol.for semantics
+    return js_symbol_for(name);
 }
 
 // =============================================================================

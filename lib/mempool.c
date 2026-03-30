@@ -108,6 +108,10 @@ void* pool_alloc(Pool* pool, size_t size) {
         return NULL;  // Overflow protection
     }
     // Use heap-specific allocation for better memory isolation
+    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
+        log_error("pool_alloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
+        return NULL;
+    }
     void* result = rpmalloc_heap_alloc(pool->heap, size);
     if (!result) {
         log_error("pool_alloc: rpmalloc_heap_alloc returned NULL (heap=%p, size=%zu)", pool->heap, size);
@@ -121,6 +125,11 @@ void* pool_calloc(Pool* pool, size_t size) {
     }
     if (size > SIZE_LIMIT) {
         return NULL;  // Overflow protection
+    }
+    // Guard against corrupted heap pointer (pre-existing bug in some JS bundles)
+    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
+        log_error("pool_calloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
+        return NULL;
     }
     // Use heap-specific zeroed allocation for better memory isolation
     return rpmalloc_heap_calloc(pool->heap, 1, size);
@@ -136,6 +145,10 @@ void pool_free(Pool* pool, void* ptr) {
 
 void* pool_realloc(Pool* pool, void* ptr, size_t size) {
     if (!pool || pool->valid != POOL_VALID_MARKER) {
+        return NULL;
+    }
+    if (!pool->heap || (uintptr_t)pool->heap < 0x10000) {
+        log_error("pool_realloc: corrupted heap pointer %p in pool %u", (void*)pool->heap, pool->pool_id);
         return NULL;
     }
     // Handle NULL pointer case (should behave like malloc)
