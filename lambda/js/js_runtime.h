@@ -117,6 +117,7 @@ Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
+Item js_new_function_from_string(Item* args, int argc);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);
@@ -343,6 +344,7 @@ void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
 Item js_constructor_create_object(Item callee);
+Item js_new_from_class_object(Item callee, Item* args, int argc);
 
 // A5: Constructor shape pre-allocation
 // Creates a new object with pre-built shape: all property slots pre-allocated
