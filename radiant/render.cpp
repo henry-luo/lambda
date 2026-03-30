@@ -604,6 +604,90 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // Track cumulative position for debugging
         float debug_start_x = x;
 
+        // Check if any text-shadow needs blur
+        bool shadow_needs_blur = false;
+        float max_shadow_blur = 0;
+        if (text_shadow) {
+            TextShadow* ts = text_shadow;
+            while (ts) {
+                if (ts->blur_radius > 0) {
+                    shadow_needs_blur = true;
+                    if (ts->blur_radius > max_shadow_blur) max_shadow_blur = ts->blur_radius;
+                }
+                ts = ts->next;
+            }
+        }
+
+        // If text-shadow has blur, do a pre-pass rendering only shadow glyphs,
+        // then apply box blur, then the main loop skips shadow rendering.
+        if (shadow_needs_blur) {
+            unsigned char* sp = str + text_rect->start_index;
+            unsigned char* s_end = end;
+            float sx_pos = x;
+            bool s_has_space = false;
+            FontStyleDesc _sd_s = font_style_desc_from_prop(rdcon->font.style);
+            bool s_word_start = true;
+
+            // Shadow-only glyph pass
+            while (sp < s_end) {
+                if (is_space(*sp)) {
+                    if (preserve_spaces || !s_has_space) {
+                        s_has_space = true;
+                        sx_pos += space_width;
+                    }
+                    s_word_start = true;
+                    sp++;
+                } else {
+                    s_has_space = false;
+                    uint32_t s_cp;
+                    int s_bytes = str_utf8_decode((const char*)sp, (size_t)(s_end - sp), &s_cp);
+                    if (s_bytes <= 0) { sp++; continue; }
+                    sp += s_bytes;
+
+                    s_cp = apply_text_transform(s_cp, text_transform, s_word_start);
+                    s_word_start = false;
+
+                    LoadedGlyph* s_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_s, s_cp, true);
+                    if (!s_glyph) {
+                        sx_pos += scaled_space_width;
+                        continue;
+                    }
+
+                    float s_ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    Color saved_color = rdcon->color;
+                    TextShadow* ts = text_shadow;
+                    while (ts) {
+                        rdcon->color = ts->color;
+                        float gsx = sx_pos + s_glyph->bitmap.bearing_x + ts->offset_x * s;
+                        float gsy = y + s_ascend - s_glyph->bitmap.bearing_y + ts->offset_y * s;
+                        draw_glyph(rdcon, &s_glyph->bitmap, gsx, gsy);
+                        ts = ts->next;
+                    }
+                    rdcon->color = saved_color;
+                    sx_pos += s_glyph->advance_x;
+                }
+            }
+
+            // Apply box blur to the shadow region
+            if (rdcon->ui_context->surface) {
+                float blur_extend = max_shadow_blur * 2;
+                // Compute shadow bounding box (text rect expanded by max shadow offsets + blur)
+                float shadow_max_ox = 0, shadow_max_oy = 0;
+                TextShadow* ts = text_shadow;
+                while (ts) {
+                    if (fabsf(ts->offset_x) > shadow_max_ox) shadow_max_ox = fabsf(ts->offset_x);
+                    if (fabsf(ts->offset_y) > shadow_max_oy) shadow_max_oy = fabsf(ts->offset_y);
+                    ts = ts->next;
+                }
+                int bx = (int)floorf(x - blur_extend - shadow_max_ox * s);
+                int by = (int)floorf(y - blur_extend - shadow_max_oy * s);
+                int bw = (int)ceilf(text_rect->width * s + blur_extend * 2 + shadow_max_ox * s * 2);
+                int bh = (int)ceilf(text_rect->height * s + blur_extend * 2 + shadow_max_oy * s * 2);
+                box_blur_region(rdcon->ui_context->surface, bx, by, bw, bh, max_shadow_blur);
+                log_debug("[TEXT-SHADOW] Applied blur radius=%.1f to region (%d,%d,%d,%d)", max_shadow_blur, bx, by, bw, bh);
+            }
+        }
+
         while (p < end) {
             // Check if current character is in selection range
             bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
@@ -704,7 +788,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     auto t3 = std::chrono::high_resolution_clock::now();
 
                     // Render text-shadow glyphs BEFORE the main glyph
-                    if (text_shadow) {
+                    // Skip if blur pre-pass already rendered shadows
+                    if (text_shadow && !shadow_needs_blur) {
                         Color saved_shadow_color = rdcon->color;
                         TextShadow* ts = text_shadow;
                         while (ts) {
@@ -1240,6 +1325,11 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     // Render background (gradient, solid color, and background-image) using new rendering system
     if (view->bound->background) {
         render_background(rdcon, view, rect);
+    }
+
+    // Render inset box-shadow AFTER background (inside the element)
+    if (view->bound->box_shadow) {
+        render_box_shadow_inset(rdcon, view, rect);
     }
 
     // Render borders using new rendering system

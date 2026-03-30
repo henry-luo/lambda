@@ -1,4 +1,5 @@
 #include "render_filter.hpp"
+#include "render_background.hpp"
 #include "../lib/log.h"
 #include <math.h>
 #include <algorithm>
@@ -267,12 +268,7 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
                         break;
 
                     case FILTER_BLUR:
-                        // Blur requires ThorVG C++ API (SceneEffect::GaussianBlur)
-                        // Log and skip
-                        if (x == left && y == top) {
-                            log_debug("[FILTER] blur(%.1fpx) not supported (requires ThorVG C++ API)",
-                                      func->params.blur_radius);
-                        }
+                        // Blur is handled as a post-processing step below (not per-pixel)
                         break;
 
                     case FILTER_DROP_SHADOW:
@@ -302,4 +298,15 @@ void apply_css_filters(ImageSurface* surface, FilterProp* filter, Rect* rect, Bo
     }
 
     log_debug("[FILTER] Applied filters to %d pixels", (right - left) * (bottom - top));
+
+    // Apply blur filter as a post-processing step (operates on entire region, not per-pixel)
+    FilterFunction* blur_func = filter->functions;
+    while (blur_func) {
+        if (blur_func->type == FILTER_BLUR && blur_func->params.blur_radius > 0) {
+            box_blur_region(surface, left, top, right - left, bottom - top, blur_func->params.blur_radius);
+            log_debug("[FILTER] Applied blur(%.1fpx) via software box blur to region (%d,%d,%d,%d)",
+                      blur_func->params.blur_radius, left, top, right - left, bottom - top);
+        }
+        blur_func = blur_func->next;
+    }
 }

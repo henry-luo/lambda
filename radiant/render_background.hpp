@@ -13,3 +13,8 @@ void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient*
 
 // Box shadow rendering
 void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect);
+
+// Software Gaussian blur (3-pass box blur approximation)
+// Can be used by box-shadow, text-shadow, and filter:blur()
+void box_blur_region(ImageSurface* surface, int rx, int ry, int rw, int rh, float blur_radius);

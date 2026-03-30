@@ -282,6 +282,92 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
     float width = view->width;
     float height = view->height;
 
+    // Render box-shadow as SVG filter
+    if (view->bound->box_shadow) {
+        // Generate unique filter IDs for each shadow
+        BoxShadow* shadow = view->bound->box_shadow;
+        int shadow_idx = 0;
+        // Use pointer value as part of ID for uniqueness
+        uintptr_t view_id = (uintptr_t)view;
+
+        while (shadow) {
+            if (!shadow->inset) {
+                // Outer shadow: use SVG filter with feGaussianBlur + feOffset
+                char filter_id[64];
+                str_fmt(filter_id, sizeof(filter_id), "shadow-%lx-%d", (unsigned long)view_id, shadow_idx);
+
+                // Emit filter definition
+                svg_indent(ctx);
+                float blur_std = shadow->blur_radius * 0.5f;
+                // Filter region must be large enough to contain the blur + offset
+                float filter_margin = shadow->blur_radius + fabsf(shadow->offset_x) + fabsf(shadow->offset_y) + fabsf(shadow->spread_radius);
+                float fx = -filter_margin / width;
+                float fy = -filter_margin / height;
+                float fw = 1.0f + 2.0f * filter_margin / width;
+                float fh = 1.0f + 2.0f * filter_margin / height;
+
+                strbuf_append_format(ctx->svg_content,
+                    "<defs><filter id=\"%s\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\">\n",
+                    filter_id, fx, fy, fw, fh);
+
+                // feGaussianBlur on SourceAlpha
+                ctx->indent_level++;
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"%.1f\" result=\"blur\" />\n",
+                    blur_std > 0 ? blur_std : 0.001f);
+
+                // feOffset
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feOffset in=\"blur\" dx=\"%.1f\" dy=\"%.1f\" result=\"offset\" />\n",
+                    shadow->offset_x, shadow->offset_y);
+
+                // feColorMatrix to apply shadow color
+                svg_indent(ctx);
+                strbuf_append_format(ctx->svg_content,
+                    "<feColorMatrix in=\"offset\" type=\"matrix\" "
+                    "values=\"0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 0 %.4f  0 0 0 %.4f 0\" result=\"color\" />\n",
+                    shadow->color.r / 255.0f, shadow->color.g / 255.0f,
+                    shadow->color.b / 255.0f, shadow->color.a / 255.0f);
+
+                // feMerge: shadow underneath, source graphic on top
+                svg_indent(ctx);
+                strbuf_append_str(ctx->svg_content,
+                    "<feMerge><feMergeNode in=\"color\" /><feMergeNode in=\"SourceGraphic\" /></feMerge>\n");
+
+                ctx->indent_level--;
+                svg_indent(ctx);
+                strbuf_append_str(ctx->svg_content, "</filter></defs>\n");
+
+                // Render shadow rect with the filter applied
+                char shadow_color[32];
+                svg_color_to_string(shadow->color, shadow_color);
+                float shadow_x = x + shadow->offset_x - shadow->spread_radius;
+                float shadow_y = y + shadow->offset_y - shadow->spread_radius;
+                float shadow_w = width + 2 * shadow->spread_radius;
+                float shadow_h = height + 2 * shadow->spread_radius;
+
+                svg_indent(ctx);
+                if (view->bound->border && view->bound->border->radius.top_left > 0) {
+                    float rx = view->bound->border->radius.top_left + shadow->spread_radius;
+                    if (rx < 0) rx = 0;
+                    strbuf_append_format(ctx->svg_content,
+                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
+                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
+                        shadow_x, shadow_y, shadow_w, shadow_h, rx, rx, shadow_color, filter_id);
+                } else {
+                    strbuf_append_format(ctx->svg_content,
+                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
+                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
+                        shadow_x, shadow_y, shadow_w, shadow_h, shadow_color, filter_id);
+                }
+            }
+            shadow = shadow->next;
+            shadow_idx++;
+        }
+    }
+
     // Render background
     if (view->bound->background && view->bound->background->color.a > 0) {
         char bg_color[32];
