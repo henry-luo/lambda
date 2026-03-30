@@ -120,10 +120,13 @@ static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) 
 
     if (!stmt) {
         log_error("rdb input: failed to prepare SELECT for table '%s'", tbl->name);
-        return builder.createArray();
+        return builder.array().final();
     }
 
-    ArrayBuilder rows = builder.array();
+    // build array of row maps
+    ArrayBuilder arr = builder.array();
+
+    int64_t row_count = 0;
     int rc;
     while ((rc = rdb_step(stmt)) == RDB_ROW) {
         MapBuilder row = builder.map();
@@ -132,11 +135,12 @@ static Item rdb_fetch_table(MarkBuilder& builder, RdbConn* conn, RdbTable* tbl) 
             Item item = rdb_value_to_item(builder, val, tbl->columns[c].type);
             row.put(tbl->columns[c].name, item);
         }
-        rows.append(row.final());
+        arr.append(row.final());
+        row_count++;
     }
 
     rdb_finalize(stmt);
-    return rows.final();
+    return arr.final();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -190,9 +194,25 @@ static Item rdb_build_table_schema(MarkBuilder& builder, RdbTable* tbl) {
             fk_map.put("column", fk->column);
             fk_map.put("ref_table", fk->ref_table);
             fk_map.put("ref_column", fk->ref_column);
+            fk_map.put("link_name", fk->link_name);
             fks.append(fk_map.final());
         }
         tbl_schema.put("foreign_keys", fks.final());
+    }
+
+    // reverse foreign keys (incoming FKs from other tables)
+    if (tbl->reverse_fk_count > 0) {
+        ArrayBuilder rfks = builder.array();
+        for (int f = 0; f < tbl->reverse_fk_count; f++) {
+            RdbForeignKey* rfk = &tbl->reverse_fks[f];
+            MapBuilder rfk_map = builder.map();
+            rfk_map.put("from_table", rfk->ref_table);
+            rfk_map.put("from_column", rfk->ref_column);
+            rfk_map.put("column", rfk->column);
+            rfk_map.put("link_name", rfk->link_name);
+            rfks.append(rfk_map.final());
+        }
+        tbl_schema.put("reverse_fks", rfks.final());
     }
 
     return tbl_schema.final();
