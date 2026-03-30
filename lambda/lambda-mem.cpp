@@ -102,6 +102,12 @@ extern "C" void heap_register_gc_root(uint64_t* slot) {
     gc_register_root(context->heap->gc, slot);
 }
 
+// register a contiguous range of Items as GC roots (e.g., JS closure env arrays)
+extern "C" void heap_register_gc_root_range(uint64_t* base, int count) {
+    if (!context || !context->heap || !context->heap->gc || !base || count <= 0) return;
+    gc_register_root_range(context->heap->gc, base, count);
+}
+
 // unregister an external root slot
 extern "C" void heap_unregister_gc_root(uint64_t* slot) {
     if (!context || !context->heap || !context->heap->gc || !slot) return;
