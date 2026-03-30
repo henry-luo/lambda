@@ -20,9 +20,9 @@ This document organizes the gaps by priority tier and proposes implementation st
 | **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete |
 | **Phase 4** | Background-image + position/size/repeat, `background-origin`, `background-clip`, `background-attachment` | ✅ Complete |
 | **Phase 5** | `filter:drop-shadow()` | ✅ Complete |
-| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started |
-| **Phase 7** | SVG output parity (gradients, shadows, transforms) | 🔲 Not started |
-| **Phase 8** | Render backend abstraction | 🔲 Not started |
+| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | ✅ Complete |
+| **Phase 7** | SVG output parity (gradients, shadows, transforms) | ✅ Complete |
+| **Phase 8** | Render backend abstraction | ✅ Complete |
 | **Phase 9** | PDF enhancements (fonts, gradients, images) | 🔲 Not started |
 
 ---
@@ -191,23 +191,16 @@ HTML/CSS → DOM Parse → Style Resolution → Layout → View Tree → Renderi
 
 ---
 
-### 3.3 SVG Inline Rendering Gaps
+### 3.3 SVG Inline Rendering Gaps ✅
 
-**Status:** Multiple gaps identified:
-- `<defs>` / gradient definitions — TODO at `render_svg_inline.cpp:1786`
-- `<use>` element — TODO at `render_svg_inline.cpp:1831`
-- `<clipPath>` — parse-only, not applied
-- `preserveAspectRatio` — TODO at `render_svg_inline.cpp:1877`
-- Gradient fills (`url(#id)`) — logged but not resolved (`render_svg_inline.cpp:551`)
+**Status:** **Complete (Phase 6).** All major inline SVG gaps resolved:
+- **`<defs>` processing** — `process_svg_defs()` walks `<defs>` children, builds `SvgDefTable` lookup (id → `SvgElemDef`/`SvgGradDef`).
+- **Gradient resolution** — `apply_svg_gradient_fill()` creates ThorVG linear/radial gradients from `SvgGradDef`. `apply_svg_fill_stroke()` resolves `url(#id)` references with element bounding-box parameters.
+- **`<use>` element** — Resolves `href`/`xlink:href`, renders referenced element with x/y offset translation.
+- **`<clipPath>`** — Build ThorVG clip shape from path data, applied via `tvg_paint_set_mask_method()`.
+- **`preserveAspectRatio`** — Full parsing of align (xMin/xMid/xMax × YMin/YMid/YMax) + meetOrSlice, computes correct viewBox→viewport transform matrix. Supports `none`, `meet`, and `slice`.
 
-**Implementation plan:**
-1. **`<defs>` processing** — Walk `<defs>` children, build a lookup table (id → element). Store in `SvgInlineContext`.
-2. **Gradient resolution** — When `fill="url(#grad1)"` is encountered, look up the gradient definition, convert to ThorVG linear/radial gradient.
-3. **`<use>` element** — Clone the referenced element's ThorVG scene graph and apply the `<use>` element's transform.
-4. **`<clipPath>`** — Build ThorVG clip shape from path data, apply via `tvg_paint_set_mask_method()`.
-5. **`preserveAspectRatio`** — Parse the attribute value (align + meetOrSlice), compute the appropriate transform matrix.
-
-**Files to modify:** `render_svg_inline.cpp`
+**Files modified:** `render_svg_inline.cpp`
 
 ---
 
@@ -248,43 +241,50 @@ Current `render_bound_svg()` only emits:
 
 | Feature | Raster | SVG |
 |---------|--------|-----|
-| Gradients (linear/radial/conic) | ✅ | ❌ |
+| Gradients (linear/radial) | ✅ | ✅ (`<linearGradient>`, `<radialGradient>`) |
 | Box-shadow (blur + inset) | ✅ | ✅ (`<filter>` + `feGaussianBlur`) |
 | Border-radius (correct per-corner) | ✅ | ⚠️ (uniform only) |
 | Border styles (all variants) | ✅ | ✅ (`<polygon>` trapezoids) |
 | Outline | ✅ | ✅ (`<rect stroke>`) |
-| CSS transforms | ✅ | ❌ |
+| CSS transforms | ✅ | ✅ (`<g transform="matrix(...)">`) |
 | CSS filters (`blur()`) | ✅ | ❌ |
-| Opacity | ⚠️ | ❌ |
+| Opacity | ✅ | ✅ (`<g opacity>`) |
 | Text decorations | ✅ | ❌ |
 | Text-shadow | ✅ | ✅ (`<filter>` + `feGaussianBlur`) |
-| Images | ✅ | ⚠️ (href only) |
+| Images | ✅ | ✅ (`<image>` href) |
 | Inline SVG | ✅ | ✅ (passthrough) |
 
-**Implementation strategy — Shared Render Trait:**
+**Render Backend Abstraction (Phase 8) — Complete:**
 
-Instead of duplicating rendering logic across backends, introduce a **render dispatch interface** that each backend implements:
+A shared `RenderBackend` vtable and tree walker eliminates duplicated traversal logic across SVG and PDF backends. Implemented in `render_backend.h` and `render_walk.cpp`:
 
 ```c
-typedef struct RenderBackend {
-    void (*draw_rect)(void* ctx, Rect rect, Color fill, BorderRadius* radii);
-    void (*draw_border)(void* ctx, Rect rect, BorderProp* border);
-    void (*draw_shadow)(void* ctx, Rect rect, BoxShadow* shadow, BorderRadius* radii);
-    void (*draw_gradient)(void* ctx, Rect rect, BackgroundProp* bg);
-    void (*draw_text)(void* ctx, float x, float y, const char* text, int len, FontBox* font, Color color);
-    void (*draw_image)(void* ctx, Rect rect, ImageSurface* img);
-    void (*push_transform)(void* ctx, Tvg_Matrix* transform);
-    void (*pop_transform)(void* ctx);
-    void (*push_clip)(void* ctx, Rect clip, BorderRadius* radii);
-    void (*pop_clip)(void* ctx);
-    void (*push_opacity)(void* ctx, float opacity);
-    void (*pop_opacity)(void* ctx);
-} RenderBackend;
+struct RenderBackend {
+    void* ctx;
+    void (*render_bound)(void* ctx, ViewBlock* view, float abs_x, float abs_y);
+    void (*render_text)(void* ctx, ViewText* text, float abs_x, float abs_y,
+                        FontBox* font, Color color);
+    void (*render_image)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*begin_block_children)(void* ctx, ViewBlock* block);
+    void (*end_block_children)(void* ctx, ViewBlock* block);
+    void (*begin_inline_children)(void* ctx, ViewSpan* span);
+    void (*end_inline_children)(void* ctx, ViewSpan* span);
+    void (*begin_opacity)(void* ctx, float opacity);
+    void (*end_opacity)(void* ctx);
+    void (*begin_transform)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*end_transform)(void* ctx);
+    void (*render_column_rules)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*on_font_change)(void* ctx, FontProp* font_prop);
+};
 ```
 
-Each backend (`render.cpp`, `render_svg.cpp`, `render_pdf.cpp`) implements these operations. The tree traversal logic (`render_block_view`, `render_children`, etc.) is written once and dispatches through the backend.
+The shared walker (`render_walk_block`, `render_walk_inline`, `render_walk_children`) handles tree traversal, context save/restore, font/color propagation, opacity/transform wrapping, and view-type dispatch. Each backend provides only the drawing callbacks. SVG uses 13 callbacks; PDF uses 3 (bound, text, font-change). The raster backend (`render.cpp`) is not wired through this interface due to HiDPI scaling, pixel-level filters/opacity, scrollbars, and form controls.
 
-This prevents the current pattern where every new CSS feature must be independently implemented 3 times.
+New rendering features added to the walker are automatically available in both SVG and PDF output.
+
+**Files added:** `render_backend.h`, `render_walk.cpp`
+**Files modified:** `render_svg.cpp`, `render_pdf.cpp`
 
 ### 4.2 PDF Output Enhancements
 
@@ -337,9 +337,9 @@ Recommended implementation sequence, ordered by impact and dependency:
 | **Phase 3** | Border style variants (double/groove/ridge/inset/outset) | ✅ Complete | Medium |
 | **Phase 4** | Background-image + position/size/repeat, `background-origin`, `background-clip`, `background-attachment` | ✅ Complete | Medium-High |
 | **Phase 5** | `filter:drop-shadow()` | ✅ Complete | Medium |
-| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | 🔲 Not started | Medium |
-| **Phase 7** | SVG output parity (gradients, transforms in SVG export) | 🔲 Not started | High |
-| **Phase 8** | Render backend abstraction | 🔲 Not started | High (refactor) |
+| **Phase 6** | SVG inline: defs, gradients, `<use>`, `<clipPath>` | ✅ Complete | Medium |
+| **Phase 7** | SVG output parity (gradients, transforms in SVG export) | ✅ Complete | High |
+| **Phase 8** | Render backend abstraction | ✅ Complete | High (refactor) |
 | **Phase 9** | PDF enhancements (fonts, gradients, images) | 🔲 Not started | High |
 
 ---
@@ -381,14 +381,14 @@ void box_blur_rgba(uint32_t* pixels, int width, int height,
 - ✅ **`text-shadow`** — data model, blur pre-pass, SVG filter output
 - ✅ **`filter:blur()`** — software kernel, shares `box_blur_region()`
 - ✅ **Border style variants** — `double`/`groove`/`ridge`/`inset`/`outset`, per-side + SVG polygon output
+- ✅ **`background-image`** — URL loading, `background-size`/`position`/`repeat`/`origin`/`clip`, raster + SVG (`<pattern>`/`<image>`)
+- ✅ **`filter:drop-shadow()`** — alpha extraction + blur + colorize pipeline
+- ✅ **SVG inline** — `<defs>`, gradient `url(#id)` resolution, `<use>`, `<clipPath>`, `preserveAspectRatio`
+- ✅ **SVG output parity** — gradients (`<linearGradient>`/`<radialGradient>`), CSS transforms (`matrix()`), opacity (`<g opacity>`)
+- ✅ **Render backend abstraction** — `RenderBackend` vtable + shared tree walker (`render_walk.cpp`), SVG (13 callbacks) and PDF (3 callbacks) migrated
 
 ### Remaining priorities
 
-1. **`background-image`** — URL images not loaded or rendered as backgrounds
-2. **`filter:drop-shadow()`** — alpha-channel extraction + blur + colorize pipeline
-3. **SVG inline gaps** — `<defs>`, gradient `url(#id)` resolution, `<use>`, `<clipPath>`
-4. **SVG output parity** — gradients and CSS transforms missing from SVG export
-5. **Backend abstraction** — shared `RenderBackend` trait to prevent per-feature triplication
-6. **PDF enhancements** — fonts, gradients, rounded rects, images
+1. **PDF enhancements** — font embedding, gradients, rounded rects, images
 
-The backend abstraction (Tier 4) is the most structurally significant remaining change. It would eliminate the current drift between raster/SVG/PDF output quality and ensure every new CSS feature is available across all output formats from day one.
+The backend abstraction is now complete. New CSS features added to the shared walker are automatically available in both SVG and PDF output.
