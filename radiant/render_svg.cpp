@@ -1075,15 +1075,15 @@ static bool svg_build_transform_attr(const TransformProp* tp, float elem_x, floa
                 break;
             case TRANSFORM_ROTATE:
             case TRANSFORM_ROTATEZ: {
-                double ang = tf->angle;  // radians
+                double ang = tf->params.angle;  // radians
                 la = cos(ang); lc = -sin(ang); lb = sin(ang); ld = cos(ang);
                 break;
             }
             case TRANSFORM_SKEWX:
-                lc = tan((double)tf->angle);
+                lc = tan((double)tf->params.angle);
                 break;
             case TRANSFORM_SKEWY:
-                lb = tan((double)tf->angle);
+                lb = tan((double)tf->params.angle);
                 break;
             case TRANSFORM_MATRIX:
                 la = tf->params.matrix.a; lb = tf->params.matrix.b;

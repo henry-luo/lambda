@@ -531,6 +531,107 @@ bool is_inline_svg_element(DomElement* elem) {
 }
 
 // ============================================================================
+// SVG Defs: Gradient definitions and element refs
+// ============================================================================
+
+#define SVG_MAX_GRAD_DEFS  64
+#define SVG_MAX_GRAD_STOPS 64
+#define SVG_MAX_ELEM_DEFS  64
+
+struct SvgGradStop {
+    float   offset;
+    Color   color;
+};
+
+struct SvgGradDef {
+    char  id[128];
+    bool  is_radial;
+    bool  user_space;          // true = gradientUnits=userSpaceOnUse
+    float x1, y1, x2, y2;     // linear gradient endpoints
+    float cx, cy, r;           // radial gradient center + radius
+    SvgGradStop stops[SVG_MAX_GRAD_STOPS];
+    int   stop_count;
+};
+
+struct SvgElemDef {
+    char     id[128];
+    Element* elem;
+};
+
+struct SvgDefTable {
+    SvgGradDef grads[SVG_MAX_GRAD_DEFS];
+    int        grad_count;
+    SvgElemDef elems[SVG_MAX_ELEM_DEFS];
+    int        elem_count;
+};
+
+static float parse_svg_pct_or_num(const char* s, float fallback) {
+    if (!s || !*s) return fallback;
+    char* end;
+    float v = strtof(s, &end);
+    if (end == s) return fallback;
+    while (*end && isspace((unsigned char)*end)) end++;
+    if (*end == '%') v /= 100.0f;
+    return v;
+}
+
+static SvgGradDef* lookup_grad_def(SvgDefTable* table, const char* id) {
+    if (!table || !id) return nullptr;
+    for (int i = 0; i < table->grad_count; i++) {
+        if (strcmp(table->grads[i].id, id) == 0) return &table->grads[i];
+    }
+    return nullptr;
+}
+
+static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
+    if (!table || !id) return nullptr;
+    for (int i = 0; i < table->elem_count; i++) {
+        if (strcmp(table->elems[i].id, id) == 0) return table->elems[i].elem;
+    }
+    return nullptr;
+}
+
+static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
+                                    float bx, float by, float bw, float bh) {
+    if (!shape || !def || def->stop_count < 2) return;
+
+    Tvg_Gradient grad;
+    if (def->is_radial) {
+        grad = tvg_radial_gradient_new();
+        float cx, cy, r;
+        if (def->user_space) {
+            cx = def->cx; cy = def->cy; r = def->r;
+        } else {
+            cx = bx + def->cx * bw;
+            cy = by + def->cy * bh;
+            r  = def->r * (bw < bh ? bw : bh);
+        }
+        tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
+    } else {
+        grad = tvg_linear_gradient_new();
+        float x1, y1, x2, y2;
+        if (def->user_space) {
+            x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
+        } else {
+            x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
+            x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
+        }
+        tvg_linear_gradient_set(grad, x1, y1, x2, y2);
+    }
+
+    Tvg_Color_Stop stops[SVG_MAX_GRAD_STOPS];
+    for (int i = 0; i < def->stop_count; i++) {
+        stops[i].offset = def->stops[i].offset;
+        stops[i].r = def->stops[i].color.r;
+        stops[i].g = def->stops[i].color.g;
+        stops[i].b = def->stops[i].color.b;
+        stops[i].a = def->stops[i].color.a;
+    }
+    tvg_gradient_set_color_stops(grad, stops, def->stop_count);
+    tvg_shape_set_gradient(shape, grad);
+}
+
+// ============================================================================
 // Apply Fill and Stroke to ThorVG Shape
 // ============================================================================
 
@@ -1799,115 +1900,12 @@ static Tvg_Paint render_svg_children_as_scene(SvgRenderContext* ctx, Element* el
 }
 
 // ============================================================================
-// SVG Defs: Gradient definitions and element refs
+// SVG Defs Processing
 // ============================================================================
-
-#define SVG_MAX_GRAD_DEFS  64
-#define SVG_MAX_GRAD_STOPS 64
-#define SVG_MAX_ELEM_DEFS  64
-
-struct SvgGradStop {
-    float   offset;
-    Color   color;
-};
-
-struct SvgGradDef {
-    char  id[128];
-    bool  is_radial;
-    bool  user_space;          // true = gradientUnits=userSpaceOnUse
-    // linear gradient endpoints (in grad units: 0-1 for OBB, px for userSpace)
-    float x1, y1, x2, y2;
-    // radial gradient center + radius
-    float cx, cy, r;
-    SvgGradStop stops[SVG_MAX_GRAD_STOPS];
-    int   stop_count;
-};
-
-struct SvgElemDef {
-    char     id[128];
-    Element* elem;       // referenced element (for <use>)
-};
-
-struct SvgDefTable {
-    SvgGradDef grads[SVG_MAX_GRAD_DEFS];
-    int        grad_count;
-    SvgElemDef elems[SVG_MAX_ELEM_DEFS];
-    int        elem_count;
-};
-
-// Parse "50%" → 0.5, "0.5" → 0.5, "" → fallback
-static float parse_svg_pct_or_num(const char* s, float fallback) {
-    if (!s || !*s) return fallback;
-    char* end;
-    float v = strtof(s, &end);
-    if (end == s) return fallback;
-    while (*end && isspace((unsigned char)*end)) end++;
-    if (*end == '%') v /= 100.0f;
-    return v;
-}
-
-static SvgGradDef* lookup_grad_def(SvgDefTable* table, const char* id) {
-    if (!table || !id) return nullptr;
-    for (int i = 0; i < table->grad_count; i++) {
-        if (strcmp(table->grads[i].id, id) == 0) return &table->grads[i];
-    }
-    return nullptr;
-}
-
-static Element* lookup_elem_def(SvgDefTable* table, const char* id) {
-    if (!table || !id) return nullptr;
-    for (int i = 0; i < table->elem_count; i++) {
-        if (strcmp(table->elems[i].id, id) == 0) return table->elems[i].elem;
-    }
-    return nullptr;
-}
-
-// Create and apply a ThorVG gradient from a parsed SvgGradDef to a shape.
-// bx/by/bw/bh are the shape's bounding box in user coords (used for objectBoundingBox mode).
-static void apply_svg_gradient_fill(Tvg_Paint shape, SvgGradDef* def,
-                                    float bx, float by, float bw, float bh) {
-    if (!shape || !def || def->stop_count < 2) return;
-
-    Tvg_Gradient grad;
-    if (def->is_radial) {
-        grad = tvg_radial_gradient_new();
-        float cx, cy, r;
-        if (def->user_space) {
-            cx = def->cx; cy = def->cy; r = def->r;
-        } else {
-            cx = bx + def->cx * bw;
-            cy = by + def->cy * bh;
-            r  = def->r  * (bw < bh ? bw : bh);
-        }
-        tvg_radial_gradient_set(grad, cx, cy, r, cx, cy, 0);
-    } else {
-        grad = tvg_linear_gradient_new();
-        float x1, y1, x2, y2;
-        if (def->user_space) {
-            x1 = def->x1; y1 = def->y1; x2 = def->x2; y2 = def->y2;
-        } else {
-            x1 = bx + def->x1 * bw; y1 = by + def->y1 * bh;
-            x2 = bx + def->x2 * bw; y2 = by + def->y2 * bh;
-        }
-        tvg_linear_gradient_set(grad, x1, y1, x2, y2);
-    }
-
-    Tvg_Color_Stop stops[SVG_MAX_GRAD_STOPS];
-    for (int i = 0; i < def->stop_count; i++) {
-        stops[i].offset = def->stops[i].offset;
-        stops[i].r = def->stops[i].color.r;
-        stops[i].g = def->stops[i].color.g;
-        stops[i].b = def->stops[i].color.b;
-        stops[i].a = def->stops[i].color.a;
-    }
-    tvg_gradient_set_color_stops(grad, stops, def->stop_count);
-    tvg_shape_set_gradient(shape, grad);
-}
 
 static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
     if (!defs) return;
 
-    // allocate the def table on first use (stored in ctx->defs via cast)
     if (!ctx->defs) {
         SvgDefTable* table = (SvgDefTable*)mem_alloc(sizeof(SvgDefTable), MEM_CAT_RENDER);
         memset(table, 0, sizeof(SvgDefTable));
@@ -1934,35 +1932,35 @@ static void process_svg_defs(SvgRenderContext* ctx, Element* defs) {
             const char* gu = get_svg_attr(child, "gradientUnits");
             def->user_space = (gu && strcmp(gu, "userSpaceOnUse") == 0);
 
-            // linear endpoints (default: x1=0%=0, y1=0%=0, x2=100%=1, y2=0%=0)
             def->x1 = parse_svg_pct_or_num(get_svg_attr(child, "x1"), 0.0f);
             def->y1 = parse_svg_pct_or_num(get_svg_attr(child, "y1"), 0.0f);
             def->x2 = parse_svg_pct_or_num(get_svg_attr(child, "x2"), 1.0f);
             def->y2 = parse_svg_pct_or_num(get_svg_attr(child, "y2"), 0.0f);
 
-            // radial center+radius (default: cx=50%=0.5, cy=50%=0.5, r=50%=0.5)
             def->cx = parse_svg_pct_or_num(get_svg_attr(child, "cx"), 0.5f);
             def->cy = parse_svg_pct_or_num(get_svg_attr(child, "cy"), 0.5f);
             def->r  = parse_svg_pct_or_num(get_svg_attr(child, "r"),  0.5f);
 
-            // parse <stop> children
             for (int64_t s = 0; s < child->length && def->stop_count < SVG_MAX_GRAD_STOPS; s++) {
-                Element* stop = get_child_element_at(child, s);
-                if (!stop) continue;
-                const char* stag = get_element_tag_name(stop);
+                Element* stop_elem = get_child_element_at(child, s);
+                if (!stop_elem) continue;
+                const char* stag = get_element_tag_name(stop_elem);
                 if (!stag || strcmp(stag, "stop") != 0) continue;
 
                 SvgGradStop* gs = &def->stops[def->stop_count++];
-                gs->offset = parse_svg_pct_or_num(get_svg_attr(stop, "offset"), 0.0f);
-                const char* sc = get_svg_attr(stop, "stop-color");
-                gs->color = sc ? parse_svg_color(sc) : Color{0, 0, 0, 255};
-                const char* so = get_svg_attr(stop, "stop-opacity");
+                gs->offset = parse_svg_pct_or_num(get_svg_attr(stop_elem, "offset"), 0.0f);
+                const char* sc = get_svg_attr(stop_elem, "stop-color");
+                if (sc) {
+                    gs->color = parse_svg_color(sc);
+                } else {
+                    gs->color.r = 0; gs->color.g = 0; gs->color.b = 0; gs->color.a = 255;
+                }
+                const char* so = get_svg_attr(stop_elem, "stop-opacity");
                 if (so) gs->color.a = (uint8_t)((float)gs->color.a * strtof(so, nullptr));
             }
             log_debug("[SVG] defs: %s id='%s' stops=%d", tag, id ? id : "", def->stop_count);
 
         } else if (id) {
-            // store element for <use> references
             if (table->elem_count < SVG_MAX_ELEM_DEFS) {
                 SvgElemDef* ed = &table->elems[table->elem_count++];
                 str_copy(ed->id, sizeof(ed->id), id, strlen(id));
