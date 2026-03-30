@@ -25,12 +25,25 @@
 #include <regex.h>
 #include <fnmatch.h>
 #include <signal.h>
+#include <unistd.h>
+#include <time.h>
 
 // ============================================================================
 // Runtime state
 // ============================================================================
 
 static int bash_last_exit_code = 0;
+
+// $0 — script name, used in bash_get_var which is earlier in file
+static const char* bash_script_name = "";
+
+// original script name for error reporting (not affected by BASH_ARGV0)
+static char bash_error_script_name[4096] = "";
+
+// SECONDS tracking: start time and user-set offset
+static time_t bash_seconds_start = 0;
+static time_t bash_seconds_offset = 0;  // set by SECONDS=N assignment
+static bool bash_seconds_initialized = false;
 
 // Loop control: 0=none, 1=break, 2=continue
 static int bash_loop_control = 0;
@@ -47,6 +60,10 @@ static bool bash_opt_functrace = false; // -T / set -o functrace
 static int bash_current_lineno = 0;
 static int bash_debug_trap_lineno = 0;
 static int bash_debug_trap_base_depth = 0;
+
+// arithmetic expression context for error messages
+static const char* bash_arith_expr_text = "";
+static int bash_arith_expr_len = 0;
 
 #define BASH_FUNCNAME_STACK_MAX 256
 static String* bash_funcname_stack[BASH_FUNCNAME_STACK_MAX];
@@ -417,7 +434,11 @@ extern "C" Item bash_divide(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        log_error("bash: division by zero");
+        // print error to stderr in bash format
+        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
+            bash_error_script_name, bash_current_lineno,
+            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
     return (Item){.item = i2it(a / b)};
@@ -427,7 +448,10 @@ extern "C" Item bash_modulo(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        log_error("bash: division by zero");
+        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
+            bash_error_script_name, bash_current_lineno,
+            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
     return (Item){.item = i2it(a % b)};
@@ -1037,6 +1061,25 @@ extern "C" Item bash_string_concat(Item left, Item right) {
     return (Item){.item = s2it(result)};
 }
 
+// var+=val: if variable has integer attribute, do arithmetic add; else string concat
+extern "C" Item bash_var_append(Item var_name, Item old_val, Item append_val) {
+    int attrs = bash_get_var_attrs(var_name);
+    if (attrs & BASH_ATTR_INTEGER) {
+        // arithmetic addition: old + new
+        Item old_str = bash_to_string(old_val);
+        Item new_str = bash_to_string(append_val);
+        String* os = it2s(old_str);
+        String* ns = it2s(new_str);
+        long old_i = (os && os->len > 0) ? strtol(os->chars, NULL, 10) : 0;
+        long new_i = (ns && ns->len > 0) ? strtol(ns->chars, NULL, 10) : 0;
+        long sum = old_i + new_i;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%ld", sum);
+        return (Item){.item = s2it(heap_create_name(buf, len))};
+    }
+    return bash_string_concat(old_val, append_val);
+}
+
 // ============================================================================
 // Tilde expansion: ~ → $HOME, ~/path → $HOME/path
 // ============================================================================
@@ -1066,6 +1109,30 @@ extern "C" Item bash_expand_tilde(Item word) {
             struct passwd* pw = getpwuid(getuid());
             if (pw) home = pw->pw_dir;
         }
+    } else if (*suffix == '-' && (suffix[1] == '\0' || suffix[1] == '/')) {
+        // ~- → $OLDPWD
+        Item oldpwd_name = (Item){.item = s2it(heap_create_name("OLDPWD", 6))};
+        extern Item bash_get_var(Item name);
+        Item oldpwd_val = bash_get_var(oldpwd_name);
+        const char* bash_oldpwd = bash_item_to_cstr(oldpwd_val);
+        if (bash_oldpwd && *bash_oldpwd) {
+            home = bash_oldpwd;
+        } else {
+            home = getenv("OLDPWD");
+        }
+        suffix = (suffix[1] == '/') ? suffix + 1 : suffix + 1;
+    } else if (*suffix == '+' && (suffix[1] == '\0' || suffix[1] == '/')) {
+        // ~+ → $PWD
+        Item pwd_name = (Item){.item = s2it(heap_create_name("PWD", 3))};
+        extern Item bash_get_var(Item name);
+        Item pwd_val = bash_get_var(pwd_name);
+        const char* bash_pwd = bash_item_to_cstr(pwd_val);
+        if (bash_pwd && *bash_pwd) {
+            home = bash_pwd;
+        } else {
+            home = getenv("PWD");
+        }
+        suffix = (suffix[1] == '/') ? suffix + 1 : suffix + 1;
     } else {
         // ~user → lookup user's home directory
         const char* slash = strchr(suffix, '/');
@@ -1086,6 +1153,117 @@ extern "C" Item bash_expand_tilde(Item word) {
     StrBuf* sb = strbuf_new();
     strbuf_append_str(sb, home);
     if (*suffix) strbuf_append_str(sb, suffix);
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// Tilde expansion in assignment value: expands ~, ~/path, ~user, ~+, ~- after each : delimiter
+// Used when assigning to variables where the value starts with ~ or contains :~ sequences
+extern "C" Item bash_expand_tilde_assign(Item word) {
+    // expand tilde in assignment values: ~ at start and after : separators
+    const char* w = bash_item_to_cstr(word);
+    if (!w || !*w) return word;
+
+    // check if any tilde expansion needed: starts with ~ or contains :~
+    bool needs_expand = (w[0] == '~');
+    if (!needs_expand) {
+        for (int i = 0; w[i]; i++) {
+            if (w[i] == ':' && w[i+1] == '~') { needs_expand = true; break; }
+        }
+    }
+    if (!needs_expand) return word;
+
+    StrBuf* sb = strbuf_new_cap((int)strlen(w) * 2);
+    const char* p = w;
+    while (*p) {
+        if (*p == '~') {
+            // expand this tilde segment: ~ up to next : or end
+            const char* seg_end = strchr(p, ':');
+            int seg_len = seg_end ? (int)(seg_end - p) : (int)strlen(p);
+            char seg[1024];
+            if (seg_len >= 1023) seg_len = 1022;
+            memcpy(seg, p, seg_len);
+            seg[seg_len] = '\0';
+
+            Item seg_item = (Item){.item = s2it(heap_create_name(seg, seg_len))};
+            Item expanded = bash_expand_tilde(seg_item);
+            const char* exp_str = bash_item_to_cstr(expanded);
+            strbuf_append_str(sb, exp_str ? exp_str : seg);
+
+            p += seg_len;
+        } else {
+            // copy up to next :~ or end
+            const char* trigger = NULL;
+            for (const char* q = p; *q; q++) {
+                if (*q == ':' && *(q+1) == '~') { trigger = q; break; }
+            }
+            if (trigger) {
+                // copy up to and including the colon
+                strbuf_append_str_n(sb, p, (int)(trigger - p) + 1);
+                p = trigger + 1; // skip to the ~
+            } else {
+                // no more :~ sequences, copy remainder
+                strbuf_append_str(sb, p);
+                p += strlen(p);
+            }
+        }
+    }
+
+    String* result = heap_create_name(sb->str, sb->length);
+    strbuf_free(sb);
+    return (Item){.item = s2it(result)};
+}
+
+// tilde-assign expansion for command arguments: NAME=~/value or NAME=~:~/value
+// handles =~ and :~ triggers (not applied in POSIX mode)
+extern "C" Item bash_expand_tilde_assign_arg(Item word) {
+    if (bash_get_posix_mode()) return word;
+    const char* w = bash_item_to_cstr(word);
+    if (!w || !*w) return word;
+
+    // check if any tilde expansion needed: contains =~ or :~
+    bool needs_expand = false;
+    for (int i = 0; w[i]; i++) {
+        if ((w[i] == '=' || w[i] == ':') && w[i+1] == '~') { needs_expand = true; break; }
+    }
+    if (!needs_expand) return word;
+
+    StrBuf* sb = strbuf_new_cap((int)strlen(w) * 2);
+    const char* p = w;
+    while (*p) {
+        if (*p == '~') {
+            const char* seg_end = NULL;
+            for (const char* q = p; *q; q++) {
+                if (*q == ':' || *q == '/') { seg_end = q; break; }
+            }
+            int seg_len = seg_end ? (int)(seg_end - p) : (int)strlen(p);
+            char seg[1024];
+            if (seg_len >= 1023) seg_len = 1022;
+            memcpy(seg, p, seg_len);
+            seg[seg_len] = '\0';
+
+            Item seg_item = (Item){.item = s2it(heap_create_name(seg, seg_len))};
+            Item expanded = bash_expand_tilde(seg_item);
+            const char* exp_str = bash_item_to_cstr(expanded);
+            strbuf_append_str(sb, exp_str ? exp_str : seg);
+
+            p += seg_len;
+        } else {
+            const char* trigger = NULL;
+            for (const char* q = p; *q; q++) {
+                if ((*q == '=' || *q == ':') && *(q+1) == '~') { trigger = q; break; }
+            }
+            if (trigger) {
+                strbuf_append_str_n(sb, p, (int)(trigger - p) + 1);
+                p = trigger + 1;
+            } else {
+                strbuf_append_str(sb, p);
+                p += strlen(p);
+            }
+        }
+    }
+
     String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
@@ -1469,6 +1647,22 @@ extern "C" Item bash_array_new(void) {
     list->capacity = 8;
     list->items = (Item*)heap_calloc(sizeof(Item) * 8, LMD_TYPE_RAW_POINTER);
     return (Item){.item = (uint64_t)(uintptr_t)list};
+}
+
+// ensure a variable holds an indexed array; create one if it doesn't
+extern "C" Item bash_ensure_array(Item name) {
+    Item current = bash_get_var(name);
+    // check if it's already a List (pointer to struct with type_id == LMD_TYPE_ARRAY)
+    uintptr_t ptr = (uintptr_t)current.item;
+    if (ptr != 0 && (ptr >> 48) == 0) {
+        // looks like a heap pointer — check type_id
+        List* list = (List*)ptr;
+        if (list->type_id == LMD_TYPE_ARRAY) return current;
+    }
+    // not an array — create one and store it
+    Item new_arr = bash_array_new();
+    bash_set_var(name, new_arr);
+    return new_arr;
 }
 
 extern "C" Item bash_array_set(Item arr, Item index, Item value) {
@@ -2056,6 +2250,11 @@ extern "C" void bash_runtime_init(void) {
     bash_return_trap_lineno = 0;
     bash_return_trap_base_depth = 0;
     bash_trap_nesting_depth = 0;
+    bash_arith_expr_text = "";
+    bash_arith_expr_len = 0;
+    bash_error_script_name[0] = '\0';
+    bash_seconds_initialized = false;
+    bash_seconds_offset = 0;
     // clear trap state
     for (int i = 0; i < BASH_TRAP_NUM; i++) {
         bash_trap_handlers[i] = NULL;
@@ -2149,6 +2348,28 @@ extern "C" void bash_set_var(Item name, Item value) {
     bash_ensure_var_table();
     String* s = it2s(name);
     if (!s) return;
+
+    // FUNCNAME, GROUPS: noassign — silently ignore
+    if (s->len == 8 && memcmp(s->chars, "FUNCNAME", 8) == 0) return;
+    if (s->len == 6 && memcmp(s->chars, "GROUPS", 6) == 0) return;
+
+    // SECONDS: assignment resets the counter
+    if (s->len == 7 && memcmp(s->chars, "SECONDS", 7) == 0) {
+        if (!bash_seconds_initialized) {
+            bash_seconds_start = time(NULL);
+            bash_seconds_initialized = true;
+        }
+        Item int_val = bash_to_int(value);
+        bash_seconds_offset = (time_t)it2i(int_val);
+        bash_seconds_start = time(NULL);
+        return;
+    }
+
+    // BASH_ARGV0: write also updates $0 (script name)
+    if (s->len == 10 && memcmp(s->chars, "BASH_ARGV0", 10) == 0) {
+        bash_set_script_name(value);
+    }
+
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
 
     // dynamic scoping: if the variable exists in any active function scope frame,
@@ -2201,6 +2422,46 @@ extern "C" Item bash_get_var(Item name) {
     bash_ensure_var_table();
     String* s = it2s(name);
     if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    // dynamic variables: computed on the fly
+    if (s->len == 7 && memcmp(s->chars, "BASHPID", 7) == 0) {
+        char buf[32];
+        // in subshells, return a unique fake PID (real bash forks, we don't)
+        int pid = (int)getpid();
+        if (bash_subshell_depth > 0) pid += bash_subshell_depth;
+        snprintf(buf, sizeof(buf), "%d", pid);
+        return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+    }
+    if (s->len == 12 && memcmp(s->chars, "EPOCHSECONDS", 12) == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%ld", (long)time(NULL));
+        return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+    }
+    if (s->len == 13 && memcmp(s->chars, "EPOCHREALTIME", 13) == 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%ld.%06ld", (long)ts.tv_sec, (long)(ts.tv_nsec / 1000));
+        return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+    }
+    if (s->len == 7 && memcmp(s->chars, "SECONDS", 7) == 0) {
+        if (!bash_seconds_initialized) {
+            bash_seconds_start = time(NULL);
+            bash_seconds_initialized = true;
+        }
+        time_t elapsed = time(NULL) - bash_seconds_start + bash_seconds_offset;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%ld", (long)elapsed);
+        return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+    }
+    if (s->len == 10 && memcmp(s->chars, "BASH_ARGV0", 10) == 0) {
+        // BASH_ARGV0 reflects $0 (script name) — check var table first then return script name
+        BashRtVar key2 = {.name = s->chars, .name_len = (size_t)s->len};
+        const BashRtVar* found2 = (const BashRtVar*)hashmap_get(bash_var_table, &key2);
+        if (found2) return found2->value;
+        return (Item){.item = s2it(heap_create_name(bash_script_name))};
+    }
+
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
 
     // dynamic scoping: walk scope stack from top (most recent) to bottom
@@ -2394,6 +2655,19 @@ extern "C" Item bash_assoc_new(void) {
     return (Item){.item = (uint64_t)(uintptr_t)aa};
 }
 
+// ensure a variable holds an associative array; create one if it doesn't
+extern "C" Item bash_ensure_assoc(Item name) {
+    Item current = bash_get_var(name);
+    uintptr_t ptr = (uintptr_t)current.item;
+    if (ptr != 0 && (ptr >> 48) == 0) {
+        BashAssocArray* aa = (BashAssocArray*)ptr;
+        if (aa->type_id == LMD_TYPE_MAP) return current;
+    }
+    Item new_map = bash_assoc_new();
+    bash_set_var(name, new_map);
+    return new_map;
+}
+
 extern "C" Item bash_assoc_set(Item map, Item key, Item value) {
     BashAssocArray* aa = bash_item_to_assoc(map);
     if (!aa) return map;
@@ -2470,7 +2744,7 @@ extern "C" int64_t bash_assoc_count(Item map) {
 
 static Item* bash_positional_args = NULL;
 static int bash_positional_count = 0;
-static const char* bash_script_name = "";
+// bash_script_name declared at top of file
 
 // stack for saving/restoring positional params during function calls
 #define BASH_POS_STACK_MAX 64
@@ -2547,6 +2821,45 @@ extern "C" Item bash_shift_args(int n) {
 
 extern "C" Item bash_get_script_name(void) {
     return (Item){.item = s2it(heap_create_name(bash_script_name))};
+}
+
+extern "C" void bash_set_script_name(Item name) {
+    String* s = it2s(name);
+    if (!s) return;
+    // store a permanent copy of the script name
+    static char bash_script_name_buf[4096];
+    int len = s->len < (int)sizeof(bash_script_name_buf) - 1 ? s->len : (int)sizeof(bash_script_name_buf) - 1;
+    memcpy(bash_script_name_buf, s->chars, len);
+    bash_script_name_buf[len] = '\0';
+    bash_script_name = bash_script_name_buf;
+    // set error script name only on first call (initial script name)
+    if (bash_error_script_name[0] == '\0') {
+        int elen = s->len < (int)sizeof(bash_error_script_name) - 1 ? s->len : (int)sizeof(bash_error_script_name) - 1;
+        memcpy(bash_error_script_name, s->chars, elen);
+        bash_error_script_name[elen] = '\0';
+    }
+}
+
+// last background PID ($!)
+static int bash_last_bg_pid_val = 0;
+
+extern "C" Item bash_get_pid(void) {
+    // $$ returns the PID of the current shell process
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", (int)getpid());
+    return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+}
+
+extern "C" Item bash_get_last_bg_pid(void) {
+    if (bash_last_bg_pid_val == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", bash_last_bg_pid_val);
+    return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+}
+
+extern "C" Item bash_get_shell_flags(void) {
+    // $- returns active shell flags: default is "hB" (hashall + braceexpand)
+    return (Item){.item = s2it(heap_create_name("hB", 2))};
 }
 
 static String* bash_get_current_source_name(void) {
@@ -2635,6 +2948,8 @@ extern "C" void bash_env_import(void) {
         "OLDPWD", "SHLVL", "IFS",
         // test harness variables — imported so bash tests can invoke sub-scripts
         "THIS_SH", "TESTSHELL",
+        // special bash variables that may be set from outside
+        "BASH_COMMAND",
         NULL
     };
     for (int i = 0; env_names[i]; i++) {
@@ -2800,6 +3115,9 @@ extern "C" void bash_set_option(Item option, bool enable) {
                (s->len == 9 && memcmp(s->chars, "functrace", 9) == 0)) {
         bash_opt_functrace = enable;
         log_debug("bash: set functrace=%s", enable ? "on" : "off");
+    } else if (s->len == 5 && memcmp(s->chars, "posix", 5) == 0) {
+        bash_posix_mode = enable;
+        log_debug("bash: set posix=%s", enable ? "on" : "off");
     } else {
         log_debug("bash: set: unknown option '%.*s'", s->len, s->chars);
     }
@@ -2839,6 +3157,17 @@ extern "C" void bash_set_lineno(int line) {
     bash_current_lineno = line;
 }
 
+extern "C" void bash_set_arith_context(Item expr_text) {
+    String* s = it2s(expr_text);
+    if (s) {
+        bash_arith_expr_text = s->chars;
+        bash_arith_expr_len = (int)s->len;
+    } else {
+        bash_arith_expr_text = "";
+        bash_arith_expr_len = 0;
+    }
+}
+
 // restore lineno from the top call frame (call site line)
 extern "C" void bash_restore_call_frame_lineno(void) {
     if (bash_call_frame_depth > 0) {
@@ -2870,7 +3199,11 @@ extern "C" Item bash_get_funcname(Item index) {
 
     int stack_idx = bash_funcname_depth - 1 - idx;
     if (stack_idx < 0 || stack_idx >= bash_funcname_depth) {
-        return (Item){.item = s2it(heap_create_name("", 0))};
+        return (Item){.item = s2it(NULL)};
+    }
+    // at top level (only "main" on stack), FUNCNAME[0] is unset
+    if (bash_funcname_depth == 1 && idx == 0) {
+        return (Item){.item = s2it(NULL)};
     }
     return (Item){.item = s2it(bash_funcname_stack[stack_idx])};
 }
