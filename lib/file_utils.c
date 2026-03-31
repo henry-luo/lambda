@@ -1,7 +1,9 @@
 // file_utils.c
 // File system utility functions — directory operations, glob, find
 
-#define _POSIX_C_SOURCE 200809L
+#ifndef _WIN32
+  #define _GNU_SOURCE
+#endif
 
 #include "file_utils.h"
 #include "file.h"
