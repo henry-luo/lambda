@@ -121,7 +121,7 @@ BashOperator bash_operator_from_string(const char* op_str, size_t len) {
         if (memcmp(op_str, "/=", 2) == 0) return BASH_OP_DIV_ASSIGN;
         if (memcmp(op_str, "%=", 2) == 0) return BASH_OP_MOD_ASSIGN;
     }
-    log_error("bash: unknown operator: %.*s", (int)len, op_str);
+    log_debug("bash: unknown operator: %.*s", (int)len, op_str);
     return BASH_OP_ADD;
 }
 
@@ -157,7 +157,7 @@ BashTestOp bash_test_op_from_string(const char* op_str, size_t len) {
         if (op_str[0] == '>') return BASH_TEST_STR_GT;
         if (op_str[0] == '!') return BASH_TEST_NOT;
     }
-    log_error("bash: unknown test operator: %.*s", (int)len, op_str);
+    log_debug("bash: unknown test operator: %.*s", (int)len, op_str);
     return BASH_TEST_EQ;
 }
 
@@ -250,7 +250,13 @@ static BashAstNode* build_statement(BashTranspiler* tp, TSNode node) {
             pipeline->negated = true;
             return (BashAstNode*)pipeline;
         }
-        return NULL;
+        // standalone `!` — negate current $? with no command
+        BashPipelineNode* pipeline = (BashPipelineNode*)alloc_bash_ast_node(
+            tp, BASH_AST_NODE_PIPELINE, node, sizeof(BashPipelineNode));
+        pipeline->commands = NULL;
+        pipeline->command_count = 0;
+        pipeline->negated = true;
+        return (BashAstNode*)pipeline;
     }
 
     // for any unrecognized node type, log and skip
@@ -472,10 +478,25 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
         // find the tail of the reversed assignment list
         BashAstNode* tail = rev;
         while (tail->next) tail = tail->next;
-        // detach assignments from the command and append it to the block
+        // detach assignments from the command
         cmd->assignments = NULL;
-        tail->next = (BashAstNode*)cmd;
-        ((BashAstNode*)cmd)->next = NULL;
+        // check if the command name is a reserved keyword (tree-sitter error recovery
+        // sometimes folds "a=1 b=2\nfor x in..." into a single command node where
+        // "for" becomes the command name — the loop body is mangled, so just drop it)
+        bool is_reserved_kw = false;
+        if (cmd->name && cmd->name->node_type == BASH_AST_NODE_WORD) {
+            BashWordNode* wn = (BashWordNode*)cmd->name;
+            const char* kw = (wn->text && wn->text->chars) ? wn->text->chars : "";
+            is_reserved_kw = !strcmp(kw,"for") || !strcmp(kw,"while") || !strcmp(kw,"until")
+                          || !strcmp(kw,"if") || !strcmp(kw,"do") || !strcmp(kw,"done")
+                          || !strcmp(kw,"fi") || !strcmp(kw,"esac") || !strcmp(kw,"then")
+                          || !strcmp(kw,"elif") || !strcmp(kw,"else") || !strcmp(kw,"case")
+                          || !strcmp(kw,"select") || !strcmp(kw,"in");
+        }
+        if (!is_reserved_kw) {
+            tail->next = (BashAstNode*)cmd;
+            ((BashAstNode*)cmd)->next = NULL;
+        }
         return (BashAstNode*)block;
     }
 
@@ -623,6 +644,17 @@ static BashAstNode* build_string_node(BashTranspiler* tp, TSNode node) {
                 append_part((BashAstNode*)gap);
             }
             append_part(build_command_substitution(tp, child));
+            pos = ts_node_end_byte(child);
+        } else if (strcmp(child_type, "arithmetic_expansion") == 0) {
+            uint32_t ae_start = ts_node_start_byte(child);
+            if (ae_start > pos) {
+                BashWordNode* gap = (BashWordNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                gap->text = name_pool_create_len(tp->name_pool, tp->source + pos, ae_start - pos);
+                gap->no_backslash_escape = true;
+                append_part((BashAstNode*)gap);
+            }
+            append_part(build_arith_expression(tp, child));
             pos = ts_node_end_byte(child);
         } else if (strcmp(child_type, "string_content") == 0) {
             uint32_t sc_end = ts_node_end_byte(child);
@@ -830,21 +862,39 @@ static BashAstNode* build_ansi_c_string(BashTranspiler* tp, TSNode node) {
 }
 
 static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
-    // check if the entire concatenation is a brace expansion pattern like {a,b,c} or {a..e}
+    // check if the entire concatenation is a brace expansion pattern
+    // e.g., {a,b,c}, ff{a,b,c}, pre{a..z}post, /usr/{lib,bin}
     StrView src = bash_node_source(tp, node);
-    if (src.length >= 3 && src.str[0] == '{' && src.str[src.length - 1] == '}') {
-        bool is_brace = false;
-        for (size_t i = 1; i < src.length - 1; i++) {
-            if (src.str[i] == ',') { is_brace = true; break; }
-            if (src.str[i] == '.' && i + 1 < src.length - 1 && src.str[i + 1] == '.') {
-                is_brace = true; break;
+    if (src.length >= 3) {
+        // look for unescaped { with matching } containing comma or ..
+        int depth = 0;
+        bool found_brace = false;
+        for (size_t i = 0; i < src.length; i++) {
+            if (src.str[i] == '\\' && i + 1 < src.length) { i++; continue; }
+            if (src.str[i] == '$' && i + 1 < src.length && src.str[i + 1] == '{') {
+                int d = 1; i += 2;
+                while (i < src.length && d > 0) {
+                    if (src.str[i] == '{') d++;
+                    else if (src.str[i] == '}') d--;
+                    i++;
+                }
+                i--; continue;
             }
-        }
-        if (is_brace) {
-            BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
-                tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
-            word->text = name_pool_create_len(tp->name_pool, src.str, (int)src.length);
-            return (BashAstNode*)word;
+            if (src.str[i] == '{') {
+                depth++;
+            } else if (src.str[i] == '}') {
+                depth--;
+                if (depth == 0 && found_brace) {
+                    // verify this is a valid brace pattern
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool, src.str, (int)src.length);
+                    return (BashAstNode*)word;
+                }
+            } else if (depth == 1) {
+                if (src.str[i] == ',') found_brace = true;
+                if (src.str[i] == '.' && i + 1 < src.length && src.str[i + 1] == '.') found_brace = true;
+            }
         }
     }
 
@@ -872,6 +922,8 @@ static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
             part = build_ansi_c_string(tp, child);
         } else if (strcmp(child_type, "command_substitution") == 0) {
             part = build_command_substitution(tp, child);
+        } else if (strcmp(child_type, "arithmetic_expansion") == 0) {
+            part = build_arith_expression(tp, child);
         } else if (strcmp(child_type, "brace_expression") == 0) {
             // brace expansion inside concatenation: e.g., ff{a,b,c} → "ffa", "ffb", "ffc"
             // store as WORD node with literal brace text so transpiler can detect it
@@ -1105,6 +1157,8 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
             BashArrayAccessNode* access = (BashArrayAccessNode*)alloc_bash_ast_node(
                 tp, BASH_AST_NODE_ARRAY_ACCESS, node, sizeof(BashArrayAccessNode));
             access->name = arr_name;
+            // subscript stays as an expression; the transpiler will wrap it with
+            // bash_arith_eval_value for indexed (non-associative) arrays
             access->index = build_expr_node(tp, index_node);
 
             // if no expansion operator, return plain array access
@@ -1272,7 +1326,6 @@ static BashAstNode* build_block(BashTranspiler* tp, TSNode node) {
 
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* tail = NULL;
-
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         BashAstNode* stmt = build_statement(tp, child);
@@ -1961,6 +2014,10 @@ static BashAstNode* build_arith_expression(BashTranspiler* tp, TSNode node) {
             var->name = node_text(tp, node);
             return (BashAstNode*)var;
         }
+        return build_expansion(tp, node);
+    }
+    if (strcmp(node_type, "expansion") == 0) {
+        // ${#arr[@]}, ${var}, etc. inside arithmetic context
         return build_expansion(tp, node);
     }
     if (strcmp(node_type, "unary_expression") == 0) {
