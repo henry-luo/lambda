@@ -1122,6 +1122,8 @@ JitImport jit_runtime_imports[] = {
     {"js_url_construct_with_base", FPTR(js_url_construct_with_base)},
     {"js_url_parse", FPTR(js_url_parse)},
     {"js_url_can_parse", FPTR(js_url_can_parse)},
+    {"js_readable_stream_new", FPTR(js_readable_stream_new)},
+    {"js_writable_stream_new", FPTR(js_writable_stream_new)},
     {"js_regex_test", FPTR(js_regex_test)},
     {"js_regex_exec", FPTR(js_regex_exec)},
     {"js_constructor_create_object", FPTR(js_constructor_create_object)},

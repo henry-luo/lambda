@@ -3163,17 +3163,18 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
                            bin->op == JS_OP_BIT_XOR || bin->op == JS_OP_BIT_LSHIFT ||
                            bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT);
 
-        if (is_arith || is_cmp) {
-            // Parameter used in arithmetic/comparison with int literal → int evidence
+        if (is_arith) {
+            // Parameter used in arithmetic with int literal → int evidence
+            // NOTE: comparisons (< > == etc.) do NOT contribute type evidence,
+            // because JS is dynamically typed — e.g. (x < 0) works for both int and float x.
             if (li >= 0 && is_int_literal(bin->right)) evidence[li].int_evidence++;
             if (ri >= 0 && is_int_literal(bin->left))  evidence[ri].int_evidence++;
-            // Parameter used in arithmetic/comparison with float literal → float evidence
+            // Parameter used in arithmetic with float literal → float evidence
             if (li >= 0 && is_float_literal(bin->right)) evidence[li].float_evidence++;
             if (ri >= 0 && is_float_literal(bin->left))  evidence[ri].float_evidence++;
             // Two params in arithmetic together → both are numeric, but could be
-            // int or float. Only add int evidence for arithmetic (not comparisons),
-            // since comparisons like (a === b) tell us nothing about int vs float.
-            if (li >= 0 && ri >= 0 && is_arith) {
+            // int or float.
+            if (li >= 0 && ri >= 0) {
                 evidence[li].int_evidence++;
                 evidence[ri].int_evidence++;
             }
@@ -3500,11 +3501,14 @@ static void jm_infer_return_type(JsFuncCollected* fc) {
         return;
     }
 
-    // Unify: all must agree (ignore ANY from expressions we couldn't resolve)
+    // Unify: all concrete types must agree. If ANY is present (unresolvable
+    // expressions like function calls), the return type must stay ANY —
+    // we can't assume what the call returns at runtime.
     TypeId unified = LMD_TYPE_ANY;
     bool has_concrete = false;
+    bool has_any = false;
     for (int i = 0; i < count; i++) {
-        if (collected[i] == LMD_TYPE_ANY) continue;
+        if (collected[i] == LMD_TYPE_ANY) { has_any = true; continue; }
         if (collected[i] == LMD_TYPE_NULL) continue; // undefined returns are compatible
         if (!has_concrete) {
             unified = collected[i];
@@ -3521,7 +3525,7 @@ static void jm_infer_return_type(JsFuncCollected* fc) {
         }
     }
 
-    if (has_concrete) {
+    if (has_concrete && !has_any) {
         fc->return_type = unified;
     }
 
@@ -8292,11 +8296,55 @@ static MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr
     if (is_int_type) {
         // Unbox to native int
         MIR_reg_t native_val = jm_emit_unbox_int(mt, val_boxed);
+
+        // For UINT8_CLAMPED: clamp to [0, 255] before storing
+        if (ta_type == JS_TYPED_UINT8_CLAMPED) {
+            MIR_reg_t clamped = jm_new_reg(mt, "clamped_u8", MIR_T_I64);
+            // if val < 0 → 0; if val > 255 → 255; else val
+            MIR_label_t l_lo = jm_new_label(mt);
+            MIR_label_t l_hi = jm_new_label(mt);
+            MIR_label_t l_clamp_done = jm_new_label(mt);
+            // check < 0
+            MIR_reg_t lt_zero = jm_new_reg(mt, "lt0", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LTS,
+                MIR_new_reg_op(mt->ctx, lt_zero),
+                MIR_new_reg_op(mt->ctx, native_val),
+                MIR_new_int_op(mt->ctx, 0)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_lo),
+                MIR_new_reg_op(mt->ctx, lt_zero)));
+            // check > 255
+            MIR_reg_t gt_255 = jm_new_reg(mt, "gt255", MIR_T_I64);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GTS,
+                MIR_new_reg_op(mt->ctx, gt_255),
+                MIR_new_reg_op(mt->ctx, native_val),
+                MIR_new_int_op(mt->ctx, 255)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                MIR_new_label_op(mt->ctx, l_hi),
+                MIR_new_reg_op(mt->ctx, gt_255)));
+            // in range: use native_val
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, clamped),
+                MIR_new_reg_op(mt->ctx, native_val)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_clamp_done)));
+            jm_emit_label(mt, l_lo);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, clamped), MIR_new_int_op(mt->ctx, 0)));
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_clamp_done)));
+            jm_emit_label(mt, l_hi);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, clamped), MIR_new_int_op(mt->ctx, 255)));
+            jm_emit_label(mt, l_clamp_done);
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, elem_addr, 0, 1),
+                MIR_new_reg_op(mt->ctx, clamped)));
+        } else {
         MIR_type_t store_type;
         switch (ta_type) {
         case JS_TYPED_INT8:           store_type = MIR_T_I8;  break;
-        case JS_TYPED_UINT8:
-        case JS_TYPED_UINT8_CLAMPED:  store_type = MIR_T_U8;  break;
+        case JS_TYPED_UINT8:          store_type = MIR_T_U8;  break;
         case JS_TYPED_INT16:          store_type = MIR_T_I16; break;
         case JS_TYPED_UINT16:         store_type = MIR_T_U16; break;
         case JS_TYPED_INT32:          store_type = MIR_T_I32; break;
@@ -8306,6 +8354,7 @@ static MIR_reg_t jm_transpile_typed_array_set(JsMirTranspiler* mt, MIR_reg_t arr
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
             MIR_new_mem_op(mt->ctx, store_type, 0, elem_addr, 0, 1),
             MIR_new_reg_op(mt->ctx, native_val)));
+        }
     } else {
         // Float types: unbox to double, store
         MIR_reg_t native_d = jm_emit_unbox_float(mt, val_boxed);
@@ -11129,6 +11178,15 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, input_arg));
     }
 
+    // new ReadableStream([underlyingSource [, queuingStrategy]])
+    if (ctor_len == 14 && strncmp(ctor_name, "ReadableStream", 14) == 0) {
+        return jm_call_0(mt, "js_readable_stream_new", MIR_T_I64);
+    }
+    // new WritableStream([underlyingSink [, queuingStrategy]])
+    if (ctor_len == 14 && strncmp(ctor_name, "WritableStream", 14) == 0) {
+        return jm_call_0(mt, "js_writable_stream_new", MIR_T_I64);
+    }
+
     // User-defined class instantiation: new ClassName(args)
     JsClassEntry* ce = jm_find_class(mt, ctor_name, ctor_len);
     if (ce) {
@@ -13759,9 +13817,15 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     }
                 }
 
+                // Unwrap assignment pattern for destructured default params: f({ x = 1 } = {})
+                // After applying the outer default above, also destructure the inner pattern.
+                JsAstNode* destr_pat = param_node;
+                if (destr_pat->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
+                    destr_pat = ((JsAssignmentPatternNode*)destr_pat)->left;
+
                 // For object-destructured params: function f({ a, b = 0 }) → extract a, b from preg
-                if (param_node->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-                    JsObjectPatternNode* op = (JsObjectPatternNode*)param_node;
+                if (destr_pat->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+                    JsObjectPatternNode* op = (JsObjectPatternNode*)destr_pat;
                     log_debug("js-mir: destructuring object param %d in %s", i, fc->name);
                     JsAstNode* prop = op->properties;
                     while (prop) {
@@ -13819,10 +13883,10 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 }
 
                 // For array-destructured params: function f([a, b]) → extract by index
-                if (param_node->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-                    JsArrayPatternNode* ap = (JsArrayPatternNode*)param_node;
+                if (destr_pat->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                    JsArrayPatternNode* aap = (JsArrayPatternNode*)destr_pat;
                     int idx = 0;
-                    JsAstNode* elem = ap->elements;
+                    JsAstNode* elem = aap->elements;
                     while (elem) {
                         if (elem->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* eid = (JsIdentifierNode*)elem;

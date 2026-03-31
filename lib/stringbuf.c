@@ -105,6 +105,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
 
         // Initialize String structure
         new_str->len = 0;
+        new_str->is_ascii = 0;
         new_str->chars[0] = '\0';
     } else {
         // Realloc existing buffer - copy String header + actual string data
@@ -546,6 +547,7 @@ String* stringbuf_to_string(StringBuf *sb) {
 
     // Ensure the String structure is properly set up
     sb->str->len = sb->length;
+    sb->str->is_ascii = (sb->length > 0) ? (str_is_ascii(sb->str->chars, sb->length) ? 1 : 0) : 1;
 
     // Return the String and reset the StringBuf
     String *result = sb->str;
