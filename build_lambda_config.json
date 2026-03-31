@@ -21,8 +21,8 @@
         "lambda/js",
         "lambda/py",
         "lambda/bash",
+        "lambda/ts",
         "lambda/network",
-        "lambda/serve",
         "radiant",
         "radiant/pdf",
         "radiant/webdriver"
@@ -39,7 +39,10 @@
         "lambda/input/input-adoc.cpp",
         "lib/font_config.c",
         "lambda/input/input-ini.cpp",
-        "lambda/input/input-prop.cpp"
+        "lambda/input/input-prop.cpp",
+        "lambda/http_module.cpp",
+        "radiant/webdriver/webdriver_server.cpp",
+        "radiant/webdriver/cmd_webdriver.cpp"
     ],
     "defines": [
         "SQLITE_THREADSAFE=0",
@@ -2722,6 +2725,17 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🐍"
+                    },
+                    {
+                        "source": "test/test_ts_gtest.cpp",
+                        "name": "TypeScript Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_ts_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🔷"
                     }
                 ],
                 "type": "lambda",

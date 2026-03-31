@@ -120,6 +120,9 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 // Direct MIR transpilation entry point
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
+// Transpile a pre-built JS AST to MIR (used by TS transpiler)
+Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename);
+
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
 extern "C" {

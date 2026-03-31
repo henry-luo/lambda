@@ -37,6 +37,7 @@
 #include "py/py_transpiler.hpp"      // Python transpiler
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
+#include "ts/ts_transpiler.hpp"      // TypeScript transpiler
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1193,6 +1194,69 @@ int main(int argc, char *argv[]) {
         runtime_cleanup(&runtime);
         log_finish();
         return bash_exit;
+    }
+
+    // Handle TypeScript command
+    log_debug("Checking for ts command");
+    if (argc >= 2 && strcmp(argv[1], "ts") == 0) {
+        log_debug("Entering TypeScript command handler");
+
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda TypeScript Transpiler v0.1\n\n");
+            printf("Usage: %s ts <file.ts>\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'ts' command runs the TypeScript transpiler.\n");
+            printf("  TypeScript types are preserved as first-class Lambda types\n");
+            printf("  for runtime introspection and native code generation.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s ts script.ts    # Transpile and run script.ts\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        if (argc >= 3) {
+            const char* ts_file = argv[2];
+            char* ts_source = read_text_file(ts_file);
+            if (!ts_source) {
+                printf("Error: Could not read file '%s'\n", ts_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+
+            Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file);
+
+            // only print non-null results
+            if (result.item != ITEM_NULL && result.item != 0) {
+                TypeId result_type = get_type_id(result);
+                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
+                    || result_type == LMD_TYPE_ELEMENT) {
+                    Pool* fmt_pool = pool_create();
+                    String* json = format_json(fmt_pool, result);
+                    if (json) {
+                        printf("%.*s\n", json->len, json->chars);
+                    }
+                    pool_destroy(fmt_pool);
+                } else {
+                    StrBuf *output = strbuf_new_cap(256);
+                    print_root_item(output, result);
+                    printf("%s\n", output->str);
+                    strbuf_free(output);
+                }
+            }
+
+            free(ts_source);
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
     }
 
     // Handle convert command

@@ -67,10 +67,9 @@ extern bool g_dry_run;
 
 // Stack overflow protection (callable from JIT-compiled code)
 #ifdef __cplusplus
-extern "C" void lambda_stack_overflow_error(const char* func_name);
-#else
-extern void lambda_stack_overflow_error(const char* func_name);
+extern "C"
 #endif
+void lambda_stack_overflow_error(const char* func_name);
 
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
