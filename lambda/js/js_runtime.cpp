@@ -1895,7 +1895,27 @@ static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
     int effective_count = arg_count;
     Item* effective_args = args;
 
-    if (arg_count < fn->param_count) {
+    // Rest params: negative param_count signals last param is ...rest
+    // Collect excess args into a JS array for the rest parameter
+    bool has_rest = (fn->param_count < 0);
+    int real_param_count = has_rest ? -fn->param_count : fn->param_count;
+
+    if (has_rest) {
+        int regular_count = real_param_count - 1;  // params before rest
+        effective_count = real_param_count;
+        // Copy regular args, then build rest array from remaining
+        for (int i = 0; i < regular_count && i < 16; i++) {
+            padded_args[i] = (i < arg_count && args) ? args[i] : undef;
+        }
+        // Build rest array from args[regular_count..arg_count-1]
+        int rest_len = (arg_count > regular_count) ? (arg_count - regular_count) : 0;
+        Item rest_arr = js_array_new(0);
+        for (int i = 0; i < rest_len; i++) {
+            js_array_push(rest_arr, args[regular_count + i]);
+        }
+        padded_args[regular_count] = rest_arr;
+        effective_args = padded_args;
+    } else if (arg_count < fn->param_count) {
         effective_count = fn->param_count;
         if (effective_count > 16) effective_count = 16;
         for (int i = 0; i < effective_count; i++) {
