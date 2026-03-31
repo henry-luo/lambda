@@ -1883,6 +1883,40 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         }
     }
 
+    // HTML rendering spec §15.5.12: First legend child of fieldset shrinks to fit content.
+    // Done post-layout because children's styles aren't resolved during pre-layout
+    // intrinsic measurement. Uses max_width tracked during child layout.
+    if (block->tag_id == HTM_TAG_LEGEND && display != CSS_VALUE_INLINE_BLOCK) {
+        ViewElement* pa = block->parent_view();
+        if (pa && pa->tag_id == HTM_TAG_FIELDSET) {
+            // Only the first legend child gets shrink-to-fit
+            bool is_first_legend = true;
+            for (View* sib = pa->first_child; sib; sib = sib->next()) {
+                if (sib == (View*)block) break;
+                if (sib->is_element() && ((ViewElement*)sib)->tag_id == HTM_TAG_LEGEND) {
+                    is_first_legend = false;
+                    break;
+                }
+            }
+            bool width_is_auto = !block->blk ||
+                block->blk->given_width_type == CSS_VALUE_AUTO ||
+                block->blk->given_width_type == CSS_VALUE__UNDEF;
+            if (is_first_legend && width_is_auto) {
+                float min_bp_width = 0;
+                if (block->bound) {
+                    min_bp_width = block->bound->padding.left + block->bound->padding.right;
+                    if (block->bound->border) {
+                        min_bp_width += block->bound->border->width.left + block->bound->border->width.right;
+                    }
+                }
+                float shrunk = min(max(flow_width, min_bp_width), block->width);
+                log_debug("legend shrink-to-fit: flow_width=%.1f, old_width=%.1f, new_width=%.1f",
+                    flow_width, block->width, shrunk);
+                block->width = shrunk;
+            }
+        }
+    }
+
     // handle horizontal overflow
     if (flow_width > block->width) { // hz overflow
         if (!block->scroller) {
@@ -3490,8 +3524,12 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     setup_line_height(lycon, block);
 
     // setup initial ascender and descender
-    // For line-height:normal, use Chrome/Blink split: asc+desc above baseline, leading below.
-    // For explicit line-height, the half-leading model adjusts per-box in output_text.
+    // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font.
+    // For line-height:normal, the strut's above-baseline extent = font ascent.
+    // The strut contributes NO below-baseline extent (init_descender=0); actual text
+    // content adds its own descender via output_text → font_get_normal_lh_split.
+    // This matches Chrome/Blink behavior where lines containing only replaced elements
+    // (no text) have zero descender below the replaced element's bottom margin edge.
     if (lycon->font.font_handle) {
         if (lycon->block.line_height_is_normal) {
             float split_asc = 0, split_desc = 0;
@@ -4925,6 +4963,43 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block);
 
+    // HTML rendering spec §15.5.12: Fieldset legend positioning.
+    // The first legend child of a fieldset is positioned at the block-start border edge
+    // (overlapping the top border), not inside the content area. All subsequent siblings
+    // shift up by the border-top width since the legend replaces the border gap.
+    if (block->is_element() && block->tag() == HTM_TAG_FIELDSET && block->first_child) {
+        float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
+        float padding_top = block->bound ? block->bound->padding.top : 0;
+        float legend_shift = border_top + padding_top;
+
+        if (legend_shift > 0) {
+            // Find the first legend child
+            ViewBlock* first_legend = nullptr;
+            for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+                if (child->is_element() && child->as_element()->tag() == HTM_TAG_LEGEND) {
+                    first_legend = (ViewBlock*)child->as_element();
+                    break;
+                }
+            }
+            if (first_legend && first_legend->view_type) {
+                // Shift legend up to the border-box top edge
+                first_legend->y -= legend_shift;
+                // Shift all subsequent siblings up by border_top (content bypasses the border gap)
+                for (DomNode* sib = first_legend->next_sibling; sib; sib = sib->next_sibling) {
+                    if (sib->is_element() && sib->as_element()->view_type) {
+                        sib->as_element()->y -= border_top;
+                    }
+                }
+                // Reduce fieldset height by border_top
+                block->height -= border_top;
+                if (block->content_height > border_top)
+                    block->content_height -= border_top;
+                log_debug("[FIELDSET] Legend repositioned: legend_shift=%.1f, border_top=%.1f, new_height=%.1f",
+                    legend_shift, border_top, block->height);
+            }
+        }
+    }
+
     // CSS 2.1 §10.3.4: For block-level replaced elements (SVG, IMG) with auto margins,
     // the intrinsic width is determined inside layout_block_inner_content (e.g., layout_inline_svg).
     // Re-compute auto margins now that the actual width is known.
@@ -5604,15 +5679,30 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // CSS 2.1 §10.8.1: Replaced elements (img, iframe, video, embed, object)
         // always have their baseline at the bottom margin edge, regardless of
         // whether their internal layout produced line boxes.
+        // Textarea is a multi-line scrollable control; per CSS 2.1 §10.8.1,
+        // inline-blocks with overflow != visible use bottom margin edge baseline.
+        // Even though textarea may not have an explicit scroller, treat it as
+        // replaced for baseline purposes.
+        // Select has no in-flow CSS line boxes (options are UA-rendered in a
+        // shadow/internal context), so it also uses bottom-margin-edge baseline
+        // per CSS 2.1 §10.8.1. This ensures correct baseline for mixed-height
+        // selects on the same line (e.g., dropdown h=19 + listbox h=70).
         bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
             block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-            block->tag() == HTM_TAG_OBJECT);
+            block->tag() == HTM_TAG_OBJECT || block->tag() == HTM_TAG_TEXTAREA ||
+            block->tag() == HTM_TAG_SELECT);
         if (is_replaced) {
             content_has_line_boxes = false;
         }
 
         log_debug("inline-block content baseline: last_line_ascender=%.1f, has_line_boxes=%d, is_replaced=%d, block_height=%.1f",
             content_last_line_ascender, content_has_line_boxes, is_replaced, block->height);
+
+        // Save content baseline to BlockProp for use in view_vertical_align second pass.
+        // finalize_block_flow does this for normal blocks, but form controls skip it.
+        if (block->blk && content_has_line_boxes && content_last_line_ascender > 0) {
+            block->blk->last_line_max_ascender = content_last_line_ascender;
+        }
 
         log_debug("flow block in parent context, block->y before restoration: %.2f, display.outer=%d, display.inner=%d, block->display.outer=%d",
             block->y, display.outer, display.inner, block->display.outer);
@@ -5850,10 +5940,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                      block->scroller->overflow_y == CSS_VALUE_VISIBLE);
 
                 // Form controls with text always report an internal text baseline,
-                // regardless of overflow setting (they set last_line_ascender in layout_form_control)
+                // regardless of overflow setting (they set last_line_ascender in layout_form_control).
+                // SELECT is excluded: it uses bottom-margin-edge baseline (handled via is_replaced above).
                 bool is_form_text_control = (block->item_prop_type == DomElement::ITEM_PROP_FORM &&
                     block->form && block->form->control_type != FORM_CONTROL_HIDDEN &&
-                    block->form->control_type != FORM_CONTROL_IMAGE);
+                    block->form->control_type != FORM_CONTROL_IMAGE &&
+                    block->form->control_type != FORM_CONTROL_SELECT);
 
                 bool uses_content_baseline = (content_has_line_boxes && overflow_visible) ||
                     (content_has_line_boxes && is_form_text_control) ||
@@ -5878,20 +5970,27 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         effective_baseline, descender_part, block->height);
                 } else {
                     // Replaced element or no in-flow content: baseline at bottom margin edge
+                    // CSS 2.1 §10.8.1: The entire margin-box sits above the baseline.
+                    // The strut's descender does NOT independently extend below the baseline
+                    // for replaced elements — Chrome enforces the strut as a minimum total
+                    // line height, not separate asc/desc contributions. Text output
+                    // adds its own descender via output_text independently.
                     if (block->bound) {
                         // margin-box above baseline = height + margin-top + margin-bottom
                         lycon->line.max_ascender = max(lycon->line.max_ascender,
                             block->height + block->bound->margin.top + block->bound->margin.bottom);
-                        // only strut descender below baseline
-                        lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
                     }
                     else {
                         lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
-                        lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
                     }
                 }
                 log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
             }
+            // Inline-block's descent contribution must survive trailing whitespace rollback.
+            // Update max_desc_before_last_text so rollback only undoes text contributions,
+            // not inline-block contributions that came after the last text output.
+            lycon->line.max_desc_before_last_text = max(lycon->line.max_desc_before_last_text,
+                lycon->line.max_descender);
             // line got content
             lycon->line.reset_space();
         }

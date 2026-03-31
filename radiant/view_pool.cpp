@@ -810,9 +810,11 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     if (view->is_element()) {
         DomElement* elem = (DomElement*)view;
         // display:contents elements don't generate a box → (0,0,0,0)
-        // option/optgroup are not rendered → getBoundingClientRect returns (0,0,0,0)
-        if (elem->display.outer == CSS_VALUE_CONTENTS ||
-            elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP) {
+        // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
+        // In listbox mode, options have non-zero dimensions and are reported via normal path.
+        bool is_unrendered_option = (elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP)
+                                    && elem->width == 0 && elem->height == 0;
+        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);

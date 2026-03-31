@@ -49,6 +49,12 @@ namespace FormDefaults {
     constexpr float SELECT_WIDTH = 57.0f;  // typical default for short options
     constexpr float SELECT_HEIGHT = 19.0f; // border-box height
     constexpr float SELECT_ARROW_WIDTH = 16.0f;
+    // Options inside an <optgroup> are indented in the dropdown popup on macOS Chrome.
+    // The indent contributes to the intrinsic select width for each optgroup option.
+    constexpr float OPTGROUP_OPTION_INDENT = 17.0f;
+    // A blank option inside an optgroup still occupies at least this much display width
+    // (the indent area itself), even if its text is empty.
+    constexpr float OPTGROUP_OPTION_MIN_WIDTH = 20.0f;
 
     // Textarea: default cols/rows
     // Chrome default: 182x36 border-box (20 cols, 2 rows)
@@ -59,7 +65,8 @@ namespace FormDefaults {
 
     // Range slider
     constexpr float RANGE_WIDTH = 129.0f;
-    constexpr float RANGE_HEIGHT = 16.0f;  // Chrome: 16px
+    constexpr float RANGE_HEIGHT = 16.0f;        // Chrome: 16px border-box (no list)
+    constexpr float RANGE_HEIGHT_WITH_LIST = 22.0f;  // Chrome: 22px border-box (with list/datalist for tick marks)
     constexpr float RANGE_TRACK_HEIGHT = 5.0f;
     constexpr float RANGE_THUMB_SIZE = 13.0f;
 
@@ -123,6 +130,7 @@ struct FormControlProp {
     int selected_index;         // Index of currently selected option (0-based, -1 if none)
     int option_count;           // Total number of options
     int hover_index;            // Index of currently hovered option in dropdown (-1 if none)
+    int select_size;            // Visible rows for select listbox (HTML size attr; 0 = not set)
 
     // Computed intrinsic dimensions (in physical pixels)
     float intrinsic_width;
@@ -142,7 +150,7 @@ struct FormControlProp {
         rows(FormDefaults::TEXTAREA_ROWS), maxlength(-1),
         range_min(0), range_max(100), range_step(1), range_value(0.5f),
         disabled(0), readonly(0), checked(0), required(0), autofocus(0), multiple(0),
-        dropdown_open(0), selected_index(-1), option_count(0), hover_index(-1),
+        dropdown_open(0), selected_index(-1), option_count(0), hover_index(-1), select_size(0),
         intrinsic_width(0), intrinsic_height(0),
         flex_grow(0), flex_shrink(1), flex_basis(-1), flex_basis_is_percent(0) {}
 };

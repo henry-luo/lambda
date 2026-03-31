@@ -14,8 +14,7 @@
 #include "../../lib/hashmap.h"
 #include "../../lib/arena.h"
 #include "../../lib/arraylist.h"
-#include "../../lib/serve/server.h"
-#include "../../lib/serve/http_handler.h"
+#include "../../lambda/serve/server.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -263,7 +262,7 @@ char* webdriver_element_screenshot(WebDriverSession* session, View* element);
 // ============================================================================
 
 typedef struct WebDriverServer {
-    server_t* http_server;          // From lib/serve
+    Server* http_server;            // From lambda/serve
     HashMap* sessions;              // Session ID -> WebDriverSession*
     Arena* arena;
     Pool* pool;

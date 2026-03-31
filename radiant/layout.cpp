@@ -4,6 +4,7 @@
 #include "layout_positioned.hpp"
 #include "layout_cache.hpp"
 #include "layout_counters.hpp"
+#include "form_control.hpp"
 #include "font_face.h"
 #include "../lib/font/font.h"
 
@@ -790,9 +791,28 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewBlock* block = (ViewBlock*)view;
         float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
-        // For replaced elements (like img), baseline is at bottom margin edge
-        // item_baseline = distance from top of margin-box to baseline = entire height
-        float item_baseline = item_height;
+        // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
+        // - Replaced elements / overflow != visible with no content: bottom margin edge
+        // - Non-replaced with overflow:visible and in-flow line boxes: last line baseline
+        // - Form text controls (input, select): content text baseline
+        float item_baseline = item_height; // default: bottom margin edge
+        if (block->blk && block->blk->last_line_max_ascender > 0) {
+            bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
+                block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
+                block->tag() == HTM_TAG_OBJECT || block->tag() == HTM_TAG_TEXTAREA ||
+                block->tag() == HTM_TAG_SELECT);
+            bool overflow_visible = !block->scroller ||
+                (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
+                 block->scroller->overflow_y == CSS_VALUE_VISIBLE);
+            bool is_form_text_ctl = (block->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                block->form && block->form->control_type != FORM_CONTROL_HIDDEN &&
+                block->form->control_type != FORM_CONTROL_IMAGE &&
+                block->form->control_type != FORM_CONTROL_SELECT);
+            if (!is_replaced_elem && (overflow_visible || is_form_text_ctl)) {
+                item_baseline = (block->bound ? block->bound->margin.top : 0) +
+                    block->blk->last_line_max_ascender;
+            }
+        }
         CssEnum align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
         float valign_offset = block->in_line && block->in_line->vertical_align ?
