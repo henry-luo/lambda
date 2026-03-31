@@ -184,6 +184,11 @@ extern "C" Item bash_to_int(Item value) {
     }
 }
 
+extern "C" int64_t bash_to_int_val(Item value) {
+    Item int_item = bash_to_int(value);
+    return it2i(int_item);
+}
+
 // Lightweight arithmetic evaluator for integer-attributed variable coercion
 // Handles: integer literals, bare variable names, +, -, *, /, %, unary +/-, parentheses
 static const char* arith_p;
@@ -597,7 +602,16 @@ extern "C" Item bash_test_le(Item left, Item right) {
     return (Item){.item = b2it(result)};
 }
 
-// string test comparisons
+// string test comparisons — literal only (no glob)
+extern "C" Item bash_str_eq(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (strcmp(l, r) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 extern "C" Item bash_test_str_eq(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
@@ -1065,16 +1079,12 @@ extern "C" Item bash_string_concat(Item left, Item right) {
 extern "C" Item bash_var_append(Item var_name, Item old_val, Item append_val) {
     int attrs = bash_get_var_attrs(var_name);
     if (attrs & BASH_ATTR_INTEGER) {
-        // arithmetic addition: old + new
-        Item old_str = bash_to_string(old_val);
-        Item new_str = bash_to_string(append_val);
-        String* os = it2s(old_str);
-        String* ns = it2s(new_str);
-        long old_i = (os && os->len > 0) ? strtol(os->chars, NULL, 10) : 0;
-        long new_i = (ns && ns->len > 0) ? strtol(ns->chars, NULL, 10) : 0;
-        long sum = old_i + new_i;
+        // arithmetic addition: evaluate both sides as arithmetic expressions
+        Item old_int = bash_arith_eval_value(old_val);
+        Item new_int = bash_arith_eval_value(append_val);
+        long long sum = it2i(old_int) + it2i(new_int);
         char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%ld", sum);
+        int len = snprintf(buf, sizeof(buf), "%lld", sum);
         return (Item){.item = s2it(heap_create_name(buf, len))};
     }
     return bash_string_concat(old_val, append_val);
@@ -1121,6 +1131,26 @@ extern "C" Item bash_expand_tilde(Item word) {
             home = getenv("OLDPWD");
         }
         suffix = (suffix[1] == '/') ? suffix + 1 : suffix + 1;
+    } else if (*suffix == '-' && isdigit((unsigned char)suffix[1])) {
+        // ~-N → directory stack from bottom (dirs -N): -0=bottom, -1=one above
+        const char* num_start = suffix + 1;
+        const char* slash = strchr(num_start, '/');
+        int digit_len = slash ? (int)(slash - num_start) : (int)strlen(num_start);
+        char nbuf[32];
+        if (digit_len >= (int)sizeof(nbuf)) digit_len = (int)sizeof(nbuf) - 1;
+        memcpy(nbuf, num_start, digit_len);
+        nbuf[digit_len] = '\0';
+        int n = atoi(nbuf); // the N in ~-N (positive)
+        extern Item bash_dirstack_total(void);
+        extern Item bash_dirstack_get(Item index);
+        int total = (int)it2i(bash_dirstack_total());
+        int idx = total - 1 - n; // -0 → last, -1 → second to last
+        Item entry = bash_dirstack_get((Item){.item = i2it(idx)});
+        const char* dir = bash_item_to_cstr(entry);
+        if (dir && *dir) {
+            home = dir;
+            suffix = slash ? slash : num_start + digit_len;
+        }
     } else if (*suffix == '+' && (suffix[1] == '\0' || suffix[1] == '/')) {
         // ~+ → $PWD
         Item pwd_name = (Item){.item = s2it(heap_create_name("PWD", 3))};
@@ -1133,6 +1163,40 @@ extern "C" Item bash_expand_tilde(Item word) {
             home = getenv("PWD");
         }
         suffix = (suffix[1] == '/') ? suffix + 1 : suffix + 1;
+    } else if (*suffix == '+' && isdigit((unsigned char)suffix[1])) {
+        // ~+N → directory stack from front (dirs +N)
+        const char* num_start = suffix + 1;
+        const char* slash = strchr(num_start, '/');
+        int nlen = slash ? (int)(slash - num_start) : (int)strlen(num_start);
+        char nbuf[32];
+        if (nlen >= (int)sizeof(nbuf)) nlen = (int)sizeof(nbuf) - 1;
+        memcpy(nbuf, num_start, nlen);
+        nbuf[nlen] = '\0';
+        int offset = atoi(nbuf);
+        extern Item bash_dirstack_get(Item index);
+        Item entry = bash_dirstack_get((Item){.item = i2it(offset)});
+        const char* dir = bash_item_to_cstr(entry);
+        if (dir && *dir) {
+            home = dir;
+            suffix = slash ? slash : num_start + nlen;
+        }
+    } else if (isdigit((unsigned char)*suffix)) {
+        // ~N → directory stack from front (same as ~+N)
+        const char* num_start = suffix;
+        const char* slash = strchr(num_start, '/');
+        int nlen = slash ? (int)(slash - num_start) : (int)strlen(num_start);
+        char nbuf[32];
+        if (nlen >= (int)sizeof(nbuf)) nlen = (int)sizeof(nbuf) - 1;
+        memcpy(nbuf, num_start, nlen);
+        nbuf[nlen] = '\0';
+        int offset = atoi(nbuf);
+        extern Item bash_dirstack_get(Item index);
+        Item entry = bash_dirstack_get((Item){.item = i2it(offset)});
+        const char* dir = bash_item_to_cstr(entry);
+        if (dir && *dir) {
+            home = dir;
+            suffix = slash ? slash : num_start + nlen;
+        }
     } else {
         // ~user → lookup user's home directory
         const char* slash = strchr(suffix, '/');
@@ -1315,19 +1379,78 @@ extern "C" Item bash_glob_expand(Item pattern) {
 // Brace expansion: {a,b,c} → "a b c", {1..5} → "1 2 3 4 5"
 // ============================================================================
 
-extern "C" Item bash_expand_brace(Item word) {
-    const char* w = bash_item_to_cstr(word);
-    if (!w || !*w) return word;
+// find the first top-level brace group in s[0..len-1]
+// returns true if found, sets *open_pos and *close_pos to { and } positions
+static bool find_brace_group(const char* s, int len, int* open_pos, int* close_pos) {
+    int depth = 0;
+    int first_open = -1;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '\\' && i + 1 < len) { i++; continue; }
+        if (s[i] == '$' && i + 1 < len && s[i + 1] == '{') {
+            // skip ${...} parameter expansion
+            int d = 1; i += 2;
+            while (i < len && d > 0) {
+                if (s[i] == '{') d++;
+                else if (s[i] == '}') d--;
+                i++;
+            }
+            i--; continue;
+        }
+        if (s[i] == '{') {
+            if (depth == 0) first_open = i;
+            depth++;
+        } else if (s[i] == '}') {
+            depth--;
+            if (depth == 0 && first_open >= 0) {
+                // verify this group has comma or .. at depth 1
+                bool valid = false;
+                int d2 = 0;
+                for (int j = first_open + 1; j < i; j++) {
+                    if (s[j] == '\\' && j + 1 < i) { j++; continue; }
+                    if (s[j] == '{') d2++;
+                    else if (s[j] == '}') d2--;
+                    else if (d2 == 0 && s[j] == ',') { valid = true; break; }
+                    else if (d2 == 0 && s[j] == '.' && j + 1 < i && s[j + 1] == '.') { valid = true; break; }
+                }
+                if (valid) {
+                    *open_pos = first_open;
+                    *close_pos = i;
+                    return true;
+                }
+                first_open = -1; // not a valid brace group, keep looking
+            }
+        }
+    }
+    return false;
+}
 
-    int len = (int)strlen(w);
-    // must start with { and end with }
-    if (w[0] != '{' || w[len - 1] != '}') return word;
+// expand a single brace group: given inside of {a,b,c}, split by top-level commas
+// and store results in items array, return count
+static int split_brace_alternatives(const char* inside, int ilen, const char** starts, int* lengths, int max_items) {
+    int count = 0;
+    int depth = 0;
+    const char* start = inside;
+    for (int i = 0; i <= ilen && count < max_items; i++) {
+        bool at_end = (i == ilen);
+        if (!at_end) {
+            if (inside[i] == '\\' && i + 1 < ilen) { i++; continue; }
+            if (inside[i] == '{') { depth++; continue; }
+            if (inside[i] == '}') { depth--; continue; }
+            if (inside[i] != ',' || depth != 0) continue;
+        }
+        starts[count] = start;
+        lengths[count] = (int)(inside + i - start);
+        count++;
+        start = inside + i + 1;
+    }
+    return count;
+}
 
-    // extract inside: between { and }
-    const char* inside = w + 1;
-    int ilen = len - 2;
-
-    // check for range: {start..end} or {start..end..step}
+// expand a range: {start..end} or {start..end..step}
+// appends space-separated results to sb, with prefix and suffix
+static bool expand_brace_range(const char* inside, int ilen, const char* prefix, int prefix_len,
+                               const char* suffix, int suffix_len, StrBuf* sb) {
+    // find first ..
     const char* dotdot = NULL;
     for (int i = 0; i < ilen - 1; i++) {
         if (inside[i] == '.' && inside[i + 1] == '.') {
@@ -1335,126 +1458,144 @@ extern "C" Item bash_expand_brace(Item word) {
             break;
         }
     }
+    if (!dotdot) return false;
 
-    if (dotdot) {
-        // range expansion
-        char start_buf[64], end_buf[64];
-        int start_len = (int)(dotdot - inside);
-        int after_dots = (int)(inside + ilen - (dotdot + 2));
-        if (start_len <= 0 || start_len >= (int)sizeof(start_buf) ||
-            after_dots <= 0 || after_dots >= (int)sizeof(end_buf))
-            return word;
-        memcpy(start_buf, inside, start_len);
-        start_buf[start_len] = '\0';
-        memcpy(end_buf, dotdot + 2, after_dots);
-        end_buf[after_dots] = '\0';
+    char start_buf[64], end_buf[64];
+    int start_len = (int)(dotdot - inside);
+    int after_dots = (int)(inside + ilen - (dotdot + 2));
+    if (start_len <= 0 || start_len >= (int)sizeof(start_buf) ||
+        after_dots <= 0 || after_dots >= (int)sizeof(end_buf))
+        return false;
+    memcpy(start_buf, inside, start_len);
+    start_buf[start_len] = '\0';
+    memcpy(end_buf, dotdot + 2, after_dots);
+    end_buf[after_dots] = '\0';
 
-        // check for step: {start..end..step}
-        int step = 1;
-        char* step_dot = strstr(end_buf, "..");
-        if (step_dot) {
-            *step_dot = '\0';
-            step = atoi(step_dot + 2);
-            if (step == 0) step = 1;
-        }
-
-        // numeric range?
-        char* endp1 = NULL;
-        char* endp2 = NULL;
-        long s = strtol(start_buf, &endp1, 10);
-        long e = strtol(end_buf, &endp2, 10);
-
-        if (endp1 && *endp1 == '\0' && endp2 && *endp2 == '\0') {
-            // numeric range: {1..5} or {10..1}
-            // check for zero-padding
-            bool zero_pad = (start_buf[0] == '0' && start_len > 1) ||
-                            (end_buf[0] == '0' && (int)strlen(end_buf) > 1);
-            int pad_width = 0;
-            if (zero_pad) {
-                pad_width = start_len > (int)strlen(end_buf) ? start_len : (int)strlen(end_buf);
-            }
-
-            StrBuf* sb = strbuf_new();
-            if (s <= e) {
-                if (step < 0) step = -step;
-                for (long i = s; i <= e; i += step) {
-                    if (sb->length > 0) strbuf_append_char(sb, ' ');
-                    char num[32];
-                    if (zero_pad)
-                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
-                    else
-                        snprintf(num, sizeof(num), "%ld", i);
-                    strbuf_append_str(sb, num);
-                }
-            } else {
-                if (step < 0) step = -step;
-                for (long i = s; i >= e; i -= step) {
-                    if (sb->length > 0) strbuf_append_char(sb, ' ');
-                    char num[32];
-                    if (zero_pad)
-                        snprintf(num, sizeof(num), "%0*ld", pad_width, i);
-                    else
-                        snprintf(num, sizeof(num), "%ld", i);
-                    strbuf_append_str(sb, num);
-                }
-            }
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
-        }
-
-        // character range: {a..z}
-        if (start_len == 1 && (int)strlen(end_buf) == 1) {
-            char sc = start_buf[0];
-            char ec = end_buf[0];
-            StrBuf* sb = strbuf_new();
-            if (sc <= ec) {
-                for (char c = sc; c <= ec; c += (char)step) {
-                    if (sb->length > 0) strbuf_append_char(sb, ' ');
-                    strbuf_append_char(sb, c);
-                }
-            } else {
-                for (char c = sc; c >= ec; c -= (char)step) {
-                    if (sb->length > 0) strbuf_append_char(sb, ' ');
-                    strbuf_append_char(sb, c);
-                }
-            }
-            String* result = heap_create_name(sb->str, sb->length);
-            strbuf_free(sb);
-            return (Item){.item = s2it(result)};
-        }
-
-        return word; // unrecognized range format
+    int step = 1;
+    char* step_dot = strstr(end_buf, "..");
+    if (step_dot) {
+        *step_dot = '\0';
+        step = atoi(step_dot + 2);
+        if (step == 0) step = 1;
     }
 
-    // comma-separated list: {a,b,c}
-    // check for commas (not inside nested braces)
-    int brace_depth = 0;
-    bool has_comma = false;
-    for (int i = 0; i < ilen; i++) {
-        if (inside[i] == '{') brace_depth++;
-        else if (inside[i] == '}') brace_depth--;
-        else if (inside[i] == ',' && brace_depth == 0) { has_comma = true; break; }
+    char* endp1 = NULL;
+    char* endp2 = NULL;
+    long s = strtol(start_buf, &endp1, 10);
+    long e = strtol(end_buf, &endp2, 10);
+
+    if (endp1 && *endp1 == '\0' && endp2 && *endp2 == '\0') {
+        // numeric range
+        bool zero_pad = (start_buf[0] == '0' && start_len > 1) ||
+                        (end_buf[0] == '0' && (int)strlen(end_buf) > 1);
+        int pad_width = 0;
+        if (zero_pad) {
+            pad_width = start_len > (int)strlen(end_buf) ? start_len : (int)strlen(end_buf);
+        }
+        if (step < 0) step = -step;
+        if (s <= e) {
+            for (long i = s; i <= e; i += step) {
+                if (sb->length > 0) strbuf_append_char(sb, ' ');
+                strbuf_append_str_n(sb, prefix, prefix_len);
+                char num[32];
+                if (zero_pad) snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                else snprintf(num, sizeof(num), "%ld", i);
+                strbuf_append_str(sb, num);
+                strbuf_append_str_n(sb, suffix, suffix_len);
+            }
+        } else {
+            for (long i = s; i >= e; i -= step) {
+                if (sb->length > 0) strbuf_append_char(sb, ' ');
+                strbuf_append_str_n(sb, prefix, prefix_len);
+                char num[32];
+                if (zero_pad) snprintf(num, sizeof(num), "%0*ld", pad_width, i);
+                else snprintf(num, sizeof(num), "%ld", i);
+                strbuf_append_str(sb, num);
+                strbuf_append_str_n(sb, suffix, suffix_len);
+            }
+        }
+        return true;
     }
 
-    if (!has_comma) return word; // no commas, return literal
+    // character range
+    if (start_len == 1 && (int)strlen(end_buf) == 1) {
+        char sc = start_buf[0];
+        char ec = end_buf[0];
+        if (sc <= ec) {
+            for (char c = sc; c <= ec; c += (char)step) {
+                if (sb->length > 0) strbuf_append_char(sb, ' ');
+                strbuf_append_str_n(sb, prefix, prefix_len);
+                strbuf_append_char(sb, c);
+                strbuf_append_str_n(sb, suffix, suffix_len);
+            }
+        } else {
+            for (char c = sc; c >= ec; c -= (char)step) {
+                if (sb->length > 0) strbuf_append_char(sb, ' ');
+                strbuf_append_str_n(sb, prefix, prefix_len);
+                strbuf_append_char(sb, c);
+                strbuf_append_str_n(sb, suffix, suffix_len);
+            }
+        }
+        return true;
+    }
+
+    return false;
+}
+
+// recursively expand brace expressions in a single word
+// results are appended as space-separated words to sb
+static void expand_brace_word(const char* w, int len, StrBuf* sb) {
+    int open_pos, close_pos;
+    if (!find_brace_group(w, len, &open_pos, &close_pos)) {
+        // no brace group, append as-is
+        if (sb->length > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str_n(sb, w, len);
+        return;
+    }
+
+    const char* prefix = w;
+    int prefix_len = open_pos;
+    const char* suffix = w + close_pos + 1;
+    int suffix_len = len - close_pos - 1;
+    const char* inside = w + open_pos + 1;
+    int ilen = close_pos - open_pos - 1;
+
+    // try range expansion first
+    if (expand_brace_range(inside, ilen, prefix, prefix_len, suffix, suffix_len, sb))
+        return;
+
+    // comma-separated alternatives
+    const char* starts[256];
+    int lengths[256];
+    int count = split_brace_alternatives(inside, ilen, starts, lengths, 256);
+    if (count <= 0) {
+        if (sb->length > 0) strbuf_append_char(sb, ' ');
+        strbuf_append_str_n(sb, w, len);
+        return;
+    }
+
+    // for each alternative, form prefix + alt + suffix and recurse
+    for (int i = 0; i < count; i++) {
+        StrBuf* tmp = strbuf_new();
+        strbuf_append_str_n(tmp, prefix, prefix_len);
+        strbuf_append_str_n(tmp, starts[i], lengths[i]);
+        strbuf_append_str_n(tmp, suffix, suffix_len);
+        // recurse on the combined string (handles nested braces)
+        expand_brace_word(tmp->str, tmp->length, sb);
+        strbuf_free(tmp);
+    }
+}
+
+extern "C" Item bash_expand_brace(Item word) {
+    const char* w = bash_item_to_cstr(word);
+    if (!w || !*w) return word;
+
+    int len = (int)strlen(w);
+    int open_pos, close_pos;
+    if (!find_brace_group(w, len, &open_pos, &close_pos)) return word;
 
     StrBuf* sb = strbuf_new();
-    brace_depth = 0;
-    const char* start = inside;
-    for (int i = 0; i <= ilen; i++) {
-        bool at_end = (i == ilen);
-        if (!at_end) {
-            if (inside[i] == '{') { brace_depth++; continue; }
-            if (inside[i] == '}') { brace_depth--; continue; }
-            if (inside[i] != ',' || brace_depth != 0) continue;
-        }
-        // emit this element
-        if (sb->length > 0) strbuf_append_char(sb, ' ');
-        int elem_len = (int)(inside + i - start);
-        if (elem_len > 0) strbuf_append_str_n(sb, start, elem_len);
-        start = inside + i + 1;
-    }
+    expand_brace_word(w, len, sb);
     String* result = heap_create_name(sb->str, sb->length);
     strbuf_free(sb);
     return (Item){.item = s2it(result)};
@@ -1665,9 +1806,18 @@ extern "C" Item bash_ensure_array(Item name) {
     return new_arr;
 }
 
+// helper: check if an Item is a bash array (untagged List* pointer)
+static inline bool bash_item_is_array(Item arr) {
+    uintptr_t ptr = (uintptr_t)arr.item;
+    if (ptr == 0) return false;
+    if ((ptr >> 48) != 0) return false;  // tagged value (string, int, etc.)
+    List* list = (List*)ptr;
+    return list->type_id == LMD_TYPE_ARRAY;
+}
+
 extern "C" Item bash_array_set(Item arr, Item index, Item value) {
-    List* list = it2list(arr);
-    if (!list) return arr;
+    if (!bash_item_is_array(arr)) return arr;
+    List* list = (List*)(uintptr_t)arr.item;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0) return arr;
 
@@ -1681,21 +1831,52 @@ extern "C" Item bash_array_set(Item arr, Item index, Item value) {
 }
 
 extern "C" Item bash_array_get(Item arr, Item index) {
-    List* list = it2list(arr);
-    if (!list) return (Item){.item = s2it(heap_create_name("", 0))};
+    // if arr is a scalar (string, int, etc.), treat as single-element array
+    // bash: ${scalar[0]} == $scalar, ${scalar[N>0]} == ""
+    if (!bash_item_is_array(arr)) {
+        if (arr.item == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+        int64_t idx = bash_coerce_int(index);
+        if (idx == 0) return arr;  // ${scalar[0]} = $scalar
+        return (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    List* list = (List*)(uintptr_t)arr.item;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0 || idx >= list->length) return (Item){.item = s2it(heap_create_name("", 0))};
     return list->items[idx];
 }
 
 extern "C" Item bash_array_append(Item arr, Item value) {
-    List* list = it2list(arr);
-    if (!list) return arr;
+    if (!bash_item_is_array(arr)) return arr;
+    List* list = (List*)(uintptr_t)arr.item;
     if (list->length >= list->capacity) {
         bash_grow_list(list);
     }
     list->items[list->length++] = value;
     return arr;
+}
+
+// arr[idx]+=val — append to array element (string concat or integer add depending on attrs)
+extern "C" void bash_array_elem_append(Item arr, Item index, Item append_val, Item var_name) {
+    if (!bash_item_is_array(arr)) return;
+    List* list = (List*)(uintptr_t)arr.item;
+    int64_t idx = bash_coerce_int(index);
+    if (idx < 0) return;
+
+    // grow if needed
+    while (idx >= list->capacity) {
+        bash_grow_list(list);
+    }
+    // get current element (empty string if unset)
+    Item old_val;
+    if (idx < list->length && list->items[idx].item != 0) {
+        old_val = list->items[idx];
+    } else {
+        old_val = (Item){.item = s2it(heap_create_name("", 0))};
+    }
+    // append (respects integer attribute on var_name)
+    Item result = bash_var_append(var_name, old_val, append_val);
+    list->items[idx] = result;
+    if (idx >= list->length) list->length = (int)(idx + 1);
 }
 
 // append all words from a space-separated expanded string (e.g. from brace/glob expansion)
@@ -1719,16 +1900,197 @@ extern "C" Item bash_words_split_into(Item arr, Item words_str) {
     return arr;
 }
 
-extern "C" Item bash_array_length(Item arr) {
+// Split a string by the current IFS value and append resulting words into arr.
+// Follows POSIX IFS splitting rules:
+//   - IFS whitespace chars: treated as field separators (multiple adjacent = one separator)
+//   - IFS non-whitespace chars: each occurrence is a field separator (adjacent = empty field)
+// Returns the array (possibly empty if value is empty or null).
+extern "C" Item bash_ifs_split_into(Item arr, Item val) {
+    const char* s = bash_item_to_cstr(val);
+    if (!s || !*s) return arr;
+
+    // get current IFS
+    const char* ifs = " \t\n";  // POSIX default
+    Item ifs_item = bash_get_var((Item){.item = s2it(heap_create_name("IFS", 3))});
+    String* ifs_str = it2s(bash_to_string(ifs_item));
+    if (ifs_str && ifs_str->len > 0) ifs = ifs_str->chars;
+    else if (ifs_str && ifs_str->len == 0) {
+        // IFS="" means no splitting: return whole string
+        bash_array_append(arr, val);
+        return arr;
+    }
+
+    // classify each IFS character as whitespace or non-whitespace
+    // IFS whitespace: space, tab, newline (and any user-specified IFS that is a space/tab/newline)
+    // IFS non-whitespace: everything else in IFS
+
+    const char* p = s;
+    int slen = (int)strlen(s);
+
+    // helper: is char at position c in IFS?
+    // helper: is IFS char a whitespace IFS char?
+    // We build a simple flag array for the IFS chars (max 256)
+    bool ifs_map[256] = {};
+    bool ifs_ws_map[256] = {};  // true if this IFS char is also a whitespace char
+    for (int i = 0; ifs[i]; i++) {
+        unsigned char c = (unsigned char)ifs[i];
+        ifs_map[c] = true;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            ifs_ws_map[c] = true;
+        }
+    }
+
+    // POSIX IFS Word Splitting algorithm:
+    //   1. Strip leading IFS-whitespace from value
+    //   2. From left to right: non-IFS chars build up a field; IFS chars delimit:
+    //      - IFS-whitespace alone: equivalent to a single separator (like default splitting)
+    //      - Non-ws IFS char (possibly with surrounding IFS-ws): always a separator;
+    //        an empty field before it is included if it's not the very first field
+    //        (but a leading non-ws IFS DOES produce a leading empty field)
+    //   3. Trailing EMPTY field caused by a trailing non-ws IFS char is dropped.
+    //      Trailing IFS-whitespace is also dropped (no field).
+    //
+    // Implementation:
+    //   - Strip leading IFS-whitespace
+    //   - Split using this state machine:
+    //       * saw_non_ws_sep: we just consumed a non-ws IFS (possibly with ws); next emit may be empty
+    //       * Non-IFS char: accumulate into current field
+    //       * IFS-ws sequence: if followed by non-ws IFS, consume together; then emit current field
+    //       * Non-ws IFS: emit current field (may be empty if saw_non_ws_sep or start); advance
+    //   - At end: emit final field only if non-empty; if saw_non_ws_sep and empty → drop it
+
+    StrBuf* cur = strbuf_new();
+    int i = 0;
+
+    // step 1: skip leading IFS whitespace
+    while (i < slen && ifs_ws_map[(unsigned char)s[i]]) i++;
+
+    if (i >= slen) {
+        // string was all IFS whitespace → no fields
+        strbuf_free(cur);
+        return arr;
+    }
+
+    bool at_start = true;      // no field emitted yet, at start of processing
+    bool pending_empty = false; // a non-ws IFS was just seen: next field may be empty
+
+    while (i < slen) {
+        unsigned char c = (unsigned char)s[i];
+
+        if (!ifs_map[c]) {
+            // non-IFS: accumulate
+            strbuf_append_char(cur, (char)c);
+            pending_empty = false;
+            at_start = false;
+            i++;
+        } else if (ifs_ws_map[c]) {
+            // IFS whitespace: skip all of it, then check if non-ws IFS follows
+            int ws_start = i;
+            while (i < slen && ifs_ws_map[(unsigned char)s[i]]) i++;
+
+            if (i >= slen) {
+                // trailing IFS whitespace: end processing (no field emitted from this ws)
+                break;
+            }
+
+            if (ifs_map[(unsigned char)s[i]] && !ifs_ws_map[(unsigned char)s[i]]) {
+                // non-ws IFS follows: IFS-ws + non-ws-IFS together form a single separator
+                // ALWAYS emit the field before this combined separator (even if empty)
+                {
+                    Item word = (Item){.item = s2it(heap_create_name(cur->str, (int)cur->length))};
+                    bash_array_append(arr, word);
+                    strbuf_reset(cur);
+                }
+                pending_empty = true;
+                at_start = false;
+                i++; // consume the non-ws IFS
+                // skip trailing IFS whitespace after it
+                while (i < slen && ifs_ws_map[(unsigned char)s[i]]) i++;
+            } else {
+                // IFS whitespace alone (no non-ws IFS follows): field separator
+                // emit current field (only if non-empty OR if pending_empty)
+                if (cur->length > 0) {
+                    Item word = (Item){.item = s2it(heap_create_name(cur->str, (int)cur->length))};
+                    bash_array_append(arr, word);
+                    strbuf_reset(cur);
+                    pending_empty = false;
+                    at_start = false;
+                }
+                // else: multiple IFS-ws run at start or between fields → skip
+                (void)ws_start;
+            }
+        } else {
+            // non-whitespace IFS char: always a separator
+            // ALWAYS emit the field before it (even if empty) — this is POSIX behavior
+            {
+                Item word = (Item){.item = s2it(heap_create_name(cur->str, (int)cur->length))};
+                bash_array_append(arr, word);
+                strbuf_reset(cur);
+            }
+            pending_empty = true;
+            at_start = false;
+            i++; // consume the non-ws IFS
+            // skip trailing IFS whitespace after it
+            while (i < slen && ifs_ws_map[(unsigned char)s[i]]) i++;
+        }
+    }
+
+    // emit final field: only if there's content. Trailing empty from non-ws IFS is dropped.
+    if (cur->length > 0) {
+        Item word = (Item){.item = s2it(heap_create_name(cur->str, (int)cur->length))};
+        bash_array_append(arr, word);
+    }
+
+    strbuf_free(cur);
+    (void)slen;
+    return arr;
+}
+
+// Set positional parameters from an array (used for IFS-aware 'set' command)
+// Forward-declared here; bash_positional_args/count are defined later.
+// We use a static buffer that gets reused/reallocated each call.
+static Item* bash_set_pos_buf = NULL;
+static int bash_set_pos_buf_cap = 0;
+
+extern "C" void bash_set_positional_from_array(Item arr) {
     List* list = it2list(arr);
-    if (!list) return (Item){.item = i2it(0)};
+    int count = (list) ? list->length : 0;
+    if (count == 0) {
+        // clear positional params
+        extern Item* bash_positional_args;
+        extern int bash_positional_count;
+        bash_positional_args = NULL;
+        bash_positional_count = 0;
+        return;
+    }
+    // grow buffer if needed
+    if (count > bash_set_pos_buf_cap) {
+        free(bash_set_pos_buf);
+        bash_set_pos_buf = (Item*)malloc(count * sizeof(Item));
+        bash_set_pos_buf_cap = count;
+    }
+    for (int i = 0; i < count; i++) {
+        bash_set_pos_buf[i] = list->items[i];
+    }
+    extern Item* bash_positional_args;
+    extern int bash_positional_count;
+    bash_positional_args = bash_set_pos_buf;
+    bash_positional_count = count;
+}
+
+extern "C" Item bash_array_length(Item arr) {
+    if (!bash_item_is_array(arr)) {
+        // scalar: ${#scalar[@]} == 1 if set, 0 if null
+        return (Item){.item = i2it(arr.item != 0 ? 1 : 0)};
+    }
+    List* list = (List*)(uintptr_t)arr.item;
     return (Item){.item = i2it(list->length)};
 }
 
 // return raw int64 count (for internal iteration loops)
 extern "C" int64_t bash_array_count(Item arr) {
-    List* list = it2list(arr);
-    if (!list) return 0;
+    if (!bash_item_is_array(arr)) return (arr.item != 0 ? 1 : 0);
+    List* list = (List*)(uintptr_t)arr.item;
     return list->length;
 }
 
@@ -1738,8 +2100,8 @@ extern "C" Item bash_array_all(Item arr) {
 }
 
 extern "C" Item bash_array_unset(Item arr, Item index) {
-    List* list = it2list(arr);
-    if (!list) return arr;
+    if (!bash_item_is_array(arr)) return arr;
+    List* list = (List*)(uintptr_t)arr.item;
     int64_t idx = bash_coerce_int(index);
     if (idx < 0 || idx >= list->length) return arr;
     // shift remaining elements down
@@ -1751,8 +2113,16 @@ extern "C" Item bash_array_unset(Item arr, Item index) {
 }
 
 extern "C" Item bash_array_slice(Item arr, Item offset, Item length) {
-    List* list = it2list(arr);
-    if (!list) return bash_array_new();
+    if (!bash_item_is_array(arr)) {
+        // scalar: treat as 1-element array
+        if (arr.item == 0) return bash_array_new();
+        int64_t off = bash_coerce_int(offset);
+        if (off != 0) return bash_array_new();
+        Item result = bash_array_new();
+        bash_array_append(result, arr);
+        return result;
+    }
+    List* list = (List*)(uintptr_t)arr.item;
 
     int64_t off = bash_coerce_int(offset);
     int64_t len = bash_coerce_int(length);
@@ -2284,6 +2654,10 @@ extern "C" void bash_runtime_init(void) {
     // reset function scope stack
     bash_func_scope_depth = 0;
     bash_env_import();
+    // set default values for special variables
+    Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
+    Item optind_val = {.item = s2it(heap_create_name("1", 1))};
+    bash_set_var(optind_name, optind_val);
     log_debug("bash: runtime initialized");
 }
 
@@ -2795,6 +3169,32 @@ extern "C" void bash_set_positional(Item* args, int count) {
     bash_positional_count = count;
 }
 
+// deferred positional args from raw argv (before heap is initialized)
+static const char** pending_argv = NULL;
+static int pending_argc = 0;
+static bool pending_skip_arg0 = false;
+
+extern "C" void bash_set_pending_args(const char** argv, int argc, bool skip_arg0) {
+    pending_argv = argv;
+    pending_argc = argc;
+    pending_skip_arg0 = skip_arg0;
+}
+
+extern "C" void bash_apply_pending_args(void) {
+    if (!pending_argv || pending_argc <= 0) return;
+    int start = pending_skip_arg0 ? 1 : 0;
+    int count = pending_argc - start;
+    if (count <= 0) { pending_argv = NULL; return; }
+    Item* params = (Item*)calloc(count, sizeof(Item));
+    for (int i = 0; i < count; i++) {
+        String* s = heap_create_name(pending_argv[start + i], (int)strlen(pending_argv[start + i]));
+        params[i] = (Item){.item = s2it(s)};
+    }
+    bash_set_positional(params, count);
+    pending_argv = NULL;
+    pending_argc = 0;
+}
+
 extern "C" Item bash_get_positional(int index) {
     if (index < 1 || index > bash_positional_count) {
         return (Item){.item = s2it(heap_create_name("", 0))};
@@ -2963,28 +3363,22 @@ bool bash_get_posix_mode(void) {
 
 extern "C" void bash_env_import(void) {
     bash_ensure_var_table();
-    static const char* env_names[] = {
-        "PATH", "HOME", "USER", "PWD", "SHELL", "LANG", "TERM",
-        "EDITOR", "HOSTNAME", "LOGNAME", "TMPDIR", "LC_ALL", "LC_CTYPE",
-        "OLDPWD", "SHLVL", "IFS",
-        // test harness variables — imported so bash tests can invoke sub-scripts
-        "THIS_SH", "TESTSHELL",
-        // special bash variables that may be set from outside
-        "BASH_COMMAND",
-        NULL
-    };
-    for (int i = 0; env_names[i]; i++) {
-        const char* val = getenv(env_names[i]);
-        if (val) {
-            Item name_item = {.item = s2it(heap_create_name(env_names[i], (int)strlen(env_names[i])))};
-            Item val_item = {.item = s2it(heap_create_name(val, (int)strlen(val)))};
-            // set in var table with export flag
-            BashRtVar entry = {.name = env_names[i], .name_len = strlen(env_names[i]),
-                               .value = val_item, .is_export = true,
-                               .attributes = BASH_ATTR_NONE};
-            hashmap_set(bash_var_table, &entry);
-            log_debug("bash: imported env %s=%s", env_names[i], val);
-        }
+    // import ALL environment variables (real bash does this)
+    for (char** env = environ; env && *env; env++) {
+        const char* eq = strchr(*env, '=');
+        if (!eq) continue;
+        int name_len = (int)(eq - *env);
+        const char* val = eq + 1;
+        int val_len = (int)strlen(val);
+        // skip entries with empty names
+        if (name_len <= 0) continue;
+        Item val_item = {.item = s2it(heap_create_name(val, val_len))};
+        // name pointer: use heap_create_name for stable storage
+        String* name_str = heap_create_name(*env, name_len);
+        BashRtVar entry = {.name = name_str->chars, .name_len = (size_t)name_len,
+                           .value = val_item, .is_export = true,
+                           .attributes = BASH_ATTR_NONE};
+        hashmap_set(bash_var_table, &entry);
     }
     // also set default IFS if not in env
     BashRtVar ifs_key = {.name = "IFS", .name_len = 3};

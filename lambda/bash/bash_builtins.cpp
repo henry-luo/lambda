@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cctype>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <regex.h>
 
 // ============================================================================
@@ -663,15 +664,14 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
         }
     }
 
-    // strip trailing whitespace (bash strips trailing IFS whitespace)
-    while (line_len > 0 && (line[line_len - 1] == ' ' || line[line_len - 1] == '\t')) {
-        line_len--;
-    }
-
     (void)raw_mode; // TODO: handle backslash escaping in non-raw mode
 
     // if no variable names specified, assign whole line to REPLY
     if (num_vars <= 0) {
+        // strip trailing whitespace for REPLY too
+        while (line_len > 0 && (line[line_len - 1] == ' ' || line[line_len - 1] == '\t')) {
+            line_len--;
+        }
         Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
         String* val = heap_create_name(line, line_len);
         bash_set_var(reply_name, (Item){.item = s2it(val)});
@@ -684,47 +684,105 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
     Item ifs_item = bash_get_var(ifs_name);
     String* ifs_str = it2s(bash_to_string(ifs_item));
     const char* ifs = " \t\n";
-    int ifs_len = 3;
     if (ifs_str && ifs_str->len > 0) {
         ifs = ifs_str->chars;
-        ifs_len = ifs_str->len;
     }
 
-    // split line by IFS and assign to variables
-    int pos = 0;
-    for (int vi = 0; vi < num_vars; vi++) {
-        int arg_idx = var_start + vi;
-        bool is_last = (vi == num_vars - 1);
-
-        // skip leading IFS whitespace
-        while (pos < line_len) {
-            bool is_ifs = false;
-            for (int k = 0; k < ifs_len; k++) {
-                if (line[pos] == ifs[k]) { is_ifs = true; break; }
-            }
-            if (!is_ifs) break;
-            pos++;
+    // build IFS character maps
+    bool ifs_map[256] = {};
+    bool ifs_ws_map[256] = {};
+    for (int i = 0; ifs[i]; i++) {
+        unsigned char c = (unsigned char)ifs[i];
+        ifs_map[c] = true;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            ifs_ws_map[c] = true;
         }
+    }
 
-        if (is_last) {
-            // last variable gets the rest of the line
-            String* val = heap_create_name(line + pos, line_len - pos);
-            bash_set_var(args[arg_idx], (Item){.item = s2it(val)});
-        } else {
-            // find next IFS delimiter
-            int word_start = pos;
-            while (pos < line_len) {
-                bool is_ifs = false;
-                for (int k = 0; k < ifs_len; k++) {
-                    if (line[pos] == ifs[k]) { is_ifs = true; break; }
-                }
-                if (is_ifs) break;
+    // strip trailing IFS whitespace only (not non-ws IFS) from line
+    while (line_len > 0 && ifs_ws_map[(unsigned char)line[line_len - 1]]) {
+        line_len--;
+    }
+
+    // POSIX IFS splitting for read:
+    // - Perform full POSIX split tracking field start/end positions in original line.
+    // - If total fields <= num_vars: assign each field to corresponding var, empty for rest.
+    // - If total fields > num_vars: assign fields 1..n-1 to vars 1..n-1;
+    //   last var gets raw line from start of field n to end of (trimmed) line.
+    //
+    // We track up to num_vars+1 fields (if there's a n+1-th field, we know to use raw remainder).
+    const int MAX_FIELDS = 64;
+    struct FieldPos { int start; int end; int raw_start; }; // raw_start: pos in line where this field starts (for last-var remainder)
+    FieldPos fields[MAX_FIELDS];
+    int num_fields = 0;
+
+    int pos = 0;
+
+    // skip leading IFS whitespace
+    while (pos < line_len && ifs_ws_map[(unsigned char)line[pos]]) pos++;
+
+    auto consume_separator = [&]() {
+        if (pos >= line_len || !ifs_map[(unsigned char)line[pos]]) return;
+        if (ifs_ws_map[(unsigned char)line[pos]]) {
+            // IFS whitespace: skip all, then if non-ws IFS follows consume it too
+            while (pos < line_len && ifs_ws_map[(unsigned char)line[pos]]) pos++;
+            if (pos < line_len && ifs_map[(unsigned char)line[pos]] && !ifs_ws_map[(unsigned char)line[pos]]) {
                 pos++;
+                while (pos < line_len && ifs_ws_map[(unsigned char)line[pos]]) pos++;
             }
-            String* val = heap_create_name(line + word_start, pos - word_start);
+        } else {
+            // non-ws IFS: consume it and any following IFS-ws
+            pos++;
+            while (pos < line_len && ifs_ws_map[(unsigned char)line[pos]]) pos++;
+        }
+    };
+
+    while (pos < line_len && num_fields < MAX_FIELDS) {
+        int raw_start = pos;
+        // check for leading non-ws IFS (empty field before it)
+        if (ifs_map[(unsigned char)line[pos]] && !ifs_ws_map[(unsigned char)line[pos]]) {
+            fields[num_fields++] = {pos, pos, raw_start};
+            pos++; // consume non-ws IFS
+            while (pos < line_len && ifs_ws_map[(unsigned char)line[pos]]) pos++;
+            continue;
+        }
+        // accumulate non-IFS chars
+        int word_start = pos;
+        while (pos < line_len && !ifs_map[(unsigned char)line[pos]]) pos++;
+        int word_end = pos;
+        fields[num_fields++] = {word_start, word_end, raw_start};
+        consume_separator();
+    }
+
+    // assign variables
+    if (num_fields <= num_vars) {
+        // fewer or equal fields: assign each field value, empty for vars beyond fields
+        for (int vi = 0; vi < num_vars; vi++) {
+            int arg_idx = var_start + vi;
+            if (arg_idx >= argc) break;
+            String* val;
+            if (vi < num_fields) {
+                val = heap_create_name(line + fields[vi].start, fields[vi].end - fields[vi].start);
+            } else {
+                val = heap_create_name("", 0);
+            }
             bash_set_var(args[arg_idx], (Item){.item = s2it(val)});
-            // skip trailing IFS delimiter(s)
-            if (pos < line_len) pos++;
+        }
+    } else {
+        // more fields than vars: assign fields 1..n-1, raw remainder to var n
+        for (int vi = 0; vi < num_vars - 1; vi++) {
+            int arg_idx = var_start + vi;
+            if (arg_idx >= argc) break;
+            String* val = heap_create_name(line + fields[vi].start, fields[vi].end - fields[vi].start);
+            bash_set_var(args[arg_idx], (Item){.item = s2it(val)});
+        }
+        // last var: raw line from raw_start of field num_vars to end
+        int last_arg_idx = var_start + num_vars - 1;
+        if (last_arg_idx < argc) {
+            int raw_from = fields[num_vars - 1].raw_start;
+            int rlen = (raw_from < line_len) ? (line_len - raw_from) : 0;
+            String* val = heap_create_name(line + raw_from, rlen);
+            bash_set_var(args[last_arg_idx], (Item){.item = s2it(val)});
         }
     }
 
@@ -1746,4 +1804,1157 @@ extern "C" Item bash_builtin_let(Item* args, int argc) {
     int exit_code = (last_val == 0) ? 1 : 0;
     bash_set_exit_code(exit_code);
     return (Item){.item = i2it(exit_code)};
+}
+
+// ============================================================================
+// type builtin
+// ============================================================================
+
+static bool bash_name_is_builtin(const char* name, int len) {
+    static const char* builtins[] = {
+        "echo", "printf", "test", "[", "true", "false", "exit", "return",
+        "read", "shift", "local", "export", "unset", "cd", "pwd", "set",
+        "shopt", "let", "declare", "typeset", "readonly", "source", ".",
+        "trap", "eval", "exec", "builtin", "command", "type", "hash",
+        "enable", "mapfile", "readarray", "caller", "getopts", "wait",
+        "kill", "jobs", "fg", "bg", "disown", "suspend", "logout",
+        "pushd", "popd", "dirs", "alias", "unalias", "bind", "help",
+        "times", "ulimit", "umask", "complete", "compgen", "compopt",
+        NULL
+    };
+    for (int i = 0; builtins[i]; i++) {
+        if ((int)strlen(builtins[i]) == len && memcmp(builtins[i], name, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool bash_name_is_keyword(const char* name, int len) {
+    static const char* keywords[] = {
+        "if", "then", "else", "elif", "fi", "case", "esac", "for", "while",
+        "until", "do", "done", "in", "function", "select", "time", "coproc",
+        "{", "}", "!", "[[", "]]",
+        NULL
+    };
+    for (int i = 0; keywords[i]; i++) {
+        if ((int)strlen(keywords[i]) == len && memcmp(keywords[i], name, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool bash_find_in_path(const char* name, int len, char* out_path, int out_size) {
+    // if name contains '/', check if file exists directly
+    for (int i = 0; i < len; i++) {
+        if (name[i] == '/') {
+            if (len < out_size) {
+                memcpy(out_path, name, len);
+                out_path[len] = '\0';
+                return access(out_path, X_OK) == 0;
+            }
+            return false;
+        }
+    }
+    const char* path_env = getenv("PATH");
+    if (!path_env) return false;
+    const char* p = path_env;
+    while (*p) {
+        const char* colon = p;
+        while (*colon && *colon != ':') colon++;
+        int dir_len = (int)(colon - p);
+        if (dir_len + 1 + len + 1 < out_size) {
+            memcpy(out_path, p, dir_len);
+            out_path[dir_len] = '/';
+            memcpy(out_path + dir_len + 1, name, len);
+            out_path[dir_len + 1 + len] = '\0';
+            if (access(out_path, X_OK) == 0) return true;
+        }
+        p = *colon ? colon + 1 : colon;
+    }
+    return false;
+}
+
+extern "C" Item bash_builtin_type(Item* args, int argc) {
+    bool flag_t = false;   // -t: type word only
+    bool flag_a = false;   // -a: all matches
+    bool flag_p = false;   // -p: path only
+    bool flag_P = false;   // -P: force path search
+    bool flag_f = false;   // -f: suppress function lookup
+    int name_start = 0;
+    int ret_code = 0;
+
+    // parse flags
+    for (int i = 0; i < argc; i++) {
+        String* s = it2s(bash_to_string(args[i]));
+        if (!s || s->len == 0 || s->chars[0] != '-') { name_start = i; break; }
+        // check for recognized flags
+        bool valid = true;
+        for (int j = 1; j < (int)s->len; j++) {
+            switch (s->chars[j]) {
+                case 't': flag_t = true; break;
+                case 'a': flag_a = true; break;
+                case 'p': flag_p = true; break;
+                case 'P': flag_P = true; break;
+                case 'f': flag_f = true; break;
+                default:
+                    // invalid flag
+                    valid = false;
+                    break;
+            }
+            if (!valid) break;
+        }
+        if (!valid) {
+            String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: type: -%c: invalid option\n",
+                    src ? src->len : 0, src ? src->chars : "",
+                    (int)it2i(bash_get_lineno()), s->chars[1]);
+            fprintf(stderr, "type: usage: type [-afptP] name [name ...]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+        name_start = i + 1;
+    }
+
+    if (name_start >= argc) {
+        // no names given: silently succeed (bash behavior)
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    for (int i = name_start; i < argc; i++) {
+        String* s = it2s(bash_to_string(args[i]));
+        if (!s) continue;
+        const char* name = s->chars;
+        int len = (int)s->len;
+        char buf[1024];
+        int n;
+        bool found = false;
+
+        // 1. function
+        if (!flag_f && !flag_P) {
+            BashRtFuncPtr func = bash_lookup_rt_func(name);
+            if (func) {
+                found = true;
+                if (flag_t) {
+                    bash_raw_write("function\n", 9);
+                } else if (!flag_p) {
+                    n = snprintf(buf, sizeof(buf), "%.*s is a function\n", len, name);
+                    bash_raw_write(buf, n);
+                    // TODO: print function body
+                }
+                if (!flag_a) continue;
+            }
+        }
+
+        // 2. builtin
+        if (!flag_P) {
+            if (bash_name_is_builtin(name, len)) {
+                found = true;
+                if (flag_t) {
+                    if (!found || flag_a) bash_raw_write("builtin\n", 8);
+                    else bash_raw_write("builtin\n", 8);
+                } else if (!flag_p) {
+                    n = snprintf(buf, sizeof(buf), "%.*s is a shell builtin\n", len, name);
+                    bash_raw_write(buf, n);
+                }
+                if (!flag_a) continue;
+            }
+        }
+
+        // 3. keyword
+        if (!flag_P) {
+            if (bash_name_is_keyword(name, len)) {
+                found = true;
+                if (flag_t) {
+                    bash_raw_write("keyword\n", 8);
+                } else if (!flag_p) {
+                    n = snprintf(buf, sizeof(buf), "%.*s is a shell keyword\n", len, name);
+                    bash_raw_write(buf, n);
+                }
+                if (!flag_a) continue;
+            }
+        }
+
+        // 4. file in PATH
+        {
+            char path_buf[1024];
+            if (bash_find_in_path(name, len, path_buf, sizeof(path_buf))) {
+                found = true;
+                if (flag_t) {
+                    bash_raw_write("file\n", 5);
+                } else if (flag_p || flag_P) {
+                    n = snprintf(buf, sizeof(buf), "%s\n", path_buf);
+                    bash_raw_write(buf, n);
+                } else {
+                    n = snprintf(buf, sizeof(buf), "%.*s is %s\n", len, name, path_buf);
+                    bash_raw_write(buf, n);
+                }
+                if (!flag_a) continue;
+            }
+        }
+
+        if (!found) {
+            String* src2 = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: type: %.*s: not found\n",
+                    src2 ? src2->len : 0, src2 ? src2->chars : "",
+                    (int)it2i(bash_get_lineno()), len, name);
+            ret_code = 1;
+        }
+    }
+
+    bash_set_exit_code(ret_code);
+    return (Item){.item = i2it(ret_code)};
+}
+
+// ============================================================================
+// command builtin (-v / -V)
+// ============================================================================
+
+extern "C" Item bash_builtin_command(Item* args, int argc) {
+    bool flag_v = false;
+    bool flag_V = false;
+    bool flag_p = false;
+    int name_start = 0;
+
+    for (int i = 0; i < argc; i++) {
+        String* s = it2s(bash_to_string(args[i]));
+        if (!s || s->len == 0 || s->chars[0] != '-') { name_start = i; break; }
+        for (int j = 1; j < (int)s->len; j++) {
+            switch (s->chars[j]) {
+                case 'v': flag_v = true; break;
+                case 'V': flag_V = true; break;
+                case 'p': flag_p = true; break;
+                default: break;
+            }
+        }
+        name_start = i + 1;
+    }
+
+    (void)flag_p;
+
+    if (!flag_v && !flag_V) {
+        // command without -v/-V: skip functions, run builtin/external
+        // for now, just pass through to external
+        bash_set_exit_code(127);
+        return (Item){.item = i2it(127)};
+    }
+
+    int ret_code = 0;
+    for (int i = name_start; i < argc; i++) {
+        String* s = it2s(bash_to_string(args[i]));
+        if (!s) continue;
+        const char* name = s->chars;
+        int len = (int)s->len;
+        char buf[1024];
+        int n;
+        bool found = false;
+
+        // function
+        BashRtFuncPtr func = bash_lookup_rt_func(name);
+        if (func) {
+            found = true;
+            if (flag_v) {
+                n = snprintf(buf, sizeof(buf), "%.*s\n", len, name);
+                bash_raw_write(buf, n);
+            } else {
+                n = snprintf(buf, sizeof(buf), "%.*s is a function\n", len, name);
+                bash_raw_write(buf, n);
+            }
+            continue;
+        }
+
+        // keyword
+        if (bash_name_is_keyword(name, len)) {
+            found = true;
+            if (flag_v) {
+                n = snprintf(buf, sizeof(buf), "%.*s\n", len, name);
+                bash_raw_write(buf, n);
+            } else {
+                n = snprintf(buf, sizeof(buf), "%.*s is a shell keyword\n", len, name);
+                bash_raw_write(buf, n);
+            }
+            continue;
+        }
+
+        // builtin
+        if (bash_name_is_builtin(name, len)) {
+            found = true;
+            if (flag_v) {
+                n = snprintf(buf, sizeof(buf), "%.*s\n", len, name);
+                bash_raw_write(buf, n);
+            } else {
+                n = snprintf(buf, sizeof(buf), "%.*s is a shell builtin\n", len, name);
+                bash_raw_write(buf, n);
+            }
+            continue;
+        }
+
+        // file
+        char path_buf[1024];
+        if (bash_find_in_path(name, len, path_buf, sizeof(path_buf))) {
+            found = true;
+            if (flag_v) {
+                n = snprintf(buf, sizeof(buf), "%s\n", path_buf);
+                bash_raw_write(buf, n);
+            } else {
+                n = snprintf(buf, sizeof(buf), "%.*s is %s\n", len, name, path_buf);
+                bash_raw_write(buf, n);
+            }
+            continue;
+        }
+
+        if (!found) {
+            String* src3 = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+            fflush(stdout);
+            fprintf(stderr, "%.*s: line %d: command: %.*s: not found\n",
+                    src3 ? src3->len : 0, src3 ? src3->chars : "",
+                    (int)it2i(bash_get_lineno()), len, name);
+            ret_code = 1;
+        }
+    }
+
+    bash_set_exit_code(ret_code);
+    return (Item){.item = i2it(ret_code)};
+}
+
+// ============================================================================
+// Directory stack: pushd, popd, dirs
+// ============================================================================
+// The directory stack stores directories below the current one.
+// dirs prints: $PWD  stack[0]  stack[1] ...
+// DIRSTACK[0] = $PWD, DIRSTACK[1] = stack[0], etc.
+
+#define DIRSTACK_MAX 256
+static char* dir_stack[DIRSTACK_MAX];
+static int dir_stack_size = 0;
+
+// helper: get current PWD string
+static const char* dirstack_get_pwd(void) {
+    Item pwd_name = (Item){.item = s2it(heap_create_name("PWD", 3))};
+    Item pwd_val = bash_get_var(pwd_name);
+    String* pwd_str = it2s(bash_to_string(pwd_val));
+    if (pwd_str && pwd_str->len > 0) return pwd_str->chars;
+    static char cwd[4096];
+    if (getcwd(cwd, sizeof(cwd))) return cwd;
+    return "/";
+}
+
+// helper: sync the DIRSTACK bash variable from the internal stack
+static void dirstack_sync_var(void) {
+    Item ds_name = (Item){.item = s2it(heap_create_name("DIRSTACK", 8))};
+    Item arr = bash_array_new();
+    // DIRSTACK[0] = PWD (current directory)
+    const char* pwd = dirstack_get_pwd();
+    arr = bash_array_set(arr, (Item){.item = i2it(0)},
+          (Item){.item = s2it(heap_create_name(pwd, strlen(pwd)))});
+    // DIRSTACK[1..N] = stack entries
+    for (int i = 0; i < dir_stack_size; i++) {
+        arr = bash_array_set(arr, (Item){.item = i2it(i + 1)},
+              (Item){.item = s2it(heap_create_name(dir_stack[i], strlen(dir_stack[i])))});
+    }
+    bash_set_var(ds_name, arr);
+}
+
+// helper: print the directory stack (space-separated)
+static void dirstack_print(void) {
+    const char* pwd = dirstack_get_pwd();
+    int n = printf("%s", pwd);
+    (void)n;
+    for (int i = 0; i < dir_stack_size; i++) {
+        printf(" %s", dir_stack[i]);
+    }
+    printf("\n");
+}
+
+// helper: print full (long) directory stack
+static void dirstack_print_long(void) {
+    dirstack_print(); // for now same as non-long (no ~ substitution)
+}
+
+// helper: print verbose (-v) directory stack
+static void dirstack_print_verbose(void) {
+    const char* pwd = dirstack_get_pwd();
+    printf(" 0  %s\n", pwd);
+    for (int i = 0; i < dir_stack_size; i++) {
+        printf(" %d  %s\n", i + 1, dir_stack[i]);
+    }
+}
+
+// helper: get the Nth entry from stack (0 = PWD, 1 = stack[0], ...)
+static const char* dirstack_get(int n) {
+    if (n == 0) return dirstack_get_pwd();
+    if (n >= 1 && n <= dir_stack_size) return dir_stack[n - 1];
+    return NULL;
+}
+
+// helper: total number of entries (including PWD)
+static int dirstack_total(void) {
+    return dir_stack_size + 1;
+}
+
+// helper: do chdir and update PWD/OLDPWD
+static int dirstack_chdir(const char* path) {
+    if (chdir(path) != 0) return -1;
+    // update PWD and OLDPWD
+    Item pwd_name = (Item){.item = s2it(heap_create_name("PWD", 3))};
+    Item cur_pwd = bash_get_var(pwd_name);
+    String* cur_str = it2s(bash_to_string(cur_pwd));
+    if (cur_str && cur_str->len > 0) {
+        Item oldpwd_name = (Item){.item = s2it(heap_create_name("OLDPWD", 6))};
+        bash_set_var(oldpwd_name, cur_pwd);
+    }
+    // use logical path (the argument) for absolute paths
+    const char* new_pwd = path;
+    if (path[0] != '/') {
+        // relative: resolve via old PWD + "/" + path
+        char buf[4096];
+        const char* old_pwd = (cur_str && cur_str->len > 0) ? cur_str->chars : "/";
+        snprintf(buf, sizeof(buf), "%s/%s", old_pwd, path);
+        Item pwd_val = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        bash_set_var(pwd_name, pwd_val);
+    } else {
+        Item pwd_val = (Item){.item = s2it(heap_create_name(new_pwd, strlen(new_pwd)))};
+        bash_set_var(pwd_name, pwd_val);
+    }
+    return 0;
+}
+
+// helper: insert at front of stack
+static void dirstack_push_front(const char* dir) {
+    if (dir_stack_size >= DIRSTACK_MAX) return;
+    for (int i = dir_stack_size; i > 0; i--) {
+        dir_stack[i] = dir_stack[i - 1];
+    }
+    dir_stack[0] = strdup(dir);
+    dir_stack_size++;
+}
+
+// helper: remove from front of stack
+static void dirstack_pop_front(void) {
+    if (dir_stack_size == 0) return;
+    free(dir_stack[0]);
+    for (int i = 0; i < dir_stack_size - 1; i++) {
+        dir_stack[i] = dir_stack[i + 1];
+    }
+    dir_stack_size--;
+}
+
+// helper: remove at index (0-based in the stack, not including PWD offset)
+static void dirstack_remove_at(int idx) {
+    if (idx < 0 || idx >= dir_stack_size) return;
+    free(dir_stack[idx]);
+    for (int i = idx; i < dir_stack_size - 1; i++) {
+        dir_stack[i] = dir_stack[i + 1];
+    }
+    dir_stack_size--;
+}
+
+// helper: get the script source prefix for error messages
+static void dirstack_err_prefix(char* buf, int bufsize) {
+    String* src = it2s(bash_get_bash_source((Item){.item = i2it(0)}));
+    int line = (int)it2i(bash_get_lineno());
+    snprintf(buf, bufsize, "%.*s: line %d",
+             src ? src->len : 0, src ? src->chars : "", line);
+}
+
+// pushd [-n] [+N | -N | dir]
+extern "C" Item bash_builtin_pushd(Item* args, int argc) {
+    bool no_cd = false; // -n flag
+    int argi = 0;
+    char err[256];
+
+    // parse flags
+    while (argi < argc) {
+        String* s = it2s(bash_to_string(args[argi]));
+        if (!s || s->len == 0 || s->chars[0] != '-') break;
+        if (s->len == 2 && s->chars[1] == 'n') {
+            no_cd = true;
+            argi++;
+        } else if (s->chars[1] == '-' && s->len == 2) {
+            argi++; break; // --
+        } else {
+            // could be -N (negative offset)
+            if (isdigit((unsigned char)s->chars[1])) break;
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: pushd: %.*s: invalid number\n", err, s->len, s->chars);
+            fprintf(stderr, "pushd: usage: pushd [-n] [+N | -N | dir]\n");
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    if (argi >= argc) {
+        // pushd with no args: swap top two
+        if (dir_stack_size == 0) {
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: pushd: no other directory\n", err);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        // swap PWD and stack[0]
+        const char* old_pwd = dirstack_get_pwd();
+        char* saved = strdup(old_pwd);
+        const char* target = dir_stack[0];
+        if (!no_cd) {
+            if (dirstack_chdir(target) != 0) {
+                dirstack_err_prefix(err, sizeof(err));
+                fflush(stdout);
+                fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, target);
+                free(saved);
+                bash_set_exit_code(1);
+                return (Item){.item = i2it(1)};
+            }
+            free(dir_stack[0]);
+            dir_stack[0] = saved;
+        } else {
+            // -n: just swap the entries without changing directory
+            free(dir_stack[0]);
+            dir_stack[0] = saved;
+        }
+        dirstack_sync_var();
+        dirstack_print();
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    String* arg = it2s(bash_to_string(args[argi]));
+    if (!arg || arg->len == 0) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    // +N or -N: rotate
+    if (arg->chars[0] == '+' || (arg->chars[0] == '-' && isdigit((unsigned char)arg->chars[1]))) {
+        int total = dirstack_total();
+        char nbuf[32]; int nlen = arg->len < 31 ? arg->len : 31;
+        memcpy(nbuf, arg->chars, nlen); nbuf[nlen] = '\0';
+        int offset = atoi(nbuf);
+        int idx;
+        if (arg->chars[0] == '+') {
+            idx = offset;
+        } else {
+            idx = total - 1 + offset; // -N means from bottom: -0=bottom, -1=one above
+        }
+        if (idx < 0 || idx >= total) {
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: pushd: %.*s: directory stack index out of range\n",
+                    err, arg->len, arg->chars);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        // rotate: move entry at idx to top
+        // build entire stack list starting with PWD at position 0
+        // then rotate so idx becomes position 0
+        char* full[DIRSTACK_MAX + 1];
+        const char* pwd = dirstack_get_pwd();
+        full[0] = strdup(pwd);
+        for (int i = 0; i < dir_stack_size; i++) full[i + 1] = strdup(dir_stack[i]);
+        // rotate left by idx
+        char* rotated[DIRSTACK_MAX + 1];
+        for (int i = 0; i < total; i++) {
+            rotated[i] = full[(i + idx) % total];
+        }
+        // set PWD to rotated[0], stack to rotated[1..]
+        if (!no_cd) {
+            if (dirstack_chdir(rotated[0]) != 0) {
+                dirstack_err_prefix(err, sizeof(err));
+                fflush(stdout);
+                fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, rotated[0]);
+                for (int i = 0; i < total; i++) free(full[i]);
+                bash_set_exit_code(1);
+                return (Item){.item = i2it(1)};
+            }
+        }
+        // update stack
+        for (int i = 0; i < dir_stack_size; i++) free(dir_stack[i]);
+        dir_stack_size = total - 1;
+        for (int i = 0; i < dir_stack_size; i++) dir_stack[i] = rotated[i + 1];
+        free(rotated[0]); // was used for chdir
+        dirstack_sync_var();
+        dirstack_print();
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    // pushd dir: push current dir, cd to new dir
+    char path[4096];
+    int copy_len = arg->len < (int)sizeof(path) - 1 ? arg->len : (int)sizeof(path) - 1;
+    memcpy(path, arg->chars, copy_len);
+    path[copy_len] = '\0';
+
+    // check if directory exists
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        dirstack_err_prefix(err, sizeof(err));
+        fflush(stdout);
+        fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, path);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    if (no_cd) {
+        // -n: add dir to stack without cd-ing
+        dirstack_push_front(path);
+    } else {
+        const char* old_pwd = dirstack_get_pwd();
+        dirstack_push_front(old_pwd);
+        if (dirstack_chdir(path) != 0) {
+            dirstack_pop_front();
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: pushd: %s: No such file or directory\n", err, path);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+    dirstack_sync_var();
+    dirstack_print();
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// popd [-n] [+N | -N]
+extern "C" Item bash_builtin_popd(Item* args, int argc) {
+    bool no_cd = false;
+    int argi = 0;
+    char err[256];
+
+    while (argi < argc) {
+        String* s = it2s(bash_to_string(args[argi]));
+        if (!s || s->len == 0 || s->chars[0] != '-') break;
+        if (s->len == 2 && s->chars[1] == 'n') {
+            no_cd = true;
+            argi++;
+        } else if (s->chars[1] == '-' && s->len == 2) {
+            argi++; break;
+        } else {
+            if (isdigit((unsigned char)s->chars[1])) break;
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: popd: %.*s: invalid number\n", err, s->len, s->chars);
+            fprintf(stderr, "popd: usage: popd [-n] [+N | -N]\n");
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    if (argi >= argc) {
+        // popd with no args: pop top, cd to new top
+        if (dir_stack_size == 0) {
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: popd: directory stack empty\n", err);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        const char* target = dir_stack[0];
+        if (!no_cd) {
+            if (dirstack_chdir(target) != 0) {
+                dirstack_err_prefix(err, sizeof(err));
+                fflush(stdout);
+                fprintf(stderr, "%s: popd: %s: No such file or directory\n", err, target);
+                bash_set_exit_code(1);
+                return (Item){.item = i2it(1)};
+            }
+        }
+        dirstack_pop_front();
+        dirstack_sync_var();
+        dirstack_print();
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    String* arg = it2s(bash_to_string(args[argi]));
+    if (!arg || arg->len == 0) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    int total = dirstack_total();
+    char nbuf[32]; int nlen = arg->len < 31 ? arg->len : 31;
+    memcpy(nbuf, arg->chars, nlen); nbuf[nlen] = '\0';
+    int offset = atoi(nbuf);
+    int idx;
+    if (arg->chars[0] == '+') {
+        idx = offset;
+    } else if (arg->chars[0] == '-') {
+        idx = total - 1 + offset;
+    } else {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    if (idx < 0 || idx >= total) {
+        dirstack_err_prefix(err, sizeof(err));
+        fflush(stdout);
+        fprintf(stderr, "%s: popd: %.*s: directory stack index out of range\n",
+                err, arg->len, arg->chars);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    if (idx == 0) {
+        // popd +0: remove current directory, cd to next
+        if (dir_stack_size == 0) {
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: popd: directory stack empty\n", err);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        if (!no_cd) dirstack_chdir(dir_stack[0]);
+        dirstack_pop_front();
+    } else {
+        // popd +N/-N: remove entry at index (1-based maps to stack index-1)
+        if (no_cd || idx != 0) {
+            dirstack_remove_at(idx - 1);
+        }
+    }
+    dirstack_sync_var();
+    dirstack_print();
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// dirs [-clpv] [+N] [-N]
+extern "C" Item bash_builtin_dirs(Item* args, int argc) {
+    bool flag_c = false, flag_l = false, flag_p = false, flag_v = false;
+    int argi = 0;
+    char err[256];
+
+    while (argi < argc) {
+        String* s = it2s(bash_to_string(args[argi]));
+        if (!s || s->len == 0 || s->chars[0] != '-' && s->chars[0] != '+') break;
+        if (s->chars[0] == '+') break; // +N arg, not a flag
+        if (s->len >= 2 && s->chars[0] == '-' && isdigit((unsigned char)s->chars[1])) break; // -N arg
+        if (s->chars[0] == '-' && s->len >= 2) {
+            for (int j = 1; j < s->len; j++) {
+                switch (s->chars[j]) {
+                case 'c': flag_c = true; break;
+                case 'l': flag_l = true; break;
+                case 'p': flag_p = true; break;
+                case 'v': flag_v = true; break;
+                default:
+                    dirstack_err_prefix(err, sizeof(err));
+                    fflush(stdout);
+                    fprintf(stderr, "%s: dirs: %c: invalid option\n", err, s->chars[j]);
+                    fprintf(stderr, "dirs: usage: dirs [-clpv] [+N] [-N]\n");
+                    bash_set_exit_code(2);
+                    return (Item){.item = i2it(2)};
+                }
+            }
+            argi++;
+        } else {
+            break;
+        }
+    }
+
+    if (flag_c) {
+        // clear the stack
+        for (int i = 0; i < dir_stack_size; i++) free(dir_stack[i]);
+        dir_stack_size = 0;
+        dirstack_sync_var();
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    // check for +N / -N argument
+    if (argi < argc) {
+        String* s = it2s(bash_to_string(args[argi]));
+        if (s && s->len > 0 && (s->chars[0] == '+' || (s->chars[0] == '-' && isdigit((unsigned char)s->chars[1])))) {
+            char nbuf[32]; int nlen = s->len < 31 ? s->len : 31;
+            memcpy(nbuf, s->chars, nlen); nbuf[nlen] = '\0';
+            int offset = atoi(nbuf);
+            int total = dirstack_total();
+            int idx;
+            if (s->chars[0] == '+') {
+                idx = offset;
+            } else {
+                idx = total - 1 + offset;
+            }
+            if (idx < 0 || idx >= total) {
+                dirstack_err_prefix(err, sizeof(err));
+                fflush(stdout);
+                fprintf(stderr, "%s: dirs: %d: directory stack index out of range\n",
+                        err, offset >= 0 ? offset : -offset);
+                bash_set_exit_code(1);
+                return (Item){.item = i2it(1)};
+            }
+            const char* entry = dirstack_get(idx);
+            if (entry) {
+                if (flag_v) {
+                    printf(" %d  %s\n", idx, entry);
+                } else {
+                    printf("%s\n", entry);
+                }
+            }
+            bash_set_exit_code(0);
+            return (Item){.item = i2it(0)};
+        }
+        // not a valid argument — check if it's a bare number (dirs 7 → invalid option)
+        if (s && s->len > 0 && isdigit((unsigned char)s->chars[0])) {
+            dirstack_err_prefix(err, sizeof(err));
+            fflush(stdout);
+            fprintf(stderr, "%s: dirs: %.*s: invalid option\n", err, s->len, s->chars);
+            fprintf(stderr, "dirs: usage: dirs [-clpv] [+N] [-N]\n");
+            bash_set_exit_code(2);
+            return (Item){.item = i2it(2)};
+        }
+    }
+
+    // print full stack
+    if (flag_v) {
+        dirstack_print_verbose();
+    } else if (flag_l) {
+        dirstack_print_long();
+    } else {
+        dirstack_print();
+    }
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// get Nth directory from stack by absolute index (0=top/PWD)
+// for tilde expansion: caller converts ~-N to proper index
+extern "C" Item bash_dirstack_get(Item index) {
+    int64_t idx = (int64_t)it2i(index);
+    int total = dirstack_total();
+    if (idx < 0 || idx >= total) {
+        return (Item){.item = 0};
+    }
+    const char* entry = dirstack_get((int)idx);
+    if (!entry) {
+        return (Item){.item = 0};
+    }
+    return (Item){.item = s2it(heap_create_name(entry, strlen(entry)))};
+}
+
+// get total number of directory stack entries (for tilde ~-N computation)
+extern "C" Item bash_dirstack_total(void) {
+    return (Item){.item = i2it(dirstack_total())};
+}
+
+// ============================================================================
+// getopts builtin
+// ============================================================================
+
+extern "C" Item bash_builtin_getopts(Item* args, int argc) {
+    // getopts optstring name [args...]
+    // args[0] = optstring, args[1] = name, args[2..] = override args (optional)
+    if (argc < 2) {
+        fprintf(stderr, "getopts: usage: getopts optstring name [arg ...]\n");
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+
+    // check if first arg looks like an invalid option to getopts itself
+    String* first_str = it2s(bash_to_string(args[0]));
+    if (first_str && first_str->len > 0 && first_str->chars[0] == '-') {
+        fprintf(stderr, "%s: %d: getopts: %.*s: invalid option\n",
+                it2s(bash_get_script_name())->chars, 0,
+                first_str->len, first_str->chars);
+        fprintf(stderr, "getopts: usage: getopts optstring name [arg ...]\n");
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+
+    String* optstring_str = it2s(bash_to_string(args[0]));
+    String* varname_str = it2s(bash_to_string(args[1]));
+    if (!optstring_str || !varname_str) {
+        bash_set_exit_code(2);
+        return (Item){.item = i2it(2)};
+    }
+
+    const char* optstring = optstring_str->chars;
+    int optstring_len = optstring_str->len;
+    const char* varname = varname_str->chars;
+    int varname_len = varname_str->len;
+
+    // validate variable name
+    if (varname_len == 0 || !(isalpha((unsigned char)varname[0]) || varname[0] == '_')) {
+        fprintf(stderr, "%s: line %d: getopts: `%.*s': not a valid identifier\n",
+                it2s(bash_get_script_name())->chars, 0, varname_len, varname);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+    for (int i = 1; i < varname_len; i++) {
+        if (!(isalnum((unsigned char)varname[i]) || varname[i] == '_')) {
+            fprintf(stderr, "%s: line %d: getopts: `%.*s': not a valid identifier\n",
+                    it2s(bash_get_script_name())->chars, 0, varname_len, varname);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    // check silent mode (leading ':' in optstring)
+    bool silent = false;
+    const char* opts = optstring;
+    int opts_len = optstring_len;
+    if (opts_len > 0 && opts[0] == ':') {
+        silent = true;
+        opts++;
+        opts_len--;
+    }
+
+    // check OPTERR
+    bool opterr = true;
+    {
+        Item opterr_name = {.item = s2it(heap_create_name("OPTERR", 6))};
+        Item opterr_val = bash_get_var(opterr_name);
+        String* opterr_s = it2s(opterr_val);
+        if (opterr_s && opterr_s->len == 1 && opterr_s->chars[0] == '0') {
+            opterr = false;
+        }
+    }
+
+    // get OPTIND (1-based index into args)
+    int optind = 1;
+    {
+        Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
+        Item optind_val = bash_get_var(optind_name);
+        String* optind_s = it2s(optind_val);
+        if (optind_s && optind_s->len > 0) {
+            optind = atoi(optind_s->chars);
+            if (optind < 1) optind = 1;
+        }
+    }
+
+    // determine the argument list to parse
+    // if extra args provided (argc > 2), use those; otherwise use positional params
+    bool use_extra_args = (argc > 2);
+    int arg_count;
+    if (use_extra_args) {
+        arg_count = argc - 2;
+    } else {
+        Item count_item = bash_get_arg_count();
+        arg_count = (int)it2i(count_item);
+    }
+
+    // helper to get arg at 1-based index
+    auto get_arg = [&](int idx) -> String* {
+        if (use_extra_args) {
+            if (idx < 1 || idx > arg_count) return NULL;
+            return it2s(bash_to_string(args[1 + idx]));
+        } else {
+            if (idx < 1 || idx > arg_count) return NULL;
+            return it2s(bash_to_string(bash_get_positional(idx)));
+        }
+    };
+
+    // static variable for tracking position within combined options (e.g., -abc)
+    // OPTIND tells us which arg we're on, and we need a sub-index for combined opts
+    // bash uses an internal "nextchar" pointer; we use a static sub-index
+    static int getopts_charind = 0;  // 0-based offset within current option arg
+
+    // if optind is out of range, we're done
+    if (optind > arg_count) {
+        getopts_charind = 0;
+        Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+        Item q_item = {.item = s2it(heap_create_name("?", 1))};
+        bash_set_var(name_item, q_item);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    String* current_arg = get_arg(optind);
+    if (!current_arg) {
+        getopts_charind = 0;
+        Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+        Item q_item = {.item = s2it(heap_create_name("?", 1))};
+        bash_set_var(name_item, q_item);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    // skip non-option arguments (doesn't start with '-', or is "-" alone, or is "--")
+    if (current_arg->len == 0 || current_arg->chars[0] != '-' || current_arg->len == 1) {
+        // not an option — done
+        getopts_charind = 0;
+        Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+        Item q_item = {.item = s2it(heap_create_name("?", 1))};
+        bash_set_var(name_item, q_item);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    // check for "--" (end of options)
+    if (current_arg->len == 2 && current_arg->chars[0] == '-' && current_arg->chars[1] == '-') {
+        getopts_charind = 0;
+        optind++;
+        // update OPTIND
+        char buf[16];
+        int blen = snprintf(buf, sizeof(buf), "%d", optind);
+        Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
+        Item optind_val = {.item = s2it(heap_create_name(buf, blen))};
+        bash_set_var(optind_name, optind_val);
+
+        Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+        Item q_item = {.item = s2it(heap_create_name("?", 1))};
+        bash_set_var(name_item, q_item);
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
+
+    // current_arg starts with '-' and has at least 2 chars
+    // determine which character in the option string we're looking at
+    int charpos = getopts_charind + 1;  // skip the leading '-'
+    if (charpos >= current_arg->len) {
+        // this shouldn't happen, but handle gracefully by moving to next arg
+        getopts_charind = 0;
+        optind++;
+        charpos = 1;
+        current_arg = get_arg(optind);
+        if (!current_arg || current_arg->len < 2 || current_arg->chars[0] != '-') {
+            char buf[16];
+            int blen = snprintf(buf, sizeof(buf), "%d", optind);
+            Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
+            Item optind_val = {.item = s2it(heap_create_name(buf, blen))};
+            bash_set_var(optind_name, optind_val);
+            Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+            Item q_item = {.item = s2it(heap_create_name("?", 1))};
+            bash_set_var(name_item, q_item);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+    }
+
+    char opt_char = current_arg->chars[charpos];
+
+    // find opt_char in optstring
+    int found_pos = -1;
+    bool has_arg = false;
+    for (int i = 0; i < opts_len; i++) {
+        if (opts[i] == opt_char) {
+            found_pos = i;
+            has_arg = (i + 1 < opts_len && opts[i + 1] == ':');
+            break;
+        }
+    }
+
+    Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
+    Item optarg_name = {.item = s2it(heap_create_name("OPTARG", 6))};
+
+    if (found_pos < 0) {
+        // unknown option
+        if (silent) {
+            // silent mode: set name to '?', OPTARG to the bad char
+            char bad[2] = {opt_char, '\0'};
+            Item q_item = {.item = s2it(heap_create_name("?", 1))};
+            Item bad_item = {.item = s2it(heap_create_name(bad, 1))};
+            bash_set_var(name_item, q_item);
+            bash_set_var(optarg_name, bad_item);
+        } else {
+            // print error, set name to '?', unset OPTARG
+            if (opterr) {
+                fprintf(stderr, "%s: illegal option -- %c\n",
+                        it2s(bash_get_script_name())->chars, opt_char);
+            }
+            Item q_item = {.item = s2it(heap_create_name("?", 1))};
+            bash_set_var(name_item, q_item);
+            // unset OPTARG
+            Item empty = {.item = s2it(heap_create_name("", 0))};
+            bash_set_var(optarg_name, empty);
+        }
+
+        // advance within combined options or to next arg
+        if (charpos + 1 < current_arg->len) {
+            getopts_charind = charpos;
+        } else {
+            getopts_charind = 0;
+            optind++;
+        }
+
+        // update OPTIND
+        char buf[16];
+        int blen = snprintf(buf, sizeof(buf), "%d", optind);
+        Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
+        Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
+        bash_set_var(optind_name_item, optind_val_item);
+
+        bash_set_exit_code(0);
+        return (Item){.item = i2it(0)};
+    }
+
+    // valid option found
+    char opt_str[2] = {opt_char, '\0'};
+    Item opt_item = {.item = s2it(heap_create_name(opt_str, 1))};
+    bash_set_var(name_item, opt_item);
+
+    if (has_arg) {
+        // option requires an argument
+        if (charpos + 1 < current_arg->len) {
+            // rest of current arg is the option argument (e.g., -bval)
+            const char* optarg_val = current_arg->chars + charpos + 1;
+            int optarg_len = current_arg->len - charpos - 1;
+            Item optarg_item = {.item = s2it(heap_create_name(optarg_val, optarg_len))};
+            bash_set_var(optarg_name, optarg_item);
+            getopts_charind = 0;
+            optind++;
+        } else {
+            // next arg is the option argument
+            optind++;
+            String* next_arg = get_arg(optind);
+            if (!next_arg) {
+                // missing argument
+                if (silent) {
+                    Item colon_item = {.item = s2it(heap_create_name(":", 1))};
+                    bash_set_var(name_item, colon_item);
+                    Item bad_item = {.item = s2it(heap_create_name(opt_str, 1))};
+                    bash_set_var(optarg_name, bad_item);
+                } else {
+                    if (opterr) {
+                        fprintf(stderr, "%s: option requires an argument -- %c\n",
+                                it2s(bash_get_script_name())->chars, opt_char);
+                    }
+                    Item q_item = {.item = s2it(heap_create_name("?", 1))};
+                    bash_set_var(name_item, q_item);
+                    Item empty = {.item = s2it(heap_create_name("", 0))};
+                    bash_set_var(optarg_name, empty);
+                }
+                getopts_charind = 0;
+                // update OPTIND and return error (but still exit 0 for the loop to continue in bash)
+                // actually bash returns 1 here to stop the while loop
+                optind++;
+                char buf[16];
+                int blen = snprintf(buf, sizeof(buf), "%d", optind);
+                Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
+                Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
+                bash_set_var(optind_name_item, optind_val_item);
+                bash_set_exit_code(0);
+                return (Item){.item = i2it(0)};
+            } else {
+                Item optarg_item = {.item = s2it(heap_create_name(next_arg->chars, next_arg->len))};
+                bash_set_var(optarg_name, optarg_item);
+                getopts_charind = 0;
+                optind++;
+            }
+        }
+    } else {
+        // no argument needed — unset OPTARG
+        Item empty = {.item = s2it(heap_create_name("", 0))};
+        bash_set_var(optarg_name, empty);
+
+        // advance within combined options or to next arg
+        if (charpos + 1 < current_arg->len) {
+            getopts_charind = charpos;
+        } else {
+            getopts_charind = 0;
+            optind++;
+        }
+    }
+
+    // update OPTIND
+    char buf[16];
+    int blen = snprintf(buf, sizeof(buf), "%d", optind);
+    Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
+    Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
+    bash_set_var(optind_name_item, optind_val_item);
+
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
 }

@@ -47,6 +47,7 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o 2>/dev/null || true
     rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
@@ -912,7 +913,7 @@ build_re2_for_linux() {
     echo "Building RE2 for Linux..."
 
     local RE2_SRC="build_temp/re2-noabsl"
-    local RE2_LIB="$RE2_SRC/build/libre2.a"
+    local RE2_LIB="$RE2_SRC/cmake_build/libre2.a"
 
     if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
         echo "✅ RE2 already built for Linux"
@@ -930,8 +931,8 @@ build_re2_for_linux() {
     fi
 
     echo "Building RE2 from $RE2_SRC..."
-    mkdir -p "$RE2_SRC/build"
-    cd "$RE2_SRC/build"
+    mkdir -p "$RE2_SRC/cmake_build"
+    cd "$RE2_SRC/cmake_build"
 
     if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON .. && \
        cmake --build . -j$(nproc); then

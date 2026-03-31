@@ -1726,8 +1726,95 @@ extern "C" Item js_delete_property(Item obj, Item key) {
 }
 
 // =============================================================================
-// v12: encodeURIComponent / decodeURIComponent
+// v12: encodeURIComponent / decodeURIComponent / atob / btoa
 // =============================================================================
+
+// Base64 decoding table
+static const unsigned char b64_decode_table[256] = {
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255, 62,255,255,255, 63,
+     52, 53, 54, 55, 56, 57, 58, 59, 60, 61,255,255,255,  0,255,255,
+    255,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
+     15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,255,255,255,255,255,
+    255, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+     41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,
+    255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+};
+
+extern "C" Item js_atob(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    const char* src = s->chars;
+    int src_len = s->len;
+
+    // skip whitespace and compute output size
+    char* buf = (char*)malloc(src_len); // output is always <= input
+    if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    int out = 0;
+    int bits = 0;
+    int val = 0;
+    for (int i = 0; i < src_len; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') continue;
+        if (c == '=') break;
+        unsigned char d = b64_decode_table[c];
+        if (d == 255) continue; // skip invalid
+        val = (val << 6) | d;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            buf[out++] = (char)((val >> bits) & 0xFF);
+        }
+    }
+
+    String* result = heap_create_name(buf, out);
+    free(buf);
+    return (Item){.item = s2it(result)};
+}
+
+static const char b64_encode_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+extern "C" Item js_btoa(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    const unsigned char* src = (const unsigned char*)s->chars;
+    int src_len = s->len;
+    int out_len = ((src_len + 2) / 3) * 4;
+    char* buf = (char*)malloc(out_len + 1);
+    if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    int out = 0;
+    int i = 0;
+    while (i < src_len) {
+        unsigned int b0 = src[i];
+        unsigned int b1 = (i + 1 < src_len) ? src[i + 1] : 0;
+        unsigned int b2 = (i + 2 < src_len) ? src[i + 2] : 0;
+        int remaining = src_len - i;
+        unsigned int triple = (b0 << 16) | (b1 << 8) | b2;
+        buf[out++] = b64_encode_table[(triple >> 18) & 0x3F];
+        buf[out++] = b64_encode_table[(triple >> 12) & 0x3F];
+        buf[out++] = (remaining > 1) ? b64_encode_table[(triple >> 6) & 0x3F] : '=';
+        buf[out++] = (remaining > 2) ? b64_encode_table[triple & 0x3F] : '=';
+        i += 3;
+    }
+
+    String* result = heap_create_name(buf, out);
+    free(buf);
+    return (Item){.item = s2it(result)};
+}
 
 extern "C" Item js_encodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
@@ -1819,6 +1906,91 @@ extern "C" Item js_unescape(Item str_item) {
             }
         }
         buf[out++] = src[i++];
+    }
+
+    String* result = heap_create_name(buf, out);
+    free(buf);
+    return (Item){.item = s2it(result)};
+}
+
+// =============================================================================
+// escape(string) — legacy percent-encoding (%XX and %uXXXX)
+// Characters NOT escaped: A-Z a-z 0-9 @ * _ + - . /
+// =============================================================================
+
+static bool js_escape_is_passthrough(unsigned char c) {
+    if (c >= 'A' && c <= 'Z') return true;
+    if (c >= 'a' && c <= 'z') return true;
+    if (c >= '0' && c <= '9') return true;
+    // @*_+-./
+    return c == '@' || c == '*' || c == '_' || c == '+' || c == '-' || c == '.' || c == '/';
+}
+
+extern "C" Item js_escape(Item str_item) {
+    Item str_val = js_to_string(str_item);
+    String* s = it2s(str_val);
+    if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    const char* src = s->chars;
+    int src_len = s->len;
+
+    // worst case: every char becomes %uXXXX (6 bytes per input byte)
+    char* buf = (char*)malloc(src_len * 6 + 1);
+    if (!buf) return (Item){.item = s2it(heap_create_name("", 0))};
+
+    static const char hex[] = "0123456789ABCDEF";
+    int out = 0;
+    int i = 0;
+    while (i < src_len) {
+        unsigned char c = (unsigned char)src[i];
+
+        if (js_escape_is_passthrough(c)) {
+            buf[out++] = (char)c;
+            i++;
+            continue;
+        }
+
+        // decode UTF-8 codepoint
+        uint32_t cp;
+        int bytes;
+        if (c < 0x80) {
+            cp = c; bytes = 1;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < src_len) {
+            cp = (c & 0x1F) << 6 | ((unsigned char)src[i+1] & 0x3F);
+            bytes = 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < src_len) {
+            cp = (c & 0x0F) << 12 | ((unsigned char)src[i+1] & 0x3F) << 6 | ((unsigned char)src[i+2] & 0x3F);
+            bytes = 3;
+        } else if ((c & 0xF8) == 0xF0 && i + 3 < src_len) {
+            // surrogate pair for codepoints above 0xFFFF
+            cp = (c & 0x07) << 18 | ((unsigned char)src[i+1] & 0x3F) << 12 | ((unsigned char)src[i+2] & 0x3F) << 6 | ((unsigned char)src[i+3] & 0x3F);
+            bytes = 4;
+        } else {
+            cp = c; bytes = 1;
+        }
+
+        if (cp > 0xFFFF) {
+            // encode as surrogate pair: %uD800-style
+            uint32_t hi = 0xD800 + ((cp - 0x10000) >> 10);
+            uint32_t lo = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+            buf[out++] = '%'; buf[out++] = 'u';
+            buf[out++] = hex[(hi >> 12) & 0xF]; buf[out++] = hex[(hi >> 8) & 0xF];
+            buf[out++] = hex[(hi >> 4) & 0xF]; buf[out++] = hex[hi & 0xF];
+            buf[out++] = '%'; buf[out++] = 'u';
+            buf[out++] = hex[(lo >> 12) & 0xF]; buf[out++] = hex[(lo >> 8) & 0xF];
+            buf[out++] = hex[(lo >> 4) & 0xF]; buf[out++] = hex[lo & 0xF];
+        } else if (cp > 0xFF) {
+            // %uXXXX
+            buf[out++] = '%'; buf[out++] = 'u';
+            buf[out++] = hex[(cp >> 12) & 0xF]; buf[out++] = hex[(cp >> 8) & 0xF];
+            buf[out++] = hex[(cp >> 4) & 0xF]; buf[out++] = hex[cp & 0xF];
+        } else {
+            // %XX
+            buf[out++] = '%';
+            buf[out++] = hex[(cp >> 4) & 0xF];
+            buf[out++] = hex[cp & 0xF];
+        }
+        i += bytes;
     }
 
     String* result = heap_create_name(buf, out);

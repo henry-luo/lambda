@@ -15,6 +15,7 @@ extern "C" {
 // Type conversion (Bash string-first semantics)
 // ========================================================================
 Item bash_to_int(Item value);               // coerce to integer (atoi semantics)
+int64_t bash_to_int_val(Item value);        // coerce to plain int64_t
 Item bash_arith_eval_value(Item value);     // evaluate as arithmetic expression (for declare -i)
 Item bash_to_string(Item value);            // coerce to string (all values)
 bool bash_is_truthy(Item value);            // Bash truthiness: non-empty string
@@ -65,6 +66,7 @@ Item bash_test_lt(Item left, Item right);
 Item bash_test_le(Item left, Item right);
 
 // string comparisons:  == / = , != , < , >
+Item bash_str_eq(Item left, Item right);     // literal strcmp (no glob)
 Item bash_test_str_eq(Item left, Item right);
 Item bash_test_str_ne(Item left, Item right);
 Item bash_test_str_lt(Item left, Item right);
@@ -133,7 +135,10 @@ Item bash_ensure_array(Item name);                  // ensure var is array, crea
 Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
+void bash_array_elem_append(Item arr, Item index, Item append_val, Item var_name); // arr[idx]+=val
 Item bash_words_split_into(Item arr, Item words_str); // append IFS-split words from str into arr
+Item bash_ifs_split_into(Item arr, Item val);          // split val by current IFS and append into arr
+void bash_set_positional_from_array(Item arr);         // set positional params from array (IFS-aware set)
 Item bash_array_length(Item arr);                   // ${#arr[@]}
 int64_t bash_array_count(Item arr);                 // raw count for iteration
 Item bash_array_all(Item arr);                      // ${arr[@]} as list
@@ -170,6 +175,8 @@ bool bash_is_assoc(Item name);                      // check if variable is asso
 
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
+void bash_set_pending_args(const char** argv, int argc, bool skip_arg0);  // store raw argv for deferred init
+void bash_apply_pending_args(void);                  // apply pending args after heap init
 void bash_push_positional(Item* args, int count);   // save + set positional params
 void bash_pop_positional(void);                      // restore positional params
 Item bash_get_positional(int index);                // $1 = index 1
@@ -229,6 +236,8 @@ void bash_scope_pop_subshell(void);                 // restore after subshell
 Item bash_builtin_echo(Item* args, int argc);
 Item bash_builtin_printf(Item* all_args, int total_argc);
 Item bash_builtin_let(Item* args, int argc);
+Item bash_builtin_type(Item* args, int argc);
+Item bash_builtin_command(Item* args, int argc);
 Item bash_builtin_test(Item* args, int argc);       // test / [ ]
 Item bash_builtin_true(void);
 Item bash_builtin_false(void);
@@ -241,6 +250,12 @@ Item bash_builtin_export(Item name, Item value);
 Item bash_builtin_unset(Item name);
 Item bash_builtin_cd(Item dir);
 Item bash_builtin_pwd(void);
+Item bash_builtin_pushd(Item* args, int argc);
+Item bash_builtin_popd(Item* args, int argc);
+Item bash_builtin_dirs(Item* args, int argc);
+Item bash_builtin_getopts(Item* args, int argc);
+Item bash_dirstack_get(Item index);
+Item bash_dirstack_total(void);
 Item bash_builtin_caller(Item* args, int argc);
 Item bash_builtin_cat(Item* args, int argc);
 Item bash_builtin_wc(Item* args, int argc);

@@ -819,6 +819,20 @@ int main(int argc, char *argv[]) {
 #ifndef NDEBUG
     // suppress debug-build note in bash mode (test expected output was generated with release build)
     bool is_bash_mode = (argc >= 2 && strcmp(argv[1], "bash") == 0);
+    // also suppress when auto-detecting bash mode: short flags, .sh, .sub
+    if (!is_bash_mode && argc >= 2) {
+        if (argv[1][0] == '-' && argv[1][1] != '-' && argv[1][1] != '\0') {
+            is_bash_mode = true;
+        } else if (argv[1][0] == '+' && (argv[1][1] == 'o' || argv[1][1] == 'O')) {
+            is_bash_mode = true;
+        } else if (argv[1][0] != '-') {
+            size_t alen = strlen(argv[1]);
+            if ((alen > 3 && strcmp(argv[1] + alen - 3, ".sh") == 0) ||
+                (alen > 4 && strcmp(argv[1] + alen - 4, ".sub") == 0)) {
+                is_bash_mode = true;
+            }
+        }
+    }
     if (!is_bash_mode) {
         log_notice("############################################");
         log_notice("!!! Running DEBUG build of lambda.exe  !!!");
@@ -1103,12 +1117,33 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // Handle Bash command
+    // Handle Bash command — either explicit "bash" subcommand or auto-detect
     log_debug("Checking for bash command");
-    if (argc >= 2 && strcmp(argv[1], "bash") == 0) {
-        log_debug("Entering Bash command handler");
+    // auto-detect bash mode: lambda.exe -c 'cmd', lambda.exe -o option, lambda.exe script.sh
+    bool bash_auto = false;
+    if (argc >= 2 && strcmp(argv[1], "bash") != 0) {
+        // check for short flags (bash uses -c, -e, -x, -o, etc.; Lambda uses only --long-flags)
+        if (argv[1][0] == '-' && argv[1][1] != '-' && argv[1][1] != '\0') {
+            bash_auto = true;
+        }
+        // check for +o (bash unset option syntax)
+        else if (argv[1][0] == '+' && (argv[1][1] == 'o' || argv[1][1] == 'O')) {
+            bash_auto = true;
+        }
+        // check for .sh or .sub file as first arg
+        else if (argv[1][0] != '-') {
+            size_t len = strlen(argv[1]);
+            if ((len > 3 && strcmp(argv[1] + len - 3, ".sh") == 0) ||
+                (len > 4 && strcmp(argv[1] + len - 4, ".sub") == 0)) {
+                bash_auto = true;
+            }
+        }
+    }
+    int bash_base = bash_auto ? 1 : 2;  // arg offset: skip "bash" subcommand when explicit
+    if (argc >= 2 && (strcmp(argv[1], "bash") == 0 || bash_auto)) {
+        log_debug("Entering Bash command handler (auto=%d)", bash_auto ? 1 : 0);
 
-        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+        if (!bash_auto && argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Bash Transpiler v0.1\n\n");
             printf("Usage: %s bash [--posix] [file.sh]\n", argv[0]);
             printf("\nDescription:\n");
@@ -1132,22 +1167,66 @@ int main(int argc, char *argv[]) {
         bool bash_posix = false;
         const char* bash_file = NULL;
         const char* bash_inline_cmd = NULL;  // -c 'command string'
-        for (int i = 2; i < argc; i++) {
+        int bash_args_start = -1;  // index where positional args start
+        for (int i = bash_base; i < argc; i++) {
             if (strcmp(argv[i], "--posix") == 0) {
                 bash_posix = true;
+            } else if ((strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "+o") == 0) && i + 1 < argc) {
+                // -o option / +o option: set/unset shell option
+                bool enable = (argv[i][0] == '-');
+                i++;
+                if (strcmp(argv[i], "posix") == 0) bash_posix = enable;
+                else if (strcmp(argv[i], "errexit") == 0) bash_set_option_flag('e', enable);
+                else if (strcmp(argv[i], "nounset") == 0) bash_set_option_flag('u', enable);
+                else if (strcmp(argv[i], "xtrace") == 0) bash_set_option_flag('x', enable);
+                else if (strcmp(argv[i], "pipefail") == 0) { /* bash_set_option_flag('p', enable); */ }
+            } else if ((strcmp(argv[i], "-O") == 0 || strcmp(argv[i], "+O") == 0) && i + 1 < argc) {
+                // -O shopt_option / +O shopt_option: set/unset shopt option (ignore for now)
+                i++; // skip option name
+            } else if (strcmp(argv[i], "-n") == 0) {
+                // syntax check only — skip execution (not fully implemented, just consume)
             } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
                 bash_inline_cmd = argv[++i];
+                // remaining args after -c 'cmd' are positional params ($0, $1, ...)
+                if (i + 1 < argc) bash_args_start = i + 1;
+                break;
             } else if (argv[i][0] == '-' && argv[i][1] != '-' && strchr(argv[i], 'c') != NULL && i + 1 < argc) {
                 // combined flags like -ce, -xc, -ec: extract non-c flags and set them
                 const char* flags = argv[i] + 1; // skip leading -
                 for (const char* f = flags; *f; f++) {
                     if (*f == 'e') bash_set_option_flag('e', true);
                     else if (*f == 'x') bash_set_option_flag('x', true);
+                    else if (*f == 'u') bash_set_option_flag('u', true);
                     // 'c' is handled by taking the next arg as inline cmd
                 }
                 bash_inline_cmd = argv[++i];
+                if (i + 1 < argc) bash_args_start = i + 1;
+                break;
+            } else if (argv[i][0] == '-' && argv[i][1] != '-' && argv[i][1] != '\0') {
+                // single-char flag(s) without 'c': -e, -x, -u, etc.
+                const char* flags = argv[i] + 1;
+                for (const char* f = flags; *f; f++) {
+                    if (*f == 'e') bash_set_option_flag('e', true);
+                    else if (*f == 'x') bash_set_option_flag('x', true);
+                    else if (*f == 'u') bash_set_option_flag('u', true);
+                }
             } else if (bash_inline_cmd == NULL && bash_file == NULL) {
                 bash_file = argv[i];
+                // remaining args after filename are positional params ($1, $2, ...)
+                if (i + 1 < argc) bash_args_start = i + 1;
+                break;
+            }
+        }
+
+        // store pending positional params from remaining args (applied after heap init)
+        if (bash_args_start >= 0 && bash_args_start < argc) {
+            if (bash_inline_cmd) {
+                // bash -c 'cmd' arg0 arg1 ... : arg0=$0, arg1=$1, ...
+                // skip arg0 ($0), set $1..$N from the rest
+                bash_set_pending_args((const char**)&argv[bash_args_start], argc - bash_args_start, true);
+            } else {
+                // bash script.sh arg1 arg2 ... : arg1=$1, arg2=$2, ...
+                bash_set_pending_args((const char**)&argv[bash_args_start], argc - bash_args_start, false);
             }
         }
 
@@ -1160,7 +1239,10 @@ int main(int argc, char *argv[]) {
             // set BASH_COMMAND to the full -c string (real bash sets it to current command)
             setenv("BASH_COMMAND", bash_inline_cmd, 1);
             char* bash_source = strdup(bash_inline_cmd);
-            Item result = transpile_bash_to_mir(&runtime, bash_source, "-c");
+            // if arg0 is provided ($0), use it as the script name; otherwise use the actual executable
+            const char* script_name = (bash_args_start >= 0 && bash_args_start < argc)
+                ? argv[bash_args_start] : argv[0];
+            Item result = transpile_bash_to_mir(&runtime, bash_source, script_name);
             (void)result;
             free(bash_source);
         } else if (bash_file) {
