@@ -6,7 +6,6 @@
     "output": "lambda.exe",
     "source_dirs": [
         "lib",
-        "lib/serve",
         "lib/font",
         "lib/font/woff2",
         "lambda",

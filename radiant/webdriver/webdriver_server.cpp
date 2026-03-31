@@ -1,9 +1,10 @@
 /**
  * @file webdriver_server.cpp
- * @brief WebDriver HTTP server implementation using lib/serve
+ * @brief WebDriver HTTP server implementation using lambda/serve
  */
 
 #include "webdriver.hpp"
+#include "../../lambda/serve/serve_utils.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
@@ -17,7 +18,7 @@
 
 // Forward declarations
 extern "C" void parse_json(Input* input, const char* json_string);
-static void webdriver_request_handler(http_request_t* request, http_response_t* response, void* user_data);
+static void webdriver_request_handler(HttpRequest* request, HttpResponse* response, void* user_data);
 
 // Simple JSON string extraction (for keys like "url", "using", "value")
 static const char* extract_json_string(const char* json, const char* key, char* buf, size_t buf_size) {
@@ -57,78 +58,78 @@ static const char* extract_json_string(const char* json, const char* key, char* 
 }
 
 // JSON response helpers
-static void json_send_success(http_response_t* resp, const char* value_json);
-static void json_send_error(http_response_t* resp, WebDriverError error, const char* message);
-static void json_send_value(http_response_t* resp, const char* key, const char* value);
+static void json_send_success(HttpResponse* resp, const char* value_json);
+static void json_send_error(HttpResponse* resp, WebDriverError error, const char* message);
+static void json_send_value(HttpResponse* resp, const char* key, const char* value);
 
 // Route parsing
 typedef struct {
     const char* method;     // GET, POST, DELETE
     const char* pattern;    // /session, /session/{sessionId}/element, etc.
-    void (*handler)(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+    void (*handler)(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                     const char* session_id, const char* element_id);
 } WebDriverRoute;
 
 // Route handlers (forward declarations)
-static void handle_new_session(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_new_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                 const char* session_id, const char* element_id);
-static void handle_delete_session(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_delete_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                    const char* session_id, const char* element_id);
-static void handle_status(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_status(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                            const char* session_id, const char* element_id);
-static void handle_get_timeouts(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id);
-static void handle_set_timeouts(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_set_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id);
-static void handle_navigate(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_navigate(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                              const char* session_id, const char* element_id);
-static void handle_get_url(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_url(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                             const char* session_id, const char* element_id);
-static void handle_get_title(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_title(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                               const char* session_id, const char* element_id);
-static void handle_get_source(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_source(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                const char* session_id, const char* element_id);
-static void handle_find_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id);
-static void handle_find_elements(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_elements(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id);
-static void handle_find_element_from_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_element_from_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                               const char* session_id, const char* element_id);
-static void handle_get_active_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_active_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                        const char* session_id, const char* element_id);
-static void handle_element_click(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_click(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id);
-static void handle_element_clear(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_clear(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id);
-static void handle_element_send_keys(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_send_keys(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id);
-static void handle_element_text(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_text(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id);
-static void handle_element_attribute(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_attribute(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id);
-static void handle_element_property(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_property(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                      const char* session_id, const char* element_id);
-static void handle_element_css(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_css(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                 const char* session_id, const char* element_id);
-static void handle_element_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id);
-static void handle_element_enabled(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_enabled(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id);
-static void handle_element_selected(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_selected(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                      const char* session_id, const char* element_id);
-static void handle_element_displayed(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_displayed(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id);
-static void handle_screenshot(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                const char* session_id, const char* element_id);
-static void handle_element_screenshot(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                        const char* session_id, const char* element_id);
-static void handle_perform_actions(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_perform_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id);
-static void handle_release_actions(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_release_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id);
-static void handle_get_window_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id);
-static void handle_set_window_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_set_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id);
 
 // ============================================================================
@@ -180,22 +181,22 @@ WebDriverServer* webdriver_server_create(const char* host, int port) {
         return NULL;
     }
 
-    // Create HTTP server using lib/serve
-    server_config_t config = server_config_default();
+    // Create HTTP server using lambda/serve
+    ServerConfig config = server_config_default();
     config.port = port;
     config.ssl_port = 0;  // No HTTPS for WebDriver
     config.timeout_seconds = 60;
 
     server->http_server = server_create(&config);
     if (!server->http_server) {
-        log_error("webdriver: failed to create HTTP server: %s", server_get_error());
+        log_error("webdriver: failed to create HTTP server: %s", serve_get_error());
         hashmap_free(server->sessions);
         pool_destroy(pool);
         return NULL;
     }
 
-    // Set default handler for all requests
-    server_set_default_handler(server->http_server, webdriver_request_handler, server);
+    // Set catch-all handler for all requests
+    server_all(server->http_server, "/*", webdriver_request_handler, server);
 
     log_info("webdriver: server created on port %d", port);
     return server;
@@ -206,7 +207,7 @@ int webdriver_server_start(WebDriverServer* server) {
         return -1;
     }
 
-    int result = server_start(server->http_server);
+    int result = server_start(server->http_server, server->port);
     if (result == 0) {
         server->running = true;
         log_info("webdriver: server started");
@@ -352,7 +353,7 @@ static bool parse_path(const char* path, char* session_id, char* element_id, cha
     return true;
 }
 
-static void webdriver_request_handler(http_request_t* request, http_response_t* response, void* user_data) {
+static void webdriver_request_handler(HttpRequest* request, HttpResponse* response, void* user_data) {
     WebDriverServer* server = (WebDriverServer*)user_data;
 
     // Set JSON content type
@@ -360,7 +361,7 @@ static void webdriver_request_handler(http_request_t* request, http_response_t* 
     http_response_set_header(response, "Cache-Control", "no-cache");
 
     const char* path = request->path;
-    http_method_t method = request->method;
+    HttpMethod method = request->method;
 
     char session_id[WD_ELEMENT_ID_LEN] = {0};
     char element_id[WD_ELEMENT_ID_LEN] = {0};
@@ -369,114 +370,114 @@ static void webdriver_request_handler(http_request_t* request, http_response_t* 
     parse_path(path, session_id, element_id, extra);
 
     log_info("webdriver: %s %s (session=%s, element=%s, extra=%s)",
-             method == HTTP_METHOD_GET ? "GET" :
-             method == HTTP_METHOD_POST ? "POST" :
-             method == HTTP_METHOD_DELETE ? "DELETE" : "OTHER",
+             method == HTTP_GET ? "GET" :
+             method == HTTP_POST ? "POST" :
+             method == HTTP_DELETE ? "DELETE" : "OTHER",
              path, session_id, element_id, extra);
 
     // Route to handler
-    if (strcmp(path, "/status") == 0 && method == HTTP_METHOD_GET) {
+    if (strcmp(path, "/status") == 0 && method == HTTP_GET) {
         handle_status(server, request, response, NULL, NULL);
     }
-    else if (strcmp(path, "/session") == 0 && method == HTTP_METHOD_POST) {
+    else if (strcmp(path, "/session") == 0 && method == HTTP_POST) {
         handle_new_session(server, request, response, NULL, NULL);
     }
-    else if (session_id[0] && element_id[0] == '\0' && method == HTTP_METHOD_DELETE) {
+    else if (session_id[0] && element_id[0] == '\0' && method == HTTP_DELETE) {
         // DELETE /session/{sessionId}
         handle_delete_session(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && strcmp(extra, "timeouts") == 0) {
-        if (method == HTTP_METHOD_GET) {
+        if (method == HTTP_GET) {
             handle_get_timeouts(server, request, response, session_id, NULL);
-        } else if (method == HTTP_METHOD_POST) {
+        } else if (method == HTTP_POST) {
             handle_set_timeouts(server, request, response, session_id, NULL);
         }
     }
     else if (session_id[0] && strcmp(extra, "url") == 0) {
-        if (method == HTTP_METHOD_GET) {
+        if (method == HTTP_GET) {
             handle_get_url(server, request, response, session_id, NULL);
-        } else if (method == HTTP_METHOD_POST) {
+        } else if (method == HTTP_POST) {
             handle_navigate(server, request, response, session_id, NULL);
         }
     }
-    else if (session_id[0] && strcmp(extra, "title") == 0 && method == HTTP_METHOD_GET) {
+    else if (session_id[0] && strcmp(extra, "title") == 0 && method == HTTP_GET) {
         handle_get_title(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "source") == 0 && method == HTTP_METHOD_GET) {
+    else if (session_id[0] && strcmp(extra, "source") == 0 && method == HTTP_GET) {
         handle_get_source(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "element") == 0 && method == HTTP_METHOD_POST) {
+    else if (session_id[0] && strcmp(extra, "element") == 0 && method == HTTP_POST) {
         handle_find_element(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "elements") == 0 && method == HTTP_METHOD_POST) {
+    else if (session_id[0] && strcmp(extra, "elements") == 0 && method == HTTP_POST) {
         handle_find_elements(server, request, response, session_id, NULL);
     }
-    else if (session_id[0] && strcmp(extra, "element/active") == 0 && method == HTTP_METHOD_GET) {
+    else if (session_id[0] && strcmp(extra, "element/active") == 0 && method == HTTP_GET) {
         handle_get_active_element(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && element_id[0]) {
         // Element-specific commands
-        if (extra[0] == '\0' && method == HTTP_METHOD_POST) {
+        if (extra[0] == '\0' && method == HTTP_POST) {
             // POST /session/{id}/element/{id} - not valid, but handle gracefully
             json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown command");
         }
-        else if (strcmp(extra, "click") == 0 && method == HTTP_METHOD_POST) {
+        else if (strcmp(extra, "click") == 0 && method == HTTP_POST) {
             handle_element_click(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "clear") == 0 && method == HTTP_METHOD_POST) {
+        else if (strcmp(extra, "clear") == 0 && method == HTTP_POST) {
             handle_element_clear(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "value") == 0 && method == HTTP_METHOD_POST) {
+        else if (strcmp(extra, "value") == 0 && method == HTTP_POST) {
             handle_element_send_keys(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "text") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "text") == 0 && method == HTTP_GET) {
             handle_element_text(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "attribute/", 10) == 0 && method == HTTP_METHOD_GET) {
+        else if (strncmp(extra, "attribute/", 10) == 0 && method == HTTP_GET) {
             handle_element_attribute(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "property/", 9) == 0 && method == HTTP_METHOD_GET) {
+        else if (strncmp(extra, "property/", 9) == 0 && method == HTTP_GET) {
             handle_element_property(server, request, response, session_id, element_id);
         }
-        else if (strncmp(extra, "css/", 4) == 0 && method == HTTP_METHOD_GET) {
+        else if (strncmp(extra, "css/", 4) == 0 && method == HTTP_GET) {
             handle_element_css(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "rect") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "rect") == 0 && method == HTTP_GET) {
             handle_element_rect(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "enabled") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "enabled") == 0 && method == HTTP_GET) {
             handle_element_enabled(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "selected") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "selected") == 0 && method == HTTP_GET) {
             handle_element_selected(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "displayed") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "displayed") == 0 && method == HTTP_GET) {
             handle_element_displayed(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "screenshot") == 0 && method == HTTP_METHOD_GET) {
+        else if (strcmp(extra, "screenshot") == 0 && method == HTTP_GET) {
             handle_element_screenshot(server, request, response, session_id, element_id);
         }
-        else if (strcmp(extra, "element") == 0 && method == HTTP_METHOD_POST) {
+        else if (strcmp(extra, "element") == 0 && method == HTTP_POST) {
             handle_find_element_from_element(server, request, response, session_id, element_id);
         }
         else {
             json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown element command");
         }
     }
-    else if (session_id[0] && strcmp(extra, "screenshot") == 0 && method == HTTP_METHOD_GET) {
+    else if (session_id[0] && strcmp(extra, "screenshot") == 0 && method == HTTP_GET) {
         handle_screenshot(server, request, response, session_id, NULL);
     }
     else if (session_id[0] && strcmp(extra, "actions") == 0) {
-        if (method == HTTP_METHOD_POST) {
+        if (method == HTTP_POST) {
             handle_perform_actions(server, request, response, session_id, NULL);
-        } else if (method == HTTP_METHOD_DELETE) {
+        } else if (method == HTTP_DELETE) {
             handle_release_actions(server, request, response, session_id, NULL);
         }
     }
     else if (session_id[0] && strcmp(extra, "window/rect") == 0) {
-        if (method == HTTP_METHOD_GET) {
+        if (method == HTTP_GET) {
             handle_get_window_rect(server, request, response, session_id, NULL);
-        } else if (method == HTTP_METHOD_POST) {
+        } else if (method == HTTP_POST) {
             handle_set_window_rect(server, request, response, session_id, NULL);
         }
     }
@@ -491,28 +492,28 @@ static void webdriver_request_handler(http_request_t* request, http_response_t* 
 // JSON Response Helpers
 // ============================================================================
 
-static void json_send_success(http_response_t* resp, const char* value_json) {
-    http_response_set_status(resp, 200);
+static void json_send_success(HttpResponse* resp, const char* value_json) {
+    http_response_status(resp, 200);
     if (value_json) {
-        http_response_add_printf(resp, "{\"value\":%s}", value_json);
+        http_response_write_fmt(resp, "{\"value\":%s}", value_json);
     } else {
-        http_response_add_string(resp, "{\"value\":null}");
+        http_response_write_str(resp, "{\"value\":null}");
     }
 }
 
-static void json_send_error(http_response_t* resp, WebDriverError error, const char* message) {
-    http_response_set_status(resp, webdriver_error_http_status(error));
-    http_response_add_printf(resp,
+static void json_send_error(HttpResponse* resp, WebDriverError error, const char* message) {
+    http_response_status(resp, webdriver_error_http_status(error));
+    http_response_write_fmt(resp,
         "{\"value\":{\"error\":\"%s\",\"message\":\"%s\",\"stacktrace\":\"\"}}",
         webdriver_error_name(error), message ? message : "");
 }
 
-static void json_send_value(http_response_t* resp, const char* key, const char* value) {
-    http_response_set_status(resp, 200);
+static void json_send_value(HttpResponse* resp, const char* key, const char* value) {
+    http_response_status(resp, 200);
     if (value) {
-        http_response_add_printf(resp, "{\"value\":\"%s\"}", value);
+        http_response_write_fmt(resp, "{\"value\":\"%s\"}", value);
     } else {
-        http_response_add_string(resp, "{\"value\":null}");
+        http_response_write_str(resp, "{\"value\":null}");
     }
 }
 
@@ -538,12 +539,12 @@ static WebDriverSession* get_session(WebDriverServer* server, const char* sessio
 // Route Handlers (Stubs - to be implemented in webdriver_commands.cpp)
 // ============================================================================
 
-static void handle_status(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_status(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                            const char* session_id, const char* element_id) {
     json_send_success(resp, "{\"ready\":true,\"message\":\"Radiant WebDriver ready\"}");
 }
 
-static void handle_new_session(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_new_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                 const char* session_id, const char* element_id) {
     // Create new session with default dimensions
     WebDriverSession* session = webdriver_session_create(1280, 720, true);
@@ -556,8 +557,8 @@ static void handle_new_session(WebDriverServer* server, http_request_t* req, htt
     hashmap_set(server->sessions, &session);
 
     // Build capabilities response
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp,
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
         "{\"value\":{"
         "\"sessionId\":\"%s\","
         "\"capabilities\":{"
@@ -582,7 +583,7 @@ static void handle_new_session(WebDriverServer* server, http_request_t* req, htt
         session->script_ms);
 }
 
-static void handle_delete_session(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_delete_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                    const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -595,7 +596,7 @@ static void handle_delete_session(WebDriverServer* server, http_request_t* req, 
     json_send_success(resp, "null");
 }
 
-static void handle_get_timeouts(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -603,13 +604,13 @@ static void handle_get_timeouts(WebDriverServer* server, http_request_t* req, ht
         return;
     }
 
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp,
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
         "{\"value\":{\"implicit\":%d,\"pageLoad\":%d,\"script\":%d}}",
         session->implicit_wait_ms, session->page_load_ms, session->script_ms);
 }
 
-static void handle_set_timeouts(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_set_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -621,7 +622,7 @@ static void handle_set_timeouts(WebDriverServer* server, http_request_t* req, ht
     json_send_success(resp, "null");
 }
 
-static void handle_navigate(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_navigate(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                              const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -629,7 +630,7 @@ static void handle_navigate(WebDriverServer* server, http_request_t* req, http_r
         return;
     }
 
-    const char* body = http_request_get_body(req);
+    const char* body = http_request_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -652,7 +653,7 @@ static void handle_navigate(WebDriverServer* server, http_request_t* req, http_r
     json_send_success(resp, "null");
 }
 
-static void handle_get_url(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_url(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                             const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -664,7 +665,7 @@ static void handle_get_url(WebDriverServer* server, http_request_t* req, http_re
     json_send_value(resp, "value", url ? url : "");
 }
 
-static void handle_get_title(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_title(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                               const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -676,7 +677,7 @@ static void handle_get_title(WebDriverServer* server, http_request_t* req, http_
     json_send_value(resp, "value", title ? title : "");
 }
 
-static void handle_get_source(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_source(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -695,7 +696,7 @@ static void handle_get_source(WebDriverServer* server, http_request_t* req, http
 }
 
 // Element finding handlers
-static void handle_find_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -703,7 +704,7 @@ static void handle_find_element(WebDriverServer* server, http_request_t* req, ht
         return;
     }
 
-    const char* body = http_request_get_body(req);
+    const char* body = http_request_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -733,11 +734,11 @@ static void handle_find_element(WebDriverServer* server, http_request_t* req, ht
         return;
     }
 
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp, "{\"value\":{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}}", elem_id);
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp, "{\"value\":{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}}", elem_id);
 }
 
-static void handle_find_elements(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_elements(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -745,7 +746,7 @@ static void handle_find_elements(WebDriverServer* server, http_request_t* req, h
         return;
     }
 
-    const char* body = http_request_get_body(req);
+    const char* body = http_request_body(req);
     if (!body) {
         json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
         return;
@@ -788,12 +789,12 @@ static void handle_find_elements(WebDriverServer* server, http_request_t* req, h
     arraylist_free(results);
 }
 
-static void handle_find_element_from_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_find_element_from_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                               const char* session_id, const char* element_id) {
     json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
 }
 
-static void handle_get_active_element(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_active_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                        const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -805,7 +806,7 @@ static void handle_get_active_element(WebDriverServer* server, http_request_t* r
     json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "No active element");
 }
 
-static void handle_element_click(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_click(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -828,7 +829,7 @@ static void handle_element_click(WebDriverServer* server, http_request_t* req, h
     json_send_success(resp, "null");
 }
 
-static void handle_element_clear(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_clear(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                   const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -851,7 +852,7 @@ static void handle_element_clear(WebDriverServer* server, http_request_t* req, h
     json_send_success(resp, "null");
 }
 
-static void handle_element_send_keys(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_send_keys(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -869,7 +870,7 @@ static void handle_element_send_keys(WebDriverServer* server, http_request_t* re
     json_send_success(resp, "null");
 }
 
-static void handle_element_text(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_text(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -888,25 +889,25 @@ static void handle_element_text(WebDriverServer* server, http_request_t* req, ht
     if (text) free(text);
 }
 
-static void handle_element_attribute(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_attribute(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id) {
     // TODO: Extract attribute name from path
     json_send_value(resp, "value", NULL);
 }
 
-static void handle_element_property(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_property(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                      const char* session_id, const char* element_id) {
     // TODO: Extract property name from path
     json_send_value(resp, "value", NULL);
 }
 
-static void handle_element_css(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_css(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                 const char* session_id, const char* element_id) {
     // TODO: Extract CSS property name from path
     json_send_value(resp, "value", "");
 }
 
-static void handle_element_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                  const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -923,13 +924,13 @@ static void handle_element_rect(WebDriverServer* server, http_request_t* req, ht
     float x, y, width, height;
     webdriver_element_get_rect(session, element, &x, &y, &width, &height);
 
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp,
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
         "{\"value\":{\"x\":%.1f,\"y\":%.1f,\"width\":%.1f,\"height\":%.1f}}",
         x, y, width, height);
 }
 
-static void handle_element_enabled(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_enabled(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -947,7 +948,7 @@ static void handle_element_enabled(WebDriverServer* server, http_request_t* req,
     json_send_success(resp, enabled ? "true" : "false");
 }
 
-static void handle_element_selected(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_selected(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                      const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -965,7 +966,7 @@ static void handle_element_selected(WebDriverServer* server, http_request_t* req
     json_send_success(resp, selected ? "true" : "false");
 }
 
-static void handle_element_displayed(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_displayed(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                       const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -983,7 +984,7 @@ static void handle_element_displayed(WebDriverServer* server, http_request_t* re
     json_send_success(resp, displayed ? "true" : "false");
 }
 
-static void handle_screenshot(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1000,7 +1001,7 @@ static void handle_screenshot(WebDriverServer* server, http_request_t* req, http
     }
 }
 
-static void handle_element_screenshot(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_element_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                        const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1023,7 +1024,7 @@ static void handle_element_screenshot(WebDriverServer* server, http_request_t* r
     }
 }
 
-static void handle_perform_actions(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_perform_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1035,7 +1036,7 @@ static void handle_perform_actions(WebDriverServer* server, http_request_t* req,
     json_send_success(resp, "null");
 }
 
-static void handle_release_actions(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_release_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1047,7 +1048,7 @@ static void handle_release_actions(WebDriverServer* server, http_request_t* req,
     json_send_success(resp, "null");
 }
 
-static void handle_get_window_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_get_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1055,13 +1056,13 @@ static void handle_get_window_rect(WebDriverServer* server, http_request_t* req,
         return;
     }
 
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp,
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
         "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
         session->window_width, session->window_height);
 }
 
-static void handle_set_window_rect(WebDriverServer* server, http_request_t* req, http_response_t* resp,
+static void handle_set_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
                                     const char* session_id, const char* element_id) {
     WebDriverSession* session = get_session(server, session_id);
     if (!session) {
@@ -1070,8 +1071,8 @@ static void handle_set_window_rect(WebDriverServer* server, http_request_t* req,
     }
 
     // TODO: Parse width/height from body and resize
-    http_response_set_status(resp, 200);
-    http_response_add_printf(resp,
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
         "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
         session->window_width, session->window_height);
 }
