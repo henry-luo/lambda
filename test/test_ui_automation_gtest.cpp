@@ -178,7 +178,7 @@ static std::vector<UiTestInfo> discover_ui_tests() {
 // Global test list (populated once in main)
 // ============================================================================
 
-static std::vector<UiTestInfo> g_ui_tests;
+static std::vector<UiTestInfo> g_ui_tests = discover_ui_tests();
 
 // ============================================================================
 // Run a single UI test via lambda.exe view
@@ -289,7 +289,7 @@ TEST_P(UIAutomationTest, RunTest) {
 INSTANTIATE_TEST_SUITE_P(
     UIAutomation,
     UIAutomationTest,
-    ::testing::Range(size_t(0), size_t(64)),  // upper bound; actual count is dynamic
+    ::testing::Range(size_t(0), g_ui_tests.size()),
     [](const ::testing::TestParamInfo<size_t>& info) {
         if (info.param < g_ui_tests.size()) {
             std::string name = g_ui_tests[info.param].test_name;
@@ -309,9 +309,6 @@ INSTANTIATE_TEST_SUITE_P(
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
-
-    // Discover UI tests before GTest initializes param suites
-    g_ui_tests = discover_ui_tests();
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
@@ -338,8 +335,5 @@ int main(int argc, char** argv) {
         std::cout << "\n";
     }
 
-    // Resize instantiation to actual count (GTest requires compile-time range,
-    // so we use 64 as upper bound; tests beyond g_ui_tests.size() are skipped
-    // by the SetUp guard above).
     return RUN_ALL_TESTS();
 }
