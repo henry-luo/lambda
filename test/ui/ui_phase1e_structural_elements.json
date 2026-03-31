@@ -1,6 +1,6 @@
 {
   "name": "Phase 1e: Click structural elements - table, positioned elements (baseline_830)",
-  "html": "test/layout/data/baseline/baseline_830_advanced_elements.html",
+  "html": "test/ui/baseline_830_advanced_elements.html",
   "description": "Tests click hit-testing on table cells and positioned elements. Table section starts at y=229 with padding 10. Table header 'Name' text center ~(42,255), 'Value' ~(106,255). Data cell 'Alpha' ~(40,284), '100' ~(98,284). 'Beta' ~(37,313), '200' ~(98,313). Position section at y=338. Relative text 'Relative' ~(90,373). Absolute text 'Absolute' ~(1120,403). Body height=438, outside at y=470.",
   "events": [
     {"type": "log", "message": "=== Phase 1e: structural element click tests (table, position) ==="},

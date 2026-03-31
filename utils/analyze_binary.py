@@ -207,7 +207,7 @@ SOURCE_DIR_MODULES = [
     ("radiant/webdriver",           "WebDriver (testing)"),
     ("lib/font/woff2",              "Fonts & woff2"),
     ("lib/font",                    "Fonts & woff2"),
-    ("lib/serve",                   "HTTP server"),
+    ("lambda/serve",                "HTTP server"),
     ("lib",                         "Misc/lib"),
 ]
 

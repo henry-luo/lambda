@@ -1,6 +1,6 @@
 {
   "name": "Phase 1c: Click by pixel position - border and outside hit-test (baseline_809)",
-  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "html": "test/ui/baseline_809_text_align.html",
   "description": "Tests hit-testing accuracy for the <p> inside .center container. Geometry: p x=32 y=104 w=300 h=18; body y=10 h=206 (bottom=216). Group A clicks inside the text element (border positions) and verifies the caret is set on text (view_type=1). Group B clicks outside the body (y=230 > body bottom 216) AFTER the caret is already set, and verifies that clicking outside correctly clears the caret (matching browser behavior).",
   "events": [
     {"type": "log", "message": "=== Phase 1c: pixel-position click tests ==="},

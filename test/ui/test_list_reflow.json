@@ -1,6 +1,6 @@
 {
   "name": "List reflow test",
-  "html": "temp/test_list_reflow.html",
+  "html": "test/ui/test_list_reflow.html",
   "events": [
     {"type": "log", "message": "=== Click on input to trigger focus (and reflow) ==="},
     {"type": "wait", "ms": 300},

@@ -18,7 +18,14 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <string>
 #include <re2/re2.h>
+
+// Forward declarations for Unicode normalization (implemented in utf_string.cpp)
+extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfd(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len);
 
 // Global Input context for JS runtime map_put operations.
 // Initialized in transpile_js_to_mir() before JIT execution.
@@ -361,6 +368,21 @@ extern "C" Item js_to_string(Item value) {
                 return (Item){.item = s2it(result)};
             }
             return name_val;
+        }
+        // Check for custom toString() method in own properties or prototype chain
+        {
+            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item ts_fn = js_prototype_lookup(value, ts_key);
+            if (ts_fn.item == ItemNull.item) {
+                // also check own
+                bool own_ts = false;
+                ts_fn = js_map_get_fast(value.map, "toString", 8, &own_ts);
+                if (!own_ts) ts_fn = ItemNull;
+            }
+            if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(ts_fn, value, NULL, 0);
+                if (get_type_id(result) == LMD_TYPE_STRING) return result;
+            }
         }
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
@@ -1136,6 +1158,10 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 if (str_key->len == 6 && strncmp(str_key->chars, "buffer", 6) == 0) {
                     JsTypedArray* ta = (JsTypedArray*)object.map->data;
+                    if (ta->buffer_item) {
+                        // Return the original ArrayBuffer Item to preserve identity (===)
+                        return (Item){.item = ta->buffer_item};
+                    }
                     if (!ta->buffer) {
                         // Create a backing ArrayBuffer lazily for standalone typed arrays
                         JsArrayBuffer* ab = (JsArrayBuffer*)malloc(sizeof(JsArrayBuffer));
@@ -1251,12 +1277,12 @@ extern "C" Item js_property_get(Item object, Item key) {
         result = js_prototype_lookup(object, key);
         if (result.item != ItemNull.item) return result;
         // Getter property fallback: check for __get_<propName> on object or prototype
-        // Check for getter if: key doesn't start with '_', OR key starts with '__sym_' (symbol getter)
+        // Skip getter check only for __get_/__set_ keys (to prevent infinite recursion)
         if (key._type_id == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             bool check_getter = (str_key->len < 128 && str_key->len > 0 &&
-                (str_key->chars[0] != '_' ||
-                 (str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0)));
+                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
+                                        strncmp(str_key->chars, "__set_", 6) == 0)));
             if (check_getter) {
                 char getter_key[256];
                 snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
@@ -1401,9 +1427,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             return js_dom_set_property(object, key, value);
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
+        // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+            if (str_key && str_key->len < 64 && str_key->len > 0 &&
+                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
+                                        strncmp(str_key->chars, "__set_", 6) == 0))) {
                 char setter_key[256];
                 snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
@@ -1489,11 +1518,127 @@ extern "C" Item js_property_access(Item object, Item key) {
     return js_property_get(object, key);
 }
 
+// Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
+// Returns the byte offset of the code unit at utf16_idx, or str_len if out of range.
+static int js_utf16_idx_to_byte(const char* chars, int str_len, int64_t utf16_idx) {
+    int pos = 0;
+    int64_t cu = 0;
+    while (pos < str_len && cu < utf16_idx) {
+        unsigned char b = (unsigned char)chars[pos];
+        int bytes;
+        uint32_t cp;
+        if (b < 0x80)            { cp = b;        bytes = 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+        else { cp = b; bytes = 1; }
+        for (int i = 1; i < bytes && pos + i < str_len; i++)
+            cp = (cp << 6) | ((unsigned char)chars[pos + i] & 0x3F);
+        cu += (cp >= 0x10000) ? 2 : 1;
+        pos += bytes;
+    }
+    return pos;
+}
+
+// JS-aware substring: indices are UTF-16 code unit indices (not codepoints).
+// Handles negative indices like JS substring (clamp to 0) or slice (count from end).
+// use_slice_semantics: true = slice (negative counts from end), false = substring (clamp to 0).
+static Item js_str_substring_utf16(Item str_item, int64_t start, int64_t end) {
+    String* s = it2s(str_item);
+    if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (s->is_ascii) {
+        // ASCII: UTF-16 idx == byte idx == codepoint idx
+        int64_t len = (int64_t)s->len;
+        if (start < 0) start = 0;
+        if (end < 0) end = 0;
+        if (start > len) start = len;
+        if (end > len) end = len;
+        if (start >= end) return (Item){.item = s2it(heap_create_name("", 0))};
+        int64_t rlen = end - start;
+        String* result = (String*)heap_alloc(sizeof(String) + (int)rlen + 1, LMD_TYPE_STRING);
+        result->len = (int)rlen;
+        result->is_ascii = 1;
+        memcpy(result->chars, s->chars + start, (int)rlen);
+        result->chars[rlen] = '\0';
+        return (Item){.item = s2it(result)};
+    }
+    // Non-ASCII: convert UTF-16 unit indices to byte offsets
+    int byte_start = js_utf16_idx_to_byte(s->chars, (int)s->len, start);
+    int byte_end   = js_utf16_idx_to_byte(s->chars, (int)s->len, end);
+    if (byte_start >= byte_end) return (Item){.item = s2it(heap_create_name("", 0))};
+    int rlen = byte_end - byte_start;
+    String* result = (String*)heap_alloc(sizeof(String) + rlen + 1, LMD_TYPE_STRING);
+    result->len = rlen;
+    result->is_ascii = 0;
+    memcpy(result->chars, s->chars + byte_start, rlen);
+    result->chars[rlen] = '\0';
+    return (Item){.item = s2it(result)};
+}
+
+// Compute UTF-16 unit count of a non-ASCII UTF-8 string.
+static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
+    if (is_ascii) return (int64_t)str_len;
+    int64_t units = 0;
+    int pos = 0;
+    while (pos < str_len) {
+        unsigned char b = (unsigned char)chars[pos];
+        int bytes;
+        uint32_t cp;
+        if (b < 0x80)            { cp = b;        bytes = 1; }
+        else if ((b & 0xE0) == 0xC0) { cp = b & 0x1F; bytes = 2; }
+        else if ((b & 0xF0) == 0xE0) { cp = b & 0x0F; bytes = 3; }
+        else if ((b & 0xF8) == 0xF0) { cp = b & 0x07; bytes = 4; }
+        else { cp = b; bytes = 1; }
+        for (int i = 1; i < bytes && pos + i < str_len; i++)
+            cp = (cp << 6) | ((unsigned char)chars[pos + i] & 0x3F);
+        units += (cp >= 0x10000) ? 2 : 1;
+        pos += bytes;
+    }
+    return units;
+}
+
 // Get the length of any JS value. Handles typed arrays specially (Map-based),
 // and delegates to fn_len for all standard Lambda types (array, list, string, etc.)
 extern "C" int64_t js_get_length(Item object) {
     if (get_type_id(object) == LMD_TYPE_MAP && js_is_typed_array(object)) {
         return (int64_t)js_typed_array_length(object);
+    }
+    // JS string .length = UTF-16 code unit count (not codepoint count).
+    if (get_type_id(object) == LMD_TYPE_STRING) {
+        String* s = it2s(object);
+        if (!s) return 0;
+        return js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii);
+    }
+    // For Map objects (JS class instances), check for:
+    // 1. Own "length" property
+    // 2. Getter (__get_length) on own or prototype chain
+    // 3. Prototype "length" property
+    // before falling back to fn_len
+    if (get_type_id(object) == LMD_TYPE_MAP) {
+        Map* m = object.map;
+        // Check own "length" property
+        bool own_found = false;
+        Item result = js_map_get_fast(m, "length", 6, &own_found);
+        if (own_found && !js_is_deleted_sentinel(result)) {
+            return (int64_t)js_get_number(result);
+        }
+        // Check getter __get_length on own object
+        Item getter = js_map_get_fast(m, "__get_length", 12);
+        if (getter.item == ItemNull.item) {
+            // Check prototype chain for getter
+            Item gk = (Item){.item = s2it(heap_create_name("__get_length", 12))};
+            getter = js_prototype_lookup(object, gk);
+        }
+        if (getter.item != ItemNull.item && get_type_id(getter) == LMD_TYPE_FUNC) {
+            Item val = js_call_function(getter, object, NULL, 0);
+            return (int64_t)js_get_number(val);
+        }
+        // Check prototype chain for regular "length" property
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item proto_result = js_prototype_lookup(object, len_key);
+        if (proto_result.item != ItemNull.item && !js_is_deleted_sentinel(proto_result)) {
+            return (int64_t)js_get_number(proto_result);
+        }
     }
     return fn_len(object);
 }
@@ -1942,6 +2087,52 @@ struct JsRegexData {
 };
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Preprocess pattern: expand JS \s / \S to the full Unicode whitespace class,
+    // since RE2's \s only matches ASCII whitespace but JS \s is Unicode-aware.
+    // JS \s = [ \t\n\r\f\v\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]
+    // RE2 equivalent: [\p{Z}\t\n\r\f\x0b\x{FEFF}]  (\p{Z} covers Zs+Zl+Zp categories)
+    // We also need to expand \S (non-whitespace).
+    static const char* S_EXPAND = "[\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
+    static const char* S_EXPAND_INNER = "\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";  // inside existing []
+    static const char* NOT_S_EXPAND = "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
+    std::string processed_pattern;
+    processed_pattern.reserve(pattern_len + 64);
+    int bracket_depth = 0;
+    for (int i = 0; i < pattern_len; i++) {
+        if (pattern[i] == '\\' && i + 1 < pattern_len) {
+            char next = pattern[i + 1];
+            if (next == 's') {
+                if (bracket_depth > 0) {
+                    processed_pattern += S_EXPAND_INNER; // inline within existing []
+                } else {
+                    processed_pattern += S_EXPAND;
+                }
+                i++;
+                continue;
+            }
+            if (next == 'S') {
+                if (bracket_depth > 0) {
+                    // can't negate inside existing class; keep as \S (best effort)
+                    processed_pattern += "\\S";
+                } else {
+                    processed_pattern += NOT_S_EXPAND;
+                }
+                i++;
+                continue;
+            }
+            // consume the 2-char escape sequence as-is
+            processed_pattern += pattern[i];
+            processed_pattern += pattern[i + 1];
+            i++;
+            continue;
+        }
+        if (pattern[i] == '[') {
+            bracket_depth++;
+        } else if (pattern[i] == ']') {
+            if (bracket_depth > 0) bracket_depth--;
+        }
+        processed_pattern += pattern[i];
+    }
     // build RE2 options from flags
     re2::RE2::Options opts;
     opts.set_log_errors(false);
@@ -1952,13 +2143,18 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         else if (flags[i] == 'g') global = true;
         else if (flags[i] == 's') opts.set_dot_nl(true);
     }
-    // compile RE2 pattern
-    re2::RE2* re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+    // compile RE2 pattern (use preprocessed version)
+    re2::RE2* re2 = new re2::RE2(processed_pattern, opts);
     if (!re2->ok()) {
-        log_error("js regex compile error: /%.*s/%.*s: %s",
-            pattern_len, pattern, flags_len, flags, re2->error().c_str());
+        // fall back to original pattern if preprocessing caused errors
         delete re2;
-        return ItemNull;
+        re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+        if (!re2->ok()) {
+            log_error("js regex compile error: /%.*s/%.*s: %s",
+                pattern_len, pattern, flags_len, flags, re2->error().c_str());
+            delete re2;
+            return ItemNull;
+        }
     }
     // store regex data in a pool-allocated struct
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
@@ -2045,26 +2241,25 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     bool matched = rd->re2->Match(re2::StringPiece(chars, len), 0, len,
         re2::RE2::UNANCHORED, matches, num_groups);
     if (!matched) return ItemNull;
-    // build result array: [fullMatch, group1, group2, ..., matchIndex]
-    // Note: matchIndex appended as last element since Lambda arrays don't support named properties
-    Item result_arr = js_array_new(num_groups + 1);
+    // build result as a map (JS object) with numeric keys + .index + .length
+    // This matches JS spec where match() returns an array-like with named properties
+    Item result = js_new_object();
     for (int i = 0; i < num_groups; i++) {
         if (matches[i].data()) {
             int mlen = (int)matches[i].size();
-            char* mbuf = (char*)alloca(mlen + 1);
-            memcpy(mbuf, matches[i].data(), mlen);
-            mbuf[mlen] = '\0';
-            Item s = (Item){.item = s2it(heap_create_name(mbuf))};
-            Item idx = (Item){.item = i2it(i)};
-            js_array_set(result_arr, idx, s);
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%d", i);
+            Item key = (Item){.item = s2it(heap_create_name(buf))};
+            Item s = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), mlen))};
+            js_property_set(result, key, s);
         }
     }
-    // store match index as last element
     int match_index = (int)(matches[0].data() - chars);
-    Item idx_item = (Item){.item = i2it(num_groups)};
-    Item idx_val = (Item){.item = i2it(match_index)};
-    js_array_set(result_arr, idx_item, idx_val);
-    return result_arr;
+    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
+    js_property_set(result, index_key, (Item){.item = i2it(match_index)});
+    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    js_property_set(result, length_key, (Item){.item = i2it(num_groups)});
+    return result;
 }
 
 // =============================================================================
@@ -3080,6 +3275,31 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 11 && strncmp(method->chars, "toUpperCase", 11) == 0) {
         return fn_upper(str);
     }
+    // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
+    if (method->len == 9 && strncmp(method->chars, "normalize", 9) == 0) {
+        String* s = it2s(str);
+        if (!s || s->len == 0) return str;
+        // Determine requested form (default: NFC)
+        const char* form = "NFC";
+        if (argc > 0 && get_type_id(args[0]) == LMD_TYPE_STRING) {
+            String* f = it2s(args[0]);
+            if (f && f->len > 0) form = f->chars;
+        }
+        char* normalized = NULL;
+        int norm_len = 0;
+        if (strncmp(form, "NFD", 3) == 0 && form[3] == '\0')
+            normalized = normalize_utf8proc_nfd(s->chars, s->len, &norm_len);
+        else if (strncmp(form, "NFKC", 4) == 0 && form[4] == '\0')
+            normalized = normalize_utf8proc_nfkc(s->chars, s->len, &norm_len);
+        else if (strncmp(form, "NFKD", 4) == 0 && form[4] == '\0')
+            normalized = normalize_utf8proc_nfkd(s->chars, s->len, &norm_len);
+        else // NFC (default)
+            normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
+        if (!normalized) return str;
+        String* result = heap_strcpy(normalized, norm_len);
+        free(normalized);
+        return (Item){.item = s2it(result)};
+    }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
         if (argc > 0) {
             Item sep = args[0];
@@ -3131,22 +3351,23 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 9 && strncmp(method->chars, "substring", 9) == 0) {
         if (argc < 1) return str;
-        Item start = js_arg_to_int(args[0]);
-        Item end_item;
-        if (argc > 1) {
-            end_item = js_arg_to_int(args[1]);
-        } else {
-            // JS substring(start) means from start to end of string
-            int64_t len = fn_len(str);
-            end_item = (Item){.item = i2it(len)};
-        }
-        return fn_substring(str, start, end_item);
+        String* s = it2s(str);
+        int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
+        int64_t start = (int64_t)js_get_number(args[0]);
+        int64_t end = argc > 1 ? (int64_t)js_get_number(args[1]) : slen;
+        // JS substring: negative indices clamp to 0; swap if start > end
+        if (start < 0) start = 0;
+        if (end < 0) end = 0;
+        if (start > slen) start = slen;
+        if (end > slen) end = slen;
+        if (start > end) { int64_t tmp = start; start = end; end = tmp; }
+        return js_str_substring_utf16(str, start, end);
     }
     if (method->len == 6 && strncmp(method->chars, "substr", 6) == 0) {
-        // substr(start, length) — legacy method
+        // substr(start, length) — legacy method, uses UTF-16 unit indices
         if (argc < 1) return str;
         String* s = it2s(str);
-        int64_t slen = s ? (int64_t)s->len : 0;
+        int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
         int64_t start = (int64_t)js_get_number(args[0]);
         if (start < 0) { start = slen + start; if (start < 0) start = 0; }
         int64_t length;
@@ -3159,21 +3380,21 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (start >= slen || length <= 0) return (Item){.item = s2it(heap_create_name(""))};
         int64_t end = start + length;
         if (end > slen) end = slen;
-        Item start_item = (Item){.item = i2it(start)};
-        Item end_item = (Item){.item = i2it(end)};
-        return fn_substring(str, start_item, end_item);
+        return js_str_substring_utf16(str, start, end);
     }
     if (method->len == 5 && strncmp(method->chars, "slice", 5) == 0) {
         if (argc < 1) return str;
-        Item start = js_arg_to_int(args[0]);
-        Item end_item;
-        if (argc > 1) {
-            end_item = js_arg_to_int(args[1]);
-        } else {
-            int64_t len = fn_len(str);
-            end_item = (Item){.item = i2it(len)};
-        }
-        return fn_substring(str, start, end_item);
+        String* s = it2s(str);
+        int64_t slen = s ? js_utf16_len(s->chars, (int)s->len, (bool)s->is_ascii) : 0;
+        int64_t start = (int64_t)js_get_number(args[0]);
+        int64_t end = argc > 1 ? (int64_t)js_get_number(args[1]) : slen;
+        // slice: negative indices count from end
+        if (start < 0) { start = slen + start; if (start < 0) start = 0; }
+        if (end < 0) { end = slen + end; if (end < 0) end = 0; }
+        if (start > slen) start = slen;
+        if (end > slen) end = slen;
+        if (start >= end) return (Item){.item = s2it(heap_create_name(""))};
+        return js_str_substring_utf16(str, start, end);
     }
     if (method->len == 7 && strncmp(method->chars, "replace", 7) == 0) {
         if (argc < 2) return str;
@@ -3181,7 +3402,13 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
-        return fn_index(str, args[0]);
+        String* s = it2s(str);
+        if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name(""))};
+        int64_t idx = (int64_t)js_get_number(args[0]);
+        if (idx < 0) return (Item){.item = s2it(heap_create_name(""))};
+        // charAt uses UTF-16 unit index; extract the code unit as a 1-char string
+        // (for BMP chars this is the char itself; for non-BMP this returns a surrogate half-char)
+        return js_str_substring_utf16(str, idx, idx + 1);
     }
     if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
         if (argc < 1) return ItemNull;
@@ -3393,20 +3620,23 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                         re2::StringPiece(s->chars, s->len), offset, (int)s->len,
                         re2::RE2::UNANCHORED, matches, num_groups);
                     if (!matched) break;
-                    // Build match object like regex exec
-                    Item match_arr = js_array_new(num_groups + 1);
+                    // Build match object with .index property (like regex exec)
+                    Item match_obj = js_new_object();
                     for (int i = 0; i < num_groups; i++) {
                         if (matches[i].data()) {
                             Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
-                            Item idx = (Item){.item = i2it(i)};
-                            js_array_set(match_arr, idx, ms);
+                            char buf[24];
+                            snprintf(buf, sizeof(buf), "%d", i);
+                            Item key = (Item){.item = s2it(heap_create_name(buf))};
+                            js_property_set(match_obj, key, ms);
                         }
                     }
                     int match_index = (int)(matches[0].data() - s->chars);
-                    Item idx_item = (Item){.item = i2it(num_groups)};
-                    Item idx_val = (Item){.item = i2it(match_index)};
-                    js_array_set(match_arr, idx_item, idx_val);
-                    array_push(result.array, match_arr);
+                    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
+                    js_property_set(match_obj, index_key, (Item){.item = i2it(match_index)});
+                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    js_property_set(match_obj, length_key, (Item){.item = i2it(num_groups)});
+                    array_push(result.array, match_obj);
                     int advance = match_index + (int)matches[0].size();
                     if (advance <= offset) advance = offset + 1;
                     offset = advance;
@@ -3755,10 +3985,27 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         }
         return result;
     }
-    // fill
+    // fill(value, start?, end?) — fill array elements in range with value
     if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
         if (argc < 1) return arr;
-        return js_array_fill(arr, args[0]);
+        if (argc == 1) return js_array_fill(arr, args[0]);
+        // fill with start and/or end index
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* a = arr.array;
+        int len = a->length;
+        int start = argc > 1 ? (int)js_get_number(args[1]) : 0;
+        int end   = argc > 2 ? (int)js_get_number(args[2]) : len;
+        if (start < 0) start = len + start;
+        if (start < 0) start = 0;
+        if (start > len) start = len;
+        if (end < 0) end = len + end;
+        if (end < 0) end = 0;
+        if (end > len) end = len;
+        Item val = args[0];
+        for (int i = start; i < end; i++) {
+            a->items[i] = val;
+        }
+        return arr;
     }
     // splice(start, deleteCount, ...items) — mutating
     if (method->len == 6 && strncmp(method->chars, "splice", 6) == 0) {

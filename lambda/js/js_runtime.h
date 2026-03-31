@@ -387,6 +387,8 @@ Item js_url_construct(Item input);
 Item js_url_construct_with_base(Item input, Item base);
 Item js_url_parse(Item input, Item base);
 Item js_url_can_parse(Item input);
+Item js_readable_stream_new(void);
+Item js_writable_stream_new(void);
 
 // Symbol API
 // Symbol items are encoded as negative ints: -(id + JS_SYMBOL_BASE).

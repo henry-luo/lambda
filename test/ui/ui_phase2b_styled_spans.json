@@ -1,6 +1,6 @@
 {
   "name": "Phase 2b: Inline spans - visibility, text, click (baseline_503)",
-  "html": "test/layout/data/baseline/baseline_503_styled_spans.html",
+  "html": "test/ui/baseline_503_styled_spans.html",
   "events": [
     {"type": "log", "message": "=== Phase 2b: inline spans on baseline_503_styled_spans ==="},
     {"type": "log", "message": "Coord note: .bold-text at (70,24) 66x17; .colored-text at (218,24) 53x17"},

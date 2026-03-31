@@ -361,14 +361,21 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
     }
 
     // 2. Platform-specific metrics (CoreText on macOS) for non-USE_TYPO_METRICS fonts
-    // Chrome/Blink split: ascender = asc + desc (content), descender = leading
+    // CSS 2.1 §10.8.1 half-leading model:
+    //   leading = line_height - (ascent + descent)
+    //   half_leading = leading / 2
+    //   ascender = ascent + half_leading   (above the text baseline)
+    //   descender = descent + half_leading (below the text baseline)
+    // Total = ascender + descender = line_height.
     float ascent, descent, line_height;
     if (get_font_metrics_platform(family, font_size, &ascent, &descent, &line_height)) {
-        *out_ascender = ascent + descent;
-        *out_descender = line_height - (ascent + descent);
+        float leading = line_height - (ascent + descent);
+        float half_leading = leading / 2.0f;
+        *out_ascender = ascent + half_leading;
+        *out_descender = descent + half_leading;
         if (*out_descender < 0) *out_descender = 0;
-        log_debug("font_get_normal_lh_split (platform): asc+desc=%f lead=%f for %s@%.1f",
-                  *out_ascender, *out_descender, family, font_size);
+        log_debug("font_get_normal_lh_split (platform, half-leading): asc=%f desc=%f lead=%f for %s@%.1f",
+                  *out_ascender, *out_descender, leading, family, font_size);
         return;
     }
 

@@ -1,6 +1,6 @@
 {
   "name": "Phase 1b: Click text - three aligned paragraphs (baseline_809)",
-  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "html": "test/ui/baseline_809_text_align.html",
   "events": [
     {"type": "log", "message": "=== Phase 1b: assert_visible + assert_text on baseline_809_text_align ==="},
     {"type": "wait", "ms": 300},

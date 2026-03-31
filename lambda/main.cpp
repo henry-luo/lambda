@@ -37,6 +37,7 @@
 #include "py/py_transpiler.hpp"      // Python transpiler
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
+#include "ts/ts_transpiler.hpp"      // TypeScript transpiler
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1277,6 +1278,69 @@ int main(int argc, char *argv[]) {
         return bash_exit;
     }
 
+    // Handle TypeScript command
+    log_debug("Checking for ts command");
+    if (argc >= 2 && strcmp(argv[1], "ts") == 0) {
+        log_debug("Entering TypeScript command handler");
+
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda TypeScript Transpiler v0.1\n\n");
+            printf("Usage: %s ts <file.ts>\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'ts' command runs the TypeScript transpiler.\n");
+            printf("  TypeScript types are preserved as first-class Lambda types\n");
+            printf("  for runtime introspection and native code generation.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s ts script.ts    # Transpile and run script.ts\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        if (argc >= 3) {
+            const char* ts_file = argv[2];
+            char* ts_source = read_text_file(ts_file);
+            if (!ts_source) {
+                printf("Error: Could not read file '%s'\n", ts_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+
+            Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file);
+
+            // only print non-null results
+            if (result.item != ITEM_NULL && result.item != 0) {
+                TypeId result_type = get_type_id(result);
+                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
+                    || result_type == LMD_TYPE_ELEMENT) {
+                    Pool* fmt_pool = pool_create();
+                    String* json = format_json(fmt_pool, result);
+                    if (json) {
+                        printf("%.*s\n", json->len, json->chars);
+                    }
+                    pool_destroy(fmt_pool);
+                } else {
+                    StrBuf *output = strbuf_new_cap(256);
+                    print_root_item(output, result);
+                    printf("%s\n", output->str);
+                    strbuf_free(output);
+                }
+            }
+
+            free(ts_source);
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
+    }
+
     // Handle convert command
     log_debug("Checking for convert command");
     if (argc >= 2 && strcmp(argv[1], "convert") == 0) {
@@ -2051,6 +2115,90 @@ int main(int argc, char *argv[]) {
         log_debug("view command completed with result: %d", exit_code);
         log_finish();
         return exit_code;
+    }
+
+    // Handle serve command (HTTP/HTTPS server)
+    log_debug("Checking for serve command");
+    if (argc >= 2 && strcmp(argv[1], "serve") == 0) {
+        log_debug("Entering serve command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda HTTP Server\n\n");
+            printf("Usage: %s serve [options] [handler.ls]\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  -p, --port <port>      HTTP port (default: 3000)\n");
+            printf("  --host <addr>          Bind address (default: 0.0.0.0)\n");
+            printf("  -d, --dir <path>       Static file directory (default: .)\n");
+            printf("  --ssl-port <port>      HTTPS port (0 to disable, default: 0)\n");
+            printf("  --ssl-cert <file>      SSL certificate file\n");
+            printf("  --ssl-key <file>       SSL private key file\n");
+            printf("  --workers <n>          Worker pool size (default: 4)\n");
+            printf("  --cors                 Enable CORS (allow all origins)\n");
+            printf("  -h, --help             Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s serve                                # Serve current dir on port 3000\n", argv[0]);
+            printf("  %s serve -p 8080 -d ./public            # Serve ./public on port 8080\n", argv[0]);
+            printf("  %s serve handler.ls                     # Run Lambda script handler\n", argv[0]);
+            printf("  %s serve -p 3000 --cors handler.ls      # With CORS enabled\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        // Parse serve command arguments
+        int port = 3000;
+        const char *host = "0.0.0.0";
+        const char *static_dir = NULL;
+        const char *handler_file = NULL;
+        const char *ssl_cert = NULL;
+        const char *ssl_key = NULL;
+        int ssl_port = 0;
+        int workers = 4;
+        bool enable_cors = false;
+
+        for (int i = 2; i < argc; i++) {
+            if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i + 1 < argc) {
+                port = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
+                host = argv[++i];
+            } else if ((strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--dir") == 0) && i + 1 < argc) {
+                static_dir = argv[++i];
+            } else if (strcmp(argv[i], "--ssl-port") == 0 && i + 1 < argc) {
+                ssl_port = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--ssl-cert") == 0 && i + 1 < argc) {
+                ssl_cert = argv[++i];
+            } else if (strcmp(argv[i], "--ssl-key") == 0 && i + 1 < argc) {
+                ssl_key = argv[++i];
+            } else if (strcmp(argv[i], "--workers") == 0 && i + 1 < argc) {
+                workers = atoi(argv[++i]);
+            } else if (strcmp(argv[i], "--cors") == 0) {
+                enable_cors = true;
+            } else if (argv[i][0] != '-') {
+                handler_file = argv[i];
+            }
+        }
+
+        // Placeholder: server initialization will be connected in Phase 5
+        // when the io.http module is fully operational
+        log_info("serve command: port=%d host=%s workers=%d", port, host, workers);
+        if (static_dir) log_info("serve static dir: %s", static_dir);
+        if (handler_file) log_info("serve handler: %s", handler_file);
+        if (enable_cors) log_info("serve CORS enabled");
+        if (ssl_port > 0) log_info("serve SSL port: %d", ssl_port);
+
+        // TODO: Phase 5 — instantiate Server, configure, and run
+        //   Server *srv = server_create(&config);
+        //   server_set_pool_size(srv, workers);
+        //   if (enable_cors) server_use(srv, middleware_cors(), NULL);
+        //   if (static_dir) server_set_static(srv, "/", static_dir);
+        //   if (handler_file) { /* load Lambda handler */ }
+        //   server_start(srv, port);
+        //   server_run(srv);
+
+        fprintf(stderr, "Error: 'serve' command not yet fully implemented.\n");
+        fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
+        log_finish();
+        return 1;
     }
 
     // Handle webdriver command

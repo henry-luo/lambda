@@ -131,6 +131,8 @@ struct DomNode {
     unsigned char* text_data() const;
     // Get attribute for element nodes
     const char* get_attribute(const char* attr_name) const;
+    // Check if attribute exists (works for boolean attrs stored as ITEM_NULL)
+    bool has_attribute(const char* attr_name) const;
 
     // tree manipulation methods (implementations in dom_node.cpp)
     bool append_child(DomNode* child);

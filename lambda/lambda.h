@@ -66,7 +66,10 @@ extern bool g_dry_run;
 #endif
 
 // Stack overflow protection (callable from JIT-compiled code)
-extern void lambda_stack_overflow_error(const char* func_name);
+#ifdef __cplusplus
+extern "C"
+#endif
+void lambda_stack_overflow_error(const char* func_name);
 
 // Name pool configuration
 #define NAME_POOL_SYMBOL_LIMIT 32  // Max length for symbols in name_pool
@@ -297,6 +300,13 @@ typedef enum SysFunc {
     SYSPROC_IO_CHMOD,
     SYSPROC_IO_RENAME,
     SYSPROC_IO_FETCH,        // io.fetch(target, options) - fetch data from URL or file
+    // io.http module (web server)
+    SYSPROC_IO_HTTP_CREATE_SERVER,  // io.http.create_server(config?) - create HTTP server
+    SYSPROC_IO_HTTP_LISTEN,         // io.http.listen(server, port) - start listening
+    SYSPROC_IO_HTTP_ROUTE,          // io.http.route(server, method, path, handler)
+    SYSPROC_IO_HTTP_USE,            // io.http.use(server, middleware) - add middleware
+    SYSPROC_IO_HTTP_STATIC,         // io.http.static(server, url_path, dir_path)
+    SYSPROC_IO_HTTP_STOP,           // io.http.stop(server) - graceful shutdown
     // vmap functions
     SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
     SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
@@ -880,6 +890,9 @@ typedef struct Context {
 } Context;
 
 #ifndef LAMBDA_STATIC
+#ifdef __cplusplus
+extern "C" {
+#endif
     Array* array();
     ArrayInt* array_int();
     ArrayInt64* array_int64();
@@ -1171,8 +1184,6 @@ typedef struct Context {
     Item fn_find2(Item source, Item pattern);
     Item fn_find3(Item source, Item pattern, Item options);
 
-    Function* to_fn(fn_ptr ptr);
-    Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
     Type* const_type(int64_t type_index);
     Type* const_type_with_tl(int64_t type_index, void* type_list_ptr);
@@ -1259,14 +1270,12 @@ typedef struct Context {
     void* ensure_typed_array(Item item, TypeId element_type_id);
 
     // VMap system functions
-#ifdef __cplusplus
-extern "C" {
-#endif
     Item vmap_new();
     Item vmap_from_array(Item array_item);
     void vmap_set(Item vmap_item, Item key, Item value);
+
 #ifdef __cplusplus
-}
+} // extern "C"
 #endif
 
 #endif
