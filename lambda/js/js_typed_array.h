@@ -48,6 +48,7 @@ typedef struct JsTypedArray {
     int byte_offset;                 // offset 12: offset into backing buffer
     void* data;                      // offset 16: raw data pointer (direct pointer to first element)
     JsArrayBuffer* buffer;           // offset 24: optional backing ArrayBuffer (NULL if standalone)
+    uint64_t buffer_item;            // offset 32: original ArrayBuffer Item for identity-preserving .buffer access
 } JsTypedArray;
 
 // Sentinel markers for identifying typed arrays, array buffers, data views

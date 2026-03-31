@@ -4932,6 +4932,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
             TypeId field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 
+            // DEBUG: trace "number" field writes
+            if (strlen(key_cstr) == 6 && strncmp(key_cstr, "number", 6) == 0) {
+                log_debug("TRACE fn_map_set: name=number value_type=%d field_type=%d val=0x%llx entry=%p",
+                          (int)value_type, (int)field_type, (unsigned long long)value.item, (void*)entry);
+            }
+
             if (field_type == value_type) {
                 // same type — fast path: in-place update
                 map_field_decrement_ref(field_ptr, field_type);

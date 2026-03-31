@@ -8406,7 +8406,8 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 search = search->superclass;
             }
 
-            // ClassName.staticGetter → call static getter method directly
+            // ClassName.staticGetter → use runtime property_get which respects
+            // data properties set via Object.defineProperty (shadow pattern)
             search = sf_ce;
             while (search) {
                 for (int i = 0; i < search->method_count; i++) {
@@ -8415,18 +8416,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                         me->name->len == prop->name->len &&
                         strncmp(me->name->chars, prop->name->chars, me->name->len) == 0 &&
                         me->fc && me->fc->func_item) {
-                        log_debug("static-getter-call: %.*s.%.*s",
+                        log_debug("static-getter-access: %.*s.%.*s via js_property_get",
                             (int)obj->name->len, obj->name->chars,
                             (int)prop->name->len, prop->name->chars);
-                        MIR_reg_t fn_item = jm_call_2(mt, "js_new_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_ref_op(mt->ctx, me->fc->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
-                        // Pass the class object as 'this' (static context)
-                        // For class expressions (var X = class _Y {}), the class object
-                        // is stored in the alias var's module_var, not the inner class name's.
+                        // Get the class object
                         MIR_reg_t cls_this;
                         {
-                            // Try alias name first (var X = class _Y {} → X holds the class object)
                             const char* lookup_name = obj->name->chars;
                             int lookup_len = (int)obj->name->len;
                             if (sf_ce->alias_name) {
@@ -8444,7 +8439,6 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                                 cls_this = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
                                     MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)cls_mc->int_val));
                             } else {
-                                // Fall back to original name
                                 snprintf(cls_key, sizeof(cls_key), "_js_%.*s", (int)obj->name->len, obj->name->chars);
                                 snprintf(cls_lookup.name, sizeof(cls_lookup.name), "%s", cls_key);
                                 cls_mc = mt->module_consts ?
@@ -8457,11 +8451,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                                 }
                             }
                         }
-                        return jm_call_4(mt, "js_call_function", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item),
+                        // Use js_property_get which checks own data properties first,
+                        // then falls back to getter — respects Object.defineProperty shadow
+                        MIR_reg_t prop_key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+                        return jm_call_2(mt, "js_property_get", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_this),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, 0));
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key));
                     }
                 }
                 search = search->superclass;
@@ -8527,7 +8522,8 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
     }
 
     // P9: .length for known typed arrays → inline memory load (no function call)
-    if (!mem->computed && mem->property &&
+    // Note: skip when optional chaining (?.) — optional chaining needs null/undefined guard first
+    if (!mem->computed && !mem->optional && mem->property &&
         mem->property->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* prop = (JsIdentifierNode*)mem->property;
         if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
@@ -11250,7 +11246,9 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, root_proto));
                         }
                     } else {
-                        // Non-class, non-builtin superclass: add prototype entry with class name
+                        // Non-class, non-builtin superclass (e.g., IIFE-returned constructor):
+                        // add prototype entry with class name AND constructor reference.
+                        // The __ctor__ ref enables runtime instanceof to match against function value.
                         MIR_reg_t proto_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                         MIR_reg_t pcn_key = jm_box_string_literal(mt, "__class_name__", 14);
                         MIR_reg_t pcn_val = jm_box_string_literal(mt, sname, slen);
@@ -11258,6 +11256,19 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_key),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, pcn_val));
+                        // Store the runtime constructor function value as __ctor__
+                        // so js_instanceof(obj, fn) can match by function identity.
+                        // Use jm_transpile_box_item to load the value at runtime
+                        // (jm_find_var fails here because the var may not be in scope yet
+                        // at transpile time when class declarations are hoisted).
+                        {
+                            MIR_reg_t ctor_key = jm_box_string_literal(mt, "__ctor__", 8);
+                            MIR_reg_t ctor_val = jm_transpile_box_item(mt, (JsAstNode*)super_id);
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
+                        }
                         jm_call_void_2(mt, "js_set_prototype",
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj));
@@ -13731,15 +13742,14 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
                     if (ap->right) {
                         // emit: if (preg != undefined) goto skip_default;
+                        // NOTE: must use MIR_BNE (64-bit) not MIR_BNES (32-bit signed) because
+                        // ITEM_JS_UNDEFINED has type tag in high bits; MIR_BNES compares only low 32
+                        // bits which would wrongly match INT 0 (0x0300000000000000) and BOOL false.
                         MIR_label_t skip_label = jm_new_label(mt);
-                        MIR_reg_t cmp = jm_new_reg(mt, "def_cmp", MIR_T_I64);
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NES,
-                            MIR_new_reg_op(mt->ctx, cmp),
-                            MIR_new_reg_op(mt->ctx, preg),
-                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
                             MIR_new_label_op(mt->ctx, skip_label),
-                            MIR_new_reg_op(mt->ctx, cmp)));
+                            MIR_new_reg_op(mt->ctx, preg),
+                            MIR_new_uint_op(mt->ctx, (uint64_t)ITEM_JS_UNDEFINED)));
                         // emit default value and store into param reg
                         MIR_reg_t def_val = jm_transpile_box_item(mt, ap->right);
                         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,

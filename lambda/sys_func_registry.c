@@ -708,6 +708,8 @@ extern Item fn_call_boxed_6(void* fp, Item a, Item b, Item c, Item d, Item e, It
 extern Item fn_call_boxed_7(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g);
 extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, Item f, Item g, Item h);
 
+// Debug tracing helpers
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -1663,6 +1665,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_tilde_assign_arg", FPTR(bash_expand_tilde_assign_arg)},
     {"bash_glob_expand", FPTR(bash_glob_expand)},
     {"bash_expand_brace", FPTR(bash_expand_brace)},
+    {"bash_words_split_into", FPTR(bash_words_split_into)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
     {"bash_scope_pop", FPTR(bash_scope_pop)},
