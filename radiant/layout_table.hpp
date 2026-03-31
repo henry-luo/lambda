@@ -22,7 +22,7 @@ void adjust_table_text_positions_final(struct ViewTable* table);
 
 // CSS 2.1 §17.5.4: Find the first baseline in a table/view hierarchy.
 // Returns distance from parent's top to the first text baseline, or -1 if none found.
-float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y);
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh = false);
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row, int table_abs_x, int cell_border, int cell_padding);
 void adjust_cell_text_positions_final(struct ViewBlock* cell, int text_abs_x);
 

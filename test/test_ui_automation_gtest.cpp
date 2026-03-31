@@ -33,6 +33,10 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <chrono>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -178,7 +182,7 @@ static std::vector<UiTestInfo> discover_ui_tests() {
 // Global test list (populated once in main)
 // ============================================================================
 
-static std::vector<UiTestInfo> g_ui_tests;
+static std::vector<UiTestInfo> g_ui_tests = discover_ui_tests();
 
 // ============================================================================
 // Run a single UI test via lambda.exe view
@@ -235,13 +239,43 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
 }
 
 // ============================================================================
+// Parallel execution: run all lambda.exe processes upfront
+// ============================================================================
+
+static std::vector<UiTestResult> g_ui_results;
+
+static void run_ui_tests_parallel(int jobs) {
+    size_t n = g_ui_tests.size();
+    g_ui_results.resize(n);
+    if (n == 0) return;
+
+    int num_threads = std::min(jobs, (int)n);
+    std::atomic<size_t> next_idx{0};
+
+    auto worker = [&]() {
+        while (true) {
+            size_t idx = next_idx.fetch_add(1);
+            if (idx >= n) break;
+            g_ui_results[idx] = run_ui_test(g_ui_tests[idx]);
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < num_threads; i++) {
+        threads.emplace_back(worker);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+}
+
+// ============================================================================
 // Parameterized test fixture
 // ============================================================================
 
 class UIAutomationTest : public ::testing::TestWithParam<size_t> {
 protected:
     void SetUp() override {
-        // Check prerequisites once
         if (!file_exists(LAMBDA_EXE)) {
             GTEST_SKIP() << "lambda.exe not found - run 'make build' first";
         }
@@ -265,9 +299,20 @@ TEST_P(UIAutomationTest, RunTest) {
 
     SCOPED_TRACE("UI test: " + info.test_name);
 
-    UiTestResult result = run_ui_test(info);
+    const UiTestResult& result = g_ui_results[idx];
 
-    // Print output on failure for easier debugging
+    // Always print assertion summary so we can verify tests actually assert
+    int total_assertions = result.assertions_passed + result.assertions_failed;
+    if (total_assertions > 0) {
+        std::cout << "  [" << info.test_name << "] "
+                  << result.assertions_passed << "/" << total_assertions
+                  << " assertions passed" << std::endl;
+    } else {
+        std::cout << "  [" << info.test_name << "] WARNING: 0 assertions"
+                  << std::endl;
+    }
+
+    // Print full output on failure for easier debugging
     if (result.exit_code != 0 || result.assertions_failed > 0) {
         std::cerr << "\n--- Output for " << info.test_name << " ---\n"
                   << result.output
@@ -277,7 +322,10 @@ TEST_P(UIAutomationTest, RunTest) {
     EXPECT_EQ(result.exit_code, 0)
         << info.test_name << " exited with code " << result.exit_code;
 
-    if (result.assertions_passed + result.assertions_failed > 0) {
+    EXPECT_GT(total_assertions, 0)
+        << info.test_name << ": test has no assertions - add assert_* events to the JSON";
+
+    if (total_assertions > 0) {
         EXPECT_EQ(result.assertions_failed, 0)
             << info.test_name << ": "
             << result.assertions_failed << " assertion(s) failed, "
@@ -289,7 +337,7 @@ TEST_P(UIAutomationTest, RunTest) {
 INSTANTIATE_TEST_SUITE_P(
     UIAutomation,
     UIAutomationTest,
-    ::testing::Range(size_t(0), size_t(64)),  // upper bound; actual count is dynamic
+    ::testing::Range(size_t(0), g_ui_tests.size()),
     [](const ::testing::TestParamInfo<size_t>& info) {
         if (info.param < g_ui_tests.size()) {
             std::string name = g_ui_tests[info.param].test_name;
@@ -310,8 +358,15 @@ INSTANTIATE_TEST_SUITE_P(
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
-    // Discover UI tests before GTest initializes param suites
-    g_ui_tests = discover_ui_tests();
+    // Parse -j N for parallelism (default: hardware concurrency)
+    int jobs = (int)std::thread::hardware_concurrency();
+    if (jobs <= 0) jobs = 4;
+    for (int i = 1; i < argc; i++) {
+        if ((strcmp(argv[i], "-j") == 0 || strcmp(argv[i], "--jobs") == 0) && i + 1 < argc) {
+            jobs = atoi(argv[++i]);
+            if (jobs <= 0) jobs = 1;
+        }
+    }
 
     std::cout << "\n";
     std::cout << "╔═══════════════════════════════════════════════════════════╗\n";
@@ -331,15 +386,21 @@ int main(int argc, char** argv) {
         std::cerr << "WARNING: No UI test pairs found in " UI_TESTS_DIR "\n";
         std::cerr << "         Create test_*.html + test_*.json pairs to add tests.\n\n";
     } else {
-        std::cout << "Found " << g_ui_tests.size() << " UI test(s):\n";
+        std::cout << "Found " << g_ui_tests.size() << " UI test(s), running with "
+                  << jobs << " parallel job(s):\n";
         for (const auto& t : g_ui_tests) {
             std::cout << "  • " << t.test_name << "\n";
         }
         std::cout << "\n";
+
+        // Run all tests in parallel before GTest checks results
+        auto t0 = std::chrono::steady_clock::now();
+        run_ui_tests_parallel(jobs);
+        auto t1 = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+        std::cout << "All " << g_ui_tests.size() << " tests executed in "
+                  << ms << " ms (" << jobs << " parallel jobs)\n\n";
     }
 
-    // Resize instantiation to actual count (GTest requires compile-time range,
-    // so we use 64 as upper bound; tests beyond g_ui_tests.size() are skipped
-    // by the SetUp guard above).
     return RUN_ALL_TESTS();
 }

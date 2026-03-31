@@ -872,6 +872,10 @@ static BashAstNode* build_concatenation(BashTranspiler* tp, TSNode node) {
             part = build_ansi_c_string(tp, child);
         } else if (strcmp(child_type, "command_substitution") == 0) {
             part = build_command_substitution(tp, child);
+        } else if (strcmp(child_type, "brace_expression") == 0) {
+            // brace expansion inside concatenation: e.g., ff{a,b,c} → "ffa", "ffb", "ffc"
+            // store as WORD node with literal brace text so transpiler can detect it
+            part = build_word(tp, child);
         } else {
             part = build_word(tp, child);
         }
@@ -1428,6 +1432,39 @@ static BashAstNode* build_for_statement(BashTranspiler* tp, TSNode node) {
 
         if (strcmp(child_type, "variable_name") == 0) {
             for_node->variable = node_text(tp, child);
+        } else if (strcmp(child_type, "ERROR") == 0) {
+            // tree-sitter-bash ERROR recovery: multiline for word list
+            // e.g., `for x\nin x\ndo` → ERROR node contains "in" + word list
+            uint32_t ec = ts_node_named_child_count(child);
+            bool found_in = false;
+            for (uint32_t j = 0; j < ec; j++) {
+                TSNode err_child = ts_node_named_child(child, j);
+                const char* ect = ts_node_type(err_child);
+                // Skip the "in" keyword
+                if (!found_in && strcmp(ect, "word") == 0) {
+                    String* wtext = node_text(tp, err_child);
+                    if (wtext && wtext->len == 2 && memcmp(wtext->chars, "in", 2) == 0) {
+                        found_in = true;
+                        continue;
+                    }
+                }
+                if (found_in) {
+                    // Treat remaining children as word list items
+                    BashAstNode* word = NULL;
+                    if (strcmp(ect, "word") == 0) word = build_word(tp, err_child);
+                    else if (strcmp(ect, "string") == 0) word = build_string_node(tp, err_child);
+                    else if (strcmp(ect, "raw_string") == 0) word = build_raw_string(tp, err_child);
+                    else if (strcmp(ect, "ansi_c_string") == 0) word = build_ansi_c_string(tp, err_child);
+                    else if (strcmp(ect, "simple_expansion") == 0 ||
+                             strcmp(ect, "expansion") == 0) word = build_expansion(tp, err_child);
+                    else if (strcmp(ect, "number") == 0) word = build_word(tp, err_child);
+                    if (word) {
+                        if (!for_node->words) { for_node->words = word; }
+                        else { words_tail->next = word; }
+                        words_tail = word;
+                    }
+                }
+            }
         } else if (strcmp(child_type, "do_group") == 0 ||
                    strcmp(child_type, "compound_statement") == 0) {
             for_node->body = build_block(tp, child);
@@ -1435,16 +1472,19 @@ static BashAstNode* build_for_statement(BashTranspiler* tp, TSNode node) {
                  strcmp(child_type, "string") == 0 ||
                  strcmp(child_type, "raw_string") == 0 ||
                  strcmp(child_type, "ansi_c_string") == 0 ||
+                 strcmp(child_type, "brace_expression") == 0 ||
                    strcmp(child_type, "simple_expansion") == 0 ||
                    strcmp(child_type, "expansion") == 0 ||
-                   strcmp(child_type, "number") == 0) {
+                   strcmp(child_type, "number") == 0 ||
+                   strcmp(child_type, "concatenation") == 0) {
             BashAstNode* word;
             if (strcmp(child_type, "string") == 0) word = build_string_node(tp, child);
             else if (strcmp(child_type, "raw_string") == 0) word = build_raw_string(tp, child);
              else if (strcmp(child_type, "ansi_c_string") == 0) word = build_ansi_c_string(tp, child);
             else if (strcmp(child_type, "simple_expansion") == 0 ||
                      strcmp(child_type, "expansion") == 0) word = build_expansion(tp, child);
-            else word = build_word(tp, child);
+            else if (strcmp(child_type, "concatenation") == 0) word = build_concatenation(tp, child);
+            else word = build_word(tp, child);  // word, number, brace_expression
 
             if (word) {
                 if (!for_node->words) {
@@ -2670,11 +2710,23 @@ BashAstNode* build_bash_program(BashTranspiler* tp, TSNode program_node) {
 
     uint32_t child_count = ts_node_named_child_count(program_node);
     BashAstNode* tail = NULL;
+    uint32_t last_end_byte = 0;
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(program_node, i);
+
+        // Skip children that overlap with a previous statement's byte range.
+        // tree-sitter error recovery can produce overlapping nodes.
+        uint32_t child_start = ts_node_start_byte(child);
+        if (child_start < last_end_byte) {
+            log_debug("bash-ast: skipping overlapping child at byte %d (prev end %d)", child_start, last_end_byte);
+            continue;
+        }
+
         BashAstNode* stmt = build_statement(tp, child);
         if (!stmt) continue;
+
+        last_end_byte = ts_node_end_byte(child);
 
         if (!program->body) {
             program->body = stmt;

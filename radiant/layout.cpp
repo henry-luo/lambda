@@ -848,7 +848,19 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 pb = span->bound->padding.bottom > 0 ? span->bound->padding.bottom : 0;
             }
             int expected_height = (int)(content_area + bt + pt + pb + bb);
+            // Check if any child inline span overflows the expected height
+            bool child_overflows = false;
             if (span->height > expected_height) {
+                View* ch = span->first_placed_child();
+                while (ch) {
+                    if (ch->view_type == RDT_VIEW_INLINE && ch->height > expected_height) {
+                        child_overflows = true;
+                        break;
+                    }
+                    ch = (View*)ch->next_sibling;
+                }
+            }
+            if (span->height > expected_height && !child_overflows) {
                 // Children extend beyond the font content area (e.g., tall image).
                 // Override both Y and height. Y is computed from the baseline position
                 // using the half-leading model.

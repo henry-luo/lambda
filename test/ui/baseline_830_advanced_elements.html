@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Advanced Elements Click Targets</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; }
+
+        /* Section 1: Interactive form elements */
+        .form-section {
+            padding: 10px;
+            background: #f0f0f0;
+        }
+        #btn1 {
+            display: inline-block;
+            padding: 8px 24px;
+            background: #4488cc;
+            color: white;
+            border: 1px solid #336699;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .radio-group, .checkbox-group {
+            margin-top: 8px;
+        }
+        .radio-group label, .checkbox-group label {
+            margin-right: 16px;
+            font-size: 14px;
+        }
+
+        /* Section 2: Image and SVG */
+        .media-section {
+            padding: 10px;
+            background: #e8f4e8;
+        }
+        #img1 {
+            width: 80px;
+            height: 60px;
+            background: #cc4444;
+            display: inline-block;
+        }
+        #svg1 {
+            width: 80px;
+            height: 60px;
+            display: inline-block;
+            vertical-align: top;
+        }
+
+        /* Section 3: Table */
+        .table-section {
+            padding: 10px;
+            background: #e8e8f4;
+        }
+        table {
+            border-collapse: collapse;
+        }
+        td, th {
+            padding: 6px 12px;
+            border: 1px solid #666;
+            font-size: 14px;
+        }
+        th { background: #ddd; }
+
+        /* Section 5: Position relative */
+        .position-section {
+            padding: 10px;
+            background: #f4f4e8;
+            position: relative;
+            height: 100px;
+        }
+        #rel-box {
+            position: relative;
+            top: 10px;
+            left: 20px;
+            width: 120px;
+            height: 30px;
+            background: #88cc44;
+            font-size: 14px;
+            line-height: 30px;
+            text-align: center;
+        }
+        #abs-box {
+            position: absolute;
+            top: 50px;
+            right: 20px;
+            width: 120px;
+            height: 30px;
+            background: #cc8844;
+            font-size: 14px;
+            line-height: 30px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-section">
+        <button id="btn1">Click Me</button>
+        <div class="radio-group">
+            <label><input type="radio" name="opt" id="radio1" value="a"> Option A</label>
+            <label><input type="radio" name="opt" id="radio2" value="b"> Option B</label>
+        </div>
+        <div class="checkbox-group">
+            <label><input type="checkbox" id="check1"> Check 1</label>
+            <label><input type="checkbox" id="check2"> Check 2</label>
+        </div>
+    </div>
+
+    <div class="media-section">
+        <img id="img1" alt="Red box">
+        <svg id="svg1" viewBox="0 0 80 60">
+            <rect width="80" height="60" fill="#4444cc"/>
+            <text x="40" y="35" text-anchor="middle" fill="white" font-size="12">SVG</text>
+        </svg>
+    </div>
+
+    <div class="table-section">
+        <table id="tbl1">
+            <tr><th>Name</th><th>Value</th></tr>
+            <tr><td id="cell-a1">Alpha</td><td id="cell-a2">100</td></tr>
+            <tr><td id="cell-b1">Beta</td><td id="cell-b2">200</td></tr>
+        </table>
+    </div>
+
+    <div class="position-section">
+        <div id="rel-box">Relative</div>
+        <div id="abs-box">Absolute</div>
+    </div>
+</body>
+</html>

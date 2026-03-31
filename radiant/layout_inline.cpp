@@ -1101,10 +1101,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (c->view_type) last_child_for_trim = c;
                 c = c->next();
             }
-            if (last_child_for_trim && last_child_for_trim->view_type != RDT_VIEW_INLINE) {
-                // Only trim non-span children (text rects, inline-blocks, etc.).
-                // Inline spans already handled their own trailing space trim
-                // during their own layout pass — trimming again would double-count.
+            if (last_child_for_trim && last_child_for_trim->view_type == RDT_VIEW_TEXT) {
+                // Only trim text children — they carry trailing space in their width.
+                // Inline spans handle their own trim; inline-blocks/tables don't have
+                // trailing space embedded in their width.
                 saved_trailing = lycon->line.trailing_space_width;
                 last_child_for_trim->width -= saved_trailing;
             }
@@ -1139,8 +1139,25 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
             int expected_height = (int)(content_area + bt + pt_val + pb_val + bb);
             if (!span_is_multi_line && span->height > expected_height) {
-                span->height = expected_height;
-                log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+                // CSS 2.1 §10.6.1: For inline non-replaced elements, the inline box
+                // height = content_area + own border + own padding. Children's borders
+                // don't increase this. However, getBoundingClientRect reflects the
+                // visual extent: if a child inline span's border expands beyond this
+                // span's own border box, the bbox should encompass the child.
+                // Check if any child inline span overflows the expected_height.
+                bool child_overflows = false;
+                View* ch = span->first_placed_child();
+                while (ch) {
+                    if (ch->view_type == RDT_VIEW_INLINE && ch->height > expected_height) {
+                        child_overflows = true;
+                        break;
+                    }
+                    ch = (View*)ch->next_sibling;
+                }
+                if (!child_overflows) {
+                    span->height = expected_height;
+                    log_debug("inline span height capped to content area: %d (area=%.1f)", expected_height, content_area);
+                }
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations
             // and negative half-leading (line-height < font content area), position

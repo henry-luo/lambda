@@ -579,7 +579,7 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
 // or the first in-flow table-row in the cell, whichever comes first. If a cell has
 // no line box and no in-flow table row, the baseline is the bottom of the content edge."
 // Returns distance from the view's top to the first text baseline, or -1 if none found.
-float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y) {
+float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_y, bool use_normal_lh) {
     for (View* child = ((ViewElement*)parent)->first_child; child; child = child->next_sibling) {
         if (!child->view_type) continue;
 
@@ -591,12 +591,18 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
                 FontBox fbox = {};
                 setup_font(lycon->ui_context, &fbox, text->font);
                 if (fbox.font_handle) {
-                    TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
-                    if (typo.valid && typo.use_typo_metrics) {
-                        ascent = typo.ascender;
+                    if (use_normal_lh) {
+                        float split_asc = 0, split_desc = 0;
+                        font_get_normal_lh_split(fbox.font_handle, &split_asc, &split_desc);
+                        ascent = split_asc;
                     } else {
-                        const FontMetrics* m = font_get_metrics(fbox.font_handle);
-                        if (m) ascent = m->hhea_ascender;
+                        TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+                        if (typo.valid && typo.use_typo_metrics) {
+                            ascent = typo.ascender;
+                        } else {
+                            const FontMetrics* m = font_get_metrics(fbox.font_handle);
+                            if (m) ascent = m->hhea_ascender;
+                        }
                     }
                 }
             }
@@ -620,13 +626,13 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 
         if (is_table_structure) {
             // always recurse into table structure for baseline search
-            float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+            float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y, use_normal_lh);
             if (result >= 0) return result;
         } else if (is_block_like) {
             // recurse into blocks, but skip blocks inside tables (those are captions)
             bool parent_is_table = (parent->view_type == RDT_VIEW_TABLE);
             if (!parent_is_table) {
-                float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y);
+                float result = find_first_baseline_recursive(lycon, child, cumulative_y + child->y, use_normal_lh);
                 if (result >= 0) return result;
             }
         }

@@ -5700,7 +5700,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // CSS 2.1 §17.5.1: inline-table baseline = baseline of the first row
             float table_baseline = -1;
             if (is_inline_table) {
-                table_baseline = find_first_baseline_recursive(lycon, (View*)block, 0);
+                table_baseline = find_first_baseline_recursive(lycon, (View*)block, 0, true);
                 log_debug("inline-table baseline lookup for positioning: table_baseline=%.1f, block_h=%.1f",
                     table_baseline, block->height);
             }

@@ -133,6 +133,7 @@ Item bash_ensure_array(Item name);                  // ensure var is array, crea
 Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
+Item bash_words_split_into(Item arr, Item words_str); // append IFS-split words from str into arr
 Item bash_array_length(Item arr);                   // ${#arr[@]}
 int64_t bash_array_count(Item arr);                 // raw count for iteration
 Item bash_array_all(Item arr);                      // ${arr[@]} as list
@@ -329,6 +330,7 @@ BashRtFuncPtr bash_lookup_rt_func(const char* name);               // lookup (re
 // Shell options (set -e, set -u, set -x, set -o pipefail)
 // ========================================================================
 void bash_set_option(Item option, bool enable);      // set/unset shell option
+void bash_set_option_flag(char flag, bool enable);   // set/unset shell option by flag char (e, u, x, T)
 bool bash_get_option_errexit(void);                  // -e: exit on error
 bool bash_get_option_nounset(void);                  // -u: error on undefined var
 bool bash_get_option_xtrace(void);                   // -x: trace commands

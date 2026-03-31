@@ -44,6 +44,11 @@ ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntr
 // Internal helper function - not exported in header but accessible to mark_builder.cpp
 void map_put(Map* mp, String* key, Item value, Input *input) {
     // note: key could be null for nested map
+    // DEBUG: trace map_put for "number" key
+    if (key && key->len == 6 && strncmp(key->chars, "number", 6) == 0) {
+        log_debug("TRACE map_put: key=number type_id=%d value.item=0x%llx mp=%p",
+                  (int)get_type_id(value), (unsigned long long)value.item, (void*)mp);
+    }
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk

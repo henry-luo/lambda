@@ -1,6 +1,6 @@
 {
   "name": "Phase 2a: Text wrapping - caret in wrapped text (baseline_502)",
-  "html": "test/layout/data/baseline/baseline_502_text_wrapping.html",
+  "html": "test/ui/baseline_502_text_wrapping.html",
   "events": [
     {"type": "log", "message": "=== Phase 2a: assert_visible + assert_text + click caret on baseline_502 ==="},
     {"type": "log", "message": "Coord note: .narrow-container at (0,0) 180x156, padding=15px, font=16px Arial"},

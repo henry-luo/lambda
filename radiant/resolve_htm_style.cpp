@@ -1010,9 +1010,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
 
         // Set display and intrinsic size based on control type
-        // All form controls use border-box sizing (matching browser UA stylesheet)
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
 
         switch (block->form->control_type) {
         case FORM_CONTROL_HIDDEN:
@@ -1021,6 +1019,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         case FORM_CONTROL_CHECKBOX:
         case FORM_CONTROL_RADIO:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             block->form->intrinsic_width = FormDefaults::CHECK_SIZE;
             block->form->intrinsic_height = FormDefaults::CHECK_SIZE;
             // Set given_width/height so layout algorithm uses intrinsic size
@@ -1035,6 +1034,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             break;
         case FORM_CONTROL_BUTTON:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             // Button intrinsic size depends on value text - computed in layout
             // Default padding: 1px 6px (Chrome UA stylesheet)
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -1053,6 +1053,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             break;
         case FORM_CONTROL_IMAGE:
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             // Image button is a replaced element; use broken-image fallback dimensions
             block->form->intrinsic_width = FormDefaults::IMAGE_INPUT_WIDTH;
             block->form->intrinsic_height = FormDefaults::IMAGE_INPUT_HEIGHT;
@@ -1061,6 +1062,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             break;
         case FORM_CONTROL_RANGE: {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
+            block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             block->form->intrinsic_width = FormDefaults::RANGE_WIDTH;
             block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT;
             // Set given_width/height so layout algorithm uses intrinsic size (border-box)
