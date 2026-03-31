@@ -18,9 +18,9 @@
 #include <cstdio>
 #include <cstdlib>
 
-// tree-sitter (fall back to JS parser for now)
+// tree-sitter TypeScript parser
 extern "C" {
-    const TSLanguage* tree_sitter_javascript(void);
+    const TSLanguage* tree_sitter_typescript(void);
 }
 
 // ============================================================================
@@ -73,10 +73,10 @@ bool ts_transpiler_parse(TsTranspiler* tp, const char* source, size_t length) {
         return false;
     }
 
-    // use JS parser which handles most TS syntax via error recovery
-    const TSLanguage* lang = tree_sitter_javascript();
+    // use TypeScript parser for full type-aware CST
+    const TSLanguage* lang = tree_sitter_typescript();
     if (!lang) {
-        log_error("ts-mir: no parser available");
+        log_error("ts-mir: no TypeScript parser available");
         return false;
     }
 
@@ -154,45 +154,35 @@ static JsAstNode* ts_strip_type_only_nodes(JsAstNode* body) {
 Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* filename) {
     log_debug("ts-mir: starting TypeScript transpilation for '%s'", filename ? filename : "<string>");
 
-    // Phase 1: Preprocess TS source — strip type annotations to produce valid JS
-    size_t js_len = 0;
-    char* js_source = ts_preprocess_source(ts_source, strlen(ts_source), &js_len);
-    if (!js_source) {
-        log_error("ts-mir: preprocessing failed");
-        return (Item){.item = ITEM_ERROR};
-    }
-    log_debug("ts-mir: preprocessed %zu bytes JS", js_len);
+    size_t ts_len = strlen(ts_source);
 
     // create TS transpiler
     TsTranspiler* tp = ts_transpiler_create(runtime);
     if (!tp) {
         log_error("ts-mir: failed to create transpiler");
-        free(js_source);
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Phase 2: Parse the preprocessed JS source with the JS parser
-    if (!ts_transpiler_parse(tp, js_source, js_len)) {
+    // Phase 1: Parse the TypeScript source with the TS parser (types preserved in CST)
+    if (!ts_transpiler_parse(tp, ts_source, ts_len)) {
         log_error("ts-mir: parse failed");
-        free(js_source);
         ts_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
 
     TSNode root = ts_tree_root_node(tp->tree);
 
-    // Phase 3: Build AST from the clean JS CST
+    // Phase 2: Build AST from the TS CST (type annotations preserved as TsTypeNode)
     log_debug("ts-mir: building AST...");
     JsAstNode* ts_ast = build_ts_ast(tp, root);
     if (!ts_ast) {
         log_error("ts-mir: AST build failed");
-        free(js_source);
         ts_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
     log_debug("ts-mir: AST built, node_type=%d", ts_ast->node_type);
 
-    // Phase 4: Resolve type annotations (from TS-specific AST nodes, if any)
+    // Phase 3: Resolve type annotations (from TS-specific AST nodes)
     log_debug("ts-mir: resolving types...");
     ts_resolve_all_types(tp, ts_ast);
     log_debug("ts-mir: types resolved");
@@ -204,12 +194,11 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
         log_debug("ts-mir: type-only nodes stripped");
     }
 
-    // Phase 5: Delegate to JS MIR transpiler with the pre-built AST
+    // Phase 4: Delegate to JS MIR transpiler with the pre-built AST
     log_debug("ts-mir: delegating to JS MIR transpiler...");
     Item result = transpile_js_ast_to_mir(runtime, (JsTranspiler*)tp, ts_ast, filename);
     log_debug("ts-mir: JS MIR transpiler returned");
 
-    free(js_source);
     ts_transpiler_destroy(tp);
     log_debug("ts-mir: transpilation completed");
     return result;

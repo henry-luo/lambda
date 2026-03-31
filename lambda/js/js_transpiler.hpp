@@ -97,6 +97,7 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node);
 JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
 
 // AST utility functions (build_js_ast.cpp)
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
