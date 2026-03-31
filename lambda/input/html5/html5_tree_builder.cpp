@@ -2514,6 +2514,14 @@ static void html5_process_in_select_mode(Html5Parser* parser, Html5Token* token)
             return;
         }
 
+        // hr inside select: allowed per updated HTML spec (WHATWG 2022+)
+        // https://bugzilla.mozilla.org/show_bug.cgi?id=2008003
+        if (strcmp(tag, "hr") == 0) {
+            html5_insert_html_element(parser, token);
+            html5_pop_element(parser);  // hr is void, immediately pop
+            return;
+        }
+
         // Anything else - parse error, ignore
         log_error("html5: ignoring <%s> in select mode", tag);
         return;

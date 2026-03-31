@@ -260,6 +260,11 @@ const char* DomNode::get_attribute(const char* attr_name) const {
     return elem ? dom_element_get_attribute(const_cast<DomElement*>(elem), attr_name) : nullptr;
 }
 
+bool DomNode::has_attribute(const char* attr_name) const {
+    const DomElement* elem = as_element();
+    return elem ? dom_element_has_attribute(const_cast<DomElement*>(elem), attr_name) : false;
+}
+
 const char* DomNode::node_name() const {
     // Dispatch based on node type
     switch (node_type) {

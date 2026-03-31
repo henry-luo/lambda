@@ -156,10 +156,10 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
         form->intrinsic_width = 0;
     }
 
-    // Content height: just font size
-    if (font && font->font_size > 0) {
-        form->intrinsic_height = font->font_size;
-    } else {
+    // Content height: border-box height should match TEXT_HEIGHT (21px) minus border and padding.
+    // Using font_size directly would give incorrect height (font_size + border + padding != 21).
+    // CSS UA stylesheets size buttons to match text input height for visual consistency.
+    {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);
         form->intrinsic_height = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
     }
@@ -190,34 +190,84 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 }
             }
         } else if (ctag == HTM_TAG_OPTGROUP) {
-            // Check options inside optgroup
+            // Measure optgroup label — shown as a header row in the dropdown (no indent)
+            const char* label_attr = child_elem->get_attribute("label");
+            if (label_attr) {
+                size_t label_len = strlen(label_attr);
+                if (label_len > 0) {
+                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, label_attr, label_len);
+                    if (tw.max_content > max_text_width)
+                        max_text_width = tw.max_content;
+                }
+            }
+            // Check options inside optgroup — they are indented in the dropdown on macOS Chrome
             for (DomNode* gc = child_elem->first_child; gc; gc = gc->next_sibling) {
                 if (gc->is_element() && gc->as_element()->tag() == HTM_TAG_OPTION) {
+                    float opt_text_width = 0;
                     for (DomNode* tc = gc->as_element()->first_child; tc; tc = tc->next_sibling) {
                         DomText* dt = tc->as_text();
                         if (dt && dt->text && dt->length > 0) {
                             TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, dt->text, dt->length);
-                            if (tw.max_content > max_text_width)
-                                max_text_width = tw.max_content;
+                            if (tw.max_content > opt_text_width)
+                                opt_text_width = tw.max_content;
                         }
                     }
+                    // Apply indent; blank options in an optgroup still occupy at least OPTGROUP_OPTION_MIN_WIDTH
+                    float effective = opt_text_width + FormDefaults::OPTGROUP_OPTION_INDENT;
+                    if (effective < FormDefaults::OPTGROUP_OPTION_MIN_WIDTH)
+                        effective = FormDefaults::OPTGROUP_OPTION_MIN_WIDTH;
+                    if (effective > max_text_width)
+                        max_text_width = effective;
                 }
             }
         }
     }
 
-    // Select border-box width = text + arrow + border
-    // Chrome empty select ≈ 22px border-box. FreeType slightly overestimates text
-    // width for long strings, so use moderate overhead and a minimum width.
-    float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f; // arrow + small margin
-    float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f; // ~22px minimum (matches Chrome empty)
-    float calculated = max_text_width + overhead;
-    form->intrinsic_width = calculated > min_select_width ? calculated : min_select_width;
-    form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
+    // Chrome select border-box width includes text + arrow area + internal padding.
+    // Chrome uses the system font for select text, which differs from the page font.
+    // FreeType measures with the page font — sometimes wider, sometimes narrower than Chrome.
+    // A moderate overhead balances both cases across the test suite.
+
+    // HTML §4.10.7: listbox mode when multiple attr is set OR size > 1
+    // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
+    bool is_listbox = form->multiple || form->select_size > 1;
+    if (is_listbox) {
+        // Listbox mode: width = max option text + small padding; no dropdown arrow
+        // Chrome listbox select content-box width = max_text_width with some internal padding
+        float content_width = max_text_width;
+        float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
+        form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
+
+        // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
+        int visible_rows;
+        if (form->select_size > 0) {
+            visible_rows = form->select_size;
+        } else if (form->multiple) {
+            visible_rows = 4;  // HTML spec default for multiple without explicit size
+        } else {
+            visible_rows = 1;
+        }
+
+        // Chrome listbox select: row_height = 17px, border = 1px all sides
+        // border-box height = visible_rows * row_height + top_border + bottom_border
+        const float row_height = 17.0f;
+        form->intrinsic_height = visible_rows * row_height + 2.0f;
+    } else {
+        // Combo box mode
+        float overhead = FormDefaults::SELECT_ARROW_WIDTH + 1.0f; // arrow + small margin
+        float min_select_width = FormDefaults::SELECT_HEIGHT + 3.0f; // ~22px minimum (matches Chrome empty)
+        float calculated = max_text_width + overhead;
+        form->intrinsic_width = calculated > min_select_width ? calculated : min_select_width;
+        form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
+    }
 
     // Update given_width only if CSS didn't specify an explicit width
     if (block->blk && block->blk->given_width < 0) {
         block->blk->given_width = form->intrinsic_width;
+    }
+    // Always update given_height to match computed intrinsic height (may differ from default)
+    if (block->blk) {
+        block->blk->given_height = form->intrinsic_height;
     }
 }
 
@@ -366,56 +416,131 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     if (block->content_height < 0) block->content_height = 0;
 
     // Set internal text baseline for inline-block baseline alignment.
-    // Form controls with text (input, select, textarea) have a virtual internal
+    // Form controls with text (input, textarea, button) have a virtual internal
     // baseline where their text content would sit. Without this, the parent's
     // inline layout treats them as replaced elements (baseline at bottom margin edge),
     // which causes the line box to be taller than expected.
+    // SELECT uses bottom-margin-edge baseline per CSS 2.1 §10.8.1 (no in-flow CSS
+    // line boxes), consistent with replaced elements. This ensures correct vertical
+    // alignment when selects of different heights appear on the same line.
     if (form->control_type == FORM_CONTROL_TEXT ||
         form->control_type == FORM_CONTROL_TEXTAREA ||
-        form->control_type == FORM_CONTROL_SELECT ||
         form->control_type == FORM_CONTROL_BUTTON) {
         float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
         float pad_top = block->bound ? block->bound->padding.top : 0;
-        // Font ascender ≈ 80% of font-size (typical for common fonts like Arial/Times)
-        float font_ascender = font ? font->font_size * 0.8f : 13.0f;
+        // Use the font ascender from font metrics (hhea_ascender).
+        // This ensures the form control's internal text baseline aligns correctly
+        // with surrounding inline text, keeping line box height minimal.
+        float font_ascender = (font && font->ascender > 0) ? font->ascender : (font ? font->font_size * 0.8f : 13.0f);
         lycon->block.last_line_ascender = border_top + pad_top + font_ascender;
+        lycon->block.last_line_max_ascender = lycon->block.last_line_ascender;
     }
 
     log_debug("[FORM] layout complete: w=%.1f h=%.1f cw=%.1f ch=%.1f",
               block->width, block->height, block->content_width, block->content_height);
 
     // For select (and other form controls with option/optgroup children):
-    // Mark option/optgroup children as 0×0 blocks in the view tree so they appear
-    // in the layout output (Chrome reports them with 0×0 getBoundingClientRect)
-    if (block->is_element()) {
+    // - Listbox mode (multiple or size>1): position each option as a row inside the select.
+    //   Each option gets the full content-area width and row_height, stacked from top.
+    //   Chrome listbox: border=1px all sides, no padding, row_height=17px.
+    // - Combo box mode: options are not rendered; report 0×0 (Chrome behaviour).
+    if (block->is_element() && form->control_type == FORM_CONTROL_SELECT) {
+        bool is_listbox = form->multiple || form->select_size > 1;
+
+        float border_left = (block->bound && block->bound->border) ? block->bound->border->width.left : 0;
+        float border_top  = (block->bound && block->bound->border) ? block->bound->border->width.top  : 0;
+        float border_right= (block->bound && block->bound->border) ? block->bound->border->width.right : 0;
+        float option_width = block->width - border_left - border_right - block->bound->padding.left - block->bound->padding.right;
+        if (option_width < 0) option_width = 0;
+
+        // row_height matches Chrome's listbox option row (17px per CSS spec / Chrome UA)
+        const float row_height = 17.0f;
+        // hr margin-top per UA stylesheet: 0.5em (HTML spec §10 / Chrome UA)
+        float fs = (font && font->font_size > 0) ? font->font_size : 13.333f;
+        const float hr_margin_top = fs * 0.5f;
+        float current_y = border_top;  // tracks y offset for next item in listbox
+
+        for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+            if (!child->is_element()) continue;
+            DomElement* celem = child->as_element();
+            uintptr_t ctag = celem->tag();
+
+            if (ctag == HTM_TAG_OPTION) {
+                celem->view_type = RDT_VIEW_BLOCK;
+                if (is_listbox) {
+                    celem->x = border_left;
+                    celem->y = current_y;
+                    celem->width = option_width;
+                    celem->height = row_height;
+                    celem->content_width = option_width;
+                    celem->content_height = row_height;
+                    current_y += row_height;
+                } else {
+                    celem->x = 0;  celem->y = 0;
+                    celem->width = 0;  celem->height = 0;
+                    celem->content_width = 0;  celem->content_height = 0;
+                }
+            } else if (ctag == HTM_TAG_HR) {
+                celem->view_type = RDT_VIEW_BLOCK;
+                if (is_listbox) {
+                    // hr inside listbox: zero height, margin-top = 0.5em (UA stylesheet)
+                    current_y += hr_margin_top;
+                    celem->x = border_left;
+                    celem->y = current_y;
+                    celem->width = option_width;
+                    celem->height = 0;
+                    celem->content_width = option_width;
+                    celem->content_height = 0;
+                } else {
+                    celem->x = 0;  celem->y = 0;
+                    celem->width = 0;  celem->height = 0;
+                    celem->content_width = 0;  celem->content_height = 0;
+                }
+            } else if (ctag == HTM_TAG_OPTGROUP) {
+                celem->view_type = RDT_VIEW_BLOCK;
+                celem->x = 0;  celem->y = 0;
+                celem->width = 0;  celem->height = 0;
+                celem->content_width = 0;  celem->content_height = 0;
+                // Recurse into optgroup children
+                for (DomNode* gc = celem->first_child; gc; gc = gc->next_sibling) {
+                    if (!gc->is_element()) continue;
+                    DomElement* gcelem = gc->as_element();
+                    uintptr_t gctag = gcelem->tag();
+                    if (gctag == HTM_TAG_OPTION) {
+                        gcelem->view_type = RDT_VIEW_BLOCK;
+                        if (is_listbox) {
+                            gcelem->x = border_left;
+                            gcelem->y = current_y;
+                            gcelem->width = option_width;
+                            gcelem->height = row_height;
+                            gcelem->content_width = option_width;
+                            gcelem->content_height = row_height;
+                            current_y += row_height;
+                        } else {
+                            gcelem->x = 0;  gcelem->y = 0;
+                            gcelem->width = 0;  gcelem->height = 0;
+                            gcelem->content_width = 0;  gcelem->content_height = 0;
+                        }
+                    } else if (gctag == HTM_TAG_OPTGROUP) {
+                        gcelem->view_type = RDT_VIEW_BLOCK;
+                        gcelem->x = 0;  gcelem->y = 0;
+                        gcelem->width = 0;  gcelem->height = 0;
+                        gcelem->content_width = 0;  gcelem->content_height = 0;
+                    }
+                }
+            }
+        }
+    } else if (block->is_element()) {
+        // Non-select form controls: mark any stray children as 0×0
         for (DomNode* child = block->first_child; child; child = child->next_sibling) {
             if (child->is_element()) {
                 uintptr_t ctag = child->as_element()->tag();
                 if (ctag == HTM_TAG_OPTION || ctag == HTM_TAG_OPTGROUP) {
                     DomElement* celem = child->as_element();
                     celem->view_type = RDT_VIEW_BLOCK;
-                    celem->x = 0;
-                    celem->y = 0;
-                    celem->width = 0;
-                    celem->height = 0;
-                    celem->content_width = 0;
-                    celem->content_height = 0;
-                    // Recursively mark nested optgroup > option children
-                    for (DomNode* gc = celem->first_child; gc; gc = gc->next_sibling) {
-                        if (gc->is_element()) {
-                            uintptr_t gctag = gc->as_element()->tag();
-                            if (gctag == HTM_TAG_OPTION || gctag == HTM_TAG_OPTGROUP) {
-                                DomElement* gcelem = gc->as_element();
-                                gcelem->view_type = RDT_VIEW_BLOCK;
-                                gcelem->x = 0;
-                                gcelem->y = 0;
-                                gcelem->width = 0;
-                                gcelem->height = 0;
-                                gcelem->content_width = 0;
-                                gcelem->content_height = 0;
-                            }
-                        }
-                    }
+                    celem->x = 0;  celem->y = 0;
+                    celem->width = 0;  celem->height = 0;
+                    celem->content_width = 0;  celem->content_height = 0;
                 }
             }
         }
