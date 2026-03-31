@@ -1,0 +1,108 @@
+name: Nightly Windows Build & Test
+
+on:
+  schedule:
+    # 3:00 PM Singapore Time (SGT = UTC+8) = 07:00 UTC
+    - cron: '0 7 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            base-devel
+            git
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
+            ccache
+            mingw-w64-clang-x86_64-mpdecimal
+            mingw-w64-clang-x86_64-mbedtls
+            mingw-w64-clang-x86_64-freetype
+            mingw-w64-clang-x86_64-glfw
+            mingw-w64-clang-x86_64-libpng
+            mingw-w64-clang-x86_64-libjpeg-turbo
+            mingw-w64-clang-x86_64-giflib
+            mingw-w64-clang-x86_64-meson
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-nodejs
+            unzip
+            curl
+            wget
+            vim
+            jq
+
+      - name: Run build and tests
+        id: test
+        run: bash .github/workflows/run-tests-windows.sh
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: |
+            log.txt
+            test_output.txt
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # --- Notifications ---
+
+      - name: Prepare notification
+        if: always()
+        run: |
+          source .github/workflows/notify.sh
+          if [ "${{ steps.test.outcome }}" = "success" ]; then
+            EXIT_CODE=0
+          else
+            EXIT_CODE=1
+          fi
+          touch test_output.txt
+          format_notification "Windows" "$EXIT_CODE" "test_output.txt"
+          echo "NOTIFICATION<<EOF" >> $GITHUB_ENV
+          echo "$NOTIFICATION_MSG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Send Telegram notification
+        if: always() && vars.TELEGRAM_ENABLED == 'true'
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ${{ env.NOTIFICATION }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Send email notification
+        if: failure() && vars.EMAIL_ENABLED == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Lambda Nightly FAILED — Windows (#${{ github.run_number }})"
+          to: ${{ secrets.MAIL_TO }}
+          from: Lambda CI <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            ${{ env.NOTIFICATION }}
+
+            Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
