@@ -19,6 +19,7 @@ premake5.*.lua
 *.lib
 *.pc
 *.exe
+*.dwarf
 *.out
 *.app
 *.bin|
