@@ -16437,6 +16437,178 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
 }
 
 // ============================================================================
+// Public entry point: transpile a pre-built JS AST to MIR (used by TS transpiler)
+// ============================================================================
+
+Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename) {
+    log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
+
+    js_source_runtime = runtime;
+
+    // set up evaluation context
+    EvalContext js_context;
+    memset(&js_context, 0, sizeof(EvalContext));
+    EvalContext* old_context = context;
+    bool reusing_context = false;
+
+    if (old_context && old_context->heap) {
+        context = old_context;
+        reusing_context = true;
+        if (!context->nursery) {
+            context->nursery = gc_nursery_create(0);
+        }
+    } else {
+        js_context.nursery = gc_nursery_create(0);
+        context = &js_context;
+        heap_init();
+        context->pool = context->heap->pool;
+        context->name_pool = name_pool_create(context->pool, nullptr);
+        context->type_list = arraylist_new(64);
+    }
+
+    _lambda_rt = (Context*)context;
+
+    Input* js_input = Input::create(context->pool);
+    js_runtime_set_input(js_input);
+
+    // initialize MIR context
+    MIR_context_t ctx = jit_init(2);
+    if (!ctx) {
+        log_error("js-mir-ast: MIR context init failed");
+        context = old_context;
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // set up MIR transpiler
+    JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
+    if (!mt) {
+        log_error("js-mir-ast: failed to allocate JsMirTranspiler");
+        MIR_finish(ctx);
+        context = old_context;
+        return (Item){.item = ITEM_ERROR};
+    }
+    memset(mt, 0, sizeof(JsMirTranspiler));
+    mt->tp = tp;
+    mt->ctx = ctx;
+    mt->import_cache = hashmap_new(sizeof(JsImportCacheEntry), 64, 0, 0,
+        js_import_cache_hash, js_import_cache_cmp, NULL, NULL);
+    mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), 32, 0, 0,
+        js_local_func_hash, js_local_func_cmp, NULL, NULL);
+    mt->var_scopes[0] = hashmap_new(sizeof(JsVarScopeEntry), 16, 0, 0,
+        js_var_scope_hash, js_var_scope_cmp, NULL, NULL);
+    mt->scope_depth = 0;
+    mt->collect_parent_func_index = -1;
+    mt->scope_env_reg = 0;
+    mt->scope_env_slot_count = 0;
+    mt->current_func_index = -1;
+    mt->filename = filename;
+
+    mt->module = MIR_new_module(ctx, "ts_script");
+
+    // transpile AST to MIR
+    transpile_js_mir_ast(mt, ast);
+
+#ifndef NDEBUG
+    create_dir_recursive("temp");
+    FILE* mir_dump = fopen("temp/ts_mir_dump.txt", "w");
+    if (mir_dump) {
+        bool dump_safe = true;
+        for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
+             m = DLIST_NEXT(MIR_module_t, m)) {
+            for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
+                 item = DLIST_NEXT(MIR_item_t, item)) {
+                if (item->item_type == MIR_func_item) {
+                    MIR_func_t func = item->u.func;
+                    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn != NULL;
+                         insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                        for (size_t i = 0; i < insn->nops; i++) {
+                            if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
+                                dump_safe = false;
+                                break;
+                            }
+                        }
+                        if (!dump_safe) break;
+                    }
+                }
+                if (!dump_safe) break;
+            }
+            if (!dump_safe) break;
+        }
+        if (dump_safe) {
+            MIR_output(ctx, mir_dump);
+        } else {
+            fprintf(mir_dump, "ERROR: NULL labels detected, dump skipped\n");
+        }
+        fclose(mir_dump);
+    }
+#endif
+
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+
+    typedef Item (*js_main_func_t)(Context*);
+    js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
+
+    if (!js_main) {
+        log_error("js-mir-ast: failed to find js_main");
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        context = old_context;
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // execute
+    log_notice("js-mir-ast: executing JIT compiled code");
+    js_reset_module_vars();
+    Item result = js_main((Context*)context);
+    log_notice("js-mir-ast: execution returned (type=%d)", get_type_id(result));
+
+    // handle result
+    Item final_result;
+    TypeId type_id = get_type_id(result);
+
+    if (reusing_context) {
+        final_result = result;
+    } else {
+        if (type_id == LMD_TYPE_FLOAT) {
+            double value = it2d(result);
+            if (value == (double)(int64_t)value && value >= INT32_MIN && value <= INT32_MAX) {
+                final_result = (Item){.item = i2it((int64_t)value)};
+            } else {
+                double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *ptr = value;
+                final_result = (Item){.item = d2it(ptr)};
+            }
+        } else {
+            final_result = result;
+        }
+    }
+
+    context = old_context;
+
+    // cleanup
+    hashmap_free(mt->import_cache);
+    hashmap_free(mt->local_funcs);
+    if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+    if (mt->module_consts) hashmap_free(mt->module_consts);
+    for (int i = 0; i <= mt->scope_depth; i++) {
+        if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+    }
+    free(mt);
+    MIR_finish(ctx);
+    jm_cleanup_deferred_mir();
+
+    log_debug("js-mir-ast: transpilation completed");
+    return final_result;
+}
+
+// ============================================================================
 // Public entry point for JS transpilation via direct MIR generation
 // ============================================================================
 
