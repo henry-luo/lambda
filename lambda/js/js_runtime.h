@@ -378,6 +378,9 @@ Item js_object_rest(Item src, Item* exclude_keys, int exclude_count);
 Item js_encodeURIComponent(Item str_item);
 Item js_decodeURIComponent(Item str_item);
 Item js_unescape(Item str_item);
+Item js_escape(Item str_item);
+Item js_atob(Item str_item);
+Item js_btoa(Item str_item);
 
 // globalThis
 Item js_get_global_this(void);

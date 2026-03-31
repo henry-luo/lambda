@@ -18,7 +18,7 @@ void collapse_empty_auto_fit_tracks(GridContainerLayout* grid_layout);
 // Initialize grid container layout state
 void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!container) return;
-    log_debug("Initializing grid container for %p\n", container);
+    log_debug("%s Initializing grid container for %p\n", container->source_loc(), container);
 
     GridContainerLayout* grid = (GridContainerLayout*)mem_calloc(1, sizeof(GridContainerLayout), MEM_CAT_LAYOUT);
     lycon->grid_container = grid;
@@ -29,11 +29,11 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     grid->auto_col_cursor = 1;
 
     // Debug: check what's available
-    log_debug("container->embed=%p", (void*)container->embed);
+    log_debug("%s container->embed=%p", container->source_loc(), (void*)container->embed);
     if (container->embed) {
-        log_debug("container->embed->grid=%p", (void*)container->embed->grid);
+        log_debug("%s container->embed->grid=%p", container->source_loc(), (void*)container->embed->grid);
         if (container->embed->grid) {
-            log_debug("embed->grid values: row_gap=%.1f, column_gap=%.1f",
+            log_debug("%s embed->grid values: row_gap=%.1f, column_gap=%.1f", container->source_loc(),
                       container->embed->grid->row_gap, container->embed->grid->column_gap);
         }
     }
@@ -41,7 +41,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (container->embed && container->embed->grid) {
         memcpy(grid, container->embed->grid, sizeof(GridProp));
         grid->lycon = lycon;  // Restore after memcpy
-        log_debug("Copied grid props: row_gap=%.1f, column_gap=%.1f",
+        log_debug("%s Copied grid props: row_gap=%.1f, column_gap=%.1f", container->source_loc(),
                   grid->row_gap, grid->column_gap);
     } else {
         // Set default values using enum names that align with Lexbor constants
@@ -66,7 +66,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->area_count = 0;  // Reset if we allocated new
     }
     // If grid_areas was copied from embed->grid, keep it as-is
-    log_debug("Grid areas after init: area_count=%d, grid_areas=%p", grid->area_count, (void*)grid->grid_areas);
+    log_debug("%s Grid areas after init: area_count=%d, grid_areas=%p", container->source_loc(), grid->area_count, (void*)grid->grid_areas);
 
     grid->allocated_line_names = 8;
     grid->line_names = (GridLineName*)mem_calloc(grid->allocated_line_names, sizeof(GridLineName), MEM_CAT_LAYOUT);
@@ -100,7 +100,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     grid->needs_reflow = false;
 
-    log_debug("Grid container initialized successfully\n");
+    log_debug("%s Grid container initialized successfully\n", container->source_loc());
 }
 
 // Cleanup grid container resources
@@ -163,9 +163,9 @@ void cleanup_grid_container(LayoutContext* lycon) {
 
 // Main grid layout algorithm entry point
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
-    log_debug("layout_grid_container called with container=%p", container);
+    log_debug("%s layout_grid_container called with container=%p", container->source_loc(), container);
     if (!container) {
-        log_debug("Early return - container is NULL\n");
+        log_debug("%s Early return - container is NULL\n", container->source_loc());
         return;
     }
 
@@ -173,21 +173,21 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Note: embed->grid may be NULL if grid-template-* properties weren't resolved,
     // but we can still run grid layout with auto-placement
     if (container->display.inner != CSS_VALUE_GRID) {
-        log_debug("Early return - not a grid container (display.inner=%d)\n", container->display.inner);
+        log_debug("%s Early return - not a grid container (display.inner=%d)\n", container->source_loc(), container->display.inner);
         return;
     }
 
     GridContainerLayout* grid_layout = lycon->grid_container;
-    log_debug("Grid container found - template_columns=%p, template_rows=%p",
+    log_debug("%s Grid container found - template_columns=%p, template_rows=%p", container->source_loc(),
         grid_layout->grid_template_columns, grid_layout->grid_template_rows);
     if (grid_layout->grid_template_columns) {
-        log_debug("DEBUG: Template columns track count: %d", grid_layout->grid_template_columns->track_count);
+        log_debug("%s DEBUG: Template columns track count: %d", container->source_loc(), grid_layout->grid_template_columns->track_count);
     }
     if (grid_layout->grid_template_rows) {
-        log_debug("DEBUG: Template rows track count: %d", grid_layout->grid_template_rows->track_count);
+        log_debug("%s DEBUG: Template rows track count: %d", container->source_loc(), grid_layout->grid_template_rows->track_count);
     }
 
-    log_debug("GRID START - container: %dx%d at (%d,%d)",
+    log_debug("%s GRID START - container: %dx%d at (%d,%d)", container->source_loc(),
         container->width, container->height, container->x, container->y);
 
     // Check if container is shrink-to-fit (absolutely positioned with no explicit width,
@@ -207,7 +207,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
     grid_layout->is_shrink_to_fit_width = is_shrink_to_fit_width;
     grid_layout->row_intrinsic_height = -1.0f;
-    log_debug("GRID: is_shrink_to_fit_width=%d", is_shrink_to_fit_width);
+    log_debug("%s GRID: is_shrink_to_fit_width=%d", container->source_loc(), is_shrink_to_fit_width);
 
     // Set container dimensions
     grid_layout->container_width = container->width;
@@ -216,7 +216,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Determine if container has an explicit height (not auto)
     // This affects whether auto row tracks should stretch to fill the container
     grid_layout->has_explicit_height = (container->blk && container->blk->given_height >= 0);
-    log_debug("GRID: has_explicit_height=%d (given_height=%.1f)",
+    log_debug("%s GRID: has_explicit_height=%d (given_height=%.1f)", container->source_loc(),
               grid_layout->has_explicit_height,
               container->blk ? container->blk->given_height : -1);
 
@@ -252,22 +252,22 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    log_debug("GRID CONTENT - content: %dx%d, container: %dx%d\n",
+    log_debug("%s GRID CONTENT - content: %dx%d, container: %dx%d\n", container->source_loc(),
               grid_layout->content_width, grid_layout->content_height,
               container->width, container->height);
 
     // Phase 1: Collect grid items (need count for auto-fit)
-    log_debug("DEBUG: Phase 1 - Collecting grid items");
+    log_debug("%s DEBUG: Phase 1 - Collecting grid items", container->source_loc());
     ViewBlock** items;
     int item_count = collect_grid_items(grid_layout, container, &items);
 
-    log_debug("GRID - collected %d items", item_count);
+    log_debug("%s GRID - collected %d items", container->source_loc(), item_count);
 
     // Expand auto-fill/auto-fit repeat() tracks now that we know content_width and item_count
     expand_auto_repeat_tracks(grid_layout);
 
     if (item_count == 0) {
-        log_debug("No grid items found - computing track sizes for empty grid (for absolute children and container sizing)");
+        log_debug("%s No grid items found - computing track sizes for empty grid (for absolute children and container sizing)", container->source_loc());
         // Even with no items, we need to resolve explicit track sizes so that:
         // 1. Absolutely positioned children can use grid-line positions for their containing block.
         // 2. The container gets the correct height from explicit grid-template-rows + padding.
@@ -292,7 +292,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
             }
             if (new_h > (float)container->height) {
                 container->height = (int)new_h;
-                log_debug("GRID: Updated empty-grid container height to %.1f from explicit rows", new_h);
+                log_debug("%s GRID: Updated empty-grid container height to %.1f from explicit rows", container->source_loc(), new_h);
             }
         }
         grid_layout->needs_reflow = false;
@@ -300,11 +300,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     // Phase 2: Resolve grid template areas
-    log_debug("DEBUG: Phase 2 - Resolving grid template areas");
+    log_debug("%s DEBUG: Phase 2 - Resolving grid template areas", container->source_loc());
     resolve_grid_template_areas(grid_layout);
 
     // Phase 2.5: Register named grid lines from track lists and template areas
-    log_debug("DEBUG: Phase 2.5 - Registering named grid lines");
+    log_debug("%s DEBUG: Phase 2.5 - Registering named grid lines", container->source_loc());
     if (grid_layout->grid_template_columns) {
         GridTrackList* cols = grid_layout->grid_template_columns;
         for (int i = 0; i <= cols->track_count && i < cols->allocated_tracks + 1; i++) {
@@ -337,11 +337,11 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     // Phase 3: Determine initial grid size from templates (before placement)
-    log_debug("DEBUG: Phase 3 - Determining initial grid size from templates");
+    log_debug("%s DEBUG: Phase 3 - Determining initial grid size from templates", container->source_loc());
     determine_grid_size(grid_layout);
 
     // Phase 3.5: Resolve named line references into integer line numbers
-    log_debug("DEBUG: Phase 3.5 - Resolving named line references");
+    log_debug("%s DEBUG: Phase 3.5 - Resolving named line references", container->source_loc());
     for (int idx = 0; idx < item_count; idx++) {
         ViewBlock* item = items[idx];
         if (!item->gi) continue;
@@ -364,7 +364,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     // Phase 4: Place grid items (using enhanced CellOccupancyMatrix algorithm)
-    log_debug("DEBUG: Phase 4 - Placing grid items with enhanced algorithm");
+    log_debug("%s DEBUG: Phase 4 - Placing grid items with enhanced algorithm", container->source_loc());
 
     // Use enhanced placement algorithm with proper collision detection
     // This replaces both place_grid_items and auto_place_grid_items_dense
@@ -382,7 +382,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // We must NOT let determine_grid_size() shrink these values — it only sees item
     // end positions and misses the full grid extent when negative implicit tracks exist.
     // Instead, just ensure the counts are at least as large as what items require.
-    log_debug("DEBUG: Phase 5 - Updating grid size after placement");
+    log_debug("%s DEBUG: Phase 5 - Updating grid size after placement", container->source_loc());
     {
         int prev_col_count = grid_layout->computed_column_count;
         int prev_row_count = grid_layout->computed_row_count;
@@ -406,7 +406,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // collapsing is implemented (CSS Grid §7.2.3.2 requires collapsed gutters too).
 
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
-    log_debug("DEBUG: Phase 6 - Resolving track sizes");
+    log_debug("%s DEBUG: Phase 6 - Resolving track sizes", container->source_loc());
     resolve_track_sizes_enhanced(grid_layout, container);
 
     // For shrink-to-fit containers, update container width based on resolved track sizes
@@ -428,15 +428,15 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     }
 
     // Phase 6: Position grid items
-    log_debug("DEBUG: Phase 6 - Positioning grid items");
+    log_debug("%s DEBUG: Phase 6 - Positioning grid items", container->source_loc());
     position_grid_items(grid_layout, container);
 
     // Phase 7: Align grid items
-    log_debug("DEBUG: Phase 7 - Aligning grid items");
+    log_debug("%s DEBUG: Phase 7 - Aligning grid items", container->source_loc());
     align_grid_items(grid_layout);
 
     // Phase 7.5: Apply relative/sticky positioning offsets to grid items
-    log_debug("DEBUG: Phase 7.5 - Applying relative positioning offsets");
+    log_debug("%s DEBUG: Phase 7.5 - Applying relative positioning offsets", container->source_loc());
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
         if (!item || !item->position) continue;
@@ -467,7 +467,7 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 : -(item->position->bottom_percent * parent_h / 100.0f);
         }
         if (offset_x != 0 || offset_y != 0) {
-            log_debug("Phase 7.5: grid item %d relative offset (%.0f, %.0f)", i, offset_x, offset_y);
+            log_debug("%s Phase 7.5: grid item %d relative offset (%.0f, %.0f)", container->source_loc(), i, offset_x, offset_y);
             item->x += (int)offset_x;
             item->y += (int)offset_y;
         }
@@ -477,20 +477,20 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // The multipass flow calls layout_final_grid_content() after this function returns
 
     // Debug: Final item positions
-    log_debug("DEBUG: FINAL GRID POSITIONS:");
+    log_debug("%s DEBUG: FINAL GRID POSITIONS:", container->source_loc());
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
-        log_debug("FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d, grid_area: (%d-%d, %d-%d)",
+        log_debug("%s FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d, grid_area: (%d-%d, %d-%d)", container->source_loc(),
             i, item->x, item->y, item->width, item->height,
             item->gi ? item->gi->computed_grid_row_start : 0,
             item->gi ? item->gi->computed_grid_row_end : 0,
             item->gi ? item->gi->computed_grid_column_start : 0,
             item->gi ? item->gi->computed_grid_column_end : 0);
     }
-    log_debug("FINAL GRID POSITIONS:");
+    log_debug("%s FINAL GRID POSITIONS:", container->source_loc());
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
-        log_debug("FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d",
+        log_debug("%s FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d", container->source_loc(),
                   i, item->x, item->y, item->width, item->height);
     }
 
@@ -499,23 +499,23 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
 // Collect grid items from container children
 int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ViewBlock*** items) {
-    log_debug("collect_grid_items called with container=%p, items=%p", container, items);
+    log_debug("%s collect_grid_items called with container=%p, items=%p", container->source_loc(), container, items);
     if (!container || !items) {
-        log_debug("Early return - container=%p, items=%p", container, items);
+        log_debug("%s Early return - container=%p, items=%p", container->source_loc(), container, items);
         return 0;
     }
-    log_debug("grid=%p", grid_layout);
+    log_debug("%s grid=%p", container->source_loc(), grid_layout);
     if (!grid_layout) {
-        log_debug("Early return - grid is NULL");
+        log_debug("%s Early return - grid is NULL", container->source_loc());
         return 0;
     }
 
     int count = 0;
 
     // Count element children first - ONLY count element nodes, skip text nodes
-    log_debug("About to access container->first_child");
+    log_debug("%s About to access container->first_child", container->source_loc());
     DomNode* child_node = container->first_child;
-    log_debug("first_child=%p", child_node);
+    log_debug("%s first_child=%p", container->source_loc(), child_node);
     while (child_node) {
         // CRITICAL FIX: Only process element nodes, skip text nodes
         if (!child_node->is_element()) {
@@ -536,7 +536,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         child_node = child_node->next_sibling;
     }
 
-    log_debug("collect_grid_items: found %d element children", count);
+    log_debug("%s collect_grid_items: found %d element children", container->source_loc(), count);
 
     if (count == 0) {
         *items = nullptr;
@@ -913,7 +913,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
         }
 
         if (!placed) {
-            log_error("Failed to auto-place grid item after %d iterations", iterations);
+            log_error("%s Failed to auto-place grid item after %d iterations", item->source_loc(), iterations);
             // Force placement at cursor as fallback
             item->gi->computed_grid_column_start = 1;
             item->gi->computed_grid_column_end = 1 + col_span;
@@ -955,14 +955,14 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item) {
         }
 
         if (!placed) {
-            log_error("Failed to auto-place grid item (column-flow) after %d iterations", iterations);
+            log_error("%s Failed to auto-place grid item (column-flow) after %d iterations", item->source_loc(), iterations);
             item->gi->computed_grid_row_start = 1;
             item->gi->computed_grid_row_end = 1 + row_span;
             item->gi->computed_grid_column_start = grid_layout->auto_col_cursor;
             item->gi->computed_grid_column_end = grid_layout->auto_col_cursor + col_span;
         }
 
-        log_debug(" Placed item at row %d-%d, col %d-%d (column-first)\n",
+        log_debug("%s  Placed item at row %d-%d, col %d-%d (column-first)\n", item->source_loc(),
                item->gi->computed_grid_row_start, item->gi->computed_grid_row_end,
                item->gi->computed_grid_column_start, item->gi->computed_grid_column_end);
     }
