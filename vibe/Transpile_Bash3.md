@@ -2,9 +2,11 @@
 
 ## Executive Summary
 
-Lambda's bash transpiler currently passes **4 of 82** GNU official tests (dbg-support2, invert, strip, tilde). The 137+ runtime C functions and tree-sitter-to-MIR pipeline are architecturally sound, but the failure patterns reveal that many features are implemented only to the depth of the hand-written baseline tests — not to the depth GNU Bash requires for conformance.
+Lambda's bash transpiler currently passes **4 of 82** GNU official tests (dbg-support2, dstack2, invert, strip). The 137+ runtime C functions and tree-sitter-to-MIR pipeline are architecturally sound, but the failure patterns reveal that many features are implemented only to the depth of the hand-written baseline tests — not to the depth GNU Bash requires for conformance.
 
 This proposal takes a **bottom-up approach**: survey what the GNU tests demand, design robust C modules to handle each feature area, unit-test those modules for correctness, then wire the transpiler to call them. Instead of chasing tests one at a time, we build solid foundations that make many tests pass simultaneously.
+
+**Baseline status:** 31/31 passing (32 total, 1 skipped).
 
 ---
 
@@ -12,14 +14,14 @@ This proposal takes a **bottom-up approach**: survey what the GNU tests demand, 
 
 ### 1.1 Test Survey Results (82 tests)
 
-| Category | Tests | Status |
-|----------|-------|--------|
-| **PASS** | dbg-support2, invert, strip, tilde | 4 |
-| **Near-pass (≤10 diff lines)** | dynvar(2), ifs-posix(2), tilde2(6), ifs(10) | 4 |
-| **Low diff (11–30)** | coproc, printf, exportfunc, case, comsub-eof, nquote4, dstack2, parser, lastpipe, posix2, extglob3, rsh, appendop, posixpat | 14 |
-| **Medium diff (31–100)** | procsub, herestr, posixpipe, attr, posixexp2, set-e, casemod, dstack, nquote3, alias, intl, getopts, cprint, set-x, nquote2, nquote5, iquote, comsub-posix, nquote, comsub | 20 |
-| **High diff (100–500)** | glob-bracket, rhs-exp, invocation, read, braces, vredir, jobs, type, nquote1, trap, quote, quotearray, heredoc, mapfile, redir, cond, comsub2, extglob, func, dbg-support, glob, histexp, posixexp, shopt, more-exp, test, errors, arith, varenv, history, complete, builtins, exp, nameref, globstar, new-exp | 36 |
-| **Crash/timeout** | array(0), assoc(0), extglob2(4.6M), arith-for(10M) | 4 |
+| Category | Tests | Count |
+|----------|-------|-------|
+| **PASS** | dbg-support2, dstack2, invert, strip | 4 |
+| **Near-pass (≤10 diff lines)** | ifs-posix(2), tilde(2), tilde2(6), ifs(9), dynvar(10) | 5 |
+| **Low diff (11–30)** | coproc(11), printf(11), exportfunc(15), case(18), comsub-eof(19), nquote4(19), posix2(19), appendop(20), parser(21), lastpipe(22), rsh(24), extglob3(25) | 12 |
+| **Medium diff (31–100)** | posixpat(31), procsub(32), herestr(35), posixpipe(35), attr(38), posixexp2(41), casemod(53), nquote3(61), alias(62), intl(63), cprint(68), getopts(69), set-x(74), set-e(75), dstack(77), nquote2(77), nquote5(87), comsub-posix(91), braces(92), iquote(92), comsub(93), nquote(93) | 22 |
+| **High diff (100–500)** | glob-bracket(104), rhs-exp(105), invocation(106), read(106), vredir(120), type(128), jobs(130), nquote1(134), trap(140), quote(147), quotearray(149), mapfile(155), heredoc(163), redir(176), cond(190), comsub2(198), extglob(216), func(249), glob(261), dbg-support(262), histexp(265), posixexp(308), shopt(315), more-exp(335), test(339), errors(345), arith(368), varenv(371), history(387), complete(388), builtins(485), exp(547), nameref(582), globstar(589), new-exp(811) | 35 |
+| **Crash/timeout** | array(0), assoc(0), extglob2(7.4M), arith-for(18.7M) | 4 |
 
 ### 1.2 Root Cause Patterns
 
@@ -523,13 +525,16 @@ If all seven modules are implemented and integrated:
 
 | Test | Diff | Blocking Issue | Module |
 |------|------|----------------|--------|
-| dynvar | 2 | Missing `$BASHPID`, `$EPOCHSECONDS` | Special variables (minor) |
 | ifs-posix | 2 | IFS word splitting | Word Expansion |
+| tilde | 2 | `~root` resolves to current user instead of root's home | Special variables (minor) |
 | tilde2 | 6 | POSIX-mode tilde differences | Word Expansion |
-| ifs | 10 | IFS word splitting | Word Expansion |
+| ifs | 9 | IFS word splitting | Word Expansion |
+| dynvar | 10 | Missing `$BASHPID`, `$EPOCHSECONDS` | Special variables (minor) |
+| coproc | 11 | Coprocess support | Builtins |
 | printf | 11 | Format specifier gaps | Printf |
+| exportfunc | 15 | `export -f` function export | Builtins |
 | case | 18 | `;&` and `;;&` operators | Pattern Matching |
-| appendop | 30 | `-i` attribute + array append | Variable Attributes |
+| appendop | 20 | `-i` attribute + array append | Variable Attributes |
 | posixpat | 31 | Bracket expression edge cases | Pattern Matching |
 
 ### Tests That Remain Hard
@@ -539,8 +544,8 @@ If all seven modules are implemented and integrated:
 | jobs, coproc | Require real job control (signals, process groups, terminal control) |
 | complete | Programmable completion — interactive feature, not targeted |
 | histexp, history | Interactive history expansion — not targeted |
-| extglob2 | 4.6M diff lines — likely infinite loop or crash |
-| arith-for | 10M diff lines — likely infinite loop in sub-scripts |
+| extglob2 | 7.4M diff lines — likely infinite loop or crash |
+| arith-for | 18.7M diff lines — likely infinite loop in sub-scripts |
 
 ---
 
@@ -614,3 +619,40 @@ If all seven modules are implemented and integrated:
 5. **Reuse existing runtime.** The 137+ existing C functions are not thrown away. The new modules wrap and organize them. For example, `bash_expand_parameter()` calls the existing `bash_param_default()`, `bash_param_assign()`, etc. — but within a proper pipeline context.
 
 6. **Stay within Lambda's C+ convention.** Use `Str`, `ArrayList`, `pool_calloc()`, `log_debug()` — not `std::string`, `std::vector`, `printf`.
+
+---
+
+## 8. Progress Log
+
+### 2025-03-31: Preprocessor Array Fix + Baseline Recovery
+
+**Baseline:** 31/31 passing (was 30/31 with `arrays` failing)
+
+**GNU tests:** 4/82 passing (dbg-support2, dstack2, invert, strip)
+- `dstack2` newly passing (was low-diff fail)
+- `tilde` regressed from PASS to FAIL[2] — `~root` resolves to current user's home instead of root's
+
+**Bugs fixed:**
+
+1. **Preprocessor array literal corruption** (root cause of `arrays` baseline failure)
+   - `preprocess_bash_source()` splits multi-assignment lines but didn't handle `(...)` array values
+   - When scanning `arr=(alpha beta)`, it broke on the space inside parentheses, stripping it and producing `arr=(alphabeta)`
+   - Fixed by adding `(` handling to copy array values verbatim with matched parentheses
+   - Files: `transpile_bash_mir.cpp` (`preprocess_bash_source`)
+
+2. **Tilde expansion applied to array literal values**
+   - `bash_expand_tilde_assign()` was called on all non-string assignment values, including array literals
+   - Added `BASH_AST_NODE_ARRAY_LITERAL` exclusion in assignment transpilation
+   - Files: `transpile_bash_mir.cpp` (assignment tilde expansion guard)
+
+3. **Defense-in-depth word splitting in AST builder**
+   - Added safety net in `build_array()` to split word nodes containing unquoted spaces into multiple elements
+   - Guards against any future tree-sitter misparsing of array contents
+   - Files: `build_bash_ast.cpp` (`build_array`)
+
+4. **`bash_var_append` integer arithmetic evaluation** (from prior session)
+   - Changed from `strtol` to `bash_arith_eval_value` for `BASH_ATTR_INTEGER` variables
+   - Enables `typeset -i b; b+=37` to do arithmetic addition instead of string concatenation
+   - Files: `bash_runtime.cpp` (`bash_var_append`)
+
+**Key discovery:** What was initially suspected as a tree-sitter-bash parser bug (array elements merged when followed by variable assignment) turned out to be caused by the preprocessor in `transpile_bash_mir.cpp`. The tree-sitter parser was parsing correctly — it was just receiving corrupted source text.
