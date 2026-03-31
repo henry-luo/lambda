@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Basic Font Size</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .small-text {
+            font-size: 12px;
+        }
+        .medium-text {
+            font-size: 16px;
+        }
+        .large-text {
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <p class="small-text">Small text</p>
+    <p class="medium-text">Medium text</p>
+    <p class="large-text">Large text</p>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_201_font_sizes",
+        "category": "baseline",
+        "features": ["font-size", "text-content"],
+        "description": "Text content with different font sizes",
+        "spec_references": ["https://www.w3.org/TR/CSS22/fonts.html#propdef-font-size"],
+        "complexity": "basic",
+        "expected_behavior": "Three paragraphs with 12px, 16px, and 24px text"
+    }
+    </script>
+</body>
+</html>

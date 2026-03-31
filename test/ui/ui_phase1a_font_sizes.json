@@ -1,6 +1,6 @@
 {
   "name": "Phase 1a: Layout verify - font sizes (baseline_201)",
-  "html": "test/layout/data/baseline/baseline_201_font_sizes.html",
+  "html": "test/ui/baseline_201_font_sizes.html",
   "events": [
     {"type": "log", "message": "=== Phase 1a: assert_visible + assert_text on baseline_201_font_sizes ==="},
     {"type": "log", "message": "No mouse interaction — pure layout verification."},

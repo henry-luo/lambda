@@ -1,6 +1,6 @@
 {
   "name": "Phase 3a: Mouse drag text selection (baseline_809)",
-  "html": "test/layout/data/baseline/baseline_809_text_align.html",
+  "html": "test/ui/baseline_809_text_align.html",
   "events": [
     {"type": "log", "message": "=== Phase 3a: drag text selection on baseline_809_text_align ==="},
     {"type": "log", "message": "Coord note: .left container (10,10) 344x62; inner <p> at (32,32) 300x18"},
