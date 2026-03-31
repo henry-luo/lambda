@@ -14,27 +14,26 @@ The render test suite renders HTML pages through both the **browser (Chrome via 
 
 ### Overall Progress
 
-| Component | Status |
-|-----------|--------|
-| Directory structure | ✅ Complete |
-| Puppeteer capture script | ✅ Complete |
-| Test runner (pixelmatch) | ✅ Complete |
-| Parallel execution | ✅ Complete |
+| Component                     | Status                    |
+| ----------------------------- | ------------------------- |
+| Directory structure           | ✅ Complete                |
+| Puppeteer capture script      | ✅ Complete                |
+| Test runner (pixelmatch)      | ✅ Complete                |
+| Parallel execution            | ✅ Complete                |
 | Per-test config.json sidecars | ✅ Complete (25 overrides) |
-| Makefile targets | ✅ Complete |
-| Lambda CLI render flags | ✅ Complete |
-| package.json & dependencies | ✅ Complete |
-| Phase 1 HTML test pages (20) | ✅ Complete |
-| Phase 1 reference PNGs | ✅ 20/20 captured |
-| **Phase 1 test results** | **✅ 20/20 passing** |
-| Phase 2 HTML test pages (10) | ✅ Complete |
-| Phase 2 reference PNGs | ✅ 10/10 captured |
-| **Phase 2 test results** | **✅ 10/10 passing** |
-| Phase 3 HTML test pages (10) | ✅ Complete |
-| Phase 3 reference PNGs | ✅ 10/10 captured |
-| **Phase 3 test results** | **✅ 10/10 passing** |
-| **Total test results** | **✅ 40/40 passing** |
-| CI/CD integration | ⏳ Not started |
+| Makefile targets              | ✅ Complete                |
+| Lambda CLI render flags       | ✅ Complete                |
+| package.json & dependencies   | ✅ Complete                |
+| Phase 1 HTML test pages (20)  | ✅ Complete                |
+| Phase 1 reference PNGs        | ✅ 20/20 captured          |
+| **Phase 1 test results**      | **✅ 20/20 passing**       |
+| Phase 2 HTML test pages (10)  | ✅ Complete                |
+| Phase 2 reference PNGs        | ✅ 10/10 captured          |
+| **Phase 2 test results**      | **✅ 10/10 passing**       |
+| Phase 3 HTML test pages (10)  | ✅ Complete                |
+| Phase 3 reference PNGs        | ✅ 10/10 captured          |
+| **Phase 3 test results**      | **✅ 10/10 passing**       |
+| **Total test results**        | **✅ 40/40 passing**       |
 
 ### Latest Test Results (macOS, debug build)
 
@@ -542,31 +541,6 @@ When a test fails:
    - Anti-aliasing issue → relax threshold in `.config.json` sidecar
    - Real regression → fix the rendering bug
    - Browser rendering changed → re-capture reference with `make capture-render test=<name>`
-
----
-
-## Integration with CI
-
-```yaml
-# GitHub Actions example
-render-test:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with: { node-version: '20' }
-    - run: make build
-    - run: make test-render
-    - uses: actions/upload-artifact@v4
-      if: failure()
-      with:
-        name: render-diffs
-        path: test/render/diff/
-```
-
-On failure, the diff images are uploaded as CI artifacts for visual inspection.
-
----
 
 ## Dependencies
 

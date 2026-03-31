@@ -1,6 +1,6 @@
 {
   "name": "Phase 1d: Click interactive elements - button, radio, checkbox, img, svg (baseline_830)",
-  "html": "test/layout/data/baseline/baseline_830_advanced_elements.html",
+  "html": "test/ui/baseline_830_advanced_elements.html",
   "description": "Tests click hit-testing on interactive and replaced elements. Button text 'Click Me' center (61,27). Radio label text 'Option A' center (52,59), 'Option B' (144,59). Checkbox label text 'Check 1' center (51,85). Image center (50,145), SVG center (135,145). Clicking replaced elements (img, svg) clears caret (browser behavior). Outside body clears caret. Body height=438, outside at y=470.",
   "events": [
     {"type": "log", "message": "=== Phase 1d: interactive element click tests ==="},
