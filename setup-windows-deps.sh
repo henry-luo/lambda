@@ -65,6 +65,7 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     rm -f lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter/tree_sitter.o 2>/dev/null || true
     rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o 2>/dev/null || true
+    rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o 2>/dev/null || true
     rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o 2>/dev/null || true
 
@@ -470,6 +471,37 @@ if [ ! -f "lambda/tree-sitter-latex/libtree-sitter-latex.a" ]; then
     cd - > /dev/null
 else
     echo "✅ Tree-sitter-latex already built for Windows"
+fi
+
+# Build tree-sitter-python
+if [ ! -f "lambda/tree-sitter-python/libtree-sitter-python.a" ]; then
+    echo "Building tree-sitter-python for Windows..."
+    cd lambda/tree-sitter-python
+
+    # Clean previous object files
+    rm -f src/*.o *.a *.so *.dylib
+
+    # Compile .c files directly to avoid Makefile OS guard
+    SRCS=$(find src -maxdepth 1 -name '*.c')
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        for f in $SRCS; do clang -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        llvm-ar rcs libtree-sitter-python.a src/*.o
+    else
+        for f in $SRCS; do gcc -std=c11 -fPIC -Isrc -O2 -c "$f" -o "${f%.c}.o"; done
+        ar rcs libtree-sitter-python.a src/*.o
+    fi
+
+    if [ -f "libtree-sitter-python.a" ]; then
+        echo "✅ Tree-sitter-python built successfully"
+    else
+        echo "❌ Tree-sitter-python build failed"
+        cd - > /dev/null
+        exit 1
+    fi
+
+    cd - > /dev/null
+else
+    echo "✅ Tree-sitter-python already built for Windows"
 fi
 
 # Function to download and extract if not exists
