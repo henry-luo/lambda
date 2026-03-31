@@ -108,8 +108,3 @@ jobs:
             ${{ env.NOTIFICATION }}
 
             Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          from: Lambda CI <${{ secrets.MAIL_USERNAME }}>
-          body: |
-            ${{ env.NOTIFICATION }}
-
-            Full run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
