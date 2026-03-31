@@ -115,6 +115,7 @@ struct JsFuncCollected {
     bool is_iife_body;              // true if this function is a top-level IIFE body
     // P3: Constructor flag (set for class constructor methods only)
     bool is_constructor;            // true if this function is a class constructor
+    bool has_rest_param;            // true if last param is ...rest
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -3314,6 +3315,18 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int pc = jm_count_params(fn);
     fc->param_count = pc;
+
+    // detect rest params (...rest as last parameter)
+    fc->has_rest_param = false;
+    if (pc > 0) {
+        JsAstNode* last_p = fn->params;
+        while (last_p && last_p->next) last_p = last_p->next;
+        if (last_p && (last_p->node_type == JS_AST_NODE_REST_ELEMENT ||
+                       last_p->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+            fc->has_rest_param = true;
+        }
+    }
+
     if (pc == 0 || pc > 16) return;
 
     // Build parameter name array
@@ -4016,9 +4029,11 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
                 int fi = (int)mc->int_val;
                 if (fi >= 0 && fi < mt->func_count && mt->func_entries[fi].func_item) {
                     JsFuncCollected* func = &mt->func_entries[fi];
+                    int fpc = func->param_count;
+                    if (func->has_rest_param) fpc = -fpc;
                     return jm_call_2(mt, "js_new_function", MIR_T_I64,
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, func->param_count));
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
                 }
                 log_error("js-mir: MCONST_FUNC '%s' has null func_item (fi=%d)", vname, fi);
                 return jm_emit_null(mt);
@@ -7557,6 +7572,24 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_unescape", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+            // escape(str) — legacy percent-encoding
+            if (nl == 6 && strncmp(n, "escape", 6) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_escape", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+            // atob(str) — base64 decode
+            if (nl == 4 && strncmp(n, "atob", 4) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_atob", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+            // btoa(str) — base64 encode
+            if (nl == 4 && strncmp(n, "btoa", 4) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_btoa", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
             // v12: Symbol(desc) — create a new unique symbol
             if (nl == 6 && strncmp(n, "Symbol", 6) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
@@ -7638,6 +7671,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 if (cs->node_type == JS_AST_NODE_SPREAD_ELEMENT) { direct_has_spread = true; break; }
             }
             if (direct_has_spread) fc = NULL;  // nullify so we fall through to fallback
+            if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
 
             if (fc && (fc->func_item || fc->native_func_item) && fc->capture_count == 0) {
                 // Phase 4: Check if we can call the native version
@@ -8972,6 +9006,7 @@ static MIR_reg_t jm_transpile_template_literal(JsMirTranspiler* mt, JsTemplateLi
 static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
     if (!fc || !fc->func_item) return jm_emit_null(mt);
     int pc = fc->param_count;
+    if (fc->has_rest_param) pc = -pc;  // negative signals rest params to js_invoke_fn
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env.
         // Don't share in loop bodies — let closures need per-iteration value copies.
@@ -9036,6 +9071,7 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     }
 
     int param_count = jm_count_params(fn);
+    if (fc->has_rest_param) param_count = -param_count;  // negative signals rest params
 
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env
@@ -9140,9 +9176,11 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
                             int fii = (int)mc->int_val;
                             if (fii >= 0 && fii < mt->func_count && mt->func_entries[fii].func_item) {
                                 JsFuncCollected* func = &mt->func_entries[fii];
+                                int fpc = func->param_count;
+                                if (func->has_rest_param) fpc = -fpc;
                                 const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
                                     MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
-                                    MIR_T_I64, MIR_new_int_op(mt->ctx, func->param_count));
+                                    MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
                             } else {
                                 const_val = jm_emit_null(mt);
                             }
@@ -10872,9 +10910,11 @@ static MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollecte
                     int fi = (int)mc->int_val;
                     if (fi >= 0 && fi < mt->func_count && mt->func_entries[fi].func_item) {
                         JsFuncCollected* func = &mt->func_entries[fi];
+                        int fpc = func->param_count;
+                        if (func->has_rest_param) fpc = -fpc;
                         const_val = jm_call_2(mt, "js_new_function", MIR_T_I64,
                             MIR_T_I64, MIR_new_ref_op(mt->ctx, func->func_item),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, func->param_count));
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, fpc));
                     } else {
                         const_val = jm_emit_null(mt);
                     }
@@ -15434,6 +15474,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (fc && fc->func_item && fc->capture_count == 0) {
                     // Non-capturing: hoist normally
                     int pc = jm_count_params(fn);
+                    if (fc->has_rest_param) pc = -pc;  // negative signals rest params
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
@@ -15525,6 +15566,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 if (fc && fc->func_item && fc->capture_count > 0) {
                     // Capturing function declaration: bind as closure at this position
                     int pc = jm_count_params(fn);
+                    if (fc->has_rest_param) pc = -pc;  // negative signals rest params
                     char vname[128];
                     snprintf(vname, sizeof(vname), "_js_%.*s", (int)fn->name->len, fn->name->chars);
                     MIR_reg_t var_reg = jm_new_reg(mt, vname, MIR_T_I64);
