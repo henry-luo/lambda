@@ -2718,6 +2718,17 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🐍"
+                    },
+                    {
+                        "source": "test/test_ts_gtest.cpp",
+                        "name": "TypeScript Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_ts_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "🔷"
                     }
                 ],
                 "type": "lambda",
