@@ -2335,6 +2335,17 @@ static BashAstNode* build_array(BashTranspiler* tp, TSNode node) {
     BashAstNode* tail = NULL;
     arr->length = 0;
 
+    auto append_elem = [&](BashAstNode* elem) {
+        if (!elem) return;
+        if (!arr->elements) {
+            arr->elements = elem;
+        } else {
+            tail->next = elem;
+        }
+        tail = elem;
+        arr->length++;
+    };
+
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         BashAstNode* elem;
@@ -2343,17 +2354,63 @@ static BashAstNode* build_array(BashTranspiler* tp, TSNode node) {
         if (strcmp(child_type, "string") == 0) elem = build_string_node(tp, child);
         else if (strcmp(child_type, "raw_string") == 0) elem = build_raw_string(tp, child);
         else if (strcmp(child_type, "ansi_c_string") == 0) elem = build_ansi_c_string(tp, child);
-        else elem = build_word(tp, child);
+        else {
+            // workaround for tree-sitter-bash bug: when a variable assignment
+            // follows an array literal, the parser may merge all array words
+            // into a single word node (e.g. "alpha beta" instead of "alpha", "beta").
+            // detect this by checking for embedded spaces and split manually.
+            uint32_t sb = ts_node_start_byte(child);
+            uint32_t eb = ts_node_end_byte(child);
+            const char* text = tp->source + sb;
+            size_t len = eb - sb;
 
-        if (elem) {
-            if (!arr->elements) {
-                arr->elements = elem;
-            } else {
-                tail->next = elem;
+            // check if this word contains unquoted spaces
+            bool has_space = false;
+            int quote = 0;
+            for (size_t j = 0; j < len; j++) {
+                char c = text[j];
+                if (!quote && (c == '\'' || c == '"')) { quote = c; continue; }
+                if (quote && c == quote) { quote = 0; continue; }
+                if (c == '\\' && j + 1 < len) { j++; continue; }
+                if (!quote && (c == ' ' || c == '\t')) { has_space = true; break; }
             }
-            tail = elem;
-            arr->length++;
+
+            if (has_space && strcmp(child_type, "word") == 0) {
+                // split on unquoted whitespace into multiple word nodes
+                quote = 0;
+                size_t word_start = 0;
+                bool in_word = false;
+                for (size_t j = 0; j <= len; j++) {
+                    char c = (j < len) ? text[j] : ' '; // force flush at end
+                    bool is_ws = false;
+                    if (!quote && (c == '\'' || c == '"')) { quote = c; in_word = true; continue; }
+                    if (quote && c == quote) { quote = 0; in_word = true; continue; }
+                    if (c == '\\' && j + 1 < len) { j++; in_word = true; continue; }
+                    if (!quote && (c == ' ' || c == '\t')) is_ws = true;
+
+                    if (is_ws) {
+                        if (in_word) {
+                            size_t wlen = j - word_start;
+                            BashWordNode* w = (BashWordNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                            w->text = name_pool_create_len(tp->name_pool, text + word_start, wlen);
+                            append_elem((BashAstNode*)w);
+                            in_word = false;
+                        }
+                    } else {
+                        if (!in_word) {
+                            word_start = j;
+                            in_word = true;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            elem = build_word(tp, child);
         }
+
+        append_elem(elem);
     }
 
     return (BashAstNode*)arr;

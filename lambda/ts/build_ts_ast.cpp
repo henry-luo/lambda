@@ -3,6 +3,11 @@
 // Wraps the JavaScript AST builder. Delegates JS nodes to build_js_ast_node(),
 // and handles TS-specific nodes (type annotations, interfaces, enums, etc.)
 // by building TsTypeNode subtrees with type expressions fully preserved.
+//
+// With the tree-sitter-typescript parser, function parameters appear as
+// required_parameter / optional_parameter nodes (not plain identifiers as in JS).
+// Variable declarators may have a type_annotation child. Functions may have
+// return_type and type_parameters. This builder intercepts those cases.
 
 #include "ts_transpiler.hpp"
 #include "../lambda-data.hpp"
@@ -456,6 +461,354 @@ static JsAstNode* build_ts_enum_declaration(TsTranspiler* tp, TSNode node) {
 }
 
 // ============================================================================
+// TS expression builder — wraps JS expression builder with TS node interception
+// ============================================================================
+
+// forward declarations
+static JsAstNode* build_ts_node(TsTranspiler* tp, TSNode node);
+static JsAstNode* build_ts_function(TsTranspiler* tp, TSNode func_node);
+
+// TS-aware expression builder: intercepts function nodes with TS-specific
+// parameter handling, delegates everything else to build_js_expression
+static JsAstNode* build_ts_expression(TsTranspiler* tp, TSNode node) {
+    const char* type_str = ts_node_type(node);
+
+    // intercept function expressions/arrows that have TS parameter nodes
+    if (strcmp(type_str, "arrow_function") == 0 ||
+        strcmp(type_str, "function_expression") == 0 ||
+        strcmp(type_str, "generator_function") == 0) {
+        return build_ts_function(tp, node);
+    }
+
+    // TS expression wrappers
+    if (strcmp(type_str, "as_expression") == 0) {
+        TsTypeExprNode* as_node = (TsTypeExprNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_AS_EXPRESSION, node, sizeof(TsTypeExprNode));
+        uint32_t cc = ts_node_named_child_count(node);
+        if (cc >= 2) {
+            as_node->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+            as_node->target_type = build_ts_type_expr(tp, ts_node_named_child(node, 1));
+        }
+        return (JsAstNode*)as_node;
+    }
+    if (strcmp(type_str, "satisfies_expression") == 0) {
+        TsTypeExprNode* sat_node = (TsTypeExprNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_SATISFIES_EXPRESSION, node, sizeof(TsTypeExprNode));
+        uint32_t cc = ts_node_named_child_count(node);
+        if (cc >= 2) {
+            sat_node->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+            sat_node->target_type = build_ts_type_expr(tp, ts_node_named_child(node, 1));
+        }
+        return (JsAstNode*)sat_node;
+    }
+    if (strcmp(type_str, "non_null_expression") == 0) {
+        TsNonNullNode* nn = (TsNonNullNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_NON_NULL_EXPRESSION, node, sizeof(TsNonNullNode));
+        if (ts_node_named_child_count(node) > 0) {
+            nn->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+        }
+        return (JsAstNode*)nn;
+    }
+
+    // delegate to JS expression builder
+    return build_js_expression((JsTranspiler*)tp, node);
+}
+
+// ============================================================================
+// TS function builder — handles required_parameter / optional_parameter
+// ============================================================================
+
+// Build a single TS parameter (required_parameter or optional_parameter)
+static JsAstNode* build_ts_parameter(TsTranspiler* tp, TSNode param_node, bool is_optional) {
+    const char* ptype = ts_node_type(param_node);
+
+    // rest_pattern: ...args (same in TS and JS grammars)
+    if (strcmp(ptype, "rest_pattern") == 0) {
+        JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_ts_ast_node(tp,
+            JS_AST_NODE_REST_ELEMENT, param_node, sizeof(JsSpreadElementNode));
+        if (ts_node_named_child_count(param_node) > 0) {
+            TSNode inner = ts_node_named_child(param_node, 0);
+            rest->argument = build_js_expression((JsTranspiler*)tp, inner);
+        }
+        rest->base.type = &TYPE_ARRAY;
+        return (JsAstNode*)rest;
+    }
+
+    // plain identifier (single-param arrow: x => ...) — no type annotation
+    if (strcmp(ptype, "identifier") == 0) {
+        return build_js_identifier((JsTranspiler*)tp, param_node);
+    }
+
+    // required_parameter or optional_parameter from the TS grammar
+    // Fields: name (pattern), type (type_annotation), value (default)
+    if (strcmp(ptype, "required_parameter") == 0 || strcmp(ptype, "optional_parameter") == 0) {
+
+        // extract the name/pattern via "pattern" field first, fallback to "name" field
+        TSNode name_node = ts_node_child_by_field_name(param_node, "pattern", 7);
+        if (ts_node_is_null(name_node)) {
+            name_node = ts_node_child_by_field_name(param_node, "name", 4);
+        }
+
+        // extract type annotation — build it for type registry but don't use for codegen yet
+        TSNode type_node = ts_node_child_by_field_name(param_node, "type", 4);
+        if (!ts_node_is_null(type_node)) {
+            build_ts_type_annotation(tp, type_node);
+        }
+
+        // extract default value (optional)
+        TSNode value_node = ts_node_child_by_field_name(param_node, "value", 5);
+        JsAstNode* default_value = NULL;
+        if (!ts_node_is_null(value_node)) {
+            default_value = build_ts_expression(tp, value_node);
+        }
+
+        // build the name/pattern as an identifier
+        JsAstNode* name_ast = NULL;
+        if (!ts_node_is_null(name_node)) {
+            const char* ntype = ts_node_type(name_node);
+            if (strcmp(ntype, "identifier") == 0) {
+                name_ast = build_js_identifier((JsTranspiler*)tp, name_node);
+            } else {
+                name_ast = build_ts_expression(tp, name_node);
+            }
+        }
+
+        // if there's a default value, wrap in assignment_pattern
+        if (default_value && name_ast) {
+            JsAssignmentPatternNode* assign = (JsAssignmentPatternNode*)alloc_ts_ast_node(tp,
+                JS_AST_NODE_ASSIGNMENT_PATTERN, param_node, sizeof(JsAssignmentPatternNode));
+            assign->left = name_ast;
+            assign->right = default_value;
+            assign->base.type = &TYPE_ANY;
+            return (JsAstNode*)assign;
+        }
+
+        return name_ast;
+    }
+
+    // assignment_pattern: param = defaultValue (can appear in TS formal_parameters too)
+    if (strcmp(ptype, "assignment_pattern") == 0) {
+        return build_js_expression((JsTranspiler*)tp, param_node);
+    }
+
+    // fallback: delegate to JS expression builder
+    return build_js_expression((JsTranspiler*)tp, param_node);
+}
+
+// Build a function from the TS parser CST — handles TS-specific parameter nodes
+static JsAstNode* build_ts_function(TsTranspiler* tp, TSNode func_node) {
+    const char* node_type = ts_node_type(func_node);
+    bool is_arrow = (strcmp(node_type, "arrow_function") == 0);
+    bool is_generator = (strcmp(node_type, "generator_function") == 0 ||
+                         strcmp(node_type, "generator_function_declaration") == 0);
+    if (strcmp(node_type, "method_definition") == 0 && !is_generator) {
+        uint32_t ccount = ts_node_child_count(func_node);
+        for (uint32_t ci = 0; ci < ccount; ci++) {
+            TSNode child = ts_node_child(func_node, ci);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "*") == 0) { is_generator = true; break; }
+            if (strcmp(ctype, "formal_parameters") == 0 || strcmp(ctype, "statement_block") == 0) break;
+        }
+    }
+
+    bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0) ||
+                         strcmp(node_type, "generator_function") == 0;
+
+    JsAstNodeType ast_type = is_arrow ? JS_AST_NODE_ARROW_FUNCTION :
+                             is_expression ? JS_AST_NODE_FUNCTION_EXPRESSION :
+                             JS_AST_NODE_FUNCTION_DECLARATION;
+
+    // allocate TsFunctionNode (extends JsFunctionNode with return_type, type_params)
+    TsFunctionNode* ts_func = (TsFunctionNode*)alloc_ts_ast_node(tp,
+        ast_type, func_node, sizeof(TsFunctionNode));
+    JsFunctionNode* func = &ts_func->base;
+
+    func->is_arrow = is_arrow;
+    func->is_generator = is_generator;
+
+    // detect async
+    func->is_async = false;
+    {
+        uint32_t ccount = ts_node_child_count(func_node);
+        for (uint32_t ci = 0; ci < ccount; ci++) {
+            TSNode child = ts_node_child(func_node, ci);
+            const char* ctype = ts_node_type(child);
+            if (strcmp(ctype, "async") == 0) { func->is_async = true; break; }
+            if (strcmp(ctype, "function") == 0 || strcmp(ctype, "=>") == 0) break;
+        }
+    }
+
+    // function name (optional for expressions)
+    TSNode name_node = ts_node_child_by_field_name(func_node, "name", 4);
+    if (!ts_node_is_null(name_node)) {
+        int len;
+        const char* text = ts_node_text(tp, name_node, &len);
+        func->name = name_pool_create_strview(tp->name_pool, {.str = text, .length = (size_t)len});
+    }
+
+    // return type annotation (TS-specific)
+    TSNode return_type_node = ts_node_child_by_field_name(func_node, "return_type", 11);
+    if (!ts_node_is_null(return_type_node)) {
+        ts_func->return_type = (TsTypeAnnotationNode*)build_ts_type_annotation(tp, return_type_node);
+    }
+
+    // type parameters (TS-specific: <T, U>)
+    TSNode type_params_node = ts_node_child_by_field_name(func_node, "type_parameters", 15);
+    if (!ts_node_is_null(type_params_node)) {
+        uint32_t tp_count = ts_node_named_child_count(type_params_node);
+        ts_func->type_params = (TsTypeParamNode**)pool_alloc(tp->ast_pool,
+            sizeof(TsTypeParamNode*) * tp_count);
+        ts_func->type_param_count = (int)tp_count;
+        for (uint32_t i = 0; i < tp_count; i++) {
+            TSNode tpn = ts_node_named_child(type_params_node, i);
+            TsTypeParamNode* tpp = (TsTypeParamNode*)alloc_ts_ast_node(tp,
+                TS_AST_NODE_TYPE_PARAMETER, tpn, sizeof(TsTypeParamNode));
+            // get name
+            if (ts_node_named_child_count(tpn) > 0) {
+                TSNode name = ts_node_named_child(tpn, 0);
+                int nlen;
+                const char* ntext = ts_node_text(tp, name, &nlen);
+                tpp->name = ts_pool_string(tp, ntext, nlen);
+            }
+            ts_func->type_params[i] = tpp;
+        }
+    }
+
+    // parameters — TS parser produces required_parameter / optional_parameter
+    TSNode params_node = ts_node_child_by_field_name(func_node, "parameters", 10);
+    if (!ts_node_is_null(params_node)) {
+        uint32_t param_count = ts_node_named_child_count(params_node);
+        JsAstNode* prev_param = NULL;
+
+        for (uint32_t i = 0; i < param_count; i++) {
+            TSNode param_node = ts_node_named_child(params_node, i);
+            JsAstNode* param = build_ts_parameter(tp, param_node, false);
+
+            if (param) {
+                if (!prev_param) {
+                    func->params = param;
+                } else {
+                    prev_param->next = param;
+                }
+                prev_param = param;
+            }
+        }
+    } else {
+        // single parameter (arrow function without parens: x => x * 2)
+        TSNode param_node = ts_node_child_by_field_name(func_node, "parameter", 9);
+        if (!ts_node_is_null(param_node)) {
+            func->params = build_ts_parameter(tp, param_node, false);
+        }
+    }
+
+    // function body
+    TSNode body_node = ts_node_child_by_field_name(func_node, "body", 4);
+    if (!ts_node_is_null(body_node)) {
+        const char* body_type = ts_node_type(body_node);
+        if (strcmp(body_type, "statement_block") == 0) {
+            func->body = build_js_block_statement((JsTranspiler*)tp, body_node);
+        } else {
+            // arrow function with expression body
+            func->body = build_ts_expression(tp, body_node);
+        }
+    }
+
+    func->base.type = &TYPE_FUNC;
+
+    // add function to scope if named (not method definitions)
+    bool is_method_def = (strcmp(node_type, "method_definition") == 0);
+    if (func->name && !is_method_def) {
+        js_scope_define((JsTranspiler*)tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
+    }
+
+    return (JsAstNode*)func;
+}
+
+// ============================================================================
+// TS variable declaration builder — handles type_annotation on variable_declarator
+// ============================================================================
+
+static JsAstNode* build_ts_variable_declaration(TsTranspiler* tp, TSNode var_node) {
+    JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_VARIABLE_DECLARATION, var_node, sizeof(JsVariableDeclarationNode));
+
+    // determine variable kind (var, let, const)
+    TSNode first_child = ts_node_child(var_node, 0);
+    int flen;
+    const char* ftext = ts_node_text(tp, first_child, &flen);
+    if (flen >= 3 && memcmp(ftext, "var", 3) == 0) {
+        var_decl->kind = JS_VAR_VAR;
+    } else if (flen >= 3 && memcmp(ftext, "let", 3) == 0) {
+        var_decl->kind = JS_VAR_LET;
+    } else if (flen >= 5 && memcmp(ftext, "const", 5) == 0) {
+        var_decl->kind = JS_VAR_CONST;
+    }
+
+    // build declarators
+    uint32_t child_count = ts_node_named_child_count(var_node);
+    JsAstNode* prev_declarator = NULL;
+
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode declarator_node = ts_node_named_child(var_node, i);
+        const char* declarator_type = ts_node_type(declarator_node);
+
+        if (strcmp(declarator_type, "variable_declarator") != 0) continue;
+
+        JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)alloc_ts_ast_node(tp,
+            JS_AST_NODE_VARIABLE_DECLARATOR, declarator_node, sizeof(JsVariableDeclaratorNode));
+
+        // get name via field
+        TSNode name_node = ts_node_child_by_field_name(declarator_node, "name", 4);
+        if (!ts_node_is_null(name_node)) {
+            const char* id_type = ts_node_type(name_node);
+            if (strcmp(id_type, "array_pattern") == 0 || strcmp(id_type, "object_pattern") == 0) {
+                declarator->id = build_js_expression((JsTranspiler*)tp, name_node);
+            } else {
+                declarator->id = build_js_identifier((JsTranspiler*)tp, name_node);
+            }
+        }
+
+        // get type annotation (TS-specific field "type") — preserve but don't
+        // override base.type yet (Phase 2 will use resolved types for codegen)
+        TSNode type_node = ts_node_child_by_field_name(declarator_node, "type", 4);
+        if (!ts_node_is_null(type_node)) {
+            // build and resolve the type annotation for later use
+            build_ts_type_annotation(tp, type_node);
+        }
+
+        // get initializer via field "value"
+        TSNode value_node = ts_node_child_by_field_name(declarator_node, "value", 5);
+        if (!ts_node_is_null(value_node)) {
+            declarator->init = build_ts_expression(tp, value_node);
+            if (declarator->init) {
+                declarator->base.type = declarator->init->type;
+            } else {
+                declarator->base.type = &TYPE_ANY;
+            }
+        } else {
+            declarator->init = NULL;
+            declarator->base.type = &TYPE_NULL;
+        }
+
+        // add to scope
+        if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
+            js_scope_define((JsTranspiler*)tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+        }
+
+        if (!prev_declarator) {
+            var_decl->declarations = (JsAstNode*)declarator;
+        } else {
+            prev_declarator->next = (JsAstNode*)declarator;
+        }
+        prev_declarator = (JsAstNode*)declarator;
+    }
+
+    var_decl->base.type = &TYPE_NULL;
+    return (JsAstNode*)var_decl;
+}
+
+// ============================================================================
 // Main TS AST builder — dispatches to TS or JS builders
 // ============================================================================
 
@@ -539,6 +892,24 @@ static JsAstNode* build_ts_node(TsTranspiler* tp, TSNode node) {
             JS_AST_NODE_PROGRAM, node, sizeof(JsProgramNode));
         prog->body = build_ts_statement_list(tp, node);
         return (JsAstNode*)prog;
+    }
+
+    // TS function declarations — must be intercepted because the TS parser produces
+    // required_parameter / optional_parameter instead of plain identifiers
+    if (strcmp(type_str, "function_declaration") == 0 ||
+        strcmp(type_str, "generator_function_declaration") == 0 ||
+        strcmp(type_str, "function_expression") == 0 ||
+        strcmp(type_str, "generator_function") == 0 ||
+        strcmp(type_str, "arrow_function") == 0 ||
+        strcmp(type_str, "method_definition") == 0) {
+        return build_ts_function(tp, node);
+    }
+
+    // TS variable declarations — must be intercepted because the TS parser's
+    // variable_declarator has a "type" field for type annotations
+    if (strcmp(type_str, "variable_declaration") == 0 ||
+        strcmp(type_str, "lexical_declaration") == 0) {
+        return build_ts_variable_declaration(tp, node);
     }
 
     // for all other nodes, delegate to the JS AST builder

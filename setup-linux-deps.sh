@@ -913,7 +913,7 @@ build_re2_for_linux() {
     echo "Building RE2 for Linux..."
 
     local RE2_SRC="build_temp/re2-noabsl"
-    local RE2_LIB="$RE2_SRC/build/libre2.a"
+    local RE2_LIB="$RE2_SRC/cmake_build/libre2.a"
 
     if [ -f "$RE2_LIB" ] && is_elf_archive "$RE2_LIB"; then
         echo "✅ RE2 already built for Linux"
@@ -931,8 +931,8 @@ build_re2_for_linux() {
     fi
 
     echo "Building RE2 from $RE2_SRC..."
-    mkdir -p "$RE2_SRC/build"
-    cd "$RE2_SRC/build"
+    mkdir -p "$RE2_SRC/cmake_build"
+    cd "$RE2_SRC/cmake_build"
 
     if cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DRE2_BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON .. && \
        cmake --build . -j$(nproc); then

@@ -180,6 +180,9 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-pkgconf" "pkg-config tool"
 # Node.js (needed for tree-sitter parser generation)
 install_msys2_package "${TOOLCHAIN_PREFIX}-nodejs" "Node.js (for tree-sitter grammar generation)"
 
+# Google Test (needed for test executables)
+install_msys2_package "${TOOLCHAIN_PREFIX}-gtest" "Google Test framework"
+
 echo ""
 echo "Setting up project-specific dependencies..."
 
@@ -322,6 +325,19 @@ fi
 
 # Build tree-sitter libraries for Windows
 echo "Building tree-sitter libraries for Windows..."
+
+# Ensure RE2 source is available (Makefile builds it, but needs the source)
+if [ ! -d "build_temp/re2-noabsl" ]; then
+    echo "Cloning RE2 (no-abseil version) for Makefile build..."
+    mkdir -p build_temp
+    if git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git build_temp/re2-noabsl; then
+        echo "✅ RE2 source cloned to build_temp/re2-noabsl"
+    else
+        echo "❌ Failed to clone RE2 — regex support may not work"
+    fi
+else
+    echo "✅ RE2 source already available"
+fi
 
 # Build tree-sitter library (amalgamated, no ICU)
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
