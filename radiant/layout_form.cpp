@@ -35,28 +35,32 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
             return;
         }
         if (strcmp(form->input_type, "datetime-local") == 0) {
-            // Chrome: ~211px border-box (shows MM/DD/YYYY, HH:MM AM/PM)
-            // Check if value contains seconds/ms (adds ~60px more)
+            // Chrome: ~211px border-box for HH:MM format, ~271px with seconds/ms
+            // Width depends on the HTML value content attribute (not JS-set value).
+            // If seconds (.ss or .sss) present in value attr → wider to show seconds field.
             float w = 205.0f;
-            if (form->value) {
-                // Count colons: "2022-04-19T12:34:56" has 3 colons (date separator + time separators)
-                int colons = 0;
-                for (const char* p = form->value; *p; p++) if (*p == ':') colons++;
-                if (colons >= 2) w = 265.0f;  // has seconds → wider
+            if (form->value && *form->value) {
+                // Find the time part after 'T' and count colons there
+                const char* t = strchr(form->value, 'T');
+                if (t) {
+                    int colons = 0;
+                    for (const char* p = t + 1; *p; p++) if (*p == ':') colons++;
+                    if (colons >= 2) w = 265.0f;  // has seconds → wider
+                }
             }
             form->intrinsic_width = w * pr;
             form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "month") == 0) {
-            // Chrome: ~127px border-box (shows MMMM YYYY)
-            form->intrinsic_width = 121.0f * pr;
+            // Chrome: ~155px border-box (shows MMMM YYYY)
+            form->intrinsic_width = 149.0f * pr;
             form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
             return;
         }
         if (strcmp(form->input_type, "week") == 0) {
-            // Chrome: ~113px border-box (shows Week ##, YYYY)
-            form->intrinsic_width = 107.0f * pr;
+            // Chrome: ~147px border-box (shows Week ##, YYYY)
+            form->intrinsic_width = 141.0f * pr;
             form->intrinsic_height = (font && font->font_size > 0) ? font->font_size + 1.0f * pr : 17.0f * pr;
             return;
         }
@@ -71,7 +75,8 @@ static void calc_text_input_size(LayoutContext* lycon, FormControlProp* form, Fo
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
 
     if (font && font->font_size > 0) {
-        // Chrome text input: content width = 147px at 16px font for 20 chars
+        // Chrome text input: content width ≈ size * avgCharWidth
+        // For default 16px font: content = 147px for 20 chars
         // => char_factor = 147 / (20 * 16) ≈ 0.459
         float content_w = size * font->font_size * 0.459f;
         form->intrinsic_width = content_w;

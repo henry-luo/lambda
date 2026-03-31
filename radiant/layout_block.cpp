@@ -5628,6 +5628,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("saved pa_block.advance_y: %.2f for element %s", pa_block.advance_y, elmt->source_loc());
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
+    // reset line ascender/descender state so stale values from the parent context
+    // do not contaminate this child block's baseline computation
+    lycon->block.last_line_ascender = 0;
+    lycon->block.last_line_max_ascender = 0;
+    lycon->block.last_line_max_descender = 0;
+    lycon->block.first_line_max_ascender = 0;
+    lycon->block.first_line_max_descender = 0;
 
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)set_view(lycon,
@@ -5778,6 +5785,24 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // No line break occurred - use current line's ascender
             content_last_line_ascender = lycon->line.max_ascender;
         }
+
+        // <button> elements go through normal child layout (not layout_form_control),
+        // so line_break() inside the button overwrites last_line_ascender with the
+        // raw text ascender, discarding border/padding.  Override with the proper
+        // form-control baseline: border-top + padding-top + font-ascender, matching
+        // the formula used in layout_form_control for other form controls.
+        // Only apply when the button actually has in-flow content (last_line_ascender > 0),
+        // so empty buttons still use the replaced-element (bottom-margin-edge) baseline path.
+        if (content_last_line_ascender > 0 &&
+            block->tag() == HTM_TAG_BUTTON && block->form &&
+            block->form->control_type == FORM_CONTROL_BUTTON) {
+            FontProp* bfont = block->font ? block->font : lycon->font.style;
+            float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
+            float pad_top = block->bound ? block->bound->padding.top : 0;
+            float font_asc = (bfont && bfont->ascender > 0) ? bfont->ascender : (bfont ? bfont->font_size * 0.8f : 13.0f);
+            content_last_line_ascender = border_top + pad_top + font_asc;
+        }
+
         bool content_has_line_boxes = content_last_line_ascender > 0;
 
         // CSS 2.1 §10.8.1: Replaced elements (img, iframe, video, embed, object)
