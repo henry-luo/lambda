@@ -506,24 +506,23 @@ static void dispatch_request(ClientConnection *conn, const char *raw, size_t raw
     }
 
     // set connection info on request
-    req->client = (uv_stream_t*)&conn->handle;
+    req->client = &conn->handle;
     req->app = server->app_data;
 
     // get remote address
     struct sockaddr_storage addr;
     int addr_len = sizeof(addr);
     if (uv_tcp_getpeername(&conn->handle, (struct sockaddr*)&addr, &addr_len) == 0) {
-        char ip[64];
+        req->remote_addr[0] = '\0';
         if (addr.ss_family == AF_INET) {
-            uv_ip4_name((struct sockaddr_in*)&addr, ip, sizeof(ip));
+            uv_ip4_name((struct sockaddr_in*)&addr, req->remote_addr, sizeof(req->remote_addr));
         } else {
-            uv_ip6_name((struct sockaddr_in6*)&addr, ip, sizeof(ip));
+            uv_ip6_name((struct sockaddr_in6*)&addr, req->remote_addr, sizeof(req->remote_addr));
         }
-        req->remote_addr = serve_strdup(ip);
     }
 
     // create response
-    HttpResponse *resp = http_response_create((uv_stream_t*)&conn->handle);
+    HttpResponse *resp = http_response_create(&conn->handle);
     if (!resp) {
         http_request_destroy(req);
         server_connection_close(conn);

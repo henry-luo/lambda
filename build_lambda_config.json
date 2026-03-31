@@ -1535,7 +1535,10 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "uv"
+                            "uv",
+                            "mbedtls",
+                            "mbedx509",
+                            "mbedcrypto"
                         ],
                         "additional_sources": [
                             "lambda/serve/serve_types.cpp",
@@ -1553,6 +1556,10 @@
                             "lambda/serve/schema_validator.cpp",
                             "lambda/serve/swagger_ui.cpp",
                             "lambda/serve/express_compat.cpp",
+                            "lambda/serve/server.cpp",
+                            "lambda/serve/tls_handler.cpp",
+                            "lambda/serve/worker_pool.cpp",
+                            "lambda/serve/language_backend.cpp",
                             "lib/log.c"
                         ],
                         "binary": "test_serve_gtest.exe",

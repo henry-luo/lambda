@@ -21,7 +21,10 @@
 
 #ifdef MBEDTLS_X509_CRT_WRITE_C
 #include <mbedtls/x509_csr.h>
+// In mbedTLS 3.x, x509 write functions are declared in x509_crt.h directly
+#if __has_include(<mbedtls/x509write_crt.h>)
 #include <mbedtls/x509write_crt.h>
+#endif
 #include <mbedtls/bignum.h>
 #include <mbedtls/rsa.h>
 #endif
@@ -339,6 +342,11 @@ int tls_generate_self_signed(const char *cert_path, const char *key_path,
     mbedtls_mpi serial;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
+    char subject[256];
+    char not_before[16], not_after[16];
+    time_t now;
+    struct tm *tm_info;
+    time_t expires;
 
     mbedtls_pk_init(&key);
     mbedtls_x509write_crt_init(&crt);
@@ -360,7 +368,6 @@ int tls_generate_self_signed(const char *cert_path, const char *key_path,
     if (ret != 0) goto cleanup;
 
     // build subject string: "CN=<common_name>"
-    char subject[256];
     snprintf(subject, sizeof(subject), "CN=%s", common_name);
 
     // set certificate fields
@@ -383,12 +390,11 @@ int tls_generate_self_signed(const char *cert_path, const char *key_path,
     if (ret != 0) goto cleanup;
 
     // validity period
-    char not_before[16], not_after[16];
-    time_t now = time(NULL);
-    struct tm *tm_info = gmtime(&now);
+    now = time(NULL);
+    tm_info = gmtime(&now);
     strftime(not_before, sizeof(not_before), "%Y%m%d%H%M%S", tm_info);
 
-    time_t expires = now + (time_t)valid_days * 86400;
+    expires = now + (time_t)valid_days * 86400;
     tm_info = gmtime(&expires);
     strftime(not_after, sizeof(not_after), "%Y%m%d%H%M%S", tm_info);
 

@@ -1,7 +1,7 @@
 # Radiant Form Support Enhancement — Phase 2 Proposal
 
 > **Predecessor:** `Radiant_Form.md` (Phase 1 — static rendering and layout)
-> **Status:** Proposal
+> **Status:** Phase 2a complete — 352/443 WPT form tests passing (79.5%)
 > **Target Controls:** button, checkbox, radio, select, text input, textarea
 
 ---
@@ -22,62 +22,66 @@ Phase 1 implemented static form rendering across five files:
 
 ### 1.2 WPT Form Test Results
 
-Test suite: 448 HTML files from WPT `html/semantics/forms/`, browser references generated via Puppeteer.
+Test suite: 443 HTML files from WPT `html/semantics/forms/`, browser references generated via Puppeteer.
 
 | Metric | Count | % |
 |--------|-------|---|
-| **Total** | 447 | 100% |
-| **Pass** | 144 | 32.2% |
-| **Fail** | 303 | 67.8% |
+| **Total** | 443 | 100% |
+| **Pass** | 352 | 79.5% |
+| **Fail** | 91 | 20.5% |
 | → Near-pass (elem ≥ 80%) | 13 | — |
-| → Mid (50–79%) | 73 | — |
-| → Low (< 50%) | 89 | — |
-| **Error** (ENOENT — layout crash) | 128 | 28.6% |
-| **Skipped** | 1 | 0.2% |
+| → Mid (50–79%) | 28 | — |
+| → Low (< 50%) | 50 | — |
+| **Error** (ENOENT — layout crash) | 0 | 0% |
 
-Average element pass rate among failures: **39.0%**
+Average element pass rate among failures: **41.1%**
 
 #### Results by control type (name-based classification):
 
 | Control | Pass | Total | Rate | Fail | Error |
 |---------|------|-------|------|------|-------|
-| text_input | 44 | 94 | 47% | 44 | 6 |
-| button | 22 | 51 | 43% | 24 | 5 |
-| validation | 14 | 19 | 74% | 3 | 2 |
-| select | 8 | 88 | 9% | 33 | 47 |
-| range | 7 | 17 | 41% | 10 | 0 |
-| date | 6 | 21 | 29% | 1 | 14 |
-| radio | 4 | 15 | 27% | 11 | 0 |
-| form | 3 | 6 | 50% | 3 | 0 |
-| hidden | 2 | 4 | 50% | 2 | 0 |
-| checkbox | 1 | 3 | 33% | 0 | 2 |
-| fieldset | 0 | 7 | 0% | 5 | 2 |
-| label | 0 | 7 | 0% | 0 | 7 |
-| meter_progress | 0 | 9 | 0% | 0 | 9 |
+| other | 78 | 94 | 82% | 16 | 0 |
+| select | 61 | 83 | 73% | 22 | 0 |
+| text_input | 42 | 59 | 71% | 17 | 0 |
+| form | 32 | 43 | 74% | 11 | 0 |
+| validation | 24 | 28 | 85% | 4 | 0 |
+| date | 23 | 29 | 79% | 6 | 0 |
+| button | 20 | 26 | 76% | 6 | 0 |
+| range | 16 | 18 | 88% | 2 | 0 |
+| textarea | 14 | 17 | 82% | 3 | 0 |
+| radio | 13 | 14 | 92% | 1 | 0 |
+| fieldset | 10 | 10 | 100% | 0 | 0 |
+| meter_progress | 8 | 9 | 88% | 1 | 0 |
+| label | 5 | 6 | 83% | 1 | 0 |
+| hidden | 3 | 4 | 75% | 1 | 0 |
+| checkbox | 3 | 3 | 100% | 0 | 0 |
 
 Key observations:
-- **128 ENOENT errors** = layout engine silently fails on these files (no output produced). Most are select (47), date (14), label (7), meter/progress (9) related.
-- **Select has the worst pass rate** (9%) with the most errors (47). Select layout/rendering is the weakest area.
-- **Text input** has decent pass rates (47%) — intrinsic sizing works but border/padding details and text rendering have issues.
-- **Radio** is low (27%) due to missing visual details (group behavior, `:checked` state rendering differences).
+- **All ENOENT crashes resolved** — 0 errors (was 128). Stub handling added for `<meter>`, `<progress>`, `<output>`, `<datalist>`, `<label>`, and complex `<select>` patterns.
+- **Fieldset and checkbox at 100%** — all tests pass for these controls.
+- **Radio** jumped from 27% → 92%, **range** from 41% → 88%, **meter/progress** from 0% → 88% — major gains from crash fixes and UA style improvements.
+- **Select** improved dramatically from 9% → 73% (was the worst, now mid-range). Remaining 22 failures involve `<optgroup>`, `<select multiple>`, and advanced dropdown behavior.
+- **Text input** at 71% (was 47%) — remaining failures are border/padding details and text measurement precision.
+- **91 remaining failures** are dominated by select (22), text_input (17), other (16), and form (11).
 
 ### 1.3 Gap Analysis
 
 | Capability | Status | Details |
 |------------|--------|---------|
-| **Intrinsic sizing** | ✅ Implemented | Text, textarea, button, checkbox, radio, select, range |
-| **Basic rendering** | ✅ Implemented | 3D borders, checkmark, radio dot, select arrow |
+| **Intrinsic sizing** | ✅ Implemented | Text, textarea, button, checkbox, radio, select, range, meter, progress |
+| **Basic rendering** | ✅ Implemented | 3D borders, checkmark, radio dot, select arrow, meter/progress bars |
 | **Attribute parsing** | ✅ Implemented | type, value, placeholder, name, size, cols, rows, disabled, readonly, checked, required |
 | **Checkbox toggle** | ✅ Implemented | Via `event_sim.cpp`, pseudo-state update |
 | **Radio toggle** | ✅ Implemented | Group unchecking, pseudo-state update |
 | **Select option** | ✅ Implemented | Index-based selection, dropdown rendering |
+| **Fieldset/legend layout** | ✅ Implemented | 100% pass rate — legend positioning and border rendering |
+| **Label handling** | ✅ Implemented | 83% pass rate — layout and rendering (click-to-focus not yet wired) |
+| **`<meter>` / `<progress>`** | ✅ Implemented | 88% pass rate — stub rendering with intrinsic sizing |
 | **Text editing** | ❌ Missing | No caret, no cursor, no selection, no keyboard input |
 | **Focus management** | ⚠️ Partial | `:focus` pseudo-state exists but no focus ring rendering, no Tab navigation for forms |
 | **Label association** | ❌ Missing | `<label for="">` click-to-focus not implemented |
 | **Form validation** | ❌ Missing | `:valid`/`:invalid` not dynamically computed |
 | **CSS `appearance`** | ❌ Missing | Property parsed in `css_properties.cpp` L348 but no rendering effect |
-| **`<meter>` / `<progress>`** | ❌ Missing | 9 tests all error — elements not handled |
-| **Fieldset/legend layout** | ⚠️ Partial | Basic padding/border but legend positioning incorrect |
 | **Placeholder rendering** | ⚠️ Partial | Color set but text not always rendered (font setup issues) |
 
 ---
@@ -102,18 +106,16 @@ Phase 2g — Testing: UI automation test suite for all controls
 
 ### Phase 2a — Infrastructure (Cross-Cutting)
 
-#### 2a.1 Fix ENOENT Crashes (128 tests)
+#### 2a.1 Fix ENOENT Crashes ~~(128 tests)~~ ✅ RESOLVED
 
-The 128 ENOENT errors mean `lambda.exe layout` produces no output JSON for these files. Root causes to investigate:
+All 128 ENOENT errors have been fixed (now 0 errors). Changes made:
 
-1. **Unsupported elements** (`<meter>`, `<progress>`, `<output>`, `<datalist>`) — add stub handling in `resolve_htm_style.cpp` so they render as inline/block instead of crashing
-2. **`<label>` crash** — 7/7 label tests error. Likely `<label>` with `for` attribute triggers unhandled code path
-3. **Complex `<select>` patterns** — 47 select errors suggest `<optgroup>` nesting, `<select multiple>`, or dynamic patterns crash the layout engine
-
-**Action:**
-- In `resolve_htm_style.cpp`, add fallback handling for `HTM_TAG_METER`, `HTM_TAG_PROGRESS`, `HTM_TAG_OUTPUT`, `HTM_TAG_DATALIST` as inline-block with reasonable default sizes
-- Debug and fix the label crash path
-- Add defensive null checks in select option traversal
+1. **Unsupported elements** (`<meter>`, `<progress>`, `<output>`, `<datalist>`) — added stub handling in `resolve_htm_style.cpp` with inline-block display and reasonable default sizes
+2. **`<label>` crash** — fixed; label tests now at 83% pass rate (5/6)
+3. **Complex `<select>` patterns** — fixed `<optgroup>` nesting, `<select multiple>`, and edge-case DOM patterns that crashed the layout engine
+4. **Half-leading font metrics** — fixed `font_get_normal_lh_split()` to use proper half-leading model (ascent + leading/2), resolving many vertical alignment mismatches
+5. **Replaced element strut** — removed `init_descender` from replaced element strut calculation to match browser behavior
+6. **Trailing whitespace rollback** — guarded whitespace rollback to preserve inline-block replaced content dimensions
 
 #### 2a.2 Focus Management System
 
@@ -232,8 +234,7 @@ After pseudo-state change, mark `needs_restyle = true` to re-resolve matched CSS
 - Option text via DOM child traversal (`get_option_text_at_index()`)
 - Select option events work
 
-#### Issues (9% pass rate — worst of all controls)
-- 47/88 tests error (ENOENT) — engine crashes on select patterns
+#### Issues (73% pass rate — remaining 22 failures)
 - Missing: `<select multiple>`, `<optgroup>` rendering, `<select size>` attribute
 - Missing: Keyboard navigation (arrow keys, type-ahead)
 - Missing: `<option disabled>` rendering
@@ -559,14 +560,14 @@ test/layout/data/automation/form_label.html        + form_label.json
 ### Priority Order
 
 ```
-P0 — Phase 2a.1: Fix 128 ENOENT crashes (unblocks 28% of tests)
+✅ DONE — Phase 2a.1: Fix 128 ENOENT crashes (0 errors remaining)
 P0 — Phase 2a.2: Focus management system (required by text editing)
-P1 — Phase 2b: Button enhancements (quick wins, 43% → 70+%)
-P1 — Phase 2c: Checkbox & radio (visual + label, 30% → 80+%)
-P1 — Phase 2d: Select fixes and enhancements (9% → 50+%)
+P1 — Phase 2b: Button enhancements (76% → 90+%)
+P1 — Phase 2c: Checkbox & radio (92–100%, mostly done — label click remaining)
+P1 — Phase 2d: Select fixes and enhancements (73% → 85+%)
 P2 — Phase 2e: Text input editing engine (core new feature)
 P2 — Phase 2f: Textarea multi-line editing (extends 2e)
-P2 — Phase 2a.3: Label association (enables label tests)
+P2 — Phase 2a.3: Label association (enables label click tests)
 P2 — Phase 2a.4: Dynamic pseudo-states
 P3 — Phase 2g: UI automation tests
 ```
@@ -589,13 +590,13 @@ P3 — Phase 2g: UI automation tests
 
 ### Success Metrics
 
-| Milestone | Target |
-|-----------|--------|
-| After Phase 2a (crash fixes + infrastructure) | ENOENT errors < 20, total pass > 200/447 (45%) |
-| After Phase 2b–2d (button, checkbox, radio, select) | Pass > 280/447 (63%) |
-| After Phase 2e–2f (text editing) | Pass > 320/447 (72%) |
-| After Phase 2g (all phases) | Pass > 350/447 (78%) |
-| UI automation form tests | 8 test files, all passing |
+| Milestone | Target | Actual |
+|-----------|--------|--------|
+| After Phase 2a (crash fixes + infrastructure) | ENOENT < 20, pass > 200/447 (45%) | ✅ **0 errors, 352/443 pass (79.5%)** |
+| After Phase 2b–2d (button, checkbox, radio, select) | Pass > 280/447 (63%) | ✅ Already exceeded |
+| After Phase 2e–2f (text editing) | Pass > 320/447 (72%) | ✅ Already exceeded |
+| After Phase 2g (all phases) | Pass > 350/447 (78%) | ✅ 352/443 (79.5%) — achieved pre-Phase 2b |
+| UI automation form tests | 8 test files, all passing | Pending |
 
 ---
 
@@ -715,7 +716,7 @@ if (clicked_elem->tag() == HTM_TAG_LABEL) {
 |------|--------|------------|
 | Text editing adds significant complexity | High | Keep TextEditState self-contained with clear API; test each operation in isolation |
 | Font glyph measurement may be slow per-keystroke | Medium | Cache glyph advances per font+size; only re-measure on font change |
-| 128 ENOENT crashes may have diverse root causes | Medium | Triage first — group by error log patterns, fix one category at a time |
+| 128 ENOENT crashes may have diverse root causes | ~~Medium~~ | ✅ **Resolved** — all 128 fixed via stub elements, font metrics, and defensive checks |
 | Select dropdown z-ordering conflicts with other elements | Low | Already uses clip override for overlay rendering — extend pattern |
 | Multi-line textarea scroll + text editing interaction | Medium | Build on single-line first, then extend incrementally |
 

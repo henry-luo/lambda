@@ -255,7 +255,7 @@ void lambda_stack_init(void) {
     install_signal_handler();
 }
 
-void lambda_stack_overflow_error(const char* func_name) {
+extern "C" void lambda_stack_overflow_error(const char* func_name) {
     // Log error with diagnostics
     log_error("stack overflow in function '%s' - possible infinite recursion",
               func_name ? func_name : "<unknown>");

@@ -22,7 +22,16 @@
 #include "../../lib/log.h"
 
 #include "../lambda.h"
-#include "../runner.cpp"   // inline for runtime_init/load_script/run_script access
+#include "../transpiler.hpp"
+
+// Forward declarations for runner.cpp functions (C++ linkage)
+struct Runtime;
+struct Input;
+struct Script;
+void runtime_init(Runtime* runtime);
+void runtime_cleanup(Runtime* runtime);
+Input* run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only);
+Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import);
 
 #include <string.h>
 #include <sys/stat.h>
@@ -125,7 +134,7 @@ static int lambda_backend_execute(LanguageBackend *self, const char *handler_pat
 
     // run the Lambda script
     // the script should define a handler function that returns a response map
-    Input *input = run_script(&data->runtime, handler_path, NULL);
+    Input *input = run_script(&data->runtime, NULL, (char*)handler_path, false);
     if (!input) {
         log_error("lambda handler execution failed: %s", handler_path);
         http_response_error(resp, HTTP_500_INTERNAL_ERROR, "Handler execution failed");
@@ -133,41 +142,39 @@ static int lambda_backend_execute(LanguageBackend *self, const char *handler_pat
     }
 
     // the result should be a map with status, headers, body
-    Item result = input->result;
+    Item result = input->root;
     if (get_type_id(result) == LMD_TYPE_MAP) {
         // extract status
-        Item status_item = map_get(it2map(result), heap_create_name("status"));
+        Item status_item = item_attr(result, "status");
         if (get_type_id(status_item) == LMD_TYPE_INT) {
-            http_response_status(resp, (HttpStatus)i2int(status_item));
+            http_response_status(resp, (HttpStatus)it2i(status_item));
         }
 
         // extract headers
-        Item headers_item = map_get(it2map(result), heap_create_name("headers"));
+        Item headers_item = item_attr(result, "headers");
         if (get_type_id(headers_item) == LMD_TYPE_MAP) {
-            Map *headers_map = it2map(headers_item);
-            // iterate map entries and set response headers
-            for (int i = 0; i < headers_map->len; i++) {
-                ShapeEntry *entry = map_entry_at(headers_map, i);
-                if (entry) {
-                    Item val = map_value_at(headers_map, i);
-                    if (get_type_id(val) == LMD_TYPE_STRING) {
-                        http_response_set_header(resp, entry->name, it2str(val)->chars);
-                    }
+            // iterate header map entries and set response headers
+            int64_t hdr_count = iter_len(headers_item, NULL, 0);
+            for (int64_t i = 0; i < hdr_count; i++) {
+                Item key = iter_key_at(headers_item, NULL, i, 0);
+                Item val = iter_val_at(headers_item, NULL, i, 0);
+                if (get_type_id(key) == LMD_TYPE_STRING && get_type_id(val) == LMD_TYPE_STRING) {
+                    http_response_set_header(resp, it2s(key)->chars, it2s(val)->chars);
                 }
             }
         }
 
         // extract body
-        Item body_item = map_get(it2map(result), heap_create_name("body"));
+        Item body_item = item_attr(result, "body");
         if (get_type_id(body_item) == LMD_TYPE_STRING) {
-            const char *body = it2str(body_item)->chars;
+            const char *body = it2s(body_item)->chars;
             http_response_write_str(resp, body);
         }
 
         http_response_send(resp);
     } else if (get_type_id(result) == LMD_TYPE_STRING) {
         // simple string result — send as text
-        http_response_text(resp, it2str(result)->chars);
+        http_response_text(resp, 200, it2s(result)->chars);
     } else {
         http_response_error(resp, HTTP_500_INTERNAL_ERROR,
                            "Handler must return a map or string");
@@ -221,6 +228,6 @@ static LanguageBackend lambda_backend_instance = {
     lambda_backend_needs_recompile
 };
 
-LanguageBackend* create_lambda_backend(void) {
+extern "C" LanguageBackend* create_lambda_backend(void) {
     return &lambda_backend_instance;
 }
