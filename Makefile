@@ -137,6 +137,7 @@ TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 TREE_SITTER_BASH_LIB = lambda/tree-sitter-bash/libtree-sitter-bash.a
+TREE_SITTER_PYTHON_LIB = lambda/tree-sitter-python/libtree-sitter-python.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
 RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
@@ -193,6 +194,11 @@ $(TREE_SITTER_JAVASCRIPT_LIB):
 $(TREE_SITTER_BASH_LIB):
 	@echo "Building tree-sitter-bash library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-bash libtree-sitter-bash.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+
+# Build tree-sitter-python library
+$(TREE_SITTER_PYTHON_LIB):
+	@echo "Building tree-sitter-python library..."
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python libtree-sitter-python.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate LaTeX parser from grammar.js when it changes
 $(LATEX_PARSER_C) $(LATEX_GRAMMAR_JSON) $(LATEX_NODE_TYPES_JSON): $(LATEX_GRAMMAR_JS)
@@ -338,7 +344,7 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
 # Default target
 .DEFAULT_GOAL := build
