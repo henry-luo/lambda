@@ -890,6 +890,9 @@ typedef struct Context {
 } Context;
 
 #ifndef LAMBDA_STATIC
+#ifdef __cplusplus
+extern "C" {
+#endif
     Array* array();
     ArrayInt* array_int();
     ArrayInt64* array_int64();
@@ -1181,8 +1184,6 @@ typedef struct Context {
     Item fn_find2(Item source, Item pattern);
     Item fn_find3(Item source, Item pattern, Item options);
 
-    Function* to_fn(fn_ptr ptr);
-    Function* to_fn_n(fn_ptr ptr, int arity);  // create function with arity info
     Type* base_type(TypeId type_id);
     Type* const_type(int64_t type_index);
     Type* const_type_with_tl(int64_t type_index, void* type_list_ptr);
@@ -1269,14 +1270,12 @@ typedef struct Context {
     void* ensure_typed_array(Item item, TypeId element_type_id);
 
     // VMap system functions
-#ifdef __cplusplus
-extern "C" {
-#endif
     Item vmap_new();
     Item vmap_from_array(Item array_item);
     void vmap_set(Item vmap_item, Item key, Item value);
+
 #ifdef __cplusplus
-}
+} // extern "C"
 #endif
 
 #endif

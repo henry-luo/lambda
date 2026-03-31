@@ -266,9 +266,11 @@ cleanup_intermediate_files() {
     # Clean object files but keep static libraries
     find . -name "*.o" -type f -delete 2>/dev/null || true
 
-    # Clean dependency build files but keep the built libraries
+    # Clean dependency intermediate build files but keep final outputs
+    # Preserve build_temp/re2-noabsl/ (RE2 source) and build_temp/utf8proc/build/libutf8proc.a
     if [ -d "build_temp" ]; then
-        rm -rf build_temp/
+        find build_temp -name "CMakeCache.txt" -type f -delete 2>/dev/null || true
+        rm -rf build_temp/*/build/CMakeFiles 2>/dev/null || true
     fi
 
     echo "Cleanup completed."

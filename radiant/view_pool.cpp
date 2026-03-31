@@ -266,6 +266,13 @@ void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* span) {
         log_debug("alloc_flex_item_prop: skipping form control");
         return;  // Preserve form control properties
     }
+    // Don't overwrite grid item properties - fi and gi share a union, so allocating
+    // fi would destroy gi placement data. Flex properties (flex-grow, flex-shrink, etc.)
+    // are irrelevant on grid items per CSS Grid spec.
+    if (span->item_prop_type == DomElement::ITEM_PROP_GRID) {
+        log_debug("alloc_flex_item_prop: skipping grid item (fi/gi union)");
+        return;  // Preserve grid item properties
+    }
     // IMPORTANT: fi and gi are in a union, so we must check item_prop_type
     // not just whether fi is NULL. If gi was allocated, fi will be non-NULL
     // but pointing to GridItemProp memory, which is wrong for flex items.
