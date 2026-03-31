@@ -1,10 +1,16 @@
 /**
  * @file webdriver_server.cpp
  * @brief WebDriver HTTP server implementation using lambda/serve
+ *
+ * Uses per-route registration with lambda/serve router.
+ * Route params (:sessionId, :elementId) extracted via http_request_param().
  */
 
 #include "webdriver.hpp"
 #include "../../lambda/serve/serve_utils.hpp"
+#include "../../lambda/serve/http_request.hpp"
+#include "../../lambda/serve/http_response.hpp"
+#include "../../lambda/serve/middleware.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
@@ -18,37 +24,81 @@
 
 // Forward declarations
 extern "C" void parse_json(Input* input, const char* json_string);
-static void webdriver_request_handler(HttpRequest* request, HttpResponse* response, void* user_data);
 
-// Simple JSON string extraction (for keys like "url", "using", "value")
-static const char* extract_json_string(const char* json, const char* key, char* buf, size_t buf_size) {
+// ============================================================================
+// JSON Response Helpers
+// ============================================================================
+
+static void wd_send_success(HttpResponse* resp, const char* value_json) {
+    http_response_status(resp, 200);
+    if (value_json) {
+        http_response_write_fmt(resp, "{\"value\":%s}", value_json);
+    } else {
+        http_response_write_str(resp, "{\"value\":null}");
+    }
+}
+
+static void wd_send_error(HttpResponse* resp, WebDriverError error, const char* message) {
+    http_response_status(resp, webdriver_error_http_status(error));
+    http_response_write_fmt(resp,
+        "{\"value\":{\"error\":\"%s\",\"message\":\"%s\",\"stacktrace\":\"\"}}",
+        webdriver_error_name(error), message ? message : "");
+}
+
+static void wd_send_value(HttpResponse* resp, const char* value) {
+    http_response_status(resp, 200);
+    if (value) {
+        http_response_write_fmt(resp, "{\"value\":\"%s\"}", value);
+    } else {
+        http_response_write_str(resp, "{\"value\":null}");
+    }
+}
+
+// ============================================================================
+// Session Lookup Helper
+// ============================================================================
+
+static WebDriverSession* get_session(WebDriverServer* server, const char* session_id) {
+    if (!session_id || !session_id[0]) return NULL;
+
+    WebDriverSession lookup_key;
+    memset(&lookup_key, 0, sizeof(lookup_key));
+    strncpy(lookup_key.id, session_id, WD_ELEMENT_ID_LEN - 1);
+    lookup_key.id[WD_ELEMENT_ID_LEN - 1] = '\0';
+
+    WebDriverSession* key_ptr = &lookup_key;
+    WebDriverSession** found = (WebDriverSession**)hashmap_get(server->sessions, &key_ptr);
+    return found ? *found : NULL;
+}
+
+// ============================================================================
+// JSON string extraction helper (for body parsing keys like "url", "using", "value")
+// ============================================================================
+
+static const char* wd_extract_json_string(const char* json, const char* key, char* buf, size_t buf_size) {
     if (!json || !key || !buf) return NULL;
 
-    // Build search pattern: "key":"
     char pattern[64];
     snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
 
     const char* start = strstr(json, pattern);
     if (!start) {
-        // Try with space: "key": "
         snprintf(pattern, sizeof(pattern), "\"%s\": \"", key);
         start = strstr(json, pattern);
     }
     if (!start) return NULL;
 
-    // Move past the pattern to the value
     start = strchr(start, ':');
     if (!start) return NULL;
     start++;
     while (*start == ' ') start++;
     if (*start != '"') return NULL;
-    start++;  // Skip opening quote
+    start++;
 
-    // Copy until closing quote
     size_t i = 0;
     while (*start && *start != '"' && i < buf_size - 1) {
         if (*start == '\\' && *(start + 1)) {
-            start++;  // Skip escape
+            start++;
         }
         buf[i++] = *start++;
     }
@@ -57,80 +107,709 @@ static const char* extract_json_string(const char* json, const char* key, char* 
     return buf;
 }
 
-// JSON response helpers
-static void json_send_success(HttpResponse* resp, const char* value_json);
-static void json_send_error(HttpResponse* resp, WebDriverError error, const char* message);
-static void json_send_value(HttpResponse* resp, const char* key, const char* value);
+// ============================================================================
+// WebDriver JSON Middleware
+// ============================================================================
 
-// Route parsing
-typedef struct {
-    const char* method;     // GET, POST, DELETE
-    const char* pattern;    // /session, /session/{sessionId}/element, etc.
-    void (*handler)(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                    const char* session_id, const char* element_id);
-} WebDriverRoute;
+static void wd_json_middleware(HttpRequest* req, HttpResponse* resp,
+                               void* user_data, MiddlewareContext* ctx) {
+    http_response_set_header(resp, "Content-Type", "application/json; charset=utf-8");
+    http_response_set_header(resp, "Cache-Control", "no-cache");
+    middleware_next(ctx);
+}
 
-// Route handlers (forward declarations)
-static void handle_new_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                const char* session_id, const char* element_id);
-static void handle_delete_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                   const char* session_id, const char* element_id);
-static void handle_status(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                           const char* session_id, const char* element_id);
-static void handle_get_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id);
-static void handle_set_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id);
-static void handle_navigate(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                             const char* session_id, const char* element_id);
-static void handle_get_url(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                            const char* session_id, const char* element_id);
-static void handle_get_title(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                              const char* session_id, const char* element_id);
-static void handle_get_source(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                               const char* session_id, const char* element_id);
-static void handle_find_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id);
-static void handle_find_elements(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id);
-static void handle_find_element_from_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                              const char* session_id, const char* element_id);
-static void handle_get_active_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                       const char* session_id, const char* element_id);
-static void handle_element_click(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id);
-static void handle_element_clear(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id);
-static void handle_element_send_keys(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id);
-static void handle_element_text(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id);
-static void handle_element_attribute(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id);
-static void handle_element_property(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                     const char* session_id, const char* element_id);
-static void handle_element_css(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                const char* session_id, const char* element_id);
-static void handle_element_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id);
-static void handle_element_enabled(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id);
-static void handle_element_selected(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                     const char* session_id, const char* element_id);
-static void handle_element_displayed(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id);
-static void handle_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                               const char* session_id, const char* element_id);
-static void handle_element_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                       const char* session_id, const char* element_id);
-static void handle_perform_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id);
-static void handle_release_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id);
-static void handle_get_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id);
-static void handle_set_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id);
+// ============================================================================
+// Route Handlers — standard RequestHandler signature
+// ============================================================================
+
+static void handle_status(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    wd_send_success(resp, "{\"ready\":true,\"message\":\"Radiant WebDriver ready\"}");
+}
+
+static void handle_new_session(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+
+    WebDriverSession* session = webdriver_session_create(1280, 720, true);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_SESSION_NOT_CREATED, "Failed to create session");
+        return;
+    }
+
+    hashmap_set(server->sessions, &session);
+
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
+        "{\"value\":{"
+        "\"sessionId\":\"%s\","
+        "\"capabilities\":{"
+        "\"browserName\":\"radiant\","
+        "\"browserVersion\":\"1.0\","
+        "\"platformName\":\"%s\","
+        "\"acceptInsecureCerts\":false,"
+        "\"pageLoadStrategy\":\"normal\","
+        "\"setWindowRect\":true,"
+        "\"timeouts\":{\"implicit\":%d,\"pageLoad\":%d,\"script\":%d}"
+        "}}}",
+        session->id,
+#ifdef __APPLE__
+        "mac",
+#elif defined(_WIN32)
+        "windows",
+#else
+        "linux",
+#endif
+        session->implicit_wait_ms,
+        session->page_load_ms,
+        session->script_ms);
+}
+
+static void handle_delete_session(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    hashmap_delete(server->sessions, &session);
+    webdriver_session_destroy(session);
+    wd_send_success(resp, "null");
+}
+
+static void handle_get_timeouts(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
+        "{\"value\":{\"implicit\":%d,\"pageLoad\":%d,\"script\":%d}}",
+        session->implicit_wait_ms, session->page_load_ms, session->script_ms);
+}
+
+static void handle_set_timeouts(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    // TODO: Parse JSON body and set timeouts
+    wd_send_success(resp, "null");
+}
+
+static void handle_navigate(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    const char* body = http_request_body(req);
+    if (!body) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return;
+    }
+
+    char url_buf[1024];
+    const char* url = wd_extract_json_string(body, "url", url_buf, sizeof(url_buf));
+    if (!url) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'url' in request");
+        return;
+    }
+
+    WebDriverError err = webdriver_session_navigate(session, url);
+    if (err != WD_SUCCESS) {
+        wd_send_error(resp, err, "Navigation failed");
+        return;
+    }
+
+    wd_send_success(resp, "null");
+}
+
+static void handle_get_url(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    const char* url = webdriver_session_get_url(session);
+    wd_send_value(resp, url ? url : "");
+}
+
+static void handle_get_title(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    const char* title = webdriver_session_get_title(session);
+    wd_send_value(resp, title ? title : "");
+}
+
+static void handle_get_source(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    char* source = webdriver_session_get_source(session);
+    if (source) {
+        wd_send_value(resp, source);
+        free(source);
+    } else {
+        wd_send_value(resp, "");
+    }
+}
+
+static void handle_find_element(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    const char* body = http_request_body(req);
+    if (!body) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return;
+    }
+
+    char using_buf[64], value_buf[256];
+    const char* using_strategy = wd_extract_json_string(body, "using", using_buf, sizeof(using_buf));
+    const char* value = wd_extract_json_string(body, "value", value_buf, sizeof(value_buf));
+    if (!value) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
+        return;
+    }
+
+    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    View* element = webdriver_find_element(session, strategy, value, NULL);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    const char* elem_id = element_registry_add(session->elements, element, session->document_version);
+    if (!elem_id) {
+        wd_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Failed to register element");
+        return;
+    }
+
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp, "{\"value\":{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}}", elem_id);
+}
+
+static void handle_find_elements(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    const char* body = http_request_body(req);
+    if (!body) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
+        return;
+    }
+
+    char using_buf[64], value_buf[256];
+    const char* using_strategy = wd_extract_json_string(body, "using", using_buf, sizeof(using_buf));
+    const char* value = wd_extract_json_string(body, "value", value_buf, sizeof(value_buf));
+    if (!value) {
+        wd_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
+        return;
+    }
+
+    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
+    ArrayList* results = arraylist_new(16);
+    int count = webdriver_find_elements(session, strategy, value, NULL, results);
+
+    StrBuf* buf = strbuf_new_cap(256);
+    strbuf_append_str(buf, "[");
+
+    for (int i = 0; i < count; i++) {
+        View* elem = (View*)results->data[i];
+        const char* elem_id = element_registry_add(session->elements, elem, session->document_version);
+        if (elem_id) {
+            if (i > 0) strbuf_append_str(buf, ",");
+            char entry[128];
+            snprintf(entry, sizeof(entry), "{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}", elem_id);
+            strbuf_append_str(buf, entry);
+        }
+    }
+
+    strbuf_append_str(buf, "]");
+    wd_send_success(resp, buf->str);
+    strbuf_free(buf);
+    arraylist_free(results);
+}
+
+static void handle_find_element_from_element(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+}
+
+static void handle_get_active_element(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    // TODO: Get focused element from state store
+    wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "No active element");
+}
+
+static void handle_element_click(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    WebDriverError err = webdriver_element_click(session, element);
+    if (err != WD_SUCCESS) {
+        wd_send_error(resp, err, "Click failed");
+        return;
+    }
+
+    wd_send_success(resp, "null");
+}
+
+static void handle_element_clear(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    WebDriverError err = webdriver_element_clear(session, element);
+    if (err != WD_SUCCESS) {
+        wd_send_error(resp, err, "Clear failed");
+        return;
+    }
+
+    wd_send_success(resp, "null");
+}
+
+static void handle_element_send_keys(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    // TODO: Parse {"text": "..."} or {"value": [...]} from body
+    wd_send_success(resp, "null");
+}
+
+static void handle_element_text(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    char* text = webdriver_element_get_text(session, element);
+    wd_send_value(resp, text ? text : "");
+    if (text) free(text);
+}
+
+static void handle_element_attribute(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+    const char* attr_name = http_request_param(req, "name");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    // TODO: Get attribute value from element
+    (void)attr_name;
+    wd_send_value(resp, NULL);
+}
+
+static void handle_element_property(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+    const char* prop_name = http_request_param(req, "propertyName");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    // TODO: Get property value from element
+    (void)prop_name;
+    wd_send_value(resp, NULL);
+}
+
+static void handle_element_css(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+    const char* css_prop = http_request_param(req, "cssProperty");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    // TODO: Get computed CSS value from element
+    (void)css_prop;
+    wd_send_value(resp, "");
+}
+
+static void handle_element_rect(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    float x, y, width, height;
+    webdriver_element_get_rect(session, element, &x, &y, &width, &height);
+
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
+        "{\"value\":{\"x\":%.1f,\"y\":%.1f,\"width\":%.1f,\"height\":%.1f}}",
+        x, y, width, height);
+}
+
+static void handle_element_enabled(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    bool enabled = webdriver_element_is_enabled(session, element);
+    wd_send_success(resp, enabled ? "true" : "false");
+}
+
+static void handle_element_selected(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    bool selected = webdriver_element_is_selected(session, element);
+    wd_send_success(resp, selected ? "true" : "false");
+}
+
+static void handle_element_displayed(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    bool displayed = webdriver_element_is_displayed(session, element);
+    wd_send_success(resp, displayed ? "true" : "false");
+}
+
+static void handle_screenshot(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    char* base64_png = webdriver_screenshot(session);
+    if (base64_png) {
+        wd_send_value(resp, base64_png);
+        free(base64_png);
+    } else {
+        wd_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
+    }
+}
+
+static void handle_element_screenshot(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+    const char* element_id = http_request_param(req, "elementId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    View* element = element_registry_get(session->elements, element_id);
+    if (!element) {
+        wd_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
+        return;
+    }
+
+    char* base64_png = webdriver_element_screenshot(session, element);
+    if (base64_png) {
+        wd_send_value(resp, base64_png);
+        free(base64_png);
+    } else {
+        wd_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
+    }
+}
+
+static void handle_perform_actions(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    // TODO: Parse actions from body and execute
+    wd_send_success(resp, "null");
+}
+
+static void handle_release_actions(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    webdriver_release_actions(session);
+    wd_send_success(resp, "null");
+}
+
+static void handle_get_window_rect(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
+        "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
+        session->window_width, session->window_height);
+}
+
+static void handle_set_window_rect(HttpRequest* req, HttpResponse* resp, void* user_data) {
+    WebDriverServer* server = (WebDriverServer*)user_data;
+    const char* session_id = http_request_param(req, "sessionId");
+
+    WebDriverSession* session = get_session(server, session_id);
+    if (!session) {
+        wd_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
+        return;
+    }
+
+    // TODO: Parse width/height from body and resize
+    http_response_status(resp, 200);
+    http_response_write_fmt(resp,
+        "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
+        session->window_width, session->window_height);
+}
+
+// ============================================================================
+// Route Registration
+// ============================================================================
+
+static void webdriver_register_routes(Server* srv, WebDriverServer* wd) {
+    // status
+    server_get(srv, "/status", handle_status, wd);
+
+    // session lifecycle
+    server_post(srv, "/session", handle_new_session, wd);
+    server_del(srv, "/session/:sessionId", handle_delete_session, wd);
+
+    // timeouts
+    server_get(srv, "/session/:sessionId/timeouts", handle_get_timeouts, wd);
+    server_post(srv, "/session/:sessionId/timeouts", handle_set_timeouts, wd);
+
+    // navigation
+    server_post(srv, "/session/:sessionId/url", handle_navigate, wd);
+    server_get(srv, "/session/:sessionId/url", handle_get_url, wd);
+    server_get(srv, "/session/:sessionId/title", handle_get_title, wd);
+    server_get(srv, "/session/:sessionId/source", handle_get_source, wd);
+
+    // element finding
+    server_post(srv, "/session/:sessionId/element", handle_find_element, wd);
+    server_post(srv, "/session/:sessionId/elements", handle_find_elements, wd);
+    server_get(srv, "/session/:sessionId/element/active", handle_get_active_element, wd);
+    server_post(srv, "/session/:sessionId/element/:elementId/element", handle_find_element_from_element, wd);
+
+    // element interaction
+    server_post(srv, "/session/:sessionId/element/:elementId/click", handle_element_click, wd);
+    server_post(srv, "/session/:sessionId/element/:elementId/clear", handle_element_clear, wd);
+    server_post(srv, "/session/:sessionId/element/:elementId/value", handle_element_send_keys, wd);
+
+    // element inspection
+    server_get(srv, "/session/:sessionId/element/:elementId/text", handle_element_text, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/attribute/:name", handle_element_attribute, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/property/:propertyName", handle_element_property, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/css/:cssProperty", handle_element_css, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/rect", handle_element_rect, wd);
+
+    // element state
+    server_get(srv, "/session/:sessionId/element/:elementId/enabled", handle_element_enabled, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/selected", handle_element_selected, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/displayed", handle_element_displayed, wd);
+
+    // screenshots
+    server_get(srv, "/session/:sessionId/screenshot", handle_screenshot, wd);
+    server_get(srv, "/session/:sessionId/element/:elementId/screenshot", handle_element_screenshot, wd);
+
+    // actions
+    server_post(srv, "/session/:sessionId/actions", handle_perform_actions, wd);
+    server_del(srv, "/session/:sessionId/actions", handle_release_actions, wd);
+
+    // window
+    server_get(srv, "/session/:sessionId/window/rect", handle_get_window_rect, wd);
+    server_post(srv, "/session/:sessionId/window/rect", handle_set_window_rect, wd);
+}
 
 // ============================================================================
 // Server Creation and Lifecycle
@@ -162,7 +841,6 @@ WebDriverServer* webdriver_server_create(const char* host, int port) {
     server->arena = arena;
     server->port = port;
 
-    // Create session hashmap (stores WebDriverSession* values, keyed by session id)
     server->sessions = hashmap_new(sizeof(WebDriverSession*), 16, 0, 0,
         [](const void* item, uint64_t seed0, uint64_t seed1) -> uint64_t {
             const WebDriverSession* sess = *(const WebDriverSession**)item;
@@ -181,10 +859,9 @@ WebDriverServer* webdriver_server_create(const char* host, int port) {
         return NULL;
     }
 
-    // Create HTTP server using lambda/serve
     ServerConfig config = server_config_default();
     config.port = port;
-    config.ssl_port = 0;  // No HTTPS for WebDriver
+    config.ssl_port = 0;
     config.timeout_seconds = 60;
 
     server->http_server = server_create(&config);
@@ -195,17 +872,18 @@ WebDriverServer* webdriver_server_create(const char* host, int port) {
         return NULL;
     }
 
-    // Set catch-all handler for all requests
-    server_all(server->http_server, "/*", webdriver_request_handler, server);
+    // register JSON middleware for all WebDriver routes
+    server_use(server->http_server, wd_json_middleware, NULL);
+
+    // register all W3C WebDriver routes
+    webdriver_register_routes(server->http_server, server);
 
     log_info("webdriver: server created on port %d", port);
     return server;
 }
 
 int webdriver_server_start(WebDriverServer* server) {
-    if (!server || !server->http_server) {
-        return -1;
-    }
+    if (!server || !server->http_server) return -1;
 
     int result = server_start(server->http_server, server->port);
     if (result == 0) {
@@ -216,15 +894,11 @@ int webdriver_server_start(WebDriverServer* server) {
 }
 
 int webdriver_server_run(WebDriverServer* server) {
-    if (!server || !server->http_server) {
-        return -1;
-    }
+    if (!server || !server->http_server) return -1;
 
     if (!server->running) {
         int result = webdriver_server_start(server);
-        if (result != 0) {
-            return result;
-        }
+        if (result != 0) return result;
     }
 
     log_info("webdriver: entering event loop");
@@ -246,7 +920,6 @@ void webdriver_server_destroy(WebDriverServer* server) {
 
     webdriver_server_stop(server);
 
-    // Destroy all sessions
     if (server->sessions) {
         size_t iter = 0;
         void* item;
@@ -267,812 +940,4 @@ void webdriver_server_destroy(WebDriverServer* server) {
     log_info("webdriver: server destroyed");
 }
 
-// ============================================================================
-// Request Routing
-// ============================================================================
-
-// Parse path segments: /session/{sessionId}/element/{elementId}/...
-static bool parse_path(const char* path, char* session_id, char* element_id, char* extra) {
-    session_id[0] = '\0';
-    element_id[0] = '\0';
-    if (extra) extra[0] = '\0';
-
-    if (!path || path[0] != '/') return false;
-
-    // Skip leading slash
-    const char* p = path + 1;
-
-    // Check for /session
-    if (strncmp(p, "session", 7) != 0) {
-        // Could be /status
-        return true;
-    }
-    p += 7;
-
-    // Check for /{sessionId}
-    if (*p == '/') {
-        p++;
-        const char* end = strchr(p, '/');
-        if (end) {
-            size_t len = end - p;
-            if (len < WD_ELEMENT_ID_LEN) {
-                strncpy(session_id, p, len);
-                session_id[len] = '\0';
-            }
-            p = end;
-        } else {
-            strncpy(session_id, p, WD_ELEMENT_ID_LEN - 1);
-            session_id[WD_ELEMENT_ID_LEN - 1] = '\0';
-            return true;
-        }
-    } else {
-        return true;  // Just /session
-    }
-
-    // Check for /element
-    if (strncmp(p, "/element", 8) == 0) {
-        p += 8;
-        if (*p == '\0') {
-            // Just /session/{id}/element - for finding elements
-            if (extra) str_copy(extra, 64, "element", 7);
-        } else if (*p == 's' && strncmp(p, "s", 1) == 0) {
-            // /session/{id}/elements
-            if (extra) str_copy(extra, 64, "elements", 8);
-        } else if (*p == '/') {
-            p++;
-            // Check for /element/active
-            if (strncmp(p, "active", 6) == 0 && (p[6] == '\0' || p[6] == '/')) {
-                if (extra) str_copy(extra, 64, "element/active", 14);
-            } else {
-                // /session/{id}/element/{elementId}
-                const char* end = strchr(p, '/');
-                if (end) {
-                    size_t len = end - p;
-                    if (len < WD_ELEMENT_ID_LEN) {
-                        strncpy(element_id, p, len);
-                        element_id[len] = '\0';
-                    }
-                    p = end;
-                    if (extra && *p == '/') {
-                        strncpy(extra, p + 1, 64);
-                    }
-                } else {
-                    strncpy(element_id, p, WD_ELEMENT_ID_LEN - 1);
-                    element_id[WD_ELEMENT_ID_LEN - 1] = '\0';
-                }
-            }
-        }
-    } else if (strncmp(p, "/elements", 9) == 0) {
-        // /session/{id}/elements
-        if (extra) str_copy(extra, 64, "elements", 8);
-    } else if (extra) {
-        // Copy remaining path for pattern matching
-        strncpy(extra, p + 1, 64);
-    }
-
-    return true;
-}
-
-static void webdriver_request_handler(HttpRequest* request, HttpResponse* response, void* user_data) {
-    WebDriverServer* server = (WebDriverServer*)user_data;
-
-    // Set JSON content type
-    http_response_set_header(response, "Content-Type", "application/json; charset=utf-8");
-    http_response_set_header(response, "Cache-Control", "no-cache");
-
-    const char* path = request->path;
-    HttpMethod method = request->method;
-
-    char session_id[WD_ELEMENT_ID_LEN] = {0};
-    char element_id[WD_ELEMENT_ID_LEN] = {0};
-    char extra[64] = {0};
-
-    parse_path(path, session_id, element_id, extra);
-
-    log_info("webdriver: %s %s (session=%s, element=%s, extra=%s)",
-             method == HTTP_GET ? "GET" :
-             method == HTTP_POST ? "POST" :
-             method == HTTP_DELETE ? "DELETE" : "OTHER",
-             path, session_id, element_id, extra);
-
-    // Route to handler
-    if (strcmp(path, "/status") == 0 && method == HTTP_GET) {
-        handle_status(server, request, response, NULL, NULL);
-    }
-    else if (strcmp(path, "/session") == 0 && method == HTTP_POST) {
-        handle_new_session(server, request, response, NULL, NULL);
-    }
-    else if (session_id[0] && element_id[0] == '\0' && method == HTTP_DELETE) {
-        // DELETE /session/{sessionId}
-        handle_delete_session(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "timeouts") == 0) {
-        if (method == HTTP_GET) {
-            handle_get_timeouts(server, request, response, session_id, NULL);
-        } else if (method == HTTP_POST) {
-            handle_set_timeouts(server, request, response, session_id, NULL);
-        }
-    }
-    else if (session_id[0] && strcmp(extra, "url") == 0) {
-        if (method == HTTP_GET) {
-            handle_get_url(server, request, response, session_id, NULL);
-        } else if (method == HTTP_POST) {
-            handle_navigate(server, request, response, session_id, NULL);
-        }
-    }
-    else if (session_id[0] && strcmp(extra, "title") == 0 && method == HTTP_GET) {
-        handle_get_title(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "source") == 0 && method == HTTP_GET) {
-        handle_get_source(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "element") == 0 && method == HTTP_POST) {
-        handle_find_element(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "elements") == 0 && method == HTTP_POST) {
-        handle_find_elements(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "element/active") == 0 && method == HTTP_GET) {
-        handle_get_active_element(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && element_id[0]) {
-        // Element-specific commands
-        if (extra[0] == '\0' && method == HTTP_POST) {
-            // POST /session/{id}/element/{id} - not valid, but handle gracefully
-            json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown command");
-        }
-        else if (strcmp(extra, "click") == 0 && method == HTTP_POST) {
-            handle_element_click(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "clear") == 0 && method == HTTP_POST) {
-            handle_element_clear(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "value") == 0 && method == HTTP_POST) {
-            handle_element_send_keys(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "text") == 0 && method == HTTP_GET) {
-            handle_element_text(server, request, response, session_id, element_id);
-        }
-        else if (strncmp(extra, "attribute/", 10) == 0 && method == HTTP_GET) {
-            handle_element_attribute(server, request, response, session_id, element_id);
-        }
-        else if (strncmp(extra, "property/", 9) == 0 && method == HTTP_GET) {
-            handle_element_property(server, request, response, session_id, element_id);
-        }
-        else if (strncmp(extra, "css/", 4) == 0 && method == HTTP_GET) {
-            handle_element_css(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "rect") == 0 && method == HTTP_GET) {
-            handle_element_rect(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "enabled") == 0 && method == HTTP_GET) {
-            handle_element_enabled(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "selected") == 0 && method == HTTP_GET) {
-            handle_element_selected(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "displayed") == 0 && method == HTTP_GET) {
-            handle_element_displayed(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "screenshot") == 0 && method == HTTP_GET) {
-            handle_element_screenshot(server, request, response, session_id, element_id);
-        }
-        else if (strcmp(extra, "element") == 0 && method == HTTP_POST) {
-            handle_find_element_from_element(server, request, response, session_id, element_id);
-        }
-        else {
-            json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown element command");
-        }
-    }
-    else if (session_id[0] && strcmp(extra, "screenshot") == 0 && method == HTTP_GET) {
-        handle_screenshot(server, request, response, session_id, NULL);
-    }
-    else if (session_id[0] && strcmp(extra, "actions") == 0) {
-        if (method == HTTP_POST) {
-            handle_perform_actions(server, request, response, session_id, NULL);
-        } else if (method == HTTP_DELETE) {
-            handle_release_actions(server, request, response, session_id, NULL);
-        }
-    }
-    else if (session_id[0] && strcmp(extra, "window/rect") == 0) {
-        if (method == HTTP_GET) {
-            handle_get_window_rect(server, request, response, session_id, NULL);
-        } else if (method == HTTP_POST) {
-            handle_set_window_rect(server, request, response, session_id, NULL);
-        }
-    }
-    else {
-        json_send_error(response, WD_ERROR_UNKNOWN_COMMAND, "Unknown command");
-    }
-
-    // response send and cleanup handled by server dispatch
-}
-
-// ============================================================================
-// JSON Response Helpers
-// ============================================================================
-
-static void json_send_success(HttpResponse* resp, const char* value_json) {
-    http_response_status(resp, 200);
-    if (value_json) {
-        http_response_write_fmt(resp, "{\"value\":%s}", value_json);
-    } else {
-        http_response_write_str(resp, "{\"value\":null}");
-    }
-}
-
-static void json_send_error(HttpResponse* resp, WebDriverError error, const char* message) {
-    http_response_status(resp, webdriver_error_http_status(error));
-    http_response_write_fmt(resp,
-        "{\"value\":{\"error\":\"%s\",\"message\":\"%s\",\"stacktrace\":\"\"}}",
-        webdriver_error_name(error), message ? message : "");
-}
-
-static void json_send_value(HttpResponse* resp, const char* key, const char* value) {
-    http_response_status(resp, 200);
-    if (value) {
-        http_response_write_fmt(resp, "{\"value\":\"%s\"}", value);
-    } else {
-        http_response_write_str(resp, "{\"value\":null}");
-    }
-}
-
-// ============================================================================
-// Session Lookup Helper
-// ============================================================================
-
-static WebDriverSession* get_session(WebDriverServer* server, const char* session_id) {
-    if (!session_id || !session_id[0]) return NULL;
-
-    // Create a temporary lookup key (only the id field is used for comparison)
-    WebDriverSession lookup_key;
-    memset(&lookup_key, 0, sizeof(lookup_key));
-    strncpy(lookup_key.id, session_id, WD_ELEMENT_ID_LEN - 1);
-    lookup_key.id[WD_ELEMENT_ID_LEN - 1] = '\0';
-
-    WebDriverSession* key_ptr = &lookup_key;
-    WebDriverSession** found = (WebDriverSession**)hashmap_get(server->sessions, &key_ptr);
-    return found ? *found : NULL;
-}
-
-// ============================================================================
-// Route Handlers (Stubs - to be implemented in webdriver_commands.cpp)
-// ============================================================================
-
-static void handle_status(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                           const char* session_id, const char* element_id) {
-    json_send_success(resp, "{\"ready\":true,\"message\":\"Radiant WebDriver ready\"}");
-}
-
-static void handle_new_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                const char* session_id, const char* element_id) {
-    // Create new session with default dimensions
-    WebDriverSession* session = webdriver_session_create(1280, 720, true);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_SESSION_NOT_CREATED, "Failed to create session");
-        return;
-    }
-
-    // Add to sessions map (store pointer to session)
-    hashmap_set(server->sessions, &session);
-
-    // Build capabilities response
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp,
-        "{\"value\":{"
-        "\"sessionId\":\"%s\","
-        "\"capabilities\":{"
-        "\"browserName\":\"radiant\","
-        "\"browserVersion\":\"1.0\","
-        "\"platformName\":\"%s\","
-        "\"acceptInsecureCerts\":false,"
-        "\"pageLoadStrategy\":\"normal\","
-        "\"setWindowRect\":true,"
-        "\"timeouts\":{\"implicit\":%d,\"pageLoad\":%d,\"script\":%d}"
-        "}}}",
-        session->id,
-#ifdef __APPLE__
-        "mac",
-#elif defined(_WIN32)
-        "windows",
-#else
-        "linux",
-#endif
-        session->implicit_wait_ms,
-        session->page_load_ms,
-        session->script_ms);
-}
-
-static void handle_delete_session(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                   const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    hashmap_delete(server->sessions, &session);
-    webdriver_session_destroy(session);
-    json_send_success(resp, "null");
-}
-
-static void handle_get_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp,
-        "{\"value\":{\"implicit\":%d,\"pageLoad\":%d,\"script\":%d}}",
-        session->implicit_wait_ms, session->page_load_ms, session->script_ms);
-}
-
-static void handle_set_timeouts(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    // TODO: Parse JSON body and set timeouts
-    json_send_success(resp, "null");
-}
-
-static void handle_navigate(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                             const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    const char* body = http_request_body(req);
-    if (!body) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
-        return;
-    }
-
-    char url_buf[1024];
-    const char* url = extract_json_string(body, "url", url_buf, sizeof(url_buf));
-
-    if (!url) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'url' in request");
-        return;
-    }
-
-    WebDriverError err = webdriver_session_navigate(session, url);
-    if (err != WD_SUCCESS) {
-        json_send_error(resp, err, "Navigation failed");
-        return;
-    }
-
-    json_send_success(resp, "null");
-}
-
-static void handle_get_url(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                            const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    const char* url = webdriver_session_get_url(session);
-    json_send_value(resp, "value", url ? url : "");
-}
-
-static void handle_get_title(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                              const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    const char* title = webdriver_session_get_title(session);
-    json_send_value(resp, "value", title ? title : "");
-}
-
-static void handle_get_source(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                               const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    char* source = webdriver_session_get_source(session);
-    if (source) {
-        // TODO: Properly escape JSON string
-        json_send_value(resp, "value", source);
-        free(source);
-    } else {
-        json_send_value(resp, "value", "");
-    }
-}
-
-// Element finding handlers
-static void handle_find_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    const char* body = http_request_body(req);
-    if (!body) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
-        return;
-    }
-
-    char using_buf[64], value_buf[256];
-    const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
-    const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
-
-    if (!value) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
-        return;
-    }
-
-    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
-    View* element = webdriver_find_element(session, strategy, value, NULL);
-
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    // Register element and return reference
-    const char* elem_id = element_registry_add(session->elements, element, session->document_version);
-    if (!elem_id) {
-        json_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Failed to register element");
-        return;
-    }
-
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp, "{\"value\":{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}}", elem_id);
-}
-
-static void handle_find_elements(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    const char* body = http_request_body(req);
-    if (!body) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing request body");
-        return;
-    }
-
-    char using_buf[64], value_buf[256];
-    const char* using_strategy = extract_json_string(body, "using", using_buf, sizeof(using_buf));
-    const char* value = extract_json_string(body, "value", value_buf, sizeof(value_buf));
-
-    if (!value) {
-        json_send_error(resp, WD_ERROR_INVALID_ARGUMENT, "Missing 'value' in request");
-        return;
-    }
-
-    LocatorStrategy strategy = webdriver_parse_strategy(using_strategy);
-
-    ArrayList* results = arraylist_new(16);
-    int count = webdriver_find_elements(session, strategy, value, NULL, results);
-
-    // Build response array
-    StrBuf* buf = strbuf_new_cap(256);
-    strbuf_append_str(buf, "[");
-
-    for (int i = 0; i < count; i++) {
-        View* elem = (View*)results->data[i];
-        const char* elem_id = element_registry_add(session->elements, elem, session->document_version);
-        if (elem_id) {
-            if (i > 0) strbuf_append_str(buf, ",");
-            char entry[128];
-            snprintf(entry, sizeof(entry), "{\"element-6066-11e4-a52e-4f735466cecf\":\"%s\"}", elem_id);
-            strbuf_append_str(buf, entry);
-        }
-    }
-
-    strbuf_append_str(buf, "]");
-
-    json_send_success(resp, buf->str);
-
-    strbuf_free(buf);
-    arraylist_free(results);
-}
-
-static void handle_find_element_from_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                              const char* session_id, const char* element_id) {
-    json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-}
-
-static void handle_get_active_element(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                       const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    // TODO: Get focused element from state store
-    json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "No active element");
-}
-
-static void handle_element_click(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    WebDriverError err = webdriver_element_click(session, element);
-    if (err != WD_SUCCESS) {
-        json_send_error(resp, err, "Click failed");
-        return;
-    }
-
-    json_send_success(resp, "null");
-}
-
-static void handle_element_clear(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                  const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    WebDriverError err = webdriver_element_clear(session, element);
-    if (err != WD_SUCCESS) {
-        json_send_error(resp, err, "Clear failed");
-        return;
-    }
-
-    json_send_success(resp, "null");
-}
-
-static void handle_element_send_keys(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    // TODO: Parse {"text": "..."} or {"value": [...]} from body
-    json_send_success(resp, "null");
-}
-
-static void handle_element_text(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    char* text = webdriver_element_get_text(session, element);
-    json_send_value(resp, "value", text ? text : "");
-    if (text) free(text);
-}
-
-static void handle_element_attribute(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id) {
-    // TODO: Extract attribute name from path
-    json_send_value(resp, "value", NULL);
-}
-
-static void handle_element_property(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                     const char* session_id, const char* element_id) {
-    // TODO: Extract property name from path
-    json_send_value(resp, "value", NULL);
-}
-
-static void handle_element_css(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                const char* session_id, const char* element_id) {
-    // TODO: Extract CSS property name from path
-    json_send_value(resp, "value", "");
-}
-
-static void handle_element_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                 const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    float x, y, width, height;
-    webdriver_element_get_rect(session, element, &x, &y, &width, &height);
-
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp,
-        "{\"value\":{\"x\":%.1f,\"y\":%.1f,\"width\":%.1f,\"height\":%.1f}}",
-        x, y, width, height);
-}
-
-static void handle_element_enabled(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    bool enabled = webdriver_element_is_enabled(session, element);
-    json_send_success(resp, enabled ? "true" : "false");
-}
-
-static void handle_element_selected(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                     const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    bool selected = webdriver_element_is_selected(session, element);
-    json_send_success(resp, selected ? "true" : "false");
-}
-
-static void handle_element_displayed(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                      const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    bool displayed = webdriver_element_is_displayed(session, element);
-    json_send_success(resp, displayed ? "true" : "false");
-}
-
-static void handle_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                               const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    char* base64_png = webdriver_screenshot(session);
-    if (base64_png) {
-        json_send_value(resp, "value", base64_png);
-        free(base64_png);
-    } else {
-        json_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
-    }
-}
-
-static void handle_element_screenshot(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                       const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    View* element = element_registry_get(session->elements, element_id);
-    if (!element) {
-        json_send_error(resp, WD_ERROR_NO_SUCH_ELEMENT, "Element not found");
-        return;
-    }
-
-    char* base64_png = webdriver_element_screenshot(session, element);
-    if (base64_png) {
-        json_send_value(resp, "value", base64_png);
-        free(base64_png);
-    } else {
-        json_send_error(resp, WD_ERROR_UNKNOWN_ERROR, "Screenshot failed");
-    }
-}
-
-static void handle_perform_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    // TODO: Parse actions from body and execute
-    json_send_success(resp, "null");
-}
-
-static void handle_release_actions(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    webdriver_release_actions(session);
-    json_send_success(resp, "null");
-}
-
-static void handle_get_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp,
-        "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
-        session->window_width, session->window_height);
-}
-
-static void handle_set_window_rect(WebDriverServer* server, HttpRequest* req, HttpResponse* resp,
-                                    const char* session_id, const char* element_id) {
-    WebDriverSession* session = get_session(server, session_id);
-    if (!session) {
-        json_send_error(resp, WD_ERROR_INVALID_SESSION_ID, "Session not found");
-        return;
-    }
-
-    // TODO: Parse width/height from body and resize
-    http_response_status(resp, 200);
-    http_response_write_fmt(resp,
-        "{\"value\":{\"x\":0,\"y\":0,\"width\":%d,\"height\":%d}}",
-        session->window_width, session->window_height);
-}
+// end of webdriver_server.cpp
