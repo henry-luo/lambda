@@ -290,14 +290,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_IFRAME: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
-        // todo: inset border style
+        // HTML spec §15.5.14: iframe { border: 2px inset; }
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left = 1;  // CSS logical pixels
+            block->bound->border->width.bottom = block->bound->border->width.left = 2;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
+        block->bound->border->top_style = block->bound->border->bottom_style = CSS_VALUE_INSET;
+        block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_INSET;
+        block->bound->border->top_color.r = block->bound->border->top_color.g =
+            block->bound->border->top_color.b = 128; block->bound->border->top_color.a = 255;
+        block->bound->border->left_color = block->bound->border->top_color;
+        block->bound->border->bottom_color.r = block->bound->border->bottom_color.g =
+            block->bound->border->bottom_color.b = 192; block->bound->border->bottom_color.a = 255;
+        block->bound->border->right_color = block->bound->border->bottom_color;
         if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = CSS_VALUE_AUTO;
         block->scroller->overflow_y = CSS_VALUE_AUTO;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         // Parse HTML width/height attributes; default 300x150 per HTML spec
         size_t value_len;  const char *value;
         value = elmt->get_attribute("width");
@@ -307,7 +316,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 StrView width_view = strview_init(value, value_len - 1);
                 float percent = strview_to_int(&width_view);
                 if (percent > 0) {
-                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                     block->blk->given_width_percent = percent;
                     lycon->block.given_width = -1;  // resolve at layout time
                     log_debug("[HTML] IFRAME width attribute: %.0f%%", percent);
@@ -315,10 +323,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             } else {
                 StrView width_view = strview_init(value, value_len);
                 float width = strview_to_int(&width_view);
-                if (width >= 0) lycon->block.given_width = width;
+                if (width >= 0) {
+                    lycon->block.given_width = width;
+                    block->blk->given_width = width;
+                }
             }
         } else {
             lycon->block.given_width = 300;  // default intrinsic width
+            block->blk->given_width = 300;
         }
         value = elmt->get_attribute("height");
         if (value) {
@@ -327,7 +339,6 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 StrView height_view = strview_init(value, value_len - 1);
                 float percent = strview_to_int(&height_view);
                 if (percent > 0) {
-                    if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                     block->blk->given_height_percent = percent;
                     lycon->block.given_height = -1;  // resolve at layout time
                     log_debug("[HTML] IFRAME height attribute: %.0f%%", percent);
@@ -335,13 +346,27 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             } else {
                 StrView height_view = strview_init(value, value_len);
                 float height = strview_to_int(&height_view);
-                if (height >= 0) lycon->block.given_height = height;
+                if (height >= 0) {
+                    lycon->block.given_height = height;
+                    block->blk->given_height = height;
+                }
             }
         } else {
             lycon->block.given_height = 150;  // default intrinsic height
+            block->blk->given_height = 150;
         }
         break;
     }
+    case HTM_TAG_OBJECT:
+    case HTM_TAG_EMBED:
+        // replaced elements with default 300x150 per HTML spec
+        block->display.inner = RDT_DISPLAY_REPLACED;
+        lycon->block.given_width = 300;
+        lycon->block.given_height = 150;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->given_width = 300;
+        block->blk->given_height = 150;
+        break;
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
@@ -935,8 +960,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->bound->padding.left = block->bound->padding.right = 0.75 * lycon->font.style->font_size;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size * 0.5;
-        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
+        block->bound->margin.left = block->bound->margin.right = 2;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
+            block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
     case HTM_TAG_LEGEND:
         // legend: padding (CSS logical pixels)
@@ -953,7 +979,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form = (FormControlProp*)alloc_prop(lycon, sizeof(FormControlProp));
             new (block->form) FormControlProp();
             block->form->control_type = FORM_CONTROL_BUTTON;
-            if (block->get_attribute("disabled")) block->form->disabled = 1;
+            if (block->has_attribute("disabled")) block->form->disabled = 1;
         }
 
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
@@ -997,16 +1023,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
 
             // Parse state attributes - check both attribute and pseudo_state
             // The pseudo_state may have been set during DOM tree building
-            if (block->get_attribute("disabled") ||
+            if (block->has_attribute("disabled") ||
                 (block->pseudo_state & PSEUDO_STATE_DISABLED)) {
                 block->form->disabled = 1;
             }
-            if (block->get_attribute("readonly")) block->form->readonly = 1;
-            if (block->get_attribute("checked") ||
+            if (block->has_attribute("readonly")) block->form->readonly = 1;
+            if (block->has_attribute("checked") ||
                 (block->pseudo_state & PSEUDO_STATE_CHECKED)) {
                 block->form->checked = 1;
             }
-            if (block->get_attribute("required")) block->form->required = 1;
+            if (block->has_attribute("required")) block->form->required = 1;
         }
 
         // Set display and intrinsic size based on control type
@@ -1025,10 +1051,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Set given_width/height so layout algorithm uses intrinsic size
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
-            // Default margin: 3px 3px 3px 4px (Chrome UA stylesheet)
+            // Default margin: Chrome UA stylesheet
+            // checkbox: 3px 3px 3px 4px, radio: 3px 3px 0px 5px
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
             block->bound->margin.top = 3; block->bound->margin.right = 3;
-            block->bound->margin.bottom = 3; block->bound->margin.left = 4;
+            block->bound->margin.bottom = (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : 3;
+            block->bound->margin.left = (block->form->control_type == FORM_CONTROL_RADIO) ? 5 : 4;
             block->bound->margin.top_specificity = block->bound->margin.right_specificity =
                 block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
             break;
@@ -1064,10 +1092,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
             block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
             block->form->intrinsic_width = FormDefaults::RANGE_WIDTH;
-            block->form->intrinsic_height = FormDefaults::RANGE_HEIGHT;
+            // On macOS Chrome, a range with a list attribute (tick marks) renders taller (22px) than one without (16px)
+            const char* list_attr = block->get_attribute("list");
+            block->form->intrinsic_height = list_attr ? FormDefaults::RANGE_HEIGHT_WITH_LIST : FormDefaults::RANGE_HEIGHT;
             // Set given_width/height so layout algorithm uses intrinsic size (border-box)
             lycon->block.given_width = block->form->intrinsic_width;
             lycon->block.given_height = block->form->intrinsic_height;
+            // Chrome default margin: 2px all sides
+            if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+            block->bound->margin.top = block->bound->margin.right =
+                block->bound->margin.bottom = block->bound->margin.left = 2;
+            block->bound->margin.top_specificity = block->bound->margin.right_specificity =
+                block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
             // Parse range attributes
             const char* min_attr = block->get_attribute("min");
             const char* max_attr = block->get_attribute("max");
@@ -1127,8 +1163,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             new (block->form) FormControlProp();
             block->form->control_type = FORM_CONTROL_SELECT;
             block->form->name = block->get_attribute("name");
-            if (block->get_attribute("disabled")) block->form->disabled = 1;
-            if (block->get_attribute("multiple")) block->form->multiple = 1;
+            if (block->has_attribute("disabled")) block->form->disabled = 1;
+            if (block->has_attribute("multiple")) block->form->multiple = 1;
+            // HTML §4.10.7: size attr specifies visible rows in listbox mode
+            const char* size_attr = block->get_attribute("size");
+            if (size_attr) {
+                int size_val = (int)str_to_int64_default(size_attr, strlen(size_attr), 0);
+                if (size_val > 0) block->form->select_size = size_val;
+            }
 
             // Count options and find selected index
             int option_count = 0;
@@ -1138,7 +1180,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (child->is_element()) {
                     DomElement* child_elem = (DomElement*)child;
                     if (child_elem->tag() == HTM_TAG_OPTION) {
-                        if (child_elem->get_attribute("selected") && selected_idx < 0) {
+                        if (child_elem->has_attribute("selected") && selected_idx < 0) {
                             selected_idx = option_count;
                         }
                         option_count++;
@@ -1149,7 +1191,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                             if (opt_child->is_element()) {
                                 DomElement* opt_elem = (DomElement*)opt_child;
                                 if (opt_elem->tag() == HTM_TAG_OPTION) {
-                                    if (opt_elem->get_attribute("selected") && selected_idx < 0) {
+                                    if (opt_elem->has_attribute("selected") && selected_idx < 0) {
                                         selected_idx = option_count;
                                     }
                                     option_count++;
@@ -1170,8 +1212,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->form->intrinsic_width = FormDefaults::SELECT_WIDTH;
         block->form->intrinsic_height = FormDefaults::SELECT_HEIGHT;
         // Don't set given_width — let CSS cascade or calc_select_size set it
-        // Set given_height so layout uses intrinsic height (border-box)
+        // Set given_height so layout uses intrinsic height (border-box); will be updated by calc_select_size for listbox
         lycon->block.given_height = block->form->intrinsic_height;
+        block->blk->given_height = block->form->intrinsic_height;
         // Default border
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
@@ -1189,8 +1232,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             block->form->control_type = FORM_CONTROL_TEXTAREA;
             block->form->name = block->get_attribute("name");
             block->form->placeholder = block->get_attribute("placeholder");
-            if (block->get_attribute("disabled")) block->form->disabled = 1;
-            if (block->get_attribute("readonly")) block->form->readonly = 1;
+            if (block->has_attribute("disabled")) block->form->disabled = 1;
+            if (block->has_attribute("readonly")) block->form->readonly = 1;
             // Parse cols/rows
             const char* cols_attr = block->get_attribute("cols");
             const char* rows_attr = block->get_attribute("rows");
@@ -1227,8 +1270,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_METER: {
         // Meter: inline-block replaced element, Chrome default 80x16
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        block->blk->given_width = FormDefaults::METER_WIDTH;
+        block->blk->given_height = FormDefaults::METER_HEIGHT;
         lycon->block.given_width = FormDefaults::METER_WIDTH;
         lycon->block.given_height = FormDefaults::METER_HEIGHT;
         break;
@@ -1236,8 +1282,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case HTM_TAG_PROGRESS: {
         // Progress: inline-block replaced element, Chrome default 160x16
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
+        block->display.inner = RDT_DISPLAY_REPLACED;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        block->blk->given_width = FormDefaults::PROGRESS_WIDTH;
+        block->blk->given_height = FormDefaults::PROGRESS_HEIGHT;
         lycon->block.given_width = FormDefaults::PROGRESS_WIDTH;
         lycon->block.given_height = FormDefaults::PROGRESS_HEIGHT;
         break;

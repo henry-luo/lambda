@@ -464,6 +464,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
+    lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.max_normal_line_height = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
@@ -556,6 +557,19 @@ void line_break(LayoutContext* lycon) {
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
 
+    // CSS Inline §5.2.1: When trailing whitespace is "collapsed away" at the end of a line,
+    // it should not contribute to line height. If the last text rect was entirely trailing
+    // whitespace (width <= 0 after trimming), rollback its max_descender contribution.
+    // This uses the saved max_descender from before the last output_text call.
+    // Guard: only apply on lines with replaced/inline-block content, where the trailing
+    // whitespace between text and replaced element inflates the descender incorrectly.
+    if (lycon->line.has_replaced_content &&
+        lycon->line.last_text_rect && lycon->line.last_text_rect->width <= 0 &&
+        lycon->line.max_descender > lycon->line.max_desc_before_last_text) {
+        log_debug("line_break: rolling back trailing whitespace descender (was %.1f, restoring %.1f)",
+            lycon->line.max_descender, lycon->line.max_desc_before_last_text);
+        lycon->line.max_descender = lycon->line.max_desc_before_last_text;
+    }
     if (lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender) {
         // apply vertical alignment
@@ -928,6 +942,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         }
         log_debug("output_text BEFORE: prev_max_asc=%.1f prev_max_desc=%.1f new_asc=%.1f new_desc=%.1f va_off=%.1f",
             lycon->line.max_ascender, lycon->line.max_descender, ascender, descender, va_offset);
+        // Save max_descender before this text's contribution, for trailing whitespace rollback
+        lycon->line.max_desc_before_last_text = lycon->line.max_descender;
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
         log_debug("output_text: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",

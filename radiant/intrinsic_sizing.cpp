@@ -970,11 +970,19 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     ViewBlock* view_block_replaced = (ViewBlock*)element;
     // Check both resolved display.inner AND element tag for replaced element detection,
     // since display.inner may not yet be resolved during early intrinsic sizing passes.
+    // Form controls (input, select, textarea) are detected by tag as well, because
+    // their FormControlProp may not be allocated yet during early intrinsic sizing.
     uintptr_t replaced_tag = element->tag();
     bool is_replaced_element = (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) ||
         (replaced_tag == HTM_TAG_IMG || replaced_tag == HTM_TAG_VIDEO ||
          replaced_tag == HTM_TAG_IFRAME || replaced_tag == HTM_TAG_HR ||
-         replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS);
+         replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS ||
+         replaced_tag == HTM_TAG_OBJECT || replaced_tag == HTM_TAG_EMBED ||
+         replaced_tag == HTM_TAG_INPUT || replaced_tag == HTM_TAG_SELECT ||
+         replaced_tag == HTM_TAG_TEXTAREA || replaced_tag == HTM_TAG_METER ||
+         replaced_tag == HTM_TAG_PROGRESS) ||
+        (view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM &&
+         view_block_replaced->form);
     if (is_replaced_element) {
         float replaced_width = -1;
 
@@ -1049,8 +1057,53 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         else if (replaced_tag == HTM_TAG_HR) {
             replaced_width = 0;
         }
-        // Form controls (INPUT, SELECT, TEXTAREA, BUTTON) fall through to
-        // normal measurement — they already have intrinsic sizing via FormControlProp
+        else if (replaced_tag == HTM_TAG_OBJECT || replaced_tag == HTM_TAG_EMBED) {
+            replaced_width = 300;
+            log_debug("  -> replaced OBJECT/EMBED intrinsic width: 300");
+        }
+        else if (replaced_tag == HTM_TAG_METER) {
+            replaced_width = FormDefaults::METER_WIDTH;
+            log_debug("  -> replaced METER intrinsic width: %.0f", replaced_width);
+        }
+        else if (replaced_tag == HTM_TAG_PROGRESS) {
+            replaced_width = FormDefaults::PROGRESS_WIDTH;
+            log_debug("  -> replaced PROGRESS intrinsic width: %.0f", replaced_width);
+        }
+
+        // Form controls (INPUT, SELECT, TEXTAREA) have intrinsic sizes.
+        // When FormControlProp is allocated (styles resolved), use its intrinsic_width.
+        // Otherwise, fall back to tag+type-based defaults for early intrinsic sizing.
+        // Return content-area width; border+padding added by common code at bottom.
+        if (replaced_width < 0 && view_block_replaced->item_prop_type == DomElement::ITEM_PROP_FORM
+            && view_block_replaced->form && view_block_replaced->form->intrinsic_width > 0) {
+            replaced_width = view_block_replaced->form->intrinsic_width;
+            log_debug("  -> replaced FORM CONTROL intrinsic width: %.1f", replaced_width);
+        }
+        // Tag-based fallback: form prop not yet allocated during early intrinsic sizing
+        if (replaced_width < 0) {
+            if (replaced_tag == HTM_TAG_INPUT) {
+                const char* input_type = element->get_attribute("type");
+                if (input_type && (strcmp(input_type, "checkbox") == 0 || strcmp(input_type, "radio") == 0)) {
+                    replaced_width = FormDefaults::CHECK_SIZE;
+                } else if (input_type && strcmp(input_type, "range") == 0) {
+                    replaced_width = FormDefaults::RANGE_WIDTH;
+                } else if (input_type && strcmp(input_type, "image") == 0) {
+                    replaced_width = FormDefaults::IMAGE_INPUT_WIDTH;
+                } else {
+                    // text, password, number, email, url, search, tel, etc.
+                    replaced_width = FormDefaults::TEXT_WIDTH;
+                }
+                log_debug("  -> replaced INPUT (tag fallback, type=%s) intrinsic width: %.1f",
+                    input_type ? input_type : "text", replaced_width);
+            } else if (replaced_tag == HTM_TAG_SELECT) {
+                replaced_width = FormDefaults::SELECT_WIDTH;
+                log_debug("  -> replaced SELECT (tag fallback) intrinsic width: %.1f", replaced_width);
+            } else if (replaced_tag == HTM_TAG_TEXTAREA) {
+                // Textarea default: 20 cols * ~8px average char width + padding
+                replaced_width = FormDefaults::TEXTAREA_COLS * 8.0f + FormDefaults::TEXTAREA_PADDING * 2;
+                log_debug("  -> replaced TEXTAREA (tag fallback) intrinsic width: %.1f", replaced_width);
+            }
+        }
 
         if (replaced_width >= 0) {
             sizes.min_content = (int)(replaced_width + 0.5f);

@@ -729,7 +729,8 @@ DisplayValue resolve_display_value(void* child) {
                             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
-                            tag_id == HTM_TAG_PROGRESS);
+                            tag_id == HTM_TAG_PROGRESS ||
+                            tag_id == HTM_TAG_OBJECT || tag_id == HTM_TAG_EMBED);
 
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
@@ -1013,7 +1014,9 @@ DisplayValue resolve_display_value(void* child) {
         } else if (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
-            tag_id == HTM_TAG_IFRAME) {
+            tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
+            tag_id == HTM_TAG_PROGRESS ||
+            tag_id == HTM_TAG_OBJECT || tag_id == HTM_TAG_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
         } else if (tag_id == HTM_TAG_HR) {
