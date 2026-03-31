@@ -23,6 +23,7 @@
         "lambda/py",
         "lambda/bash",
         "lambda/network",
+        "lambda/serve",
         "radiant",
         "radiant/pdf",
         "radiant/webdriver"
@@ -459,7 +460,8 @@
                 "lambda/format",
                 "lambda/validator",
                 "lambda/js",
-                "lambda/network"
+                "lambda/network",
+                "lambda/serve"
             ],
             "exclude_source_files": [
                 "lambda/schema_builder.cpp",
@@ -1524,6 +1526,34 @@
                         ],
                         "binary": "test_avl_tree_perf.exe",
                         "icon": "⚡"
+                    },
+                    {
+                        "source": "test_serve_gtest.cpp",
+                        "name": "Web Server Module Tests",
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "uv"
+                        ],
+                        "additional_sources": [
+                            "lambda/serve/serve_types.cpp",
+                            "lambda/serve/serve_utils.cpp",
+                            "lambda/serve/router.cpp",
+                            "lambda/serve/cookie.cpp",
+                            "lambda/serve/body_parser.cpp",
+                            "lambda/serve/mime.cpp",
+                            "lambda/serve/middleware.cpp",
+                            "lambda/serve/language_backend.cpp",
+                            "lambda/serve/static_handler.cpp",
+                            "lambda/serve/http_request.cpp",
+                            "lambda/serve/http_response.cpp",
+                            "lib/log.c"
+                        ],
+                        "binary": "test_serve_gtest.exe",
+                        "icon": "🌐"
                     }
                 ],
                 "type": "library"

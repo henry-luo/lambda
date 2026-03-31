@@ -129,7 +129,8 @@ void http_response_text(HttpResponse *resp, int status, const char *text);
 
 // send file contents with auto-detected Content-Type
 //   Node: res.sendFile(path)   Flask: send_file(path)   FastAPI: FileResponse
-int http_response_file(HttpResponse *resp, const char *filepath);
+int http_response_file(HttpResponse *resp, const char *filepath,
+                       const char *content_type = NULL);
 
 // send HTTP redirect
 //   Node: res.redirect(url)   Flask: redirect(url)   FastAPI: RedirectResponse

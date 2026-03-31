@@ -238,7 +238,8 @@ void http_response_text(HttpResponse *resp, int status, const char *text) {
     http_response_send(resp);
 }
 
-int http_response_file(HttpResponse *resp, const char *filepath) {
+int http_response_file(HttpResponse *resp, const char *filepath,
+                       const char *content_type) {
     if (!resp || !filepath) return -1;
 
     size_t file_size = 0;
@@ -248,7 +249,7 @@ int http_response_file(HttpResponse *resp, const char *filepath) {
         return -1;
     }
 
-    const char *mime = serve_mime_type_for_file(filepath);
+    const char *mime = content_type ? content_type : mime_detect(NULL, filepath, NULL, 0);
     http_response_set_header(resp, "Content-Type", mime);
     http_response_write(resp, content, file_size);
     http_response_send(resp);

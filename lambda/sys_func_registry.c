@@ -80,6 +80,14 @@ extern Item fn_redo(void);
 extern Item fn_commit0(void);
 extern Item fn_commit1(Item description);
 
+// io.http module
+extern RetItem pn_io_http_create_server(Item config);
+extern RetItem pn_io_http_listen(Item server, Item port);
+extern RetItem pn_io_http_route(Item server, Item method, Item path, Item handler);
+extern RetItem pn_io_http_use(Item server, Item middleware);
+extern RetItem pn_io_http_static(Item server, Item url_path, Item dir_path);
+extern RetItem pn_io_http_stop(Item server);
+
 // target_equal is in target.cpp (C++ linkage)
 extern bool target_equal(Target* a, Target* b);
 
@@ -589,6 +597,25 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
 
+    // io.http module
+    {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_HTTP_LISTEN, "io_http_listen", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_listen", FPTR(pn_io_http_listen), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_HTTP_ROUTE, "io_http_route", 4, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_route", FPTR(pn_io_http_route), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_HTTP_USE, "io_http_use", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_use", FPTR(pn_io_http_use), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_HTTP_STATIC, "io_http_static", 3, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_static", FPTR(pn_io_http_static), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_HTTP_STOP, "io_http_stop", 1, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
+     C_RET_RETITEM, C_ARG_ITEM, "pn_io_http_stop", FPTR(pn_io_http_stop), NULL, NULL, false, 0},
+
     {SYSFUNC_EXISTS, "exists", 1, &TYPE_BOOL, false, false, false, LMD_TYPE_ANY, false,
      C_RET_BOOL, C_ARG_ITEM, "fn_exists", FPTR(fn_exists), NULL, NULL, false, 0},
 
@@ -696,6 +723,13 @@ extern Item pn_io_rename_mir(Item old_path, Item new_path);
 extern Item pn_io_fetch1_mir(Item target);
 extern Item pn_io_fetch2_mir(Item target, Item options);
 extern Item pn_output_append_mir(Item source, Item target);
+// io.http module
+extern Item pn_io_http_create_server_mir(Item config);
+extern Item pn_io_http_listen_mir(Item server, Item port);
+extern Item pn_io_http_route_mir(Item server, Item method, Item path, Item handler);
+extern Item pn_io_http_use_mir(Item server, Item middleware);
+extern Item pn_io_http_static_mir(Item server, Item url_path, Item dir_path);
+extern Item pn_io_http_stop_mir(Item server);
 
 // Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI fix)
 extern Item fn_call_boxed_0(void* fp);
@@ -1746,6 +1780,13 @@ JitImport jit_runtime_imports[] = {
     {"pn_io_fetch1_mir", FPTR(pn_io_fetch1_mir)},
     {"pn_io_fetch2_mir", FPTR(pn_io_fetch2_mir)},
     {"pn_output_append_mir", FPTR(pn_output_append_mir)},
+    // io.http module
+    {"pn_io_http_create_server_mir", FPTR(pn_io_http_create_server_mir)},
+    {"pn_io_http_listen_mir", FPTR(pn_io_http_listen_mir)},
+    {"pn_io_http_route_mir", FPTR(pn_io_http_route_mir)},
+    {"pn_io_http_use_mir", FPTR(pn_io_http_use_mir)},
+    {"pn_io_http_static_mir", FPTR(pn_io_http_static_mir)},
+    {"pn_io_http_stop_mir", FPTR(pn_io_http_stop_mir)},
 
     // ========================================================================
     // Trampolines for calling _b boxed wrappers from MIR Direct (RetItem ABI)

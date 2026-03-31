@@ -297,6 +297,13 @@ typedef enum SysFunc {
     SYSPROC_IO_CHMOD,
     SYSPROC_IO_RENAME,
     SYSPROC_IO_FETCH,        // io.fetch(target, options) - fetch data from URL or file
+    // io.http module (web server)
+    SYSPROC_IO_HTTP_CREATE_SERVER,  // io.http.create_server(config?) - create HTTP server
+    SYSPROC_IO_HTTP_LISTEN,         // io.http.listen(server, port) - start listening
+    SYSPROC_IO_HTTP_ROUTE,          // io.http.route(server, method, path, handler)
+    SYSPROC_IO_HTTP_USE,            // io.http.use(server, middleware) - add middleware
+    SYSPROC_IO_HTTP_STATIC,         // io.http.static(server, url_path, dir_path)
+    SYSPROC_IO_HTTP_STOP,           // io.http.stop(server) - graceful shutdown
     // vmap functions
     SYSFUNC_VMAP_NEW,        // map() or map([k1,v1,...]) - create VMap
     SYSPROC_VMAP_SET,        // m.set(k, v) - in-place insert on VMap (procedural)
