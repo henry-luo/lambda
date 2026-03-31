@@ -13187,6 +13187,57 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // Allocate shared scope env for child closures inside this generator.
+        // Must be done inside the state machine (not the wrapper) so closures
+        // created after yields still have access to mutable captures.
+        if (fc->has_scope_env && fc->scope_env_count > 0) {
+            int scope_env_slot = mt->gen_local_slot_count++;
+            mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
+            mt->scope_env_slot_count = fc->scope_env_count;
+
+            // Store scope env pointer in gen_env so it persists across yields
+            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                    scope_env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                MIR_new_reg_op(mt->ctx, mt->scope_env_reg)));
+
+            // Register as a scoped variable so it gets saved/loaded across yields
+            JsVarScopeEntry senv_entry;
+            memset(&senv_entry, 0, sizeof(senv_entry));
+            snprintf(senv_entry.name, sizeof(senv_entry.name), "_scope_env");
+            senv_entry.var.reg = mt->scope_env_reg;
+            senv_entry.var.from_env = true;
+            senv_entry.var.env_slot = scope_env_slot;
+            senv_entry.var.env_reg = mt->gen_env_reg;
+            senv_entry.var.typed_array_type = -1;
+            hashmap_set(mt->var_scopes[mt->scope_depth], &senv_entry);
+
+            // Populate scope env with current values and mark vars for write-back
+            for (int s = 0; s < fc->scope_env_count; s++) {
+                const char* sname = fc->scope_env_names[s];
+                JsMirVarEntry* svar = jm_find_var(mt, sname);
+                MIR_reg_t val;
+                if (svar) {
+                    val = svar->reg;
+                    if (jm_is_native_type(svar->type_id))
+                        val = jm_box_native(mt, svar->reg, svar->type_id);
+                    svar->in_scope_env = true;
+                    svar->scope_env_slot = s;
+                    svar->scope_env_reg = mt->scope_env_reg;
+                } else if (strcmp(sname, "_js_this") == 0) {
+                    val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                } else {
+                    val = jm_emit_null(mt);
+                }
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, val)));
+            }
+            log_debug("js-mir: generator '%s' allocated scope env with %d slots at gen_env[%d]",
+                fc->name, fc->scope_env_count, scope_env_slot);
+        }
+
         // Transpile generator body
         if (fn->body) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -13431,6 +13482,55 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         li++;
                     }
                 }
+            }
+
+            // Allocate shared scope env for child closures inside this async function.
+            if (fc->has_scope_env && fc->scope_env_count > 0) {
+                int scope_env_slot = mt->gen_local_slot_count++;
+                mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
+                mt->scope_env_slot_count = fc->scope_env_count;
+
+                // Store scope env pointer in gen_env so it persists across awaits
+                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        scope_env_slot * (int)sizeof(uint64_t), mt->gen_env_reg, 0, 1),
+                    MIR_new_reg_op(mt->ctx, mt->scope_env_reg)));
+
+                // Register as a scoped variable so it gets saved/loaded across awaits
+                JsVarScopeEntry senv_entry;
+                memset(&senv_entry, 0, sizeof(senv_entry));
+                snprintf(senv_entry.name, sizeof(senv_entry.name), "_scope_env");
+                senv_entry.var.reg = mt->scope_env_reg;
+                senv_entry.var.from_env = true;
+                senv_entry.var.env_slot = scope_env_slot;
+                senv_entry.var.env_reg = mt->gen_env_reg;
+                senv_entry.var.typed_array_type = -1;
+                hashmap_set(mt->var_scopes[mt->scope_depth], &senv_entry);
+
+                // Populate scope env with current values and mark vars for write-back
+                for (int s = 0; s < fc->scope_env_count; s++) {
+                    const char* sname = fc->scope_env_names[s];
+                    JsMirVarEntry* svar = jm_find_var(mt, sname);
+                    MIR_reg_t val;
+                    if (svar) {
+                        val = svar->reg;
+                        if (jm_is_native_type(svar->type_id))
+                            val = jm_box_native(mt, svar->reg, svar->type_id);
+                        svar->in_scope_env = true;
+                        svar->scope_env_slot = s;
+                        svar->scope_env_reg = mt->scope_env_reg;
+                    } else if (strcmp(sname, "_js_this") == 0) {
+                        val = jm_call_0(mt, "js_get_this", MIR_T_I64);
+                    } else {
+                        val = jm_emit_null(mt);
+                    }
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                        MIR_new_reg_op(mt->ctx, val)));
+                }
+                log_debug("js-mir: async '%s' allocated scope env with %d slots at gen_env[%d]",
+                    fc->name, fc->scope_env_count, scope_env_slot);
             }
 
             // Push implicit try context for async exception handling
