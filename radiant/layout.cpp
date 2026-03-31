@@ -286,7 +286,7 @@ static bool run_in_should_merge_with_next(DomNode* run_in_node) {
 static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_in, DomElement* next_block) {
     if (!lycon || !run_in || !next_block) return;
 
-    log_debug("[RUN-IN] Merging <%s> into <%s>",
+    log_debug("%s [RUN-IN] Merging <%s> into <%s>", run_in->source_loc(),
               run_in->tag_name ? run_in->tag_name : "unknown",
               next_block->tag_name ? next_block->tag_name : "unknown");
 
@@ -327,7 +327,7 @@ static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_i
     run_in->display.outer = CSS_VALUE_NONE;
     run_in->display.inner = CSS_VALUE_NONE;
 
-    log_debug("[RUN-IN] Merge complete, run-in now hidden");
+    log_debug("%s [RUN-IN] Merge complete, run-in now hidden", run_in->source_loc());
 }
 
 /**
@@ -346,7 +346,7 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
 
     // CSS 2.1: If run-in contains a block-level element, it becomes block
     if (run_in_contains_block_child(node)) {
-        log_debug("[RUN-IN] <%s> contains block child, becomes BLOCK",
+        log_debug("%s [RUN-IN] <%s> contains block child, becomes BLOCK", node->source_loc(),
                   elem->tag_name ? elem->tag_name : "unknown");
         return result;
     }
@@ -366,7 +366,7 @@ static DisplayValue resolve_run_in_display(LayoutContext* lycon, DomNode* node) 
     }
 
     // CSS 2.1: Otherwise, run-in becomes a block box
-    log_debug("[RUN-IN] <%s> not followed by block, becomes BLOCK",
+    log_debug("%s [RUN-IN] <%s> not followed by block, becomes BLOCK", node->source_loc(),
               elem->tag_name ? elem->tag_name : "unknown");
     return result;
 }
@@ -485,7 +485,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // 'normal' line height
         lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
         lycon->block.line_height_is_normal = true;
-        log_debug("normal lineHeight: %f", lycon->block.line_height);
+        log_debug("%s normal lineHeight: %f", block->source_loc(), lycon->block.line_height);
     } else {
         // Resolve var() if present
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
@@ -493,7 +493,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             // var() couldn't be resolved, use normal
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             lycon->block.line_height_is_normal = true;
-            log_debug("line-height var() unresolved, using normal: %f", lycon->block.line_height);
+            log_debug("%s line-height var() unresolved, using normal: %f", block->source_loc(), lycon->block.line_height);
             return;
         }
 
@@ -513,13 +513,13 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
         // Zero is a valid computed value; only negative/NaN falls back to 'normal'
         if (resolved_height < 0 || std::isnan(resolved_height)) {
-            log_debug("invalid line-height: %f, falling back to normal", resolved_height);
+            log_debug("%s invalid line-height: %f, falling back to normal", block->source_loc(), resolved_height);
             lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
             lycon->block.line_height_is_normal = true;
         } else {
             lycon->block.line_height = resolved_height;
             lycon->block.line_height_is_normal = false;
-            log_debug("resolved line height: %f", lycon->block.line_height);
+            log_debug("%s resolved line height: %f", block->source_loc(), lycon->block.line_height);
         }
     }
 }
@@ -541,7 +541,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // because measurement passes should not permanently mark styles as resolved
             // and percentage values may need different containing block dimensions
             if (dom_elem->styles_resolved && !layout_context_is_measuring(lycon)) {
-                log_debug("[CSS] Skipping style resolution for <%s> - already resolved",
+                log_debug("%s [CSS] Skipping style resolution for <%s> - already resolved", node->source_loc(),
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
                 // Restore lycon->block dimensions from stored CSS values.
                 // layout_block resets lycon->block.given_width/height to -1 before
@@ -622,10 +622,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             // Don't mark as resolved during measurement mode - let the actual layout pass do that
             if (!layout_context_is_measuring(lycon)) {
                 dom_elem->styles_resolved = true;
-                log_debug("[CSS] Resolved styles for <%s> - marked as resolved",
+                log_debug("%s [CSS] Resolved styles for <%s> - marked as resolved", node->source_loc(),
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
             } else {
-                log_debug("[CSS] Resolved styles for <%s> in measurement mode - not marking resolved",
+                log_debug("%s [CSS] Resolved styles for <%s> in measurement mode - not marking resolved", node->source_loc(),
                     dom_elem->tag_name ? dom_elem->tag_name : "unknown");
             }
         } else {
@@ -1290,13 +1290,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // Log for IMG elements
     uintptr_t node_tag = node->tag();
     if (node_tag == HTM_TAG_IMG) {
-        log_debug("[FLOW_NODE IMG] Processing IMG element: %s", node->node_name());
+        log_debug("%s [FLOW_NODE IMG] Processing IMG element: %s", node->source_loc(), node->node_name());
     }
 
     // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
     const char* node_name = node->node_name();
     if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
-        log_debug("skipping HTML comment node");
+        log_debug("%s skipping HTML comment node", node->source_loc());
         return;
     }
 
@@ -1369,7 +1369,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                     // Outside markers: positioned outside content area, don't create a line box
                     // They are placed at advance_y and will align with the first content line
 
-                    log_debug("[MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)",
+                    log_debug("%s [MARKER] Laid out %s marker width=%.1f, height=%.1f at (%.1f, %.1f)", node->source_loc(),
                              marker_prop->is_outside ? "outside" : "inside",
                              marker_prop->width, marker_span->height, marker_span->x, marker_span->y);
                 }
@@ -1379,7 +1379,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Skip floats that were pre-laid in the float pre-pass
         if (elem->float_prelaid) {
-            log_debug("skipping pre-laid float: %s", node->node_name());
+            log_debug("%s skipping pre-laid float: %s", node->source_loc(), node->node_name());
             return;
         }
 
@@ -1389,7 +1389,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Log IMG display resolution
         if (node_tag == HTM_TAG_IMG) {
-            log_debug("[FLOW_NODE IMG] Resolved display for IMG: outer=%d, inner=%d (INLINE_BLOCK=%d, INLINE=%d)",
+            log_debug("%s [FLOW_NODE IMG] Resolved display for IMG: outer=%d, inner=%d (INLINE_BLOCK=%d, INLINE=%d)", node->source_loc(),
                      display.outer, display.inner, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_INLINE);
         }
 
@@ -1417,7 +1417,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
             // Float transforms most display values to block
             if (display.outer != CSS_VALUE_NONE) {
-                log_debug("Float on %s: transforming display from outer=%d to BLOCK (float=%d)",
+                log_debug("%s Float on %s: transforming display from outer=%d to BLOCK (float=%d)", node->source_loc(),
                           node->node_name(), display.outer, float_value);
                 display.outer = CSS_VALUE_BLOCK;
                 // Keep inner display but treat as flow for layout purposes if it's a table type
@@ -1457,7 +1457,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             elem->display = display;
             // Absolutely positioned elements become block-level
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_RUN_IN) {
-                log_debug("Position absolute/fixed on %s: transforming display from outer=%d to BLOCK",
+                log_debug("%s Position absolute/fixed on %s: transforming display from outer=%d to BLOCK", node->source_loc(),
                           node->node_name(), display.outer);
                 display.outer = CSS_VALUE_BLOCK;
             }
@@ -1472,7 +1472,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             DisplayValue resolved = resolve_run_in_display(lycon, node);
             if (resolved.outer == CSS_VALUE_NONE) {
                 // Run-in was merged into following block, skip layout
-                log_debug("run-in merged into following block, skipping");
+                log_debug("%s run-in merged into following block, skipping", node->source_loc());
                 return;
             }
             // Run-in becomes block
@@ -1483,7 +1483,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         // generate boxes. They only serve to define column properties for table layout.
         // When orphaned (outside a table context), they should not be rendered.
         if (display.inner == CSS_VALUE_TABLE_COLUMN || display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) {
-            log_debug("skipping table-column/table-column-group element (no visual rendering)");
+            log_debug("%s skipping table-column/table-column-group element (no visual rendering)", node->source_loc());
             return;
         }
 
@@ -1511,14 +1511,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
             break;
         case CSS_VALUE_NONE:
-            log_debug("skipping element of display: none");
+            log_debug("%s skipping element of display: none", node->source_loc());
             break;
         case CSS_VALUE_CONTENTS: {
             // CSS Display Level 3: display: contents
             // Element does not generate a box, but its children are laid out
             // as if they were children of the element's parent.
             // Counter properties do NOT apply (no box generated).
-            log_debug("display:contents for <%s> - no box, layout children directly", node->node_name());
+            log_debug("%s display:contents for <%s> - no box, layout children directly", node->source_loc(), node->node_name());
 
             // Mark element in the view tree with zero dimensions (no box generated)
             // Don't use set_view() — avoid affecting line start view
@@ -1551,29 +1551,29 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             break;
         }
         default:
-            log_debug("unknown display type: outer=%d", display.outer);
+            log_debug("%s unknown display type: outer=%d", node->source_loc(), display.outer);
             // skip the element
         }
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("layout_text: '%t'", str);
+        log_debug("%s layout_text: '%t'", node->source_loc(), str);
         // Skip inter-element whitespace (whitespace between/around block elements)
         // CSS 2.2: "When white space is contained at the end of a block's content,
         // or at the start, or between block-level elements, it is rendered as nothing."
         if (should_collapse_inter_element_whitespace(node)) {
             node->view_type = RDT_VIEW_NONE;
-            log_debug("skipping inter-element whitespace text");
+            log_debug("%s skipping inter-element whitespace text", node->source_loc());
         }
         else {
             layout_text(lycon, node);
         }
     }
     else {
-        log_debug("layout unknown node type: %d", node->node_type);
+        log_debug("%s layout unknown node type: %d", node->source_loc(), node->node_type);
         // skip the node
     }
-    log_debug("end flow node, block advance_y: %.0f", lycon->block.advance_y);
+    log_debug("%s end flow node, block advance_y: %.0f", node->source_loc(), lycon->block.advance_y);
 }
 
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
@@ -1634,7 +1634,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_debug("[BlockContext] Root BFC created (width=%.1f)", html->content_width);
 
     auto t_init = high_resolution_clock::now();
-    log_info("[TIMING] layout: context init: %.1fms", duration<double, std::milli>(t_init - t_start).count());
+    log_info("%s [TIMING] layout: context init: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_init - t_start).count());
 
     // resolve CSS style
     log_debug("DEBUG: About to resolve style for elmt of name=%s", elmt->source_loc());
@@ -1642,7 +1642,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     log_debug("DEBUG: After resolve style");
 
     auto t_style = high_resolution_clock::now();
-    log_info("[TIMING] layout: root style resolve: %.1fms", duration<double, std::milli>(t_style - t_init).count());
+    log_info("%s [TIMING] layout: root style resolve: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_style - t_init).count());
 
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, html->font);
@@ -1860,7 +1860,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
 
     auto t_body_find = high_resolution_clock::now();
-    log_info("[TIMING] layout: body find: %.1fms", duration<double, std::milli>(t_body_find - t_style).count());
+    log_info("%s [TIMING] layout: body find: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_body_find - t_style).count());
 
     if (body_node) {
         // After layout, find the body view for scroll height calculation
@@ -1888,7 +1888,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
 
     auto t_layout_block = high_resolution_clock::now();
-    log_info("[TIMING] layout: layout_block: %.1fms", duration<double, std::milli>(t_layout_block - t_body_find).count());
+    log_info("%s [TIMING] layout: layout_block: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_layout_block - t_body_find).count());
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
@@ -1926,12 +1926,12 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         html->scroller->clip.right = html->width;
         html->scroller->clip.bottom = physical_height;
         html->scroller->pane->v_max_scroll = content_height - physical_height;
-        log_info("viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f",
+        log_info("%s viewport scroll: content_height=%.1f, viewport_height=%.1f, v_max_scroll=%.1f", elmt->source_loc(),
             content_height, physical_height, html->scroller->pane->v_max_scroll);
     }
 
     auto t_finalize = high_resolution_clock::now();
-    log_info("[TIMING] layout: finalize_block_flow: %.1fms", duration<double, std::milli>(t_finalize - t_layout_block).count());
+    log_info("%s [TIMING] layout: finalize_block_flow: %.1fms", elmt->source_loc(), duration<double, std::milli>(t_finalize - t_layout_block).count());
 }
 
 int detect_html_version_lambda_css(DomDocument* doc) {
