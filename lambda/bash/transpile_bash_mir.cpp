@@ -2499,8 +2499,9 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
     if (node->value) {
         value = bm_transpile_node(mt, node->value);
         // apply tilde expansion in assignment values (e.g., path=~/bin or path=/usr:~/bin)
-        // but NOT when the value is double-quoted (e.g., path="~/bin")
-        if (node->value->node_type != BASH_AST_NODE_STRING) {
+        // but NOT when the value is double-quoted (e.g., path="~/bin") or an array literal
+        if (node->value->node_type != BASH_AST_NODE_STRING &&
+            node->value->node_type != BASH_AST_NODE_ARRAY_LITERAL) {
             MIR_reg_t tilde_res = bm_emit_call_1(mt, "bash_expand_tilde_assign", value);
             value = MIR_new_reg_op(mt->ctx, tilde_res);
         }
@@ -3902,7 +3903,19 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                         // emit value until next unquoted space, newline, `;`, `|`, `&`, `>`
                         while (pos < src_len) {
                             char c = src[pos];
-                            if (c == '\'' ) {
+                            if (c == '(' ) {
+                                // array value: copy until matching )
+                                strbuf_append_char(buf, c); pos++;
+                                int depth = 1;
+                                while (pos < src_len && depth > 0) {
+                                    if (src[pos] == '(') depth++;
+                                    else if (src[pos] == ')') depth--;
+                                    if (depth > 0 || src[pos] == ')') {
+                                        strbuf_append_char(buf, src[pos]);
+                                    }
+                                    pos++;
+                                }
+                            } else if (c == '\'' ) {
                                 // single-quoted: copy verbatim until closing '
                                 strbuf_append_char(buf, c); pos++;
                                 while (pos < src_len && src[pos] != '\'') {

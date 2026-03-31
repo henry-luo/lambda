@@ -1079,16 +1079,12 @@ extern "C" Item bash_string_concat(Item left, Item right) {
 extern "C" Item bash_var_append(Item var_name, Item old_val, Item append_val) {
     int attrs = bash_get_var_attrs(var_name);
     if (attrs & BASH_ATTR_INTEGER) {
-        // arithmetic addition: old + new
-        Item old_str = bash_to_string(old_val);
-        Item new_str = bash_to_string(append_val);
-        String* os = it2s(old_str);
-        String* ns = it2s(new_str);
-        long old_i = (os && os->len > 0) ? strtol(os->chars, NULL, 10) : 0;
-        long new_i = (ns && ns->len > 0) ? strtol(ns->chars, NULL, 10) : 0;
-        long sum = old_i + new_i;
+        // arithmetic addition: evaluate both sides as arithmetic expressions
+        Item old_int = bash_arith_eval_value(old_val);
+        Item new_int = bash_arith_eval_value(append_val);
+        long long sum = it2i(old_int) + it2i(new_int);
         char buf[32];
-        int len = snprintf(buf, sizeof(buf), "%ld", sum);
+        int len = snprintf(buf, sizeof(buf), "%lld", sum);
         return (Item){.item = s2it(heap_create_name(buf, len))};
     }
     return bash_string_concat(old_val, append_val);
