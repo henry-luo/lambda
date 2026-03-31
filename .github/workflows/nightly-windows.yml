@@ -18,8 +18,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -68,6 +66,7 @@ jobs:
 
       - name: Prepare notification
         if: always()
+        shell: bash
         run: |
           source .github/workflows/notify.sh
           if [ "${{ steps.test.outcome }}" = "success" ]; then
