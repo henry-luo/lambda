@@ -18,7 +18,14 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <string>
 #include <re2/re2.h>
+
+// Forward declarations for Unicode normalization (implemented in utf_string.cpp)
+extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfd(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfkc(const char* str, int len, int* out_len);
+extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len);
 
 // Global Input context for JS runtime map_put operations.
 // Initialized in transpile_js_to_mir() before JIT execution.
@@ -361,6 +368,21 @@ extern "C" Item js_to_string(Item value) {
                 return (Item){.item = s2it(result)};
             }
             return name_val;
+        }
+        // Check for custom toString() method in own properties or prototype chain
+        {
+            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item ts_fn = js_prototype_lookup(value, ts_key);
+            if (ts_fn.item == ItemNull.item) {
+                // also check own
+                bool own_ts = false;
+                ts_fn = js_map_get_fast(value.map, "toString", 8, &own_ts);
+                if (!own_ts) ts_fn = ItemNull;
+            }
+            if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(ts_fn, value, NULL, 0);
+                if (get_type_id(result) == LMD_TYPE_STRING) return result;
+            }
         }
         return (Item){.item = s2it(heap_create_name("[object Object]"))};
     }
@@ -1255,12 +1277,12 @@ extern "C" Item js_property_get(Item object, Item key) {
         result = js_prototype_lookup(object, key);
         if (result.item != ItemNull.item) return result;
         // Getter property fallback: check for __get_<propName> on object or prototype
-        // Check for getter if: key doesn't start with '_', OR key starts with '__sym_' (symbol getter)
+        // Skip getter check only for __get_/__set_ keys (to prevent infinite recursion)
         if (key._type_id == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             bool check_getter = (str_key->len < 128 && str_key->len > 0 &&
-                (str_key->chars[0] != '_' ||
-                 (str_key->len > 6 && strncmp(str_key->chars, "__sym_", 6) == 0)));
+                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
+                                        strncmp(str_key->chars, "__set_", 6) == 0)));
             if (check_getter) {
                 char getter_key[256];
                 snprintf(getter_key, sizeof(getter_key), "__get_%.*s", (int)str_key->len, str_key->chars);
@@ -1405,9 +1427,12 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
             return js_dom_set_property(object, key, value);
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
+        // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
-            if (str_key && str_key->len < 64 && str_key->len > 0 && str_key->chars[0] != '_') {
+            if (str_key && str_key->len < 64 && str_key->len > 0 &&
+                !(str_key->len > 6 && (strncmp(str_key->chars, "__get_", 6) == 0 ||
+                                        strncmp(str_key->chars, "__set_", 6) == 0))) {
                 char setter_key[256];
                 snprintf(setter_key, sizeof(setter_key), "__set_%.*s", (int)str_key->len, str_key->chars);
                 Item sk = (Item){.item = s2it(heap_create_name(setter_key, strlen(setter_key)))};
@@ -2062,6 +2087,52 @@ struct JsRegexData {
 };
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Preprocess pattern: expand JS \s / \S to the full Unicode whitespace class,
+    // since RE2's \s only matches ASCII whitespace but JS \s is Unicode-aware.
+    // JS \s = [ \t\n\r\f\v\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]
+    // RE2 equivalent: [\p{Z}\t\n\r\f\x0b\x{FEFF}]  (\p{Z} covers Zs+Zl+Zp categories)
+    // We also need to expand \S (non-whitespace).
+    static const char* S_EXPAND = "[\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
+    static const char* S_EXPAND_INNER = "\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";  // inside existing []
+    static const char* NOT_S_EXPAND = "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
+    std::string processed_pattern;
+    processed_pattern.reserve(pattern_len + 64);
+    int bracket_depth = 0;
+    for (int i = 0; i < pattern_len; i++) {
+        if (pattern[i] == '\\' && i + 1 < pattern_len) {
+            char next = pattern[i + 1];
+            if (next == 's') {
+                if (bracket_depth > 0) {
+                    processed_pattern += S_EXPAND_INNER; // inline within existing []
+                } else {
+                    processed_pattern += S_EXPAND;
+                }
+                i++;
+                continue;
+            }
+            if (next == 'S') {
+                if (bracket_depth > 0) {
+                    // can't negate inside existing class; keep as \S (best effort)
+                    processed_pattern += "\\S";
+                } else {
+                    processed_pattern += NOT_S_EXPAND;
+                }
+                i++;
+                continue;
+            }
+            // consume the 2-char escape sequence as-is
+            processed_pattern += pattern[i];
+            processed_pattern += pattern[i + 1];
+            i++;
+            continue;
+        }
+        if (pattern[i] == '[') {
+            bracket_depth++;
+        } else if (pattern[i] == ']') {
+            if (bracket_depth > 0) bracket_depth--;
+        }
+        processed_pattern += pattern[i];
+    }
     // build RE2 options from flags
     re2::RE2::Options opts;
     opts.set_log_errors(false);
@@ -2072,13 +2143,18 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
         else if (flags[i] == 'g') global = true;
         else if (flags[i] == 's') opts.set_dot_nl(true);
     }
-    // compile RE2 pattern
-    re2::RE2* re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+    // compile RE2 pattern (use preprocessed version)
+    re2::RE2* re2 = new re2::RE2(processed_pattern, opts);
     if (!re2->ok()) {
-        log_error("js regex compile error: /%.*s/%.*s: %s",
-            pattern_len, pattern, flags_len, flags, re2->error().c_str());
+        // fall back to original pattern if preprocessing caused errors
         delete re2;
-        return ItemNull;
+        re2 = new re2::RE2(re2::StringPiece(pattern, pattern_len), opts);
+        if (!re2->ok()) {
+            log_error("js regex compile error: /%.*s/%.*s: %s",
+                pattern_len, pattern, flags_len, flags, re2->error().c_str());
+            delete re2;
+            return ItemNull;
+        }
     }
     // store regex data in a pool-allocated struct
     JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
@@ -3199,6 +3275,31 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 11 && strncmp(method->chars, "toUpperCase", 11) == 0) {
         return fn_upper(str);
     }
+    // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
+    if (method->len == 9 && strncmp(method->chars, "normalize", 9) == 0) {
+        String* s = it2s(str);
+        if (!s || s->len == 0) return str;
+        // Determine requested form (default: NFC)
+        const char* form = "NFC";
+        if (argc > 0 && get_type_id(args[0]) == LMD_TYPE_STRING) {
+            String* f = it2s(args[0]);
+            if (f && f->len > 0) form = f->chars;
+        }
+        char* normalized = NULL;
+        int norm_len = 0;
+        if (strncmp(form, "NFD", 3) == 0 && form[3] == '\0')
+            normalized = normalize_utf8proc_nfd(s->chars, s->len, &norm_len);
+        else if (strncmp(form, "NFKC", 4) == 0 && form[4] == '\0')
+            normalized = normalize_utf8proc_nfkc(s->chars, s->len, &norm_len);
+        else if (strncmp(form, "NFKD", 4) == 0 && form[4] == '\0')
+            normalized = normalize_utf8proc_nfkd(s->chars, s->len, &norm_len);
+        else // NFC (default)
+            normalized = normalize_utf8proc_nfc(s->chars, s->len, &norm_len);
+        if (!normalized) return str;
+        String* result = heap_strcpy(normalized, norm_len);
+        free(normalized);
+        return (Item){.item = s2it(result)};
+    }
     if (method->len == 5 && strncmp(method->chars, "split", 5) == 0) {
         if (argc > 0) {
             Item sep = args[0];
@@ -3884,10 +3985,27 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         }
         return result;
     }
-    // fill
+    // fill(value, start?, end?) — fill array elements in range with value
     if (method->len == 4 && strncmp(method->chars, "fill", 4) == 0) {
         if (argc < 1) return arr;
-        return js_array_fill(arr, args[0]);
+        if (argc == 1) return js_array_fill(arr, args[0]);
+        // fill with start and/or end index
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        Array* a = arr.array;
+        int len = a->length;
+        int start = argc > 1 ? (int)js_get_number(args[1]) : 0;
+        int end   = argc > 2 ? (int)js_get_number(args[2]) : len;
+        if (start < 0) start = len + start;
+        if (start < 0) start = 0;
+        if (start > len) start = len;
+        if (end < 0) end = len + end;
+        if (end < 0) end = 0;
+        if (end > len) end = len;
+        Item val = args[0];
+        for (int i = start; i < end; i++) {
+            a->items[i] = val;
+        }
+        return arr;
     }
     // splice(start, deleteCount, ...items) — mutating
     if (method->len == 6 && strncmp(method->chars, "splice", 6) == 0) {
