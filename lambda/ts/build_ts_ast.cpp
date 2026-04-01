@@ -15,6 +15,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strbuf.h"
 #include <cstring>
+#include <cstdlib>
 
 // ============================================================================
 // AST node allocation
@@ -439,19 +440,64 @@ static JsAstNode* build_ts_enum_declaration(TsTranspiler* tp, TSNode node) {
             enum_node->members = (JsAstNode**)pool_alloc(tp->ast_pool, sizeof(JsAstNode*) * mc);
             enum_node->member_count = (int)mc;
             int auto_val = 0;
+            bool auto_val_valid = true; // false after a string initializer
             for (uint32_t j = 0; j < mc; j++) {
                 TSNode mem = ts_node_named_child(child, j);
+                const char* mem_type = ts_node_type(mem);
                 TsEnumMemberNode* em = (TsEnumMemberNode*)alloc_ts_ast_node(tp,
                     TS_AST_NODE_ENUM_MEMBER, mem, sizeof(TsEnumMemberNode));
-                // get member name
-                if (ts_node_named_child_count(mem) > 0) {
-                    TSNode name_node = ts_node_named_child(mem, 0);
-                    int nlen;
-                    const char* ntext = ts_node_text(tp, name_node, &nlen);
-                    em->name = ts_pool_string(tp, ntext, nlen);
+
+                if (strcmp(mem_type, "enum_assignment") == 0) {
+                    // member with explicit initializer: Name = value
+                    uint32_t mem_cc = ts_node_named_child_count(mem);
+                    if (mem_cc > 0) {
+                        TSNode name_node = ts_node_named_child(mem, 0);
+                        int nlen;
+                        const char* ntext = ts_node_text(tp, name_node, &nlen);
+                        em->name = ts_pool_string(tp, ntext, nlen);
+                    }
+                    if (mem_cc > 1) {
+                        TSNode init_node = ts_node_named_child(mem, 1);
+                        em->initializer = build_ts_expression(tp, init_node);
+                        // resolve numeric literal for auto_val continuation
+                        const char* init_type = ts_node_type(init_node);
+                        if (strcmp(init_type, "number") == 0) {
+                            int ilen;
+                            const char* itext = ts_node_text(tp, init_node, &ilen);
+                            char buf[64];
+                            int copy_len = ilen < 63 ? ilen : 63;
+                            memcpy(buf, itext, copy_len);
+                            buf[copy_len] = '\0';
+                            auto_val = (int)strtol(buf, NULL, 0);
+                            em->auto_value = auto_val;
+                            auto_val++;
+                            auto_val_valid = true;
+                        } else if (strcmp(init_type, "string") == 0 ||
+                                   strcmp(init_type, "template_string") == 0) {
+                            // string enum member — auto_val sequence breaks
+                            em->auto_value = -1;
+                            auto_val_valid = false;
+                        } else {
+                            // computed expression — use current auto_val as best guess
+                            em->auto_value = auto_val_valid ? auto_val++ : -1;
+                        }
+                    }
+                } else {
+                    // bare member (property_identifier or similar): uses auto_val
+                    if (ts_node_named_child_count(mem) > 0) {
+                        TSNode name_node = ts_node_named_child(mem, 0);
+                        int nlen;
+                        const char* ntext = ts_node_text(tp, name_node, &nlen);
+                        em->name = ts_pool_string(tp, ntext, nlen);
+                    } else {
+                        // node itself is the name (bare property_identifier)
+                        int nlen;
+                        const char* ntext = ts_node_text(tp, mem, &nlen);
+                        em->name = ts_pool_string(tp, ntext, nlen);
+                    }
+                    em->auto_value = auto_val_valid ? auto_val++ : -1;
                 }
-                em->auto_value = auto_val++;
-                // TODO: handle explicit initializer
+
                 enum_node->members[j] = (JsAstNode*)em;
             }
         }
@@ -512,6 +558,45 @@ static JsAstNode* build_ts_expression(TsTranspiler* tp, TSNode node) {
 
     // delegate to JS expression builder
     return build_js_expression((JsTranspiler*)tp, node);
+}
+
+// Override hook called from build_js_expression for unknown node types.
+// Only handles TS-specific expressions; returns NULL for JS nodes.
+JsAstNode* ts_expr_override(void* tp_void, TSNode node) {
+    TsTranspiler* tp = (TsTranspiler*)tp_void;
+    const char* type_str = ts_node_type(node);
+
+    if (strcmp(type_str, "as_expression") == 0) {
+        TsTypeExprNode* as_node = (TsTypeExprNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_AS_EXPRESSION, node, sizeof(TsTypeExprNode));
+        uint32_t cc = ts_node_named_child_count(node);
+        if (cc >= 2) {
+            as_node->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+            as_node->target_type = build_ts_type_expr(tp, ts_node_named_child(node, 1));
+        }
+        return (JsAstNode*)as_node;
+    }
+    if (strcmp(type_str, "satisfies_expression") == 0) {
+        TsTypeExprNode* sat_node = (TsTypeExprNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_SATISFIES_EXPRESSION, node, sizeof(TsTypeExprNode));
+        uint32_t cc = ts_node_named_child_count(node);
+        if (cc >= 2) {
+            sat_node->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+            sat_node->target_type = build_ts_type_expr(tp, ts_node_named_child(node, 1));
+        }
+        return (JsAstNode*)sat_node;
+    }
+    if (strcmp(type_str, "non_null_expression") == 0) {
+        TsNonNullNode* nn = (TsNonNullNode*)alloc_ts_ast_node(tp,
+            TS_AST_NODE_NON_NULL_EXPRESSION, node, sizeof(TsNonNullNode));
+        if (ts_node_named_child_count(node) > 0) {
+            nn->inner = build_ts_expression(tp, ts_node_named_child(node, 0));
+        }
+        return (JsAstNode*)nn;
+    }
+
+    // not a TS-specific expression — let JS builder handle it
+    return NULL;
 }
 
 // ============================================================================
@@ -725,6 +810,271 @@ static JsAstNode* build_ts_function(TsTranspiler* tp, TSNode func_node) {
 }
 
 // ============================================================================
+// TS class declaration builder — handles constructor parameter properties
+// ============================================================================
+
+// helper: create an identifier AST node with a given name
+static JsAstNode* make_ts_identifier(TsTranspiler* tp, TSNode node, const char* name, int len) {
+    JsIdentifierNode* id = (JsIdentifierNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
+    id->name = name_pool_create_len(tp->name_pool, name, len);
+    id->base.type = &TYPE_ANY;
+    return (JsAstNode*)id;
+}
+
+// helper: create `this.name = name;` expression statement
+static JsAstNode* make_this_assignment(TsTranspiler* tp, TSNode node, const char* name, int len) {
+    // this.name
+    JsMemberNode* member = (JsMemberNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_MEMBER_EXPRESSION, node, sizeof(JsMemberNode));
+    member->object = make_ts_identifier(tp, node, "this", 4);
+    member->property = make_ts_identifier(tp, node, name, len);
+    member->computed = false;
+    member->optional = false;
+    member->base.type = &TYPE_ANY;
+
+    // this.name = name
+    JsAssignmentNode* assign = (JsAssignmentNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_ASSIGNMENT_EXPRESSION, node, sizeof(JsAssignmentNode));
+    assign->op = JS_OP_ASSIGN;
+    assign->left = (JsAstNode*)member;
+    assign->right = make_ts_identifier(tp, node, name, len);
+    assign->base.type = &TYPE_ANY;
+
+    // expression statement wrapping the assignment
+    JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_EXPRESSION_STATEMENT, node, sizeof(JsExpressionStatementNode));
+    expr_stmt->expression = (JsAstNode*)assign;
+    expr_stmt->base.type = &TYPE_NULL;
+
+    return (JsAstNode*)expr_stmt;
+}
+
+// Build class body with constructor param property desugaring.
+// For constructor params with accessibility modifiers (public/private/protected),
+// inject `this.param = param` assignments at the beginning of the constructor body.
+static JsAstNode* build_ts_class_body(TsTranspiler* tp, TSNode body_node) {
+    JsBlockNode* body = (JsBlockNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_BLOCK_STATEMENT, body_node, sizeof(JsBlockNode));
+
+    uint32_t child_count = ts_node_named_child_count(body_node);
+    JsAstNode* prev = NULL;
+
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child_node = ts_node_named_child(body_node, i);
+        const char* child_type = ts_node_type(child_node);
+
+        JsAstNode* member = NULL;
+        if (strcmp(child_type, "field_definition") == 0) {
+            // delegate to JS field builder (TS field_definition may have type annotation
+            // but layout is the same)
+            member = build_js_field_definition((JsTranspiler*)tp, child_node);
+        } else if (strcmp(child_type, "method_definition") == 0) {
+            // build the method with TS parameter handling
+            JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)alloc_ts_ast_node(tp,
+                JS_AST_NODE_METHOD_DEFINITION, child_node, sizeof(JsMethodDefinitionNode));
+            method->computed = false;
+            method->static_method = false;
+            method->kind = JsMethodDefinitionNode::JS_METHOD_METHOD;
+
+            // detect static, get, set
+            uint32_t cc = ts_node_child_count(child_node);
+            for (uint32_t ci = 0; ci < cc; ci++) {
+                TSNode ch = ts_node_child(child_node, ci);
+                const char* ct = ts_node_type(ch);
+                if (strcmp(ct, "static") == 0) method->static_method = true;
+                else if (strcmp(ct, "get") == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
+                else if (strcmp(ct, "set") == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
+            }
+
+            // get method key
+            TSNode key_node = ts_node_child_by_field_name(child_node, "name", 4);
+            if (!ts_node_is_null(key_node)) {
+                const char* key_type = ts_node_type(key_node);
+                if (strcmp(key_type, "computed_property_name") == 0) {
+                    method->computed = true;
+                }
+                method->key = build_js_expression((JsTranspiler*)tp, key_node);
+
+                // detect constructor
+                int klen;
+                const char* ktext = ts_node_text(tp, key_node, &klen);
+                if (klen == 11 && memcmp(ktext, "constructor", 11) == 0) {
+                    method->kind = JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR;
+                }
+            }
+
+            // build function value using TS function builder (handles TS params)
+            method->value = build_ts_function(tp, child_node);
+
+            // constructor parameter property desugaring:
+            // for each param with accessibility modifier, prepend `this.x = x;` to body
+            if (method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR && method->value) {
+                JsFunctionNode* ctor_fn = (JsFunctionNode*)method->value;
+
+                // scan the CST params for accessibility modifiers
+                TSNode params_node = ts_node_child_by_field_name(child_node, "parameters", 10);
+                if (!ts_node_is_null(params_node)) {
+                    // collect param property assignments to prepend
+                    JsAstNode* assign_first = NULL;
+                    JsAstNode* assign_last = NULL;
+
+                    uint32_t param_count = ts_node_named_child_count(params_node);
+                    for (uint32_t pi = 0; pi < param_count; pi++) {
+                        TSNode param_cst = ts_node_named_child(params_node, pi);
+                        const char* ptype = ts_node_type(param_cst);
+
+                        if (strcmp(ptype, "required_parameter") == 0 ||
+                            strcmp(ptype, "optional_parameter") == 0) {
+                            // check for accessibility_modifier among children
+                            uint32_t pcc = ts_node_named_child_count(param_cst);
+                            bool has_accessibility = false;
+                            for (uint32_t pci = 0; pci < pcc; pci++) {
+                                TSNode pc = ts_node_named_child(param_cst, pci);
+                                if (strcmp(ts_node_type(pc), "accessibility_modifier") == 0) {
+                                    has_accessibility = true;
+                                    break;
+                                }
+                            }
+                            // also check for 'readonly' without accessibility
+                            if (!has_accessibility) {
+                                uint32_t ptc = ts_node_child_count(param_cst);
+                                for (uint32_t pci = 0; pci < ptc; pci++) {
+                                    TSNode pc = ts_node_child(param_cst, pci);
+                                    int rlen;
+                                    const char* rtxt = ts_node_text(tp, pc, &rlen);
+                                    if (rlen == 8 && memcmp(rtxt, "readonly", 8) == 0) {
+                                        has_accessibility = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (has_accessibility) {
+                                // get the parameter name
+                                TSNode pname = ts_node_child_by_field_name(param_cst, "pattern", 7);
+                                if (ts_node_is_null(pname)) {
+                                    pname = ts_node_child_by_field_name(param_cst, "name", 4);
+                                }
+                                if (!ts_node_is_null(pname)) {
+                                    int nlen;
+                                    const char* ntext = ts_node_text(tp, pname, &nlen);
+                                    JsAstNode* assign_stmt = make_this_assignment(tp, pname, ntext, nlen);
+                                    if (!assign_first) {
+                                        assign_first = assign_stmt;
+                                        assign_last = assign_stmt;
+                                    } else {
+                                        assign_last->next = assign_stmt;
+                                        assign_last = assign_stmt;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // prepend assignments to constructor body
+                    if (assign_first && ctor_fn->body) {
+                        if (ctor_fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                            JsBlockNode* block = (JsBlockNode*)ctor_fn->body;
+                            assign_last->next = block->statements;
+                            block->statements = assign_first;
+                        }
+                    }
+                }
+            }
+
+            method->base.type = &TYPE_FUNC;
+            member = (JsAstNode*)method;
+        } else {
+            // other class body members — delegate to JS
+            member = build_js_method_definition((JsTranspiler*)tp, child_node);
+        }
+
+        if (member) {
+            if (!prev) {
+                body->statements = member;
+            } else {
+                prev->next = member;
+            }
+            prev = member;
+        }
+    }
+
+    body->base.type = &TYPE_NULL;
+    return (JsAstNode*)body;
+}
+
+static JsAstNode* build_ts_class_declaration(TsTranspiler* tp, TSNode class_node) {
+    // collect decorators (children of class_declaration in the TS parser)
+    TsDecoratorNode* decorators[16];
+    int deco_count = 0;
+    uint32_t child_count = ts_node_named_child_count(class_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(class_node, i);
+        if (strcmp(ts_node_type(child), "decorator") == 0 && deco_count < 16) {
+            TsDecoratorNode* dec = (TsDecoratorNode*)alloc_ts_ast_node(tp,
+                TS_AST_NODE_DECORATOR, child, sizeof(TsDecoratorNode));
+            if (ts_node_named_child_count(child) > 0) {
+                dec->expression = build_ts_expression(tp, ts_node_named_child(child, 0));
+            }
+            decorators[deco_count++] = dec;
+        }
+    }
+
+    JsClassNode* class_decl = (JsClassNode*)alloc_ts_ast_node(tp,
+        JS_AST_NODE_CLASS_DECLARATION, class_node, sizeof(JsClassNode));
+
+    // get class name — TS parser uses type_identifier for class names
+    TSNode name_node = ts_node_child_by_field_name(class_node, "name", 4);
+    if (!ts_node_is_null(name_node)) {
+        int len;
+        const char* text = ts_node_text(tp, name_node, &len);
+        class_decl->name = name_pool_create_len(tp->name_pool, text, len);
+    }
+
+    // get superclass (optional) — inside class_heritage
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(class_node, i);
+        if (strcmp(ts_node_type(child), "class_heritage") == 0) {
+            TSNode super_expr = ts_node_named_child(child, 0);
+            if (!ts_node_is_null(super_expr)) {
+                class_decl->superclass = build_js_expression((JsTranspiler*)tp, super_expr);
+            }
+            break;
+        }
+    }
+
+    // get class body — use TS-aware builder for constructor param properties
+    TSNode body_node = ts_node_child_by_field_name(class_node, "body", 4);
+    if (!ts_node_is_null(body_node)) {
+        class_decl->body = build_ts_class_body(tp, body_node);
+    }
+
+    class_decl->base.type = &TYPE_FUNC;
+
+    // add class to scope
+    if (class_decl->name) {
+        js_scope_define((JsTranspiler*)tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
+    }
+
+    // if decorators found, store them on the class for lowering phase
+    if (deco_count > 0) {
+        // store decorator count and pointers in a linked list via TsDecoratorNode.base.next
+        for (int i = 0; i < deco_count - 1; i++) {
+            decorators[i]->base.next = (JsAstNode*)decorators[i + 1];
+        }
+        decorators[deco_count - 1]->base.next = NULL;
+        // prepend decorators to the class body linked list as a marker
+        // the strip phase will detect and apply them
+        JsAstNode* result = (JsAstNode*)decorators[0];
+        decorators[deco_count - 1]->base.next = (JsAstNode*)class_decl;
+        return result;
+    }
+
+    return (JsAstNode*)class_decl;
+}
+
+// ============================================================================
 // TS variable declaration builder — handles type_annotation on variable_declarator
 // ============================================================================
 
@@ -809,6 +1159,59 @@ static JsAstNode* build_ts_variable_declaration(TsTranspiler* tp, TSNode var_nod
 }
 
 // ============================================================================
+// TS namespace declaration builder
+// ============================================================================
+
+static JsAstNode* build_ts_namespace_declaration(TsTranspiler* tp, TSNode node) {
+    TsNamespaceDeclarationNode* ns = (TsNamespaceDeclarationNode*)alloc_ts_ast_node(tp,
+        TS_AST_NODE_NAMESPACE_DECLARATION, node, sizeof(TsNamespaceDeclarationNode));
+
+    // get namespace name
+    TSNode name_node = ts_node_child_by_field_name(node, "name", 4);
+    if (!ts_node_is_null(name_node)) {
+        int len;
+        const char* text = ts_node_text(tp, name_node, &len);
+        ns->name = name_pool_create_len(tp->name_pool, text, len);
+    }
+
+    // build body statements from the statement_block
+    TSNode body_node = ts_node_child_by_field_name(node, "body", 4);
+    if (!ts_node_is_null(body_node)) {
+        uint32_t child_count = ts_node_named_child_count(body_node);
+        if (child_count > 0) {
+            ns->body = (JsAstNode**)pool_alloc(tp->ast_pool, sizeof(JsAstNode*) * child_count);
+            ns->body_count = 0;
+            for (uint32_t i = 0; i < child_count; i++) {
+                TSNode child = ts_node_named_child(body_node, i);
+                JsAstNode* stmt = build_ts_node(tp, child);
+                if (stmt) {
+                    ns->body[ns->body_count++] = stmt;
+                }
+            }
+        }
+    }
+
+    return (JsAstNode*)ns;
+}
+
+// ============================================================================
+// TS decorator builder
+// ============================================================================
+
+static JsAstNode* build_ts_decorator(TsTranspiler* tp, TSNode node) {
+    TsDecoratorNode* dec = (TsDecoratorNode*)alloc_ts_ast_node(tp,
+        TS_AST_NODE_DECORATOR, node, sizeof(TsDecoratorNode));
+
+    // the decorator expression is the first named child (identifier, call, member)
+    if (ts_node_named_child_count(node) > 0) {
+        TSNode expr_node = ts_node_named_child(node, 0);
+        dec->expression = build_ts_expression(tp, expr_node);
+    }
+
+    return (JsAstNode*)dec;
+}
+
+// ============================================================================
 // Main TS AST builder — dispatches to TS or JS builders
 // ============================================================================
 
@@ -850,11 +1253,19 @@ static JsAstNode* build_ts_node(TsTranspiler* tp, TSNode node) {
         return build_ts_type_alias_declaration(tp, node);
     if (strcmp(type_str, "enum_declaration") == 0)
         return build_ts_enum_declaration(tp, node);
+    if (strcmp(type_str, "class_declaration") == 0 || strcmp(type_str, "class") == 0)
+        return build_ts_class_declaration(tp, node);
     if (strcmp(type_str, "ambient_declaration") == 0) {
         // declare ... — parse for type info, no code emitted
         // for now, skip
         return NULL;
     }
+    if (strcmp(type_str, "internal_module") == 0 ||
+        strcmp(type_str, "module") == 0) {
+        return build_ts_namespace_declaration(tp, node);
+    }
+    if (strcmp(type_str, "decorator") == 0)
+        return build_ts_decorator(tp, node);
 
     // TS expression wrappers
     if (strcmp(type_str, "as_expression") == 0) {
@@ -910,6 +1321,48 @@ static JsAstNode* build_ts_node(TsTranspiler* tp, TSNode node) {
     if (strcmp(type_str, "variable_declaration") == 0 ||
         strcmp(type_str, "lexical_declaration") == 0) {
         return build_ts_variable_declaration(tp, node);
+    }
+
+    // expression_statement wrapping internal_module (namespace) — the TS parser
+    // wraps namespace in expression_statement; intercept and unwrap it
+    if (strcmp(type_str, "expression_statement") == 0) {
+        uint32_t cc = ts_node_named_child_count(node);
+        if (cc > 0) {
+            TSNode inner = ts_node_named_child(node, 0);
+            const char* inner_type = ts_node_type(inner);
+            if (strcmp(inner_type, "internal_module") == 0 ||
+                strcmp(inner_type, "module") == 0) {
+                return build_ts_namespace_declaration(tp, inner);
+            }
+        }
+    }
+
+    // export_statement — unwrap and build the inner declaration
+    if (strcmp(type_str, "export_statement") == 0) {
+        uint32_t cc = ts_node_named_child_count(node);
+        JsAstNode* inner_result = NULL;
+        for (uint32_t i = 0; i < cc; i++) {
+            TSNode inner = ts_node_named_child(node, i);
+            const char* inner_type = ts_node_type(inner);
+            // skip 'export' keyword, '*', specifiers — just build the declaration
+            if (strcmp(inner_type, "function_declaration") == 0 ||
+                strcmp(inner_type, "lexical_declaration") == 0 ||
+                strcmp(inner_type, "variable_declaration") == 0 ||
+                strcmp(inner_type, "class_declaration") == 0 ||
+                strcmp(inner_type, "interface_declaration") == 0 ||
+                strcmp(inner_type, "type_alias_declaration") == 0 ||
+                strcmp(inner_type, "enum_declaration") == 0) {
+                inner_result = build_ts_node(tp, inner);
+                break;
+            }
+        }
+        if (inner_result) {
+            // wrap in export node so namespace lowering can detect it
+            JsExportNode* export_node = (JsExportNode*)alloc_ts_ast_node(tp,
+                JS_AST_NODE_EXPORT_DECLARATION, node, sizeof(JsExportNode));
+            export_node->declaration = inner_result;
+            return (JsAstNode*)export_node;
+        }
     }
 
     // for all other nodes, delegate to the JS AST builder
