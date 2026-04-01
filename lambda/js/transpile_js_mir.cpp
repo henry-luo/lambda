@@ -15478,7 +15478,14 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // captures (i.e., they are transitive captures from the grandparent), the
     // function can skip allocating a new scope_env and reuse the parent env.
     // Children's capture slots are remapped to the grandparent env slots.
-    for (int fi = 0; fi < mt->func_count; fi++) {
+    //
+    // IMPORTANT: Iterate in REVERSE order (outermost functions first).
+    // func_entries has inner closures at lower indices than their parents.
+    // Phase 1.7b for a function reads its captures' scope_env_slots, which
+    // are set by Phase 1.7b of its PARENT. Processing parents first ensures
+    // the captures are already remapped to grandparent slots before children
+    // try to use them as "grandparent" slots for their own grandchildren.
+    for (int fi = mt->func_count - 1; fi >= 0; fi--) {
         JsFuncCollected* parent_fc = &mt->func_entries[fi];
         parent_fc->reuse_parent_env = false;
         parent_fc->reuse_env_slot_count = 0;
