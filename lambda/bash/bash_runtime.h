@@ -199,6 +199,7 @@ Item bash_get_last_bg_pid(void);                   // $!
 Item bash_get_shell_flags(void);                   // $-
 Item bash_get_lineno(void);                         // $LINENO
 void bash_set_lineno(int line);                     // update current statement line
+void bash_set_command(Item cmd_text);               // update $BASH_COMMAND
 void bash_set_arith_context(Item expr_text);        // set arithmetic expression text for error messages
 Item bash_get_funcname(Item index);                 // ${FUNCNAME[n]}
 Item bash_get_funcname_count(void);                 // ${#FUNCNAME[@]}
@@ -306,6 +307,7 @@ Item bash_expand_brace(Item word);                       // {a,b,c} → "a b c"
 // External command execution
 // ========================================================================
 Item bash_exec_external(Item* argv, int argc);           // run system binary via posix_spawn
+Item bash_exec_cmd_with_array(Item cmd_name, Item arr);  // dispatch command with IFS-split array args
 
 // ========================================================================
 // Output
