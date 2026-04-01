@@ -26,4 +26,3 @@
   "wm_has": true,
   "ws_has": true
 }
-null

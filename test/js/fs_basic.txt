@@ -10,4 +10,3 @@ false
 true
 false
 async:hello world appended
-0

@@ -37,4 +37,3 @@ string
 2
 1
 hello world
-"DOM mutation tests complete"

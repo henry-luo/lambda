@@ -1,8 +1,0 @@
-{
-  "total": 55,
-  "product": 720,
-  "countdown": 30,
-  "evens": 110,
-  "odds": 100,
-  "max_val": 15
-}

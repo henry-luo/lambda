@@ -6,4 +6,3 @@ half: 5
 extra_val: 42
 sum: 142
 result: 52
-null

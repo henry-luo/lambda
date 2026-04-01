@@ -6,4 +6,3 @@ person?.name: Alice
 person?.missing: undefined
 arr?.[1]: 20
 null?.[0]: undefined
-null

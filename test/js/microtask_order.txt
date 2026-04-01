@@ -15,4 +15,3 @@ recovered:ok
 value:99
 macro
 resolved:hello
-0
