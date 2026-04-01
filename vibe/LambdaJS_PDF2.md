@@ -20,15 +20,23 @@
 | 7 crashing specs | 0 | ~253 | 0% |
 | **Combined** | **2,840** | **~3,626** | **78.3%** |
 
-**Latest State (2026-04-01) — After Phase 10: escape(), atob(), btoa() & Rest Params:**
+**Latest State (2026-04-02) — After Phase 11: Regex Engine, URL Normalization, Style Property Chain Fix:**
+
+| Category | Passed | Total | Rate |
+|----------|--------|-------|----- |
+| 22 running specs | 3,675 | 3,680 | 99.9% |
+| 0 crashing specs | 0 | 0 | — |
+| **Combined** | **3,675** | **3,680** | **99.9%** |
+
+**Progress:** +941 passing tests total (+24.7% combined rate vs baseline). All 22 specs produce results (0 crashing). **18 specs are PERFECT** (0 failures). Phase 11 fixed RE2 regex limitations (v-flag, \u escapes, \p{Ideographic}, lookahead assertions, empty []), URL normalization (trailing slash, backslash, percent-encoding), global regex exec() lastIndex, Array.map() flattening, and obj.style.prop transpiler interception for non-DOM objects. autolinker_spec went from 1→50 passing. xfa_tohtml_spec went from 49→51 passing. Only 5 remaining failures across 3 specs (autolinker 2 punycode, xfa_tohtml 2 pagination, util 1 Error.stack).
+
+**Previous State (2026-04-01) — After Phase 10: escape(), atob(), btoa() & Rest Params:**
 
 | Category | Passed | Total | Rate |
 |----------|--------|-------|----- |
 | 22 running specs | 3,624 | 3,680 | 98.5% |
 | 0 crashing specs | 0 | 0 | — |
 | **Combined** | **3,624** | **3,680** | **98.5%** |
-
-**Progress:** +890 passing tests total (+23.3% combined rate vs baseline). All 22 specs produce results (0 crashing). **17 specs are PERFECT** (0 failures). Test framework fix (toThrowError regex) in Phase 9 unlocked accurate counting across all specs. xfa_tohtml_spec at **49/53** after escape/atob/btoa fixes. Only 56 remaining failures across 3 specs (autolinker 51, xfa_tohtml 4, util 1).
 
 **Previous State (2026-03-31) — After Phase 8: Generator Scope Env Fix (xfa_tohtml unlocked):**
 
@@ -76,13 +84,14 @@
 | Phase 8 | Generator/async scope env fix (xfa_tohtml) | +30–50 | **+39** | **Done** |
 | Phase 9 | Rest params via spread, toThrowError regex fix | +30–60 | **+2876** | **Done** |
 | Phase 10 | escape(), atob(), btoa() global functions | +9 | **+9** | **Done** |
-| **Total** | | **+500–950** | **+3736 total** | **In progress** |
+| Phase 11 | Regex engine, URL normalization, style chain fix | +40–55 | **+51** | **Done** |
+| **Total** | | **+500–950** | **+3787 total** | **In progress** |
 
 ---
 
 ## 2. Current Scoreboard
 
-### 2.1 Running Specs (22) — Updated 2026-04-01 (Phase 10)
+### 2.1 Running Specs (22) — Updated 2026-04-02 (Phase 11)
 
 | Spec | Passed | Failed | Total | Change from Baseline | Primary Failure Causes |
 |------|--------|--------|-------|---------------------|------------------------|
@@ -97,7 +106,8 @@
 | parser_spec | 65 | 0 | 65 | **+65 PERFECT** | — |
 | crypto_spec | — | — | 75+ | timeout (>2min) | Slow crypto in debug build |
 | util_spec | 51 | 1 | 52 | **+51** | Error.stack not implemented (1) |
-| xfa_tohtml_spec | 49 | 4 | 53 | **+49** | CSS font-size (1), count (1), CSS property order (2) |
+| xfa_tohtml_spec | 51 | 2 | 53 | **+51** | XFA pagination breakBefore (2) |
+| autolinker_spec | 50 | 2 | 52 | **+50** | Punycode/IDN encoding (2) |
 | unicode_spec | 27 | 0 | 27 | **+27 PERFECT** | — |
 | pdf_find_utils_spec | 24 | 0 | 24 | **+24 PERFECT** | — |
 | type1_parser_spec | 24 | 0 | 24 | **+24 PERFECT** | — |
@@ -107,11 +117,10 @@
 | bidi_spec | 10 | 0 | 10 | **+10 PERFECT** | — |
 | xfa_serialize_data_spec | 1 | 0 | 1 | **+1 PERFECT** | — |
 | stream_spec | 1 | 0 | 1 | **+1 PERFECT** | — |
-| autolinker_spec | 1 | 51 | 52 | **+1** | Needs String.prototype.normalize("NFKC") |
 
 ### 2.2 Crashing Specs (0) — Down from 12
 
-All 22 specs now run without crashes. **17 specs are now PERFECT (0 failures).**
+All 22 specs now run without crashes. **18 specs are now PERFECT (0 failures).**
 
 ---
 
@@ -585,22 +594,20 @@ Callback function is now invoked for each match.
 | Session 8 (Phase 8) | 2026-03-31 | Generator/async scope env fix → xfa_tohtml unlocked (0→39/53) | **+39** |
 | Session 9 (Phase 9) | 2026-03-31 | Rest params via spread, toThrowError regex fix (test framework accuracy) | **+30** |
 | Session 10 (Phase 10) | 2026-04-01 | escape(), atob(), btoa() global functions → xfa_tohtml 40→49 | **+9** |
-| **Total** | | | **+890** |
+| Session 11 (Phase 11) | 2026-04-02 | Regex engine fixes (v-flag, \u→\x, \p{Ideographic}, lookahead strip, empty []), URL normalization (trailing slash, backslash, percent-encoding), global regex exec() lastIndex, Array.map() flattening fix, obj.style.prop transpiler interception fallback for non-DOM objects → autolinker 1→50, xfa_tohtml 49→51 | **+51** |
+| **Total** | | | **+941** |
 
-Session 5 gains came from unblocking 4 previously crashing specs (crypto +44, parser +56, default_appearance +7, autolinker runs but 0) plus fixing colorspace (+30) and cff_parser (+36) regressions. Session 6 was a focused push on xfa_parser_spec: 6→117 (PERFECT). Sessions 7-8 stabilized the runtime (GC roots, delete operator) and unlocked xfa_tohtml via generator scope env fix. Session 9's toThrowError regex fix dramatically improved test framework accuracy across all specs. Session 10 added missing global functions for XFA URL/base64 processing.
+Session 5 gains came from unblocking 4 previously crashing specs (crypto +44, parser +56, default_appearance +7, autolinker runs but 0) plus fixing colorspace (+30) and cff_parser (+36) regressions. Session 6 was a focused push on xfa_parser_spec: 6→117 (PERFECT). Sessions 7-8 stabilized the runtime (GC roots, delete operator) and unlocked xfa_tohtml via generator scope env fix. Session 9's toThrowError regex fix dramatically improved test framework accuracy across all specs. Session 10 added missing global functions for XFA URL/base64 processing. Session 11 was the biggest remaining-failure-reduction session: fixed 8 distinct bugs (RE2 regex limitations, URL normalization, exec() lastIndex, Array.map() flattening, style property chain interception) to achieve 99.9% pass rate.
 
-### 5.2 Remaining Work Estimate (Updated Phase 10)
+### 5.2 Remaining Work Estimate (Updated Phase 11)
 
-**56 total failures remain across 3 specs** (down from 146+ across 15 specs). 17 specs are PERFECT.
+**5 total failures remain across 3 specs** (down from 56). 18 specs are PERFECT.
 
-**Priority 1 — autolinker_spec (1/52 — 51 failures)**
-- Needs `String.prototype.normalize("NFKC")` — significant Unicode normalization feature
-- Single biggest block of remaining failures
+**Priority 1 — autolinker_spec (50/52 — 2 failures)**
+- Punycode/IDN encoding: `测试.net` → `xn--0zwm56d.net` — requires punycode/IDNA implementation
 
-**Priority 2 — xfa_tohtml_spec (49/53 — 4 failures)**
-- CSS font-size calculation: `"" to equal "13.86px"` — missing computed font-size
-- Count mismatch: `1 to equal 2` — element counting issue
-- CSS property ordering/extra properties in transform objects (2 failures)
+**Priority 2 — xfa_tohtml_spec (51/53 — 2 failures)**
+- XFA `breakBefore targetType="pageArea" startNew="1"` pagination — multi-page XFA document handling
 
 **Priority 3 — util_spec (51/52 — 1 failure)**
 - `Error.stack` not implemented — deep engine feature
@@ -655,21 +662,22 @@ Session 5 gains came from unblocking 4 previously crashing specs (crypto +44, pa
 
 | Priority | Fix | Est. Gain | Difficulty | Status |
 |----------|-----|-----------|------------|--------|
-| 1 | `String.prototype.normalize("NFKC")` | +51 | HIGH — Unicode normalization tables | ❌ autolinker_spec |
-| 2 | xfa_tohtml CSS font-size / property fixes | +4 | MED — CSS computed style issues | ❌ xfa_tohtml_spec |
+| 1 | Punycode/IDNA encoding | +2 | HIGH — Unicode IDNA lookup tables | ❌ autolinker_spec |
+| 2 | XFA breakBefore pagination | +2 | HIGH — XFA layout engine | ❌ xfa_tohtml_spec |
 | 3 | `Error.stack` implementation | +1 | HIGH — stack trace infrastructure | ❌ util_spec |
 | 4 | crypto_spec performance | ~+75 | LOW — release build only | ❌ debug timeout |
 
 ---
 
-## 6. Implementation Priority Matrix (Updated 2026-04-01)
+## 6. Implementation Priority Matrix (Updated 2026-04-02)
 
 | Priority | Issue | Effort | Est. Gain | Status |
 |----------|-------|--------|-----------|--------|
-| 🔴 P0 | `String.prototype.normalize("NFKC")` — autolinker_spec blocked | HIGH | ~+51 | ❌ Not started |
-| 🟡 P1 | xfa_tohtml CSS font-size / property ordering (4 failures) | MED | ~+4 | ❌ Remaining |
+| 🟡 P1 | Punycode/IDN encoding — autolinker_spec (2 failures) | HIGH | ~+2 | ❌ Remaining |
+| 🟡 P1 | XFA breakBefore pagination — xfa_tohtml_spec (2 failures) | HIGH | ~+2 | ❌ Remaining |
 | 🟡 P1 | `Error.stack` — util_spec (1 failure) | HIGH | ~+1 | ❌ Remaining |
 | 🟡 P1 | crypto_spec timeout — needs release build | LOW | ~+75 | ❌ Debug only |
+| ✅ Done | RE2 regex fixes, URL normalization, Array.map(), style chain | — | **+51** | ✅ Phase 11 |
 | ✅ Done | escape(), atob(), btoa() — xfa_tohtml URL/base64 processing | — | **+9** | ✅ Phase 10 |
 | ✅ Done | Rest params via spread, toThrowError regex fix | — | **+30** | ✅ Phase 9 |
 | ✅ Done | Generator/async scope env — xfa_tohtml unlocked | — | **+39** | ✅ Phase 8 |
@@ -683,21 +691,20 @@ Session 5 gains came from unblocking 4 previously crashing specs (crypto +44, pa
 
 ---
 
-## 7. Detailed Failure Catalog (Updated 2026-04-01)
+## 7. Detailed Failure Catalog (Updated 2026-04-02)
 
-**17 of 22 specs are now PERFECT (0 failures).** Only 3 specs have remaining failures (56 total), plus crypto_spec times out in debug build.
+**18 of 22 specs are now PERFECT (0 failures).** Only 3 specs have remaining failures (5 total), plus crypto_spec times out in debug build.
 
-### 7.1 autolinker_spec (51 failures)
+### 7.1 autolinker_spec (2 failures)
 
-All 51 failures require `String.prototype.normalize("NFKC")` — Unicode normalization. This is a significant feature requiring Unicode normalization tables (NFKC decomposition/composition).
+Both failures require Punycode/IDNA encoding — converting internationalized domain names (e.g. `测试.net`) to ASCII form (`xn--0zwm56d.net`). This requires implementing the IDNA/Punycode specification.
 
-### 7.2 xfa_tohtml_spec (4 failures)
+### 7.2 xfa_tohtml_spec (2 failures)
 
 | Test | Failure | Root Cause |
 |------|---------|------------|
-| Font-size computation | `"" to equal "13.86px"` | Missing CSS font-size calculation in XFA layout |
-| Element count | `1 to equal 2` | Element counting mismatch |
-| CSS property order (×2) | Extra/mismatched CSS properties in transform objects | Object key ordering or extra CSS properties |
+| Multi-page pagination | `1 to equal 2` (page count) | XFA `breakBefore targetType="pageArea" startNew="1"` not implemented |
+| Second page style comparison | Style object vs null | Second page not generated, so comparison fails |
 
 ### 7.3 util_spec (1 failure)
 
@@ -811,50 +818,33 @@ done
 
 ## 10. Summary
 
-### Progress So Far (2025-07-27 → 2026-03-29)
+### Progress So Far (2025-07-27 → 2026-04-02)
 
-**+388 passing tests** (2,734 → 3,122). **8 formerly-crashing specs now run** (12 → 4 crashes). **18 of 22 specs produce results.** Overall rate: **88.5%** (up from 75.2%).
+**+941 passing tests** (2,734 → 3,675). **12 formerly-crashing specs now run** (12 → 0 crashes). **All 22 specs produce results.** Overall rate: **99.9%** (up from 75.2%). **18 specs are PERFECT** (0 failures).
 
 Key wins by session:
 - **Session 1 (2025-07-27):** type1_parser 2→21/24, function_spec TIMEOUT→21, colorspace CRASH→32, cff_parser CRASH→4, RegExp dynamic, charCodeAt, toString(16) (+106)
 - **Session 2 (2025-07-28):** type1_parser 21→24/24, MCONST_CLASS, alias detection (+4)
 - **Session 3 (2025-03-28):** instanceof, Error super(), Map for...of+order, Array.from mapper (+3)
-- **Session 4 (2026-03-29):** Math.max spread, fn(...spread), method spread, Symbol static methods. xfa_formcalc CRASH→99/110, xml CRASH→14/15, function_spec 21→77/114, primitives 66→118/122 (+278)
+- **Session 4 (2026-03-29):** Math.max spread, fn(...spread), method spread, Symbol static methods. xfa_formcalc CRASH→99/110, xml CRASH→14/15 (+278)
+- **Session 5 (2026-03-30):** Closure write-back, array prop access, Object.keys arrays, regression fixes. Unblocked 4 crashing specs (+202)
+- **Session 6 (2026-03-30):** SOM cache, super() ancestor walk, object spread → xfa_parser 100% PERFECT (+111)
+- **Session 7 (2026-03-30):** Delete operator, GC roots, RegExp/Unicode fixes (+111)
+- **Session 8 (2026-03-31):** Generator/async scope env fix → xfa_tohtml unlocked (0→39/53) (+39)
+- **Session 9 (2026-03-31):** Rest params via spread, toThrowError regex fix (+30)
+- **Session 10 (2026-04-01):** escape(), atob(), btoa() → xfa_tohtml 40→49 (+9)
+- **Session 11 (2026-04-02):** RE2 regex workarounds, URL normalization, exec() lastIndex, Array.map() flattening, style property chain fix → autolinker 1→50, xfa_tohtml 49→51 (+51)
 
-### Session 4 Achievements (2026-03-29)
+### Remaining Failures (5 total)
 
-Implemented 6 transpiler/runtime fixes for spread calls and Symbol-keyed methods:
+Only **5 failures remain** across 3 specs (plus crypto_spec timeout in debug build):
 
-| Fix | Category | Files Changed | Impact |
-|-----|----------|---------------|--------|
-| `Math.max/min(...spread)` | C6, A10 | `transpile_js_mir.cpp`, `js_runtime.cpp` | xfa_formcalc CRASH→99, xml CRASH→14 |
-| `fn(...spread)` fallback path | C7, A11 | `transpile_js_mir.cpp` | function_spec +56 |
-| `obj.method(...spread)` | C8 | `transpile_js_mir.cpp`, `js_runtime.cpp` | Method spread calls work |
-| `jm_build_spread_args_array` helper | — | `transpile_js_mir.cpp` | Shared foundation for all 3 spread fixes |
-| Symbol-keyed static methods | A12, C10 | `build_js_ast.cpp`, `transpile_js_mir.cpp` | xfa_parser Namespace lookup +4 |
-| `resolved_fn` + spread guard | — | `transpile_js_mir.cpp` | Prevents wrong arg passing on direct calls |
-
-**Known regression:** colorspace_spec dropped from 32/65 → 10/23 (possible hang/regression from spread/method-call changes). Needs investigation.
-
-### Remaining Path to 93%+
-
-The path from **88.5% to 93%+** requires:
-
-1. **Fix colorspace regression** — most impactful immediate fix (~+22 tests recoverable)
-2. **Rest params via spread** (C9) — `f(...args)` where `f(...rest)` receives wrong args
-3. **PostScript stack eval** (C11) — 37 function_spec failures, compiled PS functions return `[]`
-4. **UTF-16 BOM decoding** (B8) — util stringToPDFString (+12 tests)
-5. **Remaining closure capture** (A1) — 4 specs still crash (crypto +44, parser +44, autolinker +13, default_appearance +23)
-6. **URL constructor** (D3) — util createValidAbsoluteUrl (+8)
-
-### Completed Items (no longer blocking)
-- ~~instanceof (C2) + Error (C3)~~ → Done
-- ~~Map for...of (D1) + insertion order (D2)~~ → Done
-- ~~Math.max/min(...spread), fn(...spread), obj.method(...spread)~~ → Done
-- ~~Symbol-keyed static methods~~ → Done
-- ~~P3/super() inheritance (A6)~~ → Done (type1_parser 2→24/24)
-- ~~MCONST_CLASS null (A7)~~ → Done (function_spec TIMEOUT→77/114)
-- ~~RegExp dynamic construction (C4), charCodeAt (B5), toString(radix) (B1)~~ → Done
+| Spec | Failures | Root Cause | Difficulty |
+|------|----------|------------|------------|
+| autolinker_spec | 2 | Punycode/IDNA encoding (`测试.net` → `xn--0zwm56d.net`) | HIGH |
+| xfa_tohtml_spec | 2 | XFA `breakBefore` pagination (multi-page) | HIGH |
+| util_spec | 1 | `Error.stack` not implemented | HIGH |
+| crypto_spec | timeout | Debug build too slow for crypto ops | LOW (release only) |
 
 ### Architectural Lessons Learned
 
@@ -863,3 +853,59 @@ The biggest discovery was the **esbuild bundle pattern** — IIFE wrapping, clas
 The **Math.max spread root cause chain** was subtle: Builder constructor used `Math.max(...Object.values(NamespaceIds).map(({id})=>id))` → returned NaN because spread args in Math inline handler were processed as a single array item, not expanded → `_nextNsId = NaN` → all XFA namespace lookups broken → entire xfa_formcalc_spec crashed (111 assertions stuck). One transpiler fix unlocked 99 passing tests.
 
 The **P3 optimization incompatibility with inheritance** was another key finding: shaped-slot writes assume static shapes, but `super()` calls require dynamic dispatch to parent constructors that may have different slot layouts.
+
+#### RE2 Regex Engine Workarounds (Phase 11)
+
+LambdaJS uses RE2 as its regex engine for safety (guaranteed linear-time matching, no catastrophic backtracking). However, RE2 lacks several features that JavaScript regex relies on. Phase 11 built a **regex preprocessor** in `js_create_regex()` (`js_runtime.cpp`) to bridge these gaps:
+
+| JS Feature | RE2 Support | Workaround |
+|------------|-------------|------------|
+| Unicode Sets v-flag `[\S--[B]]` | ❌ No | Preprocessor expands `\S` to negated Unicode property classes and merges the set subtraction: `[\S--[B]]` → `[^\p{Z}\t\n\r\f\x0b\x{FEFF}B]` |
+| `\uXXXX` Unicode escapes | ❌ No | Post-processing converts `\uXXXX` → `\x{XXXX}` and `\u{XXXXX}` → `\x{XXXXX}` |
+| `\p{Ideographic}` property | ❌ No | Post-processing maps `\p{Ideographic}` → `\p{Han}` (closest RE2 equivalent) |
+| Lookahead `(?=...)` / `(?!...)` | ❌ No | Post-processing strips lookahead groups entirely from pattern (zero-width, best-effort) |
+| Empty character class `[]` | ❌ Silent failure | Post-processing replaces `[]` → `\x{FFFE}` (never-matching codepoint) |
+
+RE2 **does** support: `\p{L}`, `\p{Ll}`, `\p{Lu}`, `\p{N}`, `\p{P}`, `\p{M}`, `\p{Z}`, `\p{S}`, `\p{Ps}`, `\p{Pe}`, `\p{Han}`, `\p{Hangul}`, and named Unicode blocks.
+
+**Key lesson:** Regex preprocessing must happen in the right order — `\s`/`\S` expansion first, then `\u` escape conversion, then property name remapping, then structural fixes (empty classes, lookahead removal). Doing these out of order produces invalid patterns.
+
+#### Global Regex exec() lastIndex (Phase 11)
+
+The `RegExp.prototype.exec()` implementation initially always searched from position 0, regardless of the `lastIndex` property. This caused **infinite loops** in the common pattern `while ((m = re.exec(text)) !== null)` — since each exec() call returned the same first match forever.
+
+Fix in `js_regex_exec()`: for global (`/g`) and sticky (`/y`) regexes, read `lastIndex` from the regex object on entry, start the RE2 match from that position, and update `lastIndex` to the match end (or reset to 0 on no-match). Zero-length matches advance `lastIndex` by 1 to prevent infinite loops (matching V8 behavior).
+
+#### Transpiler Style Property Interception (Phase 11)
+
+The MIR transpiler contains **compile-time DOM optimizations** that intercept property chains involving known DOM property names:
+
+```
+obj.style.X      → js_dom_get_style_property(obj, "X")    // GET
+obj.style.X = v  → js_dom_set_style_property(obj, "X", v)  // SET
+obj.dataset.X    → js_dataset_get_property(obj, "X")       // GET
+obj.classList.add(...)  → js_classlist_method(obj, ...)     // CALL
+```
+
+These match **purely on AST structure** (property name = "style"), not on runtime type. This meant plain JS objects with a `.style` property (e.g., XFA's `{ attributes: { style: { fontSize: "13.86px" } } }`) were routed through DOM functions that returned empty string for non-DOM elements.
+
+**Fix:** Made `js_dom_get_style_property` and `js_dom_set_style_property` fall back to normal `js_property_get`/`js_property_set` when `js_dom_unwrap_element()` returns NULL. This preserves the DOM fast path while correctly handling plain JS objects.
+
+**Lesson:** Compile-time optimizations based on property names are fragile when the language allows arbitrary objects with those same property names. Runtime type guards in the target function are essential.
+
+#### Array.map() Flattening vs JS Semantics (Phase 11)
+
+Lambda's `list_push()` and `array_push()` both check `is_content` on items and **flatten arrays** that have this flag set. The `fn_split()` function (Lambda runtime) sets `is_content = 1` on its result arrays. When `Array.map()` used `list_push(dst, mapped)` internally, the result of `.split().map(...)` chains was silently flattened — `[["a","1"],["b","2"]]` became `["a","1","b","2"]`.
+
+**Fix:** Changed `Array.map()` to pre-allocate the result array and use **direct slot assignment** (`dst->items[i] = mapped`) instead of `list_push`. Also clear `is_content = 0` on arrays returned from `fn_split()` to JS context.
+
+**Lesson:** Lambda's container semantics (content flattening for template rendering) conflict with JS semantics (arrays are always nested). Any Lambda runtime function returning arrays to JS context must clear the `is_content` flag.
+
+#### URL Normalization (Phase 11)
+
+The custom URL parser (`lib/url_parser.c`) was storing the raw input string as `href` instead of reconstructing from parsed components. This caused several failures:
+- Missing trailing `/` for HTTP URLs with no explicit path
+- Backslash `\` not normalized to `/` in path component
+- Non-ASCII characters in path/query not percent-encoded
+
+**Fix:** After parsing, reconstruct `href` from components (`protocol + "//" + authority + pathname + search + hash`), normalize backslashes in path, and apply percent-encoding to non-ASCII bytes via `url_percent_encode()` helper.

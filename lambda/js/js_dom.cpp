@@ -1533,7 +1533,12 @@ extern "C" Item js_dom_set_property(Item elem_item, Item prop_name, Item value) 
 extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item value) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
-        log_debug("js_dom_set_style_property: not a DOM element");
+        // not a DOM element — fall back to normal property set on obj.style
+        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
+        Item style_obj = js_property_get(elem_item, style_key);
+        if (style_obj.item != ITEM_NULL && get_type_id(style_obj) == LMD_TYPE_MAP) {
+            return js_property_set(style_obj, prop_name, value);
+        }
         return ItemNull;
     }
 
@@ -1576,7 +1581,12 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
 extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) {
-        log_debug("js_dom_get_style_property: not a DOM element");
+        // not a DOM element — fall back to normal property access on obj.style
+        Item style_key = (Item){.item = s2it(heap_create_name("style"))};
+        Item style_obj = js_property_get(elem_item, style_key);
+        if (style_obj.item != ITEM_NULL && get_type_id(style_obj) == LMD_TYPE_MAP) {
+            return js_property_get(style_obj, prop_name);
+        }
         return (Item){.item = s2it(heap_create_name(""))};
     }
 

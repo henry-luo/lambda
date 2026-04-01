@@ -1,6 +1,7 @@
 #include "layout_table.hpp"
 #include "layout.hpp"
 #include "intrinsic_sizing.hpp"
+#include "form_control.hpp"  // For FormDefaults (radio/checkbox margin constants)
 #include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/arraylist.h"
@@ -4791,7 +4792,38 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
                     inline_run_max += lycon->font.style->space_width;
                     log_debug("%s Cell widths: adding inter-element space width=%.2f", cell->source_loc(), lycon->font.style->space_width);
                 }
-                inline_run_max += child_max;
+                // CSS 2.1: inline element horizontal margins contribute to line box width
+                float inline_margin_h = 0;
+                ViewBlock* child_view_inline = (ViewBlock*)child_elem;
+                if (child_view_inline->bound) {
+                    if (child_view_inline->bound->margin.left_type != CSS_VALUE_AUTO)
+                        inline_margin_h += child_view_inline->bound->margin.left;
+                    if (child_view_inline->bound->margin.right_type != CSS_VALUE_AUTO)
+                        inline_margin_h += child_view_inline->bound->margin.right;
+                } else if (child_elem->specified_style) {
+                    CssDeclaration* ml = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_LEFT);
+                    if (ml && ml->value && ml->value->type == CSS_VALUE_TYPE_LENGTH)
+                        inline_margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_LEFT, ml->value);
+                    CssDeclaration* mr = style_tree_get_declaration(child_elem->specified_style, CSS_PROPERTY_MARGIN_RIGHT);
+                    if (mr && mr->value && mr->value->type == CSS_VALUE_TYPE_LENGTH)
+                        inline_margin_h += resolve_length_value(lycon, CSS_PROPERTY_MARGIN_RIGHT, mr->value);
+                } else {
+                    // No resolved styles yet (measurement pass before layout).
+                    // Apply UA default margins for known form controls to get accurate sizing.
+                    // These mirror the values set in resolve_htm_style.cpp for checkbox/radio.
+                    uintptr_t ctag = child_elem->tag();
+                    if (ctag == HTM_TAG_INPUT) {
+                        const char* inp_type = child_elem->get_attribute("type");
+                        if (inp_type && strcmp(inp_type, "radio") == 0) {
+                            inline_margin_h = FormDefaults::RADIO_MARGIN_LEFT + FormDefaults::RADIO_MARGIN_RIGHT;
+                        } else if (inp_type && strcmp(inp_type, "checkbox") == 0) {
+                            inline_margin_h = FormDefaults::CHECKBOX_MARGIN_LEFT + FormDefaults::CHECKBOX_MARGIN_RIGHT;
+                        }
+                    }
+                }
+                inline_run_max += child_max + inline_margin_h;
+                child_min += inline_margin_h;
+                if (child_min < 0) child_min = 0;
                 has_inline_content = true;
                 // Track if this element's text ends with whitespace for next sibling
                 prev_ended_with_space = element_text_ends_with_whitespace(child);
