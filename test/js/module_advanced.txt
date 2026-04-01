@@ -4,4 +4,3 @@ E: 2.71828
 closure: 15
 mapped: 1 4 9 16
 Hello, Module!
-null

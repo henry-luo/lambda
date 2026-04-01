@@ -7,4 +7,3 @@ null ||= fallback: fallback
 1 &&= 42: 42
 0 &&= 99: 0
 yes &&= no: no
-null

@@ -294,8 +294,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     bool is_horizontal = is_main_axis_horizontal(flex);
 
-    // Check if this is an absolutely positioned element with auto width (shrink-to-fit)
-    // Also check for min-width/max-width constraints - if present, don't use shrink-to-fit
+    // Check if this is a shrink-to-fit flex container (auto width):
+    // 1. Absolutely positioned with auto width (no explicit width/min/max)
+    // 2. Inline-flex (display: inline-flex) with auto width
+    // Both cases use shrink-to-fit sizing per CSS Display §3 / CSS 2.1 §10.3.9
     bool has_min_width = container->blk && container->blk->given_min_width > 0;
     bool has_max_width = container->blk && container->blk->given_max_width > 0;
     bool is_absolute_no_width = false;
@@ -307,14 +309,19 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             is_absolute_no_width = true;
         }
     }
+    // Inline-flex with auto width also uses shrink-to-fit
+    bool is_inline_no_width = !has_explicit_width &&
+        (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
+         container->display.outer == CSS_VALUE_INLINE);
+    bool is_shrink_to_fit = is_absolute_no_width || is_inline_no_width;
 
     if (is_horizontal) {
         // For row flex, main axis is width
-        // If container is absolutely positioned with auto width, use shrink-to-fit
-        if (is_absolute_no_width) {
+        // If container needs shrink-to-fit, defer width calculation
+        if (is_shrink_to_fit) {
             // Defer width calculation to layout phase (shrink-to-fit)
             flex->main_axis_size = 0.0f;
-            log_debug("%s init_flex_container: absolute row flex with auto-width, deferring main_axis_size", container->source_loc());
+            log_debug("%s init_flex_container: shrink-to-fit row flex with auto-width, deferring main_axis_size", container->source_loc());
         } else {
             flex->main_axis_size = content_width > 0 ? (float)content_width : 0.0f;
         }
@@ -322,11 +329,11 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     } else {
         flex->main_axis_size = content_height > 0 ? (float)content_height : 0.0f;
         // For column flex, cross axis is width
-        // If container is absolutely positioned with auto width, use shrink-to-fit
-        if (is_absolute_no_width) {
+        // If container needs shrink-to-fit, defer width calculation
+        if (is_shrink_to_fit) {
             // Defer width calculation to layout phase (shrink-to-fit)
             flex->cross_axis_size = 0.0f;
-            log_debug("%s init_flex_container: absolute column flex with auto-width, deferring cross_axis_size", container->source_loc());
+            log_debug("%s init_flex_container: shrink-to-fit column flex with auto-width, deferring cross_axis_size", container->source_loc());
         } else {
             flex->cross_axis_size = content_width > 0 ? (float)content_width : 0.0f;
         }
@@ -408,9 +415,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // CRITICAL FIX: If this container already has a width set by a parent flex algorithm,
         // treat it as definite. This prevents nested flex containers from overriding the
         // width that was calculated by the parent's flex item sizing.
-        // Exception: absolute-positioned elements with auto width get their containing block's
-        // width as fallback, so we must NOT treat that as definite.
-        if (!has_definite_width && container->width > 0 && !is_absolute_no_width) {
+        // Exception: shrink-to-fit containers (absolute-positioned or inline-flex with auto
+        // width) get their containing block's width as fallback, so we must NOT treat that
+        // as definite.
+        if (!has_definite_width && container->width > 0 && !is_shrink_to_fit) {
             has_definite_width = true;
             log_debug("%s init_flex_container: using width set by parent (%.1f)", container->source_loc(),
                       container->width);
@@ -585,9 +593,13 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 bool is_absolute = container->position &&
                     (container->position->position == CSS_VALUE_ABSOLUTE ||
                      container->position->position == CSS_VALUE_FIXED);
-                // Only use shrink-to-fit if truly auto-width (no width, min-width, or max-width constraints)
+                // Shrink-to-fit: absolute with auto width, or inline-flex with auto width
                 bool is_absolute_no_width = is_absolute && !has_explicit_width && !has_min_width && !has_max_width &&
                     !(container->position && container->position->has_left && container->position->has_right);
+                bool is_inline_no_width = !has_explicit_width &&
+                    (container->display.outer == CSS_VALUE_INLINE_BLOCK ||
+                     container->display.outer == CSS_VALUE_INLINE);
+                bool is_shrink_to_fit = is_absolute_no_width || is_inline_no_width;
 
                 if (is_absolute_no_width && content_width > 0) {
                     // ABS POS already computed the intrinsic width via shrink-to-fit.
@@ -617,55 +629,84 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         // Fall through to manual calculation below
                         goto manual_shrink_to_fit;
                     }
-                } else if (is_absolute_no_width) {
+                } else if (is_shrink_to_fit) {
                     manual_shrink_to_fit:
-                    // Calculate width from flex items (shrink-to-fit) using flex-aware sizing.
-                    // For items with explicit flex-basis, use flex-basis (not given_width).
-                    // For items without flex-basis (auto), use given_width or intrinsic size.
+                    // CSS Flexbox §9.9.1: Intrinsic main size of a single-line flex container
+                    // is the sum of max-content contributions of flex items.
+                    // Iterate DOM children (not view children) to include text nodes
+                    // that become anonymous flex items.
                     float total_item_width = 0.0f;
                     int child_count = 0;
-                    View* child = container->first_child;
-                    while (child) {
-                        if (child->view_type == RDT_VIEW_BLOCK) {
-                            ViewElement* item = (ViewElement*)child->as_element();
-                            // Skip display:none and absolute/hidden items
-                            if (item && !should_skip_flex_item(item)) {
-                                float item_width = 0.0f;
-                                if (item->fi && item->fi->flex_basis >= 0) {
-                                    // Explicit flex-basis (including 0): use as the item's main size.
-                                    // Floor to padding+border (content-box can't go negative).
-                                    item_width = item->fi->flex_basis;
-                                    if (item->bound) {
-                                        float pb = item->bound->padding.left + item->bound->padding.right;
-                                        if (item->bound->border) {
-                                            pb += item->bound->border->width.left + item->bound->border->width.right;
-                                        }
-                                        if (item_width < pb) item_width = pb;
-                                    }
-                                } else if (item->blk && item->blk->given_width >= 0) {
+                    if (container->is_element()) {
+                        DomElement* container_elem = (DomElement*)container;
+                        for (DomNode* dom_child = container_elem->first_child; dom_child; dom_child = dom_child->next_sibling) {
+                            float item_width = 0.0f;
+                            if (dom_child->is_element()) {
+                                ViewElement* item = (ViewElement*)dom_child->as_element();
+                                // Skip display:none and absolute/hidden items
+                                if (!item || should_skip_flex_item(item)) continue;
+                                if (item->blk && item->blk->given_width >= 0) {
                                     item_width = item->blk->given_width;
-                                } else if (item->width > 0) {
-                                    item_width = item->width;
-                                } else if (item->fi && item->fi->has_intrinsic_width) {
-                                    item_width = item->fi->intrinsic_width.max_content;
+                                } else {
+                                    DomElement* item_elem = (DomElement*)item;
+                                    IntrinsicSizes item_sizes = measure_element_intrinsic_widths(lycon, item_elem);
+                                    item_width = item_sizes.max_content;
                                 }
-                                // Clamp by min-width/max-width if set (§1.1)
+                                // Add padding+border for border-box contribution
+                                if (item->bound) {
+                                    float pb = item->bound->padding.left + item->bound->padding.right;
+                                    if (item->bound->border)
+                                        pb += item->bound->border->width.left + item->bound->border->width.right;
+                                    // Only add if intrinsic sizing returned content-box value
+                                    if (!(item->blk && item->blk->given_width >= 0))
+                                        item_width += pb;
+                                }
+                                // Clamp by min-width/max-width (§1.1)
                                 if (item->blk) {
                                     if (item->blk->given_max_width >= 0 && item_width > item->blk->given_max_width)
                                         item_width = item->blk->given_max_width;
                                     if (item->blk->given_min_width >= 0 && item_width < item->blk->given_min_width)
                                         item_width = item->blk->given_min_width;
                                 }
-                                total_item_width += item_width;
                                 child_count++;
-                                log_debug("ROW FLEX SHRINK-TO-FIT: item width=%.1f, total=%.1f",
-                                          item_width, total_item_width);
+                            } else if (dom_child->is_text()) {
+                                // Text nodes become anonymous flex items
+                                const char* text = (const char*)dom_child->text_data();
+                                if (!text) continue;
+                                size_t text_len = strlen(text);
+                                char normalized[2048];
+                                size_t out_pos = 0;
+                                bool in_ws = true;
+                                for (size_t i = 0; i < text_len && out_pos < sizeof(normalized) - 1; i++) {
+                                    unsigned char ch = (unsigned char)text[i];
+                                    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                                        if (!in_ws) { normalized[out_pos++] = ' '; in_ws = true; }
+                                    } else {
+                                        normalized[out_pos++] = (char)ch; in_ws = false;
+                                    }
+                                }
+                                while (out_pos > 0 && normalized[out_pos - 1] == ' ') out_pos--;
+                                normalized[out_pos] = '\0';
+                                if (out_pos > 0) {
+                                    TextIntrinsicWidths tw = measure_text_intrinsic_widths(lycon, normalized, out_pos);
+                                    item_width = tw.max_content;
+                                    child_count++;
+                                } else {
+                                    continue;
+                                }
+                            } else {
+                                continue;
                             }
+                            total_item_width += item_width;
+                            log_debug("ROW FLEX SHRINK-TO-FIT: item width=%.1f, total=%.1f", item_width, total_item_width);
                         }
-                        child = child->next();
                     }
-                    // Note: gaps are NOT added to total_item_width for auto-sizing.
-                    // The container width = sum of items only. Gaps cause overflow if items don't shrink.
+                    // Add column gaps between items (non-percentage only)
+                    if (child_count > 1 && flex_layout->column_gap > 0 &&
+                        !(container->embed && container->embed->flex &&
+                          container->embed->flex->column_gap_is_percent)) {
+                        total_item_width += flex_layout->column_gap * (child_count - 1);
+                    }
                     flex_layout->main_axis_size = total_item_width;
                     // Also update container width (include padding AND border)
                     float padding_border_width = 0.0f;
@@ -676,7 +717,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                         }
                     }
                     container->width = total_item_width + padding_border_width;
-                    log_debug("ROW FLEX SHRINK-TO-FIT: main_axis_size=%.1f, container.width=%d",
+                    log_debug("ROW FLEX SHRINK-TO-FIT: main_axis_size=%.1f, container.width=%.1f",
                               flex_layout->main_axis_size, container->width);
                 } else {
                     flex_layout->main_axis_size = (float)content_width;
@@ -2246,12 +2287,20 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         log_debug("Step 1: Creating View for %s", child->source_loc());
         init_flex_item_view(lycon, child);
 
+        // Check if init_flex_item_view skipped this child (display:none)
+        // In that case no View was created and we must not process further
+        ViewElement* item = (ViewElement*)child->as_element();
+        if (item->display.outer == CSS_VALUE_NONE) {
+            log_debug("Skipping display:none flex child: %s", child->node_name());
+            child = child->next_sibling;
+            continue;
+        }
+
         // Step 2: Measure content (uses resolved styles)
         log_debug("Step 2: Measuring content for %s", child->source_loc());
         measure_flex_child_content(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
-        ViewElement* item = (ViewElement*)child->as_element();
 
         // Step 3: Check if should skip (absolute, hidden)
         if (should_skip_flex_item(item)) {

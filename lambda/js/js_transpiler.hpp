@@ -67,6 +67,13 @@ typedef struct JsTranspiler {
     
     // Runtime integration
     Runtime* runtime;               // Lambda runtime context
+
+    // Unified JS/TS mode flags
+    bool strict_js;                 // true = reject TS syntax (pure JS mode), false = allow TS
+    bool emit_runtime_checks;       // emit ts_assert_type/ts_check_shape calls (TS dev mode)
+
+    // Type registry: name → Type* (TS interfaces, aliases, enums)
+    struct hashmap* type_registry;
 } JsTranspiler;
 
 // JavaScript type mapping functions
@@ -98,6 +105,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
 JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
+JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
+JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
+JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
+JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node);
 
 // AST utility functions (build_js_ast.cpp)
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
@@ -106,6 +117,9 @@ JsOperator js_operator_from_string(const char* op_str, size_t len);
 // Error handling functions
 void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
 void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...);
+
+// Early error detection (js_early_errors.cpp)
+int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
 
 // Debug functions
 void print_js_ast_node(JsAstNode* node, int indent);

@@ -8,6 +8,8 @@
 // for literals; expression results are already boxed.
 
 #include "js_transpiler.hpp"
+#include "../ts/ts_ast.hpp"
+#include "../ts/ts_transpiler.hpp"
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
@@ -48,7 +50,7 @@ extern "C" void js_reset_module_vars();
 
 // External declarations for parallel module compilation
 extern "C" {
-    const TSLanguage* tree_sitter_javascript(void);
+    const TSLanguage* tree_sitter_typescript(void);
     void ensure_jit_imports_initialized(void);
 }
 
@@ -75,6 +77,7 @@ struct JsMirVarEntry {
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
     bool is_js_array;        // A2: true if variable is known to hold a regular JS array
     JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
+    Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
 };
 
 // Loop label pair for break/continue
@@ -104,6 +107,8 @@ struct JsFuncCollected {
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
     char scope_env_names[64][128];   // variable names in scope env
+    bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
+    int reuse_env_slot_count;        // v16: slot count when reusing parent env
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type
@@ -120,6 +125,7 @@ struct JsFuncCollected {
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
+    int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
 };
 
 // Class method info for transpiler
@@ -359,6 +365,8 @@ static uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t 
 
 // Forward declarations
 static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
+static Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
+static JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
 
 // ============================================================================
 // Basic MIR helpers
@@ -1732,6 +1740,31 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
     return result;
 }
 
+// v12: Build a compile-time stack trace string from the lexical function chain.
+// Walks from current function up through parent_index to build:
+//   "Error\n    at FuncName1\n    at FuncName2\n..."
+static MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type) {
+    char buf[1024];
+    int pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", error_type);
+
+    // Walk the lexical function chain from current to top-level
+    int fi = mt->current_func_index;
+    while (fi >= 0 && fi < mt->func_count && pos < (int)sizeof(buf) - 32) {
+        JsFuncCollected* fc = &mt->func_entries[fi];
+        const char* js_name = NULL;
+        if (fc->node && fc->node->name) {
+            js_name = fc->node->name->chars;
+        }
+        if (js_name && js_name[0]) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "\n    at %s", js_name);
+        }
+        fi = fc->parent_index;
+    }
+
+    return jm_box_string_literal(mt, buf, pos);
+}
+
 // ============================================================================
 // Inline unboxing helpers (MIR instructions, no function calls)
 // ============================================================================
@@ -2022,6 +2055,14 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // Phase 5: If callee is Math.xxx(), resolve return type at compile time
         String* math_method = jm_get_math_method(call);
         if (math_method) return jm_math_return_type(math_method, mt, call->arguments);
+        // Phase 3.5: return type from any collected function (not just native-eligible)
+        // Skip generators — they return iterator objects, not the inferred return type
+        {
+            JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
+            if (any_fc && any_fc->return_type != LMD_TYPE_ANY
+                && any_fc->node && !any_fc->node->is_generator)
+                return any_fc->return_type;
+        }
         return LMD_TYPE_ANY;
     }
 
@@ -2042,6 +2083,19 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
                 return LMD_TYPE_INT;
             }
+
+            // P3.4: TypeMap shape lookup — if the object has a full_type (TypeMap from TS interface),
+            // look up the property name in the ShapeEntry chain to find the field type.
+            Type* obj_full = jm_get_full_type(mt, mem->object);
+            if (obj_full && obj_full->type_id == LMD_TYPE_MAP) {
+                TypeMap* tm = (TypeMap*)obj_full;
+                for (ShapeEntry* se = tm->shape; se; se = se->next) {
+                    if (se->name && se->name->str && se->name->length == prop->name->len &&
+                        memcmp(se->name->str, prop->name->chars, prop->name->len) == 0) {
+                        if (se->type) return se->type->type_id;
+                    }
+                }
+            }
         }
         return LMD_TYPE_ANY;
     }
@@ -2049,6 +2103,21 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     default:
         return LMD_TYPE_ANY;
     }
+}
+
+// Returns the full Type* for an expression (richer than just TypeId).
+// Checks variable scope for Type* carried from TS annotations.
+// Returns NULL for unknown or non-compound types.
+static Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return NULL;
+    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (var) return var->full_type;
+    }
+    return NULL;
 }
 
 // Check if a type is native (not boxed)
@@ -2067,11 +2136,18 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
     if (!fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
         if (strcmp(name, fc->scope_env_names[s]) == 0) {
+            // Determine the actual slot: when reusing parent env, use the
+            // remapped slot (from the var's env_slot), not the local index.
+            int slot = s;
+            if (fc->reuse_parent_env) {
+                JsMirVarEntry* var = jm_find_var(mt, name);
+                if (var && var->from_env) slot = var->env_slot;
+            }
             // Mark the variable entry
             JsMirVarEntry* var = jm_find_var(mt, name);
             if (var) {
                 var->in_scope_env = true;
-                var->scope_env_slot = s;
+                var->scope_env_slot = slot;
                 var->scope_env_reg = mt->scope_env_reg;
             }
             // Write current value to scope env
@@ -2079,7 +2155,7 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
             if (jm_is_native_type(type_id))
                 val = jm_box_native(mt, val_reg, type_id);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, val)));
             return;
         }
@@ -2362,6 +2438,29 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 // Phase 4: Native call resolution
 // ============================================================================
 
+// Phase 3.5: find the collected entry for a direct call without checking native eligibility.
+// Used to propagate return types from any known function, even non-native ones.
+static JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
+    if (!entry) entry = id->entry;
+    if (!entry || !entry->node) return NULL;
+    JsFunctionNode* fn = NULL;
+    JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
+    if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
+        fn = (JsFunctionNode*)entry->node;
+    } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
+        if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION
+            || decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+            fn = (JsFunctionNode*)decl->init;
+        }
+    }
+    if (!fn) return NULL;
+    return jm_find_collected_func(mt, fn);
+}
+
 // Check if a call expression should use the native version of a function.
 // Returns the JsFuncCollected* if native call is possible, NULL otherwise.
 static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
@@ -2567,6 +2666,10 @@ static void jm_get_param_name(JsAstNode* param_node, int index, char* out, int o
     if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
         snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
+    } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+        // TsParameterNode: delegate to the wrapped pattern
+        TsParameterNode* tsp = (TsParameterNode*)param_node;
+        jm_get_param_name(tsp->pattern, index, out, out_size);
     } else if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
         jm_get_param_name(ap->left, index, out, out_size);
@@ -3042,6 +3145,77 @@ static int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int pro
     return -1;
 }
 
+// detect typed array constructor type from a new expression
+// also detects chained method calls like new Uint8Array(n).map(fn)
+static int jm_detect_typed_array_new(JsAstNode* rhs) {
+    if (!rhs) return -1;
+    // direct: new TypedArray(...)
+    if (rhs->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        JsCallNode* new_call = (JsCallNode*)rhs;
+        if (!new_call->callee || new_call->callee->node_type != JS_AST_NODE_IDENTIFIER) return -1;
+        JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Uint8Array", 10) == 0) return JS_TYPED_UINT8;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int32Array", 10) == 0) return JS_TYPED_INT32;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int16Array", 10) == 0) return JS_TYPED_INT16;
+        if (ctor->name->len == 9 && strncmp(ctor->name->chars, "Int8Array", 9) == 0) return JS_TYPED_INT8;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint32Array", 11) == 0) return JS_TYPED_UINT32;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) return JS_TYPED_UINT16;
+        if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) return JS_TYPED_UINT8_CLAMPED;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) return JS_TYPED_FLOAT64;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) return JS_TYPED_FLOAT32;
+        return -1;
+    }
+    // chained: new TypedArray(n).map(fn) / .filter(fn) / .slice(...) etc.
+    // TypedArray methods that preserve type: map, filter, slice, sort, reverse, subarray
+    if (rhs->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)rhs;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* cm = (JsMemberNode*)call->callee;
+            if (!cm->computed && cm->property &&
+                cm->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* method = (JsIdentifierNode*)cm->property;
+                bool preserves_type = false;
+                if (method->name->len == 3 && strncmp(method->name->chars, "map", 3) == 0) preserves_type = true;
+                else if (method->name->len == 6 && strncmp(method->name->chars, "filter", 6) == 0) preserves_type = true;
+                else if (method->name->len == 5 && strncmp(method->name->chars, "slice", 5) == 0) preserves_type = true;
+                else if (method->name->len == 4 && strncmp(method->name->chars, "sort", 4) == 0) preserves_type = true;
+                else if (method->name->len == 7 && strncmp(method->name->chars, "reverse", 7) == 0) preserves_type = true;
+                else if (method->name->len == 8 && strncmp(method->name->chars, "subarray", 8) == 0) preserves_type = true;
+                if (preserves_type) {
+                    return jm_detect_typed_array_new(cm->object);
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+// look up typed array type for a class instance field by name.
+// checks the class and its superclass chain for instance fields with typed array initializers.
+static int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len) {
+    while (ce) {
+        for (int i = 0; i < ce->instance_field_count; i++) {
+            JsInstanceFieldEntry* f = &ce->instance_fields[i];
+            if (f->name && (int)f->name->len == prop_len &&
+                strncmp(f->name->chars, prop_name, prop_len) == 0) {
+                return jm_detect_typed_array_new(f->initializer);
+            }
+        }
+        // also check ctor_prop_ta_types for constructor body assignments
+        if (ce->constructor && ce->constructor->fc) {
+            JsFuncCollected* fc = ce->constructor->fc;
+            for (int i = 0; i < fc->ctor_prop_count; i++) {
+                if (fc->ctor_prop_lens[i] == prop_len &&
+                    strncmp(fc->ctor_prop_ptrs[i], prop_name, prop_len) == 0) {
+                    return fc->ctor_prop_ta_types[i];
+                }
+            }
+        }
+        ce = ce->superclass;
+    }
+    return -1;
+}
+
 // A5: Scan constructor body for this.property = expr assignment patterns.
 // Records property names in order so we can pre-build the object shape.
 static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
@@ -3066,6 +3240,8 @@ static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                             if (fc->ctor_prop_count < 16) {
                                 fc->ctor_prop_ptrs[fc->ctor_prop_count] = prop->name->chars;
                                 fc->ctor_prop_lens[fc->ctor_prop_count] = (int)prop->name->len;
+                                // detect typed array type from RHS
+                                fc->ctor_prop_ta_types[fc->ctor_prop_count] = jm_detect_typed_array_new(asgn->right);
                                 fc->ctor_prop_count++;
                             }
                         }
@@ -3329,6 +3505,59 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
 
     if (pc == 0 || pc > 16) return;
 
+    // Phase 3.4: Check for TS type annotations on parameters first
+    // If ALL params have annotations, use them. Otherwise fall through to body-scan.
+    bool use_annotations = false;
+    {
+        int ann_count = 0;
+        JsAstNode* p = fn->params;
+        while (p) {
+            if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                TsParameterNode* tsp = (TsParameterNode*)p;
+                if (tsp->ts_type) ann_count++;
+            }
+            p = p->next;
+        }
+        if (ann_count > 0) {
+            // use annotations for annotated params, ANY for unannotated
+            use_annotations = true;
+            p = fn->params;
+            for (int i = 0; i < pc && p; i++, p = p->next) {
+                if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                    TsParameterNode* tsp = (TsParameterNode*)p;
+                    if (tsp->ts_type && tsp->ts_type->type_expr && !tsp->optional) {
+                        TypeId tid = ts_predefined_name_to_type_id(NULL, 0);  // default
+                        // resolve from the predefined_type or type_expr
+                        TsTypeNode* tex = tsp->ts_type->type_expr;
+                        if (tex->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)tex;
+                            tid = pt->predefined_id;
+                        } else {
+                            // fallback: resolve via ts_resolve_type
+                            tid = LMD_TYPE_ANY;
+                        }
+                        fc->param_types[i] = tid;
+                    } else {
+                        fc->param_types[i] = LMD_TYPE_ANY;
+                    }
+                } else if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                    fc->param_types[i] = LMD_TYPE_ANY;
+                } else {
+                    // not a TsParameterNode — use body-scan for this param
+                    fc->param_types[i] = LMD_TYPE_ANY;
+                }
+            }
+            log_debug("js-mir P3.4: annotation-based param types for %s: [%s%s%s%s]",
+                fn->name ? fn->name->chars : "(anon)",
+                pc > 0 ? (fc->param_types[0] == LMD_TYPE_INT ? "INT" : fc->param_types[0] == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
+                pc > 1 ? (fc->param_types[1] == LMD_TYPE_INT ? ",INT" : fc->param_types[1] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 2 ? (fc->param_types[2] == LMD_TYPE_INT ? ",INT" : fc->param_types[2] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 3 ? ",..." : "");
+        }
+    }
+
+    if (use_annotations) return;  // annotations took priority
+
     // Build parameter name array
     char param_names[16][128];
     JsAstNode* p = fn->params;
@@ -3485,6 +3714,19 @@ static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
 static void jm_infer_return_type(JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     fc->return_type = LMD_TYPE_ANY;
+
+    // Phase 3.4: check for explicit TS return type annotation
+    if (fn->ts_return_type) {
+        TsTypeAnnotationNode* ann = fn->ts_return_type;
+        if (ann->type_expr && ann->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
+            fc->return_type = pt->predefined_id;
+            log_debug("js-mir P3.4: annotation-based return type for %s: %s",
+                fn->name ? fn->name->chars : "(anon)",
+                fc->return_type == LMD_TYPE_INT ? "INT" : fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+            return;
+        }
+    }
 
     char self_name[128] = {0};
     if (fn->name && fn->name->chars) {
@@ -6122,8 +6364,17 @@ static MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* cal
     JsAstNode* param_node = fn->params;
     JsAstNode* arg_node = call->arguments;
     for (int i = 0; i < fc->param_count && param_node; i++) {
+        // resolve param name: plain identifier or TsParameterNode
+        JsAstNode* pid_node = NULL;
         if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
+            pid_node = param_node;
+        } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+            TsParameterNode* tsp = (TsParameterNode*)param_node;
+            if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER)
+                pid_node = tsp->pattern;
+        }
+        if (pid_node) {
+            JsIdentifierNode* pid = (JsIdentifierNode*)pid_node;
             char pname[140];
             snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
             TypeId ptype = fc->param_types[i];
@@ -7640,6 +7891,31 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, url_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, opts_arg));
             }
+            // type(val) — runtime type introspection (TS-aware)
+            if (nl == 4 && strncmp(n, "type", 4) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "ts_type_info", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
+
+            // Native SHA: calculateSHA256/384/512(data, offset, length)
+            if (nl == 15 && strncmp(n, "calculateSHA", 12) == 0 && arg_count == 3) {
+                const char* suffix = n + 12;
+                const char* native_fn = NULL;
+                if (suffix[0] == '2' && suffix[1] == '5' && suffix[2] == '6') native_fn = "js_native_sha256";
+                else if (suffix[0] == '3' && suffix[1] == '8' && suffix[2] == '4') native_fn = "js_native_sha384";
+                else if (suffix[0] == '5' && suffix[1] == '1' && suffix[2] == '2') native_fn = "js_native_sha512";
+                if (native_fn) {
+                    log_debug("js-mir: native SHA override: %.*s", nl, n);
+                    MIR_reg_t a0 = jm_transpile_box_item(mt, call->arguments);
+                    MIR_reg_t a1 = jm_transpile_box_item(mt, call->arguments->next);
+                    MIR_reg_t a2 = jm_transpile_box_item(mt, call->arguments->next->next);
+                    return jm_call_3(mt, native_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a1),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a2));
+                }
+            }
         }
 
         NameEntry* entry = js_scope_lookup(mt->tp, id->name);
@@ -8642,6 +8918,44 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native, ta_var->typed_array_type);
         }
 
+        // P9b: this.prop[idx] where prop is a known typed array from class fields
+        if (mt->current_class && mem->object &&
+            mem->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* inner = (JsMemberNode*)mem->object;
+            if (!inner->computed && inner->object &&
+                inner->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                inner->property && inner->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)inner->object;
+                JsIdentifierNode* prop_id = (JsIdentifierNode*)inner->property;
+                if (obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
+                    int ta_type = jm_class_field_ta_type(mt->current_class,
+                        prop_id->name->chars, (int)prop_id->name->len);
+                    if (ta_type >= 0) {
+                        // load this.prop, then inline typed array get
+                        MIR_reg_t this_reg = jm_transpile_box_item(mt, inner->object);
+                        MIR_reg_t prop_key = jm_box_string_literal(mt, prop_id->name->chars, prop_id->name->len);
+                        MIR_reg_t ta_reg = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key));
+                        MIR_reg_t idx_native2;
+                        TypeId idx_type2 = jm_get_effective_type(mt, mem->property);
+                        if (idx_type2 == LMD_TYPE_INT) {
+                            idx_native2 = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_INT);
+                        } else if (idx_type2 == LMD_TYPE_FLOAT) {
+                            MIR_reg_t idx_f = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_FLOAT);
+                            idx_native2 = jm_emit_double_to_int(mt, idx_f);
+                        } else {
+                            MIR_reg_t idx_b = jm_transpile_box_item(mt, mem->property);
+                            idx_native2 = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
+                        }
+                        log_debug("P9b: inline this.%.*s[idx] as typed array type %d",
+                                  (int)prop_id->name->len, prop_id->name->chars, ta_type);
+                        return jm_transpile_typed_array_get(mt, ta_reg, idx_native2, ta_type);
+                    }
+                }
+            }
+        }
+
         // A4/A2: Regular array fast path — when index is known INT, use fast access
         // bypassing js_get_number() conversion overhead
         // Skip when optional chaining (?.) — need null/undefined guard first
@@ -9010,8 +9324,10 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env.
         // Don't share in loop bodies — let closures need per-iteration value copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0
-                              && mt->loop_depth == 0);
+                              && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // The scope env is always up-to-date: parent assignments trigger
@@ -9039,9 +9355,17 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
             JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
             MIR_reg_t val;
             if (var) {
-                val = var->reg;
-                if (jm_is_native_type(var->type_id))
-                    val = jm_box_native(mt, var->reg, var->type_id);
+                if (var->from_env) {
+                    // v16: Re-read LIVE from parent env for transitively captured vars
+                    val = jm_new_reg(mt, "cenv_live", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, val),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                } else {
+                    val = var->reg;
+                    if (jm_is_native_type(var->type_id))
+                        val = jm_box_native(mt, var->reg, var->type_id);
+                }
             } else if (strcmp(fc->captures[ci].name, "_js_this") == 0) {
                 val = jm_call_0(mt, "js_get_this", MIR_T_I64);
             } else {
@@ -9075,8 +9399,10 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env
-        // Don't use shared scope env inside loops — let variables need per-iteration copies
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && mt->loop_depth == 0);
+        // Don't use shared scope env inside loops — let variables need per-iteration copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // Do NOT overwrite scope env with parent's register values — they
@@ -9115,9 +9441,18 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
             if (var) {
                 // env[slot] = current value of captured variable
                 // Box native-typed variables before storing in env (closures read boxed Items)
-                MIR_reg_t value_to_store = var->reg;
-                if (jm_is_native_type(var->type_id)) {
-                    value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                MIR_reg_t value_to_store;
+                if (var->from_env) {
+                    // v16: Re-read LIVE from parent env for transitively captured vars
+                    value_to_store = jm_new_reg(mt, "fenv_live", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, value_to_store),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                } else {
+                    value_to_store = var->reg;
+                    if (jm_is_native_type(var->type_id)) {
+                        value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                    }
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
@@ -10046,6 +10381,19 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 } else if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);
+
+                    // Phase 3.4: override with TS type annotation if present
+                    if (d->ts_type && d->ts_type->type_expr &&
+                        d->ts_type->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)d->ts_type->type_expr;
+                        TypeId ann_type = pt->predefined_id;
+                        if (ann_type == LMD_TYPE_FLOAT || ann_type == LMD_TYPE_INT ||
+                            ann_type == LMD_TYPE_STRING || ann_type == LMD_TYPE_BOOL) {
+                            log_debug("var-decl P3.4: '%s' annotation type overrides inference", vname);
+                            init_type = ann_type;
+                        }
+                    }
+
                     TypeId orig_type = init_type;
 
                     // v15: In generators, force boxed types for consistent env save/load
@@ -10087,6 +10435,21 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
+
+                        // Phase 3.4: if annotated with a non-predefined TS type (e.g. interface/type alias),
+                        // resolve it and store TypeMap in full_type for member access inference.
+                        if (d->ts_type && d->ts_type->type_expr && mt->tp &&
+                            d->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, d->ts_type->type_expr);
+                            if (resolved && resolved->type_id == LMD_TYPE_MAP) {
+                                JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                if (var_entry) {
+                                    var_entry->full_type = resolved;
+                                    log_debug("P3.4: var '%s' full_type=TypeMap (%d fields)", vname,
+                                        ((TypeMap*)resolved)->length);
+                                }
+                            }
+                        }
 
                         // P9: Track typed array type for direct memory access
                         if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION) {
@@ -10160,6 +10523,29 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                         if (var_entry) {
                                             var_entry->is_js_array = true;
                                             log_debug("A2: var '%s' is regular JS array (Array.from)", vname);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // propagate typed array type from this.prop in class methods
+                        if (d->init->node_type == JS_AST_NODE_MEMBER_EXPRESSION && mt->current_class) {
+                            JsMemberNode* im = (JsMemberNode*)d->init;
+                            if (!im->computed && im->object && im->property &&
+                                im->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                                im->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* obj_id = (JsIdentifierNode*)im->object;
+                                if (obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
+                                    JsIdentifierNode* prop_id = (JsIdentifierNode*)im->property;
+                                    int ta_type = jm_class_field_ta_type(mt->current_class,
+                                        prop_id->name->chars, (int)prop_id->name->len);
+                                    if (ta_type >= 0) {
+                                        JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                        if (var_entry) {
+                                            var_entry->typed_array_type = ta_type;
+                                            log_debug("P9b: var '%s' is typed array type %d (from this.%.*s)",
+                                                      vname, ta_type, (int)prop_id->name->len, prop_id->name->chars);
                                         }
                                     }
                                 }
@@ -10444,7 +10830,82 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
     }
 }
 
+// Phase 3.5: Detect `typeof x === "number"/"string"/"boolean"` pattern.
+// Returns the identifier node for x, or NULL if not matched.
+// Sets *narrowed_type to the narrowed TypeId (FLOAT for "number", etc.)
+// Sets *negate to true if the comparison is !== (narrowing applies to the else branch)
+static JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
+                                                    TypeId* narrowed_type, bool* negate) {
+    if (!test || test->node_type != JS_AST_NODE_BINARY_EXPRESSION) return NULL;
+    JsBinaryNode* bin = (JsBinaryNode*)test;
+    bool is_eq  = (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_EQ);
+    bool is_neq = (bin->op == JS_OP_STRICT_NE || bin->op == JS_OP_NE);
+    if (!is_eq && !is_neq) return NULL;
+    *negate = is_neq;
+
+    // Find which side is `typeof id` and which is a string literal
+    JsAstNode* typeof_side = NULL;
+    JsAstNode* literal_side = NULL;
+    auto is_typeof_unary = [](JsAstNode* n) -> bool {
+        if (!n || n->node_type != JS_AST_NODE_UNARY_EXPRESSION) return false;
+        return ((JsUnaryNode*)n)->op == JS_OP_TYPEOF;
+    };
+    if (is_typeof_unary(bin->left))  { typeof_side = bin->left;  literal_side = bin->right; }
+    else if (is_typeof_unary(bin->right)) { typeof_side = bin->right; literal_side = bin->left; }
+    if (!typeof_side || !literal_side) return NULL;
+
+    if (literal_side->node_type != JS_AST_NODE_LITERAL) return NULL;
+    JsLiteralNode* lit = (JsLiteralNode*)literal_side;
+    if (lit->literal_type != JS_LITERAL_STRING || !lit->value.string_value) return NULL;
+
+    const char* s = lit->value.string_value->chars;
+    size_t slen   = lit->value.string_value->len;
+    if      (slen == 6 && strncmp(s, "number",  6) == 0) *narrowed_type = LMD_TYPE_FLOAT;
+    else if (slen == 6 && strncmp(s, "string",  6) == 0) *narrowed_type = LMD_TYPE_STRING;
+    else if (slen == 7 && strncmp(s, "boolean", 7) == 0) *narrowed_type = LMD_TYPE_BOOL;
+    else return NULL;
+
+    JsUnaryNode* un = (JsUnaryNode*)typeof_side;
+    if (!un->operand || un->operand->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    return (JsIdentifierNode*)un->operand;
+}
+
+// Push a narrowed scope entry for a variable after a typeof guard.
+// Returns true if narrowing was applied (caller must call jm_pop_scope after the block).
+// Only narrows ANY→FLOAT for "number" guards (creates a new unboxed double register).
+static bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId narrowed_type) {
+    if (!id) return false;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    JsMirVarEntry* orig = jm_find_var(mt, vname);
+    if (!orig || orig->type_id != LMD_TYPE_ANY) return false;
+
+    if (narrowed_type == LMD_TYPE_FLOAT) {
+        // Unbox the boxed item to a native double
+        MIR_reg_t narrow_reg = jm_new_reg(mt, "typeof_f", MIR_T_D);
+        MIR_reg_t unboxed = jm_emit_unbox_float(mt, orig->reg);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, narrow_reg),
+            MIR_new_reg_op(mt->ctx, unboxed)));
+        jm_push_scope(mt);
+        jm_set_var(mt, vname, narrow_reg, MIR_T_D, LMD_TYPE_FLOAT);
+        log_debug("js-mir P3.5 typeof: narrowed %s to FLOAT in branch", vname);
+        return true;
+    }
+    // STRING / BOOL: no native form; just update type_id while keeping the original register
+    jm_push_scope(mt);
+    jm_set_var(mt, vname, orig->reg, orig->mir_type, narrowed_type);
+    log_debug("js-mir P3.5 typeof: narrowed %s type_id to %d in branch", vname, narrowed_type);
+    return true;
+}
+
 static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
+    // Phase 3.5: detect typeof narrowing pattern before emitting the test
+    TypeId typeof_narrowed_type = LMD_TYPE_ANY;
+    bool typeof_negate = false;
+    JsIdentifierNode* typeof_id = jm_detect_typeof_pattern(if_node->test,
+        &typeof_narrowed_type, &typeof_negate);
+
     // Determine if we can use native comparison for the test.
     // BOTH operands must be typed numeric so the comparison returns a native 0/1
     // (not a boxed Lambda boolean Item). MIR_BF checks for raw 0, so a boxed
@@ -10483,6 +10944,11 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     // Consequent
     if (if_node->consequent) {
+        // Phase 3.5: narrow variable type inside the consequent when typeof guard matched
+        bool consequent_narrowed = false;
+        if (typeof_id && !typeof_negate)
+            consequent_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
+
         if (if_node->consequent->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             JsBlockNode* blk = (JsBlockNode*)if_node->consequent;
             JsAstNode* s = blk->statements;
@@ -10490,12 +10956,19 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         } else {
             jm_transpile_statement(mt, if_node->consequent);
         }
+
+        if (consequent_narrowed) jm_pop_scope(mt);
     }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     // Alternate
     jm_emit_label(mt, l_else);
     if (if_node->alternate) {
+        // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
+        bool alternate_narrowed = false;
+        if (typeof_id && typeof_negate)
+            alternate_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
+
         if (if_node->alternate->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             JsBlockNode* blk = (JsBlockNode*)if_node->alternate;
             JsAstNode* s = blk->statements;
@@ -10503,6 +10976,8 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         } else {
             jm_transpile_statement(mt, if_node->alternate);
         }
+
+        if (alternate_narrowed) jm_pop_scope(mt);
     }
     jm_emit_label(mt, l_end);
 }
@@ -11119,11 +11594,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // new Error(message) — built-in Error constructor
+    // new Error(message) — built-in Error constructor with compile-time stack trace
     if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) {
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_1(mt, "js_new_error", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, "Error");
+        return jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // v11: new TypeError/RangeError/SyntaxError/ReferenceError(message)
@@ -11133,9 +11610,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         (ctor_len == 14 && strncmp(ctor_name, "ReferenceError", 14) == 0)) {
         MIR_reg_t name_arg = jm_box_string_literal(mt, ctor_name, ctor_len);
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_2(mt, "js_new_error_with_name", MIR_T_I64,
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, ctor_name);
+        return jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // new Date() — returns a Date object with getTime() method
@@ -11365,6 +11844,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
+                            // v12: Link proto marker to base constructor's .prototype
+                            // so inherited properties (e.g. Error.stack) are accessible
+                            jm_call_void_2(mt, "js_link_base_prototype",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
                         }
                         jm_call_void_2(mt, "js_set_prototype",
@@ -13935,6 +14419,24 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
                 jm_set_var(mt, vname, preg);
 
+                // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
+                // access on this param can resolve field types via jm_get_effective_type.
+                if (param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
+                    TsParameterNode* tsp = (TsParameterNode*)param_node;
+                    if (tsp->ts_type && tsp->ts_type->type_expr &&
+                        tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, tsp->ts_type->type_expr);
+                        if (resolved && resolved->type_id == LMD_TYPE_MAP) {
+                            JsMirVarEntry* pvar = jm_find_var(mt, vname);
+                            if (pvar) {
+                                pvar->full_type = resolved;
+                                log_debug("P3.4: param '%s' full_type=TypeMap (%d fields)", vname,
+                                    ((TypeMap*)resolved)->length);
+                            }
+                        }
+                    }
+                }
+
                 // For default params (ASSIGNMENT_PATTERN): if the arg is undefined, eval and assign default
                 if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
                     JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
@@ -14084,6 +14586,26 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
         if (fc->has_scope_env && fc->scope_env_count > 0) {
+            if (fc->reuse_parent_env && has_captures && env_reg != 0) {
+                // v16: Reuse parent env as scope_env — no allocation needed.
+                // All scope_env vars are transitive captures, so children can
+                // read/write directly from the grandparent's scope_env.
+                // Child captures were already remapped in Phase 1.7b.
+                mt->scope_env_reg = env_reg;
+                mt->scope_env_slot_count = fc->reuse_env_slot_count;
+
+                // Mark vars for scope_env write-back using parent env slots
+                for (int s = 0; s < fc->scope_env_count; s++) {
+                    const char* sname = fc->scope_env_names[s];
+                    JsMirVarEntry* svar = jm_find_var(mt, sname);
+                    if (svar) {
+                        svar->in_scope_env = true;
+                        svar->scope_env_slot = svar->env_slot;
+                        svar->scope_env_reg = mt->scope_env_reg;
+                    }
+                }
+                log_debug("js-mir: reusing parent env as scope env for '%s' (slot_count=%d)", fc->name, mt->scope_env_slot_count);
+            } else {
             mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
             mt->scope_env_slot_count = fc->scope_env_count;
@@ -14094,9 +14616,19 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsMirVarEntry* svar = jm_find_var(mt, sname);
                 MIR_reg_t val;
                 if (svar) {
-                    val = svar->reg;
-                    if (jm_is_native_type(svar->type_id))
-                        val = jm_box_native(mt, svar->reg, svar->type_id);
+                    if (svar->from_env) {
+                        // v16: Re-read LIVE from parent's env instead of stale register.
+                        // This ensures mutations by sibling closures (e.g. beforeAll)
+                        // are visible to grandchild closures (e.g. it() in nested describe).
+                        val = jm_new_reg(mt, "senv_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, svar->env_slot * (int)sizeof(uint64_t), svar->env_reg, 0, 1)));
+                    } else {
+                        val = svar->reg;
+                        if (jm_is_native_type(svar->type_id))
+                            val = jm_box_native(mt, svar->reg, svar->type_id);
+                    }
                     // Mark var for scope_env write-back on future assignments
                     svar->in_scope_env = true;
                     svar->scope_env_slot = s;
@@ -14113,6 +14645,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_reg_op(mt->ctx, val)));
             }
             log_debug("js-mir: allocated scope env for '%s' with %d slots", fc->name, fc->scope_env_count);
+            }
         } else {
             mt->scope_env_reg = 0;
             mt->scope_env_slot_count = 0;
@@ -14425,6 +14958,129 @@ static void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int nam
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+}
+
+// ============================================================================
+// Phase 3.5: Call-site type propagation
+// Scan function bodies for calls with literal arguments that contradict the
+// inferred param types. Widen those params to ANY and revoke native eligibility.
+// ============================================================================
+
+static void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        // Recurse into arguments first (depth-first)
+        JsAstNode* a = call->arguments;
+        while (a) { jm_callsite_scan_node(mt, a); a = a->next; }
+        // Check callee arguments against collected function's param types
+        JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
+        if (callee_fc && callee_fc->has_native_version) {
+            JsAstNode* arg = call->arguments;
+            for (int i = 0; i < callee_fc->param_count && i < 16; i++) {
+                if (!arg) break;
+                if (arg->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* lit = (JsLiteralNode*)arg;
+                    TypeId arg_type = LMD_TYPE_ANY;
+                    if (lit->literal_type == JS_LITERAL_NUMBER)
+                        arg_type = lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                    else if (lit->literal_type == JS_LITERAL_STRING)
+                        arg_type = LMD_TYPE_STRING;
+                    else if (lit->literal_type == JS_LITERAL_BOOLEAN)
+                        arg_type = LMD_TYPE_BOOL;
+                    TypeId expected = callee_fc->param_types[i];
+                    bool ok = true;
+                    if (expected == LMD_TYPE_INT)
+                        ok = (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_BOOL || arg_type == LMD_TYPE_ANY);
+                    else if (expected == LMD_TYPE_FLOAT)
+                        ok = (arg_type == LMD_TYPE_FLOAT || arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_ANY);
+                    if (!ok) {
+                        log_debug("js-mir P3.5 callsite: widening %s param %d from type %d to ANY (literal mismatch)",
+                            callee_fc->name, i, expected);
+                        callee_fc->param_types[i] = LMD_TYPE_ANY;
+                        callee_fc->has_native_version = false;
+                    }
+                }
+                arg = arg->next;
+            }
+        }
+        // Recurse into callee (for method calls)
+        jm_callsite_scan_node(mt, call->callee);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_callsite_scan_node(mt, bin->left);
+        jm_callsite_scan_node(mt, bin->right);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_callsite_scan_node(mt, un->operand);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        jm_callsite_scan_node(mt, asgn->right);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        jm_callsite_scan_node(mt, mem->object);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_callsite_scan_node(mt, cond->test);
+        jm_callsite_scan_node(mt, cond->consequent);
+        jm_callsite_scan_node(mt, cond->alternate);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_callsite_scan_node(mt, ret->argument);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
+        JsAstNode* d = decl->declarations;
+        while (d) {
+            JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
+            jm_callsite_scan_node(mt, vd->init);
+            d = d->next;
+        }
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_callsite_scan_node(mt, es->expression);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_callsite_scan_node(mt, ifn->test);
+        jm_callsite_scan_node(mt, ifn->consequent);
+        jm_callsite_scan_node(mt, ifn->alternate);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void jm_callsite_propagate(JsMirTranspiler* mt) {
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (fc->node && fc->node->body)
+            jm_callsite_scan_node(mt, (JsAstNode*)fc->node->body);
+    }
 }
 
 void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
@@ -15346,6 +16002,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 parent_fc->has_scope_env = true;
                 parent_fc->scope_env_count = slot_count;
                 log_debug("js-mir: scope env for '%s': %d vars", parent_fc->name, slot_count);
+                for (int ds = 0; ds < slot_count; ds++) {
+                    log_debug("js-mir:   scope_env[%d] = '%s'", ds, parent_fc->scope_env_names[ds]);
+                }
 
                 // Remap child capture indices to scope env slots
                 for (int ci = 0; ci < mt->func_count; ci++) {
@@ -15366,6 +16025,84 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
 
             hashmap_free(scope_vars);
+        }
+    }
+
+    // Phase 1.7b: Detect parent env reuse for transitively captured scope envs.
+    // If ALL scope_env variables of a function are also in that function's own
+    // captures (i.e., they are transitive captures from the grandparent), the
+    // function can skip allocating a new scope_env and reuse the parent env.
+    // Children's capture slots are remapped to the grandparent env slots.
+    //
+    // IMPORTANT: Iterate in REVERSE order (outermost functions first).
+    // func_entries has inner closures at lower indices than their parents.
+    // Phase 1.7b for a function reads its captures' scope_env_slots, which
+    // are set by Phase 1.7b of its PARENT. Processing parents first ensures
+    // the captures are already remapped to grandparent slots before children
+    // try to use them as "grandparent" slots for their own grandchildren.
+    for (int fi = mt->func_count - 1; fi >= 0; fi--) {
+        JsFuncCollected* parent_fc = &mt->func_entries[fi];
+        parent_fc->reuse_parent_env = false;
+        parent_fc->reuse_env_slot_count = 0;
+        if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
+        if (parent_fc->capture_count == 0) continue;  // not a closure, can't reuse
+
+        // Check if ALL scope_env vars are also in this function's own captures
+        bool all_transitive = true;
+        for (int s = 0; s < parent_fc->scope_env_count; s++) {
+            bool found_in_captures = false;
+            for (int c = 0; c < parent_fc->capture_count; c++) {
+                if (strcmp(parent_fc->scope_env_names[s], parent_fc->captures[c].name) == 0) {
+                    found_in_captures = true;
+                    break;
+                }
+            }
+            if (!found_in_captures) {
+                all_transitive = false;
+                break;
+            }
+        }
+
+        if (!all_transitive) continue;
+
+        // All scope_env vars are transitive captures. Remap children's captures
+        // to use the grandparent env slots instead of this function's local scope_env slots.
+        parent_fc->reuse_parent_env = true;
+        int max_slot = 0;
+        for (int s = 0; s < parent_fc->scope_env_count; s++) {
+            const char* sname = parent_fc->scope_env_names[s];
+            // Find this scope_env var in parent_fc's own captures to get grandparent slot
+            for (int c = 0; c < parent_fc->capture_count; c++) {
+                if (strcmp(sname, parent_fc->captures[c].name) == 0) {
+                    int grandparent_slot = parent_fc->captures[c].scope_env_slot;
+                    if (grandparent_slot < 0) {
+                        // Can't remap — grandparent doesn't use scope_env for this var
+                        parent_fc->reuse_parent_env = false;
+                        break;
+                    }
+                    if (grandparent_slot + 1 > max_slot) max_slot = grandparent_slot + 1;
+
+                    // Remap all children's captures of this var
+                    for (int ci = 0; ci < mt->func_count; ci++) {
+                        JsFuncCollected* child = &mt->func_entries[ci];
+                        if (child->parent_index != fi) continue;
+                        for (int k = 0; k < child->capture_count; k++) {
+                            if (strcmp(child->captures[k].name, sname) == 0) {
+                                child->captures[k].scope_env_slot = grandparent_slot;
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            if (!parent_fc->reuse_parent_env) break;  // aborted
+        }
+
+        if (parent_fc->reuse_parent_env) {
+            parent_fc->reuse_env_slot_count = max_slot;
+            log_debug("js-mir: Phase 1.7b: '%s' will reuse parent env (all %d scope_env vars are transitive captures, slot_count=%d)",
+                parent_fc->name, parent_fc->scope_env_count, max_slot);
         }
     }
 
@@ -15408,6 +16145,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // This ensures func_item is set for all functions before any body is compiled,
     // so forward references (e.g., a class method calling a free function declared
     // later in the source) resolve correctly via MCONST_FUNC and direct call paths.
+
+    // Phase 1.76: Call-site propagation — scan all function bodies for call
+    // expressions that pass literal arguments contradicting inferred param types.
+    // Widen mismatched params to ANY and revoke native eligibility.
+    jm_callsite_propagate(mt);
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (!fc->func_item) {
@@ -16111,7 +16853,7 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
 
     // create JS parser for discovery
     TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_javascript());
+    ts_parser_set_language(parser, tree_sitter_typescript());
 
     // initialize graph with main script as sentinel (index 0, not compiled here)
     int capacity = 16;
@@ -16780,6 +17522,14 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+
+    // Run early error detection (static semantic validation)
+    int early_errors = js_check_early_errors(tp, js_ast);
+    if (early_errors > 0) {
+        log_error("js-mir: %d early error(s) detected", early_errors);
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }

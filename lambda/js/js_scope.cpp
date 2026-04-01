@@ -3,11 +3,18 @@
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
-#include "../tree-sitter-javascript/bindings/c/tree-sitter-javascript.h"
+#include "../../lib/hashmap.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+
+// TypeScript parser (unified: handles both JS and TS)
+// NOTE: tree_sitter_typescript is currently a stub; use JavaScript parser for now
+extern "C" {
+    const TSLanguage* tree_sitter_typescript(void);
+    const TSLanguage* tree_sitter_javascript(void);
+}
 
 // Scope management functions
 
@@ -177,7 +184,12 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
 
     // Initialize Tree-sitter parser
     tp->parser = ts_parser_new();
-    ts_parser_set_language(tp->parser, tree_sitter_javascript());
+    const TSLanguage* lang = tree_sitter_typescript();
+    if (!lang) {
+        // TypeScript parser not yet generated; fall back to JavaScript
+        lang = tree_sitter_javascript();
+    }
+    ts_parser_set_language(tp->parser, lang);
 
     // Initialize scopes
     tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);
@@ -188,6 +200,7 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->label_counter = 0;
     tp->in_expression = false;
     tp->has_errors = false;
+    tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
     tp->runtime = runtime;
 
     return tp;
@@ -219,6 +232,9 @@ void js_transpiler_destroy(JsTranspiler* tp) {
     }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);
+    }
+    if (tp->type_registry) {
+        hashmap_free(tp->type_registry);
     }
 
     free(tp);

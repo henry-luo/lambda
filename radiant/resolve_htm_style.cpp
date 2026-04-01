@@ -202,7 +202,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_UL:  case HTM_TAG_OL:
+    case HTM_TAG_UL:  case HTM_TAG_OL:  case HTM_TAG_MENU:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->list_style_type = elmt_name == HTM_TAG_UL ? CSS_VALUE_DISC : CSS_VALUE_DECIMAL;
         if (!block->bound) {
@@ -357,15 +357,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_OBJECT:
     case HTM_TAG_EMBED:
-        // replaced elements with default 300x150 per HTML spec
+        // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
         lycon->block.given_width = 300;
         lycon->block.given_height = 150;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->given_width = 300;
         block->blk->given_height = 150;
+        break;
+    case HTM_TAG_OBJECT:
+        // HTML §4.8.7: <object> is replaced only when it has a data attribute.
+        // Without data, it renders its fallback content (children) as normal flow.
+        if (elmt->get_attribute("data")) {
+            block->display.inner = RDT_DISPLAY_REPLACED;
+            lycon->block.given_width = 300;
+            lycon->block.given_height = 150;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_width = 300;
+            block->blk->given_height = 150;
+        }
         break;
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -989,11 +1000,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        // Chrome UA: font-size 13.3333px, font-family Arial for form controls
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
+        block->font->font_size = 13.3333f;
+        block->font->family = (char*)"Arial";
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->padding.top = block->bound->padding.bottom = FormDefaults::BUTTON_PADDING_V;
         block->bound->padding.left = block->bound->padding.right = FormDefaults::BUTTON_PADDING_H;
         block->bound->padding.top_specificity = block->bound->padding.bottom_specificity =
             block->bound->padding.left_specificity = block->bound->padding.right_specificity = -1;
+        // Default border: 2px outset (Chrome UA stylesheet) — same as <input type=button/submit>
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+        block->bound->border->width.top = block->bound->border->width.bottom =
+            block->bound->border->width.left = block->bound->border->width.right = FormDefaults::BUTTON_BORDER;
+        block->bound->border->width.top_specificity = block->bound->border->width.bottom_specificity =
+            block->bound->border->width.left_specificity = block->bound->border->width.right_specificity = -1;
+        block->bound->border->top_style = block->bound->border->bottom_style =
+            block->bound->border->left_style = block->bound->border->right_style = CSS_VALUE_OUTSET;
         break;
     }
     case HTM_TAG_INPUT: {
@@ -1054,9 +1077,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // Default margin: Chrome UA stylesheet
             // checkbox: 3px 3px 3px 4px, radio: 3px 3px 0px 5px
             if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-            block->bound->margin.top = 3; block->bound->margin.right = 3;
-            block->bound->margin.bottom = (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : 3;
-            block->bound->margin.left = (block->form->control_type == FORM_CONTROL_RADIO) ? 5 : 4;
+            block->bound->margin.top = 3; block->bound->margin.right = FormDefaults::CHECK_MARGIN;
+            block->bound->margin.bottom = (block->form->control_type == FORM_CONTROL_RADIO) ? 0 : FormDefaults::CHECK_MARGIN;
+            block->bound->margin.left = (block->form->control_type == FORM_CONTROL_RADIO) ? FormDefaults::RADIO_MARGIN_LEFT : FormDefaults::CHECKBOX_MARGIN_LEFT;
             block->bound->margin.top_specificity = block->bound->margin.right_specificity =
                 block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
             break;
@@ -1120,17 +1143,19 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         default:  // FORM_CONTROL_TEXT
             block->display.outer = CSS_VALUE_INLINE_BLOCK;
-            // File inputs are wider than text inputs (Chrome: ~253px border-box)
+            // File inputs: Chrome renders as 253×21 border-box with no external border/padding
+            // (the internal "Choose File" button + label text are shadow DOM)
             if (block->form->input_type && strcmp(block->form->input_type, "file") == 0) {
                 block->form->intrinsic_width = 253.0f;
                 block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
                 if (!block->blk) { block->blk = alloc_block_prop(lycon); }
                 block->blk->given_width = 253.0f;
                 block->blk->given_height = FormDefaults::TEXT_HEIGHT;
-            } else {
-                block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
-                block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
+                block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+                break;
             }
+            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
+            block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT;
             // Don't set given_width/given_height — layout_form_control computes
             // intrinsic size dynamically from size attribute and font metrics
             // Default border for text inputs (CSS logical pixels)
@@ -1295,14 +1320,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // label is inline by default, no special styling
         break;
     case HTM_TAG_OPTION:
-    case HTM_TAG_OPTGROUP:
-        // Keep option/optgroup in layout tree as 0×0 blocks (Chrome reports 0x0 dimensions)
-        block->display.outer = CSS_VALUE_BLOCK;
-        block->display.inner = CSS_VALUE_FLOW;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->given_width = 0;
-        block->blk->given_height = 0;
+    case HTM_TAG_OPTGROUP: {
+        // HTML spec: option/optgroup inside select/datalist are 0×0 (UA rendered).
+        // Outside select/datalist, they render as normal block flow content.
+        uintptr_t parent_tag = elmt->parent ? elmt->parent->tag() : 0;
+        if (parent_tag == HTM_TAG_SELECT || parent_tag == HTM_TAG_DATALIST ||
+            parent_tag == HTM_TAG_OPTGROUP) {
+            block->display.outer = CSS_VALUE_BLOCK;
+            block->display.inner = CSS_VALUE_FLOW;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_width = 0;
+            block->blk->given_height = 0;
+        }
         break;
+    }
     case HTM_TAG_DATALIST:
         // Datalist should be completely hidden (display:none)
         block->display.outer = CSS_VALUE_NONE;

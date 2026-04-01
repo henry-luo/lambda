@@ -254,6 +254,7 @@ Item js_map_method(Item obj, Item method_name, Item* args, int argc);
 Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
+void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
 Item js_reflect_construct(Item target, Item args_array);
@@ -322,15 +323,17 @@ Item js_clear_exception(void);
 
 /**
  * Create a new Error object with a message.
- * Returns a Map with {name: "Error", message: msg}.
+ * Returns a Map with {name: "Error", message: msg, stack: trace}.
  */
 Item js_new_error(Item message);
+Item js_new_error_with_stack(Item message, Item stack_str);
 
 /**
  * v11: Create a typed Error object (TypeError, RangeError, etc.).
- * Returns a Map with {name: error_name, message: msg}.
+ * Returns a Map with {name: error_name, message: msg, stack: trace}.
  */
 Item js_new_error_with_name(Item error_name, Item message);
+Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
 
 // =============================================================================
 // Runtime Context
@@ -530,6 +533,11 @@ Item js_module_get(Item specifier);
  * Create a module namespace object from an export map.
  */
 Item js_module_namespace_create(Item exports_map);
+
+// Native SHA hash functions (js_crypto.cpp)
+Item js_native_sha256(Item data, Item offset, Item length);
+Item js_native_sha384(Item data, Item offset, Item length);
+Item js_native_sha512(Item data, Item offset, Item length);
 
 #ifdef __cplusplus
 }

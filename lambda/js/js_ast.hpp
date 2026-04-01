@@ -8,6 +8,9 @@ extern "C" {
 #include "../ast.hpp"
 #include "../lambda-data.hpp"
 
+// forward declaration so JsFunctionNode and JsVariableDeclaratorNode can reference it
+struct TsTypeAnnotationNode;
+
 // JavaScript-specific Tree-sitter symbols
 #define JS_SYM_PROGRAM sym_program
 #define JS_SYM_FUNCTION_DECLARATION sym_function_declaration
@@ -281,6 +284,7 @@ typedef struct JsFunctionNode {
     bool is_arrow;                  // Arrow function vs regular function
     bool is_async;                  // Async function
     bool is_generator;              // Generator function
+    struct TsTypeAnnotationNode* ts_return_type; // TS return type annotation (NULL in JS mode)
 } JsFunctionNode;
 
 // JavaScript call expression node
@@ -334,6 +338,7 @@ typedef struct JsVariableDeclaratorNode {
     JsAstNode base;
     JsAstNode* id;                  // Variable identifier
     JsAstNode* init;                // Initializer expression (optional)
+    struct TsTypeAnnotationNode* ts_type; // TS type annotation (NULL in JS mode)
 } JsVariableDeclaratorNode;
 
 // JavaScript if statement node

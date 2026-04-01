@@ -9,4 +9,3 @@ is(NaN, NaN): true
 is(null, null): true
 is(null, undefined): false
 is('a', 'a'): true
-null

@@ -1260,6 +1260,15 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
     // Get display properties for the element
     DisplayValue display = resolve_display_value(node);
 
+    // CSS Flexbox §4: display:none elements do not generate flex items and must
+    // not have a View created. Without this check, a ViewBlock is allocated and
+    // linked into the view tree, causing display:none children (e.g. hidden
+    // dropdown menus) to be rendered.
+    if (display.outer == CSS_VALUE_NONE) {
+        log_debug("init_flex_item_view: skipping display:none element %s", node->node_name());
+        return;
+    }
+
     // Create ViewBlock directly (similar to layout_block but without child processing)
     ViewBlock* block = (ViewBlock*)set_view(lycon,
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :

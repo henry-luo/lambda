@@ -139,6 +139,9 @@ static uint16_t be16toh_local(uint16_t v) {
 // Hashmap callbacks
 // ============================================================================
 
+// missing_families: simple string-key set using FontFamily struct (only family_name used)
+// Reuses family_hash/family_compare for case-insensitive matching.
+
 static uint64_t family_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const FontFamily* f = (const FontFamily*)item;
     if (!f || !f->family_name) return 0;
@@ -198,11 +201,13 @@ FontDatabase* font_database_create_internal(Pool* pool, Arena* arena) {
     db->pool = pool;
     db->arena = arena;
     db->scanned = false;
+    db->organized_up_to = 0;
 
     // create hashmaps
     db->families        = hashmap_new(sizeof(FontFamily), 64, 0, 0, family_hash, family_compare, NULL, NULL);
     db->postscript_names = hashmap_new(sizeof(FontEntry), 64, 0, 0, ps_name_hash, ps_name_compare, NULL, NULL);
     db->file_paths      = hashmap_new(sizeof(FontEntry), 256, 0, 0, file_path_hash, file_path_compare, NULL, NULL);
+    db->missing_families = hashmap_new(sizeof(FontFamily), 32, 0, 0, family_hash, family_compare, NULL, NULL);
 
     // create arraylists
     db->all_fonts        = arraylist_new(0);
@@ -219,6 +224,7 @@ void font_database_destroy_internal(FontDatabase* db) {
     if (db->families)         hashmap_free(db->families);
     if (db->postscript_names) hashmap_free(db->postscript_names);
     if (db->file_paths)       hashmap_free(db->file_paths);
+    if (db->missing_families) hashmap_free(db->missing_families);
     if (db->all_fonts)        arraylist_free(db->all_fonts);
     if (db->font_files)       arraylist_free(db->font_files);
     if (db->scan_directories) arraylist_free(db->scan_directories);
@@ -845,7 +851,9 @@ static FontEntry* lazy_load_font(FontDatabase* db, const char* file_path) {
 // ============================================================================
 
 static void organize_fonts_into_families(FontDatabase* db) {
-    for (int i = 0; i < db->all_fonts->length; i++) {
+    // incremental: only process entries added since last organize
+    int start = db->organized_up_to;
+    for (int i = start; i < db->all_fonts->length; i++) {
         FontEntry* entry = (FontEntry*)db->all_fonts->data[i];
         if (!entry || !entry->family_name) continue;
 
@@ -860,6 +868,11 @@ static void organize_fonts_into_families(FontDatabase* db) {
             new_fam.is_system_family = true;
             hashmap_set(db->families, &new_fam);
             family = (FontFamily*)hashmap_get(db->families, &search);
+
+            // newly discovered family — remove from missing cache if present
+            if (db->missing_families) {
+                hashmap_delete(db->missing_families, &search);
+            }
         }
 
         if (family && family->fonts) {
@@ -876,6 +889,7 @@ static void organize_fonts_into_families(FontDatabase* db) {
             hashmap_set(db->file_paths, entry);
         }
     }
+    db->organized_up_to = db->all_fonts->length;
 }
 
 // ============================================================================
@@ -987,12 +1001,18 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
         font_database_scan_internal(db);
     }
 
-    // first: check if family already organized
+    // fast path: check if family is known to be missing (no fonts with this name exist)
     FontFamily search_fam = {.family_name = criteria->family_name};
+    if (db->missing_families && hashmap_get(db->missing_families, &search_fam)) {
+        return result; // confirmed absent — skip all work
+    }
+
+    // check if family already organized
     FontFamily* family = (FontFamily*)hashmap_get(db->families, &search_fam);
 
     // if not found, try lazy loading matching placeholders
     if (!family) {
+        bool parsed_any = false;
         for (int i = 0; i < db->all_fonts->length; i++) {
             FontEntry* e = (FontEntry*)db->all_fonts->data[i];
             if (!e || !e->is_placeholder || !e->family_name) continue;
@@ -1003,14 +1023,24 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
                 } else {
                     parse_placeholder_font(e, db->arena);
                 }
+                parsed_any = true;
             }
         }
-        // re-organize
-        organize_fonts_into_families(db);
+        // only re-organize if new fonts were actually parsed
+        if (parsed_any) {
+            organize_fonts_into_families(db);
+        }
         family = (FontFamily*)hashmap_get(db->families, &search_fam);
+
+        if (!family) {
+            // family confirmed absent — cache for future lookups
+            FontFamily missing = {.family_name = criteria->family_name};
+            hashmap_set(db->missing_families, &missing);
+            return result;
+        }
     }
 
-    // score all fonts in the family (or all fonts if no exact family)
+    // score all fonts in the family
     float best_score = -1.0f;
     FontEntry* best_font = NULL;
 
@@ -1036,19 +1066,6 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
         for (int i = 0; family && i < family->fonts->length; i++) {
             FontEntry* e = (FontEntry*)family->fonts->data[i];
             if (!e) continue;
-            float score = calculate_match_score(e, criteria);
-            if (score > best_score) {
-                best_score = score;
-                best_font = e;
-            }
-        }
-    }
-
-    if (!best_font) {
-        // try all fonts
-        for (int i = 0; i < db->all_fonts->length; i++) {
-            FontEntry* e = (FontEntry*)db->all_fonts->data[i];
-            if (!e || e->is_placeholder) continue;
             float score = calculate_match_score(e, criteria);
             if (score > best_score) {
                 best_score = score;

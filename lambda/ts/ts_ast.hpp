@@ -52,6 +52,7 @@ typedef enum TsAstNodeType {
     TS_AST_NODE_NAMESPACE_DECLARATION,   // namespace Foo { ... }
     TS_AST_NODE_DECORATOR,               // @decorator
     TS_AST_NODE_AMBIENT_DECLARATION,     // declare ... (type info kept, no code emitted)
+    TS_AST_NODE_PARAMETER,               // required_parameter / optional_parameter with type annotation
 
     TS_AST_NODE__MAX,
 } TsAstNodeType;
@@ -233,10 +234,8 @@ typedef struct TsNonNullNode {
 } TsNonNullNode;
 
 // Extended JS nodes with optional TS type annotations
-typedef struct TsVariableDeclaratorNode {
-    JsVariableDeclaratorNode base;
-    TsTypeAnnotationNode* ts_type;  // NULL in pure JS mode
-} TsVariableDeclaratorNode;
+// TsVariableDeclaratorNode: the ts_type field is now in JsVariableDeclaratorNode base
+typedef JsVariableDeclaratorNode TsVariableDeclaratorNode;
 
 typedef struct TsParameterNode {
     JsAstNode base;
@@ -245,6 +244,7 @@ typedef struct TsParameterNode {
     JsAstNode* default_value;      // default value (nullable)
     int accessibility;             // 0=none, 1=public, 2=private, 3=protected
     bool readonly;
+    bool optional;                 // true for optional_parameter (y?: T)
 } TsParameterNode;
 
 typedef struct TsFunctionNode {

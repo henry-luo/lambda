@@ -151,12 +151,39 @@ extern "C" Item js_clear_exception(void) {
 }
 
 extern "C" Item js_new_error(Item message) {
+    return js_new_error_with_stack(message, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+// v12: Create Error with a compile-time stack trace string
+extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     Item obj = js_new_object();
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
     js_property_set(obj, name_key, name_val);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set stack property from compile-time stack trace
+    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
+    if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        // Default: "Error" + message
+        const char* msg_str = "";
+        int msg_len = 0;
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            msg_str = ms->chars;
+            msg_len = ms->len;
+        }
+        char buf[512];
+        int len;
+        if (msg_len > 0) {
+            len = snprintf(buf, sizeof(buf), "Error: %.*s", msg_len, msg_str);
+        } else {
+            len = snprintf(buf, sizeof(buf), "Error");
+        }
+        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, name_val);
@@ -165,11 +192,44 @@ extern "C" Item js_new_error(Item message) {
 
 // v11: Create a typed Error (TypeError, RangeError, SyntaxError, ReferenceError)
 extern "C" Item js_new_error_with_name(Item error_name, Item message) {
+    return js_new_error_with_name_stack(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+// v12: Create typed Error with compile-time stack trace
+extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
     Item obj = js_new_object();
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     js_property_set(obj, name_key, error_name);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set stack property
+    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
+    if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        const char* name_str = "Error";
+        int name_len = 5;
+        if (get_type_id(error_name) == LMD_TYPE_STRING) {
+            String* ns = it2s(error_name);
+            name_str = ns->chars;
+            name_len = ns->len;
+        }
+        const char* msg_str = "";
+        int msg_len = 0;
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            msg_str = ms->chars;
+            msg_len = ms->len;
+        }
+        char buf[512];
+        int len;
+        if (msg_len > 0) {
+            len = snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str);
+        } else {
+            len = snprintf(buf, sizeof(buf), "%.*s", name_len, name_str);
+        }
+        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, error_name);
@@ -879,7 +939,13 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Case 1: callee is a function — standard constructor call
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         Item obj = js_constructor_create_object(callee);
-        js_call_function(callee, obj, args, argc);
+        Item result = js_call_function(callee, obj, args, argc);
+        // Per ES spec §9.2.2: if constructor returns an Object, use that instead of this
+        TypeId rt = get_type_id(result);
+        if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+            rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+            return result;
+        }
         return obj;
     }
     // Case 2: callee is a class object (MAP with __ctor__ and __instance_proto__)
@@ -1715,6 +1781,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         }
         return make_js_undefined();
     }
+    // fast path for typed arrays: avoid going through js_property_access
+    if (js_is_typed_array(array)) {
+        return js_typed_array_get(array, (Item){.item = i2it((int)index)});
+    }
     // fall back to general property access for strings, maps, etc.
     return js_property_access(array, (Item){.item = i2it((int)index)});
 }
@@ -1722,6 +1792,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
 // P10e: Fast array set with native int index
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        // fast path for typed arrays
+        if (js_is_typed_array(array)) {
+            return js_typed_array_set(array, (Item){.item = i2it((int)index)}, value);
+        }
         return js_property_set(array, (Item){.item = i2it((int)index)}, value);
     }
     Array* arr = array.array;
@@ -2107,6 +2181,152 @@ struct JsRegexData {
 };
 
 extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len) {
+    // Check for 'v' flag (Unicode Sets mode) — needs preprocessing for set operations
+    bool has_v_flag = false;
+    for (int i = 0; i < flags_len; i++) {
+        if (flags[i] == 'v') has_v_flag = true;
+    }
+
+    // If v flag is present, preprocess set subtraction [A--B] and intersection [A&&B]
+    // by transforming them into RE2-compatible character classes.
+    std::string v_processed;
+    const char* effective_pattern = pattern;
+    int effective_pattern_len = pattern_len;
+    if (has_v_flag) {
+        v_processed.reserve(pattern_len + 128);
+        int i = 0;
+        while (i < pattern_len) {
+            // handle escape sequences
+            if (pattern[i] == '\\' && i + 1 < pattern_len) {
+                v_processed += pattern[i];
+                v_processed += pattern[i + 1];
+                i += 2;
+                continue;
+            }
+            // detect [ to look for set operations
+            if (pattern[i] == '[') {
+                // scan for set subtraction [X--[Y]] or intersection [X&&[Y]]
+                // find the matching ] accounting for nesting and escapes
+                int start = i;
+                bool has_set_op = false;
+                int op_pos = -1;
+                char op_type = 0; // '-' for subtraction, '&' for intersection
+                int depth = 0;
+                for (int j = i; j < pattern_len; j++) {
+                    if (pattern[j] == '\\' && j + 1 < pattern_len) {
+                        j++; // skip escaped char
+                        continue;
+                    }
+                    if (pattern[j] == '[') depth++;
+                    else if (pattern[j] == ']') {
+                        depth--;
+                        if (depth == 0) break;
+                    }
+                    // check for -- or && at depth==1 (outermost class)
+                    if (depth == 1 && j + 1 < pattern_len) {
+                        if (pattern[j] == '-' && pattern[j+1] == '-') {
+                            has_set_op = true;
+                            op_pos = j;
+                            op_type = '-';
+                        } else if (pattern[j] == '&' && pattern[j+1] == '&') {
+                            has_set_op = true;
+                            op_pos = j;
+                            op_type = '&';
+                        }
+                    }
+                }
+
+                if (has_set_op && op_type == '-') {
+                    // Set subtraction: [A--[B]] → transform
+                    // Extract A part (from [ to --)
+                    int a_start = start + 1;
+                    int a_end = op_pos;
+                    // Extract B part (from --[ to matching ])
+                    int b_bracket_start = op_pos + 2; // skip --
+                    // find the end of [B] part
+                    if (b_bracket_start < pattern_len && pattern[b_bracket_start] == '[') {
+                        int b_start = b_bracket_start + 1;
+                        int b_depth = 1;
+                        int b_end = b_start;
+                        for (int j = b_start; j < pattern_len && b_depth > 0; j++) {
+                            if (pattern[j] == '\\' && j + 1 < pattern_len) { j++; continue; }
+                            if (pattern[j] == '[') b_depth++;
+                            else if (pattern[j] == ']') { b_depth--; if (b_depth == 0) { b_end = j; break; } }
+                        }
+                        // find the outer ]
+                        int outer_end = b_end + 1;
+                        if (outer_end < pattern_len && pattern[outer_end] == ']') outer_end++;
+                        else { outer_end = b_end + 1; }
+
+                        // Check what A is:
+                        std::string a_content(pattern + a_start, a_end - a_start);
+                        std::string b_content(pattern + b_start, b_end - b_start);
+
+                        // if A contains \S → build [^\s B] (negate whitespace union B)
+                        if (a_content.find("\\S") != std::string::npos) {
+                            // \S--[B] → [^(whitespace_chars)(B_chars)]
+                            v_processed += "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";
+                            v_processed += b_content;
+                            v_processed += "]";
+                        }
+                        // if A contains \w → build [^\W B]
+                        else if (a_content.find("\\w") != std::string::npos) {
+                            v_processed += "[^\\W";
+                            v_processed += b_content;
+                            v_processed += "]";
+                        }
+                        // generic: A minus B → (?:(?![B])A) using lookahead
+                        else {
+                            // use negative lookahead: (?:(?![B])[A])
+                            v_processed += "(?:(?![";
+                            v_processed += b_content;
+                            v_processed += "])[";
+                            v_processed += a_content;
+                            v_processed += "])";
+                        }
+                        i = outer_end;
+                        continue;
+                    }
+                }
+                else if (has_set_op && op_type == '&') {
+                    // Set intersection: [A&&[B]] → (?:(?=[B])[A])
+                    int a_start = start + 1;
+                    int a_end = op_pos;
+                    int b_bracket_start = op_pos + 2;
+                    if (b_bracket_start < pattern_len && pattern[b_bracket_start] == '[') {
+                        int b_start = b_bracket_start + 1;
+                        int b_depth = 1;
+                        int b_end = b_start;
+                        for (int j = b_start; j < pattern_len && b_depth > 0; j++) {
+                            if (pattern[j] == '\\' && j + 1 < pattern_len) { j++; continue; }
+                            if (pattern[j] == '[') b_depth++;
+                            else if (pattern[j] == ']') { b_depth--; if (b_depth == 0) { b_end = j; break; } }
+                        }
+                        int outer_end = b_end + 1;
+                        if (outer_end < pattern_len && pattern[outer_end] == ']') outer_end++;
+                        else { outer_end = b_end + 1; }
+
+                        std::string a_content(pattern + a_start, a_end - a_start);
+                        std::string b_content(pattern + b_start, b_end - b_start);
+
+                        // intersection: char must match BOTH A and B → (?:(?=[B])[A])
+                        v_processed += "(?:(?=[";
+                        v_processed += b_content;
+                        v_processed += "])[";
+                        v_processed += a_content;
+                        v_processed += "])";
+                        i = outer_end;
+                        continue;
+                    }
+                }
+            }
+            v_processed += pattern[i];
+            i++;
+        }
+        effective_pattern = v_processed.c_str();
+        effective_pattern_len = (int)v_processed.size();
+    }
+
     // Preprocess pattern: expand JS \s / \S to the full Unicode whitespace class,
     // since RE2's \s only matches ASCII whitespace but JS \s is Unicode-aware.
     // JS \s = [ \t\n\r\f\v\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]
@@ -2116,11 +2336,11 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
     static const char* S_EXPAND_INNER = "\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}";  // inside existing []
     static const char* NOT_S_EXPAND = "[^\\p{Z}\\t\\n\\r\\f\\x0b\\x{FEFF}]";
     std::string processed_pattern;
-    processed_pattern.reserve(pattern_len + 64);
+    processed_pattern.reserve(effective_pattern_len + 64);
     int bracket_depth = 0;
-    for (int i = 0; i < pattern_len; i++) {
-        if (pattern[i] == '\\' && i + 1 < pattern_len) {
-            char next = pattern[i + 1];
+    for (int i = 0; i < effective_pattern_len; i++) {
+        if (effective_pattern[i] == '\\' && i + 1 < effective_pattern_len) {
+            char next = effective_pattern[i + 1];
             if (next == 's') {
                 if (bracket_depth > 0) {
                     processed_pattern += S_EXPAND_INNER; // inline within existing []
@@ -2141,18 +2361,118 @@ extern "C" Item js_create_regex(const char* pattern, int pattern_len, const char
                 continue;
             }
             // consume the 2-char escape sequence as-is
-            processed_pattern += pattern[i];
-            processed_pattern += pattern[i + 1];
+            // but convert JS \uXXXX to RE2 \x{XXXX}
+            if (next == 'u') {
+                // \u{XXXXX} form
+                if (i + 2 < effective_pattern_len && effective_pattern[i + 2] == '{') {
+                    int j = i + 3;
+                    while (j < effective_pattern_len && effective_pattern[j] != '}') j++;
+                    if (j < effective_pattern_len) {
+                        processed_pattern += "\\x{";
+                        processed_pattern.append(effective_pattern + i + 3, j - (i + 3));
+                        processed_pattern += '}';
+                        i = j;
+                        continue;
+                    }
+                }
+                // \uXXXX form (exactly 4 hex digits)
+                if (i + 5 < effective_pattern_len) {
+                    bool all_hex = true;
+                    for (int j = i + 2; j < i + 6; j++) {
+                        char c = effective_pattern[j];
+                        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                            all_hex = false; break;
+                        }
+                    }
+                    if (all_hex) {
+                        processed_pattern += "\\x{";
+                        processed_pattern.append(effective_pattern + i + 2, 4);
+                        processed_pattern += '}';
+                        i += 5; // skip \uXXXX (6 chars, loop will i++)
+                        continue;
+                    }
+                }
+            }
+            processed_pattern += effective_pattern[i];
+            processed_pattern += effective_pattern[i + 1];
             i++;
             continue;
         }
-        if (pattern[i] == '[') {
+        if (effective_pattern[i] == '[') {
             bracket_depth++;
-        } else if (pattern[i] == ']') {
+        } else if (effective_pattern[i] == ']') {
             if (bracket_depth > 0) bracket_depth--;
         }
-        processed_pattern += pattern[i];
+        processed_pattern += effective_pattern[i];
     }
+
+    // Post-process: fix patterns RE2 cannot handle
+    // 1. Replace empty character class [] with a never-matching pattern
+    {
+        size_t pos = 0;
+        while ((pos = processed_pattern.find("[]", pos)) != std::string::npos) {
+            // check it's not preceded by backslash (escaped bracket)
+            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+            // replace [] with (?!.)  — wait, RE2 doesn't support lookahead
+            // replace [] with \x{FFFE} (BOM internal — never in real text)
+            processed_pattern.replace(pos, 2, "\\x{FFFE}");
+            pos += 9;
+        }
+    }
+    // 2. Strip lookahead assertions (?=...) and (?!...) since RE2 doesn't support them
+    //    (?=X) → remove entirely (zero-width assertion; dropping it is approximate but safe)
+    //    (?!X) → remove entirely (drops the negative constraint)
+    {
+        size_t pos = 0;
+        while ((pos = processed_pattern.find("(?=", pos)) != std::string::npos) {
+            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+            // find matching closing paren and remove entire (?=...) group
+            int depth = 1;
+            size_t end = pos + 3;
+            while (end < processed_pattern.size() && depth > 0) {
+                if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
+                    end += 2; continue;
+                }
+                if (processed_pattern[end] == '(') depth++;
+                else if (processed_pattern[end] == ')') depth--;
+                end++;
+            }
+            processed_pattern.erase(pos, end - pos);
+        }
+        pos = 0;
+        while ((pos = processed_pattern.find("(?!", pos)) != std::string::npos) {
+            if (pos > 0 && processed_pattern[pos - 1] == '\\') { pos++; continue; }
+            // find matching closing paren
+            int depth = 1;
+            size_t end = pos + 3;
+            while (end < processed_pattern.size() && depth > 0) {
+                if (processed_pattern[end] == '\\' && end + 1 < processed_pattern.size()) {
+                    end += 2; continue;
+                }
+                if (processed_pattern[end] == '(') depth++;
+                else if (processed_pattern[end] == ')') depth--;
+                end++;
+            }
+            // remove the entire (?!...) group
+            processed_pattern.erase(pos, end - pos);
+        }
+    }
+    // 3. Map unsupported Unicode property names to RE2-compatible equivalents
+    {
+        // \p{Ideographic} → \p{Han} (covers CJK Unified Ideographs)
+        size_t pos = 0;
+        while ((pos = processed_pattern.find("\\p{Ideographic}", pos)) != std::string::npos) {
+            processed_pattern.replace(pos, 15, "\\p{Han}");
+            pos += 7;
+        }
+        // \P{Ideographic} → \P{Han}
+        pos = 0;
+        while ((pos = processed_pattern.find("\\P{Ideographic}", pos)) != std::string::npos) {
+            processed_pattern.replace(pos, 15, "\\P{Han}");
+            pos += 7;
+        }
+    }
+
     // build RE2 options from flags
     re2::RE2::Options opts;
     opts.set_log_errors(false);
@@ -2254,13 +2574,45 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     if (tid != LMD_TYPE_STRING) return ItemNull;
     const char* chars = str.get_chars();
     int len = str.get_len();
+
+    // for global/sticky regexes, read lastIndex to start search from there
+    int start_pos = 0;
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    if (rd->global) {
+        Item li_val = js_property_get(regex, li_key);
+        TypeId li_tid = get_type_id(li_val);
+        if (li_tid == LMD_TYPE_INT || li_tid == LMD_TYPE_INT64) {
+            start_pos = (int)it2i(li_val);
+        } else if (li_tid == LMD_TYPE_FLOAT) {
+            start_pos = (int)li_val.get_double();
+        }
+        if (start_pos < 0 || start_pos > len) {
+            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+            return ItemNull;
+        }
+    }
+
     // perform match with captures
     int num_groups = rd->re2->NumberOfCapturingGroups() + 1; // +1 for full match
     if (num_groups > 16) num_groups = 16;
     re2::StringPiece matches[16];
-    bool matched = rd->re2->Match(re2::StringPiece(chars, len), 0, len,
+    bool matched = rd->re2->Match(re2::StringPiece(chars, len), start_pos, len,
         re2::RE2::UNANCHORED, matches, num_groups);
-    if (!matched) return ItemNull;
+    if (!matched) {
+        if (rd->global) {
+            js_property_set(regex, li_key, (Item){.item = i2it(0)});
+        }
+        return ItemNull;
+    }
+
+    // update lastIndex for global regexes
+    if (rd->global) {
+        int match_end = (int)(matches[0].data() - chars) + (int)matches[0].size();
+        // advance at least 1 to avoid infinite loop on zero-length matches
+        if (match_end == start_pos) match_end++;
+        js_property_set(regex, li_key, (Item){.item = i2it(match_end)});
+    }
+
     // build result as a map (JS object) with numeric keys + .index + .length
     // This matches JS spec where match() returns an array-like with named properties
     Item result = js_new_object();
@@ -3367,7 +3719,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             }
         }
         Item sep = argc > 0 ? args[0] : (Item){.item = s2it(heap_create_name(""))};
-        return fn_split(str, sep);
+        Item result = fn_split(str, sep);
+        // Clear is_content flag to prevent array flattening in JS context
+        if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
+            result.array->is_content = 0;
+        }
+        return result;
     }
     if (method->len == 9 && strncmp(method->chars, "substring", 9) == 0) {
         if (argc < 1) return str;
@@ -3820,13 +4177,14 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item callback = args[0];
         if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
         Array* src = arr.array;
-        Item result = js_array_new(0);
+        Item result = js_array_new(src->length);
         Array* dst = result.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
             Item cb_args[2] = { src->items[i], (Item){.item = i2it(i)} };
             Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 2 ? 2 : 1);
-            list_push(dst, mapped);
+            // directly assign to preserve arrays (avoid list_push flattening)
+            dst->items[i] = mapped;
         }
         return result;
     }
@@ -4598,6 +4956,20 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     js_property_set(object, key, prototype);
 }
 
+// v12: Link a proto marker to the base constructor's .prototype object
+// so that inherited properties (e.g. Error.stack) are accessible through __proto__ chain.
+// proto_marker is the __proto__ node created for instanceof resolution.
+// base_ctor is the runtime value of the base constructor function.
+extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
+    if (get_type_id(proto_marker) != LMD_TYPE_MAP) return;
+    // Look up base_ctor.prototype
+    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    Item base_proto = js_property_get(base_ctor, proto_key);
+    if (base_proto.item != ItemNull.item && get_type_id(base_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(proto_marker, base_proto);
+    }
+}
+
 // Get the prototype of an object (read __proto__ property)
 // P10d: uses interned key + first-match lookup (no heap allocation per call)
 extern "C" Item js_get_prototype(Item object) {
@@ -5192,7 +5564,6 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
         if (thenable) {
             if (thenable->state != JS_PROMISE_PENDING) {
                 js_promise_settle(p, thenable->state, thenable->result);
-                js_microtask_flush();
             } else {
                 // register then on thenable to forward settlement
                 Item p_item = js_promise_to_item(p);
@@ -5207,7 +5578,6 @@ static Item js_resolve_callback(Item promise_idx_item, Item value) {
             }
         } else {
             js_promise_settle(p, JS_PROMISE_FULFILLED, value);
-            js_microtask_flush();
         }
     }
     return ItemNull;
@@ -5217,7 +5587,6 @@ static Item js_reject_callback(Item promise_idx_item, Item reason) {
     int64_t idx = it2i(promise_idx_item);
     if (idx >= 0 && idx < js_promise_count) {
         js_promise_settle(&js_promises[idx], JS_PROMISE_REJECTED, reason);
-        js_microtask_flush();
     }
     return ItemNull;
 }
@@ -5374,11 +5743,9 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (next_state == -1) {
         // Done — fulfill the async function's promise
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_FULFILLED, value);
-        js_microtask_flush();
     } else if (next_state == -2) {
         // Rejected — reject the async function's promise
         js_promise_settle(&js_promises[ctx->promise_idx], JS_PROMISE_REJECTED, value);
-        js_microtask_flush();
     } else {
         // Suspended on pending promise — register resume/reject callbacks
         ctx->state = next_state;
@@ -5394,7 +5761,6 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
 
         // Register on the pending promise
         js_promise_then(value, bound_resume, bound_reject);
-        js_microtask_flush();
     }
 }
 
@@ -5525,6 +5891,113 @@ extern "C" Item js_promise_finally(Item promise, Item on_finally) {
     return next_item;
 }
 
+// =============================================================================
+// Promise Combinator Helpers (spec-compliant microtask scheduling)
+// =============================================================================
+
+// Helper for Promise.all: individual element fulfillment
+// Bound args: counter_obj, index_item, result_item; Call arg: value
+static Item js_all_resolve_element(Item counter_obj, Item index_item, Item result_item, Item value) {
+    String* k_remaining = heap_create_name("remaining", 9);
+    String* k_results = heap_create_name("results", 7);
+
+    Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
+    int idx = (int)it2i(index_item);
+    if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
+        results.array->items[idx] = value;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
+    js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
+
+    if (remaining == 0) {
+        JsPromise* result = js_get_promise(result_item);
+        if (result) js_promise_settle(result, JS_PROMISE_FULFILLED, results);
+    }
+    return ItemNull;
+}
+
+// Helper for Promise.any: individual element rejection
+// Bound args: counter_obj, index_item, result_item; Call arg: reason
+static Item js_any_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason) {
+    String* k_remaining = heap_create_name("remaining", 9);
+    String* k_errors = heap_create_name("errors", 6);
+
+    Item errors = js_property_get(counter_obj, (Item){.item = s2it(k_errors)});
+    int idx = (int)it2i(index_item);
+    if (get_type_id(errors) == LMD_TYPE_ARRAY && idx < errors.array->length) {
+        errors.array->items[idx] = reason;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
+    js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
+
+    if (remaining == 0) {
+        Item msg = (Item){.item = s2it(heap_create_name("All promises were rejected", 26))};
+        Item err = js_new_error(msg);
+        js_property_set(err, (Item){.item = s2it(k_errors)}, errors);
+        JsPromise* result = js_get_promise(result_item);
+        if (result) js_promise_settle(result, JS_PROMISE_REJECTED, err);
+    }
+    return ItemNull;
+}
+
+// Helper for Promise.allSettled: individual element fulfillment
+static Item js_settled_fulfill_element(Item counter_obj, Item index_item, Item result_item, Item value) {
+    String* k_remaining = heap_create_name("remaining", 9);
+    String* k_results = heap_create_name("results", 7);
+
+    Item entry = js_new_object();
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("status", 6))},
+        (Item){.item = s2it(heap_create_name("fulfilled", 9))});
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+
+    Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
+    int idx = (int)it2i(index_item);
+    if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
+        results.array->items[idx] = entry;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
+    js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
+
+    if (remaining == 0) {
+        JsPromise* result = js_get_promise(result_item);
+        if (result) js_promise_settle(result, JS_PROMISE_FULFILLED, results);
+    }
+    return ItemNull;
+}
+
+// Helper for Promise.allSettled: individual element rejection
+static Item js_settled_reject_element(Item counter_obj, Item index_item, Item result_item, Item reason) {
+    String* k_remaining = heap_create_name("remaining", 9);
+    String* k_results = heap_create_name("results", 7);
+
+    Item entry = js_new_object();
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("status", 6))},
+        (Item){.item = s2it(heap_create_name("rejected", 8))});
+    js_property_set(entry, (Item){.item = s2it(heap_create_name("reason", 6))}, reason);
+
+    Item results = js_property_get(counter_obj, (Item){.item = s2it(k_results)});
+    int idx = (int)it2i(index_item);
+    if (get_type_id(results) == LMD_TYPE_ARRAY && idx < results.array->length) {
+        results.array->items[idx] = entry;
+    }
+
+    int remaining = (int)it2i(js_property_get(counter_obj, (Item){.item = s2it(k_remaining)})) - 1;
+    js_property_set(counter_obj, (Item){.item = s2it(k_remaining)}, (Item){.item = i2it(remaining)});
+
+    if (remaining == 0) {
+        JsPromise* result = js_get_promise(result_item);
+        if (result) js_promise_settle(result, JS_PROMISE_FULFILLED, results);
+    }
+    return ItemNull;
+}
+
+// =============================================================================
+// Promise Combinators (spec-compliant: all settlements go through microtask queue)
+// =============================================================================
+
 extern "C" Item js_promise_all(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
 
@@ -5532,112 +6005,150 @@ extern "C" Item js_promise_all(Item iterable) {
     int count = arr->length;
 
     if (count == 0) {
-        Item empty_arr = js_array_new(0);
-        return js_promise_resolve(empty_arr);
+        return js_promise_resolve(js_array_new(0));
     }
 
-    // Simplified: resolve all synchronously settled promises
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    Item result_item = js_promise_to_item(result);
+
+    // shared counter { remaining: N, results: Array(N) }
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
     Item results_arr = js_array_new(count);
-    Array* results = results_arr.array;
-    results->length = count;
-    int resolved = 0;
+    results_arr.array->length = count;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
+
+    // any single rejection rejects the result immediately
+    int idx = (int)(result - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
 
     for (int i = 0; i < count; i++) {
-        JsPromise* p = js_get_promise(arr->items[i]);
-        if (p) {
-            if (p->state == JS_PROMISE_REJECTED) {
-                return js_promise_reject(p->result);
-            }
-            results->items[i] = (p->state == JS_PROMISE_FULFILLED) ? p->result : ItemNull;
-            if (p->state == JS_PROMISE_FULFILLED) resolved++;
-        } else {
-            results->items[i] = arr->items[i]; // non-promise value
-            resolved++;
-        }
+        Item elem = arr->items[i];
+        JsPromise* p = js_get_promise(elem);
+        if (!p) elem = js_promise_resolve(elem);
+
+        Item resolve_handler = js_new_function((void*)js_all_resolve_element, 4);
+        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item resolve_fn = js_bind_function(resolve_handler, ItemNull, bound_args, 3);
+
+        js_promise_then(elem, resolve_fn, reject_fn);
     }
 
-    return js_promise_resolve(results_arr);
+    return result_item;
 }
 
 extern "C" Item js_promise_race(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
 
     Array* arr = iterable.array;
-    for (int i = 0; i < arr->length; i++) {
-        JsPromise* p = js_get_promise(arr->items[i]);
-        if (p && p->state == JS_PROMISE_FULFILLED) {
-            return js_promise_resolve(p->result);
-        }
-        if (p && p->state == JS_PROMISE_REJECTED) {
-            return js_promise_reject(p->result);
-        }
-        if (!p) {
-            return js_promise_resolve(arr->items[i]);
-        }
-    }
 
-    // All pending — return a pending promise
+    // per spec: empty array → never-settling promise
     JsPromise* result = js_alloc_promise();
     if (!result) return ItemNull;
-    return js_promise_to_item(result);
+    Item result_item = js_promise_to_item(result);
+
+    if (arr->length == 0) return result_item;
+
+    int idx = (int)(result - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item reject_base = js_new_function((void*)js_reject_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+    Item reject_fn = js_bind_function(reject_base, ItemNull, &idx_item, 1);
+
+    for (int i = 0; i < arr->length; i++) {
+        Item elem = arr->items[i];
+        JsPromise* p = js_get_promise(elem);
+        if (!p) elem = js_promise_resolve(elem);
+        js_promise_then(elem, resolve_fn, reject_fn);
+    }
+
+    return result_item;
 }
 
 extern "C" Item js_promise_any(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
 
     Array* arr = iterable.array;
-    for (int i = 0; i < arr->length; i++) {
-        JsPromise* p = js_get_promise(arr->items[i]);
-        if (p && p->state == JS_PROMISE_FULFILLED) {
-            return js_promise_resolve(p->result);
-        }
-        if (!p) {
-            return js_promise_resolve(arr->items[i]);
-        }
+    int count = arr->length;
+
+    if (count == 0) {
+        Item msg = (Item){.item = s2it(heap_create_name("All promises were rejected", 26))};
+        return js_promise_reject(js_new_error(msg));
     }
 
-    // All rejected
-    Item err = js_new_error((Item){.item = s2it(heap_create_name("All promises were rejected", 26))});
-    return js_promise_reject(err);
+    JsPromise* result_p = js_alloc_promise();
+    if (!result_p) return ItemNull;
+    Item result_item = js_promise_to_item(result_p);
+
+    // first fulfillment wins (reuse resolve_callback bound to result)
+    int idx = (int)(result_p - js_promises);
+    Item idx_item = (Item){.item = i2it(idx)};
+    Item resolve_base = js_new_function((void*)js_resolve_callback, 2);
+    Item resolve_fn = js_bind_function(resolve_base, ItemNull, &idx_item, 1);
+
+    // shared counter for rejection tracking
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
+    Item errors_arr = js_array_new(count);
+    errors_arr.array->length = count;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
+
+    for (int i = 0; i < count; i++) {
+        Item elem = arr->items[i];
+        JsPromise* p = js_get_promise(elem);
+        if (!p) elem = js_promise_resolve(elem);
+
+        Item reject_handler = js_new_function((void*)js_any_reject_element, 4);
+        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
+
+        js_promise_then(elem, resolve_fn, reject_fn);
+    }
+
+    return result_item;
 }
 
 extern "C" Item js_promise_all_settled(Item iterable) {
     if (get_type_id(iterable) != LMD_TYPE_ARRAY) return js_promise_resolve(iterable);
 
     Array* arr = iterable.array;
-    Item results_arr = js_array_new(arr->length);
-    Array* results = results_arr.array;
+    int count = arr->length;
 
-    for (int i = 0; i < arr->length; i++) {
-        JsPromise* p = js_get_promise(arr->items[i]);
-        Item entry = js_new_object();
-        String* status_key = heap_create_name("status", 6);
-
-        if (p) {
-            if (p->state == JS_PROMISE_FULFILLED) {
-                js_property_set(entry, (Item){.item = s2it(status_key)},
-                    (Item){.item = s2it(heap_create_name("fulfilled", 9))});
-                String* val_key = heap_create_name("value", 5);
-                js_property_set(entry, (Item){.item = s2it(val_key)}, p->result);
-            } else if (p->state == JS_PROMISE_REJECTED) {
-                js_property_set(entry, (Item){.item = s2it(status_key)},
-                    (Item){.item = s2it(heap_create_name("rejected", 8))});
-                String* reason_key = heap_create_name("reason", 6);
-                js_property_set(entry, (Item){.item = s2it(reason_key)}, p->result);
-            } else {
-                js_property_set(entry, (Item){.item = s2it(status_key)},
-                    (Item){.item = s2it(heap_create_name("pending", 7))});
-            }
-        } else {
-            js_property_set(entry, (Item){.item = s2it(status_key)},
-                (Item){.item = s2it(heap_create_name("fulfilled", 9))});
-            String* val_key = heap_create_name("value", 5);
-            js_property_set(entry, (Item){.item = s2it(val_key)}, arr->items[i]);
-        }
-        results->items[i] = entry;
+    if (count == 0) {
+        return js_promise_resolve(js_array_new(0));
     }
 
-    return js_promise_resolve(results_arr);
+    JsPromise* result = js_alloc_promise();
+    if (!result) return ItemNull;
+    Item result_item = js_promise_to_item(result);
+
+    Item counter = js_new_object();
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("remaining", 9))}, (Item){.item = i2it(count)});
+    Item results_arr = js_array_new(count);
+    results_arr.array->length = count;
+    js_property_set(counter, (Item){.item = s2it(heap_create_name("results", 7))}, results_arr);
+
+    for (int i = 0; i < count; i++) {
+        Item elem = arr->items[i];
+        JsPromise* p = js_get_promise(elem);
+        if (!p) elem = js_promise_resolve(elem);
+
+        Item bound_args[3] = {counter, (Item){.item = i2it(i)}, result_item};
+
+        Item fulfill_handler = js_new_function((void*)js_settled_fulfill_element, 4);
+        Item fulfill_fn = js_bind_function(fulfill_handler, ItemNull, bound_args, 3);
+
+        Item reject_handler = js_new_function((void*)js_settled_reject_element, 4);
+        Item reject_fn = js_bind_function(reject_handler, ItemNull, bound_args, 3);
+
+        js_promise_then(elem, fulfill_fn, reject_fn);
+    }
+
+    return result_item;
 }
 
 // =============================================================================

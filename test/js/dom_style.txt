@@ -11,4 +11,3 @@ true
 test-class
 test-class
 dynamic-el
-"DOM style tests complete"
