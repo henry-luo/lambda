@@ -37,6 +37,12 @@ namespace FormDefaults {
     // Checkbox/Radio: square controls
     constexpr float CHECK_SIZE = 13.0f;
     constexpr float CHECK_MARGIN = 3.0f;
+    // Radio: margin-left=5, margin-right=3 (Chrome UA stylesheet)
+    constexpr float RADIO_MARGIN_LEFT = 5.0f;
+    constexpr float RADIO_MARGIN_RIGHT = 3.0f;
+    // Checkbox: margin-left=4, margin-right=3 (Chrome UA stylesheet)
+    constexpr float CHECKBOX_MARGIN_LEFT = 4.0f;
+    constexpr float CHECKBOX_MARGIN_RIGHT = 3.0f;
 
     // Button: content-based + padding + 2px border
     constexpr float BUTTON_PADDING_H = 6.0f;
