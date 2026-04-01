@@ -32,7 +32,6 @@
     ],
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
-        "lambda/ts/build_ts_ast.cpp",
         "radiant/radiant.cpp",
         "radiant/render_dvi.cpp",
         "radiant/render_texnode.cpp",

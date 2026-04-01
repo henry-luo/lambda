@@ -411,26 +411,29 @@ function distance(p1: Point, p2: Point): number {
       annotations and variable scope for rich type info.
 - [x] Implement the `Type*` carry in `JsMirVarEntry` (add `Type* full_type` field).
 
-### Phase 3.5 — Type Inference Enhancements (JS benefit)
+### Phase 3.5 — Type Inference Enhancements (JS benefit) ✅
 
-- [ ] Call-site type propagation: scan call expressions to reinforce/contradict
-      body-scan parameter types.
-- [ ] Union type narrowing: after `typeof x === "number"` guard, narrow x to
-      LMD_TYPE_FLOAT in that branch's scope.
-- [ ] Track return type from call targets: if `let x = knownFunc(42)`, set x's type
-      to `knownFunc.return_type`.
-- [ ] Conditional expression type: `cond ? intExpr : intExpr` → INT (not ANY).
+- [x] Call-site type propagation: scan call expressions to reinforce/contradict
+      body-scan parameter types. Added `jm_callsite_propagate` (Phase 1.76 pass).
+- [x] Union type narrowing: after `typeof x === "number"` guard, narrow x to
+      LMD_TYPE_FLOAT in that branch's scope. Implemented via `jm_detect_typeof_pattern`
+      and `jm_push_typeof_narrow` in `jm_transpile_if`.
+- [x] Track return type from call targets: if `let x = knownFunc(42)`, set x's type
+      to `knownFunc.return_type`. Added `jm_find_collected_func_for_call` (skips generators).
+- [x] Conditional expression type: `cond ? intExpr : intExpr` → INT (not ANY). Already existed.
 
-### Phase 3.6 — Cleanup and Testing
+### Phase 3.6 — Cleanup and Testing ✅
 
-- [ ] Delete `lambda/ts/ts_transpiler.hpp`.
-- [ ] Delete `lambda/ts/build_ts_ast.cpp` (merged).
-- [ ] Delete `lambda/ts/transpile_ts_mir.cpp` (merged).
-- [ ] Keep `lambda/ts/ts_type_builder.cpp` (type resolution logic) — or move to
-      `lambda/type_builder.cpp`.
-- [ ] Keep `lambda/ts/ts_runtime.cpp` / `ts_runtime.h` (runtime helpers).
-- [ ] Run all 754+ baseline tests — must pass 100%.
-- [ ] Run all 18 TS tests — must pass 100%.
+- [x] ~~Delete `lambda/ts/ts_transpiler.hpp`~~ Kept: still declares `TsTranspiler` typedef
+      and public APIs (`ts_resolve_type`, etc.) used by multiple files.
+- [x] Delete `lambda/ts/build_ts_ast.cpp` (merged). Moved to `temp/build_ts_ast.cpp.bak`;
+      removed from `build_lambda_config.json`.
+- [x] ~~Delete `lambda/ts/transpile_ts_mir.cpp`~~ Kept: still provides `transpile_ts_to_mir()`
+      entry point called from `main.cpp`. Now a thin wrapper over the unified pipeline.
+- [x] Keep `lambda/ts/ts_type_builder.cpp` (type resolution logic).
+- [x] Keep `lambda/ts/ts_runtime.cpp` / `ts_runtime.h` (runtime helpers).
+- [x] Run all 755 baseline tests — pass 100% (754 original + 1 new `type_inference.ts`).
+- [x] Run all 19 TS tests — pass 100% (18 original + 1 new `type_inference.ts`).
 - [ ] Performance benchmark: typed TS functions generate identical native code to
       manually-optimized JS.
 
@@ -441,7 +444,7 @@ function distance(p1: Point, p2: Point): number {
 | Before | After | Notes |
 |--------|-------|-------|
 | `lambda/js/js_transpiler.hpp` | `lambda/js/js_transpiler.hpp` | + type_registry, strict_js, emit_runtime_checks |
-| `lambda/ts/ts_transpiler.hpp` | *(deleted)* | Fields merged into JsTranspiler |
+| `lambda/ts/ts_transpiler.hpp` | `lambda/ts/ts_transpiler.hpp` | Kept: typedef + public API declarations |
 | `lambda/js/build_js_ast.cpp` | `lambda/js/build_js_ast.cpp` | + TS node handling |
 | `lambda/ts/build_ts_ast.cpp` | *(deleted)* | Merged into build_js_ast.cpp |
 | `lambda/js/transpile_js_mir.cpp` | `lambda/js/transpile_js_mir.cpp` | + annotation-aware inference |
