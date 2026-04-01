@@ -100,6 +100,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "py/py_async.h"
 #include "py/py_stdlib.h"
 #include "bash/bash_runtime.h"
+#ifdef LAMBDA_RUBY
+#include "rb/rb_runtime.h"
+#endif
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
@@ -1672,6 +1675,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_shell_flags", FPTR(bash_get_shell_flags)},
     {"bash_get_lineno", FPTR(bash_get_lineno)},
     {"bash_set_lineno", FPTR(bash_set_lineno)},
+    {"bash_set_command", FPTR(bash_set_command)},
     {"bash_set_arith_context", FPTR(bash_set_arith_context)},
     {"bash_get_funcname", FPTR(bash_get_funcname)},
     {"bash_get_funcname_count", FPTR(bash_get_funcname_count)},
@@ -1713,6 +1717,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_redirect_read", FPTR(bash_redirect_read)},
     // external command execution
     {"bash_exec_external", FPTR(bash_exec_external)},
+    {"bash_exec_cmd_with_array", FPTR(bash_exec_cmd_with_array)},
     // expansions (tilde, glob, brace)
     {"bash_expand_tilde", FPTR(bash_expand_tilde)},
     {"bash_expand_tilde_assign", FPTR(bash_expand_tilde_assign)},
@@ -1880,6 +1885,69 @@ JitImport jit_runtime_imports[] = {
     {"ts_enum_create", FPTR(ts_enum_create)},
     {"ts_enum_add_member", FPTR(ts_enum_add_member)},
     {"ts_enum_freeze", FPTR(ts_enum_freeze)},
+
+#ifdef LAMBDA_RUBY
+    // Ruby runtime functions
+    {"rb_to_int", FPTR(rb_to_int)},
+    {"rb_to_float", FPTR(rb_to_float)},
+    {"rb_to_str", FPTR(rb_to_str)},
+    {"rb_to_bool", FPTR(rb_to_bool)},
+    {"rb_to_s", FPTR(rb_to_s)},
+    {"rb_to_i", FPTR(rb_to_i)},
+    {"rb_to_f", FPTR(rb_to_f)},
+    {"rb_is_truthy", FPTR(rb_is_truthy)},
+    {"rb_add", FPTR(rb_add)},
+    {"rb_subtract", FPTR(rb_subtract)},
+    {"rb_multiply", FPTR(rb_multiply)},
+    {"rb_divide", FPTR(rb_divide)},
+    {"rb_modulo", FPTR(rb_modulo)},
+    {"rb_power", FPTR(rb_power)},
+    {"rb_negate", FPTR(rb_negate)},
+    {"rb_positive", FPTR(rb_positive)},
+    {"rb_bit_not", FPTR(rb_bit_not)},
+    {"rb_bit_and", FPTR(rb_bit_and)},
+    {"rb_bit_or", FPTR(rb_bit_or)},
+    {"rb_bit_xor", FPTR(rb_bit_xor)},
+    {"rb_lshift", FPTR(rb_lshift)},
+    {"rb_rshift", FPTR(rb_rshift)},
+    {"rb_eq", FPTR(rb_eq)},
+    {"rb_ne", FPTR(rb_ne)},
+    {"rb_lt", FPTR(rb_lt)},
+    {"rb_le", FPTR(rb_le)},
+    {"rb_gt", FPTR(rb_gt)},
+    {"rb_ge", FPTR(rb_ge)},
+    {"rb_cmp", FPTR(rb_cmp)},
+    {"rb_case_eq", FPTR(rb_case_eq)},
+    {"rb_getattr", FPTR(rb_getattr)},
+    {"rb_setattr", FPTR(rb_setattr)},
+    {"rb_new_object", FPTR(rb_new_object)},
+    {"rb_array_new", FPTR(rb_array_new)},
+    {"rb_array_push", FPTR(rb_array_push)},
+    {"rb_array_get", FPTR(rb_array_get)},
+    {"rb_array_set", FPTR(rb_array_set)},
+    {"rb_array_length", FPTR(rb_array_length)},
+    {"rb_array_pop", FPTR(rb_array_pop)},
+    {"rb_hash_new", FPTR(rb_hash_new)},
+    {"rb_hash_get", FPTR(rb_hash_get)},
+    {"rb_hash_set", FPTR(rb_hash_set)},
+    {"rb_range_new", FPTR(rb_range_new)},
+    {"rb_subscript_get", FPTR(rb_subscript_get)},
+    {"rb_subscript_set", FPTR(rb_subscript_set)},
+    {"rb_string_concat", FPTR(rb_string_concat)},
+    {"rb_string_repeat", FPTR(rb_string_repeat)},
+    {"rb_get_iterator", FPTR(rb_get_iterator)},
+    {"rb_iterator_next", FPTR(rb_iterator_next)},
+    {"rb_is_stop_iteration", FPTR(rb_is_stop_iteration)},
+    {"rb_set_module_var", FPTR(rb_set_module_var)},
+    {"rb_get_module_var", FPTR(rb_get_module_var)},
+    {"rb_reset_module_vars", FPTR(rb_reset_module_vars)},
+    {"rb_puts_one", FPTR(rb_puts_one)},
+    {"rb_print_one", FPTR(rb_print_one)},
+    {"rb_p_one", FPTR(rb_p_one)},
+    {"rb_builtin_len", FPTR(rb_builtin_len)},
+    {"rb_builtin_type", FPTR(rb_builtin_type)},
+    {"rb_builtin_rand", FPTR(rb_builtin_rand)},
+#endif // LAMBDA_RUBY
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

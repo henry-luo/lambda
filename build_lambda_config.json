@@ -22,6 +22,7 @@
         "lambda/py",
         "lambda/bash",
         "lambda/ts",
+        "lambda/rb",
         "lambda/network",
         "radiant",
         "radiant/pdf",
@@ -58,6 +59,7 @@
         "lambda/tree-sitter-javascript/bindings/c",
         "lambda/tree-sitter-python/bindings/c",
         "lambda/tree-sitter-bash/bindings/c",
+        "lambda/tree-sitter-ruby/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/font/woff2/include",
         "mac-deps/thorvg/src/bindings/capi"
@@ -104,6 +106,12 @@
             "name": "tree-sitter-bash",
             "include": "lambda/tree-sitter-bash/bindings/c",
             "lib": "lambda/tree-sitter-bash/libtree-sitter-bash.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-ruby",
+            "include": "lambda/tree-sitter-ruby/bindings/c",
+            "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
             "link": "static"
         },
         {

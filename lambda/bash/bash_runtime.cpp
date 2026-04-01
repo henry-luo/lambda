@@ -61,6 +61,9 @@ static int bash_current_lineno = 0;
 static int bash_debug_trap_lineno = 0;
 static int bash_debug_trap_base_depth = 0;
 
+// BASH_COMMAND: the command currently being executed (set before each simple command)
+static char bash_current_command[4096] = "";
+
 // arithmetic expression context for error messages
 static const char* bash_arith_expr_text = "";
 static int bash_arith_expr_len = 0;
@@ -2298,6 +2301,107 @@ extern char** environ;
 static Item bash_stdin_item;
 static bool bash_stdin_item_set;
 
+// forward declarations for builtins used by array-based dispatch
+extern "C" Item bash_builtin_echo(Item* args, int argc);
+extern "C" Item bash_builtin_printf(Item* all_args, int total_argc);
+extern "C" Item bash_builtin_test(Item* args, int argc);
+extern "C" Item bash_builtin_read(Item* args, int argc);
+extern "C" Item bash_builtin_caller(Item* args, int argc);
+extern "C" Item bash_builtin_cat(Item* args, int argc);
+extern "C" Item bash_builtin_wc(Item* args, int argc);
+extern "C" Item bash_builtin_head(Item* args, int argc);
+extern "C" Item bash_builtin_tail(Item* args, int argc);
+extern "C" Item bash_builtin_grep(Item* args, int argc);
+extern "C" Item bash_builtin_sort(Item* args, int argc);
+extern "C" Item bash_builtin_tr(Item* args, int argc);
+extern "C" Item bash_builtin_cut(Item* args, int argc);
+extern "C" Item bash_builtin_let(Item* args, int argc);
+extern "C" Item bash_builtin_type(Item* args, int argc);
+extern "C" Item bash_builtin_command(Item* args, int argc);
+extern "C" Item bash_builtin_pushd(Item* args, int argc);
+extern "C" Item bash_builtin_popd(Item* args, int argc);
+extern "C" Item bash_builtin_dirs(Item* args, int argc);
+extern "C" Item bash_builtin_getopts(Item* args, int argc);
+
+// dispatch a builtin or external command with dynamically-built array args
+// The array contains all arguments (NOT including the command name).
+// cmd_name and cmd_len identify the builtin; if not a builtin, falls through to external exec.
+extern "C" Item bash_exec_cmd_with_array(Item cmd_name_item, Item arr) {
+    const char* cmd_name = bash_item_to_cstr(cmd_name_item);
+    int cmd_len = cmd_name ? (int)strlen(cmd_name) : 0;
+    if (!cmd_name || cmd_len == 0) {
+        bash_last_exit_code = 127;
+        return (Item){.item = i2it(127)};
+    }
+
+    // extract array items into a stack/heap buffer
+    int argc = 0;
+    Item* argv = NULL;
+    if (bash_item_is_array(arr)) {
+        List* list = (List*)(uintptr_t)arr.item;
+        argc = list->length;
+        if (argc > 0) {
+            argv = (Item*)malloc(argc * sizeof(Item));
+            for (int i = 0; i < argc; i++) {
+                argv[i] = list->items[i];
+            }
+        }
+    }
+
+    Item result = {.item = i2it(0)};
+
+    // dispatch to known builtins
+    #define MATCH_BUILTIN(name_str, func) \
+        if (cmd_len == (int)sizeof(name_str)-1 && memcmp(cmd_name, name_str, sizeof(name_str)-1) == 0) { \
+            result = func(argv, argc); goto done; }
+
+    MATCH_BUILTIN("echo", bash_builtin_echo)
+    MATCH_BUILTIN("printf", bash_builtin_printf)
+    MATCH_BUILTIN("test", bash_builtin_test)
+    MATCH_BUILTIN("read", bash_builtin_read)
+    MATCH_BUILTIN("caller", bash_builtin_caller)
+    MATCH_BUILTIN("cat", bash_builtin_cat)
+    MATCH_BUILTIN("wc", bash_builtin_wc)
+    MATCH_BUILTIN("head", bash_builtin_head)
+    MATCH_BUILTIN("tail", bash_builtin_tail)
+    MATCH_BUILTIN("grep", bash_builtin_grep)
+    MATCH_BUILTIN("sort", bash_builtin_sort)
+    MATCH_BUILTIN("tr", bash_builtin_tr)
+    MATCH_BUILTIN("cut", bash_builtin_cut)
+    MATCH_BUILTIN("let", bash_builtin_let)
+    MATCH_BUILTIN("type", bash_builtin_type)
+    MATCH_BUILTIN("command", bash_builtin_command)
+    MATCH_BUILTIN("pushd", bash_builtin_pushd)
+    MATCH_BUILTIN("popd", bash_builtin_popd)
+    MATCH_BUILTIN("dirs", bash_builtin_dirs)
+    MATCH_BUILTIN("getopts", bash_builtin_getopts)
+    #undef MATCH_BUILTIN
+
+    // try user-defined / runtime functions before external
+    {
+        Item rt_result = bash_call_rt_func(cmd_name_item, argv, argc);
+        if (bash_last_exit_code != 127) {
+            result = rt_result;
+            goto done;
+        }
+    }
+
+    // not a known builtin or function — run as external command
+    // external exec expects cmd name + args in a single argv
+    {
+        int ext_argc = argc + 1;
+        Item* ext_argv = (Item*)malloc(ext_argc * sizeof(Item));
+        ext_argv[0] = cmd_name_item;
+        for (int i = 0; i < argc; i++) ext_argv[i + 1] = argv[i];
+        result = bash_exec_external(ext_argv, ext_argc);
+        free(ext_argv);
+    }
+
+done:
+    if (argv) free(argv);
+    return result;
+}
+
 extern "C" Item bash_exec_external(Item* argv, int argc) {
     if (argc < 1) {
         bash_last_exit_code = 127;
@@ -2855,6 +2959,47 @@ extern "C" Item bash_get_var(Item name) {
         const BashRtVar* found2 = (const BashRtVar*)hashmap_get(bash_var_table, &key2);
         if (found2) return found2->value;
         return (Item){.item = s2it(heap_create_name(bash_script_name))};
+    }
+    if (s->len == 12 && memcmp(s->chars, "BASH_COMMAND", 12) == 0) {
+        return (Item){.item = s2it(heap_create_name(bash_current_command, (int)strlen(bash_current_command)))};
+    }
+
+    // special variables accessible via ${#*}, ${#@}, ${!...} etc.
+    if (s->len == 1) {
+        switch (s->chars[0]) {
+        case '*':
+        case '@': {
+            extern Item bash_get_all_args_string(void);
+            return bash_get_all_args_string();
+        }
+        case '#': {
+            extern Item bash_get_arg_count(void);
+            return bash_get_arg_count();
+        }
+        case '?': {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", bash_last_exit_code);
+            return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+        }
+        case '$': {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", (int)getpid());
+            return (Item){.item = s2it(heap_create_name(buf, (int)strlen(buf)))};
+        }
+        case '!': {
+            return (Item){.item = s2it(heap_create_name("", 0))};
+        }
+        case '0':
+            return (Item){.item = s2it(heap_create_name(bash_script_name))};
+        case '-': {
+            return (Item){.item = s2it(heap_create_name("", 0))};
+        }
+        }
+        // check if single digit 1-9
+        if (s->chars[0] >= '1' && s->chars[0] <= '9') {
+            extern Item bash_get_positional(int);
+            return bash_get_positional(s->chars[0] - '0');
+        }
     }
 
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
@@ -3580,6 +3725,15 @@ extern "C" Item bash_get_lineno(void) {
 
 extern "C" void bash_set_lineno(int line) {
     bash_current_lineno = line;
+}
+
+extern "C" void bash_set_command(Item cmd_text) {
+    String* s = it2s(cmd_text);
+    if (s && s->len > 0) {
+        int len = s->len < (int)sizeof(bash_current_command) - 1 ? s->len : (int)sizeof(bash_current_command) - 1;
+        memcpy(bash_current_command, s->chars, len);
+        bash_current_command[len] = '\0';
+    }
 }
 
 extern "C" void bash_set_arith_context(Item expr_text) {
