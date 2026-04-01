@@ -100,7 +100,9 @@ extern bool target_equal(Target* a, Target* b);
 #include "py/py_async.h"
 #include "py/py_stdlib.h"
 #include "bash/bash_runtime.h"
+#ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
+#endif
 #include "js/js_dom.h"
 #include "js/js_typed_array.h"
 #include "js/js_event_loop.h"
@@ -1879,6 +1881,7 @@ JitImport jit_runtime_imports[] = {
     {"ts_enum_add_member", FPTR(ts_enum_add_member)},
     {"ts_enum_freeze", FPTR(ts_enum_freeze)},
 
+#ifdef LAMBDA_RUBY
     // Ruby runtime functions
     {"rb_to_int", FPTR(rb_to_int)},
     {"rb_to_float", FPTR(rb_to_float)},
@@ -1939,6 +1942,7 @@ JitImport jit_runtime_imports[] = {
     {"rb_builtin_len", FPTR(rb_builtin_len)},
     {"rb_builtin_type", FPTR(rb_builtin_type)},
     {"rb_builtin_rand", FPTR(rb_builtin_rand)},
+#endif // LAMBDA_RUBY
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

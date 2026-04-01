@@ -39,7 +39,9 @@
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
 #include "ts/ts_transpiler.hpp"      // TypeScript transpiler
+#ifdef LAMBDA_RUBY
 #include "rb/rb_transpiler.hpp"      // Ruby transpiler
+#endif
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1115,6 +1117,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+#ifdef LAMBDA_RUBY
     // Handle Ruby command
     log_debug("Checking for rb command");
     if (argc >= 2 && strcmp(argv[1], "rb") == 0) {
@@ -1176,6 +1179,7 @@ int main(int argc, char *argv[]) {
         log_finish();
         return 0;
     }
+#endif // LAMBDA_RUBY
 
     // Handle Bash command — either explicit "bash" subcommand or auto-detect
     log_debug("Checking for bash command");
