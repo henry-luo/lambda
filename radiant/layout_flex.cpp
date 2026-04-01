@@ -2246,12 +2246,20 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
         log_debug("Step 1: Creating View for %s", child->source_loc());
         init_flex_item_view(lycon, child);
 
+        // Check if init_flex_item_view skipped this child (display:none)
+        // In that case no View was created and we must not process further
+        ViewElement* item = (ViewElement*)child->as_element();
+        if (item->display.outer == CSS_VALUE_NONE) {
+            log_debug("Skipping display:none flex child: %s", child->node_name());
+            child = child->next_sibling;
+            continue;
+        }
+
         // Step 2: Measure content (uses resolved styles)
         log_debug("Step 2: Measuring content for %s", child->source_loc());
         measure_flex_child_content(lycon, child);
 
         // Now child IS the View (unified tree) - get as ViewGroup
-        ViewElement* item = (ViewElement*)child->as_element();
 
         // Step 3: Check if should skip (absolute, hidden)
         if (should_skip_flex_item(item)) {

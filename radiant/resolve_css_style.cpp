@@ -6811,7 +6811,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 // Single value - all corners get same radius
-                float radius = value->data.length.value;
+                float radius = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, value);
 
                 // Check specificity before setting each corner
                 if (specificity >= span->bound->border->radius.tl_specificity) {
@@ -6839,8 +6839,8 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 if (count == 2 && (values[0]->type == CSS_VALUE_TYPE_LENGTH || values[0]->type == CSS_VALUE_TYPE_NUMBER) &&
                            (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left/bottom-right, top-right/bottom-left
-                    float diagonal1 = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float diagonal2 = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
+                    float diagonal1 = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
+                    float diagonal2 = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = diagonal1;
@@ -6863,9 +6863,9 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                            (values[1]->type == CSS_VALUE_TYPE_LENGTH || values[1]->type == CSS_VALUE_TYPE_NUMBER) &&
                            (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left, top-right/bottom-left, bottom-right
-                    float top_left = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float diagonal = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom_right = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
+                    float top_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
+                    float diagonal = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
+                    float bottom_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[2]);
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
@@ -6889,10 +6889,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                            (values[2]->type == CSS_VALUE_TYPE_LENGTH || values[2]->type == CSS_VALUE_TYPE_NUMBER) &&
                            (values[3]->type == CSS_VALUE_TYPE_LENGTH || values[3]->type == CSS_VALUE_TYPE_NUMBER)) {
                     // top-left, top-right, bottom-right, bottom-left
-                    float top_left = (values[0]->type == CSS_VALUE_TYPE_LENGTH) ? values[0]->data.length.value : values[0]->data.number.value;
-                    float top_right = (values[1]->type == CSS_VALUE_TYPE_LENGTH) ? values[1]->data.length.value : values[1]->data.number.value;
-                    float bottom_right = (values[2]->type == CSS_VALUE_TYPE_LENGTH) ? values[2]->data.length.value : values[2]->data.number.value;
-                    float bottom_left = (values[3]->type == CSS_VALUE_TYPE_LENGTH) ? values[3]->data.length.value : values[3]->data.number.value;
+                    float top_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[0]);
+                    float top_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[1]);
+                    float bottom_right = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[2]);
+                    float bottom_left = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, values[3]);
 
                     if (specificity >= span->bound->border->radius.tl_specificity) {
                         span->bound->border->radius.top_left = top_left;
