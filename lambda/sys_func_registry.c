@@ -1660,6 +1660,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_get_shell_flags", FPTR(bash_get_shell_flags)},
     {"bash_get_lineno", FPTR(bash_get_lineno)},
     {"bash_set_lineno", FPTR(bash_set_lineno)},
+    {"bash_set_command", FPTR(bash_set_command)},
     {"bash_set_arith_context", FPTR(bash_set_arith_context)},
     {"bash_get_funcname", FPTR(bash_get_funcname)},
     {"bash_get_funcname_count", FPTR(bash_get_funcname_count)},
@@ -1701,6 +1702,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_redirect_read", FPTR(bash_redirect_read)},
     // external command execution
     {"bash_exec_external", FPTR(bash_exec_external)},
+    {"bash_exec_cmd_with_array", FPTR(bash_exec_cmd_with_array)},
     // expansions (tilde, glob, brace)
     {"bash_expand_tilde", FPTR(bash_expand_tilde)},
     {"bash_expand_tilde_assign", FPTR(bash_expand_tilde_assign)},

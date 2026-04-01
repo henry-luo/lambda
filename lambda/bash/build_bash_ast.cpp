@@ -36,6 +36,7 @@ static BashAstNode* build_list(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_subshell(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_compound_statement(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_word(BashTranspiler* tp, TSNode node);
+static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, TSNode node);
 static BashAstNode* build_string_node(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_raw_string(BashTranspiler* tp, TSNode node);
 static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node);
@@ -314,6 +315,7 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
 
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* args_tail = NULL;
+    uint32_t prev_arg_end_byte = 0;  // track end byte of previous argument for merge detection
     cmd->arg_count = 0;
     int last_assign_line = -1;   // track last prefix-assignment line
     int cmd_name_line = -1;      // track command_name line
@@ -366,6 +368,8 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
         StrView ch_src = bash_node_source(tp, child);
         TSPoint ch_start = ts_node_start_point(child);
         TSPoint ch_end = ts_node_end_point(child);
+        uint32_t ch_start_byte = ts_node_start_byte(child);
+        uint32_t ch_end_byte = ts_node_end_byte(child);
 
         // skip redirect children – they are handled separately
         if (strcmp(child_type, "herestring_redirect") == 0 ||
@@ -445,8 +449,103 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
 
         if (!child_ast) continue;
 
+        // tree-sitter sometimes splits a single argument into multiple adjacent nodes
+        // (e.g., "$a/$b/file" → argument "$a/" + argument "$b/file").
+        // detect this by checking if this child starts exactly where the previous one ended
+        // (no whitespace gap), or with only a "$" in between (anonymous token lost by tree-sitter).
+        if (args_tail && prev_arg_end_byte > 0) {
+            bool should_merge = false;
+            bool has_dollar_gap = false;
+            if (ch_start_byte == prev_arg_end_byte) {
+                should_merge = true;
+            } else if (ch_start_byte == prev_arg_end_byte + 1 && tp->source &&
+                       prev_arg_end_byte < (uint32_t)tp->source_length &&
+                       tp->source[prev_arg_end_byte] == '$') {
+                // the gap is a single '$' that tree-sitter treated as anonymous token
+                should_merge = true;
+                has_dollar_gap = true;
+            }
+            if (should_merge) {
+                // check if prevarg's trailing anonymous '$' or a gap '$' needs handling
+                bool needs_dollar_prefix = has_dollar_gap;
+                if (!has_dollar_gap && ch_start_byte > 0 && tp->source &&
+                    ch_start_byte <= (uint32_t)tp->source_length &&
+                    tp->source[ch_start_byte - 1] == '$') {
+                    // anonymous '$' inside the previous node (trailing)
+                    needs_dollar_prefix = true;
+                }
+                if (needs_dollar_prefix) {
+                    // reconstruct the text with the '$' prefix and scan for variable refs
+                    uint32_t text_start = has_dollar_gap ? prev_arg_end_byte : (ch_start_byte - 1);
+                    String* full_text = name_pool_create_len(tp->name_pool,
+                        tp->source + text_start,
+                        ch_end_byte - text_start);
+                    BashAstNode* split_result = scan_text_for_dollar_vars(tp, full_text, child);
+                    if (split_result) {
+                        child_ast = split_result;
+                    } else {
+                        BashWordNode* synth = (BashWordNode*)alloc_bash_ast_node(
+                            tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                        synth->text = full_text;
+                        child_ast = (BashAstNode*)synth;
+                    }
+                }
+                // merge: wrap args_tail and child_ast into a concatenation
+            BashConcatNode* concat = NULL;
+            if (args_tail->node_type == BASH_AST_NODE_CONCATENATION) {
+                // previous arg is already a concat — just append to it
+                concat = (BashConcatNode*)args_tail;
+                BashAstNode* tail = concat->parts;
+                while (tail && tail->next) tail = tail->next;
+                // if child_ast is a concat, flatten its parts into this concat
+                if (child_ast->node_type == BASH_AST_NODE_CONCATENATION) {
+                    BashAstNode* parts = ((BashConcatNode*)child_ast)->parts;
+                    if (tail) tail->next = parts;
+                    else concat->parts = parts;
+                } else {
+                    child_ast->next = NULL;
+                    if (tail) tail->next = child_ast;
+                    else concat->parts = child_ast;
+                }
+            } else {
+                // create new concat node wrapping both
+                concat = (BashConcatNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_CONCATENATION, child, sizeof(BashConcatNode));
+                BashAstNode* prev = args_tail;
+                // detach prev from the arg list (it's being absorbed into concat)
+                prev->next = child_ast;
+                child_ast->next = NULL;
+                concat->parts = prev;
+                // replace args_tail in the list with the concat
+                if (cmd->args == args_tail) {
+                    cmd->args = (BashAstNode*)concat;
+                } else {
+                    // find the node before args_tail
+                    BashAstNode* p = cmd->args;
+                    while (p && p->next != args_tail) p = p->next;
+                    if (p) p->next = (BashAstNode*)concat;
+                }
+            }
+            args_tail = (BashAstNode*)concat;
+            prev_arg_end_byte = ch_end_byte;
+            continue;
+            }
+        }
+
+        // check if the name node also needs merging (rare: command_name and first arg adjacent)
         if (!cmd->name) {
             cmd->name = child_ast;
+        } else if (cmd->name && !cmd->args && cmd->name != child_ast &&
+                   ch_start_byte == prev_arg_end_byte) {
+            // merge name + this child into a concatenation to form the real name
+            BashConcatNode* concat = (BashConcatNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_CONCATENATION, child, sizeof(BashConcatNode));
+            cmd->name->next = child_ast;
+            child_ast->next = NULL;
+            concat->parts = cmd->name;
+            cmd->name = (BashAstNode*)concat;
+            prev_arg_end_byte = ch_end_byte;
+            continue;
         } else {
             if (!cmd->args) {
                 cmd->args = child_ast;
@@ -456,6 +555,7 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
             args_tail = child_ast;
             cmd->arg_count++;
         }
+        prev_arg_end_byte = ch_end_byte;
     }
 
     // split: if all prefix assignments are on an earlier line than the command_name,
@@ -538,10 +638,141 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
     return (BashAstNode*)cmd;
 }
 
+// scan text for embedded $var patterns (e.g. "$b/file" where tree-sitter missed the $)
+// returns a BashConcatNode if $vars found, or NULL if no splitting needed
+static BashAstNode* scan_text_for_dollar_vars(BashTranspiler* tp, String* text, TSNode node) {
+    if (!text || text->len < 2) return NULL;
+    bool has_dollar = false;
+    for (int k = 0; k < text->len; k++) {
+        if (text->chars[k] == '$') { has_dollar = true; break; }
+    }
+    if (!has_dollar) return NULL;
+
+    BashConcatNode* concat = NULL;
+    BashAstNode* parts_tail = NULL;
+    int i = 0;
+    int literal_start = 0;
+    bool did_split = false;
+
+    while (i < text->len) {
+        if (text->chars[i] == '\\' && i + 1 < text->len) { i += 2; continue; }
+        if (text->chars[i] == '$' && i + 1 < text->len) {
+            char next = text->chars[i + 1];
+            bool is_var = false;
+            int var_name_end = i + 1;
+
+            if (next == '{') {
+                int depth = 1; int j = i + 2;
+                while (j < text->len && depth > 0) {
+                    if (text->chars[j] == '{') depth++;
+                    else if (text->chars[j] == '}') depth--;
+                    j++;
+                }
+                if (depth == 0) { is_var = true; var_name_end = j; }
+            } else if ((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || next == '_') {
+                int j = i + 1;
+                while (j < text->len && ((text->chars[j] >= 'a' && text->chars[j] <= 'z') ||
+                       (text->chars[j] >= 'A' && text->chars[j] <= 'Z') ||
+                       (text->chars[j] >= '0' && text->chars[j] <= '9') || text->chars[j] == '_')) j++;
+                is_var = true; var_name_end = j;
+            } else if (next == '?' || next == '#' || next == '@' || next == '*' ||
+                       next == '$' || next == '!' || next == '-' ||
+                       (next >= '0' && next <= '9')) {
+                is_var = true; var_name_end = i + 2;
+            }
+
+            if (is_var) {
+                did_split = true;
+                if (!concat) concat = (BashConcatNode*)alloc_bash_ast_node(
+                    tp, BASH_AST_NODE_CONCATENATION, node, sizeof(BashConcatNode));
+                // emit literal part before the variable
+                if (i > literal_start) {
+                    BashWordNode* lit = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
+                    lit->text = name_pool_create_len(tp->name_pool, text->chars + literal_start, i - literal_start);
+                    if (!concat->parts) concat->parts = (BashAstNode*)lit;
+                    else parts_tail->next = (BashAstNode*)lit;
+                    parts_tail = (BashAstNode*)lit;
+                }
+                // emit variable reference
+                if (text->chars[i + 1] == '{') {
+                    int name_s = i + 2;
+                    int name_e = var_name_end - 1;
+                    BashVarRefNode* ref = (BashVarRefNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_VARIABLE_REF, node, sizeof(BashVarRefNode));
+                    ref->name = name_pool_create_len(tp->name_pool, text->chars + name_s, name_e - name_s);
+                    if (!concat->parts) concat->parts = (BashAstNode*)ref;
+                    else parts_tail->next = (BashAstNode*)ref;
+                    parts_tail = (BashAstNode*)ref;
+                } else {
+                    int name_s = i + 1;
+                    int name_len = var_name_end - name_s;
+                    if (name_len == 1 && (text->chars[name_s] == '?' || text->chars[name_s] == '#' ||
+                        text->chars[name_s] == '@' || text->chars[name_s] == '*' ||
+                        text->chars[name_s] == '$' || text->chars[name_s] == '!' ||
+                        text->chars[name_s] == '-' ||
+                        (text->chars[name_s] >= '0' && text->chars[name_s] <= '9'))) {
+                        BashSpecialVarNode* sv = (BashSpecialVarNode*)alloc_bash_ast_node(
+                            tp, BASH_AST_NODE_SPECIAL_VARIABLE, node, sizeof(BashSpecialVarNode));
+                        switch (text->chars[name_s]) {
+                        case '?': sv->special_id = BASH_SPECIAL_QUESTION; break;
+                        case '#': sv->special_id = BASH_SPECIAL_HASH; break;
+                        case '@': sv->special_id = BASH_SPECIAL_AT; break;
+                        case '*': sv->special_id = BASH_SPECIAL_STAR; break;
+                        case '$': sv->special_id = BASH_SPECIAL_DOLLAR; break;
+                        case '!': sv->special_id = BASH_SPECIAL_BANG; break;
+                        case '-': sv->special_id = BASH_SPECIAL_DASH; break;
+                        default:
+                            if (text->chars[name_s] >= '0' && text->chars[name_s] <= '9')
+                                sv->special_id = BASH_SPECIAL_ZERO + (text->chars[name_s] - '0');
+                            else sv->special_id = BASH_SPECIAL_QUESTION;
+                            break;
+                        }
+                        if (!concat->parts) concat->parts = (BashAstNode*)sv;
+                        else parts_tail->next = (BashAstNode*)sv;
+                        parts_tail = (BashAstNode*)sv;
+                    } else {
+                        BashVarRefNode* ref = (BashVarRefNode*)alloc_bash_ast_node(
+                            tp, BASH_AST_NODE_VARIABLE_REF, node, sizeof(BashVarRefNode));
+                        ref->name = name_pool_create_len(tp->name_pool, text->chars + name_s, name_len);
+                        if (!concat->parts) concat->parts = (BashAstNode*)ref;
+                        else parts_tail->next = (BashAstNode*)ref;
+                        parts_tail = (BashAstNode*)ref;
+                    }
+                }
+                literal_start = var_name_end;
+                i = var_name_end;
+                continue;
+            }
+        }
+        i++;
+    }
+
+    if (did_split && concat) {
+        if (literal_start < text->len) {
+            BashWordNode* lit = (BashWordNode*)alloc_bash_ast_node(
+                tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
+            lit->text = name_pool_create_len(tp->name_pool, text->chars + literal_start, text->len - literal_start);
+            if (!concat->parts) concat->parts = (BashAstNode*)lit;
+            else parts_tail->next = (BashAstNode*)lit;
+        }
+        return (BashAstNode*)concat;
+    }
+    return NULL;
+}
+
 static BashAstNode* build_word(BashTranspiler* tp, TSNode node) {
+    String* text = node_text(tp, node);
+    
+    // detect if the word contains embedded $var patterns that tree-sitter missed
+    if (text && text->len > 1) {
+        BashAstNode* result = scan_text_for_dollar_vars(tp, text, node);
+        if (result) return result;
+    }
+
     BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
         tp, BASH_AST_NODE_WORD, node, sizeof(BashWordNode));
-    word->text = node_text(tp, node);
+    word->text = text;
     return (BashAstNode*)word;
 }
 
@@ -1268,8 +1499,8 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
             continue;
         }
 
-        // named children: variable_name, word, regex, number
-        if (strcmp(ch_type, "variable_name") == 0) {
+        // named children: variable_name, special_variable_name, word, regex, number
+        if (strcmp(ch_type, "variable_name") == 0 || strcmp(ch_type, "special_variable_name") == 0) {
             expansion->variable = node_text(tp, ch);
             found_var = true;
         } else if (!found_var && strcmp(ch_type, "#") == 0) {
@@ -1892,6 +2123,8 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
     bool is_export = (source.length >= 6 && strncmp(source.str, "export", 6) == 0);
     bool is_declare = (source.length >= 7 && strncmp(source.str, "declare", 7) == 0) ||
                       (source.length >= 7 && strncmp(source.str, "typeset", 7) == 0);
+    // typeset/declare inside functions create local variables (like local)
+    if (is_declare) is_local = true;
 
     // parse declare/local flags from source: "declare -Ai var=value" or "local -i var=value"
     int declare_flags = BASH_ATTR_NONE;
