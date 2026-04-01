@@ -93,6 +93,7 @@ extern bool target_equal(Target* a, Target* b);
 
 // JS runtime functions
 #include "js/js_runtime.h"
+#include "ts/ts_runtime.h"
 #include "py/py_runtime.h"
 #include "py/py_class.h"
 #include "py/py_bigint.h"
@@ -1856,6 +1857,18 @@ JitImport jit_runtime_imports[] = {
     {"edit_undo", FPTR(edit_undo)},
     {"edit_redo", FPTR(edit_redo)},
     {"edit_current", FPTR(edit_current)},
+
+    // ========================================================================
+    // TS runtime
+    // ========================================================================
+    {"ts_typeof", FPTR(ts_typeof)},
+    {"ts_check_shape", FPTR(ts_check_shape)},
+    {"ts_assert_type", FPTR(ts_assert_type)},
+    {"ts_type_info", FPTR(ts_type_info)},
+    {"ts_box_type", FPTR(ts_box_type)},
+    {"ts_enum_create", FPTR(ts_enum_create)},
+    {"ts_enum_add_member", FPTR(ts_enum_add_member)},
+    {"ts_enum_freeze", FPTR(ts_enum_freeze)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

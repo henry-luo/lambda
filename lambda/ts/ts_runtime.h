@@ -12,6 +12,8 @@ extern "C" {
 Item ts_typeof(Item value);
 Item ts_check_shape(Item obj, Item type_item);
 Item ts_assert_type(Item value, Item type_item);
+Item ts_type_info(Item value);
+Item ts_box_type(Type* type);
 
 // enum support
 Item ts_enum_create(int member_count);

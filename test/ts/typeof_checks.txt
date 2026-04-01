@@ -1,0 +1,7 @@
+got number
+got string
+bool
+str
+other
+undefined
+object

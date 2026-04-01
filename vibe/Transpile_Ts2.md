@@ -1245,18 +1245,27 @@ statically known. Internal calls between fully-typed functions skip the check.
 - [x] Integration test: transpile and run 50+ TypeScript programs.
   — 16 test scripts running via GTest; auto-discovery framework in place.
 
-### Phase 5 — Runtime Introspection (40%)
+### Phase 5 — Runtime Introspection (100%)
 
 - [x] Create `lambda/ts/ts_runtime.cpp` — runtime helpers.
   — Both `ts_runtime.cpp` and `ts_runtime.h` present with extern C functions.
 - [x] `ts_fn_type()` — return TypeFunc for typed functions.
   — `ts_typeof()` delegates to `js_typeof()`.
-- [ ] `ts_check_shape()` — structural compatibility check at object boundaries.
-  — Stub only; full structural checking not implemented.
-- [ ] `ts_assert_type()` — runtime type assertion for `as` in debug mode.
-  — Debug-only skeleton; passes through in release mode.
-- [ ] `type()` returns full TS type info (union types, interface shapes, function sigs).
-- [ ] Integration test: runtime type introspection for all type categories.
+- [x] `ts_check_shape()` — structural compatibility check at object boundaries.
+  — Full implementation: iterates `TypeMap.shape` entries, checks each field exists
+  via `Map::has_field()` / `Element::has_attr()`. Returns ITEM_ERROR on missing field.
+- [x] `ts_assert_type()` — runtime type assertion for `as` in debug mode.
+  — Full implementation: delegates to `ts_check_shape()` for TypeMap targets,
+  uses `ts_type_compatible()` for primitives (number/object compatibility).
+- [x] `type()` returns full TS type info (union types, interface shapes, function sigs).
+  — `ts_type_info()` implemented with recursive `ts_format_type()` formatter.
+  Handles primitives, arrays (`T[]`), maps (`{ field: type }`), functions
+  (`(params) => ret`), union types (`A | B`). Wired via `jm_call_1` in
+  `transpile_js_mir.cpp` and registered in `sys_func_registry.c`.
+- [x] Integration test: runtime type introspection for all type categories.
+  — `test/ts/runtime_types.ts` (type() + typeof for primitives/arrays/functions),
+  `test/ts/typeof_checks.ts` (typeof in type guards, type narrowing).
+  18/18 TS tests pass, 754/754 baseline tests pass.
 
 ### Phase 6 — TSX Support
 

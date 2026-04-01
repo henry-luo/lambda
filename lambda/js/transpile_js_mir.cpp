@@ -7640,6 +7640,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, url_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, opts_arg));
             }
+            // type(val) — runtime type introspection (TS-aware)
+            if (nl == 4 && strncmp(n, "type", 4) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "ts_type_info", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
         }
 
         NameEntry* entry = js_scope_lookup(mt->tp, id->name);
