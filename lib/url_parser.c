@@ -12,6 +12,34 @@
 #include "log.h"
 #include "str.h"
 
+// percent-encode non-ASCII bytes in a URL component.
+// Characters already percent-encoded (%XX) are preserved.
+// Returns a malloc'd string; caller must free.
+static char* url_percent_encode(const char* input, size_t len) {
+    // worst case: every byte becomes %XX (3x expansion)
+    char* out = malloc(len * 3 + 1);
+    if (!out) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == '%' && i + 2 < len &&
+            isxdigit((unsigned char)input[i+1]) && isxdigit((unsigned char)input[i+2])) {
+            // already percent-encoded, pass through
+            out[j++] = input[i];
+            out[j++] = input[i+1];
+            out[j++] = input[i+2];
+            i += 2;
+        } else if (c > 0x7E) {
+            // non-ASCII: percent-encode each byte
+            j += sprintf(out + j, "%%%02X", c);
+        } else {
+            out[j++] = (char)c;
+        }
+    }
+    out[j] = '\0';
+    return out;
+}
+
 // Create URL parser
 UrlParser* url_parser_create(const char* input) {
     if (!input) return NULL;
@@ -207,8 +235,15 @@ UrlError url_parse_into(const char* input, Url* url) {
         if (path_buf) {
             strncpy(path_buf, path_start, path_len);
             path_buf[path_len] = '\0';
+            // Normalize backslashes to forward slashes per URL spec
+            for (size_t pi = 0; pi < path_len; pi++) {
+                if (path_buf[pi] == '\\') path_buf[pi] = '/';
+            }
+            // Percent-encode non-ASCII bytes
+            char* encoded = url_percent_encode(path_buf, strlen(path_buf));
             url_free_string(url->pathname);
-            url->pathname = url_create_string(path_buf);
+            url->pathname = url_create_string(encoded ? encoded : path_buf);
+            if (encoded) free(encoded);
             free(path_buf);
         }
     } else if (url->scheme == URL_SCHEME_HTTP || url->scheme == URL_SCHEME_HTTPS) {
@@ -238,8 +273,11 @@ UrlError url_parse_into(const char* input, Url* url) {
                 query_buf[0] = '?';
                 strncpy(query_buf + 1, query_start, query_len);
                 query_buf[query_len + 1] = '\0';
+                // Percent-encode non-ASCII bytes
+                char* encoded = url_percent_encode(query_buf, strlen(query_buf));
                 url_free_string(url->search);
-                url->search = url_create_string(query_buf);
+                url->search = url_create_string(encoded ? encoded : query_buf);
+                if (encoded) free(encoded);
                 free(query_buf);
             }
         }
@@ -267,9 +305,60 @@ UrlError url_parse_into(const char* input, Url* url) {
         }
     }
 
-    // Update href (full input)
-    url_free_string(url->href);
-    url->href = url_create_string(input);
+    // Reconstruct href from parsed components (normalized)
+    {
+        char href_buf[4096];
+        int pos = 0;
+        // protocol
+        if (url->protocol && url->protocol->chars) {
+            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->protocol->chars);
+            if (n > 0) pos += n;
+        }
+        // authority
+        if (url->hostname && url->hostname->chars && url->hostname->chars[0]) {
+            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "//");
+            if (n > 0) pos += n;
+            // credentials
+            if (url->username && url->username->chars && url->username->chars[0]) {
+                n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->username->chars);
+                if (n > 0) pos += n;
+                if (url->password && url->password->chars && url->password->chars[0]) {
+                    n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->password->chars);
+                    if (n > 0) pos += n;
+                }
+                n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "@");
+                if (n > 0) pos += n;
+            }
+            n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hostname->chars);
+            if (n > 0) pos += n;
+            // port (only if non-default)
+            if (url->port && url->port->chars && url->port->chars[0]) {
+                uint16_t default_port = url_default_port_for_scheme(url->scheme);
+                if (url->port_number != default_port) {
+                    n = snprintf(href_buf + pos, sizeof(href_buf) - pos, ":%s", url->port->chars);
+                    if (n > 0) pos += n;
+                }
+            }
+        }
+        // pathname
+        if (url->pathname && url->pathname->chars) {
+            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->pathname->chars);
+            if (n > 0) pos += n;
+        }
+        // search
+        if (url->search && url->search->chars) {
+            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->search->chars);
+            if (n > 0) pos += n;
+        }
+        // hash
+        if (url->hash && url->hash->chars) {
+            int n = snprintf(href_buf + pos, sizeof(href_buf) - pos, "%s", url->hash->chars);
+            if (n > 0) pos += n;
+        }
+        href_buf[pos] = '\0';
+        url_free_string(url->href);
+        url->href = url_create_string(href_buf);
+    }
     if (!url->href) {
         return URL_ERROR_MEMORY_ALLOCATION;
     }
