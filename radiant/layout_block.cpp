@@ -445,6 +445,7 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
         // Create pseudo-element even for empty content if display/clear properties are set
         // Pass block->font (from ViewBlock) for accurate font-family inheritance
         pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font);
+        pseudo->before_generated = true;
         log_debug("%s [PSEUDO] Created ::before for <%s> with content='%s'", block->source_loc(),
                   elem->tag_name ? elem->tag_name : "?", before_content ? before_content : "(empty)");
     }
@@ -468,6 +469,7 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
 
         // Pass block->font (from ViewBlock) for accurate font-family inheritance
         pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
+        pseudo->after_generated = true;
         log_debug("%s [PSEUDO] Created ::after for <%s> with content='%s'", block->source_loc(),
                   elem->tag_name ? elem->tag_name : "?", after_content ? after_content : "(empty)");
     }

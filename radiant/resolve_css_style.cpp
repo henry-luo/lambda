@@ -141,6 +141,8 @@ static Color hsl_to_rgb(float h, float s, float l, float a) {
     return result;
 }
 
+static Color get_current_color(LayoutContext* lycon);
+
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
     Color result;
     result.r = 0;
@@ -170,14 +172,20 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
                                 (float)hsl.a / 255.0f);
             break;
         }
+        case CSS_COLOR_CURRENTCOLOR:
+            result = get_current_color(lycon);
+            break;
         default:
             break;
         }
         break;
     }
     case CSS_VALUE_TYPE_KEYWORD: {
-        // map color keyword to RGB
-        result = color_name_to_rgb(value->data.keyword);
+        if (value->data.keyword == CSS_VALUE_CURRENTCOLOR) {
+            result = get_current_color(lycon);
+        } else {
+            result = color_name_to_rgb(value->data.keyword);
+        }
         break;
     }
     case CSS_VALUE_TYPE_FUNCTION: {
@@ -334,6 +342,27 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value) {
         break;
     }
     return result;
+}
+
+// Get the CSS currentColor value for the element being styled.
+// Since 'color' may not be resolved yet on the current element (border properties
+// are processed before color in AVL tree order), walk up the parent chain.
+static Color get_current_color(LayoutContext* lycon) {
+    ViewSpan* span = (ViewSpan*)lycon->view;
+    if (span && span->in_line && span->in_line->color.c != 0) {
+        return span->in_line->color;
+    }
+    DomNode* p = span ? span->parent : nullptr;
+    while (p) {
+        if (p->is_element()) {
+            DomElement* pe = (DomElement*)p;
+            if (pe->in_line && pe->in_line->color.c != 0) {
+                return pe->in_line->color;
+            }
+        }
+        p = p->parent;
+    }
+    return Color{0xFF000000};
 }
 
 // ============================================================================
@@ -6211,7 +6240,7 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // CSS spec: when no color specified, default to currentColor (text color)
             if (border_color.c == 0 && border_style >= 0 &&
                 border_style != CSS_VALUE_NONE && border_style != CSS_VALUE_HIDDEN) {
-                border_color.c = 0xFF000000;  // opaque black (ABGR) as default currentColor
+                border_color = get_current_color(lycon);
             }
             if (border_width >= 0) {
                 span->bound->border->width.top = border_width;
@@ -6279,6 +6308,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (border.color) {
                 span->bound->border->top_color = resolve_color_value(lycon, border.color);
                 span->bound->border->top_color_specificity = specificity;
+            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
+                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                span->bound->border->top_color = get_current_color(lycon);
+                span->bound->border->top_color_specificity = specificity;
             }
             break;
         }
@@ -6315,6 +6348,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (border.color) {
                 span->bound->border->right_color = resolve_color_value(lycon, border.color);
+                span->bound->border->right_color_specificity = specificity;
+            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
+                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                span->bound->border->right_color = get_current_color(lycon);
                 span->bound->border->right_color_specificity = specificity;
             }
             break;
@@ -6353,6 +6390,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (border.color) {
                 span->bound->border->bottom_color = resolve_color_value(lycon, border.color);
                 span->bound->border->bottom_color_specificity = specificity;
+            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
+                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                span->bound->border->bottom_color = get_current_color(lycon);
+                span->bound->border->bottom_color_specificity = specificity;
             }
             break;
         }
@@ -6389,6 +6430,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
             if (border.color) {
                 span->bound->border->left_color = resolve_color_value(lycon, border.color);
+                span->bound->border->left_color_specificity = specificity;
+            } else if (border.style && border.style->data.keyword != CSS_VALUE_NONE &&
+                       border.style->data.keyword != CSS_VALUE_HIDDEN) {
+                span->bound->border->left_color = get_current_color(lycon);
                 span->bound->border->left_color_specificity = specificity;
             }
             break;
