@@ -68,8 +68,12 @@ typedef struct JsTranspiler {
     // Runtime integration
     Runtime* runtime;               // Lambda runtime context
 
-    // Extension hook: override expression builder (used by TS transpiler)
-    JsAstNode* (*expr_builder_override)(void* tp, TSNode node);
+    // Unified JS/TS mode flags
+    bool strict_js;                 // true = reject TS syntax (pure JS mode), false = allow TS
+    bool emit_runtime_checks;       // emit ts_assert_type/ts_check_shape calls (TS dev mode)
+
+    // Type registry: name → Type* (TS interfaces, aliases, enums)
+    struct hashmap* type_registry;
 } JsTranspiler;
 
 // JavaScript type mapping functions

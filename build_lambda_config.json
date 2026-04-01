@@ -32,6 +32,7 @@
     ],
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
+        "lambda/ts/build_ts_ast.cpp",
         "radiant/radiant.cpp",
         "radiant/render_dvi.cpp",
         "radiant/render_texnode.cpp",
@@ -54,7 +55,6 @@
         "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
         "lambda/tree-sitter-typescript/bindings/c",
         "lambda/tree-sitter-python/bindings/c",
         "lambda/tree-sitter-bash/bindings/c",
@@ -80,12 +80,6 @@
             "name": "tree-sitter-lambda",
             "include": "lambda/tree-sitter-lambda/bindings/c",
             "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-javascript",
-            "include": "lambda/tree-sitter-javascript/bindings/c",
-            "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
             "link": "static"
         },
         {
@@ -489,7 +483,6 @@
                 "build_temp/re2-noabsl",
                 "lambda/tree-sitter/lib/include",
                 "lambda/tree-sitter-lambda/bindings/c",
-                "lambda/tree-sitter-javascript/bindings/c",
                 "mac-deps/rpmalloc-install/include"
             ],
             "exclude_libraries": [
@@ -889,12 +882,6 @@
                     "name": "tree-sitter-lambda",
                     "include": "lambda/tree-sitter-lambda/bindings/c",
                     "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-                    "link": "static"
-                },
-                {
-                    "name": "tree-sitter-javascript",
-                    "include": "lambda/tree-sitter-javascript/bindings/c",
-                    "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
                     "link": "static"
                 },
                 {

@@ -557,7 +557,7 @@ static JsAstNode* build_ts_expression(TsTranspiler* tp, TSNode node) {
     }
 
     // delegate to JS expression builder
-    return build_js_expression((JsTranspiler*)tp, node);
+    return build_js_expression(tp, node);
 }
 
 // Override hook called from build_js_expression for unknown node types.
@@ -613,7 +613,7 @@ static JsAstNode* build_ts_parameter(TsTranspiler* tp, TSNode param_node, bool i
             JS_AST_NODE_REST_ELEMENT, param_node, sizeof(JsSpreadElementNode));
         if (ts_node_named_child_count(param_node) > 0) {
             TSNode inner = ts_node_named_child(param_node, 0);
-            rest->argument = build_js_expression((JsTranspiler*)tp, inner);
+            rest->argument = build_js_expression(tp, inner);
         }
         rest->base.type = &TYPE_ARRAY;
         return (JsAstNode*)rest;
@@ -621,7 +621,7 @@ static JsAstNode* build_ts_parameter(TsTranspiler* tp, TSNode param_node, bool i
 
     // plain identifier (single-param arrow: x => ...) — no type annotation
     if (strcmp(ptype, "identifier") == 0) {
-        return build_js_identifier((JsTranspiler*)tp, param_node);
+        return build_js_identifier(tp, param_node);
     }
 
     // required_parameter or optional_parameter from the TS grammar
@@ -652,7 +652,7 @@ static JsAstNode* build_ts_parameter(TsTranspiler* tp, TSNode param_node, bool i
         if (!ts_node_is_null(name_node)) {
             const char* ntype = ts_node_type(name_node);
             if (strcmp(ntype, "identifier") == 0) {
-                name_ast = build_js_identifier((JsTranspiler*)tp, name_node);
+                name_ast = build_js_identifier(tp, name_node);
             } else {
                 name_ast = build_ts_expression(tp, name_node);
             }
@@ -673,11 +673,11 @@ static JsAstNode* build_ts_parameter(TsTranspiler* tp, TSNode param_node, bool i
 
     // assignment_pattern: param = defaultValue (can appear in TS formal_parameters too)
     if (strcmp(ptype, "assignment_pattern") == 0) {
-        return build_js_expression((JsTranspiler*)tp, param_node);
+        return build_js_expression(tp, param_node);
     }
 
     // fallback: delegate to JS expression builder
-    return build_js_expression((JsTranspiler*)tp, param_node);
+    return build_js_expression(tp, param_node);
 }
 
 // Build a function from the TS parser CST — handles TS-specific parameter nodes
@@ -791,7 +791,7 @@ static JsAstNode* build_ts_function(TsTranspiler* tp, TSNode func_node) {
     if (!ts_node_is_null(body_node)) {
         const char* body_type = ts_node_type(body_node);
         if (strcmp(body_type, "statement_block") == 0) {
-            func->body = build_js_block_statement((JsTranspiler*)tp, body_node);
+            func->body = build_js_block_statement(tp, body_node);
         } else {
             // arrow function with expression body
             func->body = build_ts_expression(tp, body_node);
@@ -803,7 +803,7 @@ static JsAstNode* build_ts_function(TsTranspiler* tp, TSNode func_node) {
     // add function to scope if named (not method definitions)
     bool is_method_def = (strcmp(node_type, "method_definition") == 0);
     if (func->name && !is_method_def) {
-        js_scope_define((JsTranspiler*)tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
+        js_scope_define(tp, func->name, (JsAstNode*)func, JS_VAR_VAR);
     }
 
     return (JsAstNode*)func;
@@ -868,7 +868,7 @@ static JsAstNode* build_ts_class_body(TsTranspiler* tp, TSNode body_node) {
         if (strcmp(child_type, "field_definition") == 0) {
             // delegate to JS field builder (TS field_definition may have type annotation
             // but layout is the same)
-            member = build_js_field_definition((JsTranspiler*)tp, child_node);
+            member = build_js_field_definition(tp, child_node);
         } else if (strcmp(child_type, "method_definition") == 0) {
             // build the method with TS parameter handling
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)alloc_ts_ast_node(tp,
@@ -894,7 +894,7 @@ static JsAstNode* build_ts_class_body(TsTranspiler* tp, TSNode body_node) {
                 if (strcmp(key_type, "computed_property_name") == 0) {
                     method->computed = true;
                 }
-                method->key = build_js_expression((JsTranspiler*)tp, key_node);
+                method->key = build_js_expression(tp, key_node);
 
                 // detect constructor
                 int klen;
@@ -987,7 +987,7 @@ static JsAstNode* build_ts_class_body(TsTranspiler* tp, TSNode body_node) {
             member = (JsAstNode*)method;
         } else {
             // other class body members — delegate to JS
-            member = build_js_method_definition((JsTranspiler*)tp, child_node);
+            member = build_js_method_definition(tp, child_node);
         }
 
         if (member) {
@@ -1038,7 +1038,7 @@ static JsAstNode* build_ts_class_declaration(TsTranspiler* tp, TSNode class_node
         if (strcmp(ts_node_type(child), "class_heritage") == 0) {
             TSNode super_expr = ts_node_named_child(child, 0);
             if (!ts_node_is_null(super_expr)) {
-                class_decl->superclass = build_js_expression((JsTranspiler*)tp, super_expr);
+                class_decl->superclass = build_js_expression(tp, super_expr);
             }
             break;
         }
@@ -1054,7 +1054,7 @@ static JsAstNode* build_ts_class_declaration(TsTranspiler* tp, TSNode class_node
 
     // add class to scope
     if (class_decl->name) {
-        js_scope_define((JsTranspiler*)tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
+        js_scope_define(tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
     }
 
     // if decorators found, store them on the class for lowering phase
@@ -1112,9 +1112,9 @@ static JsAstNode* build_ts_variable_declaration(TsTranspiler* tp, TSNode var_nod
         if (!ts_node_is_null(name_node)) {
             const char* id_type = ts_node_type(name_node);
             if (strcmp(id_type, "array_pattern") == 0 || strcmp(id_type, "object_pattern") == 0) {
-                declarator->id = build_js_expression((JsTranspiler*)tp, name_node);
+                declarator->id = build_js_expression(tp, name_node);
             } else {
-                declarator->id = build_js_identifier((JsTranspiler*)tp, name_node);
+                declarator->id = build_js_identifier(tp, name_node);
             }
         }
 
@@ -1143,7 +1143,7 @@ static JsAstNode* build_ts_variable_declaration(TsTranspiler* tp, TSNode var_nod
         // add to scope
         if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
-            js_scope_define((JsTranspiler*)tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
+            js_scope_define(tp, id->name, (JsAstNode*)declarator, (JsVarKind)var_decl->kind);
         }
 
         if (!prev_declarator) {
@@ -1367,9 +1367,9 @@ static JsAstNode* build_ts_node(TsTranspiler* tp, TSNode node) {
 
     // for all other nodes, delegate to the JS AST builder
     // cast TsTranspiler to JsTranspiler (layout-compatible for core fields)
-    JsAstNode* result = build_js_statement((JsTranspiler*)tp, node);
+    JsAstNode* result = build_js_statement(tp, node);
     if (!result) {
-        result = build_js_expression((JsTranspiler*)tp, node);
+        result = build_js_expression(tp, node);
     }
 
     // after building a JS node, check if it has a type_annotation child

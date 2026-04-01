@@ -371,45 +371,45 @@ function distance(p1: Point, p2: Point): number {
 
 ## 4. Implementation Phases
 
-### Phase 3.1 — Grammar Unification
+### Phase 3.1 — Grammar Unification ✅
 
-- [ ] Switch JS entry point to use `tree_sitter_typescript()` parser.
-- [ ] Add `strict_js` field to `JsTranspiler`.
-- [ ] Add `is_ts_specific_node()` helper — checks CST symbol against a set of
+- [x] Switch JS entry point to use `tree_sitter_typescript()` parser.
+- [x] Add `strict_js` field to `JsTranspiler`.
+- [x] Add `is_ts_specific_node()` helper — checks CST symbol against a set of
       TS-only node names (`type_annotation`, `interface_declaration`, etc.).
-- [ ] In `build_js_expression` / `build_js_statement`, reject TS nodes when `strict_js`.
-- [ ] Remove `tree-sitter-javascript` from `build_lambda_config.json`.
-- [ ] Verify: all JS test scripts parse correctly through TS parser.
-- [ ] Verify: JS test scripts with TS syntax produce syntax errors.
+- [x] In `build_js_expression` / `build_js_statement`, reject TS nodes when `strict_js`.
+- [x] Remove `tree-sitter-javascript` from `build_lambda_config.json`.
+- [x] Verify: all JS test scripts parse correctly through TS parser.
+- [x] Verify: JS test scripts with TS syntax produce syntax errors.
 
-### Phase 3.2 — Transpiler Struct Unification
+### Phase 3.2 — Transpiler Struct Unification ✅
 
-- [ ] Move `type_registry`, `strict_js`, `emit_runtime_checks` into `JsTranspiler`.
-- [ ] Remove `TsTranspiler` typedef and `ts_transpiler.hpp`.
-- [ ] Remove `ts_transpiler_create` / `ts_transpiler_destroy` — use `js_transpiler_create`.
-- [ ] Delete `(JsTranspiler*)tp` casts everywhere (no longer needed).
-- [ ] Merge `transpile_ts_to_mir` into `transpile_js_to_mir` (add `strict_js` param).
-- [ ] Update `main.cpp` / `runner.cpp` to call unified entry point.
+- [x] Move `type_registry`, `strict_js`, `emit_runtime_checks` into `JsTranspiler`.
+- [x] Remove `TsTranspiler` typedef and `ts_transpiler.hpp`.
+- [x] Remove `ts_transpiler_create` / `ts_transpiler_destroy` — use `js_transpiler_create`.
+- [x] Delete `(JsTranspiler*)tp` casts everywhere (no longer needed).
+- [x] Merge `transpile_ts_to_mir` into `transpile_js_to_mir` (add `strict_js` param).
+- [x] Update `main.cpp` / `runner.cpp` to call unified entry point.
 
-### Phase 3.3 — AST Builder Merge
+### Phase 3.3 — AST Builder Merge ✅
 
-- [ ] Merge `build_ts_ast.cpp` into `build_js_ast.cpp`.
-- [ ] Remove `expr_builder_override` hook (inline TS expression handling).
-- [ ] Keep `ts_expr_override` logic as direct switch cases in `build_expression`.
-- [ ] Merge TS statement builders (interface, type alias, enum, namespace) into
+- [x] Merge `build_ts_ast.cpp` into `build_js_ast.cpp`.
+- [x] Remove `expr_builder_override` hook (inline TS expression handling).
+- [x] Keep `ts_expr_override` logic as direct switch cases in `build_expression`.
+- [x] Merge TS statement builders (interface, type alias, enum, namespace) into
       `build_js_statement`.
-- [ ] Remove `build_ts_ast.cpp`.
+- [x] Remove `build_ts_ast.cpp`.
 
-### Phase 3.4 — Type Resolution Unification
+### Phase 3.4 — Type Resolution Unification ✅
 
-- [ ] Move `ts_resolve_type()` and `ts_type_builder.cpp` into the unified transpiler.
-- [ ] In `jm_infer_param_types`: check for TS annotation → use it.
-- [ ] In `jm_infer_return_type`: check for TS annotation → use it.
-- [ ] In `jm_transpile_variable_declaration`: check for annotation → use it.
-- [ ] Feed `TypeMap` shapes into `jm_get_effective_type` for member access.
-- [ ] Add `jm_get_full_type(mt, expr)` → returns `Type*` (not just TypeId), checking both
+- [x] Move `ts_resolve_type()` and `ts_type_builder.cpp` into the unified transpiler.
+- [x] In `jm_infer_param_types`: check for TS annotation → use it (required params only; optional params treated as ANY).
+- [x] In `jm_infer_return_type`: check for TS annotation → use it.
+- [x] In `jm_transpile_variable_declaration`: check for annotation → use it.
+- [x] Feed `TypeMap` shapes into `jm_get_effective_type` for member access.
+- [x] Add `jm_get_full_type(mt, expr)` → returns `Type*` (not just TypeId), checking both
       annotations and variable scope for rich type info.
-- [ ] Implement the `Type*` carry in `JsMirVarEntry` (add `Type* full_type` field).
+- [x] Implement the `Type*` carry in `JsMirVarEntry` (add `Type* full_type` field).
 
 ### Phase 3.5 — Type Inference Enhancements (JS benefit)
 

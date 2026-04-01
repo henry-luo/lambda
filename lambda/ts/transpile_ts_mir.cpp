@@ -18,33 +18,24 @@
 #include <cstdio>
 #include <cstdlib>
 
-// tree-sitter TypeScript parser
-extern "C" {
-    const TSLanguage* tree_sitter_typescript(void);
+// ============================================================================
+// TS transpiler creation — uses unified JsTranspiler with TS mode
+// ============================================================================
+
+// local alloc helper for lowering code (same as alloc_js_ast_node but takes int node_type)
+static JsAstNode* alloc_ts_ast_node(JsTranspiler* tp, int node_type, TSNode node, size_t size) {
+    return alloc_js_ast_node(tp, (JsAstNodeType)node_type, node, size);
 }
 
-// ============================================================================
-// TsTranspiler lifecycle
-// ============================================================================
-
-TsTranspiler* ts_transpiler_create(Runtime* runtime) {
-    TsTranspiler* tp = (TsTranspiler*)calloc(1, sizeof(TsTranspiler));
+static TsTranspiler* ts_transpiler_create(Runtime* runtime) {
+    // use the unified JS transpiler, then configure for TS mode
+    TsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) return NULL;
 
-    tp->ast_pool = pool_create();
-    tp->name_pool = name_pool_create(tp->ast_pool, NULL);
-    tp->code_buf = strbuf_new_cap(4096);
-    tp->func_buf = strbuf_new_cap(2048);
-    tp->error_buf = strbuf_new_cap(256);
-    tp->runtime = runtime;
-    tp->strict_mode = true;  // TS always implies strict mode
+    tp->strict_js = false;           // allow TS syntax
+    tp->strict_mode = true;          // TS always implies strict mode
     tp->emit_runtime_checks = false;
-    tp->expr_builder_override = ts_expr_override;
-
-    // create global scope
-    tp->global_scope = js_scope_create((JsTranspiler*)tp, JS_SCOPE_GLOBAL, NULL);
     tp->global_scope->strict_mode = true;
-    tp->current_scope = tp->global_scope;
 
     // initialize type registry
     ts_type_registry_init(tp);
@@ -52,67 +43,8 @@ TsTranspiler* ts_transpiler_create(Runtime* runtime) {
     return tp;
 }
 
-void ts_transpiler_destroy(TsTranspiler* tp) {
-    if (!tp) return;
-    if (tp->tree) ts_tree_delete(tp->tree);
-    if (tp->parser) ts_parser_delete(tp->parser);
-    if (tp->code_buf) strbuf_free(tp->code_buf);
-    if (tp->func_buf) strbuf_free(tp->func_buf);
-    if (tp->error_buf) strbuf_free(tp->error_buf);
-    if (tp->type_registry) hashmap_free(tp->type_registry);
-    if (tp->ast_pool) pool_destroy(tp->ast_pool);
-    free(tp);
-}
-
-bool ts_transpiler_parse(TsTranspiler* tp, const char* source, size_t length) {
-    tp->source = source;
-    tp->source_length = length;
-
-    tp->parser = ts_parser_new();
-    if (!tp->parser) {
-        log_error("ts-mir: failed to create parser");
-        return false;
-    }
-
-    // use TypeScript parser for full type-aware CST
-    const TSLanguage* lang = tree_sitter_typescript();
-    if (!lang) {
-        log_error("ts-mir: no TypeScript parser available");
-        return false;
-    }
-
-    ts_parser_set_language(tp->parser, lang);
-    tp->tree = ts_parser_parse_string(tp->parser, NULL, source, (uint32_t)length);
-    if (!tp->tree) {
-        log_error("ts-mir: parse failed");
-        return false;
-    }
-
-    return true;
-}
-
-// ============================================================================
-// Scope management (delegates to JS scope functions via cast)
-// ============================================================================
-
-JsScope* ts_scope_create(TsTranspiler* tp, JsScopeType scope_type, JsScope* parent) {
-    return js_scope_create((JsTranspiler*)tp, scope_type, parent);
-}
-
-void ts_scope_push(TsTranspiler* tp, JsScope* scope) {
-    js_scope_push((JsTranspiler*)tp, scope);
-}
-
-void ts_scope_pop(TsTranspiler* tp) {
-    js_scope_pop((JsTranspiler*)tp);
-}
-
-NameEntry* ts_scope_lookup(TsTranspiler* tp, String* name) {
-    return js_scope_lookup((JsTranspiler*)tp, name);
-}
-
-void ts_scope_define(TsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind) {
-    js_scope_define((JsTranspiler*)tp, name, node, kind);
+static void ts_transpiler_destroy(TsTranspiler* tp) {
+    js_transpiler_destroy(tp);
 }
 
 // ============================================================================
@@ -236,7 +168,7 @@ static JsAstNode* ts_lower_enum_to_js(TsTranspiler* tp, TsEnumDeclarationNode* e
 
     // register in scope
     if (enum_decl->name) {
-        js_scope_define((JsTranspiler*)tp, enum_decl->name, (JsAstNode*)declarator, JS_VAR_CONST);
+        js_scope_define(tp, enum_decl->name, (JsAstNode*)declarator, JS_VAR_CONST);
     }
 
     return (JsAstNode*)var_decl;
@@ -663,7 +595,7 @@ static JsAstNode* ts_lower_namespace_to_js(TsTranspiler* tp, TsNamespaceDeclarat
 
     // register namespace name in scope
     if (ns->name) {
-        js_scope_define((JsTranspiler*)tp, ns->name, (JsAstNode*)ns_decl, JS_VAR_VAR);
+        js_scope_define(tp, ns->name, (JsAstNode*)ns_decl, JS_VAR_VAR);
     }
 
     // link: var Foo; → (function(Foo) { ... })(Foo || (Foo = {}));
@@ -877,7 +809,7 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
     }
 
     // Phase 1: Parse the TypeScript source with the TS parser (types preserved in CST)
-    if (!ts_transpiler_parse(tp, ts_source, ts_len)) {
+    if (!js_transpiler_parse(tp, ts_source, ts_len)) {
         log_error("ts-mir: parse failed");
         ts_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
@@ -885,9 +817,9 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
 
     TSNode root = ts_tree_root_node(tp->tree);
 
-    // Phase 2: Build AST from the TS CST (type annotations preserved as TsTypeNode)
+    // Phase 2: Build AST from the TS CST (unified builder handles both JS and TS nodes)
     log_debug("ts-mir: building AST...");
-    JsAstNode* ts_ast = build_ts_ast(tp, root);
+    JsAstNode* ts_ast = build_js_ast(tp, root);
     if (!ts_ast) {
         log_error("ts-mir: AST build failed");
         ts_transpiler_destroy(tp);
@@ -909,7 +841,7 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
 
     // Phase 4: Delegate to JS MIR transpiler with the pre-built AST
     log_debug("ts-mir: delegating to JS MIR transpiler...");
-    Item result = transpile_js_ast_to_mir(runtime, (JsTranspiler*)tp, ts_ast, filename);
+    Item result = transpile_js_ast_to_mir(runtime, tp, ts_ast, filename);
     log_debug("ts-mir: JS MIR transpiler returned");
 
     ts_transpiler_destroy(tp);
