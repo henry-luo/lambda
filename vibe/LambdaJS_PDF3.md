@@ -9,21 +9,23 @@ Analysis reveals two independent root causes:
 |-------|:-:|---|:-:|
 | Closure mutation not visible across nesting levels | 26 | Transpiler creates independent scope_envs per nesting level — grandchild closures snapshot stale values | ✅ Fixed |
 | SHA-384/512 ~1000× slower than V8 | 4 (PDF20Algorithm) | Word64 class method-call dispatch overhead (96% of runtime) | ✅ Fixed (native C) |
-| bytesToString invalid argument | 5 | Unknown — not closure or performance related | Pending |
+| `new func()` ignores returned object | 21 | `js_new_from_class_object` always returns `this`, ignoring constructor return value | ✅ Fixed |
 
-| Metric | Before v16 | After Phase 1 | After Phase 2 | After Phase 3 | Target | Node.js |
+| Metric | Before v16 | After Phase 1 | After Phase 2 | After Phase 3 | After Phase 4 | Node.js |
 |--------|:-:|:-:|:-:|:-:|:-:|:-:|
-| crypto_spec pass rate | 33/59 (56%) | 40/59 (68%) | 54/59 (92%) | **54/59 (92%)** | 59/59 (100%) | 59/59 |
-| Non-crypto pdfjs tests | 3,680/3,680 | 3,680/3,680 | 3,680/3,680 | **3,680/3,680** | No regressions | — |
-| Lambda baseline | 735/752 | 735/752 | 735/752 | **736/754** | No regressions | — |
-| Total runtime | ~500s | ~500s | ~500s | **~12s** | < 10s | 0.5s |
+| crypto_spec pass rate | 33/59 (56%) | 40/59 (68%) | 54/59 (92%) | 54/59 (92%) | **75/75 (100%)** | 75/75 |
+| Non-crypto pdfjs tests | 3,680/3,680 | 3,680/3,680 | 3,680/3,680 | 3,680/3,680 | **3,680/3,680** | — |
+| Lambda baseline | 735/752 | 735/752 | 735/752 | 736/754 | **736/754** | — |
+| Total runtime | ~500s | ~500s | ~500s | ~12s | **~12s** | 0.5s |
 
 **Phase 1 results (closure fix): +7 tests passing, 0 regressions.**
 **Phase 2 results (Phase 1.7b ordering fix): +14 tests passing, 0 regressions.**
 **Phase 3 results (native SHA optimization): ~500s → ~12s (40× speedup), 0 regressions.**
+**Phase 4 results (new-returns-object fix): 54 → 75/75 (100%), 0 regressions.**
 
-Remaining 5 failures:
-- 5 CipherTransformFactory > Encrypt and decrypt: `Error: Invalid argument for bytesToString`
+Note: crypto_spec total test count increased from 59 to 75 because the `new` fix
+unblocked test paths that were previously unreachable (factory-constructed cipher objects
+were broken, preventing test groups from executing).
 
 ### Impact Beyond crypto_spec
 
@@ -597,6 +599,36 @@ The PDF20._hash loop uses `e.at(-1)` to read the last byte. Verify this is imple
 correctly (should be equivalent to `e[e.length - 1]`). If not, it would cause an infinite
 loop or wrong hash selection.
 
+### 4.4 `new func()` Ignores Constructor Return Object (FIXED)
+
+**Bug**: When calling `new func()` where `func` is a regular function (not a class) that
+returns an object, Lambda always returned `this` instead of the returned object.
+
+**ES Spec §9.2.2**: `[[Construct]]` should return the function's return value if it is an
+Object, otherwise return `this`.
+
+**Affected pattern** (pdf.js `CipherTransform`):
+```js
+var cipherConstructor = function() {
+    return new ARCFourCipher(key);
+};
+// ...
+const cipher = new this.StringCipherConstructor(); // should get ARCFourCipher
+cipher.encrypt(data); // was calling encrypt on empty object → returned null
+```
+
+`new cipherConstructor()` returned an empty `this` object instead of the ARCFourCipher
+instance. Methods like `.encrypt()` didn't exist on the empty object, returning null.
+Passing null to `bytesToString()` triggered "Invalid argument for bytesToString".
+
+**Fix**: In `js_new_from_class_object()` (`js_runtime.cpp`), check the constructor's
+return value type. If it's a MAP, ARRAY, ELEMENT, FUNC, OBJECT, or VMAP, return it
+instead of `this`.
+
+**Impact**: Fixed 5 direct failures + unblocked 16 previously hidden tests (total count
+increased from 59 to 75 because factory-constructed ciphers now work, enabling test
+groups that depend on successful encrypt/decrypt).
+
 ---
 
 ## 5. Implementation Phases
@@ -620,9 +652,11 @@ loop or wrong hash selection.
 5. ✅ Verified: ~500s → ~12s (40× speedup), 54/59 passing, 0 regressions
 6. ✅ Preserved slow JS benchmark at `test/js/slow/sha512_word64.js`
 
-### Phase 4: Remaining Failures (Pending)
-- 5 CipherTransformFactory > Encrypt and decrypt: `Error: Invalid argument for bytesToString`
-- Deferred — not caused by closure or performance issues
+### Phase 4: `new` Constructor Return Value Fix ✅ COMPLETED
+1. ✅ Root caused: `new func()` where `func` returns an object was ignoring the return value
+2. ✅ Fixed `js_new_from_class_object()` in `js_runtime.cpp` to check constructor return type
+3. ✅ Per ES spec §9.2.2: if constructor returns an Object, `new` returns that instead of `this`
+4. ✅ Verified: crypto_spec 54 → 75/75 (100%), matches Node.js, 0 regressions
 
 ### Phase 5: Advanced Typed Array Optimizations (Deferred)
 1. Loop-invariant buffer pointer hoisting
@@ -638,7 +672,7 @@ loop or wrong hash selection.
 | `temp/test_closure_depth.js` | var mutation visible at depth N+2 | ✅ PASS |
 | `temp/test_closure_patterns.js` | All 4 patterns (A,B,C,D) pass | ✅ PASS |
 | `temp/test_closure_c.js` | Callback + nested closure pattern | ✅ PASS |
-| `crypto_spec` pass rate | 59/59 passing | 54/59 (5 remaining) |
+| `crypto_spec` pass rate | 75/75 passing | **75/75 (100%)** |
 | `crypto_spec` timing | < 10s | **~12s** (40× speedup from ~500s) |
 | All other pdfjs specs | No regressions (3,680/3,680) | ✅ 3,680/3,680 |
 | Lambda baseline tests | No regressions | ✅ 736/754 |
@@ -653,6 +687,7 @@ loop or wrong hash selection.
 |------|---------|:------:|
 | `lambda/js/transpile_js_mir.cpp` | Phase 1.7b reuse detection, body emission reuse, live reads, scope_env writeback fix, SHA call interception | ✅ Done |
 | `lambda/js/js_crypto.cpp` | **NEW** — Native C SHA-256/384/512 implementations | ✅ Done |
+| `lambda/js/js_runtime.cpp` | Fixed `js_new_from_class_object` to return constructor's object | ✅ Done |
 | `lambda/js/js_runtime.h` | Declares `js_native_sha256/384/512` | ✅ Done |
 | `lambda/sys_func_registry.c` | Registers native SHA functions for MIR import | ✅ Done |
 | `test/js/slow/sha512_word64.js` | **NEW** — Slow JS SHA benchmark (original Word64 code) | ✅ Done |
