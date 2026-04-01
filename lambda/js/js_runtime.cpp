@@ -939,7 +939,13 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Case 1: callee is a function — standard constructor call
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         Item obj = js_constructor_create_object(callee);
-        js_call_function(callee, obj, args, argc);
+        Item result = js_call_function(callee, obj, args, argc);
+        // Per ES spec §9.2.2: if constructor returns an Object, use that instead of this
+        TypeId rt = get_type_id(result);
+        if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+            rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+            return result;
+        }
         return obj;
     }
     // Case 2: callee is a class object (MAP with __ctor__ and __instance_proto__)
