@@ -54,6 +54,9 @@ typedef struct TsTranspiler {
     // runtime integration
     Runtime* runtime;
 
+    // Extension hook: override expression builder for TS node types
+    JsAstNode* (*expr_builder_override)(void* tp, TSNode node);
+
     // --- TS-specific fields ---
 
     // type registry: name -> Type* (interfaces, aliases, enums)
@@ -82,6 +85,9 @@ JsAstNode* build_ts_program(TsTranspiler* tp, TSNode program_node);
 JsAstNode* build_ts_statement(TsTranspiler* tp, TSNode stmt_node);
 JsAstNode* build_ts_expression(TsTranspiler* tp, TSNode expr_node);
 TsTypeNode* build_ts_type_node(TsTranspiler* tp, TSNode type_node);
+
+// Override hook for build_js_expression — handles TS-specific expression nodes
+JsAstNode* ts_expr_override(void* tp, TSNode node);
 
 // Type resolution (ts_type_builder.cpp)
 Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node);
