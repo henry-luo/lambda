@@ -753,13 +753,15 @@ DisplayValue resolve_display_value(void* child) {
 
         // Determine if this is a replaced element (img, video, iframe, svg, etc.)
         // Replaced elements always have inner display of RDT_DISPLAY_REPLACED
+        // HTML §4.8.7: <object> is replaced only when it has a data attribute
         bool is_replaced = (tag_id == HTM_TAG_IMG || tag_id == HTM_TAG_VIDEO ||
                             tag_id == HTM_TAG_INPUT || tag_id == HTM_TAG_SELECT ||
                             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
                             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_HR ||
                             tag_id == HTM_TAG_SVG || tag_id == HTM_TAG_METER ||
                             tag_id == HTM_TAG_PROGRESS ||
-                            tag_id == HTM_TAG_OBJECT || tag_id == HTM_TAG_EMBED);
+                            (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
+                            tag_id == HTM_TAG_EMBED);
 
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
@@ -1045,9 +1047,14 @@ DisplayValue resolve_display_value(void* child) {
             tag_id == HTM_TAG_TEXTAREA || tag_id == HTM_TAG_BUTTON ||
             tag_id == HTM_TAG_IFRAME || tag_id == HTM_TAG_METER ||
             tag_id == HTM_TAG_PROGRESS ||
-            tag_id == HTM_TAG_OBJECT || tag_id == HTM_TAG_EMBED) {
+            (tag_id == HTM_TAG_OBJECT && dom_elem && dom_elem->get_attribute("data")) ||
+            tag_id == HTM_TAG_EMBED) {
             display.outer = CSS_VALUE_INLINE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
+        } else if (tag_id == HTM_TAG_OBJECT) {
+            // <object> without data attribute: inline flow (renders fallback children)
+            display.outer = CSS_VALUE_INLINE;
+            display.inner = CSS_VALUE_FLOW;
         } else if (tag_id == HTM_TAG_HR) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = RDT_DISPLAY_REPLACED;
@@ -1063,7 +1070,8 @@ DisplayValue resolve_display_value(void* child) {
             display.outer = CSS_VALUE_NONE;
             display.inner = CSS_VALUE_NONE;
         } else if (tag_id == HTM_TAG_OPTION || tag_id == HTM_TAG_OPTGROUP) {
-            // Option/optgroup: keep in tree as 0x0 blocks (browsers report 0x0)
+            // Option/optgroup inside select/datalist: block 0x0 (browsers report 0x0)
+            // Outside select/datalist: normal block flow (shows text content)
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
         } else if (tag_id == HTM_TAG_TABLE) {

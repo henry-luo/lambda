@@ -5820,7 +5820,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // selects on the same line (e.g., dropdown h=19 + listbox h=70).
         bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
             block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-            block->tag() == HTM_TAG_OBJECT || block->tag() == HTM_TAG_TEXTAREA ||
+            (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
+            block->tag() == HTM_TAG_TEXTAREA ||
             block->tag() == HTM_TAG_SELECT);
         if (is_replaced) {
             content_has_line_boxes = false;

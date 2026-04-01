@@ -357,15 +357,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         break;
     }
-    case HTM_TAG_OBJECT:
     case HTM_TAG_EMBED:
-        // replaced elements with default 300x150 per HTML spec
+        // replaced element with default 300x150 per HTML spec
         block->display.inner = RDT_DISPLAY_REPLACED;
         lycon->block.given_width = 300;
         lycon->block.given_height = 150;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->given_width = 300;
         block->blk->given_height = 150;
+        break;
+    case HTM_TAG_OBJECT:
+        // HTML §4.8.7: <object> is replaced only when it has a data attribute.
+        // Without data, it renders its fallback content (children) as normal flow.
+        if (elmt->get_attribute("data")) {
+            block->display.inner = RDT_DISPLAY_REPLACED;
+            lycon->block.given_width = 300;
+            lycon->block.given_height = 150;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_width = 300;
+            block->blk->given_height = 150;
+        }
         break;
     case HTM_TAG_HR:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -1309,14 +1320,20 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // label is inline by default, no special styling
         break;
     case HTM_TAG_OPTION:
-    case HTM_TAG_OPTGROUP:
-        // Keep option/optgroup in layout tree as 0×0 blocks (Chrome reports 0x0 dimensions)
-        block->display.outer = CSS_VALUE_BLOCK;
-        block->display.inner = CSS_VALUE_FLOW;
-        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->given_width = 0;
-        block->blk->given_height = 0;
+    case HTM_TAG_OPTGROUP: {
+        // HTML spec: option/optgroup inside select/datalist are 0×0 (UA rendered).
+        // Outside select/datalist, they render as normal block flow content.
+        uintptr_t parent_tag = elmt->parent ? elmt->parent->tag() : 0;
+        if (parent_tag == HTM_TAG_SELECT || parent_tag == HTM_TAG_DATALIST ||
+            parent_tag == HTM_TAG_OPTGROUP) {
+            block->display.outer = CSS_VALUE_BLOCK;
+            block->display.inner = CSS_VALUE_FLOW;
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_width = 0;
+            block->blk->given_height = 0;
+        }
         break;
+    }
     case HTM_TAG_DATALIST:
         // Datalist should be completely hidden (display:none)
         block->display.outer = CSS_VALUE_NONE;
