@@ -95,6 +95,7 @@ struct RbMirTranspiler {
 
     int reg_counter;
     int label_counter;
+    int temp_count;
 
     RbFuncCollected func_entries[128];
     int func_count;
@@ -163,6 +164,7 @@ static uint64_t rb_local_func_hash(const void* item, uint64_t seed0, uint64_t se
 
 static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr);
 static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt);
+static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs);
 
 // ============================================================================
 // Basic MIR helpers
@@ -782,7 +784,7 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             }
 
             char proto_name[140];
-            snprintf(proto_name, sizeof(proto_name), "call_%s_p", fname);
+            snprintf(proto_name, sizeof(proto_name), "call_%s_%d_p", fname, mt->temp_count++);
             MIR_type_t res_type = MIR_T_I64;
             MIR_item_t proto = MIR_new_proto_arr(mt->ctx, proto_name, 1, &res_type, nargs, param_vars);
 
@@ -921,10 +923,108 @@ static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr) {
                 }
             }
             return rm_emit_null(mt);
+        case RB_AST_NODE_IF:
+        case RB_AST_NODE_UNLESS:
+            return rm_transpile_if_expr(mt, (RbIfNode*)expr);
+        case RB_AST_NODE_ASSIGNMENT: {
+            // assignment as expression — transpile and return the value
+            RbAssignmentNode* assign = (RbAssignmentNode*)expr;
+            MIR_reg_t val = rm_transpile_expression(mt, assign->value);
+            if (assign->target && assign->target->node_type == RB_AST_NODE_IDENTIFIER) {
+                RbIdentifierNode* id = (RbIdentifierNode*)assign->target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                RbMirVarEntry* var = rm_find_var(mt, vname);
+                if (var) {
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                        MIR_new_reg_op(mt->ctx, val)));
+                } else {
+                    MIR_reg_t r = rm_new_reg(mt, vname, MIR_T_I64);
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_reg_op(mt->ctx, val)));
+                    rm_set_var(mt, vname, r);
+                }
+            }
+            return val;
+        }
         default:
             log_debug("rb-mir: unhandled expression type: %d", expr->node_type);
             return rm_emit_null(mt);
     }
+}
+
+// if/unless as expression — returns the last value from the taken branch
+static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs) {
+    MIR_reg_t result = rm_new_reg(mt, "ifr", MIR_T_I64);
+    // initialize to nil
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+
+    MIR_reg_t cond = rm_transpile_expression(mt, ifs->condition);
+    MIR_reg_t truthy = rm_call_1(mt, "rb_is_truthy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, cond));
+
+    MIR_label_t l_else = rm_new_label(mt);
+    MIR_label_t l_end = rm_new_label(mt);
+
+    if (ifs->is_unless) {
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_else),
+            MIR_new_reg_op(mt->ctx, truthy)));
+    } else {
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_else),
+            MIR_new_reg_op(mt->ctx, truthy)));
+    }
+
+    // then body — last expression is the value
+    {
+        MIR_reg_t last = rm_emit_null(mt);
+        RbAstNode* stmt = ifs->then_body;
+        while (stmt) {
+            if (!stmt->next) {
+                last = rm_transpile_expression(mt, stmt);
+            } else {
+                rm_transpile_statement(mt, stmt);
+            }
+            stmt = stmt->next;
+        }
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, last)));
+    }
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+
+    rm_emit_label(mt, l_else);
+
+    // elsif chain
+    if (ifs->elsif_chain) {
+        RbAstNode* elsif = ifs->elsif_chain;
+        while (elsif) {
+            if (elsif->node_type == RB_AST_NODE_IF || elsif->node_type == RB_AST_NODE_UNLESS) {
+                MIR_reg_t ev = rm_transpile_if_expr(mt, (RbIfNode*)elsif);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, ev)));
+            }
+            elsif = elsif->next;
+        }
+    }
+
+    // else body
+    if (ifs->else_body) {
+        MIR_reg_t last = rm_emit_null(mt);
+        RbAstNode* es = ifs->else_body;
+        while (es) {
+            if (!es->next) {
+                last = rm_transpile_expression(mt, es);
+            } else {
+                rm_transpile_statement(mt, es);
+            }
+            es = es->next;
+        }
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, last)));
+    }
+
+    rm_emit_label(mt, l_end);
+    return result;
 }
 
 // ============================================================================
@@ -1301,7 +1401,7 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
 
     // create MIR function
     char fn_name[260];
-    snprintf(fn_name, sizeof(fn_name), "rb_%s", fc->name);
+    snprintf(fn_name, sizeof(fn_name), "rbu_%s", fc->name);
 
     MIR_type_t res_type = MIR_T_I64;
     fc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type, nparams, params);
@@ -1426,7 +1526,7 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
     for (int i = 0; i < mt->func_count; i++) {
         RbFuncCollected* fc = &mt->func_entries[i];
         char fn_name[260];
-        snprintf(fn_name, sizeof(fn_name), "rb_%s", fc->name);
+        snprintf(fn_name, sizeof(fn_name), "rbu_%s", fc->name);
         MIR_item_t fwd = MIR_new_forward(mt->ctx, fn_name);
         fc->func_item = fwd;
         RbLocalFuncEntry lfe;
@@ -1459,10 +1559,25 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
             continue; // already compiled
         }
 
-        // for expression-like statements, capture the last result
-        last_result = rm_transpile_expression(mt, s);
-        if (last_result == 0) {
-            last_result = rm_emit_null(mt);
+        // use statement transpiler for assignment, control flow, etc.
+        if (s->node_type == RB_AST_NODE_ASSIGNMENT ||
+            s->node_type == RB_AST_NODE_OP_ASSIGNMENT ||
+            s->node_type == RB_AST_NODE_IF ||
+            s->node_type == RB_AST_NODE_UNLESS ||
+            s->node_type == RB_AST_NODE_WHILE ||
+            s->node_type == RB_AST_NODE_UNTIL ||
+            s->node_type == RB_AST_NODE_FOR ||
+            s->node_type == RB_AST_NODE_RETURN ||
+            s->node_type == RB_AST_NODE_CASE ||
+            s->node_type == RB_AST_NODE_BREAK ||
+            s->node_type == RB_AST_NODE_NEXT) {
+            rm_transpile_statement(mt, s);
+        } else {
+            // expression statement — capture last result
+            last_result = rm_transpile_expression(mt, s);
+            if (last_result == 0) {
+                last_result = rm_emit_null(mt);
+            }
         }
 
         s = s->next;

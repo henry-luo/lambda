@@ -167,7 +167,6 @@ extern "C" int rb_is_truthy(Item value) {
 extern "C" Item rb_add(Item left, Item right) {
     TypeId lt = get_type_id(left);
     TypeId rt = get_type_id(right);
-    log_debug("rb_add: lt=%d rt=%d left.item=%llu right.item=%llu", lt, rt, (unsigned long long)left.item, (unsigned long long)right.item);
 
     // int + int
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
