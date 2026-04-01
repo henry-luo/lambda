@@ -93,6 +93,7 @@ extern bool target_equal(Target* a, Target* b);
 
 // JS runtime functions
 #include "js/js_runtime.h"
+#include "ts/ts_runtime.h"
 #include "py/py_runtime.h"
 #include "py/py_class.h"
 #include "py/py_bigint.h"
@@ -1143,6 +1144,8 @@ JitImport jit_runtime_imports[] = {
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_new_error", FPTR(js_new_error)},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
+    {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
+    {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
@@ -1341,6 +1344,7 @@ JitImport jit_runtime_imports[] = {
     // prototype chain
     {"js_get_prototype", FPTR(js_get_prototype)},
     {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_link_base_prototype", FPTR(js_link_base_prototype)},
     {"js_prototype_lookup", FPTR(js_prototype_lookup)},
 
     // ========================================================================
@@ -1856,6 +1860,18 @@ JitImport jit_runtime_imports[] = {
     {"edit_undo", FPTR(edit_undo)},
     {"edit_redo", FPTR(edit_redo)},
     {"edit_current", FPTR(edit_current)},
+
+    // ========================================================================
+    // TS runtime
+    // ========================================================================
+    {"ts_typeof", FPTR(ts_typeof)},
+    {"ts_check_shape", FPTR(ts_check_shape)},
+    {"ts_assert_type", FPTR(ts_assert_type)},
+    {"ts_type_info", FPTR(ts_type_info)},
+    {"ts_box_type", FPTR(ts_box_type)},
+    {"ts_enum_create", FPTR(ts_enum_create)},
+    {"ts_enum_add_member", FPTR(ts_enum_add_member)},
+    {"ts_enum_freeze", FPTR(ts_enum_freeze)},
 };
 
 const int jit_runtime_import_count = sizeof(jit_runtime_imports) / sizeof(jit_runtime_imports[0]);

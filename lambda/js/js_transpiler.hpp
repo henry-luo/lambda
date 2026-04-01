@@ -67,6 +67,9 @@ typedef struct JsTranspiler {
     
     // Runtime integration
     Runtime* runtime;               // Lambda runtime context
+
+    // Extension hook: override expression builder (used by TS transpiler)
+    JsAstNode* (*expr_builder_override)(void* tp, TSNode node);
 } JsTranspiler;
 
 // JavaScript type mapping functions
@@ -98,6 +101,10 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
 JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
+JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
+JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
+JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
+JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node);
 
 // AST utility functions (build_js_ast.cpp)
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);

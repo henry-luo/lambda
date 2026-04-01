@@ -104,6 +104,8 @@ struct JsFuncCollected {
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
     char scope_env_names[64][128];   // variable names in scope env
+    bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
+    int reuse_env_slot_count;        // v16: slot count when reusing parent env
     // Phase 4: Type inference results
     TypeId param_types[16];         // inferred parameter types
     TypeId return_type;             // inferred return type
@@ -1732,6 +1734,31 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
     return result;
 }
 
+// v12: Build a compile-time stack trace string from the lexical function chain.
+// Walks from current function up through parent_index to build:
+//   "Error\n    at FuncName1\n    at FuncName2\n..."
+static MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type) {
+    char buf[1024];
+    int pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", error_type);
+
+    // Walk the lexical function chain from current to top-level
+    int fi = mt->current_func_index;
+    while (fi >= 0 && fi < mt->func_count && pos < (int)sizeof(buf) - 32) {
+        JsFuncCollected* fc = &mt->func_entries[fi];
+        const char* js_name = NULL;
+        if (fc->node && fc->node->name) {
+            js_name = fc->node->name->chars;
+        }
+        if (js_name && js_name[0]) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "\n    at %s", js_name);
+        }
+        fi = fc->parent_index;
+    }
+
+    return jm_box_string_literal(mt, buf, pos);
+}
+
 // ============================================================================
 // Inline unboxing helpers (MIR instructions, no function calls)
 // ============================================================================
@@ -2067,11 +2094,18 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
     if (!fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
         if (strcmp(name, fc->scope_env_names[s]) == 0) {
+            // Determine the actual slot: when reusing parent env, use the
+            // remapped slot (from the var's env_slot), not the local index.
+            int slot = s;
+            if (fc->reuse_parent_env) {
+                JsMirVarEntry* var = jm_find_var(mt, name);
+                if (var && var->from_env) slot = var->env_slot;
+            }
             // Mark the variable entry
             JsMirVarEntry* var = jm_find_var(mt, name);
             if (var) {
                 var->in_scope_env = true;
-                var->scope_env_slot = s;
+                var->scope_env_slot = slot;
                 var->scope_env_reg = mt->scope_env_reg;
             }
             // Write current value to scope env
@@ -2079,7 +2113,7 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
             if (jm_is_native_type(type_id))
                 val = jm_box_native(mt, val_reg, type_id);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_mem_op(mt->ctx, MIR_T_I64, s * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), mt->scope_env_reg, 0, 1),
                 MIR_new_reg_op(mt->ctx, val)));
             return;
         }
@@ -7640,6 +7674,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, url_arg),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, opts_arg));
             }
+            // type(val) — runtime type introspection (TS-aware)
+            if (nl == 4 && strncmp(n, "type", 4) == 0) {
+                MIR_reg_t val = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "ts_type_info", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
         }
 
         NameEntry* entry = js_scope_lookup(mt->tp, id->name);
@@ -9010,8 +9050,10 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env.
         // Don't share in loop bodies — let closures need per-iteration value copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0
-                              && mt->loop_depth == 0);
+                              && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // The scope env is always up-to-date: parent assignments trigger
@@ -9039,9 +9081,17 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
             JsMirVarEntry* var = jm_find_var(mt, fc->captures[ci].name);
             MIR_reg_t val;
             if (var) {
-                val = var->reg;
-                if (jm_is_native_type(var->type_id))
-                    val = jm_box_native(mt, var->reg, var->type_id);
+                if (var->from_env) {
+                    // v16: Re-read LIVE from parent env for transitively captured vars
+                    val = jm_new_reg(mt, "cenv_live", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, val),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                } else {
+                    val = var->reg;
+                    if (jm_is_native_type(var->type_id))
+                        val = jm_box_native(mt, var->reg, var->type_id);
+                }
             } else if (strcmp(fc->captures[ci].name, "_js_this") == 0) {
                 val = jm_call_0(mt, "js_get_this", MIR_T_I64);
             } else {
@@ -9075,8 +9125,10 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env
-        // Don't use shared scope env inside loops — let variables need per-iteration copies
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && mt->loop_depth == 0);
+        // Don't use shared scope env inside loops — let variables need per-iteration copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // Do NOT overwrite scope env with parent's register values — they
@@ -9115,9 +9167,18 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
             if (var) {
                 // env[slot] = current value of captured variable
                 // Box native-typed variables before storing in env (closures read boxed Items)
-                MIR_reg_t value_to_store = var->reg;
-                if (jm_is_native_type(var->type_id)) {
-                    value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                MIR_reg_t value_to_store;
+                if (var->from_env) {
+                    // v16: Re-read LIVE from parent env for transitively captured vars
+                    value_to_store = jm_new_reg(mt, "fenv_live", MIR_T_I64);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, value_to_store),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, var->env_slot * (int)sizeof(uint64_t), var->env_reg, 0, 1)));
+                } else {
+                    value_to_store = var->reg;
+                    if (jm_is_native_type(var->type_id)) {
+                        value_to_store = jm_box_native(mt, var->reg, var->type_id);
+                    }
                 }
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, slot * (int)sizeof(uint64_t), env, 0, 1),
@@ -11119,11 +11180,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // new Error(message) — built-in Error constructor
+    // new Error(message) — built-in Error constructor with compile-time stack trace
     if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) {
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_1(mt, "js_new_error", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, "Error");
+        return jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // v11: new TypeError/RangeError/SyntaxError/ReferenceError(message)
@@ -11133,9 +11196,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         (ctor_len == 14 && strncmp(ctor_name, "ReferenceError", 14) == 0)) {
         MIR_reg_t name_arg = jm_box_string_literal(mt, ctor_name, ctor_len);
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_2(mt, "js_new_error_with_name", MIR_T_I64,
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, ctor_name);
+        return jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // new Date() — returns a Date object with getTime() method
@@ -11365,6 +11430,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
+                            // v12: Link proto marker to base constructor's .prototype
+                            // so inherited properties (e.g. Error.stack) are accessible
+                            jm_call_void_2(mt, "js_link_base_prototype",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
                         }
                         jm_call_void_2(mt, "js_set_prototype",
@@ -14084,6 +14154,26 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // The scope env is a single heap-allocated Item array shared by all child closures,
         // enabling mutable capture semantics (JS captures by reference, not by value).
         if (fc->has_scope_env && fc->scope_env_count > 0) {
+            if (fc->reuse_parent_env && has_captures && env_reg != 0) {
+                // v16: Reuse parent env as scope_env — no allocation needed.
+                // All scope_env vars are transitive captures, so children can
+                // read/write directly from the grandparent's scope_env.
+                // Child captures were already remapped in Phase 1.7b.
+                mt->scope_env_reg = env_reg;
+                mt->scope_env_slot_count = fc->reuse_env_slot_count;
+
+                // Mark vars for scope_env write-back using parent env slots
+                for (int s = 0; s < fc->scope_env_count; s++) {
+                    const char* sname = fc->scope_env_names[s];
+                    JsMirVarEntry* svar = jm_find_var(mt, sname);
+                    if (svar) {
+                        svar->in_scope_env = true;
+                        svar->scope_env_slot = svar->env_slot;
+                        svar->scope_env_reg = mt->scope_env_reg;
+                    }
+                }
+                log_debug("js-mir: reusing parent env as scope env for '%s' (slot_count=%d)", fc->name, mt->scope_env_slot_count);
+            } else {
             mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
                 MIR_T_I64, MIR_new_int_op(mt->ctx, fc->scope_env_count));
             mt->scope_env_slot_count = fc->scope_env_count;
@@ -14094,9 +14184,19 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 JsMirVarEntry* svar = jm_find_var(mt, sname);
                 MIR_reg_t val;
                 if (svar) {
-                    val = svar->reg;
-                    if (jm_is_native_type(svar->type_id))
-                        val = jm_box_native(mt, svar->reg, svar->type_id);
+                    if (svar->from_env) {
+                        // v16: Re-read LIVE from parent's env instead of stale register.
+                        // This ensures mutations by sibling closures (e.g. beforeAll)
+                        // are visible to grandchild closures (e.g. it() in nested describe).
+                        val = jm_new_reg(mt, "senv_live", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, svar->env_slot * (int)sizeof(uint64_t), svar->env_reg, 0, 1)));
+                    } else {
+                        val = svar->reg;
+                        if (jm_is_native_type(svar->type_id))
+                            val = jm_box_native(mt, svar->reg, svar->type_id);
+                    }
                     // Mark var for scope_env write-back on future assignments
                     svar->in_scope_env = true;
                     svar->scope_env_slot = s;
@@ -14113,6 +14213,7 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     MIR_new_reg_op(mt->ctx, val)));
             }
             log_debug("js-mir: allocated scope env for '%s' with %d slots", fc->name, fc->scope_env_count);
+            }
         } else {
             mt->scope_env_reg = 0;
             mt->scope_env_slot_count = 0;
@@ -15346,6 +15447,9 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 parent_fc->has_scope_env = true;
                 parent_fc->scope_env_count = slot_count;
                 log_debug("js-mir: scope env for '%s': %d vars", parent_fc->name, slot_count);
+                for (int ds = 0; ds < slot_count; ds++) {
+                    log_debug("js-mir:   scope_env[%d] = '%s'", ds, parent_fc->scope_env_names[ds]);
+                }
 
                 // Remap child capture indices to scope env slots
                 for (int ci = 0; ci < mt->func_count; ci++) {
@@ -15366,6 +15470,84 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             }
 
             hashmap_free(scope_vars);
+        }
+    }
+
+    // Phase 1.7b: Detect parent env reuse for transitively captured scope envs.
+    // If ALL scope_env variables of a function are also in that function's own
+    // captures (i.e., they are transitive captures from the grandparent), the
+    // function can skip allocating a new scope_env and reuse the parent env.
+    // Children's capture slots are remapped to the grandparent env slots.
+    //
+    // IMPORTANT: Iterate in REVERSE order (outermost functions first).
+    // func_entries has inner closures at lower indices than their parents.
+    // Phase 1.7b for a function reads its captures' scope_env_slots, which
+    // are set by Phase 1.7b of its PARENT. Processing parents first ensures
+    // the captures are already remapped to grandparent slots before children
+    // try to use them as "grandparent" slots for their own grandchildren.
+    for (int fi = mt->func_count - 1; fi >= 0; fi--) {
+        JsFuncCollected* parent_fc = &mt->func_entries[fi];
+        parent_fc->reuse_parent_env = false;
+        parent_fc->reuse_env_slot_count = 0;
+        if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
+        if (parent_fc->capture_count == 0) continue;  // not a closure, can't reuse
+
+        // Check if ALL scope_env vars are also in this function's own captures
+        bool all_transitive = true;
+        for (int s = 0; s < parent_fc->scope_env_count; s++) {
+            bool found_in_captures = false;
+            for (int c = 0; c < parent_fc->capture_count; c++) {
+                if (strcmp(parent_fc->scope_env_names[s], parent_fc->captures[c].name) == 0) {
+                    found_in_captures = true;
+                    break;
+                }
+            }
+            if (!found_in_captures) {
+                all_transitive = false;
+                break;
+            }
+        }
+
+        if (!all_transitive) continue;
+
+        // All scope_env vars are transitive captures. Remap children's captures
+        // to use the grandparent env slots instead of this function's local scope_env slots.
+        parent_fc->reuse_parent_env = true;
+        int max_slot = 0;
+        for (int s = 0; s < parent_fc->scope_env_count; s++) {
+            const char* sname = parent_fc->scope_env_names[s];
+            // Find this scope_env var in parent_fc's own captures to get grandparent slot
+            for (int c = 0; c < parent_fc->capture_count; c++) {
+                if (strcmp(sname, parent_fc->captures[c].name) == 0) {
+                    int grandparent_slot = parent_fc->captures[c].scope_env_slot;
+                    if (grandparent_slot < 0) {
+                        // Can't remap — grandparent doesn't use scope_env for this var
+                        parent_fc->reuse_parent_env = false;
+                        break;
+                    }
+                    if (grandparent_slot + 1 > max_slot) max_slot = grandparent_slot + 1;
+
+                    // Remap all children's captures of this var
+                    for (int ci = 0; ci < mt->func_count; ci++) {
+                        JsFuncCollected* child = &mt->func_entries[ci];
+                        if (child->parent_index != fi) continue;
+                        for (int k = 0; k < child->capture_count; k++) {
+                            if (strcmp(child->captures[k].name, sname) == 0) {
+                                child->captures[k].scope_env_slot = grandparent_slot;
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            if (!parent_fc->reuse_parent_env) break;  // aborted
+        }
+
+        if (parent_fc->reuse_parent_env) {
+            parent_fc->reuse_env_slot_count = max_slot;
+            log_debug("js-mir: Phase 1.7b: '%s' will reuse parent env (all %d scope_env vars are transitive captures, slot_count=%d)",
+                parent_fc->name, parent_fc->scope_env_count, max_slot);
         }
     }
 

@@ -1466,6 +1466,12 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         // Handle nodes that return numeric symbol IDs instead of type names
         TSSymbol symbol = ts_node_symbol(expr_node);
 
+        // check for language extension override (e.g. TypeScript) before heuristics
+        if (tp->expr_builder_override) {
+            JsAstNode* result = tp->expr_builder_override(tp, expr_node);
+            if (result) return result;
+        }
+
         // Check if this is a literal by examining the node content
         StrView source = js_node_source(tp, expr_node);
         if (source.length > 0) {
