@@ -799,7 +799,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         if (block->blk && block->blk->last_line_max_ascender > 0) {
             bool is_replaced_elem = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                 block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-                block->tag() == HTM_TAG_OBJECT || block->tag() == HTM_TAG_TEXTAREA ||
+                (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")) ||
+                block->tag() == HTM_TAG_TEXTAREA ||
                 block->tag() == HTM_TAG_SELECT);
             bool overflow_visible = !block->scroller ||
                 (block->scroller->overflow_x == CSS_VALUE_VISIBLE &&
