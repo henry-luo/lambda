@@ -548,7 +548,7 @@ void calculate_absolute_position(LayoutContext* lycon, ViewBlock* block, ViewBlo
     // use intrinsic dimensions for auto width/height, not the constraint equation.
     bool is_replaced = (block->tag() == HTM_TAG_IMG || block->tag() == HTM_TAG_IFRAME ||
                         block->tag() == HTM_TAG_VIDEO || block->tag() == HTM_TAG_EMBED ||
-                        block->tag() == HTM_TAG_OBJECT);
+                        (block->tag() == HTM_TAG_OBJECT && block->get_attribute("data")));
 
     // Gather horizontal border+padding for constraint calculations
     float h_border_padding = 0;

@@ -10,18 +10,18 @@ Analysis reveals two independent root causes:
 | Closure mutation not visible across nesting levels | 26 (all failures) | Transpiler creates independent scope_envs per nesting level — grandchild closures snapshot stale values |
 | AES/SHA hot loop 285× slower than V8 | 4 (PDF20Algorithm) | Unoptimized typed array ops, per-iteration object allocation, interpreter-level overhead |
 
-| Metric | Before v16 | After v16 Phase 1 | Target | Node.js |
-|--------|:-:|:-:|:-:|:-:|
-| crypto_spec pass rate | 33/59 (56%) | **40/59 (68%)** | 59/59 (100%) | 59/59 |
-| Non-crypto pdfjs tests | 3,680/3,680 | **3,680/3,680** | No regressions | — |
-| Lambda baseline | 735/752 | **735/752** | No regressions | — |
-| Total runtime | 142.5s | TBD | < 10s | 0.5s |
+| Metric | Before v16 | After v16 Phase 1 | After v16 Phase 2 | Target | Node.js |
+|--------|:-:|:-:|:-:|:-:|:-:|
+| crypto_spec pass rate | 33/59 (56%) | 40/59 (68%) | **54/59 (92%)** | 59/59 (100%) | 59/59 |
+| Non-crypto pdfjs tests | 3,680/3,680 | 3,680/3,680 | **3,680/3,680** | No regressions | — |
+| Lambda baseline | 735/752 | 735/752 | **735/752** | No regressions | — |
+| Total runtime | 142.5s | TBD | TBD | < 10s | 0.5s |
 
 **v16 Phase 1 results (closure fix): +7 tests passing, 0 regressions.**
+**v16 Phase 2 results (Phase 1.7b ordering fix): +14 tests passing, 0 regressions.**
 
-Remaining 19 failures:
-- 14 unnamed tests: `expected false to equal true` / `expected null to equal N`
-- 5 CipherTransformFactory encrypt/decrypt: `Error: Invalid argument for bytesToString`
+Remaining 5 failures:
+- 5 CipherTransformFactory > Encrypt and decrypt: `Error: Invalid argument for bytesToString`
 
 ### Impact Beyond crypto_spec
 
@@ -253,6 +253,54 @@ Test patterns verified:
 - Pattern B: Direct nested closure read ✅
 - Pattern C: Callback registration + nested closure ✅
 - Pattern D: Object property mutation ✅
+
+### 2.7 Phase 2: Phase 1.7b Iteration Order Fix
+
+**Bug**: Phase 1.7b iterated `func_entries[]` from index 0 to max. In the Lambda JS
+transpiler, inner closures have **lower** indices than their parents (depth-first
+collection). This caused Phase 1.7b to process children BEFORE parents, reading stale
+`scope_env_slot` values that hadn't been remapped yet.
+
+**Example**: With 3-level nesting (Outer > level2 > level3a > it_callback):
+```
+func_entries[4] = it_d3a (depth 3, innermost)
+func_entries[5] = level3a (depth 2)
+func_entries[11] = level2 (depth 1)
+func_entries[12] = Outer (depth 0)
+```
+
+Phase 1.7b at fi=5 (level3a) reads `level3a->captures[c].scope_env_slot` to get
+"grandparent" slots for remapping it_d3a's captures. But at fi=5, level2's Phase 1.7b
+(fi=11) hasn't run yet, so level3a's captures still hold level2's *local* scope_env
+positions instead of Outer's *root* positions.
+
+Result: all slot indices mapped to the intermediate function's ordering, not the root
+env's ordering. For 10 variables, this manifested as a systematic scramble (e.g., v6
+reading slot 5 instead of 4, fn0 reading slot 1 instead of 9).
+
+**Fix**: Reverse the Phase 1.7b iteration order:
+```cpp
+// BEFORE (broken): inner closures processed first
+for (int fi = 0; fi < mt->func_count; fi++) { ... }
+
+// AFTER (fixed): outer closures processed first
+for (int fi = mt->func_count - 1; fi >= 0; fi--) { ... }
+```
+
+This ensures parents are always processed before children, so children read correctly
+remapped grandparent slots.
+
+**Reproduction test**: `temp/test_closure_depth.js` — 6 functions + 9 let vars in outer
+scope, deferred callback execution at depths 1-4. Before fix: depth 3+ showed scrambled
+values. After fix: all depths read correctly.
+
+#### Results
+
+| Test Suite | Before | After | Delta |
+|-----------|:-:|:-:|:-:|
+| crypto_spec | 40/59 | **54/59** | **+14** |
+| Non-crypto pdfjs | 3,680/3,680 | 3,680/3,680 | 0 |
+| JS baseline | 67/72 | 67/72 | 0 |
 
 ---
 

@@ -973,11 +973,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // Form controls (input, select, textarea) are detected by tag as well, because
     // their FormControlProp may not be allocated yet during early intrinsic sizing.
     uintptr_t replaced_tag = element->tag();
+    // HTML §4.8.7: <object> is replaced only when it has a data attribute
     bool is_replaced_element = (view_block_replaced->display.inner == RDT_DISPLAY_REPLACED) ||
         (replaced_tag == HTM_TAG_IMG || replaced_tag == HTM_TAG_VIDEO ||
          replaced_tag == HTM_TAG_IFRAME || replaced_tag == HTM_TAG_HR ||
          replaced_tag == HTM_TAG_SVG || replaced_tag == HTM_TAG_CANVAS ||
-         replaced_tag == HTM_TAG_OBJECT || replaced_tag == HTM_TAG_EMBED ||
+         (replaced_tag == HTM_TAG_OBJECT && element->get_attribute("data")) ||
+         replaced_tag == HTM_TAG_EMBED ||
          replaced_tag == HTM_TAG_INPUT || replaced_tag == HTM_TAG_SELECT ||
          replaced_tag == HTM_TAG_TEXTAREA || replaced_tag == HTM_TAG_METER ||
          replaced_tag == HTM_TAG_PROGRESS) ||
@@ -1057,7 +1059,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         else if (replaced_tag == HTM_TAG_HR) {
             replaced_width = 0;
         }
-        else if (replaced_tag == HTM_TAG_OBJECT || replaced_tag == HTM_TAG_EMBED) {
+        else if (replaced_tag == HTM_TAG_EMBED ||
+                 (replaced_tag == HTM_TAG_OBJECT && element->get_attribute("data"))) {
             replaced_width = 300;
             log_debug("  -> replaced OBJECT/EMBED intrinsic width: 300");
         }
