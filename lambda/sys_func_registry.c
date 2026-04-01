@@ -1144,6 +1144,8 @@ JitImport jit_runtime_imports[] = {
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_new_error", FPTR(js_new_error)},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
+    {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
+    {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
     {"js_array_method", FPTR(js_array_method)},
@@ -1342,6 +1344,7 @@ JitImport jit_runtime_imports[] = {
     // prototype chain
     {"js_get_prototype", FPTR(js_get_prototype)},
     {"js_set_prototype", FPTR(js_set_prototype)},
+    {"js_link_base_prototype", FPTR(js_link_base_prototype)},
     {"js_prototype_lookup", FPTR(js_prototype_lookup)},
 
     // ========================================================================

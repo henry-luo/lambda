@@ -151,12 +151,39 @@ extern "C" Item js_clear_exception(void) {
 }
 
 extern "C" Item js_new_error(Item message) {
+    return js_new_error_with_stack(message, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+// v12: Create Error with a compile-time stack trace string
+extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     Item obj = js_new_object();
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
     js_property_set(obj, name_key, name_val);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set stack property from compile-time stack trace
+    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
+    if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        // Default: "Error" + message
+        const char* msg_str = "";
+        int msg_len = 0;
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            msg_str = ms->chars;
+            msg_len = ms->len;
+        }
+        char buf[512];
+        int len;
+        if (msg_len > 0) {
+            len = snprintf(buf, sizeof(buf), "Error: %.*s", msg_len, msg_str);
+        } else {
+            len = snprintf(buf, sizeof(buf), "Error");
+        }
+        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, name_val);
@@ -165,11 +192,44 @@ extern "C" Item js_new_error(Item message) {
 
 // v11: Create a typed Error (TypeError, RangeError, SyntaxError, ReferenceError)
 extern "C" Item js_new_error_with_name(Item error_name, Item message) {
+    return js_new_error_with_name_stack(error_name, message, (Item){.item = ITEM_JS_UNDEFINED});
+}
+
+// v12: Create typed Error with compile-time stack trace
+extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
     Item obj = js_new_object();
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     js_property_set(obj, name_key, error_name);
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
     js_property_set(obj, msg_key, message);
+    // Set stack property
+    Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
+    if (stack_str.item != ITEM_JS_UNDEFINED) {
+        js_property_set(obj, stack_key, stack_str);
+    } else {
+        const char* name_str = "Error";
+        int name_len = 5;
+        if (get_type_id(error_name) == LMD_TYPE_STRING) {
+            String* ns = it2s(error_name);
+            name_str = ns->chars;
+            name_len = ns->len;
+        }
+        const char* msg_str = "";
+        int msg_len = 0;
+        if (get_type_id(message) == LMD_TYPE_STRING) {
+            String* ms = it2s(message);
+            msg_str = ms->chars;
+            msg_len = ms->len;
+        }
+        char buf[512];
+        int len;
+        if (msg_len > 0) {
+            len = snprintf(buf, sizeof(buf), "%.*s: %.*s", name_len, name_str, msg_len, msg_str);
+        } else {
+            len = snprintf(buf, sizeof(buf), "%.*s", name_len, name_str);
+        }
+        js_property_set(obj, stack_key, (Item){.item = s2it(heap_create_name(buf, len))});
+    }
     // Set __class_name__ for instanceof support
     Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
     js_property_set(obj, cn_key, error_name);
@@ -4880,6 +4940,20 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     // P10d: use interned __proto__ key
     Item key = js_get_proto_key();
     js_property_set(object, key, prototype);
+}
+
+// v12: Link a proto marker to the base constructor's .prototype object
+// so that inherited properties (e.g. Error.stack) are accessible through __proto__ chain.
+// proto_marker is the __proto__ node created for instanceof resolution.
+// base_ctor is the runtime value of the base constructor function.
+extern "C" void js_link_base_prototype(Item proto_marker, Item base_ctor) {
+    if (get_type_id(proto_marker) != LMD_TYPE_MAP) return;
+    // Look up base_ctor.prototype
+    Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+    Item base_proto = js_property_get(base_ctor, proto_key);
+    if (base_proto.item != ItemNull.item && get_type_id(base_proto) == LMD_TYPE_MAP) {
+        js_set_prototype(proto_marker, base_proto);
+    }
 }
 
 // Get the prototype of an object (read __proto__ property)
