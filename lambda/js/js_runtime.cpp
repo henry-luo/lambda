@@ -307,6 +307,28 @@ extern "C" Item js_to_number(Item value) {
     }
 
     default:
+        // v16: Objects/arrays — check for Symbol.toPrimitive before returning NaN
+        if (type == LMD_TYPE_MAP) {
+            bool found = false;
+            Item to_prim = js_map_get_fast(value.map, "__sym_2", 7, &found);
+            if (found && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("number", 6))};
+                Item args[1] = { hint };
+                Item result = js_call_function(to_prim, value, args, 1);
+                return js_to_number(result);
+            }
+            // try valueOf()
+            found = false;
+            Item valueOf_fn = js_map_get_fast(value.map, "valueOf", 7, &found);
+            if (!found) valueOf_fn = js_prototype_lookup(value, (Item){.item = s2it(heap_create_name("valueOf", 7))});
+            if (valueOf_fn.item != ItemNull.item && get_type_id(valueOf_fn) == LMD_TYPE_FUNC) {
+                Item result = js_call_function(valueOf_fn, value, NULL, 0);
+                TypeId rt = get_type_id(result);
+                if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY) {
+                    return js_to_number(result);
+                }
+            }
+        }
         // Objects, arrays, etc. -> NaN
         double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *nan_ptr = NAN;
@@ -379,6 +401,18 @@ extern "C" Item js_to_string(Item value) {
     }
 
     case LMD_TYPE_MAP: {
+        // v16: Check for Symbol.toPrimitive first
+        {
+            bool found = false;
+            Item to_prim = js_map_get_fast(value.map, "__sym_2", 7, &found);
+            if (found && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("string", 6))};
+                Item args[1] = { hint };
+                Item result = js_call_function(to_prim, value, args, 1);
+                if (get_type_id(result) == LMD_TYPE_STRING) return result;
+                return js_to_string(result);
+            }
+        }
         // Check for Date objects (have __class_name__ == "Date")
         bool own_cls = false;
         Item cls_val = js_map_get_fast(value.map, "__class_name__", 14, &own_cls);
@@ -887,6 +921,86 @@ struct JsFunction {
     Item bound_this; // v11: bound 'this' (0 if not a bound function)
     Item* bound_args; // v11: pre-applied arguments (NULL if none)
     int bound_argc;  // v11: number of bound arguments
+    String* name;    // Function name (NULL if anonymous)
+    int builtin_id;  // >0 for built-in method dispatch (0 = user function)
+};
+
+// Built-in method IDs for prototype method dispatch
+enum JsBuiltinId {
+    JS_BUILTIN_NONE = 0,
+    // Object.prototype
+    JS_BUILTIN_OBJ_HAS_OWN_PROPERTY,
+    JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE,
+    JS_BUILTIN_OBJ_TO_STRING,
+    JS_BUILTIN_OBJ_VALUE_OF,
+    JS_BUILTIN_OBJ_IS_PROTOTYPE_OF,
+    // Array.prototype
+    JS_BUILTIN_ARR_PUSH,
+    JS_BUILTIN_ARR_POP,
+    JS_BUILTIN_ARR_SHIFT,
+    JS_BUILTIN_ARR_UNSHIFT,
+    JS_BUILTIN_ARR_JOIN,
+    JS_BUILTIN_ARR_SLICE,
+    JS_BUILTIN_ARR_SPLICE,
+    JS_BUILTIN_ARR_INDEX_OF,
+    JS_BUILTIN_ARR_INCLUDES,
+    JS_BUILTIN_ARR_MAP,
+    JS_BUILTIN_ARR_FILTER,
+    JS_BUILTIN_ARR_REDUCE,
+    JS_BUILTIN_ARR_FOR_EACH,
+    JS_BUILTIN_ARR_FIND,
+    JS_BUILTIN_ARR_FIND_INDEX,
+    JS_BUILTIN_ARR_SOME,
+    JS_BUILTIN_ARR_EVERY,
+    JS_BUILTIN_ARR_SORT,
+    JS_BUILTIN_ARR_REVERSE,
+    JS_BUILTIN_ARR_CONCAT,
+    JS_BUILTIN_ARR_FLAT,
+    JS_BUILTIN_ARR_FLAT_MAP,
+    JS_BUILTIN_ARR_FILL,
+    JS_BUILTIN_ARR_COPY_WITHIN,
+    JS_BUILTIN_ARR_TO_STRING,
+    JS_BUILTIN_ARR_KEYS,
+    JS_BUILTIN_ARR_VALUES,
+    JS_BUILTIN_ARR_ENTRIES,
+    JS_BUILTIN_ARR_AT,
+    JS_BUILTIN_ARR_LAST_INDEX_OF,
+    // Function.prototype
+    JS_BUILTIN_FUNC_CALL,
+    JS_BUILTIN_FUNC_APPLY,
+    JS_BUILTIN_FUNC_BIND,
+    // String.prototype
+    JS_BUILTIN_STR_CHAR_AT,
+    JS_BUILTIN_STR_CHAR_CODE_AT,
+    JS_BUILTIN_STR_INDEX_OF,
+    JS_BUILTIN_STR_INCLUDES,
+    JS_BUILTIN_STR_SLICE,
+    JS_BUILTIN_STR_SUBSTRING,
+    JS_BUILTIN_STR_TO_LOWER_CASE,
+    JS_BUILTIN_STR_TO_UPPER_CASE,
+    JS_BUILTIN_STR_TRIM,
+    JS_BUILTIN_STR_SPLIT,
+    JS_BUILTIN_STR_REPLACE,
+    JS_BUILTIN_STR_MATCH,
+    JS_BUILTIN_STR_SEARCH,
+    JS_BUILTIN_STR_STARTS_WITH,
+    JS_BUILTIN_STR_ENDS_WITH,
+    JS_BUILTIN_STR_REPEAT,
+    JS_BUILTIN_STR_PAD_START,
+    JS_BUILTIN_STR_PAD_END,
+    JS_BUILTIN_STR_TO_STRING,
+    JS_BUILTIN_STR_VALUE_OF,
+    JS_BUILTIN_STR_TRIM_START,
+    JS_BUILTIN_STR_TRIM_END,
+    JS_BUILTIN_STR_CODE_POINT_AT,
+    JS_BUILTIN_STR_NORMALIZE,
+    JS_BUILTIN_STR_CONCAT,
+    JS_BUILTIN_STR_AT,
+    JS_BUILTIN_STR_LAST_INDEX_OF,
+    JS_BUILTIN_STR_LOCALE_COMPARE,
+    JS_BUILTIN_STR_REPLACE_ALL,
+    JS_BUILTIN_STR_MATCH_ALL,
+    JS_BUILTIN_MAX
 };
 
 extern "C" void* js_function_get_ptr(Item fn_item) {
@@ -1200,6 +1314,9 @@ static Item js_get_proto_key() {
     return js_proto_key_item;
 }
 
+// Forward declaration for builtin method lookup
+static Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+
 extern "C" Item js_property_get(Item object, Item key) {
     // Convert Symbol keys to unique string keys for property lookup
     if (js_key_is_symbol(key)) key = js_symbol_to_key(key);
@@ -1364,7 +1481,23 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
             }
         }
-        // Property not found — return undefined (JS semantics)
+        // Property not found — check for built-in methods (Object.prototype)
+        // Also check Array/String methods for prototype objects
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            // Check Object.prototype methods first (applies to all objects)
+            Item builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) return builtin;
+            // Also check Array methods (for Array.prototype and array-like objects)
+            builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) return builtin;
+            // Also check String methods (for String.prototype)
+            builtin = js_lookup_builtin_method(LMD_TYPE_STRING, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) return builtin;
+            // Also check Function methods (for Function.prototype)
+            builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) return builtin;
+        }
         return make_js_undefined();
     } else if (type == LMD_TYPE_ELEMENT) {
         return elmt_get(object.element, key);
@@ -1404,14 +1537,12 @@ extern "C" Item js_property_get(Item object, Item key) {
         return make_js_undefined();
     }
 
-    // Function: reading .prototype property
-    // Lazy initialization: create an empty prototype object on first access.
-    // This is needed for patterns like `Foo.prototype.method = function(){}`
-    // where prototype must be a real object, not null.
+    // Function: reading .prototype, .length, .name, .call, .apply, .bind properties
     if (type == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
+            // .prototype — lazy initialization
             if (str_key->len == 9 && strncmp(str_key->chars, "prototype", 9) == 0) {
                 if (fn->prototype.item == ItemNull.item) {
                     fn->prototype = js_new_object();
@@ -1419,7 +1550,33 @@ extern "C" Item js_property_get(Item object, Item key) {
                 }
                 return fn->prototype;
             }
+            // .length — formal parameter count (minus rest param, bound args adjustment)
+            if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
+                int len = fn->param_count;
+                if (fn->bound_args) {
+                    len = len - fn->bound_argc;
+                    if (len < 0) len = 0;
+                }
+                return (Item){.item = i2it(len)};
+            }
+            // .name — function name
+            if (str_key->len == 4 && strncmp(str_key->chars, "name", 4) == 0) {
+                if (fn->name) {
+                    return (Item){.item = s2it(fn->name)};
+                }
+                return (Item){.item = s2it(heap_create_name("", 0))};
+            }
+            // .call, .apply, .bind and other Function.prototype methods
+            Item builtin = js_lookup_builtin_method(LMD_TYPE_FUNC, str_key->chars, str_key->len);
+            if (builtin.item != ItemNull.item) return builtin;
         }
+    }
+
+    // Fallback: check for built-in method on the value's type
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        Item builtin = js_lookup_builtin_method(type, str_key->chars, str_key->len);
+        if (builtin.item != ItemNull.item) return builtin;
     }
 
     return make_js_undefined();
@@ -1487,6 +1644,36 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 snprintf(buf, sizeof(buf), "%g", it2d(key));
             }
             key = (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
+        // v16: Enforce Object.freeze — frozen objects reject all property writes
+        {
+            bool frozen_found = false;
+            Item frozen_val = js_map_get_fast(m, "__frozen__", 10, &frozen_found);
+            if (frozen_found && js_is_truthy(frozen_val)) {
+                // skip writes to internal properties (needed for freeze itself)
+                if (get_type_id(key) == LMD_TYPE_STRING) {
+                    String* sk = it2s(key);
+                    if (!(sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_')) {
+                        return value; // silently reject write to frozen object
+                    }
+                }
+            }
+        }
+        // v16: Enforce non-writable properties via __nw_<name> marker
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* str_key = it2s(key);
+            if (str_key && str_key->len > 0 && str_key->len < 200 &&
+                !(str_key->len >= 5 && strncmp(str_key->chars, "__nw_", 5) == 0) &&
+                !(str_key->len >= 5 && strncmp(str_key->chars, "__nc_", 5) == 0) &&
+                !(str_key->len >= 5 && strncmp(str_key->chars, "__ne_", 5) == 0)) {
+                char nw_key[256];
+                snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
+                bool nw_found = false;
+                Item nw_val = js_map_get_fast(m, nw_key, (int)strlen(nw_key), &nw_found);
+                if (nw_found && js_is_truthy(nw_val)) {
+                    return value; // silently reject write to non-writable property
+                }
+            }
         }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
@@ -1668,6 +1855,16 @@ static int64_t js_utf16_len(const char* chars, int str_len, bool is_ascii) {
 extern "C" int64_t js_get_length(Item object) {
     if (get_type_id(object) == LMD_TYPE_MAP && js_is_typed_array(object)) {
         return (int64_t)js_typed_array_length(object);
+    }
+    // Function .length = formal parameter count
+    if (get_type_id(object) == LMD_TYPE_FUNC) {
+        JsFunction* fn = (JsFunction*)object.function;
+        int len = fn->param_count;
+        if (fn->bound_args) {
+            len = len - fn->bound_argc;
+            if (len < 0) len = 0;
+        }
+        return (int64_t)len;
     }
     // JS string .length = UTF-16 code unit count (not codepoint count).
     if (get_type_id(object) == LMD_TYPE_STRING) {
@@ -1898,6 +2095,146 @@ static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
     }
 }
 
+// Built-in method function cache — keyed by builtin_id
+static Item js_builtin_cache[JS_BUILTIN_MAX];
+static bool js_builtin_cache_init = false;
+
+static Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count) {
+    if (!js_builtin_cache_init) {
+        for (int i = 0; i < JS_BUILTIN_MAX; i++) js_builtin_cache[i] = ItemNull;
+        js_builtin_cache_init = true;
+    }
+    if (js_builtin_cache[builtin_id].item != ItemNull.item) {
+        return js_builtin_cache[builtin_id];
+    }
+    JsFunction* fn = (JsFunction*)pool_calloc(js_input->pool, sizeof(JsFunction));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = NULL;  // not needed, dispatch uses builtin_id
+    fn->param_count = param_count;
+    fn->builtin_id = builtin_id;
+    fn->name = heap_create_name(name, strlen(name));
+    fn->prototype = ItemNull;
+    // NOTE: bound_this left as 0 (from pool_calloc). Do NOT set to ItemNull
+    // because ItemNull.item is non-zero (0x100000000000000) and the bound
+    // function check uses `fn->bound_this.item` as a boolean test.
+    Item result = {.function = (Function*)fn};
+    js_builtin_cache[builtin_id] = result;
+    return result;
+}
+
+// Lookup built-in method by name for a given receiver type
+static Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
+    // Object.prototype methods (available on all objects and arrays)
+    if (len == 14 && strncmp(name, "hasOwnProperty", 14) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, "hasOwnProperty", 1);
+    if (len == 21 && strncmp(name, "propertyIsEnumerable", 21) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, "propertyIsEnumerable", 1);
+    if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
+    if (len == 7 && strncmp(name, "valueOf", 7) == 0 && type != LMD_TYPE_FUNC)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
+    if (len == 13 && strncmp(name, "isPrototypeOf", 13) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, "isPrototypeOf", 1);
+
+    // Function.prototype methods
+    if (type == LMD_TYPE_FUNC) {
+        if (len == 4 && strncmp(name, "call", 4) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_FUNC_CALL, "call", 1);
+        if (len == 5 && strncmp(name, "apply", 5) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_FUNC_APPLY, "apply", 2);
+        if (len == 4 && strncmp(name, "bind", 4) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_FUNC_BIND, "bind", 1);
+        if (len == 8 && strncmp(name, "toString", 8) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
+    }
+
+    // Array.prototype methods
+    if (type == LMD_TYPE_ARRAY) {
+        struct { const char* name; int len; int id; int pc; } arr_methods[] = {
+            {"push", 4, JS_BUILTIN_ARR_PUSH, 1},
+            {"pop", 3, JS_BUILTIN_ARR_POP, 0},
+            {"shift", 5, JS_BUILTIN_ARR_SHIFT, 0},
+            {"unshift", 7, JS_BUILTIN_ARR_UNSHIFT, 1},
+            {"join", 4, JS_BUILTIN_ARR_JOIN, 1},
+            {"slice", 5, JS_BUILTIN_ARR_SLICE, 2},
+            {"splice", 6, JS_BUILTIN_ARR_SPLICE, 2},
+            {"indexOf", 7, JS_BUILTIN_ARR_INDEX_OF, 1},
+            {"lastIndexOf", 11, JS_BUILTIN_ARR_LAST_INDEX_OF, 1},
+            {"includes", 8, JS_BUILTIN_ARR_INCLUDES, 1},
+            {"map", 3, JS_BUILTIN_ARR_MAP, 1},
+            {"filter", 6, JS_BUILTIN_ARR_FILTER, 1},
+            {"reduce", 6, JS_BUILTIN_ARR_REDUCE, 1},
+            {"forEach", 7, JS_BUILTIN_ARR_FOR_EACH, 1},
+            {"find", 4, JS_BUILTIN_ARR_FIND, 1},
+            {"findIndex", 9, JS_BUILTIN_ARR_FIND_INDEX, 1},
+            {"some", 4, JS_BUILTIN_ARR_SOME, 1},
+            {"every", 5, JS_BUILTIN_ARR_EVERY, 1},
+            {"sort", 4, JS_BUILTIN_ARR_SORT, 1},
+            {"reverse", 7, JS_BUILTIN_ARR_REVERSE, 0},
+            {"concat", 6, JS_BUILTIN_ARR_CONCAT, 1},
+            {"flat", 4, JS_BUILTIN_ARR_FLAT, 0},
+            {"flatMap", 7, JS_BUILTIN_ARR_FLAT_MAP, 1},
+            {"fill", 4, JS_BUILTIN_ARR_FILL, 1},
+            {"copyWithin", 10, JS_BUILTIN_ARR_COPY_WITHIN, 2},
+            {"toString", 8, JS_BUILTIN_ARR_TO_STRING, 0},
+            {"keys", 4, JS_BUILTIN_ARR_KEYS, 0},
+            {"values", 6, JS_BUILTIN_ARR_VALUES, 0},
+            {"entries", 7, JS_BUILTIN_ARR_ENTRIES, 0},
+            {"at", 2, JS_BUILTIN_ARR_AT, 1},
+            {NULL, 0, 0, 0}
+        };
+        for (int i = 0; arr_methods[i].name; i++) {
+            if (len == arr_methods[i].len && strncmp(name, arr_methods[i].name, len) == 0) {
+                return js_get_or_create_builtin(arr_methods[i].id, arr_methods[i].name, arr_methods[i].pc);
+            }
+        }
+    }
+
+    // String.prototype methods
+    if (type == LMD_TYPE_STRING) {
+        struct { const char* name; int len; int id; int pc; } str_methods[] = {
+            {"charAt", 6, JS_BUILTIN_STR_CHAR_AT, 1},
+            {"charCodeAt", 10, JS_BUILTIN_STR_CHAR_CODE_AT, 1},
+            {"indexOf", 7, JS_BUILTIN_STR_INDEX_OF, 1},
+            {"lastIndexOf", 11, JS_BUILTIN_STR_LAST_INDEX_OF, 1},
+            {"includes", 8, JS_BUILTIN_STR_INCLUDES, 1},
+            {"slice", 5, JS_BUILTIN_STR_SLICE, 2},
+            {"substring", 9, JS_BUILTIN_STR_SUBSTRING, 2},
+            {"toLowerCase", 11, JS_BUILTIN_STR_TO_LOWER_CASE, 0},
+            {"toUpperCase", 11, JS_BUILTIN_STR_TO_UPPER_CASE, 0},
+            {"trim", 4, JS_BUILTIN_STR_TRIM, 0},
+            {"trimStart", 9, JS_BUILTIN_STR_TRIM_START, 0},
+            {"trimEnd", 7, JS_BUILTIN_STR_TRIM_END, 0},
+            {"split", 5, JS_BUILTIN_STR_SPLIT, 1},
+            {"replace", 7, JS_BUILTIN_STR_REPLACE, 2},
+            {"replaceAll", 10, JS_BUILTIN_STR_REPLACE_ALL, 2},
+            {"match", 5, JS_BUILTIN_STR_MATCH, 1},
+            {"matchAll", 8, JS_BUILTIN_STR_MATCH_ALL, 1},
+            {"search", 6, JS_BUILTIN_STR_SEARCH, 1},
+            {"startsWith", 10, JS_BUILTIN_STR_STARTS_WITH, 1},
+            {"endsWith", 8, JS_BUILTIN_STR_ENDS_WITH, 1},
+            {"repeat", 6, JS_BUILTIN_STR_REPEAT, 1},
+            {"padStart", 8, JS_BUILTIN_STR_PAD_START, 2},
+            {"padEnd", 6, JS_BUILTIN_STR_PAD_END, 2},
+            {"toString", 8, JS_BUILTIN_STR_TO_STRING, 0},
+            {"valueOf", 7, JS_BUILTIN_STR_VALUE_OF, 0},
+            {"codePointAt", 11, JS_BUILTIN_STR_CODE_POINT_AT, 1},
+            {"normalize", 9, JS_BUILTIN_STR_NORMALIZE, 0},
+            {"concat", 6, JS_BUILTIN_STR_CONCAT, 1},
+            {"at", 2, JS_BUILTIN_STR_AT, 1},
+            {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
+            {NULL, 0, 0, 0}
+        };
+        for (int i = 0; str_methods[i].name; i++) {
+            if (len == str_methods[i].len && strncmp(name, str_methods[i].name, len) == 0) {
+                return js_get_or_create_builtin(str_methods[i].id, str_methods[i].name, str_methods[i].pc);
+            }
+        }
+    }
+
+    return ItemNull;
+}
+
 extern "C" Item js_new_function(void* func_ptr, int param_count) {
     if (!func_ptr) {
         log_error("js_new_function: null func_ptr! param_count=%d", param_count);
@@ -1941,6 +2278,16 @@ extern "C" Item* js_alloc_env(int count) {
     Item* env = (Item*)pool_calloc(js_input->pool, count * sizeof(Item));
     heap_register_gc_root_range((uint64_t*)env, count);
     return env;
+}
+
+// Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)
+extern "C" void js_set_function_name(Item fn_item, Item name_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn->func_ptr) { // is JsFunction layout
+        fn->name = it2s(name_item);
+    }
 }
 
 // Invoke a JsFunction with args, handling env if it's a closure
@@ -2060,6 +2407,209 @@ extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
     return ItemNull;
 }
 
+// Forward declarations for builtin dispatch
+extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc);
+static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count);
+
+// Dispatch a built-in method call by builtin_id
+static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int arg_count) {
+    Item undef = make_js_undefined();
+    Item arg0 = arg_count > 0 && args ? args[0] : undef;
+    Item arg1 = arg_count > 1 && args ? args[1] : undef;
+    Item arg2 = arg_count > 2 && args ? args[2] : undef;
+
+    switch (builtin_id) {
+    // Object.prototype methods
+    case JS_BUILTIN_OBJ_HAS_OWN_PROPERTY:
+        return js_has_own_property(this_val, arg0);
+    case JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE: {
+        // Check if the property exists and is enumerable
+        Item has = js_has_own_property(this_val, arg0);
+        if (!it2b(has)) return (Item){.item = ITEM_FALSE};
+        // All own data properties on maps are enumerable in our engine
+        return (Item){.item = ITEM_TRUE};
+    }
+    case JS_BUILTIN_OBJ_TO_STRING:
+        return js_to_string(this_val);
+    case JS_BUILTIN_OBJ_VALUE_OF:
+        return this_val;
+    case JS_BUILTIN_OBJ_IS_PROTOTYPE_OF:
+        // Check if this_val is in the prototype chain of arg0
+        return (Item){.item = ITEM_FALSE}; // simplified
+
+    // Array.prototype methods - delegate to js_map_method which handles arrays
+    case JS_BUILTIN_ARR_PUSH:
+    case JS_BUILTIN_ARR_POP:
+    case JS_BUILTIN_ARR_SHIFT:
+    case JS_BUILTIN_ARR_UNSHIFT:
+    case JS_BUILTIN_ARR_JOIN:
+    case JS_BUILTIN_ARR_SLICE:
+    case JS_BUILTIN_ARR_SPLICE:
+    case JS_BUILTIN_ARR_INDEX_OF:
+    case JS_BUILTIN_ARR_INCLUDES:
+    case JS_BUILTIN_ARR_MAP:
+    case JS_BUILTIN_ARR_FILTER:
+    case JS_BUILTIN_ARR_REDUCE:
+    case JS_BUILTIN_ARR_FOR_EACH:
+    case JS_BUILTIN_ARR_FIND:
+    case JS_BUILTIN_ARR_FIND_INDEX:
+    case JS_BUILTIN_ARR_SOME:
+    case JS_BUILTIN_ARR_EVERY:
+    case JS_BUILTIN_ARR_SORT:
+    case JS_BUILTIN_ARR_REVERSE:
+    case JS_BUILTIN_ARR_CONCAT:
+    case JS_BUILTIN_ARR_FLAT:
+    case JS_BUILTIN_ARR_FLAT_MAP:
+    case JS_BUILTIN_ARR_FILL:
+    case JS_BUILTIN_ARR_COPY_WITHIN:
+    case JS_BUILTIN_ARR_TO_STRING:
+    case JS_BUILTIN_ARR_KEYS:
+    case JS_BUILTIN_ARR_VALUES:
+    case JS_BUILTIN_ARR_ENTRIES:
+    case JS_BUILTIN_ARR_AT:
+    case JS_BUILTIN_ARR_LAST_INDEX_OF: {
+        // Map builtin_id to method name and delegate to js_map_method
+        static const char* arr_method_names[] = {
+            [JS_BUILTIN_ARR_PUSH - JS_BUILTIN_ARR_PUSH] = "push",
+            [JS_BUILTIN_ARR_POP - JS_BUILTIN_ARR_PUSH] = "pop",
+            [JS_BUILTIN_ARR_SHIFT - JS_BUILTIN_ARR_PUSH] = "shift",
+            [JS_BUILTIN_ARR_UNSHIFT - JS_BUILTIN_ARR_PUSH] = "unshift",
+            [JS_BUILTIN_ARR_JOIN - JS_BUILTIN_ARR_PUSH] = "join",
+            [JS_BUILTIN_ARR_SLICE - JS_BUILTIN_ARR_PUSH] = "slice",
+            [JS_BUILTIN_ARR_SPLICE - JS_BUILTIN_ARR_PUSH] = "splice",
+            [JS_BUILTIN_ARR_INDEX_OF - JS_BUILTIN_ARR_PUSH] = "indexOf",
+            [JS_BUILTIN_ARR_INCLUDES - JS_BUILTIN_ARR_PUSH] = "includes",
+            [JS_BUILTIN_ARR_MAP - JS_BUILTIN_ARR_PUSH] = "map",
+            [JS_BUILTIN_ARR_FILTER - JS_BUILTIN_ARR_PUSH] = "filter",
+            [JS_BUILTIN_ARR_REDUCE - JS_BUILTIN_ARR_PUSH] = "reduce",
+            [JS_BUILTIN_ARR_FOR_EACH - JS_BUILTIN_ARR_PUSH] = "forEach",
+            [JS_BUILTIN_ARR_FIND - JS_BUILTIN_ARR_PUSH] = "find",
+            [JS_BUILTIN_ARR_FIND_INDEX - JS_BUILTIN_ARR_PUSH] = "findIndex",
+            [JS_BUILTIN_ARR_SOME - JS_BUILTIN_ARR_PUSH] = "some",
+            [JS_BUILTIN_ARR_EVERY - JS_BUILTIN_ARR_PUSH] = "every",
+            [JS_BUILTIN_ARR_SORT - JS_BUILTIN_ARR_PUSH] = "sort",
+            [JS_BUILTIN_ARR_REVERSE - JS_BUILTIN_ARR_PUSH] = "reverse",
+            [JS_BUILTIN_ARR_CONCAT - JS_BUILTIN_ARR_PUSH] = "concat",
+            [JS_BUILTIN_ARR_FLAT - JS_BUILTIN_ARR_PUSH] = "flat",
+            [JS_BUILTIN_ARR_FLAT_MAP - JS_BUILTIN_ARR_PUSH] = "flatMap",
+            [JS_BUILTIN_ARR_FILL - JS_BUILTIN_ARR_PUSH] = "fill",
+            [JS_BUILTIN_ARR_COPY_WITHIN - JS_BUILTIN_ARR_PUSH] = "copyWithin",
+            [JS_BUILTIN_ARR_TO_STRING - JS_BUILTIN_ARR_PUSH] = "toString",
+            [JS_BUILTIN_ARR_KEYS - JS_BUILTIN_ARR_PUSH] = "keys",
+            [JS_BUILTIN_ARR_VALUES - JS_BUILTIN_ARR_PUSH] = "values",
+            [JS_BUILTIN_ARR_ENTRIES - JS_BUILTIN_ARR_PUSH] = "entries",
+            [JS_BUILTIN_ARR_AT - JS_BUILTIN_ARR_PUSH] = "at",
+            [JS_BUILTIN_ARR_LAST_INDEX_OF - JS_BUILTIN_ARR_PUSH] = "lastIndexOf",
+        };
+        int idx = builtin_id - JS_BUILTIN_ARR_PUSH;
+        const char* name = arr_method_names[idx];
+        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
+        // Route to js_array_method for actual arrays, js_map_method for maps/typed arrays.
+        // Do NOT call js_map_method for plain MAPs — it would recurse through
+        // the property access fallback which finds the builtin again.
+        TypeId this_type = get_type_id(this_val);
+        if (this_type == LMD_TYPE_ARRAY) {
+            return js_array_method(this_val, method_name, args, arg_count);
+        }
+        // For MAP objects (typed arrays, data views), delegate to js_map_method
+        // which handles them. For plain Maps without the method, return undefined.
+        if (this_type == LMD_TYPE_MAP) {
+            if (js_is_typed_array(this_val) || js_is_dataview(this_val)) {
+                return js_map_method(this_val, method_name, args, arg_count);
+            }
+            // Plain Map: not an array, return undefined for array methods
+            return make_js_undefined();
+        }
+        return make_js_undefined();
+    }
+
+    // Function.prototype methods
+    case JS_BUILTIN_FUNC_CALL: {
+        // fn.call(thisArg, ...args) → js_call_function(fn=this_val, thisArg=arg0, rest)
+        Item* rest_args = arg_count > 1 ? args + 1 : NULL;
+        int rest_count = arg_count > 1 ? arg_count - 1 : 0;
+        return js_call_function(this_val, arg0, rest_args, rest_count);
+    }
+    case JS_BUILTIN_FUNC_APPLY:
+        return js_apply_function(this_val, arg0, arg1);
+    case JS_BUILTIN_FUNC_BIND:
+        return js_func_bind(this_val, arg0, arg_count > 1 ? args + 1 : NULL, arg_count > 1 ? arg_count - 1 : 0);
+
+    // String.prototype methods - delegate to js_string_method
+    case JS_BUILTIN_STR_CHAR_AT:
+    case JS_BUILTIN_STR_CHAR_CODE_AT:
+    case JS_BUILTIN_STR_INDEX_OF:
+    case JS_BUILTIN_STR_INCLUDES:
+    case JS_BUILTIN_STR_SLICE:
+    case JS_BUILTIN_STR_SUBSTRING:
+    case JS_BUILTIN_STR_TO_LOWER_CASE:
+    case JS_BUILTIN_STR_TO_UPPER_CASE:
+    case JS_BUILTIN_STR_TRIM:
+    case JS_BUILTIN_STR_SPLIT:
+    case JS_BUILTIN_STR_REPLACE:
+    case JS_BUILTIN_STR_MATCH:
+    case JS_BUILTIN_STR_SEARCH:
+    case JS_BUILTIN_STR_STARTS_WITH:
+    case JS_BUILTIN_STR_ENDS_WITH:
+    case JS_BUILTIN_STR_REPEAT:
+    case JS_BUILTIN_STR_PAD_START:
+    case JS_BUILTIN_STR_PAD_END:
+    case JS_BUILTIN_STR_TO_STRING:
+    case JS_BUILTIN_STR_VALUE_OF:
+    case JS_BUILTIN_STR_TRIM_START:
+    case JS_BUILTIN_STR_TRIM_END:
+    case JS_BUILTIN_STR_CODE_POINT_AT:
+    case JS_BUILTIN_STR_NORMALIZE:
+    case JS_BUILTIN_STR_CONCAT:
+    case JS_BUILTIN_STR_AT:
+    case JS_BUILTIN_STR_LAST_INDEX_OF:
+    case JS_BUILTIN_STR_LOCALE_COMPARE:
+    case JS_BUILTIN_STR_REPLACE_ALL:
+    case JS_BUILTIN_STR_MATCH_ALL: {
+        static const char* str_method_names[] = {
+            [JS_BUILTIN_STR_CHAR_AT - JS_BUILTIN_STR_CHAR_AT] = "charAt",
+            [JS_BUILTIN_STR_CHAR_CODE_AT - JS_BUILTIN_STR_CHAR_AT] = "charCodeAt",
+            [JS_BUILTIN_STR_INDEX_OF - JS_BUILTIN_STR_CHAR_AT] = "indexOf",
+            [JS_BUILTIN_STR_INCLUDES - JS_BUILTIN_STR_CHAR_AT] = "includes",
+            [JS_BUILTIN_STR_SLICE - JS_BUILTIN_STR_CHAR_AT] = "slice",
+            [JS_BUILTIN_STR_SUBSTRING - JS_BUILTIN_STR_CHAR_AT] = "substring",
+            [JS_BUILTIN_STR_TO_LOWER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toLowerCase",
+            [JS_BUILTIN_STR_TO_UPPER_CASE - JS_BUILTIN_STR_CHAR_AT] = "toUpperCase",
+            [JS_BUILTIN_STR_TRIM - JS_BUILTIN_STR_CHAR_AT] = "trim",
+            [JS_BUILTIN_STR_SPLIT - JS_BUILTIN_STR_CHAR_AT] = "split",
+            [JS_BUILTIN_STR_REPLACE - JS_BUILTIN_STR_CHAR_AT] = "replace",
+            [JS_BUILTIN_STR_MATCH - JS_BUILTIN_STR_CHAR_AT] = "match",
+            [JS_BUILTIN_STR_SEARCH - JS_BUILTIN_STR_CHAR_AT] = "search",
+            [JS_BUILTIN_STR_STARTS_WITH - JS_BUILTIN_STR_CHAR_AT] = "startsWith",
+            [JS_BUILTIN_STR_ENDS_WITH - JS_BUILTIN_STR_CHAR_AT] = "endsWith",
+            [JS_BUILTIN_STR_REPEAT - JS_BUILTIN_STR_CHAR_AT] = "repeat",
+            [JS_BUILTIN_STR_PAD_START - JS_BUILTIN_STR_CHAR_AT] = "padStart",
+            [JS_BUILTIN_STR_PAD_END - JS_BUILTIN_STR_CHAR_AT] = "padEnd",
+            [JS_BUILTIN_STR_TO_STRING - JS_BUILTIN_STR_CHAR_AT] = "toString",
+            [JS_BUILTIN_STR_VALUE_OF - JS_BUILTIN_STR_CHAR_AT] = "valueOf",
+            [JS_BUILTIN_STR_TRIM_START - JS_BUILTIN_STR_CHAR_AT] = "trimStart",
+            [JS_BUILTIN_STR_TRIM_END - JS_BUILTIN_STR_CHAR_AT] = "trimEnd",
+            [JS_BUILTIN_STR_CODE_POINT_AT - JS_BUILTIN_STR_CHAR_AT] = "codePointAt",
+            [JS_BUILTIN_STR_NORMALIZE - JS_BUILTIN_STR_CHAR_AT] = "normalize",
+            [JS_BUILTIN_STR_CONCAT - JS_BUILTIN_STR_CHAR_AT] = "concat",
+            [JS_BUILTIN_STR_AT - JS_BUILTIN_STR_CHAR_AT] = "at",
+            [JS_BUILTIN_STR_LAST_INDEX_OF - JS_BUILTIN_STR_CHAR_AT] = "lastIndexOf",
+            [JS_BUILTIN_STR_LOCALE_COMPARE - JS_BUILTIN_STR_CHAR_AT] = "localeCompare",
+            [JS_BUILTIN_STR_REPLACE_ALL - JS_BUILTIN_STR_CHAR_AT] = "replaceAll",
+            [JS_BUILTIN_STR_MATCH_ALL - JS_BUILTIN_STR_CHAR_AT] = "matchAll",
+        };
+        int idx = builtin_id - JS_BUILTIN_STR_CHAR_AT;
+        const char* name = str_method_names[idx];
+        Item method_name = {.item = s2it(heap_create_name(name, strlen(name)))};
+        return js_string_method(this_val, method_name, args, arg_count);
+    }
+
+    default:
+        log_error("js_dispatch_builtin: unknown builtin_id=%d", builtin_id);
+        return undef;
+    }
+}
+
 extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count) {
     js_call_count++;
 
@@ -2071,9 +2621,27 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
     }
 
     JsFunction* fn = (JsFunction*)func_item.function;
-    if (!fn || !fn->func_ptr) {
+    if (!fn || (!fn->func_ptr && fn->builtin_id == 0)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
+    }
+
+    // Built-in method dispatch (prototype methods like Array.prototype.push)
+    if (fn->builtin_id > 0) {
+        // Handle bound builtins
+        if (fn->bound_args || fn->bound_this.item) {
+            Item effective_this = fn->bound_this.item ? fn->bound_this : this_val;
+            int total_argc = fn->bound_argc + arg_count;
+            Item* merged_args = (Item*)alloca(total_argc * sizeof(Item));
+            for (int i = 0; i < fn->bound_argc; i++) {
+                merged_args[i] = fn->bound_args[i];
+            }
+            for (int i = 0; i < arg_count; i++) {
+                merged_args[fn->bound_argc + i] = args ? args[i] : ItemNull;
+            }
+            return js_dispatch_builtin(fn->builtin_id, effective_this, merged_args, total_argc);
+        }
+        return js_dispatch_builtin(fn->builtin_id, this_val, args, arg_count);
     }
 
     // v11: handle bound functions — use bound this and prepend bound args
@@ -2138,6 +2706,7 @@ extern "C" Item js_bind_function(Item func_item, Item bound_this, Item* bound_ar
     bound->env = orig->env;
     bound->env_size = orig->env_size;
     bound->prototype = ItemNull;
+    bound->builtin_id = orig->builtin_id;
     bound->bound_this = bound_this;
     if (bound_argc > 0 && bound_args) {
         bound->bound_args = (Item*)pool_calloc(js_input->pool, bound_argc * sizeof(Item));
@@ -4951,6 +5520,19 @@ static const int PROTO_KEY_LEN = 9;
 extern "C" void js_set_prototype(Item object, Item prototype) {
     if (get_type_id(object) != LMD_TYPE_MAP) return;
     if (get_type_id(prototype) != LMD_TYPE_MAP && prototype.item != ItemNull.item) return;
+    // v16: Prevent circular prototype chains (ES spec §9.1.2)
+    if (get_type_id(prototype) == LMD_TYPE_MAP) {
+        Item p = prototype;
+        int depth = 0;
+        while (p.item != ItemNull.item && get_type_id(p) == LMD_TYPE_MAP && depth < 32) {
+            if (p.map == object.map) {
+                log_error("js_set_prototype: circular prototype chain detected, rejecting");
+                return;
+            }
+            p = js_get_prototype(p);
+            depth++;
+        }
+    }
     // P10d: use interned __proto__ key
     Item key = js_get_proto_key();
     js_property_set(object, key, prototype);
