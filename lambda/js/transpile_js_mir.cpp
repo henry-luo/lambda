@@ -122,6 +122,7 @@ struct JsFuncCollected {
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
     int ctor_prop_lens[16];         // lengths of each property name
+    int ctor_prop_ta_types[16];     // typed array type for each prop (-1 = not a typed array)
 };
 
 // Class method info for transpiler
@@ -3076,6 +3077,77 @@ static int jm_ctor_prop_slot(JsFuncCollected* fc, const char* prop_name, int pro
     return -1;
 }
 
+// detect typed array constructor type from a new expression
+// also detects chained method calls like new Uint8Array(n).map(fn)
+static int jm_detect_typed_array_new(JsAstNode* rhs) {
+    if (!rhs) return -1;
+    // direct: new TypedArray(...)
+    if (rhs->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        JsCallNode* new_call = (JsCallNode*)rhs;
+        if (!new_call->callee || new_call->callee->node_type != JS_AST_NODE_IDENTIFIER) return -1;
+        JsIdentifierNode* ctor = (JsIdentifierNode*)new_call->callee;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Uint8Array", 10) == 0) return JS_TYPED_UINT8;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int32Array", 10) == 0) return JS_TYPED_INT32;
+        if (ctor->name->len == 10 && strncmp(ctor->name->chars, "Int16Array", 10) == 0) return JS_TYPED_INT16;
+        if (ctor->name->len == 9 && strncmp(ctor->name->chars, "Int8Array", 9) == 0) return JS_TYPED_INT8;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint32Array", 11) == 0) return JS_TYPED_UINT32;
+        if (ctor->name->len == 11 && strncmp(ctor->name->chars, "Uint16Array", 11) == 0) return JS_TYPED_UINT16;
+        if (ctor->name->len == 17 && strncmp(ctor->name->chars, "Uint8ClampedArray", 17) == 0) return JS_TYPED_UINT8_CLAMPED;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float64Array", 12) == 0) return JS_TYPED_FLOAT64;
+        if (ctor->name->len == 12 && strncmp(ctor->name->chars, "Float32Array", 12) == 0) return JS_TYPED_FLOAT32;
+        return -1;
+    }
+    // chained: new TypedArray(n).map(fn) / .filter(fn) / .slice(...) etc.
+    // TypedArray methods that preserve type: map, filter, slice, sort, reverse, subarray
+    if (rhs->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)rhs;
+        if (call->callee && call->callee->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* cm = (JsMemberNode*)call->callee;
+            if (!cm->computed && cm->property &&
+                cm->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* method = (JsIdentifierNode*)cm->property;
+                bool preserves_type = false;
+                if (method->name->len == 3 && strncmp(method->name->chars, "map", 3) == 0) preserves_type = true;
+                else if (method->name->len == 6 && strncmp(method->name->chars, "filter", 6) == 0) preserves_type = true;
+                else if (method->name->len == 5 && strncmp(method->name->chars, "slice", 5) == 0) preserves_type = true;
+                else if (method->name->len == 4 && strncmp(method->name->chars, "sort", 4) == 0) preserves_type = true;
+                else if (method->name->len == 7 && strncmp(method->name->chars, "reverse", 7) == 0) preserves_type = true;
+                else if (method->name->len == 8 && strncmp(method->name->chars, "subarray", 8) == 0) preserves_type = true;
+                if (preserves_type) {
+                    return jm_detect_typed_array_new(cm->object);
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+// look up typed array type for a class instance field by name.
+// checks the class and its superclass chain for instance fields with typed array initializers.
+static int jm_class_field_ta_type(JsClassEntry* ce, const char* prop_name, int prop_len) {
+    while (ce) {
+        for (int i = 0; i < ce->instance_field_count; i++) {
+            JsInstanceFieldEntry* f = &ce->instance_fields[i];
+            if (f->name && (int)f->name->len == prop_len &&
+                strncmp(f->name->chars, prop_name, prop_len) == 0) {
+                return jm_detect_typed_array_new(f->initializer);
+            }
+        }
+        // also check ctor_prop_ta_types for constructor body assignments
+        if (ce->constructor && ce->constructor->fc) {
+            JsFuncCollected* fc = ce->constructor->fc;
+            for (int i = 0; i < fc->ctor_prop_count; i++) {
+                if (fc->ctor_prop_lens[i] == prop_len &&
+                    strncmp(fc->ctor_prop_ptrs[i], prop_name, prop_len) == 0) {
+                    return fc->ctor_prop_ta_types[i];
+                }
+            }
+        }
+        ce = ce->superclass;
+    }
+    return -1;
+}
+
 // A5: Scan constructor body for this.property = expr assignment patterns.
 // Records property names in order so we can pre-build the object shape.
 static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
@@ -3100,6 +3172,8 @@ static void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
                             if (fc->ctor_prop_count < 16) {
                                 fc->ctor_prop_ptrs[fc->ctor_prop_count] = prop->name->chars;
                                 fc->ctor_prop_lens[fc->ctor_prop_count] = (int)prop->name->len;
+                                // detect typed array type from RHS
+                                fc->ctor_prop_ta_types[fc->ctor_prop_count] = jm_detect_typed_array_new(asgn->right);
                                 fc->ctor_prop_count++;
                             }
                         }
@@ -8682,6 +8756,44 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
             return jm_transpile_typed_array_get(mt, ta_var->reg, idx_native, ta_var->typed_array_type);
         }
 
+        // P9b: this.prop[idx] where prop is a known typed array from class fields
+        if (mt->current_class && mem->object &&
+            mem->object->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* inner = (JsMemberNode*)mem->object;
+            if (!inner->computed && inner->object &&
+                inner->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                inner->property && inner->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                JsIdentifierNode* obj_id = (JsIdentifierNode*)inner->object;
+                JsIdentifierNode* prop_id = (JsIdentifierNode*)inner->property;
+                if (obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
+                    int ta_type = jm_class_field_ta_type(mt->current_class,
+                        prop_id->name->chars, (int)prop_id->name->len);
+                    if (ta_type >= 0) {
+                        // load this.prop, then inline typed array get
+                        MIR_reg_t this_reg = jm_transpile_box_item(mt, inner->object);
+                        MIR_reg_t prop_key = jm_box_string_literal(mt, prop_id->name->chars, prop_id->name->len);
+                        MIR_reg_t ta_reg = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, this_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key));
+                        MIR_reg_t idx_native2;
+                        TypeId idx_type2 = jm_get_effective_type(mt, mem->property);
+                        if (idx_type2 == LMD_TYPE_INT) {
+                            idx_native2 = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_INT);
+                        } else if (idx_type2 == LMD_TYPE_FLOAT) {
+                            MIR_reg_t idx_f = jm_transpile_as_native(mt, mem->property, idx_type2, LMD_TYPE_FLOAT);
+                            idx_native2 = jm_emit_double_to_int(mt, idx_f);
+                        } else {
+                            MIR_reg_t idx_b = jm_transpile_box_item(mt, mem->property);
+                            idx_native2 = jm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_b));
+                        }
+                        log_debug("P9b: inline this.%.*s[idx] as typed array type %d",
+                                  (int)prop_id->name->len, prop_id->name->chars, ta_type);
+                        return jm_transpile_typed_array_get(mt, ta_reg, idx_native2, ta_type);
+                    }
+                }
+            }
+        }
+
         // A4/A2: Regular array fast path — when index is known INT, use fast access
         // bypassing js_get_number() conversion overhead
         // Skip when optional chaining (?.) — need null/undefined guard first
@@ -10221,6 +10333,29 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                                         if (var_entry) {
                                             var_entry->is_js_array = true;
                                             log_debug("A2: var '%s' is regular JS array (Array.from)", vname);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // propagate typed array type from this.prop in class methods
+                        if (d->init->node_type == JS_AST_NODE_MEMBER_EXPRESSION && mt->current_class) {
+                            JsMemberNode* im = (JsMemberNode*)d->init;
+                            if (!im->computed && im->object && im->property &&
+                                im->object->node_type == JS_AST_NODE_IDENTIFIER &&
+                                im->property->node_type == JS_AST_NODE_IDENTIFIER) {
+                                JsIdentifierNode* obj_id = (JsIdentifierNode*)im->object;
+                                if (obj_id->name->len == 4 && strncmp(obj_id->name->chars, "this", 4) == 0) {
+                                    JsIdentifierNode* prop_id = (JsIdentifierNode*)im->property;
+                                    int ta_type = jm_class_field_ta_type(mt->current_class,
+                                        prop_id->name->chars, (int)prop_id->name->len);
+                                    if (ta_type >= 0) {
+                                        JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                        if (var_entry) {
+                                            var_entry->typed_array_type = ta_type;
+                                            log_debug("P9b: var '%s' is typed array type %d (from this.%.*s)",
+                                                      vname, ta_type, (int)prop_id->name->len, prop_id->name->chars);
                                         }
                                     }
                                 }

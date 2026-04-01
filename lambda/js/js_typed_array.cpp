@@ -200,10 +200,16 @@ extern "C" Item js_typed_array_new_from_array(int type_id, Item source) {
         JsTypedArray* src = (JsTypedArray*)source.map->data;
         Item result = js_typed_array_new(type_id, src->length);
         JsTypedArray* dst = (JsTypedArray*)result.map->data;
-        for (int i = 0; i < src->length; i++) {
-            Item idx = (Item){.item = i2it(i)};
-            Item val = js_typed_array_get(source, idx);
-            js_typed_array_set(result, idx, val);
+        if (src->element_type == (JsTypedArrayType)type_id) {
+            // fast path: same type → memcpy
+            int elem_size = typed_array_element_size(src->element_type);
+            memcpy(dst->data, src->data, src->length * elem_size);
+        } else {
+            for (int i = 0; i < src->length; i++) {
+                Item idx = (Item){.item = i2it(i)};
+                Item val = js_typed_array_get(source, idx);
+                js_typed_array_set(result, idx, val);
+            }
         }
         return result;
     }
@@ -356,9 +362,66 @@ extern "C" Item js_typed_array_fill(Item ta_item, Item value, int start, int end
     if (end < 0) end = 0;
     if (start >= end) return ta_item;
 
-    for (int i = start; i < end; i++) {
-        Item idx = (Item){.item = i2it(i)};
-        js_typed_array_set(ta_item, idx, value);
+    int count = end - start;
+
+    // fast path for byte-sized types: memset
+    TypeId vtype = get_type_id(value);
+    double num_val = 0.0;
+    if (vtype == LMD_TYPE_INT) num_val = (double)it2i(value);
+    else if (vtype == LMD_TYPE_FLOAT) num_val = it2d(value);
+
+    switch (ta->element_type) {
+    case JS_TYPED_UINT8:
+    case JS_TYPED_UINT8_CLAMPED: {
+        int v = (int)num_val;
+        if (ta->element_type == JS_TYPED_UINT8_CLAMPED) {
+            if (v < 0) v = 0; else if (v > 255) v = 255;
+        }
+        memset((uint8_t*)ta->data + start, (uint8_t)v, count);
+        return ta_item;
+    }
+    case JS_TYPED_INT8: {
+        memset((int8_t*)ta->data + start, (int8_t)(int32_t)num_val, count);
+        return ta_item;
+    }
+    case JS_TYPED_INT16: {
+        int16_t v = (int16_t)(int32_t)num_val;
+        int16_t* p = (int16_t*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_UINT16: {
+        uint16_t v = (uint16_t)(uint32_t)num_val;
+        uint16_t* p = (uint16_t*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_INT32: {
+        int32_t v = (int32_t)num_val;
+        int32_t* p = (int32_t*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_UINT32: {
+        uint32_t v = (uint32_t)num_val;
+        uint32_t* p = (uint32_t*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_FLOAT32: {
+        float v = (float)num_val;
+        float* p = (float*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    case JS_TYPED_FLOAT64: {
+        double v = num_val;
+        double* p = (double*)ta->data + start;
+        for (int i = 0; i < count; i++) p[i] = v;
+        return ta_item;
+    }
+    default:
+        break;
     }
 
     return ta_item;
@@ -372,11 +435,24 @@ extern "C" Item js_typed_array_set_from(Item ta_item, Item source, int offset) {
 
     if (js_is_typed_array(source)) {
         JsTypedArray* src = (JsTypedArray*)source.map->data;
-        for (int i = 0; i < src->length && (offset + i) < dst->length; i++) {
-            Item idx_s = (Item){.item = i2it(i)};
-            Item idx_d = (Item){.item = i2it(offset + i)};
-            Item val = js_typed_array_get(source, idx_s);
-            js_typed_array_set(ta_item, idx_d, val);
+        int copy_len = src->length;
+        if (offset + copy_len > dst->length) copy_len = dst->length - offset;
+        if (copy_len <= 0) return (Item){.item = ITEM_NULL};
+
+        if (src->element_type == dst->element_type) {
+            // fast path: same type → memcpy (or memmove for overlapping buffers)
+            int elem_size = typed_array_element_size(src->element_type);
+            void* dst_ptr = (char*)dst->data + offset * elem_size;
+            void* src_ptr = src->data;
+            memmove(dst_ptr, src_ptr, copy_len * elem_size);
+        } else {
+            // different types: element-by-element with direct memory access
+            for (int i = 0; i < copy_len; i++) {
+                Item idx_s = (Item){.item = i2it(i)};
+                Item idx_d = (Item){.item = i2it(offset + i)};
+                Item val = js_typed_array_get(source, idx_s);
+                js_typed_array_set(ta_item, idx_d, val);
+            }
         }
     } else if (get_type_id(source) == LMD_TYPE_ARRAY) {
         Array* arr = source.array;

@@ -1775,6 +1775,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
         }
         return make_js_undefined();
     }
+    // fast path for typed arrays: avoid going through js_property_access
+    if (js_is_typed_array(array)) {
+        return js_typed_array_get(array, (Item){.item = i2it((int)index)});
+    }
     // fall back to general property access for strings, maps, etc.
     return js_property_access(array, (Item){.item = i2it((int)index)});
 }
@@ -1782,6 +1786,10 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
 // P10e: Fast array set with native int index
 extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     if (get_type_id(array) != LMD_TYPE_ARRAY) {
+        // fast path for typed arrays
+        if (js_is_typed_array(array)) {
+            return js_typed_array_set(array, (Item){.item = i2it((int)index)}, value);
+        }
         return js_property_set(array, (Item){.item = i2it((int)index)}, value);
     }
     Array* arr = array.array;
