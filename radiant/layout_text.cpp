@@ -194,6 +194,128 @@ static inline bool is_cjk_character(uint32_t codepoint) {
            (codepoint >= 0xAC00 && codepoint <= 0xD7AF);    // Hangul Syllables
 }
 
+// ============================================================================
+// Unicode Line Break Class Helpers (UAX #14 / CSS Text 3 §5.2)
+// ============================================================================
+
+/**
+ * Check if a codepoint has OP (Opening Punctuation) line-break class.
+ * CSS Text 3 §5.2: No break after OP characters — they stay with following content.
+ * Based on Unicode Line Break Algorithm (UAX #14).
+ */
+static inline bool is_line_break_op(uint32_t cp) {
+    // ASCII opening brackets
+    if (cp == 0x0028 || cp == 0x005B || cp == 0x007B) return true;
+    // Tibetan opening marks
+    if (cp == 0x0F3A || cp == 0x0F3C) return true;
+    // Ogham
+    if (cp == 0x169B) return true;
+    // Quotation marks with OP class
+    if (cp == 0x201A || cp == 0x201E) return true;
+    // Left-pointing double angle quotation mark opening
+    if (cp == 0x2045) return true;
+    // Left-pointing angle bracket
+    if (cp == 0x2329) return true;
+    // Misc math paired brackets
+    if (cp >= 0x2768 && cp <= 0x2775 && (cp & 1) == 0) return true; // even = opening
+    // Mathematical brackets
+    if (cp == 0x27E6 || cp == 0x27E8 || cp == 0x27EA) return true;
+    // Misc technical paired brackets
+    if (cp >= 0x2983 && cp <= 0x2998 && (cp & 1) == 1) return true; // odd = opening
+    if (cp == 0x29D8 || cp == 0x29DA || cp == 0x29FC) return true;
+    // CJK paired brackets and quotation marks
+    if (cp == 0x3008 || cp == 0x300A || cp == 0x300C || cp == 0x300E ||
+        cp == 0x3010 || cp == 0x3014 || cp == 0x3016 || cp == 0x3018 ||
+        cp == 0x301A || cp == 0x301D) return true;
+    // CJK compatibility forms (vertical)
+    if (cp >= 0xFE35 && cp <= 0xFE44 && (cp & 1) == 1) return true; // odd = opening
+    if (cp == 0xFE47) return true;
+    // Small form variants
+    if (cp == 0xFE59 || cp == 0xFE5B || cp == 0xFE5D) return true;
+    // Fullwidth forms
+    if (cp == 0xFF08 || cp == 0xFF3B || cp == 0xFF5B || cp == 0xFF5F || cp == 0xFF62) return true;
+    return false;
+}
+
+/**
+ * Check if a codepoint has CL (Closing Punctuation) or CP line-break class.
+ * CSS Text 3 §5.2: No break before CL/CP characters — they stay with preceding content.
+ * Includes both CL (Closing Punctuation) and CP (Close Parenthesis) classes,
+ * plus EX (Exclamation/Interrogation) as they behave similarly for CJK contexts.
+ */
+static inline bool is_line_break_cl(uint32_t cp) {
+    // ASCII closing brackets
+    if (cp == 0x0029 || cp == 0x005D || cp == 0x007D) return true;
+    // Tibetan closing marks
+    if (cp == 0x0F3B || cp == 0x0F3D) return true;
+    // Ogham
+    if (cp == 0x169C) return true;
+    // Superscript/subscript closing parens
+    if (cp == 0x207E || cp == 0x208E) return true;
+    // Right-pointing angle bracket
+    if (cp == 0x232A) return true;
+    // Misc math paired brackets (odd = closing)
+    if (cp >= 0x2769 && cp <= 0x2775 && (cp & 1) == 1) return true;
+    // Mathematical brackets
+    if (cp == 0x27E7 || cp == 0x27E9 || cp == 0x27EB) return true;
+    // Misc technical paired brackets (even = closing)
+    if (cp >= 0x2984 && cp <= 0x2998 && (cp & 1) == 0) return true;
+    if (cp == 0x29D9 || cp == 0x29DB || cp == 0x29FD) return true;
+    // CJK comma, full stop (CL class)
+    if (cp == 0x3001 || cp == 0x3002) return true;
+    // CJK paired closing brackets
+    if (cp == 0x3009 || cp == 0x300B || cp == 0x300D || cp == 0x300F ||
+        cp == 0x3011 || cp == 0x3015 || cp == 0x3017 || cp == 0x3019 ||
+        cp == 0x301B || cp == 0x301E || cp == 0x301F) return true;
+    // CJK compatibility forms (vertical, even = closing)
+    if (cp >= 0xFE36 && cp <= 0xFE44 && (cp & 1) == 0) return true;
+    if (cp == 0xFE48) return true;
+    // Small form variants
+    if (cp == 0xFE50 || cp == 0xFE52) return true;
+    if (cp == 0xFE5A || cp == 0xFE5C || cp == 0xFE5E) return true;
+    // Fullwidth forms
+    if (cp == 0xFF09 || cp == 0xFF0C || cp == 0xFF0E || cp == 0xFF3D ||
+        cp == 0xFF5D || cp == 0xFF60 || cp == 0xFF61 || cp == 0xFF63 ||
+        cp == 0xFF64) return true;
+    return false;
+}
+
+/**
+ * Check if a codepoint has NS (Non-Starter) line-break class.
+ * CSS Text 3 §5.2: No break before NS characters when preceded by CJK.
+ */
+static inline bool is_line_break_ns(uint32_t cp) {
+    // Thai
+    if (cp == 0x0E5A || cp == 0x0E5B) return true;
+    // Khmer
+    if (cp == 0x17D4 || cp == 0x17D6 || cp == 0x17DA) return true;
+    // Double exclamation mark
+    if (cp == 0x203C) return true;
+    // CJK non-starters: iteration marks, prolonged sound marks, etc.
+    if (cp == 0x3005 || cp == 0x301C || cp == 0x303B || cp == 0x303C) return true;
+    if (cp == 0x309B || cp == 0x309C || cp == 0x309D || cp == 0x309E) return true;
+    if (cp == 0x30A0 || cp == 0x30FB || cp == 0x30FD || cp == 0x30FE) return true;
+    // Small form variants (semicolon, colon)
+    if (cp == 0xFE54 || cp == 0xFE55) return true;
+    // Fullwidth colon, semicolon
+    if (cp == 0xFF1A || cp == 0xFF1B) return true;
+    // Halfwidth forms
+    if (cp == 0xFF65 || cp == 0xFF9E || cp == 0xFF9F) return true;
+    return false;
+}
+
+/**
+ * Peek at the next Unicode codepoint without advancing the string pointer.
+ * Returns 0 if at end of string.
+ */
+static inline uint32_t peek_codepoint(const unsigned char* str) {
+    if (!str || !*str) return 0;
+    if (*str < 128) return *str;
+    uint32_t cp = 0;
+    str_utf8_decode((const char*)str, 4, &cp);
+    return cp ? cp : *str;
+}
+
 /**
  * Get the Unicode-specified width for special space characters.
  * These characters have fixed widths defined by Unicode standard, which browsers
@@ -555,6 +677,13 @@ void line_break(LayoutContext* lycon) {
         lycon->line.committed_trailing_rect = NULL;
         lycon->line.committed_trailing_space = 0;
     }
+    // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
+    // don't contribute to the line box width for min/max-width calculations.
+    // Only adjust advance_x (line box width), NOT the text rect width (visual rendering).
+    if (lycon->line.hanging_space_width > 0) {
+        lycon->line.advance_x -= lycon->line.hanging_space_width;
+        lycon->line.hanging_space_width = 0;
+    }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
 
     // CSS Inline §5.2.1: When trailing whitespace is "collapsed away" at the end of a line,
@@ -770,6 +899,10 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             if (bytes <= 0) codepoint = *str;
             else char_bytes = bytes;
         }
+
+        // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is hangable — treat as space
+        // for lookahead purposes so it doesn't predict false overflow.
+        if (codepoint == 0x3000) return RDT_LINE_NOT_FILLED;
         codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         // CSS font-variant: small-caps — convert lowercase to uppercase
         // Track whether we scaled a lowercase char for size reduction
@@ -1028,7 +1161,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     CssEnum white_space = get_white_space_value(text_node);  // todo: white-space should be put in BlockContext
     bool collapse_spaces = ws_collapse_spaces(white_space);
     bool collapse_newlines = ws_collapse_newlines(white_space);
-    bool wrap_lines = ws_wrap_lines(white_space);
+    // CSS Sizing 3: In max-content mode, never wrap — measure full unwrapped width
+    bool wrap_lines = ws_wrap_lines(white_space) && !is_max_content_mode(lycon);
 
     // Get word-break property for CJK line breaking
     CssEnum word_break = get_word_break(lycon);
@@ -1368,22 +1502,30 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                            lycon->line.effective_right : lycon->line.right;
         if (wrap_lines && rect->x + rect->width > line_right) { // line filled up and wrapping enabled
             log_debug("line filled up");
-            if (is_space(*str)) { // break at the current space
+            if (codepoint == 0x3000) {
+                // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.
+                // Don't break here — fall through to break tracking below.
+            }
+            else if (is_space(*str) && !collapse_spaces && white_space != CSS_VALUE_BREAK_SPACES) {
+                // CSS Text 3 §4.1.3: In pre-wrap, trailing spaces hang at end of line.
+                // Don't break here — fall through to break tracking where
+                // hanging_space_width is accumulated.
+            }
+            else if (is_space(*str) && lycon->line.hanging_space_width > 0) {
+                // Space within a hanging sequence (after U+3000): don't break.
+                // The space is between hangable characters and should hang with them.
+            }
+            else if (is_space(*str)) { // break at the current space (collapsible or break-spaces)
                 log_debug("break on space");
                 // skip spaces according to white-space mode
                 if (collapse_spaces) {
                     do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
                 } else {
-                    str++;  // only skip the current space in pre-wrap mode
+                    str++;  // only skip the current space in break-spaces mode
                 }
                 rect->width -= wd;  // minus away space width at line break
-                // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces at the
-                // end of a wrapped line "hang" — subtract their accumulated width.
-                if (lycon->line.hanging_space_width > 0) {
-                    rect->width -= lycon->line.hanging_space_width;
-                    lycon->line.hanging_space_width = 0;
-                }
                 lycon->line.trailing_space_width = 0;  // already trimmed, don't double-subtract
+                // Note: hanging_space_width (from U+3000) is handled by line_break().
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
                 line_break(lycon);
                 log_debug("after space line break");
@@ -1394,12 +1536,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                     str = lycon->line.last_space + 1;
-                    // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces hang.
+                    // Output full width including hanging spaces — visual rect preserves
+                    // hanging width. line_break() adjusts advance_x to exclude it.
                     float output_width = lycon->line.last_space_pos;
-                    if (lycon->line.last_space_hanging_width > 0) {
-                        output_width -= lycon->line.last_space_hanging_width;
-                        lycon->line.hanging_space_width = 0;
-                    }
                     output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
@@ -1502,6 +1641,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // reset the live hanging_space_width since the last space.
             lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
         }
+        else if (codepoint == 0x3000) {
+            // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is a hangable break opportunity.
+            // It hangs at end of line in all white-space modes except 'pre'.
+            str = next_ch;
+            lycon->line.last_space = str - 1;
+            lycon->line.last_space_pos = rect->width;
+            lycon->line.last_space_is_hyphen = false;
+            lycon->line.has_space = true;
+            lycon->line.is_line_start = false;
+            // Track as hanging space — its width doesn't count for line box width
+            lycon->line.hanging_space_width += wd;
+            lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
+        }
         else if (*str == '-') {
             // Hyphens are break opportunities (CSS allows breaking after hyphens)
             // Track this as a potential break point, but include the hyphen in the current line
@@ -1515,22 +1667,51 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.hanging_space_width = 0;
         }
         else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
-            // CJK or break-all: can break after this character
-            // Note: Don't track as last_space since CJK breaks don't consume characters
-            // Instead, allow breaking at current position when line fills
+            // CJK or break-all: can break after this character.
+            // Track as last_space so overflow handling can break at this position.
+            // UAX #14 / CSS Text 3 §5.2: Apply OP/CL/NS rules:
+            //   - No break before OP (opening punctuation) or NS (non-starter)
+            //   - No break after CL (closing punctuation)
             str = next_ch;
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
 
-            // Track position for potential break (but don't set last_space)
-            // CJK breaks happen before the next character, not after a separator
+            // Record break opportunity after this character, unless forbidden by line-break rules
+            bool allow_break = true;
+            // CSS Text 3 §5.2: No break after OP characters (OP stays with following content)
+            if (is_line_break_op(codepoint)) allow_break = false;
+            if (allow_break) {
+                // Peek at next character: no break before CL or NS (they stay with preceding)
+                uint32_t next_cp = peek_codepoint(str);
+                if (next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp))) {
+                    allow_break = false;
+                }
+            }
+            if (allow_break) {
+                lycon->line.last_space = str - 1;  // last byte of current char
+                lycon->line.last_space_pos = rect->width;  // width including this char
+                lycon->line.last_space_is_hyphen = false;
+            }
         }
         else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
+            // UAX #14 / CSS Text 3 §5.2: CL/NS characters adjacent to CJK text
+            // participate in CJK-style break tracking. After CL/NS, a break is
+            // allowed (they stay with preceding content, break after is fine).
+            // OP characters don't allow break after them.
+            if (wrap_lines && (is_line_break_cl(codepoint) || is_line_break_ns(codepoint))) {
+                // Peek at next character: no break if next is also CL/NS
+                uint32_t next_cp = peek_codepoint(str);
+                if (!(next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp)))) {
+                    lycon->line.last_space = str - 1;
+                    lycon->line.last_space_pos = rect->width;
+                    lycon->line.last_space_is_hyphen = false;
+                }
+            }
         }
     } while (*str);
     // end of text
@@ -1541,12 +1722,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str = lycon->line.last_space + 1;
                 // Restore advance_x before output_text (it will add the correct width)
                 lycon->line.advance_x = saved_advance_x;
-                // CSS Text 3 §4.1.3: For pre-wrap, trailing preserved spaces hang.
+                // Output with full width including hanging spaces — the visual rect
+                // preserves hanging space width. line_break() adjusts advance_x
+                // to exclude hanging width from line box calculations.
                 float output_width = lycon->line.last_space_pos;
-                if (lycon->line.last_space_hanging_width > 0) {
-                    output_width -= lycon->line.last_space_hanging_width;
-                    lycon->line.hanging_space_width = 0;
-                }
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                 line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
