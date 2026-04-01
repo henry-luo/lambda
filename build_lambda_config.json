@@ -2662,6 +2662,16 @@
                         "icon": "🟨"
                     },
                     {
+                        "source": "test/test_js_test262_gtest.cpp",
+                        "name": "test262 Compliance Tests",
+                        "dependencies": [],
+                        "binary": "test_js_test262_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "icon": "📋"
+                    },
+                    {
                         "source": "test/test_c2mir_gtest.cpp",
                         "name": "C2MIR JIT Execution Tests",
                         "dependencies": [],
