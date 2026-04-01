@@ -118,6 +118,9 @@ JsOperator js_operator_from_string(const char* op_str, size_t len);
 void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
 void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...);
 
+// Early error detection (js_early_errors.cpp)
+int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
+
 // Debug functions
 void print_js_ast_node(JsAstNode* node, int indent);
 

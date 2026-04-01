@@ -17526,6 +17526,14 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Run early error detection (static semantic validation)
+    int early_errors = js_check_early_errors(tp, js_ast);
+    if (early_errors > 0) {
+        log_error("js-mir: %d early error(s) detected", early_errors);
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+
     // Set up evaluation context EARLY — needed before module loading
     // so that heap-allocated module objects (namespaces, strings) persist.
     EvalContext js_context;

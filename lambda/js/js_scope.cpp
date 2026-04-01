@@ -10,8 +10,10 @@
 #include <cstdlib>
 
 // TypeScript parser (unified: handles both JS and TS)
+// NOTE: tree_sitter_typescript is currently a stub; use JavaScript parser for now
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
+    const TSLanguage* tree_sitter_javascript(void);
 }
 
 // Scope management functions
@@ -182,7 +184,12 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
 
     // Initialize Tree-sitter parser
     tp->parser = ts_parser_new();
-    ts_parser_set_language(tp->parser, tree_sitter_typescript());
+    const TSLanguage* lang = tree_sitter_typescript();
+    if (!lang) {
+        // TypeScript parser not yet generated; fall back to JavaScript
+        lang = tree_sitter_javascript();
+    }
+    ts_parser_set_language(tp->parser, lang);
 
     // Initialize scopes
     tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);

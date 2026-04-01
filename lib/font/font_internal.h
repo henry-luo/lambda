@@ -161,6 +161,10 @@ typedef struct FontDatabase {
     bool        cache_dirty;
     bool        scanned;                // true after first scan
 
+    // incremental organize tracking
+    int         organized_up_to;        // index in all_fonts up to which families are organized
+    HashMap*    missing_families;       // family names confirmed absent after lazy parsing
+
     // memory management (owned by FontContext)
     Pool*       pool;
     Arena*      arena;

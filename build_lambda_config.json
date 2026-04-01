@@ -56,6 +56,7 @@
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-typescript/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
         "lambda/tree-sitter-python/bindings/c",
         "lambda/tree-sitter-bash/bindings/c",
         "lambda/tree-sitter-ruby/bindings/c",
@@ -87,6 +88,12 @@
             "name": "tree-sitter-typescript",
             "include": "lambda/tree-sitter-typescript/bindings/c",
             "lib": "lambda/tree-sitter-typescript/libtree-sitter-typescript.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-javascript",
+            "include": "lambda/tree-sitter-javascript/bindings/c",
+            "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
             "link": "static"
         },
         {
@@ -2667,6 +2674,16 @@
                             "gtest_main"
                         ],
                         "icon": "🟨"
+                    },
+                    {
+                        "source": "test/test_js_test262_gtest.cpp",
+                        "name": "test262 Compliance Tests",
+                        "dependencies": [],
+                        "binary": "test_js_test262_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "icon": "📋"
                     },
                     {
                         "source": "test/test_c2mir_gtest.cpp",

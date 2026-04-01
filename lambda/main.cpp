@@ -34,6 +34,7 @@
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
+#include "js/js_runtime.h"           // v16: js_check_exception for exit code
 #include "py/py_transpiler.hpp"      // Python transpiler
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
@@ -971,6 +972,8 @@ int main(int argc, char *argv[]) {
         // Initialize stack bounds for GC conservative scanning
         lambda_stack_init();
 
+        bool js_had_error = false;
+
         if (argc >= 3) {
             // Parse arguments: js file.js [--document page.html]
             const char* js_file = argv[2];
@@ -1034,12 +1037,20 @@ int main(int argc, char *argv[]) {
             // JS mode: no REPL printing of last expression value
             // (JS spec: scripts don't print their completion value)
 
+            // Track if transpilation failed or uncaught exception occurred
+            if (result.item == ITEM_ERROR) {
+                js_had_error = true;
+            }
+            if (js_check_exception()) {
+                js_had_error = true;
+            }
+
             free(js_source);
         }
 
         runtime_cleanup(&runtime);
         log_finish();
-        return 0;
+        return js_had_error ? 1 : 0;
     }
 
     // Handle Python command
