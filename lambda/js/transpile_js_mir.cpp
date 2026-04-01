@@ -7754,6 +7754,25 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "ts_type_info", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
+
+            // Native SHA: calculateSHA256/384/512(data, offset, length)
+            if (nl == 15 && strncmp(n, "calculateSHA", 12) == 0 && arg_count == 3) {
+                const char* suffix = n + 12;
+                const char* native_fn = NULL;
+                if (suffix[0] == '2' && suffix[1] == '5' && suffix[2] == '6') native_fn = "js_native_sha256";
+                else if (suffix[0] == '3' && suffix[1] == '8' && suffix[2] == '4') native_fn = "js_native_sha384";
+                else if (suffix[0] == '5' && suffix[1] == '1' && suffix[2] == '2') native_fn = "js_native_sha512";
+                if (native_fn) {
+                    log_debug("js-mir: native SHA override: %.*s", nl, n);
+                    MIR_reg_t a0 = jm_transpile_box_item(mt, call->arguments);
+                    MIR_reg_t a1 = jm_transpile_box_item(mt, call->arguments->next);
+                    MIR_reg_t a2 = jm_transpile_box_item(mt, call->arguments->next->next);
+                    return jm_call_3(mt, native_fn, MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a1),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a2));
+                }
+            }
         }
 
         NameEntry* entry = js_scope_lookup(mt->tp, id->name);

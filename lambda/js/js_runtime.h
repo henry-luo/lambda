@@ -534,6 +534,11 @@ Item js_module_get(Item specifier);
  */
 Item js_module_namespace_create(Item exports_map);
 
+// Native SHA hash functions (js_crypto.cpp)
+Item js_native_sha256(Item data, Item offset, Item length);
+Item js_native_sha384(Item data, Item offset, Item length);
+Item js_native_sha512(Item data, Item offset, Item length);
+
 #ifdef __cplusplus
 }
 #endif
