@@ -1977,13 +1977,13 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     // This also ensures the HTML→DOM tree mapping is pristine (no JS mutations yet).
     apply_inline_styles_to_tree(dom_root, html_root, pool);
 
-    // Step 2d: Execute inline <script> elements and body onload handlers
+    // Step 2d: Execute <script> elements (inline + external) and body onload handlers
     // Scripts run after inline style application so JS style changes override HTML attrs.
     // Scripts run before stylesheet cascade so JS DOM mutations (className changes,
     // appendChild, removeChild, etc.) take effect before styles are resolved.
     // getComputedStyle can query parsed stylesheets via on-demand matching.
     dom_doc->root = dom_root;  // set root for JS DOM API access
-    execute_document_scripts(html_root, dom_doc, pool);
+    execute_document_scripts(html_root, dom_doc, pool, html_url);
 
     auto t_scripts = high_resolution_clock::now();
 
