@@ -38,6 +38,7 @@
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
 #include "ts/ts_transpiler.hpp"      // TypeScript transpiler
+#include "rb/rb_transpiler.hpp"      // Ruby transpiler
 
 // Network module includes
 #include "network/network_downloader.h"
@@ -1096,6 +1097,68 @@ int main(int argc, char *argv[]) {
             }
 
             free(py_source);
+        }
+
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
+    }
+
+    // Handle Ruby command
+    log_debug("Checking for rb command");
+    if (argc >= 2 && strcmp(argv[1], "rb") == 0) {
+        log_debug("Entering Ruby command handler");
+
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Ruby Transpiler v1.0\n\n");
+            printf("Usage: %s rb [file.rb]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'rb' command runs the Ruby transpiler.\n");
+            printf("  If a file is provided, it transpiles and executes the Ruby code.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help    Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s rb script.rb    # Transpile and run script.rb\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        if (argc >= 3) {
+            const char* rb_file = argv[2];
+            char* rb_source = read_text_file(rb_file);
+            if (!rb_source) {
+                printf("Error: Could not read file '%s'\n", rb_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+
+            Item result = transpile_rb_to_mir(&runtime, rb_source, rb_file);
+
+            // only print non-null results (Ruby scripts use puts for output)
+            if (result.item != ITEM_NULL && result.item != 0) {
+                TypeId result_type = get_type_id(result);
+                if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
+                    || result_type == LMD_TYPE_ELEMENT) {
+                    Pool* fmt_pool = pool_create();
+                    String* json = format_json(fmt_pool, result);
+                    if (json) {
+                        printf("%.*s\n", json->len, json->chars);
+                    }
+                    pool_destroy(fmt_pool);
+                } else {
+                    StrBuf *output = strbuf_new_cap(256);
+                    print_root_item(output, result);
+                    printf("%s\n", output->str);
+                    strbuf_free(output);
+                }
+            }
+
+            free(rb_source);
         }
 
         runtime_cleanup(&runtime);
