@@ -143,6 +143,7 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node);
 static void bm_transpile_function_def(BashMirTranspiler* mt, BashFunctionDefNode* node);
 static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node);
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node);
+static MIR_op_t bm_emit_string_literal(BashMirTranspiler* mt, const char* text, size_t len);
 static MIR_op_t bm_transpile_string(BashMirTranspiler* mt, BashStringNode* node);
 static MIR_op_t bm_transpile_concat(BashMirTranspiler* mt, BashConcatNode* node);
 static MIR_label_t bm_new_label(BashMirTranspiler* mt);
@@ -374,6 +375,84 @@ static void bm_emit_call_void_4(BashMirTranspiler* mt, const char* fn_name,
 
 // emit a varargs builtin call: func(Item* args, int argc) -> Item
 // builds args buffer, fills it, and calls the function
+
+// check if a single arg node needs IFS word splitting (unquoted expansion)
+static bool arg_needs_ifs_split(BashAstNode* arg) {
+    if (arg->node_type == BASH_AST_NODE_VARIABLE_REF) return true;
+    if (arg->node_type == BASH_AST_NODE_EXPANSION) return true;
+    if (arg->node_type == BASH_AST_NODE_COMMAND_SUB) return true;
+    if (arg->node_type == BASH_AST_NODE_SPECIAL_VARIABLE) {
+        BashSpecialVarNode* sv = (BashSpecialVarNode*)arg;
+        // positional params $1-$9 need IFS splitting; $@/$* have own handling
+        if (sv->special_id >= BASH_SPECIAL_POS_1) return true;
+    }
+    return false;
+}
+
+// check if any command arg is an unquoted expansion that needs IFS word splitting
+static bool cmd_has_unquoted_expansion(BashCommandNode* cmd) {
+    BashAstNode* arg = cmd->args;
+    while (arg) {
+        if (arg_needs_ifs_split(arg)) return true;
+        arg = arg->next;
+    }
+    return false;
+}
+
+// emit command dispatch via IFS-split array: builds array with bash_ifs_split_into
+// for unquoted expansions, then calls bash_exec_cmd_with_array(cmd_name, arr)
+static MIR_op_t bm_emit_ifs_split_cmd(BashMirTranspiler* mt, const char* cmd_name,
+                                        int cmd_len, BashCommandNode* cmd) {
+    // build array FIRST using current IFS (before prefix assignments)
+    MIR_reg_t arr_reg = bm_emit_call_0(mt, "bash_array_new");
+    MIR_op_t arr_val = MIR_new_reg_op(mt->ctx, arr_reg);
+    BashAstNode* p = cmd->args;
+    while (p) {
+        bool needs_ifs_split = arg_needs_ifs_split(p);
+        MIR_op_t val = bm_transpile_cmd_arg(mt, p);
+        if (needs_ifs_split) {
+            MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_ifs_split_into", arr_val, val);
+            arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+        } else {
+            MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_array_append", arr_val, val);
+            arr_val = MIR_new_reg_op(mt->ctx, new_arr);
+        }
+        p = p->next;
+    }
+
+    // THEN handle prefix assignments (e.g., IFS=: echo $x) — save, set, run, restore
+    // In bash, prefix assignments take effect for the command execution but NOT for
+    // word splitting of the command's own arguments
+    int n_prefix = 0;
+    MIR_reg_t saved_vals[8];
+    String* saved_names[8];
+    BashAstNode* pa = cmd->assignments;
+    while (pa && n_prefix < 8) {
+        BashAssignmentNode* a = (BashAssignmentNode*)pa;
+        if (a->name) {
+            saved_names[n_prefix] = a->name;
+            MIR_op_t name_op = bm_emit_string_literal(mt, a->name->chars, a->name->len);
+            saved_vals[n_prefix] = bm_emit_call_1(mt, "bash_get_var", name_op);
+            MIR_op_t val_op = a->value ? bm_transpile_node(mt, a->value)
+                                       : bm_emit_string_literal(mt, "", 0);
+            bm_emit_call_void_2(mt, "bash_set_var", name_op, val_op);
+            n_prefix++;
+        }
+        pa = pa->next;
+    }
+
+    MIR_op_t cmd_name_op = bm_emit_string_literal(mt, cmd_name, cmd_len);
+    MIR_reg_t result = bm_emit_call_2(mt, "bash_exec_cmd_with_array", cmd_name_op, arr_val);
+
+    // restore prefix assignments
+    for (int i = 0; i < n_prefix; i++) {
+        MIR_op_t name_op = bm_emit_string_literal(mt, saved_names[i]->chars, saved_names[i]->len);
+        bm_emit_call_void_2(mt, "bash_set_var", name_op, MIR_new_reg_op(mt->ctx, saved_vals[i]));
+    }
+
+    return MIR_new_reg_op(mt->ctx, result);
+}
+
 static MIR_op_t bm_emit_varargs_builtin(BashMirTranspiler* mt, const char* fn_name,
                                           BashCommandNode* cmd) {
     int argc = cmd->arg_count;
@@ -1408,6 +1487,10 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
     if (exp->inner_expr) {
         // inner_expr overrides variable lookup (e.g. ${arr[idx]:-default})
         var_val = bm_transpile_node(mt, exp->inner_expr);
+    } else if (exp->variable->len == 1 && (exp->variable->chars[0] == '*' || exp->variable->chars[0] == '@')) {
+        // ${*} / ${@} / ${*-default} / ${#*} etc. — get all positional args
+        MIR_reg_t all_args = bm_emit_call_0(mt, "bash_get_all_args_string");
+        var_val = MIR_new_reg_op(mt->ctx, all_args);
     } else if (exp->variable->len >= 1 && exp->variable->chars[0] >= '1' && exp->variable->chars[0] <= '9') {
         // check if ALL chars are digits (positional param)
         bool all_digits = true;
@@ -1653,6 +1736,43 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     const char* cmd_name = name_node->text->chars;
     int cmd_len = name_node->text->len;
 
+    // set BASH_COMMAND to the source text of this command
+    if (mt->tp->source && cmd->base.node.id) {
+        uint32_t sb = ts_node_start_byte(cmd->base.node);
+        uint32_t eb = ts_node_end_byte(cmd->base.node);
+        if (eb > sb && eb <= (uint32_t)mt->tp->source_length) {
+            MIR_op_t cmd_text = bm_emit_string_literal(mt, mt->tp->source + sb, (size_t)(eb - sb));
+            bm_emit_call_void_1(mt, "bash_set_command", cmd_text);
+        }
+    }
+
+    // IFS word splitting: if any arg is an unquoted expansion AND the command is
+    // known to bash_exec_cmd_with_array, use array-based dispatch so that $var
+    // gets split by IFS before being passed as separate arguments.
+    // Commands handled: echo, printf, test, read, caller, cat, wc, head, tail,
+    // grep, sort, tr, cut, let, type, command, pushd, popd, dirs, getopts,
+    // plus user-defined functions and external commands.
+    // Commands NOT handled here: :, eval, [, source, export, local, declare,
+    // return, exit, shift, cd, pwd — these have special transpiler-level handling.
+    if (cmd->arg_count > 0 && cmd_has_unquoted_expansion(cmd)) {
+        // skip IFS dispatch for commands with special transpiler handling
+        bool skip_ifs_dispatch = false;
+        if (cmd_len == 1 && (cmd_name[0] == ':' || cmd_name[0] == '[')) skip_ifs_dispatch = true;
+        else if (cmd_len == 4 && memcmp(cmd_name, "eval", 4) == 0) skip_ifs_dispatch = true;
+        else if (cmd_len == 3 && memcmp(cmd_name, "set", 3) == 0) skip_ifs_dispatch = true;
+        else if (cmd_len == 5 && (memcmp(cmd_name, "local", 5) == 0 || memcmp(cmd_name, "shift", 5) == 0)) skip_ifs_dispatch = true;
+        else if (cmd_len == 5 && memcmp(cmd_name, "unset", 5) == 0) skip_ifs_dispatch = true;
+        else if (cmd_len == 6 && (memcmp(cmd_name, "export", 6) == 0 || memcmp(cmd_name, "return", 6) == 0 || memcmp(cmd_name, "source", 6) == 0)) skip_ifs_dispatch = true;
+        else if (cmd_len == 4 && memcmp(cmd_name, "exit", 4) == 0) skip_ifs_dispatch = true;
+        else if (cmd_len == 7 && (memcmp(cmd_name, "declare", 7) == 0 || memcmp(cmd_name, "typeset", 7) == 0)) skip_ifs_dispatch = true;
+        else if (cmd_len == 2 && (memcmp(cmd_name, "cd", 2) == 0 || memcmp(cmd_name, "bg", 2) == 0 || memcmp(cmd_name, "fg", 2) == 0)) skip_ifs_dispatch = true;
+        else if (cmd_len == 3 && memcmp(cmd_name, "pwd", 3) == 0) skip_ifs_dispatch = true;
+        else if (cmd_len == 8 && memcmp(cmd_name, "readonly", 8) == 0) skip_ifs_dispatch = true;
+        if (!skip_ifs_dispatch) {
+            return bm_emit_ifs_split_cmd(mt, cmd_name, cmd_len, cmd);
+        }
+    }
+
     // handle built-in commands
     if (cmd_len == 4 && memcmp(cmd_name, "echo", 4) == 0) {
         int argc = cmd->arg_count;
@@ -1755,7 +1875,34 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             combined = MIR_new_reg_op(mt->ctx, concatenated);
             arg = arg->next;
         }
+
+        // handle prefix assignments (e.g., IFS=: eval echo \$x)
+        int n_pa_eval = 0;
+        MIR_reg_t pa_eval_saved[8];
+        String* pa_eval_names[8];
+        BashAstNode* pa_node = cmd->assignments;
+        while (pa_node && n_pa_eval < 8) {
+            BashAssignmentNode* a = (BashAssignmentNode*)pa_node;
+            if (a->name) {
+                pa_eval_names[n_pa_eval] = a->name;
+                MIR_op_t nop = bm_emit_string_literal(mt, a->name->chars, a->name->len);
+                pa_eval_saved[n_pa_eval] = bm_emit_call_1(mt, "bash_get_var", nop);
+                MIR_op_t vop = a->value ? bm_transpile_node(mt, a->value)
+                                        : bm_emit_string_literal(mt, "", 0);
+                bm_emit_call_void_2(mt, "bash_set_var", nop, vop);
+                n_pa_eval++;
+            }
+            pa_node = pa_node->next;
+        }
+
         MIR_reg_t result = bm_emit_call_1(mt, "bash_eval_string", combined);
+
+        // restore prefix assignments
+        for (int i = 0; i < n_pa_eval; i++) {
+            MIR_op_t nop = bm_emit_string_literal(mt, pa_eval_names[i]->chars, pa_eval_names[i]->len);
+            bm_emit_call_void_2(mt, "bash_set_var", nop, MIR_new_reg_op(mt->ctx, pa_eval_saved[i]));
+        }
+
         return MIR_new_reg_op(mt->ctx, result);
     }
 
@@ -2246,6 +2393,20 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     if ((cmd_len == 6 && memcmp(cmd_name, "export", 6) == 0) ||
         (cmd_len == 8 && memcmp(cmd_name, "readonly", 8) == 0)) {
         bool is_readonly = (cmd_len == 8);
+
+        // handle prefix assignments — in posix mode they persist, otherwise temporary
+        BashAstNode* pa_n = cmd->assignments;
+        while (pa_n) {
+            BashAssignmentNode* a = (BashAssignmentNode*)pa_n;
+            if (a->name) {
+                MIR_op_t nop = bm_emit_string_literal(mt, a->name->chars, a->name->len);
+                MIR_op_t vop = a->value ? bm_transpile_node(mt, a->value)
+                                        : bm_emit_string_literal(mt, "", 0);
+                bm_emit_call_void_2(mt, "bash_set_var", nop, vop);
+            }
+            pa_n = pa_n->next;
+        }
+
         BashAstNode* arg = cmd->args;
         while (arg) {
             // skip flags like -p, -n, -f
@@ -2319,6 +2480,25 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
                              MIR_new_uint_op(mt->ctx, 0)));
         }
 
+        // handle prefix assignments (e.g., IFS=: ff args)
+        int n_pa = 0;
+        MIR_reg_t pa_saved[8];
+        String* pa_names[8];
+        BashAstNode* pa_node = cmd->assignments;
+        while (pa_node && n_pa < 8) {
+            BashAssignmentNode* a = (BashAssignmentNode*)pa_node;
+            if (a->name) {
+                pa_names[n_pa] = a->name;
+                MIR_op_t nop = bm_emit_string_literal(mt, a->name->chars, a->name->len);
+                pa_saved[n_pa] = bm_emit_call_1(mt, "bash_get_var", nop);
+                MIR_op_t vop = a->value ? bm_transpile_node(mt, a->value)
+                                        : bm_emit_string_literal(mt, "", 0);
+                bm_emit_call_void_2(mt, "bash_set_var", nop, vop);
+                n_pa++;
+            }
+            pa_node = pa_node->next;
+        }
+
         // call the user function: bash_uf_XXX(args_ptr, argc) -> Item
         char mir_name[140];
         snprintf(mir_name, sizeof(mir_name), "bash_uf_%.*s", cmd_len, cmd_name);
@@ -2346,7 +2526,34 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
 
             bm_emit_call_void_0(mt, "bash_pop_call_frame");
 
+        // restore prefix assignments
+        for (int i = 0; i < n_pa; i++) {
+            MIR_op_t nop = bm_emit_string_literal(mt, pa_names[i]->chars, pa_names[i]->len);
+            bm_emit_call_void_2(mt, "bash_set_var", nop, MIR_new_reg_op(mt->ctx, pa_saved[i]));
+        }
+
         return MIR_new_reg_op(mt->ctx, result);
+    }
+
+    // handle prefix assignments for runtime/external commands (e.g., IFS=: cmd args)
+    int n_pa_ext = 0;
+    MIR_reg_t pa_ext_saved[8];
+    String* pa_ext_names[8];
+    {
+        BashAstNode* pa_n = cmd->assignments;
+        while (pa_n && n_pa_ext < 8) {
+            BashAssignmentNode* a = (BashAssignmentNode*)pa_n;
+            if (a->name) {
+                pa_ext_names[n_pa_ext] = a->name;
+                MIR_op_t nop = bm_emit_string_literal(mt, a->name->chars, a->name->len);
+                pa_ext_saved[n_pa_ext] = bm_emit_call_1(mt, "bash_get_var", nop);
+                MIR_op_t vop = a->value ? bm_transpile_node(mt, a->value)
+                                        : bm_emit_string_literal(mt, "", 0);
+                bm_emit_call_void_2(mt, "bash_set_var", nop, vop);
+                n_pa_ext++;
+            }
+            pa_n = pa_n->next;
+        }
     }
 
     // before trying external: check runtime function registry (for functions from sourced files)
@@ -2443,6 +2650,13 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
 
     // done: rt_result_reg holds the final result
     MIR_append_insn(mt->ctx, mt->current_func_item, done_label_rt);
+
+    // restore prefix assignments for runtime/external commands
+    for (int i = 0; i < n_pa_ext; i++) {
+        MIR_op_t nop = bm_emit_string_literal(mt, pa_ext_names[i]->chars, pa_ext_names[i]->len);
+        bm_emit_call_void_2(mt, "bash_set_var", nop, MIR_new_reg_op(mt->ctx, pa_ext_saved[i]));
+    }
+
     return MIR_new_reg_op(mt->ctx, rt_result_reg);
 }
 
@@ -2799,11 +3013,15 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
         MIR_append_insn(mt->ctx, mt->current_func_item, loop_end);
     } else {
         // compile-time unrolled iteration over word list
-        // but if any word requires brace/glob expansion (which produces multiple words),
-        // build a runtime array first and use array iteration.
+        // but if any word requires brace/glob expansion or IFS splitting
+        // (which produces multiple words), build a runtime array first.
         word = node->words;
         bool needs_runtime_array = false;
         for (BashAstNode* w = word; w; w = w->next) {
+            if (arg_needs_ifs_split(w)) {
+                needs_runtime_array = true;
+                break;
+            }
             if (w->node_type == BASH_AST_NODE_WORD) {
                 BashWordNode* wn = (BashWordNode*)w;
                 if (wn->text) {
@@ -2852,7 +3070,12 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
                         MIR_new_reg_op(mt->ctx, expanded_reg));
                 } else {
                     MIR_op_t wval = bm_transpile_cmd_arg(mt, w);
-                    bm_emit_call_2(mt, "bash_array_append", cur_arr, wval);
+                    if (arg_needs_ifs_split(w)) {
+                        MIR_reg_t new_arr = bm_emit_call_2(mt, "bash_ifs_split_into", cur_arr, wval);
+                        (void)new_arr;
+                    } else {
+                        bm_emit_call_2(mt, "bash_array_append", cur_arr, wval);
+                    }
                 }
             }
 
@@ -3446,6 +3669,10 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
 
 static Runtime* bash_source_runtime = NULL;
 
+// forward declarations for preprocessor passes
+static const char* preprocess_dollar_dollar(const char* src, size_t src_len, StrBuf** out_buf);
+static const char* preprocess_bash_source(const char* src, size_t src_len, StrBuf** out_buf);
+
 // list of MIR contexts from sourced files — kept alive for function pointer validity
 #define BASH_SOURCE_CTX_MAX 32
 static MIR_context_t bash_source_ctx_list[BASH_SOURCE_CTX_MAX];
@@ -3487,13 +3714,29 @@ extern "C" Item bash_source_file(Item filename) {
     tp->source = source_text;
     tp->source_length = strlen(source_text);
 
+    // preprocess: fix $$ at end-of-word and multi-assignment lines
+    StrBuf* dd_buf = NULL;
+    const char* dd_src = preprocess_dollar_dollar(tp->source, tp->source_length, &dd_buf);
+    if (dd_src != tp->source) {
+        tp->source = dd_src;
+        tp->source_length = strlen(dd_src);
+    }
+    StrBuf* preproc_buf = NULL;
+    const char* pp_src = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
+    if (pp_src != tp->source) {
+        tp->source = pp_src;
+        tp->source_length = strlen(pp_src);
+    }
+
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_bash());
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source_text, (uint32_t)tp->source_length);
+    TSTree* tree = ts_parser_parse_string(parser, NULL, tp->source, (uint32_t)tp->source_length);
     if (!tree) {
         log_error("bash: source: parse failed for '%s'", path_buf);
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         return (Item){.item = i2it(1)};
     }
@@ -3505,6 +3748,8 @@ extern "C" Item bash_source_file(Item filename) {
         ts_tree_delete(tree);
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         return (Item){.item = i2it(1)};
     }
@@ -3515,6 +3760,8 @@ extern "C" Item bash_source_file(Item filename) {
         ts_tree_delete(tree);
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         return (Item){.item = i2it(1)};
     }
@@ -3621,6 +3868,8 @@ extern "C" Item bash_source_file(Item filename) {
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);
+    if (preproc_buf) strbuf_free(preproc_buf);
+    if (dd_buf) strbuf_free(dd_buf);
     free(source_text);
 
     return result;
@@ -3664,13 +3913,29 @@ extern "C" Item bash_eval_string(Item code) {
     tp->source = source_text;
     tp->source_length = (int)s->len;
 
+    // preprocess: fix $$ at end-of-word and multi-assignment lines
+    StrBuf* dd_buf = NULL;
+    const char* dd_src = preprocess_dollar_dollar(tp->source, tp->source_length, &dd_buf);
+    if (dd_src != tp->source) {
+        tp->source = dd_src;
+        tp->source_length = strlen(dd_src);
+    }
+    StrBuf* preproc_buf = NULL;
+    const char* pp_src = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
+    if (pp_src != tp->source) {
+        tp->source = pp_src;
+        tp->source_length = strlen(pp_src);
+    }
+
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_bash());
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source_text, (uint32_t)s->len);
+    TSTree* tree = ts_parser_parse_string(parser, NULL, tp->source, (uint32_t)tp->source_length);
     if (!tree) {
         log_error("bash: eval: parse failed");
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
@@ -3683,6 +3948,8 @@ extern "C" Item bash_eval_string(Item code) {
         ts_tree_delete(tree);
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
@@ -3694,6 +3961,8 @@ extern "C" Item bash_eval_string(Item code) {
         ts_tree_delete(tree);
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
+        if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         free(source_text);
         bash_set_exit_code(1);
         return (Item){.item = i2it(1)};
@@ -3796,15 +4065,80 @@ extern "C" Item bash_eval_string(Item code) {
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);
+    if (preproc_buf) strbuf_free(preproc_buf);
+    if (dd_buf) strbuf_free(dd_buf);
     free(source_text);
 
     return result;
 }
 
 // ============================================================================
-// Source preprocessing: fix multi-assignment lines for tree-sitter
+// Source preprocessing: fix tree-sitter parsing issues
 // ============================================================================
 
+// Pass 1: Replace $$ with ${$} outside single quotes.
+// tree-sitter-bash fails to recognize $$ as a special variable when it appears
+// at the end of a word (e.g., "test-$$" parses as a single word, losing the expansion).
+// ${$} is semantically identical and always parsed correctly.
+static const char* preprocess_dollar_dollar(const char* src, size_t src_len, StrBuf** out_buf) {
+    // quick scan: is there any $$ in the source?
+    bool has_dd = false;
+    for (size_t i = 0; i + 1 < src_len; i++) {
+        if (src[i] == '$' && src[i+1] == '$') {
+            // check it's not $$( which is $( after PID — actually $$( is $$ then (
+            // and not $${ which is already covered, and not $$$
+            has_dd = true;
+            break;
+        }
+    }
+    if (!has_dd) return src;
+
+    StrBuf* buf = strbuf_new_cap(src_len + 64);
+    *out_buf = buf;
+    bool in_single_quote = false;
+    bool in_double_quote = false;
+    for (size_t i = 0; i < src_len; i++) {
+        char c = src[i];
+        if (c == '\\' && !in_single_quote && i + 1 < src_len) {
+            // escaped char — copy both
+            strbuf_append_char(buf, c);
+            i++;
+            strbuf_append_char(buf, src[i]);
+            continue;
+        }
+        if (c == '\'' && !in_double_quote) {
+            in_single_quote = !in_single_quote;
+            strbuf_append_char(buf, c);
+            continue;
+        }
+        if (c == '"' && !in_single_quote) {
+            in_double_quote = !in_double_quote;
+            strbuf_append_char(buf, c);
+            continue;
+        }
+        if (!in_single_quote && c == '$' && i + 1 < src_len && src[i+1] == '$') {
+            // check that the next-next char is NOT [a-zA-Z_0-9] (which would make $$var, not $$)
+            // and not another $ (which would be $$$)
+            bool is_dd = true;
+            if (i + 2 < src_len) {
+                char next2 = src[i+2];
+                if ((next2 >= 'a' && next2 <= 'z') || (next2 >= 'A' && next2 <= 'Z') ||
+                    next2 == '_' || next2 == '$') {
+                    is_dd = false;
+                }
+            }
+            if (is_dd) {
+                strbuf_append_str(buf, "${$}");
+                i++; // skip second $
+                continue;
+            }
+        }
+        strbuf_append_char(buf, c);
+    }
+    return buf->str;
+}
+
+// Pass 2: Fix multi-assignment lines for tree-sitter.
 // tree-sitter-bash fails to parse "a=1 b=2\nfor ..." inside compound statements:
 // it drops the "for" line entirely as a parse error. This preprocessor converts
 // lines that are purely multiple space-separated assignments (e.g. "a=1 b=2 c=3")
@@ -3950,6 +4284,7 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                             }
                         }
                         // skip spaces/tabs to check for next assignment
+                        size_t ws_start = pos;
                         while (pos < src_len && (src[pos] == ' ' || src[pos] == '\t')) pos++;
 
                         // check if next token is IDENTIFIER=
@@ -3968,13 +4303,14 @@ static const char* preprocess_bash_source(const char* src, size_t src_len, StrBu
                                                next_name_end < src_len &&
                                                src[next_name_end] == '=');
                         if (next_is_assign) {
-                            // emit newline to separate assignments
-                            strbuf_append_char(buf, '\n');
-                            // emit same indentation for next assignment
-                            for (size_t k = line_start; k < content_start; k++) {
+                            // emit semicolon to separate assignments (preserve line count for LINENO)
+                            strbuf_append_str(buf, "; ");
+                            any_extra = true;
+                        } else {
+                            // preserve whitespace before non-assignment token (e.g., comment)
+                            for (size_t k = ws_start; k < pos; k++) {
                                 strbuf_append_char(buf, src[k]);
                             }
-                            any_extra = true;
                         }
                         // continue to next assignment (or end of line)
                     } else {
@@ -4042,10 +4378,18 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     tp->source = bash_source;
     tp->source_length = strlen(bash_source);
 
-    // preprocess source to split multi-assignment lines (fixes tree-sitter error recovery)
+    // preprocess pass 1: fix $$ at end-of-word (tree-sitter doesn't recognize it)
+    StrBuf* dd_buf = NULL;
+    const char* dd_source = preprocess_dollar_dollar(bash_source, tp->source_length, &dd_buf);
+    if (dd_source != bash_source) {
+        tp->source = dd_source;
+        tp->source_length = strlen(dd_source);
+    }
+
+    // preprocess pass 2: split multi-assignment lines (fixes tree-sitter error recovery)
     StrBuf* preproc_buf = NULL;
-    const char* actual_source = preprocess_bash_source(bash_source, tp->source_length, &preproc_buf);
-    if (actual_source != bash_source) {
+    const char* actual_source = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
+    if (actual_source != tp->source) {
         tp->source = actual_source;
         tp->source_length = strlen(actual_source);
         log_debug("bash-mir: preprocessed source (%zu -> %zu bytes)", strlen(bash_source), tp->source_length);
@@ -4061,6 +4405,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4074,6 +4419,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4114,6 +4460,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         ts_parser_delete(parser);
         bash_transpiler_destroy(tp);
         if (preproc_buf) strbuf_free(preproc_buf);
+        if (dd_buf) strbuf_free(dd_buf);
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -4234,6 +4581,7 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
     ts_parser_delete(parser);
     bash_transpiler_destroy(tp);
     if (preproc_buf) strbuf_free(preproc_buf);
+    if (dd_buf) strbuf_free(dd_buf);
 
     if (!reusing_context) {
         context = old_context;
