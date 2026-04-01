@@ -12,6 +12,184 @@
 #include "log.h"
 #include "str.h"
 
+// ============================================================================
+// Punycode encoder (RFC 3492) for IDNA domain name encoding
+// ============================================================================
+
+#define PUNY_BASE        36
+#define PUNY_TMIN        1
+#define PUNY_TMAX        26
+#define PUNY_SKEW        38
+#define PUNY_DAMP        700
+#define PUNY_INITIAL_BIAS 72
+#define PUNY_INITIAL_N   128
+
+static int puny_adapt(int delta, int numpoints, bool firsttime) {
+    delta = firsttime ? delta / PUNY_DAMP : delta / 2;
+    delta += delta / numpoints;
+    int k = 0;
+    while (delta > ((PUNY_BASE - PUNY_TMIN) * PUNY_TMAX) / 2) {
+        delta /= (PUNY_BASE - PUNY_TMIN);
+        k += PUNY_BASE;
+    }
+    return k + ((PUNY_BASE - PUNY_TMIN + 1) * delta) / (delta + PUNY_SKEW);
+}
+
+static char puny_encode_digit(int d) {
+    return (char)(d < 26 ? d + 'a' : d - 26 + '0');
+}
+
+// Decode UTF-8 bytes into an array of Unicode code points.
+// Returns number of code points, or -1 on error.
+static int utf8_to_codepoints(const char* s, int len, uint32_t* out, int max_out) {
+    int n = 0;
+    for (int i = 0; i < len && n < max_out; ) {
+        unsigned char c = (unsigned char)s[i];
+        uint32_t cp;
+        int bytes;
+        if (c < 0x80) { cp = c; bytes = 1; }
+        else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; bytes = 2; }
+        else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; bytes = 3; }
+        else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; bytes = 4; }
+        else return -1;
+        if (i + bytes > len) return -1;
+        for (int j = 1; j < bytes; j++) {
+            if (((unsigned char)s[i+j] & 0xC0) != 0x80) return -1;
+            cp = (cp << 6) | ((unsigned char)s[i+j] & 0x3F);
+        }
+        out[n++] = cp;
+        i += bytes;
+    }
+    return n;
+}
+
+// Punycode-encode a single domain label (UTF-8 input).
+// Writes "xn--<encoded>" to out. Returns length written, or -1 on error.
+static int punycode_encode_label(const char* label, int label_len, char* out, int out_max) {
+    uint32_t codepoints[256];
+    int cp_count = utf8_to_codepoints(label, label_len, codepoints, 256);
+    if (cp_count <= 0) return -1;
+
+    // Check if label has any non-ASCII
+    bool has_non_ascii = false;
+    for (int i = 0; i < cp_count; i++) {
+        if (codepoints[i] >= 0x80) { has_non_ascii = true; break; }
+    }
+    if (!has_non_ascii) {
+        // All ASCII — no encoding needed
+        if (label_len >= out_max) return -1;
+        memcpy(out, label, label_len);
+        return label_len;
+    }
+
+    // Start with "xn--"
+    if (out_max < 8) return -1;
+    int pos = 0;
+    out[pos++] = 'x'; out[pos++] = 'n'; out[pos++] = '-'; out[pos++] = '-';
+
+    // Copy ASCII characters
+    int basic_count = 0;
+    for (int i = 0; i < cp_count; i++) {
+        if (codepoints[i] < 0x80) {
+            if (pos >= out_max - 1) return -1;
+            out[pos++] = (char)codepoints[i];
+            basic_count++;
+        }
+    }
+    if (basic_count > 0) {
+        // Insert hyphen separator
+        if (pos >= out_max - 1) return -1;
+        out[pos++] = '-';
+    }
+
+    int n = PUNY_INITIAL_N;
+    int delta = 0;
+    int bias = PUNY_INITIAL_BIAS;
+    int handled = basic_count;
+
+    while (handled < cp_count) {
+        // Find the minimum code point >= n
+        uint32_t m = 0x7FFFFFFF;
+        for (int i = 0; i < cp_count; i++) {
+            if (codepoints[i] >= (uint32_t)n && codepoints[i] < m)
+                m = codepoints[i];
+        }
+
+        delta += (int)(m - n) * (handled + 1);
+        n = (int)m;
+
+        for (int i = 0; i < cp_count; i++) {
+            if (codepoints[i] < (uint32_t)n) {
+                delta++;
+            } else if (codepoints[i] == (uint32_t)n) {
+                // Encode delta as variable-length integer
+                int q = delta;
+                for (int k = PUNY_BASE; ; k += PUNY_BASE) {
+                    int t;
+                    if (k <= bias) t = PUNY_TMIN;
+                    else if (k >= bias + PUNY_TMAX) t = PUNY_TMAX;
+                    else t = k - bias;
+                    if (q < t) break;
+                    if (pos >= out_max - 1) return -1;
+                    out[pos++] = puny_encode_digit(t + (q - t) % (PUNY_BASE - t));
+                    q = (q - t) / (PUNY_BASE - t);
+                }
+                if (pos >= out_max - 1) return -1;
+                out[pos++] = puny_encode_digit(q);
+                bias = puny_adapt(delta, handled + 1, handled == basic_count);
+                delta = 0;
+                handled++;
+            }
+        }
+        delta++;
+        n++;
+    }
+
+    out[pos] = '\0';
+    return pos;
+}
+
+// Apply IDNA encoding to a hostname: encode each label containing non-ASCII
+// characters using Punycode. Returns a malloc'd string; caller must free.
+// Returns NULL if no encoding was needed (all ASCII).
+static char* url_idna_encode_hostname(const char* hostname) {
+    // Quick check: any non-ASCII bytes?
+    bool needs_encoding = false;
+    for (const char* p = hostname; *p; p++) {
+        if ((unsigned char)*p >= 0x80) { needs_encoding = true; break; }
+    }
+    if (!needs_encoding) return NULL;
+
+    char result[1024];
+    int rpos = 0;
+    const char* p = hostname;
+
+    while (*p) {
+        // Find next label (delimited by '.')
+        const char* dot = strchr(p, '.');
+        int label_len = dot ? (int)(dot - p) : (int)strlen(p);
+
+        char encoded[256];
+        int elen = punycode_encode_label(p, label_len, encoded, sizeof(encoded));
+        if (elen < 0) return NULL;  // encoding failed
+
+        if (rpos + elen + 1 >= (int)sizeof(result)) return NULL;  // overflow
+        memcpy(result + rpos, encoded, elen);
+        rpos += elen;
+
+        if (dot) {
+            result[rpos++] = '.';
+            p = dot + 1;
+        } else {
+            break;
+        }
+    }
+    result[rpos] = '\0';
+    char* out = malloc(rpos + 1);
+    if (out) memcpy(out, result, rpos + 1);
+    return out;
+}
+
 // percent-encode non-ASCII bytes in a URL component.
 // Characters already percent-encoded (%XX) are preserved.
 // Returns a malloc'd string; caller must free.
@@ -186,10 +364,14 @@ UrlError url_parse_into(const char* input, Url* url) {
             if (host_len < sizeof(host_buf)) {
                 strncpy(host_buf, host_start, host_len);
                 host_buf[host_len] = '\0';
+                // v12: Apply IDNA/Punycode encoding for internationalized domain names
+                char* idna_host = url_idna_encode_hostname(host_buf);
+                const char* final_host = idna_host ? idna_host : host_buf;
                 url_free_string(url->host);
                 url_free_string(url->hostname);
-                url->host = url_create_string(host_buf);
-                url->hostname = url_create_string(host_buf); // Same as host for now
+                url->host = url_create_string(final_host);
+                url->hostname = url_create_string(final_host);
+                if (idna_host) free(idna_host);
             }
         }
 

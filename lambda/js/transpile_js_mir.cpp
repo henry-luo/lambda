@@ -1732,6 +1732,31 @@ static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int
     return result;
 }
 
+// v12: Build a compile-time stack trace string from the lexical function chain.
+// Walks from current function up through parent_index to build:
+//   "Error\n    at FuncName1\n    at FuncName2\n..."
+static MIR_reg_t jm_build_error_stack_string(JsMirTranspiler* mt, const char* error_type) {
+    char buf[1024];
+    int pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "%s", error_type);
+
+    // Walk the lexical function chain from current to top-level
+    int fi = mt->current_func_index;
+    while (fi >= 0 && fi < mt->func_count && pos < (int)sizeof(buf) - 32) {
+        JsFuncCollected* fc = &mt->func_entries[fi];
+        const char* js_name = NULL;
+        if (fc->node && fc->node->name) {
+            js_name = fc->node->name->chars;
+        }
+        if (js_name && js_name[0]) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "\n    at %s", js_name);
+        }
+        fi = fc->parent_index;
+    }
+
+    return jm_box_string_literal(mt, buf, pos);
+}
+
 // ============================================================================
 // Inline unboxing helpers (MIR instructions, no function calls)
 // ============================================================================
@@ -9010,8 +9035,10 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env.
         // Don't share in loop bodies — let closures need per-iteration value copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
         bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0
-                              && mt->loop_depth == 0);
+                              && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // The scope env is always up-to-date: parent assignments trigger
@@ -9075,8 +9102,10 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
 
     if (fc->capture_count > 0) {
         // Check if this closure should use the parent's shared scope env
-        // Don't use shared scope env inside loops — let variables need per-iteration copies
-        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && mt->loop_depth == 0);
+        // Don't use shared scope env inside loops — let variables need per-iteration copies.
+        // Exception: generators always use scope_env because all variables are
+        // hoisted to gen_env (no per-iteration let bindings in state machines).
+        bool use_scope_env = (mt->scope_env_reg != 0 && fc->captures[0].scope_env_slot >= 0 && (mt->loop_depth == 0 || mt->in_generator));
         if (use_scope_env) {
             // Use parent's shared scope env directly — no separate allocation.
             // Do NOT overwrite scope env with parent's register values — they
@@ -11119,11 +11148,13 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // new Error(message) — built-in Error constructor
+    // new Error(message) — built-in Error constructor with compile-time stack trace
     if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) {
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_1(mt, "js_new_error", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, "Error");
+        return jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // v11: new TypeError/RangeError/SyntaxError/ReferenceError(message)
@@ -11133,9 +11164,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         (ctor_len == 14 && strncmp(ctor_name, "ReferenceError", 14) == 0)) {
         MIR_reg_t name_arg = jm_box_string_literal(mt, ctor_name, ctor_len);
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
-        return jm_call_2(mt, "js_new_error_with_name", MIR_T_I64,
+        MIR_reg_t stack_arg = jm_build_error_stack_string(mt, ctor_name);
+        return jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg));
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
     }
 
     // new Date() — returns a Date object with getTime() method
@@ -11365,6 +11398,11 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                             jm_call_3(mt, "js_property_set", MIR_T_I64,
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
+                            // v12: Link proto marker to base constructor's .prototype
+                            // so inherited properties (e.g. Error.stack) are accessible
+                            jm_call_void_2(mt, "js_link_base_prototype",
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_obj),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_val));
                         }
                         jm_call_void_2(mt, "js_set_prototype",
