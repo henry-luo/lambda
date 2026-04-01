@@ -5,4 +5,3 @@ z is greater than 5 but not greater than 10
 45
 20
 36
-null

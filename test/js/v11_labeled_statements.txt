@@ -6,4 +6,3 @@ inside
   0,
   "break-outer"
 ]
-null

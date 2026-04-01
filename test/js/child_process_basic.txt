@@ -5,4 +5,3 @@ stdout:async_hello
 err:null
 stderr_empty:true
 has_error:true
-0

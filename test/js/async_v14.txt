@@ -1,9 +1,8 @@
-10
+sync
 oops
 100
+10
 fast
 ok
-sync
 timer2
 timer1
-0

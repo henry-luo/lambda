@@ -6,4 +6,3 @@ isSafe 42: true
 from array: 10,20,30
 from len: 3
 from string: h,i
-null
