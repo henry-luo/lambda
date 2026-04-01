@@ -51,5 +51,3 @@ blue
 blue
 
 10px
-"DOM v12b tests complete"
-

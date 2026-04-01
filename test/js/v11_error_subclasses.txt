@@ -8,4 +8,3 @@ ReferenceError name: ReferenceError
 ReferenceError msg: not defined
 Error name: Error
 Error msg: basic error
-null

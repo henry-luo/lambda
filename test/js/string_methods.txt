@@ -20,4 +20,3 @@ hello world
 0
 hello  
   hello
-null

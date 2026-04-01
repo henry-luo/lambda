@@ -3,4 +3,3 @@ rename: 10 20
 person: Alice 30
 person: Bob 25
 after delete a: 1 c: 3
-null

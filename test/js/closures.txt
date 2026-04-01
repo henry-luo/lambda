@@ -9,4 +9,3 @@ map: 3 6 9 12 15
 filter: 4 5
 running: 1 3 6
 immediate: Hello World
-null

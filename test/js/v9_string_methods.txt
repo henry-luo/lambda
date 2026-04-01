@@ -10,4 +10,3 @@ at 4: o
 search: 6
 search miss: -1
 toString: test
-null

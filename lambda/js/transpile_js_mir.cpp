@@ -8,6 +8,8 @@
 // for literals; expression results are already boxed.
 
 #include "js_transpiler.hpp"
+#include "../ts/ts_ast.hpp"
+#include "../ts/ts_transpiler.hpp"
 #include "js_dom.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
@@ -48,7 +50,7 @@ extern "C" void js_reset_module_vars();
 
 // External declarations for parallel module compilation
 extern "C" {
-    const TSLanguage* tree_sitter_javascript(void);
+    const TSLanguage* tree_sitter_typescript(void);
     void ensure_jit_imports_initialized(void);
 }
 
@@ -75,6 +77,7 @@ struct JsMirVarEntry {
     int typed_array_type;    // P9: JsTypedArrayType enum value, -1 if not a typed array
     bool is_js_array;        // A2: true if variable is known to hold a regular JS array
     JsClassEntry* class_entry;  // P4: non-NULL if variable is a known class instance
+    Type* full_type;         // P3.4: full Type* (e.g. TypeMap for interface vars; NULL otherwise)
 };
 
 // Loop label pair for break/continue
@@ -362,6 +365,8 @@ static uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t 
 
 // Forward declarations
 static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc);
+static Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node);
+static JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
 
 // ============================================================================
 // Basic MIR helpers
@@ -2050,6 +2055,14 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // Phase 5: If callee is Math.xxx(), resolve return type at compile time
         String* math_method = jm_get_math_method(call);
         if (math_method) return jm_math_return_type(math_method, mt, call->arguments);
+        // Phase 3.5: return type from any collected function (not just native-eligible)
+        // Skip generators — they return iterator objects, not the inferred return type
+        {
+            JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
+            if (any_fc && any_fc->return_type != LMD_TYPE_ANY
+                && any_fc->node && !any_fc->node->is_generator)
+                return any_fc->return_type;
+        }
         return LMD_TYPE_ANY;
     }
 
@@ -2070,6 +2083,19 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
             if (prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "length", 6) == 0) {
                 return LMD_TYPE_INT;
             }
+
+            // P3.4: TypeMap shape lookup — if the object has a full_type (TypeMap from TS interface),
+            // look up the property name in the ShapeEntry chain to find the field type.
+            Type* obj_full = jm_get_full_type(mt, mem->object);
+            if (obj_full && obj_full->type_id == LMD_TYPE_MAP) {
+                TypeMap* tm = (TypeMap*)obj_full;
+                for (ShapeEntry* se = tm->shape; se; se = se->next) {
+                    if (se->name && se->name->str && se->name->length == prop->name->len &&
+                        memcmp(se->name->str, prop->name->chars, prop->name->len) == 0) {
+                        if (se->type) return se->type->type_id;
+                    }
+                }
+            }
         }
         return LMD_TYPE_ANY;
     }
@@ -2077,6 +2103,21 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
     default:
         return LMD_TYPE_ANY;
     }
+}
+
+// Returns the full Type* for an expression (richer than just TypeId).
+// Checks variable scope for Type* carried from TS annotations.
+// Returns NULL for unknown or non-compound types.
+static Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return NULL;
+    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+        JsMirVarEntry* var = jm_find_var(mt, vname);
+        if (var) return var->full_type;
+    }
+    return NULL;
 }
 
 // Check if a type is native (not boxed)
@@ -2397,6 +2438,29 @@ static MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
 // Phase 4: Native call resolution
 // ============================================================================
 
+// Phase 3.5: find the collected entry for a direct call without checking native eligibility.
+// Used to propagate return types from any known function, even non-native ones.
+static JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call) {
+    if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
+    if (!entry) entry = id->entry;
+    if (!entry || !entry->node) return NULL;
+    JsFunctionNode* fn = NULL;
+    JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
+    if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
+        fn = (JsFunctionNode*)entry->node;
+    } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
+        if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION
+            || decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
+            fn = (JsFunctionNode*)decl->init;
+        }
+    }
+    if (!fn) return NULL;
+    return jm_find_collected_func(mt, fn);
+}
+
 // Check if a call expression should use the native version of a function.
 // Returns the JsFuncCollected* if native call is possible, NULL otherwise.
 static JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
@@ -2602,6 +2666,10 @@ static void jm_get_param_name(JsAstNode* param_node, int index, char* out, int o
     if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
         snprintf(out, out_size, "_js_%.*s", (int)pid->name->len, pid->name->chars);
+    } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+        // TsParameterNode: delegate to the wrapped pattern
+        TsParameterNode* tsp = (TsParameterNode*)param_node;
+        jm_get_param_name(tsp->pattern, index, out, out_size);
     } else if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
         jm_get_param_name(ap->left, index, out, out_size);
@@ -3437,6 +3505,59 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
 
     if (pc == 0 || pc > 16) return;
 
+    // Phase 3.4: Check for TS type annotations on parameters first
+    // If ALL params have annotations, use them. Otherwise fall through to body-scan.
+    bool use_annotations = false;
+    {
+        int ann_count = 0;
+        JsAstNode* p = fn->params;
+        while (p) {
+            if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                TsParameterNode* tsp = (TsParameterNode*)p;
+                if (tsp->ts_type) ann_count++;
+            }
+            p = p->next;
+        }
+        if (ann_count > 0) {
+            // use annotations for annotated params, ANY for unannotated
+            use_annotations = true;
+            p = fn->params;
+            for (int i = 0; i < pc && p; i++, p = p->next) {
+                if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                    TsParameterNode* tsp = (TsParameterNode*)p;
+                    if (tsp->ts_type && tsp->ts_type->type_expr && !tsp->optional) {
+                        TypeId tid = ts_predefined_name_to_type_id(NULL, 0);  // default
+                        // resolve from the predefined_type or type_expr
+                        TsTypeNode* tex = tsp->ts_type->type_expr;
+                        if (tex->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)tex;
+                            tid = pt->predefined_id;
+                        } else {
+                            // fallback: resolve via ts_resolve_type
+                            tid = LMD_TYPE_ANY;
+                        }
+                        fc->param_types[i] = tid;
+                    } else {
+                        fc->param_types[i] = LMD_TYPE_ANY;
+                    }
+                } else if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
+                    fc->param_types[i] = LMD_TYPE_ANY;
+                } else {
+                    // not a TsParameterNode — use body-scan for this param
+                    fc->param_types[i] = LMD_TYPE_ANY;
+                }
+            }
+            log_debug("js-mir P3.4: annotation-based param types for %s: [%s%s%s%s]",
+                fn->name ? fn->name->chars : "(anon)",
+                pc > 0 ? (fc->param_types[0] == LMD_TYPE_INT ? "INT" : fc->param_types[0] == LMD_TYPE_FLOAT ? "FLOAT" : "ANY") : "",
+                pc > 1 ? (fc->param_types[1] == LMD_TYPE_INT ? ",INT" : fc->param_types[1] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 2 ? (fc->param_types[2] == LMD_TYPE_INT ? ",INT" : fc->param_types[2] == LMD_TYPE_FLOAT ? ",FLOAT" : ",ANY") : "",
+                pc > 3 ? ",..." : "");
+        }
+    }
+
+    if (use_annotations) return;  // annotations took priority
+
     // Build parameter name array
     char param_names[16][128];
     JsAstNode* p = fn->params;
@@ -3593,6 +3714,19 @@ static void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
 static void jm_infer_return_type(JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     fc->return_type = LMD_TYPE_ANY;
+
+    // Phase 3.4: check for explicit TS return type annotation
+    if (fn->ts_return_type) {
+        TsTypeAnnotationNode* ann = fn->ts_return_type;
+        if (ann->type_expr && ann->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
+            fc->return_type = pt->predefined_id;
+            log_debug("js-mir P3.4: annotation-based return type for %s: %s",
+                fn->name ? fn->name->chars : "(anon)",
+                fc->return_type == LMD_TYPE_INT ? "INT" : fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+            return;
+        }
+    }
 
     char self_name[128] = {0};
     if (fn->name && fn->name->chars) {
@@ -6230,8 +6364,17 @@ static MIR_reg_t jm_transpile_inline_native(JsMirTranspiler* mt, JsCallNode* cal
     JsAstNode* param_node = fn->params;
     JsAstNode* arg_node = call->arguments;
     for (int i = 0; i < fc->param_count && param_node; i++) {
+        // resolve param name: plain identifier or TsParameterNode
+        JsAstNode* pid_node = NULL;
         if (param_node->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* pid = (JsIdentifierNode*)param_node;
+            pid_node = param_node;
+        } else if (param_node->node_type == (int)TS_AST_NODE_PARAMETER) {
+            TsParameterNode* tsp = (TsParameterNode*)param_node;
+            if (tsp->pattern && tsp->pattern->node_type == JS_AST_NODE_IDENTIFIER)
+                pid_node = tsp->pattern;
+        }
+        if (pid_node) {
+            JsIdentifierNode* pid = (JsIdentifierNode*)pid_node;
             char pname[140];
             snprintf(pname, sizeof(pname), "_js_%.*s", (int)pid->name->len, pid->name->chars);
             TypeId ptype = fc->param_types[i];
@@ -10238,6 +10381,19 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                 } else if (d->init) {
                     log_debug("var-decl: '%s' init node_type=%d", vname, d->init->node_type);
                     TypeId init_type = jm_get_effective_type(mt, d->init);
+
+                    // Phase 3.4: override with TS type annotation if present
+                    if (d->ts_type && d->ts_type->type_expr &&
+                        d->ts_type->type_expr->base.node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)d->ts_type->type_expr;
+                        TypeId ann_type = pt->predefined_id;
+                        if (ann_type == LMD_TYPE_FLOAT || ann_type == LMD_TYPE_INT ||
+                            ann_type == LMD_TYPE_STRING || ann_type == LMD_TYPE_BOOL) {
+                            log_debug("var-decl P3.4: '%s' annotation type overrides inference", vname);
+                            init_type = ann_type;
+                        }
+                    }
+
                     TypeId orig_type = init_type;
 
                     // v15: In generators, force boxed types for consistent env save/load
@@ -10279,6 +10435,21 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             MIR_new_reg_op(mt->ctx, val)));
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
                         jm_scope_env_mark_and_writeback(mt, vname, reg, init_type);
+
+                        // Phase 3.4: if annotated with a non-predefined TS type (e.g. interface/type alias),
+                        // resolve it and store TypeMap in full_type for member access inference.
+                        if (d->ts_type && d->ts_type->type_expr && mt->tp &&
+                            d->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                            Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, d->ts_type->type_expr);
+                            if (resolved && resolved->type_id == LMD_TYPE_MAP) {
+                                JsMirVarEntry* var_entry = jm_find_var(mt, vname);
+                                if (var_entry) {
+                                    var_entry->full_type = resolved;
+                                    log_debug("P3.4: var '%s' full_type=TypeMap (%d fields)", vname,
+                                        ((TypeMap*)resolved)->length);
+                                }
+                            }
+                        }
 
                         // P9: Track typed array type for direct memory access
                         if (d->init->node_type == JS_AST_NODE_NEW_EXPRESSION) {
@@ -10659,7 +10830,82 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
     }
 }
 
+// Phase 3.5: Detect `typeof x === "number"/"string"/"boolean"` pattern.
+// Returns the identifier node for x, or NULL if not matched.
+// Sets *narrowed_type to the narrowed TypeId (FLOAT for "number", etc.)
+// Sets *negate to true if the comparison is !== (narrowing applies to the else branch)
+static JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
+                                                    TypeId* narrowed_type, bool* negate) {
+    if (!test || test->node_type != JS_AST_NODE_BINARY_EXPRESSION) return NULL;
+    JsBinaryNode* bin = (JsBinaryNode*)test;
+    bool is_eq  = (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_EQ);
+    bool is_neq = (bin->op == JS_OP_STRICT_NE || bin->op == JS_OP_NE);
+    if (!is_eq && !is_neq) return NULL;
+    *negate = is_neq;
+
+    // Find which side is `typeof id` and which is a string literal
+    JsAstNode* typeof_side = NULL;
+    JsAstNode* literal_side = NULL;
+    auto is_typeof_unary = [](JsAstNode* n) -> bool {
+        if (!n || n->node_type != JS_AST_NODE_UNARY_EXPRESSION) return false;
+        return ((JsUnaryNode*)n)->op == JS_OP_TYPEOF;
+    };
+    if (is_typeof_unary(bin->left))  { typeof_side = bin->left;  literal_side = bin->right; }
+    else if (is_typeof_unary(bin->right)) { typeof_side = bin->right; literal_side = bin->left; }
+    if (!typeof_side || !literal_side) return NULL;
+
+    if (literal_side->node_type != JS_AST_NODE_LITERAL) return NULL;
+    JsLiteralNode* lit = (JsLiteralNode*)literal_side;
+    if (lit->literal_type != JS_LITERAL_STRING || !lit->value.string_value) return NULL;
+
+    const char* s = lit->value.string_value->chars;
+    size_t slen   = lit->value.string_value->len;
+    if      (slen == 6 && strncmp(s, "number",  6) == 0) *narrowed_type = LMD_TYPE_FLOAT;
+    else if (slen == 6 && strncmp(s, "string",  6) == 0) *narrowed_type = LMD_TYPE_STRING;
+    else if (slen == 7 && strncmp(s, "boolean", 7) == 0) *narrowed_type = LMD_TYPE_BOOL;
+    else return NULL;
+
+    JsUnaryNode* un = (JsUnaryNode*)typeof_side;
+    if (!un->operand || un->operand->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
+    return (JsIdentifierNode*)un->operand;
+}
+
+// Push a narrowed scope entry for a variable after a typeof guard.
+// Returns true if narrowing was applied (caller must call jm_pop_scope after the block).
+// Only narrows ANY→FLOAT for "number" guards (creates a new unboxed double register).
+static bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId narrowed_type) {
+    if (!id) return false;
+    char vname[128];
+    snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
+    JsMirVarEntry* orig = jm_find_var(mt, vname);
+    if (!orig || orig->type_id != LMD_TYPE_ANY) return false;
+
+    if (narrowed_type == LMD_TYPE_FLOAT) {
+        // Unbox the boxed item to a native double
+        MIR_reg_t narrow_reg = jm_new_reg(mt, "typeof_f", MIR_T_D);
+        MIR_reg_t unboxed = jm_emit_unbox_float(mt, orig->reg);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, narrow_reg),
+            MIR_new_reg_op(mt->ctx, unboxed)));
+        jm_push_scope(mt);
+        jm_set_var(mt, vname, narrow_reg, MIR_T_D, LMD_TYPE_FLOAT);
+        log_debug("js-mir P3.5 typeof: narrowed %s to FLOAT in branch", vname);
+        return true;
+    }
+    // STRING / BOOL: no native form; just update type_id while keeping the original register
+    jm_push_scope(mt);
+    jm_set_var(mt, vname, orig->reg, orig->mir_type, narrowed_type);
+    log_debug("js-mir P3.5 typeof: narrowed %s type_id to %d in branch", vname, narrowed_type);
+    return true;
+}
+
 static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
+    // Phase 3.5: detect typeof narrowing pattern before emitting the test
+    TypeId typeof_narrowed_type = LMD_TYPE_ANY;
+    bool typeof_negate = false;
+    JsIdentifierNode* typeof_id = jm_detect_typeof_pattern(if_node->test,
+        &typeof_narrowed_type, &typeof_negate);
+
     // Determine if we can use native comparison for the test.
     // BOTH operands must be typed numeric so the comparison returns a native 0/1
     // (not a boxed Lambda boolean Item). MIR_BF checks for raw 0, so a boxed
@@ -10698,6 +10944,11 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
 
     // Consequent
     if (if_node->consequent) {
+        // Phase 3.5: narrow variable type inside the consequent when typeof guard matched
+        bool consequent_narrowed = false;
+        if (typeof_id && !typeof_negate)
+            consequent_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
+
         if (if_node->consequent->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             JsBlockNode* blk = (JsBlockNode*)if_node->consequent;
             JsAstNode* s = blk->statements;
@@ -10705,12 +10956,19 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         } else {
             jm_transpile_statement(mt, if_node->consequent);
         }
+
+        if (consequent_narrowed) jm_pop_scope(mt);
     }
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
     // Alternate
     jm_emit_label(mt, l_else);
     if (if_node->alternate) {
+        // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
+        bool alternate_narrowed = false;
+        if (typeof_id && typeof_negate)
+            alternate_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
+
         if (if_node->alternate->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
             JsBlockNode* blk = (JsBlockNode*)if_node->alternate;
             JsAstNode* s = blk->statements;
@@ -10718,6 +10976,8 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         } else {
             jm_transpile_statement(mt, if_node->alternate);
         }
+
+        if (alternate_narrowed) jm_pop_scope(mt);
     }
     jm_emit_label(mt, l_end);
 }
@@ -14159,6 +14419,24 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 MIR_reg_t preg = MIR_reg(mt->ctx, vname, func);
                 jm_set_var(mt, vname, preg);
 
+                // Phase 3.4: if param has a TypeMap TS annotation, set full_type so member
+                // access on this param can resolve field types via jm_get_effective_type.
+                if (param_node->node_type == (int)TS_AST_NODE_PARAMETER && mt->tp) {
+                    TsParameterNode* tsp = (TsParameterNode*)param_node;
+                    if (tsp->ts_type && tsp->ts_type->type_expr &&
+                        tsp->ts_type->type_expr->base.node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
+                        Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, tsp->ts_type->type_expr);
+                        if (resolved && resolved->type_id == LMD_TYPE_MAP) {
+                            JsMirVarEntry* pvar = jm_find_var(mt, vname);
+                            if (pvar) {
+                                pvar->full_type = resolved;
+                                log_debug("P3.4: param '%s' full_type=TypeMap (%d fields)", vname,
+                                    ((TypeMap*)resolved)->length);
+                            }
+                        }
+                    }
+                }
+
                 // For default params (ASSIGNMENT_PATTERN): if the arg is undefined, eval and assign default
                 if (param_node->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
                     JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)param_node;
@@ -14680,6 +14958,129 @@ static void jm_emit_module_export(JsMirTranspiler* mt, const char* name, int nam
         MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->namespace_reg),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+}
+
+// ============================================================================
+// Phase 3.5: Call-site type propagation
+// Scan function bodies for calls with literal arguments that contradict the
+// inferred param types. Widen those params to ANY and revoke native eligibility.
+// ============================================================================
+
+static void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!node) return;
+    switch (node->node_type) {
+    case JS_AST_NODE_CALL_EXPRESSION: {
+        JsCallNode* call = (JsCallNode*)node;
+        // Recurse into arguments first (depth-first)
+        JsAstNode* a = call->arguments;
+        while (a) { jm_callsite_scan_node(mt, a); a = a->next; }
+        // Check callee arguments against collected function's param types
+        JsFuncCollected* callee_fc = jm_find_collected_func_for_call(mt, call);
+        if (callee_fc && callee_fc->has_native_version) {
+            JsAstNode* arg = call->arguments;
+            for (int i = 0; i < callee_fc->param_count && i < 16; i++) {
+                if (!arg) break;
+                if (arg->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* lit = (JsLiteralNode*)arg;
+                    TypeId arg_type = LMD_TYPE_ANY;
+                    if (lit->literal_type == JS_LITERAL_NUMBER)
+                        arg_type = lit->has_decimal ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+                    else if (lit->literal_type == JS_LITERAL_STRING)
+                        arg_type = LMD_TYPE_STRING;
+                    else if (lit->literal_type == JS_LITERAL_BOOLEAN)
+                        arg_type = LMD_TYPE_BOOL;
+                    TypeId expected = callee_fc->param_types[i];
+                    bool ok = true;
+                    if (expected == LMD_TYPE_INT)
+                        ok = (arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_BOOL || arg_type == LMD_TYPE_ANY);
+                    else if (expected == LMD_TYPE_FLOAT)
+                        ok = (arg_type == LMD_TYPE_FLOAT || arg_type == LMD_TYPE_INT || arg_type == LMD_TYPE_ANY);
+                    if (!ok) {
+                        log_debug("js-mir P3.5 callsite: widening %s param %d from type %d to ANY (literal mismatch)",
+                            callee_fc->name, i, expected);
+                        callee_fc->param_types[i] = LMD_TYPE_ANY;
+                        callee_fc->has_native_version = false;
+                    }
+                }
+                arg = arg->next;
+            }
+        }
+        // Recurse into callee (for method calls)
+        jm_callsite_scan_node(mt, call->callee);
+        break;
+    }
+    case JS_AST_NODE_BINARY_EXPRESSION: {
+        JsBinaryNode* bin = (JsBinaryNode*)node;
+        jm_callsite_scan_node(mt, bin->left);
+        jm_callsite_scan_node(mt, bin->right);
+        break;
+    }
+    case JS_AST_NODE_UNARY_EXPRESSION: {
+        JsUnaryNode* un = (JsUnaryNode*)node;
+        jm_callsite_scan_node(mt, un->operand);
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
+        JsAssignmentNode* asgn = (JsAssignmentNode*)node;
+        jm_callsite_scan_node(mt, asgn->right);
+        break;
+    }
+    case JS_AST_NODE_MEMBER_EXPRESSION: {
+        JsMemberNode* mem = (JsMemberNode*)node;
+        jm_callsite_scan_node(mt, mem->object);
+        break;
+    }
+    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
+        JsConditionalNode* cond = (JsConditionalNode*)node;
+        jm_callsite_scan_node(mt, cond->test);
+        jm_callsite_scan_node(mt, cond->consequent);
+        jm_callsite_scan_node(mt, cond->alternate);
+        break;
+    }
+    case JS_AST_NODE_RETURN_STATEMENT: {
+        JsReturnNode* ret = (JsReturnNode*)node;
+        jm_callsite_scan_node(mt, ret->argument);
+        break;
+    }
+    case JS_AST_NODE_VARIABLE_DECLARATION: {
+        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
+        JsAstNode* d = decl->declarations;
+        while (d) {
+            JsVariableDeclaratorNode* vd = (JsVariableDeclaratorNode*)d;
+            jm_callsite_scan_node(mt, vd->init);
+            d = d->next;
+        }
+        break;
+    }
+    case JS_AST_NODE_EXPRESSION_STATEMENT: {
+        JsExpressionStatementNode* es = (JsExpressionStatementNode*)node;
+        jm_callsite_scan_node(mt, es->expression);
+        break;
+    }
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* ifn = (JsIfNode*)node;
+        jm_callsite_scan_node(mt, ifn->test);
+        jm_callsite_scan_node(mt, ifn->consequent);
+        jm_callsite_scan_node(mt, ifn->alternate);
+        break;
+    }
+    case JS_AST_NODE_BLOCK_STATEMENT: {
+        JsBlockNode* blk = (JsBlockNode*)node;
+        JsAstNode* s = blk->statements;
+        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void jm_callsite_propagate(JsMirTranspiler* mt) {
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* fc = &mt->func_entries[i];
+        if (fc->node && fc->node->body)
+            jm_callsite_scan_node(mt, (JsAstNode*)fc->node->body);
+    }
 }
 
 void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
@@ -15744,6 +16145,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // This ensures func_item is set for all functions before any body is compiled,
     // so forward references (e.g., a class method calling a free function declared
     // later in the source) resolve correctly via MCONST_FUNC and direct call paths.
+
+    // Phase 1.76: Call-site propagation — scan all function bodies for call
+    // expressions that pass literal arguments contradicting inferred param types.
+    // Widen mismatched params to ANY and revoke native eligibility.
+    jm_callsite_propagate(mt);
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (!fc->func_item) {
@@ -16447,7 +16853,7 @@ static int jm_precompile_js_imports(Runtime* runtime, const char* js_source, con
 
     // create JS parser for discovery
     TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_javascript());
+    ts_parser_set_language(parser, tree_sitter_typescript());
 
     // initialize graph with main script as sentinel (index 0, not compiled here)
     int capacity = 16;

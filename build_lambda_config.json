@@ -54,7 +54,6 @@
         "build_temp/re2-noabsl",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-javascript/bindings/c",
         "lambda/tree-sitter-typescript/bindings/c",
         "lambda/tree-sitter-python/bindings/c",
         "lambda/tree-sitter-bash/bindings/c",
@@ -80,12 +79,6 @@
             "name": "tree-sitter-lambda",
             "include": "lambda/tree-sitter-lambda/bindings/c",
             "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-javascript",
-            "include": "lambda/tree-sitter-javascript/bindings/c",
-            "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
             "link": "static"
         },
         {
@@ -489,7 +482,6 @@
                 "build_temp/re2-noabsl",
                 "lambda/tree-sitter/lib/include",
                 "lambda/tree-sitter-lambda/bindings/c",
-                "lambda/tree-sitter-javascript/bindings/c",
                 "mac-deps/rpmalloc-install/include"
             ],
             "exclude_libraries": [
@@ -889,12 +881,6 @@
                     "name": "tree-sitter-lambda",
                     "include": "lambda/tree-sitter-lambda/bindings/c",
                     "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-                    "link": "static"
-                },
-                {
-                    "name": "tree-sitter-javascript",
-                    "include": "lambda/tree-sitter-javascript/bindings/c",
-                    "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
                     "link": "static"
                 },
                 {
@@ -2673,6 +2659,16 @@
                             "gtest_main"
                         ],
                         "icon": "🟨"
+                    },
+                    {
+                        "source": "test/test_js_test262_gtest.cpp",
+                        "name": "test262 Compliance Tests",
+                        "dependencies": [],
+                        "binary": "test_js_test262_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "icon": "📋"
                     },
                     {
                         "source": "test/test_c2mir_gtest.cpp",

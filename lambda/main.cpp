@@ -1030,22 +1030,8 @@ int main(int argc, char *argv[]) {
 
             Item result = transpile_js_to_mir(&runtime, js_source, js_file);
 
-            // Format output: use JSON for maps/arrays, Lambda format for scalars
-            TypeId result_type = get_type_id(result);
-            if (result_type == LMD_TYPE_MAP || result_type == LMD_TYPE_ARRAY
-                || result_type == LMD_TYPE_ELEMENT) {
-                Pool* fmt_pool = pool_create();
-                String* json = format_json(fmt_pool, result);
-                if (json) {
-                    printf("%.*s\n", json->len, json->chars);
-                }
-                pool_destroy(fmt_pool);
-            } else {
-                StrBuf *output = strbuf_new_cap(256);
-                print_root_item(output, result);
-                printf("%s\n", output->str);
-                strbuf_free(output);
-            }
+            // JS mode: no REPL printing of last expression value
+            // (JS spec: scripts don't print their completion value)
 
             free(js_source);
         }

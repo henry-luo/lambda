@@ -8,4 +8,3 @@ upper: HELLO
 sep: -
 combined: RED-rgb(0,0,0)
 stars: ****
-null

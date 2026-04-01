@@ -7,4 +7,3 @@ hasOwn name: true
 hasOwn missing: false
 before freeze: false
 after freeze: true
-null
