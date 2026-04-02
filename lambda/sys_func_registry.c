@@ -499,9 +499,6 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0},
 
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
-
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_take", FPTR(fn_take), NULL, NULL, false, 0},
 
@@ -915,8 +912,11 @@ JitImport jit_runtime_imports[] = {
     {"fn_strcat", FPTR(fn_strcat)},
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
-    {"fn_concat", FPTR(fn_concat)},
     {"fn_join", FPTR(fn_join)},
+    // native String* variants for string functions
+    {"fn_starts_with_str", FPTR(fn_starts_with_str)},
+    {"fn_ends_with_str", FPTR(fn_ends_with_str)},
+    {"fn_ord_str", FPTR(fn_ord_str)},
 
     // ========================================================================
     // MIR swap-safe store functions

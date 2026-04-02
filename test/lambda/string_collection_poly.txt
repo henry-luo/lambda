@@ -1,0 +1,58 @@
+"===== contains: string =====str contains sub:"
+true
+"str not contains:"
+false
+"str contains single char:"
+true
+"===== contains: list =====list contains int:"
+true
+"list not contains:"
+false
+"list contains string:"
+true
+"list contains bool:"
+true
+"empty list:"
+false
+"===== index_of: string =====str index:"
+6
+"str not found:"
+-1
+"===== index_of: list =====list index int:"
+1
+"list index not found:"
+-1
+"list index string:"
+2
+"list index first:"
+1
+"===== last_index_of: string =====str last index:"
+12
+"str last not found:"
+-1
+"===== last_index_of: list =====list last index:"
+3
+"list last not found:"
+-1
+"list last first el:"
+4
+"===== starts_with: string (native path) =====sw basic:"
+true
+"sw no match:"
+false
+"sw empty prefix:"
+true
+"===== ends_with: string (native path) =====ew basic:"
+true
+"ew no match:"
+false
+"ew empty suffix:"
+true
+"===== ord: string (native path) =====ord A:"
+65
+"ord a:"
+97
+"ord emoji:"
+128512
+"===== chained: index_of on list =====find index in list:"
+1
