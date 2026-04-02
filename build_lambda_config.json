@@ -2679,6 +2679,7 @@
                     {
                         "source": "test/test_js_test262_gtest.cpp",
                         "name": "test262 Compliance Tests",
+                        "category": "extended",
                         "dependencies": [],
                         "binary": "test_js_test262_gtest.exe",
                         "libraries": [
@@ -2754,7 +2755,8 @@
                             "gtest"
                         ],
                         "requires_lambda_exe": true,
-                        "icon": "💎"
+                        "icon": "💎",
+                        "category": "extended"
                     },
                     {
                         "source": "test/test_ts_gtest.cpp",
