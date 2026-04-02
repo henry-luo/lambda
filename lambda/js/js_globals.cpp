@@ -29,11 +29,16 @@ extern Item parse_json_to_item(Input* input, const char* json_string);
 #include <mach/mach_time.h>
 #endif
 
+static inline Item make_js_undefined() {
+    return (Item){.item = ((uint64_t)LMD_TYPE_UNDEFINED << 56)};
+}
+
 extern void* heap_alloc(int size, TypeId type_id);
 extern void fn_array_set(Array* arr, int64_t index, Item value);
 extern "C" void js_set_prototype(Item object, Item prototype);
 extern "C" Item js_get_prototype(Item object);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
+extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 
 // =============================================================================
 // Process I/O
@@ -746,6 +751,25 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // a __class_name__ marker that matches any __class_name__ in left's proto chain.
     if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
+    // v16: Check for Symbol.hasInstance on the right-hand constructor
+    // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
+    {
+        TypeId rt = get_type_id(right);
+        if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_FUNC) {
+            // look for __sym_3 (Symbol.hasInstance = ID 3)
+            Item has_instance_fn = ItemNull;
+            if (rt == LMD_TYPE_MAP) {
+                bool found = false;
+                has_instance_fn = js_map_get_fast_ext(right.map, "__sym_3", 7, &found);
+            }
+            if (has_instance_fn.item != ItemNull.item && get_type_id(has_instance_fn) == LMD_TYPE_FUNC) {
+                Item args[1] = { left };
+                Item result = js_call_function(has_instance_fn, right, args, 1);
+                return (Item){.item = b2it(js_is_truthy(result))};
+            }
+        }
+    }
+
     // If right is a function (IIFE-returned constructor), walk the __proto__ chain
     // and check for __ctor__ (function identity) match, stored at object creation time.
     TypeId right_type = get_type_id(right);
@@ -1096,6 +1120,189 @@ extern "C" Item js_reflect_construct(Item target, Item args_array) {
 }
 
 // =============================================================================
+// Object.getOwnPropertyDescriptor — return descriptor for an own property
+// =============================================================================
+
+extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
+    TypeId type = get_type_id(obj);
+
+    // Convert name to string for comparison
+    Item name_str_item = js_to_string(name);
+    if (get_type_id(name_str_item) != LMD_TYPE_STRING) return ItemNull;
+    String* name_str = it2s(name_str_item);
+
+    // Function properties: length, name, prototype
+    if (type == LMD_TYPE_FUNC) {
+        if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
+            Item value = js_property_get(obj, name);
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            return desc;
+        }
+        if (name_str->len == 4 && strncmp(name_str->chars, "name", 4) == 0) {
+            Item name_val = js_property_get(obj, name);
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, name_val);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            return desc;
+        }
+        if (name_str->len == 9 && strncmp(name_str->chars, "prototype", 9) == 0) {
+            Item desc = js_new_object();
+            Item proto = js_property_get(obj, name);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, proto);
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+            return desc;
+        }
+        return make_js_undefined();
+    }
+
+    // String properties: length, numeric indices
+    if (type == LMD_TYPE_STRING) {
+        String* s = it2s(obj);
+        if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(s->len)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+            return desc;
+        }
+        // numeric index → character at that position
+        if (name_str->len > 0 && name_str->chars[0] >= '0' && name_str->chars[0] <= '9') {
+            int idx = 0;
+            bool valid = true;
+            for (int i = 0; i < (int)name_str->len; i++) {
+                if (name_str->chars[i] < '0' || name_str->chars[i] > '9') { valid = false; break; }
+                idx = idx * 10 + (name_str->chars[i] - '0');
+            }
+            if (valid && idx >= 0 && idx < (int)s->len) {
+                Item ch = item_at(obj, (int64_t)idx);
+                Item desc = js_new_object();
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, ch);
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(false)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+                return desc;
+            }
+        }
+        return make_js_undefined();
+    }
+
+    // Array properties: length, numeric indices
+    if (type == LMD_TYPE_ARRAY) {
+        if (name_str->len == 6 && strncmp(name_str->chars, "length", 6) == 0) {
+            Item desc = js_new_object();
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, (Item){.item = i2it(obj.array->length)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
+            return desc;
+        }
+        // numeric index
+        if (name_str->len > 0 && name_str->chars[0] >= '0' && name_str->chars[0] <= '9') {
+            int idx = 0;
+            for (int i = 0; i < (int)name_str->len; i++) {
+                if (name_str->chars[i] < '0' || name_str->chars[i] > '9') { idx = -1; break; }
+                idx = idx * 10 + (name_str->chars[i] - '0');
+            }
+            if (idx >= 0 && idx < obj.array->length) {
+                Item desc = js_new_object();
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, obj.array->items[idx]);
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+                return desc;
+            }
+        }
+        return make_js_undefined();
+    }
+
+    // Map (object) properties
+    if (type == LMD_TYPE_MAP) {
+        Map* m = obj.map;
+        if (!m || !m->type) return make_js_undefined();
+
+        // Check for accessor properties (__get_<name> / __set_<name>)
+        char key_buf[256];
+        snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)name_str->len, name_str->chars);
+        Item getter_key = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+        Item has_getter = js_has_own_property(obj, getter_key);
+        snprintf(key_buf, sizeof(key_buf), "__set_%.*s", (int)name_str->len, name_str->chars);
+        Item setter_key = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
+        Item has_setter = js_has_own_property(obj, setter_key);
+
+        if (it2b(has_getter) || it2b(has_setter)) {
+            // Accessor descriptor
+            Item desc = js_new_object();
+            if (it2b(has_getter)) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, js_property_get(obj, getter_key));
+            } else {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("get", 3))}, make_js_undefined());
+            }
+            if (it2b(has_setter)) {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, js_property_get(obj, setter_key));
+            } else {
+                js_property_set(desc, (Item){.item = s2it(heap_create_name("set", 3))}, make_js_undefined());
+            }
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+            js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+            return desc;
+        }
+
+        // Check for own data property
+        Item has_own = js_has_own_property(obj, name);
+        if (!it2b(has_own)) return make_js_undefined();
+
+        Item value = js_property_get(obj, name);
+        Item desc = js_new_object();
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, value);
+        // v16: Check stored attribute markers for writable/enumerable/configurable
+        char attr_buf[256];
+        bool nw_found = false, nc_found = false, ne_found = false;
+        snprintf(attr_buf, sizeof(attr_buf), "__nw_%.*s", (int)name_str->len, name_str->chars);
+        Item nw_val = js_map_get_fast_ext(m, attr_buf, (int)strlen(attr_buf), &nw_found);
+        snprintf(attr_buf, sizeof(attr_buf), "__nc_%.*s", (int)name_str->len, name_str->chars);
+        Item nc_val = js_map_get_fast_ext(m, attr_buf, (int)strlen(attr_buf), &nc_found);
+        snprintf(attr_buf, sizeof(attr_buf), "__ne_%.*s", (int)name_str->len, name_str->chars);
+        Item ne_val = js_map_get_fast_ext(m, attr_buf, (int)strlen(attr_buf), &ne_found);
+        bool is_writable = !(nw_found && js_is_truthy(nw_val));
+        bool is_configurable = !(nc_found && js_is_truthy(nc_val));
+        bool is_enumerable = !(ne_found && js_is_truthy(ne_val));
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(is_writable)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(is_enumerable)});
+        js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(is_configurable)});
+        return desc;
+    }
+
+    return make_js_undefined();
+}
+
+// =============================================================================
+// Object.getOwnPropertyDescriptors — return descriptors for all own properties
+// =============================================================================
+
+extern "C" Item js_object_get_own_property_descriptors(Item obj) {
+    Item result = js_new_object();
+    Item keys = js_object_keys(obj);
+    if (get_type_id(keys) != LMD_TYPE_ARRAY) return result;
+    for (int i = 0; i < keys.array->length; i++) {
+        Item key = keys.array->items[i];
+        Item desc = js_object_get_own_property_descriptor(obj, key);
+        if (desc.item != make_js_undefined().item) {
+            js_property_set(result, key, desc);
+        }
+    }
+    return result;
+}
+
+// =============================================================================
 // Object.defineProperty — define a property on an object
 // =============================================================================
 
@@ -1134,6 +1341,63 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 js_property_set(obj, sk, setter);
             }
         }
+    }
+    // v16: Store property attribute markers for writable/configurable/enumerable enforcement
+    Item name_str_item = js_to_string(name);
+    if (get_type_id(name_str_item) == LMD_TYPE_STRING) {
+        String* name_str = it2s(name_str_item);
+        if (name_str && name_str->len > 0 && name_str->len < 200) {
+            char attr_key[256];
+            // writable: default true for data descriptors, store marker only when false
+            Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+            Item has_writable = js_has_own_property(descriptor, writable_key);
+            if (it2b(has_writable)) {
+                Item writable_val = js_property_get(descriptor, writable_key);
+                if (!js_is_truthy(writable_val)) {
+                    snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
+                    Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_property_set(obj, nw_k, (Item){.item = b2it(true)});
+                }
+            }
+            // configurable: default true, store marker only when false
+            Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+            Item has_configurable = js_has_own_property(descriptor, configurable_key);
+            if (it2b(has_configurable)) {
+                Item configurable_val = js_property_get(descriptor, configurable_key);
+                if (!js_is_truthy(configurable_val)) {
+                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
+                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_property_set(obj, nc_k, (Item){.item = b2it(true)});
+                }
+            }
+            // enumerable: default true, store marker only when false
+            Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+            Item has_enumerable = js_has_own_property(descriptor, enumerable_key);
+            if (it2b(has_enumerable)) {
+                Item enumerable_val = js_property_get(descriptor, enumerable_key);
+                if (!js_is_truthy(enumerable_val)) {
+                    snprintf(attr_key, sizeof(attr_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
+                    Item ne_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_property_set(obj, ne_k, (Item){.item = b2it(true)});
+                }
+            }
+        }
+    }
+    return obj;
+}
+
+// =============================================================================
+// Object.defineProperties — define multiple properties on an object
+// =============================================================================
+
+extern "C" Item js_object_define_properties(Item obj, Item props) {
+    if (obj.item == 0 || get_type_id(props) != LMD_TYPE_MAP) return obj;
+    Item keys = js_object_keys(props);
+    if (get_type_id(keys) != LMD_TYPE_ARRAY) return obj;
+    for (int i = 0; i < keys.array->length; i++) {
+        Item key = keys.array->items[i];
+        Item desc = js_property_get(props, key);
+        js_object_define_property(obj, key, desc);
     }
     return obj;
 }
@@ -1192,10 +1456,10 @@ extern "C" Item js_object_keys(Item object) {
         const char* s = e->name->str;
         int len = (int)e->name->length;
         // skip engine-internal properties:
-        // __class_name__, __proto__, __get_*, __set_*, __sym_*, constructor
+        // __class_name__, __proto__, __get_*, __set_*, __sym_*, __nw_*, __nc_*, __ne_*, constructor
         bool skip = false;
         if (len >= 2 && s[0] == '_' && s[1] == '_') {
-            // skip __class_name__, __proto__, __get_*, __set_*, __sym_*
+            // skip __class_name__, __proto__, __get_*, __set_*, __sym_*, __nw_*, __nc_*, __ne_*
             skip = true;
         } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
             skip = true;
@@ -1204,6 +1468,14 @@ extern "C" Item js_object_keys(Item object) {
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+        }
+        // v16: skip non-enumerable properties (have __ne_<name> marker)
+        if (!skip && len > 0 && len < 200) {
+            char ne_key[256];
+            snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", len, s);
+            bool ne_found = false;
+            Item ne_val = js_map_get_fast_ext(m, ne_key, (int)strlen(ne_key), &ne_found);
+            if (ne_found && js_is_truthy(ne_val)) skip = true;
         }
         if (!skip) count++;
         e = e->next;
@@ -1224,6 +1496,14 @@ extern "C" Item js_object_keys(Item object) {
         if (!skip) {
             Item val = _map_read_field(e, m->data);
             if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+            // v16: skip non-enumerable properties
+            if (len > 0 && len < 200) {
+                char ne_key[256];
+                snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", len, s);
+                bool ne_found = false;
+                Item ne_val = js_map_get_fast_ext(m, ne_key, (int)strlen(ne_key), &ne_found);
+                if (ne_found && js_is_truthy(ne_val)) { e = e->next; continue; }
+            }
             char nbuf[256];
             int nlen = len < 255 ? len : 255;
             memcpy(nbuf, s, nlen);
@@ -1521,6 +1801,25 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
 
 extern "C" Item js_object_freeze(Item obj) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return obj;
+    // v16: Mark all existing own properties as non-writable and non-configurable
+    Item keys = js_object_keys(obj);
+    if (get_type_id(keys) == LMD_TYPE_ARRAY) {
+        for (int i = 0; i < keys.array->length; i++) {
+            Item key = keys.array->items[i];
+            if (get_type_id(key) == LMD_TYPE_STRING) {
+                String* str_key = it2s(key);
+                if (str_key && str_key->len > 0 && str_key->len < 200) {
+                    char attr_key[256];
+                    snprintf(attr_key, sizeof(attr_key), "__nw_%.*s", (int)str_key->len, str_key->chars);
+                    Item nw_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_property_set(obj, nw_k, (Item){.item = b2it(true)});
+                    snprintf(attr_key, sizeof(attr_key), "__nc_%.*s", (int)str_key->len, str_key->chars);
+                    Item nc_k = (Item){.item = s2it(heap_create_name(attr_key, strlen(attr_key)))};
+                    js_property_set(obj, nc_k, (Item){.item = b2it(true)});
+                }
+            }
+        }
+    }
     Item key = (Item){.item = s2it(heap_create_name("__frozen__", 10))};
     js_property_set(obj, key, (Item){.item = b2it(true)});
     return obj;
@@ -1696,6 +1995,28 @@ extern "C" Item js_json_stringify(Item value) {
 
 extern "C" Item js_delete_property(Item obj, Item key) {
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(true)};
+    // v16: Frozen objects reject property deletion
+    {
+        Map* m = obj.map;
+        bool frozen_found = false;
+        Item frozen_val = js_map_get_fast_ext(m, "__frozen__", 10, &frozen_found);
+        if (frozen_found && js_is_truthy(frozen_val)) {
+            return (Item){.item = b2it(false)};
+        }
+    }
+    // v16: Non-configurable properties cannot be deleted
+    if (get_type_id(key) == LMD_TYPE_STRING) {
+        String* str_key = it2s(key);
+        if (str_key && str_key->len > 0 && str_key->len < 200) {
+            char nc_key[256];
+            snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)str_key->len, str_key->chars);
+            bool nc_found = false;
+            Item nc_val = js_map_get_fast_ext(obj.map, nc_key, (int)strlen(nc_key), &nc_found);
+            if (nc_found && js_is_truthy(nc_val)) {
+                return (Item){.item = b2it(false)};
+            }
+        }
+    }
     // Mark property as deleted using sentinel value.
     // Object.keys, hasOwnProperty, in, and JSON.stringify skip sentinel entries.
     //
@@ -2020,6 +2341,123 @@ extern "C" Item js_get_global_this() {
 }
 
 // =============================================================================
+// Built-in constructor cache: Array, Object, Function, String, Number, Boolean, etc.
+// These return JsFunction objects so that `typeof Array === "function"` and
+// `Array.prototype.push` work correctly.
+// =============================================================================
+
+// Constructor IDs for dispatch
+enum JsConstructorId {
+    JS_CTOR_OBJECT = 1,
+    JS_CTOR_ARRAY,
+    JS_CTOR_FUNCTION,
+    JS_CTOR_STRING,
+    JS_CTOR_NUMBER,
+    JS_CTOR_BOOLEAN,
+    JS_CTOR_SYMBOL,
+    JS_CTOR_ERROR,
+    JS_CTOR_TYPE_ERROR,
+    JS_CTOR_RANGE_ERROR,
+    JS_CTOR_REFERENCE_ERROR,
+    JS_CTOR_SYNTAX_ERROR,
+    JS_CTOR_URI_ERROR,
+    JS_CTOR_REGEXP,
+    JS_CTOR_DATE,
+    JS_CTOR_PROMISE,
+    JS_CTOR_MAP,
+    JS_CTOR_SET,
+    JS_CTOR_WEAKMAP,
+    JS_CTOR_WEAKSET,
+    JS_CTOR_MAX
+};
+
+static Item js_constructor_cache[JS_CTOR_MAX];
+static bool js_ctor_cache_init = false;
+
+// Dummy func_ptr for constructors (makes typeof return "function")
+static Item js_ctor_placeholder() { return ItemNull; }
+
+// Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
+struct JsCtor {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+};
+
+static Item js_create_constructor(int ctor_id, const char* name, int param_count) {
+    if (!js_ctor_cache_init) {
+        for (int i = 0; i < JS_CTOR_MAX; i++) js_constructor_cache[i] = ItemNull;
+        js_ctor_cache_init = true;
+    }
+    if (js_constructor_cache[ctor_id].item != ItemNull.item) {
+        return js_constructor_cache[ctor_id];
+    }
+    // Allocate directly via pool — do NOT use js_new_function() because it
+    // caches by func_ptr and all constructors share js_ctor_placeholder.
+    JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->func_ptr = (void*)js_ctor_placeholder;
+    fn->param_count = param_count;
+    fn->env = NULL;
+    fn->env_size = 0;
+    fn->prototype = ItemNull;
+    // NOTE: bound_this left as 0 (from pool_calloc). Do NOT set to ItemNull
+    // because ItemNull.item is non-zero and bound check uses truthy test.
+    fn->bound_args = NULL;
+    fn->bound_argc = 0;
+    fn->name = heap_create_name(name, strlen(name));
+    fn->builtin_id = 0;
+    Item fn_item = (Item){.function = (Function*)fn};
+    js_constructor_cache[ctor_id] = fn_item;
+    return fn_item;
+}
+
+extern "C" Item js_get_constructor(Item name_item) {
+    if (get_type_id(name_item) != LMD_TYPE_STRING) return make_js_undefined();
+    String* name = it2s(name_item);
+    if (!name) return make_js_undefined();
+
+    struct { const char* name; int len; int id; int pc; } ctors[] = {
+        {"Object", 6, JS_CTOR_OBJECT, 1},
+        {"Array", 5, JS_CTOR_ARRAY, 0},
+        {"Function", 8, JS_CTOR_FUNCTION, 1},
+        {"String", 6, JS_CTOR_STRING, 1},
+        {"Number", 6, JS_CTOR_NUMBER, 1},
+        {"Boolean", 7, JS_CTOR_BOOLEAN, 1},
+        {"Symbol", 6, JS_CTOR_SYMBOL, 0},
+        {"Error", 5, JS_CTOR_ERROR, 1},
+        {"TypeError", 9, JS_CTOR_TYPE_ERROR, 1},
+        {"RangeError", 10, JS_CTOR_RANGE_ERROR, 1},
+        {"ReferenceError", 14, JS_CTOR_REFERENCE_ERROR, 1},
+        {"SyntaxError", 11, JS_CTOR_SYNTAX_ERROR, 1},
+        {"URIError", 8, JS_CTOR_URI_ERROR, 1},
+        {"RegExp", 6, JS_CTOR_REGEXP, 2},
+        {"Date", 4, JS_CTOR_DATE, 1},
+        {"Promise", 7, JS_CTOR_PROMISE, 1},
+        {"Map", 3, JS_CTOR_MAP, 0},
+        {"Set", 3, JS_CTOR_SET, 0},
+        {"WeakMap", 7, JS_CTOR_WEAKMAP, 0},
+        {"WeakSet", 7, JS_CTOR_WEAKSET, 0},
+        {NULL, 0, 0, 0}
+    };
+
+    for (int i = 0; ctors[i].name; i++) {
+        if ((int)name->len == ctors[i].len && strncmp(name->chars, ctors[i].name, name->len) == 0) {
+            return js_create_constructor(ctors[i].id, ctors[i].name, ctors[i].pc);
+        }
+    }
+    return make_js_undefined();
+}
+
+// =============================================================================
 // v12: Symbol API
 // =============================================================================
 
@@ -2039,6 +2477,13 @@ static HashMap* js_symbol_registry = nullptr;  // string key -> JsSymbolEntry
 #define JS_SYMBOL_ID_TO_PRIMITIVE   2
 #define JS_SYMBOL_ID_HAS_INSTANCE   3
 #define JS_SYMBOL_ID_TO_STRING_TAG  4
+#define JS_SYMBOL_ID_ASYNC_ITERATOR 5
+#define JS_SYMBOL_ID_SPECIES        6
+#define JS_SYMBOL_ID_MATCH          7
+#define JS_SYMBOL_ID_REPLACE        8
+#define JS_SYMBOL_ID_SEARCH         9
+#define JS_SYMBOL_ID_SPLIT          10
+#define JS_SYMBOL_ID_UNSCOPABLES    11
 
 static int js_symbol_entry_compare(const void* a, const void* b, void* udata) {
     (void)udata;
@@ -2126,10 +2571,17 @@ extern "C" Item js_symbol_to_string(Item sym) {
     uint64_t id = js_symbol_item_id(sym);
 
     // well-known symbols
-    if (id == JS_SYMBOL_ID_ITERATOR)      return (Item){.item = s2it(heap_create_name("Symbol(Symbol.iterator)", 23))};
+    if (id == JS_SYMBOL_ID_ITERATOR)       return (Item){.item = s2it(heap_create_name("Symbol(Symbol.iterator)", 23))};
     if (id == JS_SYMBOL_ID_TO_PRIMITIVE)   return (Item){.item = s2it(heap_create_name("Symbol(Symbol.toPrimitive)", 26))};
     if (id == JS_SYMBOL_ID_HAS_INSTANCE)   return (Item){.item = s2it(heap_create_name("Symbol(Symbol.hasInstance)", 26))};
     if (id == JS_SYMBOL_ID_TO_STRING_TAG)  return (Item){.item = s2it(heap_create_name("Symbol(Symbol.toStringTag)", 26))};
+    if (id == JS_SYMBOL_ID_ASYNC_ITERATOR) return (Item){.item = s2it(heap_create_name("Symbol(Symbol.asyncIterator)", 28))};
+    if (id == JS_SYMBOL_ID_SPECIES)        return (Item){.item = s2it(heap_create_name("Symbol(Symbol.species)", 22))};
+    if (id == JS_SYMBOL_ID_MATCH)          return (Item){.item = s2it(heap_create_name("Symbol(Symbol.match)", 20))};
+    if (id == JS_SYMBOL_ID_REPLACE)        return (Item){.item = s2it(heap_create_name("Symbol(Symbol.replace)", 22))};
+    if (id == JS_SYMBOL_ID_SEARCH)         return (Item){.item = s2it(heap_create_name("Symbol(Symbol.search)", 21))};
+    if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol(Symbol.split)", 20))};
+    if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol(Symbol.unscopables)", 26))};
 
     // check registry
     if (js_symbol_registry) {
@@ -2162,10 +2614,20 @@ extern "C" Item js_symbol_well_known(Item name) {
             return js_make_symbol_item(JS_SYMBOL_ID_HAS_INSTANCE);
         if (s->len == 11 && strncmp(s->chars, "toStringTag", 11) == 0)
             return js_make_symbol_item(JS_SYMBOL_ID_TO_STRING_TAG);
-        if (s->len == 7 && strncmp(s->chars, "asyncIterator", 7) == 0)
-            return js_make_symbol_item(5);
+        if (s->len == 13 && strncmp(s->chars, "asyncIterator", 13) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_ASYNC_ITERATOR);
         if (s->len == 7 && strncmp(s->chars, "species", 7) == 0)
-            return js_make_symbol_item(6);
+            return js_make_symbol_item(JS_SYMBOL_ID_SPECIES);
+        if (s->len == 5 && strncmp(s->chars, "match", 5) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_MATCH);
+        if (s->len == 7 && strncmp(s->chars, "replace", 7) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_REPLACE);
+        if (s->len == 6 && strncmp(s->chars, "search", 6) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_SEARCH);
+        if (s->len == 5 && strncmp(s->chars, "split", 5) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_SPLIT);
+        if (s->len == 11 && strncmp(s->chars, "unscopables", 11) == 0)
+            return js_make_symbol_item(JS_SYMBOL_ID_UNSCOPABLES);
     }
     // Unknown well-known symbol — create a stable entry via Symbol.for semantics
     return js_symbol_for(name);

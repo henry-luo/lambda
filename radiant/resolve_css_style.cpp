@@ -684,7 +684,7 @@ static CssEnum get_position_value_from_style(DomElement* elem) {
 
 // CSS 2.1 §9.7: Apply blockification for floated or absolutely positioned elements
 // Converts internal table display values to 'block'
-static DisplayValue blockify_display(DisplayValue display) {
+DisplayValue blockify_display(DisplayValue display) {
     // Table internal display values that get blockified
     if (display.inner == CSS_VALUE_TABLE_ROW ||
         display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
@@ -2969,6 +2969,34 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // Pre-reset font-variant before scanning; if small-caps is found, the loop sets it.
             span->font->font_variant = CSS_VALUE_NORMAL;
 
+            // CSS 2.1 §15.8: Handle system font keywords (caption, icon, menu,
+            // message-box, small-caption, status-bar) as sole value.
+            // These set ALL font sub-properties to the system font values.
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_SYSTEM_FONT) {
+                    log_debug("[CSS] Font shorthand: system font keyword '%s'", info->name);
+                    // CSS 2.1 §15.8: System font keywords set all font sub-properties.
+                    // Map to platform system font. On macOS/Linux, system UI fonts
+                    // typically resolve to a sans-serif family.
+                    span->font->family = (char*)"Arial";
+                    span->font->font_size = 13.333f;  // typical system font size (browser default)
+                    span->font->font_size_from_medium = false;
+                    span->font->font_weight = CSS_VALUE_NORMAL;
+                    span->font->font_weight_numeric = 400;
+                    span->font->font_style = CSS_VALUE_NORMAL;
+                    span->font->font_variant = CSS_VALUE_NORMAL;
+                    if (!span->blk) { span->blk = alloc_block_prop(lycon); }
+                    // line-height: normal for system fonts
+                    span->blk->line_height = nullptr;
+                    break;
+                }
+                // CSS 2.1 §6.1.1: 'inherit' as sole value inherits from parent.
+                // For font shorthand, this means inherit ALL font sub-properties.
+                // Single-keyword 'inherit' is handled by the global inherit mechanism.
+                break;
+            }
+
             // Font shorthand format: [font-style] [font-variant] [font-weight] [font-stretch] font-size[/line-height] font-family
             // The last value (or values) is always font-family
             // font-size is required and comes before font-family
@@ -2977,6 +3005,26 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 2) {
                 size_t count = value->data.list.count;
                 log_debug("[CSS] Font shorthand: %zu values", count);
+
+                // CSS 2.1 §15.8: If 'inherit' appears mixed with other values
+                // in the font shorthand, the entire declaration is invalid.
+                // System font keywords (caption, icon, etc.) are NOT rejected here
+                // because when mixed with other values, they act as font-family names.
+                {
+                    bool has_inherit = false;
+                    for (size_t i = 0; i < count; i++) {
+                        const CssValue* v = value->data.list.values[i];
+                        if (v && v->type == CSS_VALUE_TYPE_KEYWORD) {
+                            const CssEnumInfo* ki = css_enum_info(v->data.keyword);
+                            if (ki && ki->group == CSS_VALUE_GROUP_GLOBAL) {
+                                log_debug("[CSS] Font shorthand: invalid - '%s' mixed with other values, ignoring declaration", ki->name);
+                                has_inherit = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (has_inherit) break;  // break from CSS_PROPERTY_FONT case
+                }
 
                 // Last value(s) are font-family - find the font-size value first
                 // Scan backwards: last is family, find size

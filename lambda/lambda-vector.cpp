@@ -1866,48 +1866,6 @@ Item fn_unique(Item item) {
     return { .array = result };
 }
 
-// concat(v1, v2) - concatenate two vectors
-// string/symbol: delegates to fn_join(a, b) for string concatenation
-Item fn_concat(Item a, Item b) {
-    GUARD_ERROR2(a, b);
-
-    TypeId type_a = get_type_id(a);
-    TypeId type_b = get_type_id(b);
-
-    // string/symbol concatenation via fn_join
-    if ((type_a == LMD_TYPE_STRING || type_a == LMD_TYPE_SYMBOL) &&
-        (type_b == LMD_TYPE_STRING || type_b == LMD_TYPE_SYMBOL)) {
-        return fn_join(a, b);
-    }
-
-    int64_t len_a = vector_length(a);
-    int64_t len_b = vector_length(b);
-
-    if (len_a < 0 || len_b < 0) return ItemError;
-
-    // If both are same homogeneous type, preserve it
-    if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* result = array_int64_new(len_a + len_b);
-        for (int64_t i = 0; i < len_a; i++) result->items[i] = a.array_int64->items[i];
-        for (int64_t i = 0; i < len_b; i++) result->items[len_a + i] = b.array_int64->items[i];
-        return { .array_int64 = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* result = array_float_new(len_a + len_b);
-        for (int64_t i = 0; i < len_a; i++) result->items[i] = a.array_float->items[i];
-        for (int64_t i = 0; i < len_b; i++) result->items[len_a + i] = b.array_float->items[i];
-        return { .array_float = result };
-    }
-    else {
-        // Generic list concatenation
-        List* result = list();
-        for (int64_t i = 0; i < len_a; i++) list_push(result, vector_get(a, i));
-        for (int64_t i = 0; i < len_b; i++) list_push(result, vector_get(b, i));
-        result->is_content = 1;
-        return { .list = result };
-    }
-}
-
 // take(vec, n) - first n elements
 // string/symbol: delegates to fn_substring(str, 0, n)
 Item fn_take(Item vec, Item n_item) {

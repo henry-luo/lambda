@@ -1,8 +1,12 @@
 /**
  * Script Runner for Radiant Layout Engine
  *
- * Extracts inline <script> source from the HTML Element* tree and executes
- * it via the Lambda JS transpiler with the DomDocument as the DOM context.
+ * Extracts inline and external <script> source from the HTML Element* tree
+ * and executes it via the Lambda JS transpiler with the DomDocument as the
+ * DOM context.
+ *
+ * External scripts are downloaded (HTTP) or read from disk using the same
+ * URL resolution infrastructure as CSS and image loading.
  *
  * Pipeline position:
  *   HTML parse → Element* tree → DomElement* tree → execute_document_scripts()
@@ -16,9 +20,12 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/mark_reader.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include "../lib/str.h"
+#include "../lib/url.h"
+#include "../lib/file.h"
 
 #include <cstring>
 #include <cctype>
@@ -83,12 +90,96 @@ static void extract_script_text(Element* script_elem, StrBuf* buf) {
 }
 
 /**
- * Recursively walk the Element* tree, collecting <script> source text
- * and the body onload handler in document order.
+ * Resolve a script src attribute to a loadable path/URL, following the same
+ * URL resolution logic as CSS stylesheet loading in collect_linked_stylesheets.
+ *
+ * @param src        The src attribute value (absolute, relative, or full URL)
+ * @param base_url   The document base URL for resolving relative paths
+ * @param out_is_http Set to true if the resolved path is an HTTP(S) URL
+ * @return           Resolved path string (static buffer — copy before next call)
  */
-static int skipped_external_scripts = 0;
+static const char* resolve_script_url(const char* src, Url* base_url, bool* out_is_http) {
+    static char resolved_path[2048];
+    *out_is_http = false;
 
-static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf* onload_buf) {
+    if (src[0] == '/' && src[1] != '/') {
+        // absolute local path
+        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
+        resolved_path[sizeof(resolved_path) - 1] = '\0';
+    } else if (strstr(src, "://") != nullptr) {
+        // full URL
+        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
+        resolved_path[sizeof(resolved_path) - 1] = '\0';
+        *out_is_http = (strncmp(src, "http://", 7) == 0 || strncmp(src, "https://", 8) == 0);
+    } else if (base_url) {
+        // relative path — resolve against base URL
+        Url* resolved_url = parse_url(base_url, src);
+        if (resolved_url && resolved_url->is_valid) {
+            if (resolved_url->scheme == URL_SCHEME_HTTP || resolved_url->scheme == URL_SCHEME_HTTPS) {
+                const char* url_str = url_get_href(resolved_url);
+                strncpy(resolved_path, url_str, sizeof(resolved_path) - 1);
+                resolved_path[sizeof(resolved_path) - 1] = '\0';
+                *out_is_http = true;
+            } else {
+                char* local_path = url_to_local_path(resolved_url);
+                if (local_path) {
+                    strncpy(resolved_path, local_path, sizeof(resolved_path) - 1);
+                    resolved_path[sizeof(resolved_path) - 1] = '\0';
+                    free(local_path);
+                } else {
+                    strncpy(resolved_path, src, sizeof(resolved_path) - 1);
+                    resolved_path[sizeof(resolved_path) - 1] = '\0';
+                }
+            }
+            url_destroy(resolved_url);
+        } else {
+            strncpy(resolved_path, src, sizeof(resolved_path) - 1);
+            resolved_path[sizeof(resolved_path) - 1] = '\0';
+        }
+    } else {
+        strncpy(resolved_path, src, sizeof(resolved_path) - 1);
+        resolved_path[sizeof(resolved_path) - 1] = '\0';
+    }
+    return resolved_path;
+}
+
+/**
+ * Load external script content from a resolved path or URL.
+ *
+ * @param resolved_path  The resolved file path or URL
+ * @param is_http        Whether the path is an HTTP(S) URL
+ * @return               Allocated string with script content, or nullptr on failure.
+ *                       Caller must free() the returned string.
+ */
+static char* load_script_content(const char* resolved_path, bool is_http) {
+    char* content = nullptr;
+    if (is_http) {
+        size_t content_size = 0;
+        content = download_http_content(resolved_path, &content_size, nullptr);
+        if (content) {
+            log_debug("script_runner: downloaded external script from URL: %s (%zu bytes)", resolved_path, content_size);
+        } else {
+            log_error("script_runner: failed to download external script: %s", resolved_path);
+        }
+    } else {
+        content = read_text_file(resolved_path);
+        if (content) {
+            log_debug("script_runner: loaded external script from file: %s (%zu bytes)", resolved_path, strlen(content));
+        } else {
+            log_error("script_runner: failed to read external script file: %s", resolved_path);
+        }
+    }
+    return content;
+}
+
+/**
+ * Recursively walk the Element* tree, collecting <script> source text
+ * (both inline and external) and the body onload handler in document order.
+ */
+static int loaded_external_scripts = 0;
+static int failed_external_scripts = 0;
+
+static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf* onload_buf, Url* base_url) {
     if (!elem) return;
 
     // check for <body onload="...">
@@ -137,11 +228,20 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             strcasecmp(type_attr, "application/ecmascript") != 0) {
             return;
         }
-        // check for src attribute - external scripts not supported yet
+        // check for src attribute - load external scripts
         const char* src_attr = extract_element_attribute(elem, "src", nullptr);
         if (src_attr && src_attr[0]) {
-            log_debug("script_runner: skipping external <script src='%s'>", src_attr);
-            skipped_external_scripts++;
+            bool is_http = false;
+            const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
+            char* content = load_script_content(resolved, is_http);
+            if (content) {
+                strbuf_append_str(script_buf, content);
+                strbuf_append_str(script_buf, "\n");
+                free(content);
+                loaded_external_scripts++;
+            } else {
+                failed_external_scripts++;
+            }
             return;
         }
         // extract inline script source
@@ -155,7 +255,7 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
         Item child = elem->items[i];
         TypeId tid = get_type_id(child);
         if (tid == LMD_TYPE_ELEMENT) {
-            collect_scripts_recursive(child.element, script_buf, onload_buf);
+            collect_scripts_recursive(child.element, script_buf, onload_buf, base_url);
         }
     }
 }
@@ -164,20 +264,21 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
 // Main entry point
 // ============================================================================
 
-extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool) {
+extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_doc, Pool* pool, Url* base_url) {
     if (!html_root || !dom_doc) {
         log_debug("execute_document_scripts: null parameters, skipping");
         return;
     }
 
-    // reset external script counter
-    skipped_external_scripts = 0;
+    // reset counters
+    loaded_external_scripts = 0;
+    failed_external_scripts = 0;
 
     // collect all scripts and onload handlers
     StrBuf* script_buf = strbuf_new_cap(4096);
     StrBuf* onload_buf = strbuf_new_cap(256);
 
-    collect_scripts_recursive(html_root, script_buf, onload_buf);
+    collect_scripts_recursive(html_root, script_buf, onload_buf, base_url);
 
     // append onload handler after all script definitions
     // This handles both:
@@ -194,10 +295,10 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         return;
     }
 
-    // log skipped external scripts
-    if (skipped_external_scripts > 0) {
-        log_notice("script_runner: skipped %d external <script src=...> (not supported), inline scripts may have missing dependencies",
-            skipped_external_scripts);
+    // log external script loading stats
+    if (loaded_external_scripts > 0 || failed_external_scripts > 0) {
+        log_info("script_runner: external scripts: %d loaded, %d failed",
+            loaded_external_scripts, failed_external_scripts);
     }
 
     // Wrap script code with window object support:

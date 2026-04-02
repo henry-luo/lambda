@@ -486,6 +486,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 // Called for each property in DomElement->specified_style
 void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child); // Unified function for both Lexbor and Lambda CSS
+DisplayValue blockify_display(DisplayValue display); // CSS Display Level 3 §3: blockify inline-level displays
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);

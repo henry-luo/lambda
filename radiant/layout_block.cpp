@@ -5052,17 +5052,23 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->content_width = max(new_content_width, 0.0f);
             lycon->block.content_width = block->content_width;
 
-            // Re-setup line context with new width
-            line_init(lycon, 0, block->content_width);
+            // CSS 2.1 §16.1: Reset is_first_line BEFORE line_init so that
+            // line_reset() (called inside line_init) applies text-indent on the
+            // actual first content line. The initial setup_inline → line_reset
+            // consumed is_first_line during the intrinsic measurement pass.
+            lycon->block.is_first_line = true;
+
+            // Re-setup line context with new width, mirroring setup_inline logic:
+            // compute inner_left from border+padding, then pass to line_init so
+            // line_reset correctly applies text-indent on top of it.
+            float inner_left = 0;
             if (block->bound) {
                 if (block->bound->border) {
-                    lycon->line.advance_x += block->bound->border->width.left;
-                    lycon->line.right -= block->bound->border->width.right;
+                    inner_left += block->bound->border->width.left;
                 }
-                lycon->line.advance_x += block->bound->padding.left;
-                lycon->line.left = lycon->line.advance_x;
-                lycon->line.right = lycon->line.left + block->content_width;
+                inner_left += block->bound->padding.left;
             }
+            line_init(lycon, inner_left, inner_left + block->content_width);
         }
     }
 

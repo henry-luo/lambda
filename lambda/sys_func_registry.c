@@ -499,9 +499,6 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_UNIQUE, "unique", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_unique", FPTR(fn_unique), NULL, NULL, false, 0},
 
-    {SYSFUNC_CONCAT, "concat", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_concat", FPTR(fn_concat), NULL, NULL, false, 0},
-
     {SYSFUNC_TAKE, "take", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_take", FPTR(fn_take), NULL, NULL, false, 0},
 
@@ -915,8 +912,11 @@ JitImport jit_runtime_imports[] = {
     {"fn_strcat", FPTR(fn_strcat)},
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
-    {"fn_concat", FPTR(fn_concat)},
     {"fn_join", FPTR(fn_join)},
+    // native String* variants for string functions
+    {"fn_starts_with_str", FPTR(fn_starts_with_str)},
+    {"fn_ends_with_str", FPTR(fn_ends_with_str)},
+    {"fn_ord_str", FPTR(fn_ord_str)},
 
     // ========================================================================
     // MIR swap-safe store functions
@@ -1199,6 +1199,11 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_symbols", FPTR(js_object_get_own_property_symbols)},
     {"js_object_create", FPTR(js_object_create)},
     {"js_object_define_property", FPTR(js_object_define_property)},
+    {"js_object_define_properties", FPTR(js_object_define_properties)},
+    {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
+    {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
+    {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
     {"js_make_getter_key", FPTR(js_make_getter_key)},

@@ -261,7 +261,6 @@ typedef enum SysFunc {
     SYSFUNC_SORT,
     SYSFUNC_SORT2,
     SYSFUNC_UNIQUE,
-    SYSFUNC_CONCAT,
     SYSFUNC_TAKE,
     SYSFUNC_DROP,
     SYSFUNC_ZIP,
@@ -1138,7 +1137,6 @@ extern "C" {
     Item fn_sort2(Item a, Item dir);
     void fn_sort_by_keys(Item values, Item keys, int64_t descending);
     Item fn_unique(Item a);
-    Item fn_concat(Item a, Item b);
     Item fn_take(Item a, Item n);
     Item fn_drop(Item a, Item n);
     Item fn_slice(Item a, Item start, Item end);
@@ -1164,7 +1162,9 @@ extern "C" {
     Item fn_join(Item a, Item b);
     // string functions
     Bool fn_starts_with(Item str, Item prefix);
+    Bool fn_starts_with_str(String* str, String* prefix);   // native String* variant
     Bool fn_ends_with(Item str, Item suffix);
+    Bool fn_ends_with_str(String* str, String* suffix);     // native String* variant
     int64_t fn_index_of(Item str, Item sub);
     int64_t fn_last_index_of(Item str, Item sub);
     Item fn_trim(Item str);
@@ -1177,6 +1177,7 @@ extern "C" {
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_split2(Item str, Item sep);  // overloaded alias for fn_split
     int64_t fn_ord(Item str);           // ord(str) - Unicode code point of first character
+    int64_t fn_ord_str(String* str);    // native String* variant
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);

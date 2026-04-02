@@ -343,9 +343,124 @@ find("no-match", digits)
 find("a1b22", digits) | ~.value     // ["1", "22"]
 ```
 
+### contains(str, substring)
+
+Check if a string contains a substring. Returns `true` or `false`. Also works on collections (see [Collection Functions](#collection-functions)).
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `contains(str, sub)` | Check substring presence | `contains("hello", "ell")` | `true` |
+
+```lambda
+contains("hello world", "world")   // true
+contains("hello world", "xyz")     // false
+contains("abcdef", "cd")           // true
+contains("", "a")                  // false
+```
+
+### starts_with(str, prefix)
+
+Check if a string starts with a given prefix. Returns `true` or `false`.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `starts_with(str, prefix)` | Check prefix | `starts_with("hello", "hel")` | `true` |
+
+```lambda
+starts_with("hello world", "hello")   // true
+starts_with("hello world", "world")   // false
+starts_with("abc", "")                // true
+starts_with("abc", "abcd")            // false
+```
+
+### ends_with(str, suffix)
+
+Check if a string ends with a given suffix. Returns `true` or `false`.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `ends_with(str, suffix)` | Check suffix | `ends_with("hello", "llo")` | `true` |
+
+```lambda
+ends_with("hello world", "world")   // true
+ends_with("hello world", "hello")   // false
+ends_with("abc", "")                // true
+ends_with("abc", "abcd")            // false
+```
+
+### index_of(str, substring)
+
+Return the index of the first occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `index_of(str, sub)` | First occurrence index | `index_of("hello", "ll")` | `2` |
+
+```lambda
+index_of("hello world", "world")   // 6
+index_of("hello world", "xyz")     // -1
+index_of("abcabc", "bc")           // 1
+```
+
+### last_index_of(str, substring)
+
+Return the index of the last occurrence of a substring (-1 if not found). Also works on collections (see [Collection Functions](#collection-functions)).
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `last_index_of(str, sub)` | Last occurrence index | `last_index_of("abcabc", "bc")` | `4` |
+
+```lambda
+last_index_of("abcabc", "abc")    // 3
+last_index_of("hello", "l")       // 3
+last_index_of("hello", "xyz")     // -1
+```
+
+### trim(str) / trim_start(str) / trim_end(str)
+
+Remove whitespace from a string.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `trim(str)` | Remove leading and trailing whitespace | `trim("  hello  ")` | `"hello"` |
+| `trim_start(str)` | Remove leading whitespace | `trim_start("  hello  ")` | `"hello  "` |
+| `trim_end(str)` | Remove trailing whitespace | `trim_end("  hello  ")` | `"  hello"` |
+
+```lambda
+trim("  hello world  ")       // "hello world"
+trim_start("  hello  ")       // "hello  "
+trim_end("  hello  ")         // "  hello"
+trim("\t\n hello \n")         // "hello"
+```
+
+### upper(str) / lower(str)
+
+Convert string case. Unicode-aware.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `upper(str)` | Convert to uppercase | `upper("hello")` | `"HELLO"` |
+| `lower(str)` | Convert to lowercase | `lower("HELLO")` | `"hello"` |
+
+```lambda
+upper("hello")         // "HELLO"
+lower("HELLO")         // "hello"
+upper("café")          // "CAFÉ"
+lower("Straße")        // "straße"
+```
+
 ### normalize(str)
 
 Normalize a string (Unicode normalization).
+
+### url_resolve(base, relative)
+
+Resolve a relative URL against a base URL.
+
+```lambda
+url_resolve("https://example.com/a/b", "../c")    // "https://example.com/c"
+url_resolve("https://example.com/a/", "page.html") // "https://example.com/a/page.html"
+```
 
 ### ord(str)
 
@@ -388,8 +503,28 @@ Functions for working with arrays and other collections.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `len(x)` | Length of collection | `len([1, 2, 3])` | `3` |
+| `contains(vec, val)` | Check if element exists | `contains([1, 2, 3], 2)` | `true` |
+| `index_of(vec, val)` | Index of first match (-1 if none) | `index_of([1, 2, 3], 2)` | `1` |
+| `last_index_of(vec, val)` | Index of last match (-1 if none) | `last_index_of([1, 2, 1], 1)` | `2` |
 | `all(vec)` | All elements truthy? | `all([true, true, false])` | `false` |
 | `any(vec)` | Any element truthy? | `any([false, false, true])` | `true` |
+
+`contains`, `index_of`, and `last_index_of` work on lists, typed arrays (int, float), maps (key existence), and elements (children). They also work on strings (see [String Functions](#string-functions)).
+
+```lambda
+// List membership
+contains([1, 2, 3], 2)              // true
+contains(["a", "b", "c"], "d")      // false
+
+// Index search
+index_of([10, 20, 30, 20], 20)      // 1
+last_index_of([10, 20, 30, 20], 20) // 3
+index_of([1, 2, 3], 99)             // -1
+
+// Map key existence
+contains({name: "Alice", age: 30}, 'name')   // true
+contains({x: 1, y: 2}, 'z')                  // false
+```
 
 ### Extraction
 
@@ -998,6 +1133,16 @@ if (result is error) {
 ### String Functions
 | Function | Args | Description |
 |----------|------|-------------|
+| `contains` | 2 | Check if string contains substring |
+| `starts_with` | 2 | Check if string starts with prefix |
+| `ends_with` | 2 | Check if string ends with suffix |
+| `index_of` | 2 | Index of first substring occurrence |
+| `last_index_of` | 2 | Index of last substring occurrence |
+| `trim` | 1 | Remove leading/trailing whitespace |
+| `trim_start` | 1 | Remove leading whitespace |
+| `trim_end` | 1 | Remove trailing whitespace |
+| `upper` | 1 | Convert to uppercase |
+| `lower` | 1 | Convert to lowercase |
 | `replace` | 3 | Replace pattern/substring in string |
 | `split` | 2-3 | Split string by pattern/substring |
 | `join` | 2 | Join list of strings with separator |
@@ -1005,10 +1150,14 @@ if (result is error) {
 | `ord` | 1 | Unicode code point of first character |
 | `chr` | 1 | Character from Unicode code point |
 | `normalize` | 1 | Normalize string |
+| `url_resolve` | 2 | Resolve relative URL against base |
 
 ### Collection Functions
 | Function | Args | Description |
 |----------|------|-------------|
+| `contains` | 2 | Check element membership |
+| `index_of` | 2 | Index of first matching element |
+| `last_index_of` | 2 | Index of last matching element |
 | `slice` | 3 | Extract slice |
 | `set` | 1+ | Remove duplicates |
 | `all` | 1 | All truthy |

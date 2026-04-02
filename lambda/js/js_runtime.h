@@ -118,6 +118,8 @@ int64_t js_get_length(Item object);
 Item js_new_function(void* func_ptr, int param_count);
 Item js_new_closure(void* func_ptr, int param_count, Item* env, int env_size);
 Item* js_alloc_env(int count);
+void js_set_function_name(Item fn_item, Item name_item);
+Item js_get_constructor(Item name_item);
 Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
 Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
@@ -238,6 +240,9 @@ Item js_make_setter_key(Item key);
 
 Item js_object_create(Item proto);
 Item js_object_define_property(Item obj, Item name, Item descriptor);
+Item js_object_define_properties(Item obj, Item props);
+Item js_object_get_own_property_descriptor(Item obj, Item name);
+Item js_object_get_own_property_descriptors(Item obj);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
