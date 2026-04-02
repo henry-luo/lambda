@@ -223,14 +223,22 @@
 
 /* Theme Toggle */
 .nav-github {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   color: var(--color-text-muted);
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
+  justify-content: center;
   margin-left: var(--space-sm);
-  transition: color var(--transition);
+  flex-shrink: 0;
+  transition: all var(--transition);
 }
 .nav-github:hover {
   color: var(--color-text);
+  border-color: var(--color-border-light);
 }
 
 .theme-toggle {
