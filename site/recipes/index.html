@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recipes — Lambda Script</title>
+  <meta name="description" content="Task-oriented recipes for Lambda Script: convert formats, validate data, render documents, transform pipelines, and more.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/language-tour/">Language Tour</a></li>
+      <li><a href="/examples/">Examples</a></li>
+      <li><a href="/blog/">Blog</a></li>
+      <li><a href="/download/" class="nav-cta">Download</a></li>
+    </ul>
+    <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">Recipes</span>
+    <h1>Task-Oriented Guides</h1>
+    <p>Practical, copy-paste recipes for common document and data tasks.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container">
+
+    <!-- Convert -->
+    <h2>Format Conversion</h2>
+    <div class="card-list">
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>Markdown → HTML</h3>
+        <p>Convert a Markdown file to a standalone HTML page.</p>
+<pre><code>lambda convert readme.md -t html -o readme.html</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>JSON → YAML</h3>
+        <p>Convert JSON data to YAML format.</p>
+<pre><code>lambda convert data.json -t yaml -o data.yaml</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>YAML → JSON</h3>
+        <p>Convert YAML configuration to JSON.</p>
+<pre><code>lambda convert config.yaml -t json -o config.json</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>LaTeX → HTML</h3>
+        <p>Convert LaTeX documents to styled HTML.</p>
+<pre><code>lambda convert paper.tex -t html -o paper.html --full-document</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>XML → JSON</h3>
+        <p>Parse XML into the Lambda tree and output as JSON.</p>
+<pre><code>lambda convert data.xml -f xml -t json -o data.json</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Convert</span>
+        <h3>CSV → JSON</h3>
+        <p>Convert CSV tabular data to structured JSON.</p>
+<pre><code>lambda convert data.csv -t json -o data.json</code></pre>
+      </div>
+    </div>
+
+    <!-- Validate -->
+    <h2 class="mt-3xl">Data Validation</h2>
+    <div class="card-list">
+      <div class="card">
+        <span class="card-tag blue">Validate</span>
+        <h3>Validate JSON with a schema</h3>
+        <p>Define a schema and validate JSON files against it.</p>
+<pre><code>// schema.ls
+type User = {
+    name: string,
+    age: int that (0 &lt;= ~ &lt;= 150),
+    email: string?
+}</code></pre>
+<pre><code>lambda validate users.json -s schema.ls</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag blue">Validate</span>
+        <h3>Validate HTML5</h3>
+        <p>HTML files are validated against the built-in HTML5 schema automatically.</p>
+<pre><code>lambda validate page.html</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag blue">Validate</span>
+        <h3>Strict YAML validation</h3>
+        <p>Strict mode: all optional fields must be present or null.</p>
+<pre><code>lambda validate config.yaml -s config_schema.ls --strict</code></pre>
+      </div>
+    </div>
+
+    <!-- Render -->
+    <h2 class="mt-3xl">Rendering &amp; Viewing</h2>
+    <div class="card-list">
+      <div class="card">
+        <span class="card-tag green">Render</span>
+        <h3>HTML → SVG</h3>
+        <p>Render an HTML page to SVG output.</p>
+<pre><code>lambda render page.html -o output.svg</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag green">Render</span>
+        <h3>HTML → PDF</h3>
+        <p>Render an HTML page to a PDF document.</p>
+<pre><code>lambda render page.html -o output.pdf</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag green">Render</span>
+        <h3>HTML → Screenshot (PNG)</h3>
+        <p>Take a high-DPI screenshot of an HTML page.</p>
+<pre><code>lambda render page.html -o screenshot.png \
+    -vw 1920 -vh 1080 --pixel-ratio 2.0</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag green">Render</span>
+        <h3>Mermaid → SVG</h3>
+        <p>Render a Mermaid diagram to SVG with a dark theme.</p>
+<pre><code>lambda render diagram.mmd -o diagram.svg -t github-dark</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag green">View</span>
+        <h3>Interactive viewer</h3>
+        <p>Open any document in the native viewer window.</p>
+<pre><code>lambda view page.html
+lambda view readme.md
+lambda view https://example.com</code></pre>
+      </div>
+    </div>
+
+    <!-- Transform -->
+    <h2 class="mt-3xl">Data Transformation</h2>
+    <div class="card-list">
+      <div class="card">
+        <span class="card-tag purple">Transform</span>
+        <h3>Filter and sort JSON data</h3>
+        <p>Use pipes and for-expressions to query JSON files.</p>
+<pre><code>// filter_users.ls
+let users = input("users.json", 'json')
+
+// Active users, sorted by age, top 10
+for (u in users
+     where u.active
+     order by u.age desc
+     limit 10)
+  {name: u.name, age: u.age}</code></pre>
+<pre><code>lambda filter_users.ls</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Transform</span>
+        <h3>Extract images from Markdown</h3>
+        <p>Query the document tree for all image elements.</p>
+<pre><code>// images.ls
+let doc = input("readme.md", 'markdown')
+doc?&lt;img&gt; | ~.src</code></pre>
+<pre><code>lambda images.ls</code></pre>
+      </div>
+
+      <div class="card">
+        <span class="card-tag purple">Transform</span>
+        <h3>Batch CSV → JSON with filtering</h3>
+        <p>Read CSV, filter rows, and output as JSON.</p>
+<pre><code>// csv_filter.ls
+let data = input("sales.csv", 'csv')
+let big = data that ~.amount > 1000
+format(big, 'json')</code></pre>
+<pre><code>lambda csv_filter.ls</code></pre>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="/docs/quickstart/">Quick Start</a></li>
+          <li><a href="/docs/language-tour/">Language Tour</a></li>
+          <li><a href="/docs/cli/">CLI Reference</a></li>
+          <li><a href="/docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="/recipes/">Recipes</a></li>
+          <li><a href="/formats/">Formats</a></li>
+          <li><a href="/examples/">Examples</a></li>
+          <li><a href="/blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="/community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License · Built with ♥ by <a href="https://github.com/henry-luo">Henry Luo</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="../js/main.js"></script>
+</body>
+</html>

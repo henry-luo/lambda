@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Download &amp; Install — Lambda Script</title>
+  <meta name="description" content="Download Lambda Script for macOS, Linux, or Windows. A 9 MB single binary — unzip and run.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Install Lambda Script",
+    "description": "How to install Lambda Script on macOS, Linux, or Windows.",
+    "step": [
+      {"@type": "HowToStep", "text": "Download the release binary for your platform from GitHub Releases."},
+      {"@type": "HowToStep", "text": "Unzip the archive to a directory of your choice."},
+      {"@type": "HowToStep", "text": "Run lambda view from a terminal to verify the installation."}
+    ]
+  }
+  </script>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="/docs/">Docs</a></li>
+      <li><a href="/docs/language-tour/">Language Tour</a></li>
+      <li><a href="/examples/">Examples</a></li>
+      <li><a href="/blog/">Blog</a></li>
+      <li><a href="/download/" class="nav-cta active">Download</a></li>
+    </ul>    <button class="theme-toggle" aria-label="Toggle theme">☀</button>  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">Download</span>
+    <h1>Install Lambda Script</h1>
+    <p>A single 9 MB binary. Download, unzip, and start transforming documents.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container-narrow">
+
+    <h2>Pre-built Binaries</h2>
+    <p>Download the latest release for your platform from the GitHub Releases page:</p>
+
+    <div class="text-center mb-xl">
+      <a href="https://github.com/henry-luo/lambda/releases" class="btn btn-primary" target="_blank" rel="noopener">↓ Download from GitHub Releases</a>
+    </div>
+
+    <div class="os-tabs">
+      <button class="os-tab active" data-os="mac">macOS</button>
+      <button class="os-tab" data-os="linux">Linux</button>
+      <button class="os-tab" data-os="windows">Windows</button>
+    </div>
+
+    <div class="os-panel active" data-os="mac">
+      <h3>macOS (Apple Silicon &amp; Intel)</h3>
+      <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
+        <li>Download <code>lambda-macos.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Unzip to a directory of your choice</li>
+        <li>Open Terminal and run:</li>
+      </ol>
+<pre><code>cd ~/Downloads/lambda    # or wherever you unzipped
+./lambda view            # verify it works</code></pre>
+      <p class="text-muted" style="font-size: 0.9rem;">Tip: Add the directory to your PATH for global access: <code>export PATH="$PATH:~/lambda"</code></p>
+    </div>
+
+    <div class="os-panel" data-os="linux">
+      <h3>Linux (x86_64)</h3>
+      <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
+        <li>Download <code>lambda-linux.tar.gz</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Extract and run:</li>
+      </ol>
+<pre><code>tar -xzf lambda-linux.tar.gz
+cd lambda
+./lambda view</code></pre>
+      <p class="text-muted" style="font-size: 0.9rem;">Tested on Ubuntu 20.04+. Requires basic X11/Wayland for the viewer.</p>
+    </div>
+
+    <div class="os-panel" data-os="windows">
+      <h3>Windows (x86_64)</h3>
+      <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
+        <li>Download <code>lambda-windows.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Unzip to a folder (e.g., <code>C:\lambda</code>)</li>
+        <li>Open a terminal (cmd or PowerShell) and run:</li>
+      </ol>
+<pre><code>cd C:\lambda
+lambda.exe view</code></pre>
+      <p class="text-muted" style="font-size: 0.9rem;">Tip: Add to your system PATH for convenience.</p>
+    </div>
+
+    <h2>Build From Source</h2>
+    <p>Clone the repository and build with the included scripts:</p>
+
+<pre><code>git clone https://github.com/henry-luo/lambda.git
+cd lambda
+
+# Install dependencies (pick your platform)
+./setup-mac-deps.sh       # macOS
+./setup-linux-deps.sh     # Linux
+./setup-windows-deps.sh   # Windows (MSYS2)
+
+# Build
+make build                # Debug build (fast iteration)
+make release              # Optimized release build
+make test                 # Run tests</code></pre>
+
+    <p>See the <a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">README</a> for detailed build instructions.</p>
+
+    <h2>Verify Installation</h2>
+    <p>After installing, run these commands to verify everything works:</p>
+
+<pre><code># Start the interactive REPL
+lambda
+
+# Open the built-in viewer
+lambda view
+
+# Show version / help
+lambda --help</code></pre>
+
+    <div class="text-center mt-2xl">
+      <a href="/docs/quickstart/" class="btn btn-primary">Next: Quick Start Guide →</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="/docs/quickstart/">Quick Start</a></li>
+          <li><a href="/docs/language-tour/">Language Tour</a></li>
+          <li><a href="/docs/cli/">CLI Reference</a></li>
+          <li><a href="/docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="/recipes/">Recipes</a></li>
+          <li><a href="/formats/">Formats</a></li>
+          <li><a href="/examples/">Examples</a></li>
+          <li><a href="/blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="/community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License · Built with ♥ by <a href="https://github.com/henry-luo">Henry Luo</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="../js/main.js"></script>
+</body>
+</html>
