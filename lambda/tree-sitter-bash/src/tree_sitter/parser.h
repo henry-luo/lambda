@@ -113,6 +113,7 @@ struct TSLanguage {
   uint32_t state_count;
   uint32_t large_state_count;
   uint32_t production_id_count;
+  uint32_t supertype_count;
   uint32_t field_count;
   uint16_t max_alias_sequence_length;
   const uint16_t *parse_table;
@@ -123,11 +124,14 @@ struct TSLanguage {
   const char * const *field_names;
   const TSMapSlice *field_map_slices;
   const TSFieldMapEntry *field_map_entries;
+  const TSMapSlice *supertype_map_slices;
+  const TSSymbol *supertype_map_entries;
+  const TSSymbol *supertype_symbols;
   const TSSymbolMetadata *symbol_metadata;
   const TSSymbol *public_symbol_map;
   const uint16_t *alias_map;
   const TSSymbol *alias_sequences;
-  const TSLexerMode *lex_modes;
+  const void *lex_modes;
   bool (*lex_fn)(TSLexer *, TSStateId);
   bool (*keyword_lex_fn)(TSLexer *, TSStateId);
   TSSymbol keyword_capture_token;
@@ -142,12 +146,7 @@ struct TSLanguage {
   } external_scanner;
   const TSStateId *primary_state_ids;
   const char *name;
-  const TSSymbol *reserved_words;
-  uint16_t max_reserved_word_set_size;
-  uint32_t supertype_count;
-  const TSSymbol *supertype_symbols;
-  const TSMapSlice *supertype_map_slices;
-  const TSSymbol *supertype_map_entries;
+  uint32_t max_reserved_word_set_size;
   TSLanguageMetadata metadata;
 };
 

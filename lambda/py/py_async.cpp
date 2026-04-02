@@ -48,6 +48,12 @@ extern "C" bool py_is_coroutine(Item x) {
 static Item g_coro_return_value = {.item = ITEM_NULL};
 
 extern "C" Item py_coro_set_return(Item value) {
+    // register as GC root on first use (static variable invisible to stack scanning)
+    static bool root_registered = false;
+    if (!root_registered) {
+        heap_register_gc_root(&g_coro_return_value.item);
+        root_registered = true;
+    }
     g_coro_return_value = value;
     return value;
 }

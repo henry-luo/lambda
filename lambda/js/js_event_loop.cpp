@@ -9,6 +9,7 @@
 #include "js_event_loop.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
+#include "../transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/uv_loop.h"
 
@@ -202,6 +203,13 @@ extern "C" void js_event_loop_init(void) {
     microtask_tail = 0;
     microtask_count = 0;
     next_timer_id = 1;
+
+    // register microtask ring buffer as GC root (static memory invisible to stack scanning)
+    static bool statics_rooted = false;
+    if (!statics_rooted) {
+        heap_register_gc_root_range((uint64_t*)microtask_ring, MICROTASK_CAPACITY);
+        statics_rooted = true;
+    }
 
     // initialize libuv loop
     lambda_uv_init();
