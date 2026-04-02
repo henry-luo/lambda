@@ -1140,6 +1140,7 @@ JitImport jit_runtime_imports[] = {
     {"js_array_set_int", FPTR(js_array_set_int)},
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
+    {"js_set_this", FPTR(js_set_this)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value)},
