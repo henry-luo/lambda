@@ -443,6 +443,13 @@ static const CssEnumInfo css_value_definitions[] = {
     // Background repeat values
     {"repeat", 6, CSS_VALUE_REPEAT, CSS_VALUE_GROUP_BGROUND_REPEAT},
     {"no-repeat", 9, CSS_VALUE_NO_REPEAT, CSS_VALUE_GROUP_BGROUND_REPEAT},
+    // CSS 2.1 §15.8: System font keywords for font shorthand
+    {"caption", 7, CSS_VALUE_CAPTION, CSS_VALUE_GROUP_SYSTEM_FONT},
+    {"icon", 4, CSS_VALUE_ICON, CSS_VALUE_GROUP_SYSTEM_FONT},
+    {"menu", 4, CSS_VALUE_MENU, CSS_VALUE_GROUP_SYSTEM_FONT},
+    {"message-box", 11, CSS_VALUE_MESSAGE_BOX, CSS_VALUE_GROUP_SYSTEM_FONT},
+    {"small-caption", 13, CSS_VALUE_SMALL_CAPTION, CSS_VALUE_GROUP_SYSTEM_FONT},
+    {"status-bar", 10, CSS_VALUE_STATUS_BAR, CSS_VALUE_GROUP_SYSTEM_FONT},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

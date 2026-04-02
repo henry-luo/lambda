@@ -1269,6 +1269,10 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
         return;
     }
 
+    // CSS Display Level 3 §3: Flex items have their display blockified.
+    // inline → block, inline-block → block, inline-table → table, inline-flex → flex, inline-grid → grid
+    display = blockify_display(display);
+
     // Create ViewBlock directly (similar to layout_block but without child processing)
     ViewBlock* block = (ViewBlock*)set_view(lycon,
         display.outer == CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :

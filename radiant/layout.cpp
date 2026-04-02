@@ -1044,9 +1044,10 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
         view = view->next();
     }
 
-    // Extend the last text rect to fill any remaining space
-    // This handles rounding errors and ensures the line is fully justified
-    if (last_rect && last_view && last_view->view_type == RDT_VIEW_TEXT) {
+    // Extend the last text rect to fill any remaining space due to rounding errors.
+    // Only do this if justification actually distributed space (cumulative_offset > 0),
+    // otherwise a single-word line would be incorrectly stretched to fill the line.
+    if (cumulative_offset > 0 && last_rect && last_view && last_view->view_type == RDT_VIEW_TEXT) {
         float line_end = lycon->block.content_width;
         float current_end = last_rect->x + last_rect->width;
         if (current_end < line_end) {
