@@ -222,6 +222,17 @@
 }
 
 /* Theme Toggle */
+.nav-github {
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  margin-left: var(--space-sm);
+  transition: color var(--transition);
+}
+.nav-github:hover {
+  color: var(--color-text);
+}
+
 .theme-toggle {
   background: none;
   border: 1px solid var(--color-border);
