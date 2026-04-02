@@ -10,6 +10,13 @@
 #include "../lambda/input/css/css_parser.hpp"
 #include "../lambda/template_registry.h"
 #include "../lambda/render_map.h"
+#include "../lambda/lambda.h"         // Context (input_context)
+#include "../lambda/lambda-data.hpp"  // EvalContext
+#include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
+
+// thread-local eval context used by heap allocation functions
+extern __thread EvalContext* context;
+extern __thread Context* input_context;
 DomDocument* show_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height);
 View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
@@ -354,6 +361,26 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 log_info("dispatch_lambda_handler: invoking '%s' handler on tmpl=%s",
                                          event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
 
+                                // Set up eval context for heap allocation during handler/retransform.
+                                // After run_script_mir returns, the thread-local context is stale
+                                // (pointed to a stack-local Runner). Restore it from the retained runtime.
+                                EvalContext handler_ctx;
+                                memset(&handler_ctx, 0, sizeof(handler_ctx));
+                                DomDocument* doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
+                                Runtime* rt = doc ? doc->lambda_runtime : nullptr;
+                                EvalContext* saved_context = context;
+                                Context* saved_input_context = input_context;
+                                if (rt && rt->heap) {
+                                    handler_ctx.heap = rt->heap;
+                                    handler_ctx.nursery = rt->nursery;
+                                    handler_ctx.name_pool = rt->name_pool;
+                                    handler_ctx.pool = rt->heap->pool;
+                                    context = &handler_ctx;
+                                }
+                                // Clear input_context to prevent stale arena access
+                                // during list expansion in retransformed body functions.
+                                input_context = nullptr;
+
                                 // invoke handler: Item handler(Item model)
                                 typedef Item (*handler_fn)(Item);
                                 handler_fn fn = (handler_fn)h->handler_func;
@@ -367,6 +394,10 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     // rebuild DOM from updated Lambda element tree
                                     rebuild_lambda_doc(evcon->ui_context);
                                 }
+
+                                // restore previous context
+                                context = saved_context;
+                                input_context = saved_input_context;
 
                                 return true;
                             }

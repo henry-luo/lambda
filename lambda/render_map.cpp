@@ -224,6 +224,8 @@ int render_map_retransform(void) {
         }
 
         // re-execute template body with the source item
+        // NOTE: Do NOT call heap_gc_collect() here — the GC doesn't know about
+        // s_doc_root or other static roots, so it would collect live elements.
         typedef Item (*template_body_fn)(Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
         Item new_result = fn(entry->key.source_item);
