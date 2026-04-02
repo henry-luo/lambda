@@ -232,7 +232,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: var(--space-sm);
   flex-shrink: 0;
   transition: all var(--transition);
 }
@@ -254,7 +253,6 @@
   cursor: pointer;
   font-size: 1.1rem;
   transition: all var(--transition);
-  margin-left: var(--space-sm);
   flex-shrink: 0;
 }
 .theme-toggle:hover {
@@ -402,6 +400,14 @@ pre code {
 
 .nav-links a:hover,
 .nav-links a.active { color: #fff; }
+
+.nav-icons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: var(--space-md);
+  flex-shrink: 0;
+}
 
 .nav-cta {
   background: var(--color-primary);
