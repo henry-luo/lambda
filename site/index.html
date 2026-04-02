@@ -55,20 +55,14 @@
     </div>
     <h1>Documents as Data.<br><span class="highlight">One Language. One Pipeline.</span></h1>
     <p class="hero-subtitle">
-      Lambda Script is a cross-platform functional scripting language and document processing engine — parse, validate, transform, and render documents as structured data.
+      Lambda Script is a <i>functional</i> scripting language and runtime engine that parses, validates, queries, transforms, and renders <i>all your data.</i>
     </p>
     <div class="hero-actions">
       <a href="./download/" class="btn btn-primary">↓ Download</a>
       <a href="./docs/quickstart/" class="btn btn-secondary">Get Started →</a>
       <a href="https://github.com/henry-luo/lambda" class="btn btn-ghost" target="_blank" rel="noopener">GitHub</a>
     </div>
-  </div>
-</header>
-
-<!-- Pipeline Visualization -->
-<section>
-  <div class="container">
-    <div class="pipeline">
+    <div class="pipeline pipeline-compact">
       <div class="pipeline-step">
         <div class="step-label">Input</div>
         <div class="step-value">MD · HTML · JSON · YAML · LaTeX · PDF …</div>
@@ -76,7 +70,7 @@
       <div class="pipeline-arrow">→</div>
       <div class="pipeline-step">
         <div class="step-label">Parse</div>
-        <div class="step-value">Lambda/Mark Tree</div>
+        <div class="step-value">Mark Node Tree</div>
       </div>
       <div class="pipeline-arrow">→</div>
       <div class="pipeline-step">
@@ -90,84 +84,7 @@
       </div>
     </div>
   </div>
-</section>
-
-<!-- Key Stats -->
-<section>
-  <div class="container">
-    <div class="stats-row">
-      <div class="stat-item">
-        <div class="stat-value">13×</div>
-        <div class="stat-label">Faster than CPython</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">100%</div>
-        <div class="stat-label">HTML5 Conformance</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">100%</div>
-        <div class="stat-label">CommonMark Conformance</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">20+</div>
-        <div class="stat-label">Input Formats</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">9 MB</div>
-        <div class="stat-label">Single Binary</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Features -->
-<section>
-  <div class="container">
-    <div class="section-header">
-      <span class="section-label">Features</span>
-      <h2>One Runtime. One Data Model. One Pipeline.</h2>
-      <p>Replace stitched-together toolchains with a single, expressive functional language that treats documents as data.</p>
-    </div>
-
-    <div class="feature-grid">
-      <div class="feature-card">
-        <div class="feature-icon purple">λ</div>
-        <h3>Pure Functional Core</h3>
-        <p>Immutable data, first-class functions and types, expressive pipe operator for fluent data transformation pipelines.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon blue">⚡</div>
-        <h3>JIT Compiled Performance</h3>
-        <p>MIR-based JIT compilation delivers near-native speed. Competitive with Node.js V8, 13× faster than CPython.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon green">📄</div>
-        <h3>Multi-Format Document Pipeline</h3>
-        <p>Parse Markdown, HTML, JSON, YAML, LaTeX, PDF, XML, CSV, TOML, and more into a unified node tree representation.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon purple">✓</div>
-        <h3>Schema Validation</h3>
-        <p>Rich type system with schema-based validation for structured data and document trees, including element schemas for HTML/XML.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon blue">🎨</div>
-        <h3>Layout &amp; Rendering Engine</h3>
-        <p>Built-in Radiant HTML/CSS engine with block, inline, flex, grid, and table layout. Render to SVG, PDF, PNG, or JPEG.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon green">🖥</div>
-        <h3>Interactive Viewer</h3>
-        <p>Open HTML, Markdown, LaTeX, SVG, PDF, diagrams, and Lambda scripts in a native viewer with <code>lambda view</code>.</p>
-      </div>
-    </div>
-  </div>
-</section>
+</header>
 
 <!-- Code Examples -->
 <section style="background: var(--color-bg-alt);">
@@ -281,6 +198,55 @@ data?{status: <span style="color:#34d399">"ok"</span>}           <span style="co
   </div>
 </section>
 
+<!-- Features -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">Features</span>
+      <h2>One Runtime. One Data Model. One Pipeline.</h2>
+      <p>Replace stitched-together toolchains with a single, expressive functional language that treats documents as data.</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon purple">λ</div>
+        <h3>Pure Functional Core</h3>
+        <p>Immutable data, first-class functions and types, expressive pipe operator for fluent data transformation pipelines.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon blue">⚡</div>
+        <h3>JIT Compiled Performance</h3>
+        <p>MIR-based JIT compilation delivers near-native speed. Competitive with Node.js V8, 13× faster than CPython.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon green">📄</div>
+        <h3>Multi-Format Document Pipeline</h3>
+        <p>Parse Markdown, HTML, JSON, YAML, LaTeX, PDF, XML, CSV, TOML, and more into a unified node tree representation.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon purple">✓</div>
+        <h3>Schema Validation</h3>
+        <p>Rich type system with schema-based validation for structured data and document trees, including element schemas for HTML/XML.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon blue">🎨</div>
+        <h3>Layout &amp; Rendering Engine</h3>
+        <p>Built-in Radiant HTML/CSS engine with block, inline, flex, grid, and table layout. Render to SVG, PDF, PNG, or JPEG.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon green">🖥</div>
+        <h3>Interactive Viewer</h3>
+        <p>Open HTML, Markdown, LaTeX, SVG, PDF, diagrams, and Lambda scripts in a native viewer with <code>lambda view</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- Benchmarks -->
 <section>
   <div class="container">
@@ -326,14 +292,28 @@ data?{status: <span style="color:#34d399">"ok"</span>}           <span style="co
   </div>
 </section>
 
-<!-- Standards -->
+<!-- Standards & Stats -->
 <section style="background: var(--color-bg-alt);">
   <div class="container">
     <div class="section-header">
-      <span class="section-label">Standards Conformance</span>
-      <h2>Battle-Tested Parsing</h2>
+      <span class="section-label">By the Numbers</span>
+      <h2>Proven &amp; Performant</h2>
     </div>
     <div class="stats-row">
+      <div class="stat-item">
+        <div class="stat-value">13×</div>
+        <div class="stat-label">Faster than CPython (geomean)</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">20+</div>
+        <div class="stat-label">Input formats — JSON, HTML, CSS, PDF …</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">9 MB</div>
+        <div class="stat-label">Single binary, zero dependencies</div>
+      </div>
+    </div>
+    <div class="stats-row" style="margin-top: 2rem;">
       <div class="stat-item">
         <div class="stat-value">100%</div>
         <div class="stat-label">HTML5 (html5lib / WPT) · 1,560+ tests</div>
