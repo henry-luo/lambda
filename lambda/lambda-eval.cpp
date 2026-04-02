@@ -3020,17 +3020,71 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 // contains system function - checks if a string contains a substring
 Bool fn_contains(Item str_item, Item substr_item) {
     GUARD_BOOL_ERROR2(str_item, substr_item);
+    TypeId coll_type = get_type_id(str_item);
     // null doesn't contain anything, and nothing contains null
-    if (get_type_id(str_item) == LMD_TYPE_NULL || get_type_id(substr_item) == LMD_TYPE_NULL) {
+    if (coll_type == LMD_TYPE_NULL || get_type_id(substr_item) == LMD_TYPE_NULL) {
         return BOOL_FALSE;
     }
-    if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        log_debug("fn_contains: first argument must be a string");
+
+    // --- List/Array: check if any element equals the item ---
+    if (coll_type == LMD_TYPE_ARRAY) {
+        List* list = str_item.list;
+        if (!list) return BOOL_FALSE;
+        for (int64_t i = 0; i < list->length; i++) {
+            if (fn_eq(list->items[i], substr_item) == BOOL_TRUE) {
+                return BOOL_TRUE;
+            }
+        }
+        return BOOL_FALSE;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = str_item.array_int64;
+        if (!arr) return BOOL_FALSE;
+        int64_t val = it2l(substr_item);
+        for (int64_t i = 0; i < arr->length; i++) {
+            if (arr->items[i] == val) return BOOL_TRUE;
+        }
+        return BOOL_FALSE;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = str_item.array_float;
+        if (!arr) return BOOL_FALSE;
+        double val = it2d(substr_item);
+        for (int64_t i = 0; i < arr->length; i++) {
+            if (arr->items[i] == val) return BOOL_TRUE;
+        }
+        return BOOL_FALSE;
+    }
+
+    // --- Map: check if any key matches ---
+    if (coll_type == LMD_TYPE_MAP) {
+        Map* map = str_item.map;
+        if (!map) return BOOL_FALSE;
+        Item val = map_get(map, substr_item);
+        return (get_type_id(val) != LMD_TYPE_NULL) ? BOOL_TRUE : BOOL_FALSE;
+    }
+
+    // --- Element: check attribute keys and children ---
+    if (coll_type == LMD_TYPE_ELEMENT) {
+        Element* el = str_item.element;
+        if (!el) return BOOL_FALSE;
+        // check children
+        for (int64_t i = 0; i < el->length; i++) {
+            if (fn_eq(el->items[i], substr_item) == BOOL_TRUE) {
+                return BOOL_TRUE;
+            }
+        }
+        return BOOL_FALSE;
+    }
+
+    // --- String: substring check ---
+    if (coll_type != LMD_TYPE_STRING) {
+        log_debug("fn_contains: first argument must be a string, list, map, or element");
         return BOOL_ERROR;
     }
 
     if (get_type_id(substr_item) != LMD_TYPE_STRING) {
-        log_debug("fn_contains: second argument must be a string");
+        log_debug("fn_contains: second argument must be a string for string contains");
         return BOOL_ERROR;
     }
 
@@ -3050,7 +3104,7 @@ Bool fn_contains(Item str_item, Item substr_item) {
     }
 
     // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
-    for (int i = 0; i <= str->len - substr->len; i++) {
+    for (uint32_t i = 0; i <= str->len - substr->len; i++) {
         if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
             return BOOL_TRUE;
         }
@@ -3059,21 +3113,22 @@ Bool fn_contains(Item str_item, Item substr_item) {
     return BOOL_FALSE;
 }
 
+// starts_with native: String* in, Bool out (no Item boxing)
+Bool fn_starts_with_str(String* str, String* prefix) {
+    if (!str) return BOOL_FALSE;
+    if (!prefix || prefix->len == 0) return BOOL_TRUE;
+    if (str->len < prefix->len) return BOOL_FALSE;
+    return (memcmp(str->chars, prefix->chars, prefix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
+}
+
 // starts_with(str, prefix) - check if string starts with prefix
 Bool fn_starts_with(Item str_item, Item prefix_item) {
     GUARD_BOOL_ERROR2(str_item, prefix_item);
     TypeId str_type = get_type_id(str_item);
     TypeId prefix_type = get_type_id(prefix_item);
 
-    // null string doesn't start with anything
-    if (str_type == LMD_TYPE_NULL) {
-        return BOOL_FALSE;
-    }
-
-    // null prefix matches any string (like empty prefix)
-    if (prefix_type == LMD_TYPE_NULL) {
-        return BOOL_TRUE;
-    }
+    if (str_type == LMD_TYPE_NULL) return BOOL_FALSE;
+    if (prefix_type == LMD_TYPE_NULL) return BOOL_TRUE;
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (prefix_type != LMD_TYPE_STRING && prefix_type != LMD_TYPE_SYMBOL)) {
@@ -3086,19 +3141,20 @@ Bool fn_starts_with(Item str_item, Item prefix_item) {
     const char* prefix_chars = prefix_item.get_chars();
     uint32_t prefix_len = prefix_item.get_len();
 
-    if (!str_chars || !prefix_chars) {
-        return BOOL_FALSE;
-    }
-
-    if (prefix_len == 0) {
-        return BOOL_TRUE;  // empty prefix matches any string
-    }
-
-    if (str_len < prefix_len) {
-        return BOOL_FALSE;
-    }
+    if (!str_chars || !prefix_chars) return BOOL_FALSE;
+    if (prefix_len == 0) return BOOL_TRUE;
+    if (str_len < prefix_len) return BOOL_FALSE;
 
     return (memcmp(str_chars, prefix_chars, prefix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
+}
+
+// ends_with native: String* in, Bool out (no Item boxing)
+Bool fn_ends_with_str(String* str, String* suffix) {
+    if (!str) return BOOL_FALSE;
+    if (!suffix || suffix->len == 0) return BOOL_TRUE;
+    if (str->len < suffix->len) return BOOL_FALSE;
+    size_t offset = str->len - suffix->len;
+    return (memcmp(str->chars + offset, suffix->chars, suffix->len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // ends_with(str, suffix) - check if string ends with suffix
@@ -3107,15 +3163,8 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     TypeId str_type = get_type_id(str_item);
     TypeId suffix_type = get_type_id(suffix_item);
 
-    // null string doesn't end with anything
-    if (str_type == LMD_TYPE_NULL) {
-        return BOOL_FALSE;
-    }
-
-    // null suffix matches any string (like empty suffix)
-    if (suffix_type == LMD_TYPE_NULL) {
-        return BOOL_TRUE;
-    }
+    if (str_type == LMD_TYPE_NULL) return BOOL_FALSE;
+    if (suffix_type == LMD_TYPE_NULL) return BOOL_TRUE;
 
     if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
         (suffix_type != LMD_TYPE_STRING && suffix_type != LMD_TYPE_SYMBOL)) {
@@ -3128,34 +3177,59 @@ Bool fn_ends_with(Item str_item, Item suffix_item) {
     const char* suffix_chars = suffix_item.get_chars();
     uint32_t suffix_len = suffix_item.get_len();
 
-    if (!str_chars || !suffix_chars) {
-        return BOOL_FALSE;
-    }
-
-    if (suffix_len == 0) {
-        return BOOL_TRUE;  // empty suffix matches any string
-    }
-
-    if (str_len < suffix_len) {
-        return BOOL_FALSE;
-    }
+    if (!str_chars || !suffix_chars) return BOOL_FALSE;
+    if (suffix_len == 0) return BOOL_TRUE;
+    if (str_len < suffix_len) return BOOL_FALSE;
 
     size_t offset = str_len - suffix_len;
     return (memcmp(str_chars + offset, suffix_chars, suffix_len) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // index_of(str, sub) - find first occurrence of substring, returns -1 if not found
+// Also works on lists: index_of(list, item) finds first matching element
 int64_t fn_index_of(Item str_item, Item sub_item) {
     // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return INT64_ERROR;
     }
-    TypeId str_type = get_type_id(str_item);
+    TypeId coll_type = get_type_id(str_item);
+
+    // --- List/Array: find first matching element ---
+    if (coll_type == LMD_TYPE_ARRAY) {
+        List* list = str_item.list;
+        if (!list) return -1;
+        for (int64_t i = 0; i < list->length; i++) {
+            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = str_item.array_int64;
+        if (!arr) return -1;
+        int64_t val = it2l(sub_item);
+        for (int64_t i = 0; i < arr->length; i++) {
+            if (arr->items[i] == val) return i;
+        }
+        return -1;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = str_item.array_float;
+        if (!arr) return -1;
+        double val = it2d(sub_item);
+        for (int64_t i = 0; i < arr->length; i++) {
+            if (arr->items[i] == val) return i;
+        }
+        return -1;
+    }
+
+    // --- String/Symbol: substring search ---
     TypeId sub_type = get_type_id(sub_item);
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+    if ((coll_type != LMD_TYPE_STRING && coll_type != LMD_TYPE_SYMBOL) ||
         (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
-        log_debug("fn_index_of: arguments must be strings or symbols");
+        log_debug("fn_index_of: arguments must be strings/symbols or first arg must be a list");
         return -1;
     }
 
@@ -3190,17 +3264,50 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
 }
 
 // last_index_of(str, sub) - find last occurrence of substring, returns -1 if not found
+// Also works on lists: last_index_of(list, item) finds last matching element
 int64_t fn_last_index_of(Item str_item, Item sub_item) {
     // propagate error inputs as INT64_ERROR (distinct from -1 = 'not found')
     if (get_type_id(str_item) == LMD_TYPE_ERROR || get_type_id(sub_item) == LMD_TYPE_ERROR) {
         return INT64_ERROR;
     }
-    TypeId str_type = get_type_id(str_item);
+    TypeId coll_type = get_type_id(str_item);
+
+    // --- List/Array: find last matching element ---
+    if (coll_type == LMD_TYPE_ARRAY) {
+        List* list = str_item.list;
+        if (!list) return -1;
+        for (int64_t i = list->length - 1; i >= 0; i--) {
+            if (fn_eq(list->items[i], sub_item) == BOOL_TRUE) {
+                return i;
+            }
+        }
+        return -1;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = str_item.array_int64;
+        if (!arr) return -1;
+        int64_t val = it2l(sub_item);
+        for (int64_t i = arr->length - 1; i >= 0; i--) {
+            if (arr->items[i] == val) return i;
+        }
+        return -1;
+    }
+    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = str_item.array_float;
+        if (!arr) return -1;
+        double val = it2d(sub_item);
+        for (int64_t i = arr->length - 1; i >= 0; i--) {
+            if (arr->items[i] == val) return i;
+        }
+        return -1;
+    }
+
+    // --- String/Symbol: substring search from end ---
     TypeId sub_type = get_type_id(sub_item);
 
-    if ((str_type != LMD_TYPE_STRING && str_type != LMD_TYPE_SYMBOL) ||
+    if ((coll_type != LMD_TYPE_STRING && coll_type != LMD_TYPE_SYMBOL) ||
         (sub_type != LMD_TYPE_STRING && sub_type != LMD_TYPE_SYMBOL)) {
-        log_debug("fn_last_index_of: arguments must be strings or symbols");
+        log_debug("fn_last_index_of: arguments must be strings/symbols or first arg must be a list");
         return -1;
     }
 
@@ -3796,6 +3903,15 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 }
 
 // ord(str) - return Unicode code point of first character
+// ord native: String* in, int64_t out (no Item boxing)
+int64_t fn_ord_str(String* str) {
+    if (!str || str->len == 0) return 0;
+    uint32_t codepoint = 0;
+    int decoded = str_utf8_decode(str->chars, str->len, &codepoint);
+    if (decoded <= 0) return 0;
+    return (int64_t)codepoint;
+}
+
 int64_t fn_ord(Item str_item) {
     TypeId type = get_type_id(str_item);
 

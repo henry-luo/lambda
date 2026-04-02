@@ -5767,6 +5767,46 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
             // Fallback: use generic fn_len(Item) for unknown types (handled below)
         }
 
+        // ==== Native starts_with/ends_with for typed strings ====
+        // When both args are statically known as String*, dispatch to native fn_*_str variants
+        // that take String* pointers and return Bool directly (no Item unboxing overhead).
+        if (info->fn == SYSFUNC_STARTS_WITH && arg_count == 2) {
+            arg = call_node->argument;
+            AstNode* arg2 = arg->next;
+            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a2_tid = arg2 && arg2->type ? arg2->type->type_id : LMD_TYPE_ANY;
+            if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
+                MIR_reg_t a1 = transpile_expr(mt, arg);
+                MIR_reg_t a2 = transpile_expr(mt, arg2);
+                return emit_call_2(mt, "fn_starts_with_str", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
+            }
+        }
+        if (info->fn == SYSFUNC_ENDS_WITH && arg_count == 2) {
+            arg = call_node->argument;
+            AstNode* arg2 = arg->next;
+            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            TypeId a2_tid = arg2 && arg2->type ? arg2->type->type_id : LMD_TYPE_ANY;
+            if (a1_tid == LMD_TYPE_STRING && a2_tid == LMD_TYPE_STRING) {
+                MIR_reg_t a1 = transpile_expr(mt, arg);
+                MIR_reg_t a2 = transpile_expr(mt, arg2);
+                return emit_call_2(mt, "fn_ends_with_str", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, a1),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, a2));
+            }
+        }
+
+        // ==== Native ord() for typed strings ====
+        if (info->fn == SYSFUNC_ORD && arg_count == 1) {
+            arg = call_node->argument;
+            TypeId a1_tid = arg->type ? arg->type->type_id : LMD_TYPE_ANY;
+            if (a1_tid == LMD_TYPE_STRING) {
+                MIR_reg_t a1 = transpile_expr(mt, arg);
+                return emit_call_1(mt, "fn_ord_str", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
+            }
+        }
+
         // ==== Bitwise functions: inline as native MIR instructions ====
         // band/bor/bxor → MIR_AND/MIR_OR/MIR_XOR (single instruction, no function call)
         // shl/shr → guarded: if (b >= 0 && b < 64) then MIR_LSH/MIR_RSH else 0

@@ -61,7 +61,7 @@ svg_pages = typeset(doc_content, typeset_options)
 # Output each page as a separate SVG file
 page_num = 1
 for page in svg_pages {
-    filename = concat('test_document_page_', page_num, '.svg')
+    filename = 'test_document_page_' ++ page_num ++ '.svg'
     output(filename, page.svg_content, 'svg')
     print('Generated page ', page_num, ': ', filename)
     page_num = page_num + 1
@@ -129,7 +129,7 @@ md_pages = typeset_from_markdown(markdown_content, {
 
 page_num = 1
 for page in md_pages {
-    filename = concat('markdown_page_', page_num, '.svg')
+    filename = 'markdown_page_' ++ page_num ++ '.svg'
     output(filename, page.svg_content, 'svg')
     page_num = page_num + 1
 }
@@ -179,7 +179,7 @@ latex_pages = typeset_from_latex(latex_content, {
 
 page_num = 1
 for page in latex_pages {
-    filename = concat('latex_page_', page_num, '.svg')
+    filename = 'latex_page_' ++ page_num ++ '.svg'
     output(filename, page.svg_content, 'svg')
     page_num = page_num + 1
 }

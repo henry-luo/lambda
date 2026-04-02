@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI Reference — Lambda Script</title>
+  <meta name="description" content="Complete CLI reference for Lambda Script: run scripts, validate data, convert formats, render documents, and more.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="../../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="../../docs/">Docs</a></li>
+      <li><a href="../../docs/language-tour/">Language Tour</a></li>
+      <li><a href="../../examples/">Examples</a></li>
+      <li><a href="../../blog/">Blog</a></li>
+      <li><a href="../../download/" class="nav-cta">Download</a></li>
+    </ul>
+    <div class="nav-icons">
+      <a href="https://github.com/henry-luo/lambda" class="nav-github" target="_blank" rel="noopener" aria-label="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">CLI Reference</span>
+    <h1>Command-Line Interface</h1>
+    <p>All commands, flags, and options for the Lambda CLI.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container-narrow">
+
+    <h2>Synopsis</h2>
+<pre><code>lambda                                      # Start interactive REPL
+lambda &lt;script.ls&gt; [options]                # Run a functional script (JIT compiled)
+lambda &lt;command&gt; [options] [arguments]      # Run a subcommand</code></pre>
+
+    <h2>Global Options</h2>
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-h, --help</code></td><td>Show help message</td><td></td></tr>
+        <tr><td><code>--c2mir</code></td><td>Use C2MIR JIT compilation</td><td><code>false</code></td></tr>
+        <tr><td><code>--optimize=N</code></td><td>MIR JIT optimization level (0–3)</td><td><code>2</code></td></tr>
+        <tr><td><code>--max-errors N</code></td><td>Max type errors before stopping</td><td><code>10</code></td></tr>
+        <tr><td><code>--dry-run</code></td><td>Skip real I/O; fabricated results</td><td><code>false</code></td></tr>
+      </tbody>
+    </table>
+
+    <!-- run -->
+    <h2 id="run"><code>run</code> — Run a Procedural Script</h2>
+    <p>Executes a Lambda script with a <code>main()</code> procedure entry point.</p>
+<pre><code>lambda run [options] &lt;script.ls&gt;</code></pre>
+<pre><code># Example
+lambda run server.ls
+lambda run --c2mir script.ls</code></pre>
+
+    <!-- validate -->
+    <h2 id="validate"><code>validate</code> — Validate Data Against a Schema</h2>
+    <p>Validates one or more data files against a Lambda schema.</p>
+<pre><code>lambda validate [-s &lt;schema&gt;] [-f &lt;format&gt;] [options] &lt;file&gt; [files...]</code></pre>
+
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-s &lt;schema&gt;</code></td><td>Schema file (<code>.ls</code>)</td><td>Auto</td></tr>
+        <tr><td><code>-f &lt;format&gt;</code></td><td>Input format</td><td>Auto-detect</td></tr>
+        <tr><td><code>--strict</code></td><td>All optional fields must be present or null</td><td><code>false</code></td></tr>
+        <tr><td><code>--max-errors N</code></td><td>Stop after N errors</td><td><code>100</code></td></tr>
+        <tr><td><code>--allow-unknown</code></td><td>Allow fields not defined in schema</td><td><code>false</code></td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>Supported formats:</strong> <code>json</code>, <code>csv</code>, <code>ini</code>, <code>toml</code>, <code>yaml</code>, <code>xml</code>, <code>markdown</code>, <code>rst</code>, <code>html</code>, <code>latex</code>, <code>rtf</code>, <code>pdf</code>, <code>wiki</code>, <code>asciidoc</code>, <code>man</code>, <code>eml</code>, <code>ics</code>, <code>vcf</code>, <code>textile</code>, <code>mark</code>, <code>text</code></p>
+
+    <p><strong>Built-in schemas</strong> (no <code>-s</code> needed): <code>html</code>, <code>eml</code>, <code>ics</code>, <code>vcf</code>, <code>asciidoc</code>, <code>man</code>, <code>markdown</code>, <code>rst</code>, <code>textile</code>, <code>wiki</code></p>
+
+<pre><code># Examples
+lambda validate data.json -s schema.ls
+lambda validate page.html
+lambda validate --strict config.yaml -s config_schema.ls
+lambda validate file1.json file2.json -s schema.ls</code></pre>
+
+    <!-- convert -->
+    <h2 id="convert"><code>convert</code> — Format Conversion</h2>
+    <p>Convert data between supported formats.</p>
+<pre><code>lambda convert &lt;input&gt; [-f &lt;from&gt;] -t &lt;to&gt; -o &lt;output&gt; [options]</code></pre>
+
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-f &lt;from&gt;</code></td><td>Input format</td><td>Auto-detect</td></tr>
+        <tr><td><code>-t &lt;to&gt;</code></td><td>Output format (required)</td><td></td></tr>
+        <tr><td><code>-o &lt;output&gt;</code></td><td>Output file path (required)</td><td></td></tr>
+        <tr><td><code>--full-document</code></td><td>For LaTeX→HTML: generate complete HTML</td><td><code>false</code></td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>Output formats:</strong> <code>mark</code>, <code>json</code>, <code>xml</code>, <code>html</code>, <code>yaml</code>, <code>toml</code>, <code>ini</code>, <code>css</code>, <code>jsx</code>, <code>mdx</code>, <code>latex</code>, <code>rst</code>, <code>org</code>, <code>wiki</code>, <code>textile</code>, <code>text</code>, <code>markdown</code></p>
+
+<pre><code># Examples
+lambda convert input.json -t yaml -o output.yaml
+lambda convert doc.md -t html -o doc.html
+lambda convert formula.tex -t html -o formula.html --full-document
+lambda convert data.xml -f xml -t json -o data.json</code></pre>
+
+    <!-- layout -->
+    <h2 id="layout"><code>layout</code> — HTML/CSS Layout Analysis</h2>
+    <p>Run the CSS layout engine and output the computed layout tree.</p>
+<pre><code>lambda layout &lt;file&gt; [options]</code></pre>
+
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-o, --output</code></td><td>Output file</td><td>stdout</td></tr>
+        <tr><td><code>-vw</code></td><td>Viewport width (px)</td><td><code>1200</code></td></tr>
+        <tr><td><code>-vh</code></td><td>Viewport height (px)</td><td><code>800</code></td></tr>
+        <tr><td><code>-c, --css</code></td><td>External CSS file</td><td></td></tr>
+        <tr><td><code>--summary</code></td><td>Print summary statistics</td><td></td></tr>
+      </tbody>
+    </table>
+
+<pre><code># Examples
+lambda layout page.html
+lambda layout page.html -vw 800 -vh 600
+lambda layout *.html --output-dir results/ --summary</code></pre>
+
+    <!-- render -->
+    <h2 id="render"><code>render</code> — Render to Image or Document</h2>
+    <p>Render HTML, LaTeX, or diagrams to SVG, PDF, PNG, or JPEG.</p>
+<pre><code>lambda render &lt;input&gt; -o &lt;output&gt; [options]</code></pre>
+
+    <table>
+      <thead>
+        <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>-o, --output</code></td><td>Output file (required; format from extension)</td><td></td></tr>
+        <tr><td><code>-vw</code></td><td>Viewport width (px)</td><td>Auto-size</td></tr>
+        <tr><td><code>-vh</code></td><td>Viewport height (px)</td><td>Auto-size</td></tr>
+        <tr><td><code>-s, --scale</code></td><td>Zoom scale factor</td><td><code>1.0</code></td></tr>
+        <tr><td><code>--pixel-ratio</code></td><td>Device pixel ratio (HiDPI)</td><td><code>1.0</code></td></tr>
+        <tr><td><code>-t, --theme</code></td><td>Color theme for diagrams</td><td><code>zinc-dark</code></td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>Input formats:</strong> <code>.html</code>, <code>.tex</code>, <code>.ls</code>, <code>.mmd</code> (Mermaid), <code>.d2</code>, <code>.dot</code>/<code>.gv</code> (GraphViz)</p>
+    <p><strong>Output formats:</strong> <code>.svg</code>, <code>.pdf</code>, <code>.png</code>, <code>.jpg</code>/<code>.jpeg</code></p>
+    <p><strong>Available themes:</strong> <code>tokyo-night</code>, <code>nord</code>, <code>dracula</code>, <code>catppuccin-mocha</code>, <code>one-dark</code>, <code>github-dark</code>, <code>github-light</code>, <code>solarized-light</code>, <code>catppuccin-latte</code>, <code>zinc-dark</code>, <code>zinc-light</code>, <code>dark</code>, <code>light</code></p>
+
+<pre><code># Examples
+lambda render page.html -o output.svg
+lambda render doc.tex -o doc.pdf
+lambda render page.html -o screenshot.png -vw 1920 -vh 1080 --pixel-ratio 2.0
+lambda render diagram.mmd -o diagram.svg -t github-dark</code></pre>
+
+    <!-- view -->
+    <h2 id="view"><code>view</code> — Interactive Document Viewer</h2>
+    <p>Open a document in a native viewer window.</p>
+<pre><code>lambda view [document_file] [options]</code></pre>
+
+    <p><strong>Supported formats:</strong> <code>.pdf</code>, <code>.html</code>, <code>.md</code>, <code>.tex</code>, <code>.ls</code>, <code>.xml</code>, <code>.rst</code>, <code>.wiki</code>, <code>.svg</code>, <code>.mmd</code>, <code>.d2</code>, <code>.dot</code>, <code>.png</code>, <code>.jpg</code>, <code>.gif</code>, <code>.json</code>, <code>.yaml</code>, <code>.toml</code>, <code>.txt</code>, <code>.csv</code>, and more.</p>
+    <p>Also accepts HTTP/HTTPS URLs.</p>
+
+<pre><code># Examples
+lambda view                       # opens built-in demo
+lambda view page.html
+lambda view report.pdf
+lambda view https://example.com
+lambda view diagram.mmd</code></pre>
+
+    <!-- fetch -->
+    <h2 id="fetch"><code>fetch</code> — HTTP/HTTPS Download</h2>
+<pre><code>lambda fetch &lt;url&gt; [-o &lt;file&gt;] [-t &lt;timeout_ms&gt;] [-v]</code></pre>
+<pre><code># Examples
+lambda fetch https://example.com/data.json
+lambda fetch https://example.com/data.json -o data.json
+lambda fetch https://api.example.com/endpoint -t 5000 -v</code></pre>
+
+    <!-- js -->
+    <h2 id="js"><code>js</code> — JavaScript Transpiler</h2>
+<pre><code>lambda js [file.js] [--document page.html]</code></pre>
+<pre><code># Examples
+lambda js app.js
+lambda js app.js --document index.html</code></pre>
+
+    <!-- REPL -->
+    <h2 id="repl">Interactive REPL</h2>
+    <p>Start with no arguments. Prompt is <code>λ&gt;</code> (or <code>&gt;</code> as fallback).</p>
+    <table>
+      <thead>
+        <tr><th>Command</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>quit</code>, <code>q</code>, <code>exit</code></td><td>Exit the REPL</td></tr>
+        <tr><td><code>help</code>, <code>h</code></td><td>Show help</td></tr>
+        <tr><td><code>clear</code></td><td>Clear history</td></tr>
+      </tbody>
+    </table>
+
+    <div class="text-center mt-3xl">
+      <a href="../../recipes/" class="btn btn-primary">See Recipes →</a>
+      <a href="../../formats/" class="btn btn-secondary" style="margin-left: 0.5rem;">Supported Formats</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="../../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="../../docs/quickstart/">Quick Start</a></li>
+          <li><a href="../../docs/language-tour/">Language Tour</a></li>
+          <li><a href="../../docs/cli/">CLI Reference</a></li>
+          <li><a href="../../docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="../../recipes/">Recipes</a></li>
+          <li><a href="../../formats/">Formats</a></li>
+          <li><a href="../../examples/">Examples</a></li>
+          <li><a href="../../blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="../../community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../../js/main.js"></script>
+</body>
+</html>

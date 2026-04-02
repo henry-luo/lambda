@@ -1,5 +1,5 @@
 // Test: Collection Basic
-// Layer: 1 | Category: function | Covers: sort, reverse, unique, concat, slice
+// Layer: 1 | Category: function | Covers: sort, reverse, unique, slice
 
 // ===== sort =====
 sort([3, 1, 4, 1, 5])
@@ -16,8 +16,8 @@ unique([1, 2, 2, 3, 3, 3])
 unique(["a", "b", "a", "c"])
 unique([])
 
-// ===== concat =====
-concat([[1, 2], [3, 4], [5, 6]])
+// ===== ++ (concatenation) =====
+[1, 2] ++ [3, 4] ++ [5, 6]
 
 // ===== slice =====
 slice([1, 2, 3, 4, 5], 1, 3)

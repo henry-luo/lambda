@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Supported Formats &amp; Pipelines — Lambda Script</title>
+  <meta name="description" content="Lambda Script parses 20+ formats into a unified tree: Markdown, HTML, JSON, YAML, XML, LaTeX, PDF, CSV, TOML, and more.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="../docs/">Docs</a></li>
+      <li><a href="../docs/language-tour/">Language Tour</a></li>
+      <li><a href="../examples/">Examples</a></li>
+      <li><a href="../blog/">Blog</a></li>
+      <li><a href="../download/" class="nav-cta">Download</a></li>
+    </ul>
+    <div class="nav-icons">
+      <a href="https://github.com/henry-luo/lambda" class="nav-github" target="_blank" rel="noopener" aria-label="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">Formats &amp; Pipelines</span>
+    <h1>One Tree, Many Formats</h1>
+    <p>Lambda parses disparate formats into a single Lambda/Mark node tree — so transformations, validation, and rendering work uniformly.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container">
+
+    <!-- Architecture -->
+    <div class="text-center mb-xl">
+      <div class="pipeline">
+        <div class="pipeline-step">
+          <div class="step-label">Source Files</div>
+          <div class="step-value">Any supported format</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step" style="border-color: var(--color-primary);">
+          <div class="step-label">Unified Tree</div>
+          <div class="step-value" style="color: var(--color-primary-light);">Lambda / Mark</div>
+        </div>
+        <div class="pipeline-arrow">→</div>
+        <div class="pipeline-step">
+          <div class="step-label">Operations</div>
+          <div class="step-value">Transform · Validate · Render</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input Formats -->
+    <h2>Input Formats</h2>
+
+    <h3>Lightweight Markup Languages</h3>
+    <p>All markup flavors are parsed into the same Mark Doc schema — an element tree rooted at <code>&lt;doc&gt;</code>, with HTML-compatible element names.</p>
+    <div class="benchmark-table">
+      <table>
+        <thead>
+          <tr><th>Format</th><th>Input Type</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>CommonMark / GFM Markdown</td><td><code>markdown</code></td><td>100% CommonMark pass rate</td></tr>
+          <tr><td>reStructuredText</td><td><code>rst</code></td><td></td></tr>
+          <tr><td>MediaWiki / DokuWiki</td><td><code>wiki</code></td><td></td></tr>
+          <tr><td>AsciiDoc</td><td><code>asciidoc</code></td><td></td></tr>
+          <tr><td>Emacs Org-mode</td><td><code>org</code></td><td></td></tr>
+          <tr><td>Textile</td><td><code>textile</code></td><td></td></tr>
+          <tr><td>troff / man pages</td><td><code>man</code></td><td></td></tr>
+          <tr><td>MDX (Markdown + JSX)</td><td><code>mdx</code></td><td>Inline React/JSX components</td></tr>
+          <tr><td>HTML5</td><td><code>html</code></td><td>100% html5lib pass rate</td></tr>
+          <tr><td>LaTeX</td><td><code>latex</code></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="mt-2xl">Data Interchange Formats</h3>
+    <div class="benchmark-table">
+      <table>
+        <thead>
+          <tr><th>Format</th><th>Input Type</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>JSON</td><td><code>json</code></td><td>Maps to Lambda maps/arrays</td></tr>
+          <tr><td>YAML</td><td><code>yaml</code></td><td>100% YAML 1.2 pass rate</td></tr>
+          <tr><td>TOML</td><td><code>toml</code></td><td></td></tr>
+          <tr><td>CSV</td><td><code>csv</code></td><td></td></tr>
+          <tr><td>INI</td><td><code>ini</code></td><td></td></tr>
+          <tr><td>XML</td><td><code>xml</code></td><td>Maps to Lambda elements</td></tr>
+          <tr><td>Mark Notation</td><td><code>mark</code></td><td>Native Lambda/Mark format</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="mt-2xl">Other Formats</h3>
+    <div class="benchmark-table">
+      <table>
+        <thead>
+          <tr><th>Format</th><th>Input Type</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PDF</td><td><code>pdf</code></td><td>Text extraction and structure</td></tr>
+          <tr><td>RTF</td><td><code>rtf</code></td><td></td></tr>
+          <tr><td>Email (EML)</td><td><code>eml</code></td><td>Built-in schema available</td></tr>
+          <tr><td>Calendar (ICS)</td><td><code>ics</code></td><td>Built-in schema available</td></tr>
+          <tr><td>vCard (VCF)</td><td><code>vcf</code></td><td>Built-in schema available</td></tr>
+          <tr><td>CSS</td><td><code>css</code></td><td></td></tr>
+          <tr><td>Mermaid diagrams</td><td><code>mermaid</code></td><td></td></tr>
+          <tr><td>D2 diagrams</td><td><code>d2</code></td><td></td></tr>
+          <tr><td>GraphViz DOT</td><td><code>dot</code></td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Output Formats -->
+    <h2 class="mt-3xl">Output Formats</h2>
+
+    <h3>Conversion Output (<code>lambda convert -t &lt;format&gt;</code>)</h3>
+    <div class="format-tags" style="justify-content: flex-start;">
+      <span class="format-tag">mark</span>
+      <span class="format-tag">json</span>
+      <span class="format-tag">xml</span>
+      <span class="format-tag">html</span>
+      <span class="format-tag">yaml</span>
+      <span class="format-tag">toml</span>
+      <span class="format-tag">ini</span>
+      <span class="format-tag">css</span>
+      <span class="format-tag">jsx</span>
+      <span class="format-tag">mdx</span>
+      <span class="format-tag">latex</span>
+      <span class="format-tag">rst</span>
+      <span class="format-tag">org</span>
+      <span class="format-tag">wiki</span>
+      <span class="format-tag">textile</span>
+      <span class="format-tag">text</span>
+      <span class="format-tag">markdown</span>
+      <span class="format-tag">properties</span>
+    </div>
+
+    <h3 class="mt-2xl">Render Output (<code>lambda render -o &lt;file&gt;</code>)</h3>
+    <div class="format-tags" style="justify-content: flex-start;">
+      <span class="format-tag">SVG</span>
+      <span class="format-tag">PDF</span>
+      <span class="format-tag">PNG</span>
+      <span class="format-tag">JPEG</span>
+    </div>
+
+    <!-- Unified Model -->
+    <h2 class="mt-3xl">The Unified Mark Doc Schema</h2>
+    <p>All lightweight markup parsers produce the same element-tree shape, aligned with HTML element names:</p>
+
+    <div class="benchmark-table">
+      <table>
+        <thead>
+          <tr><th>Category</th><th>Mark Element(s)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Document root</td><td><code>&lt;doc&gt;</code></td></tr>
+          <tr><td>Metadata</td><td><code>&lt;meta title: … author: … date: …&gt;</code></td></tr>
+          <tr><td>Headings</td><td><code>&lt;h1&gt;</code> … <code>&lt;h6&gt;</code></td></tr>
+          <tr><td>Paragraph</td><td><code>&lt;p&gt;</code></td></tr>
+          <tr><td>Block quote</td><td><code>&lt;blockquote&gt;</code></td></tr>
+          <tr><td>Code block</td><td><code>&lt;pre&gt;&lt;code&gt;</code></td></tr>
+          <tr><td>Lists</td><td><code>&lt;ul&gt;</code> / <code>&lt;ol&gt;</code> / <code>&lt;li&gt;</code></td></tr>
+          <tr><td>Tables</td><td><code>&lt;table&gt;</code> / <code>&lt;thead&gt;</code> / <code>&lt;tbody&gt;</code> / <code>&lt;tr&gt;</code> / <code>&lt;th&gt;</code> / <code>&lt;td&gt;</code></td></tr>
+          <tr><td>Strong / Emphasis</td><td><code>&lt;strong&gt;</code> / <code>&lt;em&gt;</code></td></tr>
+          <tr><td>Links / Images</td><td><code>&lt;a href:…&gt;</code> / <code>&lt;img src:…&gt;</code></td></tr>
+          <tr><td>Math</td><td><code>&lt;math mode:'inline'&gt;</code> / <code>&lt;math mode:'display'&gt;</code></td></tr>
+          <tr><td>Footnotes</td><td><code>&lt;footnote id:…&gt;</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- How it works -->
+    <h2 class="mt-3xl">How Parsing Works</h2>
+    <p>In Lambda scripts, load any format with <code>input()</code>:</p>
+<pre><code>let md   = input("readme.md",    'markdown')
+let html = input("page.html",    'html')
+let json = input("data.json",    'json')
+let yaml = input("config.yaml",  'yaml')
+let csv  = input("data.csv",     'csv')
+let tex  = input("paper.tex",    'latex')
+let pdf  = input("report.pdf",   'pdf')</code></pre>
+
+    <p>From the CLI, convert directly:</p>
+<pre><code>lambda convert input.json -t yaml -o output.yaml
+lambda convert doc.md -t html -o doc.html</code></pre>
+
+    <div class="text-center mt-3xl">
+      <a href="../recipes/" class="btn btn-primary">See Recipes →</a>
+      <a href="../docs/cli/#convert" class="btn btn-secondary" style="margin-left: 0.5rem;">CLI Convert Reference</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="../docs/quickstart/">Quick Start</a></li>
+          <li><a href="../docs/language-tour/">Language Tour</a></li>
+          <li><a href="../docs/cli/">CLI Reference</a></li>
+          <li><a href="../docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="../recipes/">Recipes</a></li>
+          <li><a href="../formats/">Formats</a></li>
+          <li><a href="../examples/">Examples</a></li>
+          <li><a href="../blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="../community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../js/main.js"></script>
+</body>
+</html>

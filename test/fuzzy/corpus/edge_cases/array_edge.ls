@@ -22,7 +22,7 @@ let nested_empty2 = [[[[]]]]
 // Array operations on empty/small
 let op1 = [][0]  // Should handle gracefully
 let op2 = slice([], 0, 10)
-let op3 = concat([], [])
+let op3 = [] ++ []
 let op4 = take([], 5)
 let op5 = drop([1, 2], 10)
 

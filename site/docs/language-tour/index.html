@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Language Tour — Lambda Script</title>
+  <meta name="description" content="A guided tour of Lambda Script: data types, pipes, for-expressions, pattern matching, type system, functions, and document processing.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="../../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="../../docs/">Docs</a></li>
+      <li><a href="../../docs/language-tour/" class="active">Language Tour</a></li>
+      <li><a href="../../examples/">Examples</a></li>
+      <li><a href="../../blog/">Blog</a></li>
+      <li><a href="../../download/" class="nav-cta">Download</a></li>
+    </ul>
+    <div class="nav-icons">
+      <a href="https://github.com/henry-luo/lambda" class="nav-github" target="_blank" rel="noopener" aria-label="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">Language Tour</span>
+    <h1>Learn Lambda Script</h1>
+    <p>A guided tour of the language — from basic values to advanced document processing.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container-narrow">
+
+    <!-- Data Types -->
+    <h2 id="data-types">Data Types</h2>
+    <p>Lambda Script has a rich set of primitive and composite types:</p>
+
+    <h3>Primitives</h3>
+<pre><code>42              // int (56-bit signed)
+3.14            // float (64-bit)
+123.45n         // decimal (arbitrary precision)
+"hello"         // string (UTF-8)
+'symbol'        // symbol (interned identifier)
+true false      // bool
+null            // null
+t'2025-04-01'   // datetime
+b'\xDEADBEEF'   // binary</code></pre>
+
+    <h3>Collections</h3>
+<pre><code>[1, 2, 3]                   // array
+{name: "Alice", age: 30}    // map
+&lt;div class: "card"; "text"&gt; // element (markup literal)
+1 to 10                     // range (inclusive)</code></pre>
+
+    <h3>Indexing &amp; Slicing</h3>
+<pre><code>arr[0]            // first element
+arr[1 to 3]       // slice (indices 1, 2, 3)
+map.key           // field access
+"hello"[1 to 3]   // "ell" — string slicing</code></pre>
+
+    <!-- Variables -->
+    <h2 id="variables">Variables &amp; Bindings</h2>
+<pre><code>// Immutable bindings (default)
+let x = 42
+let name: string = "Lambda"
+
+// Let expressions (inline bindings)
+(let a = 1, b = 2, a + b)   // 3
+
+// Mutable variables (in procedural functions)
+pn main() {
+    var count = 0
+    count = count + 1
+}</code></pre>
+
+    <!-- Pipes -->
+    <h2 id="pipes">Pipe Operator &amp; Data Pipelines</h2>
+    <p>The pipe operator <code>|</code> is Lambda's signature feature — fluent, set-oriented data transformations. Use <code>~</code> to reference the current item:</p>
+
+<pre><code>// Map: apply a transformation to every element
+[1, 2, 3] | ~ * 2                    // [2, 4, 6]
+
+// Extract fields
+users | ~.name                        // ["Alice", "Bob", "Carol"]
+
+// Filter with 'that'
+[1, 2, 3, 4, 5] that ~ > 3           // [4, 5]
+
+// Chain operations: filter → map → aggregate
+users that ~.age >= 18 | ~.name | len // count adult names
+
+// Pipe spread in array literals
+[0, [1, 2, 3] | ~ * 10, 99]          // [0, 10, 20, 30, 99]</code></pre>
+
+    <h3>Vector Arithmetic</h3>
+    <p>Scalar operations automatically broadcast over collections:</p>
+<pre><code>1 + [2, 3]          // [3, 4]
+[1, 2] * 2          // [2, 4]
+[1, 2] + [3, 4]     // [4, 6]
+[1, 2] ^ 2          // [1, 4]</code></pre>
+
+    <!-- For-Expressions -->
+    <h2 id="for-expressions">For-Expressions</h2>
+    <p>SQL-like comprehensions with <code>where</code>, <code>order by</code>, <code>limit</code>, <code>offset</code>:</p>
+<pre><code>// Filter and transform
+for (x in data where x > 0) x * 2
+
+// With local bindings
+for (x in data, let sq = x * x where sq > 10) sq
+
+// Sorting and pagination
+for (x in items order by x.price desc limit 5) x.name
+
+// Multi-source comprehension
+for (x in xs, y in ys where x + y > 10) {x, y}</code></pre>
+
+    <!-- Type System -->
+    <h2 id="type-system">Type System</h2>
+    <p>Lambda has a rich type system with inference and explicit annotations, similar to and beyond TypeScript:</p>
+
+<pre><code>// Type annotations
+let x: int = 42
+let items: [string] = ["a", "b"]
+
+// Union and optional types
+type Result = int | error
+type Name = string?          // string | null
+
+// Type declarations
+type User = {name: string, age: int}
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"</code></pre>
+
+    <h3>Object Types</h3>
+<pre><code>type Point {
+    x: float, y: float;
+    fn distance(other: Point) =>
+        math.sqrt((x - other.x)**2 + (y - other.y)**2)
+}
+
+type Circle : Point { radius: float; }  // inheritance
+
+let p = {Point x: 3.0, y: 4.0}          // object literal
+p.distance({Point x: 0.0, y: 0.0})      // method call
+p is Point                                // true (nominal)</code></pre>
+
+    <h3>Element Type Patterns</h3>
+<pre><code>// Schema types for document structures
+type Link = &lt;a href: string; string&gt;
+type Article = &lt;article title: string; string, Section*&gt;
+type ImgTag = &lt;img src: string, alt: string&gt;</code></pre>
+
+    <!-- Functions -->
+    <h2 id="functions">Functions</h2>
+<pre><code>// Pure functions (fn)
+fn add(a: int, b: int) => a + b
+fn greet(name: string) => "Hello, " ++ name ++ "!"
+
+// Lambda expressions
+let double = (x) => x * 2
+let add3 = fn(a, b, c) => a + b + c
+
+// Procedural functions with mutation (pn)
+pn process() {
+    var total = 0
+    for i in range(0, 10) {
+        total = total + i
+    }
+    print(total)
+}</code></pre>
+
+    <!-- Pattern Matching -->
+    <h2 id="pattern-matching">Pattern Matching</h2>
+<pre><code>fn describe(x) => match x {
+    case null:             "nothing"
+    case 0:                "zero"
+    case 1 to 9:           "small number"      // range
+    case int that (~ > 9): "big number"        // type + constraint
+    case string:           "text: " ++ ~        // type
+    case [int]:            "int array"          // collection type
+    default:               "something else"
+}</code></pre>
+
+    <h3>Query Operator</h3>
+    <p>The <code>?</code> query operator searches data trees by type or structure:</p>
+<pre><code>html?&lt;img&gt;                    // all &lt;img&gt; descendants
+html?&lt;div class: string&gt;      // &lt;div&gt;s with a class attribute
+data?{status: "ok"}           // maps where status == "ok"
+html[body][div]?&lt;a&gt;           // direct path then recursive</code></pre>
+
+    <!-- Error Handling -->
+    <h2 id="error-handling">Error Handling</h2>
+<pre><code>// Functions that can fail return T^E (value ^ error)
+fn divide(a: float, b: float) float^error =>
+    if b == 0 { raise "division by zero" }
+    else { a / b }
+
+// Propagate errors with ?
+fn compute(x: float) float^error => {
+    let r = divide(100, x)?    // propagates error if divide fails
+    r * 2
+}
+
+// Destructure with let a^err
+let result^err = divide(10, 0)
+if err { print("Error: " ++ err.message) }
+else { print("Result: " ++ str(result)) }</code></pre>
+
+    <!-- Document Processing -->
+    <h2 id="documents">Document Processing</h2>
+    <p>Lambda's signature capability — treat documents as structured data:</p>
+
+    <h3>Markup Literals</h3>
+<pre><code>let page = &lt;html
+    &lt;head
+        &lt;title "My Page"&gt;
+        &lt;style "body { font-family: sans-serif; }"&gt;
+    &gt;
+    &lt;body
+        &lt;h1 "Welcome"&gt;
+        &lt;p "Lambda treats " &lt;strong "documents"&gt; " as data."&gt;
+    &gt;
+&gt;
+
+format(page, 'html')    // render to HTML string</code></pre>
+
+    <h3>Multi-Format Parsing</h3>
+<pre><code>let md   = input("readme.md",    'markdown')
+let html = input("page.html",    'html')
+let json = input("data.json",    'json')
+let yaml = input("config.yaml",  'yaml')
+let csv  = input("data.csv",     'csv')
+let tex  = input("paper.tex",    'latex')</code></pre>
+
+    <h3>Format Conversion</h3>
+<pre><code>// Direct format conversion
+format(data, 'json')       // to JSON string
+format(data, 'yaml')       // to YAML string
+format(data, 'markdown')   // to Markdown string</code></pre>
+
+    <div class="text-center mt-3xl">
+      <a href="../../docs/cli/" class="btn btn-primary">Explore the CLI →</a>
+      <a href="../../recipes/" class="btn btn-secondary" style="margin-left: 0.5rem;">See Recipes</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="../../" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="../../docs/quickstart/">Quick Start</a></li>
+          <li><a href="../../docs/language-tour/">Language Tour</a></li>
+          <li><a href="../../docs/cli/">CLI Reference</a></li>
+          <li><a href="../../docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="../../recipes/">Recipes</a></li>
+          <li><a href="../../formats/">Formats</a></li>
+          <li><a href="../../examples/">Examples</a></li>
+          <li><a href="../../blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="../../community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../../js/main.js"></script>
+</body>
+</html>

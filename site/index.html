@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lambda Script — Functional Scripting Language &amp; Document Processing Engine</title>
+  <meta name="description" content="Lambda Script: a cross-platform functional scripting language and document processing engine. Parse, validate, transform, and render documents as structured data.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Structured Data: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Lambda Script",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "description": "A cross-platform functional scripting language and document processing engine.",
+    "license": "https://opensource.org/licenses/MIT",
+    "url": "https://github.com/henry-luo/lambda"
+  }
+  </script>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="./" class="nav-logo">
+      <span class="logo-symbol">λ</span> Lambda Script
+    </a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="./docs/">Docs</a></li>
+      <li><a href="./docs/language-tour/">Language Tour</a></li>
+      <li><a href="./examples/">Examples</a></li>
+      <li><a href="./blog/">Blog</a></li>
+      <li><a href="./download/" class="nav-cta">Download</a></li>
+    </ul>
+    <div class="nav-icons">
+      <a href="https://github.com/henry-luo/lambda" class="nav-github" target="_blank" rel="noopener" aria-label="GitHub"><svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+      <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-badge">
+      <span>v0.3</span> · MIT Licensed · 9 MB Runtime
+    </div>
+    <h1>Documents as Data.<br><span class="highlight">One Language. One Pipeline.</span></h1>
+    <p class="hero-subtitle">
+      Lambda Script is a <i>functional</i> scripting language and runtime engine that parses, validates, queries, transforms, and renders <i>all your data.</i>
+    </p>
+    <div class="hero-actions">
+      <a href="./download/" class="btn btn-primary">↓ Download</a>
+      <a href="./docs/quickstart/" class="btn btn-secondary">Get Started →</a>
+      <a href="https://github.com/henry-luo/lambda" class="btn btn-ghost" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <div class="pipeline pipeline-compact">
+      <div class="pipeline-step">
+        <div class="step-label">Input</div>
+        <div class="step-value">MD · HTML · JSON · YAML · LaTeX · PDF …</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-label">Parse</div>
+        <div class="step-value">Mark Node Tree</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-label">Transform</div>
+        <div class="step-value">Validate · Query · Map</div>
+      </div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">
+        <div class="step-label">Output</div>
+        <div class="step-value">HTML · PDF · SVG · PNG · JSON …</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Code Examples -->
+<section style="background: var(--color-bg-alt);">
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">See It In Action</span>
+      <h2>Expressive, Concise, Powerful</h2>
+    </div>
+
+    <div class="code-example">
+      <div class="code-tabs">
+        <button class="code-tab active" data-tab="pipes">Pipes &amp; Transforms</button>
+        <button class="code-tab" data-tab="elements">Markup Literals</button>
+        <button class="code-tab" data-tab="types">Type System</button>
+        <button class="code-tab" data-tab="for">SQL-like Queries</button>
+        <button class="code-tab" data-tab="match">Pattern Matching</button>
+      </div>
+
+      <div class="code-panel active" data-panel="pipes">
+<pre><code><span style="color:#6b7094">// Map: double each element</span>
+[1, 2, 3] | ~ * 2                    <span style="color:#6b7094">// [2, 4, 6]</span>
+
+<span style="color:#6b7094">// Extract fields from a collection</span>
+users | ~.name                        <span style="color:#6b7094">// ["Alice", "Bob", "Carol"]</span>
+
+<span style="color:#6b7094">// Filter with 'that'</span>
+[1, 2, 3, 4, 5] that ~ > 3           <span style="color:#6b7094">// [4, 5]</span>
+
+<span style="color:#6b7094">// Chain: filter → map → aggregate</span>
+users that ~.age >= 18 | ~.name | len <span style="color:#6b7094">// count adult names</span>
+
+<span style="color:#6b7094">// Vector arithmetic broadcasts automatically</span>
+[1, 2, 3] + 10                        <span style="color:#6b7094">// [11, 12, 13]</span>
+[1, 2] * [3, 4]                       <span style="color:#6b7094">// [3, 8]</span></code></pre>
+      </div>
+
+      <div class="code-panel" data-panel="elements">
+<pre><code><span style="color:#6b7094">// First-class markup syntax</span>
+<span style="color:#7c6ef6">let</span> card = &lt;<span style="color:#38bdf8">div</span> class: <span style="color:#34d399">"card"</span>
+    &lt;<span style="color:#38bdf8">h2</span> <span style="color:#34d399">"Hello World"</span>&gt;
+    &lt;<span style="color:#38bdf8">p</span> <span style="color:#34d399">"Lambda treats documents as data."</span>&gt;
+&gt;
+
+<span style="color:#6b7094">// Render to HTML string</span>
+format(card, <span style="color:#34d399">'html'</span>)
+
+<span style="color:#6b7094">// Parse any format into a unified tree</span>
+<span style="color:#7c6ef6">let</span> doc = input(<span style="color:#34d399">"readme.md"</span>, <span style="color:#34d399">'markdown'</span>)
+<span style="color:#7c6ef6">let</span> data = input(<span style="color:#34d399">"config.yaml"</span>, <span style="color:#34d399">'yaml'</span>)
+
+<span style="color:#6b7094">// Query the tree</span>
+doc?&lt;<span style="color:#38bdf8">img</span>&gt;                           <span style="color:#6b7094">// all images in document</span>
+doc?&lt;<span style="color:#38bdf8">a</span> href: string&gt;                 <span style="color:#6b7094">// all links with href</span></code></pre>
+      </div>
+
+      <div class="code-panel" data-panel="types">
+<pre><code><span style="color:#6b7094">// Type annotations</span>
+<span style="color:#7c6ef6">let</span> x: int = 42
+<span style="color:#7c6ef6">let</span> items: [string] = [<span style="color:#34d399">"a"</span>, <span style="color:#34d399">"b"</span>]
+
+<span style="color:#6b7094">// Union and optional types</span>
+<span style="color:#7c6ef6">type</span> Result = int | error
+<span style="color:#7c6ef6">type</span> Name = string?
+
+<span style="color:#6b7094">// Object types with methods</span>
+<span style="color:#7c6ef6">type</span> Point {
+    x: float, y: float;
+    <span style="color:#7c6ef6">fn</span> distance(other: Point) =&gt;
+        math.sqrt((x - other.x)**2 + (y - other.y)**2)
+}
+
+<span style="color:#6b7094">// Element type patterns for document schemas</span>
+<span style="color:#7c6ef6">type</span> Link = &lt;a href: string; string&gt;
+<span style="color:#7c6ef6">type</span> Article = &lt;article title: string; string, Section*&gt;</code></pre>
+      </div>
+
+      <div class="code-panel" data-panel="for">
+<pre><code><span style="color:#6b7094">// Filter and transform with for-expressions</span>
+<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> data <span style="color:#7c6ef6">where</span> x &gt; 0) x * 2
+
+<span style="color:#6b7094">// With local bindings</span>
+<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> data, <span style="color:#7c6ef6">let</span> sq = x * x <span style="color:#7c6ef6">where</span> sq &gt; 10) sq
+
+<span style="color:#6b7094">// Sorting and pagination</span>
+<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> items <span style="color:#7c6ef6">order by</span> x.price <span style="color:#7c6ef6">desc</span> <span style="color:#7c6ef6">limit</span> 5) x.name
+
+<span style="color:#6b7094">// Grouping and aggregation</span>
+<span style="color:#7c6ef6">for</span> (u <span style="color:#7c6ef6">in</span> users <span style="color:#7c6ef6">where</span> u.active
+     <span style="color:#7c6ef6">order by</span> u.age <span style="color:#7c6ef6">desc</span>
+     <span style="color:#7c6ef6">limit</span> 10 <span style="color:#7c6ef6">offset</span> 5)
+  {name: u.name, age: u.age}</code></pre>
+      </div>
+
+      <div class="code-panel" data-panel="match">
+<pre><code><span style="color:#7c6ef6">fn</span> describe(x) =&gt; <span style="color:#7c6ef6">match</span> x {
+    <span style="color:#7c6ef6">case</span> null:             <span style="color:#34d399">"nothing"</span>
+    <span style="color:#7c6ef6">case</span> 0:                <span style="color:#34d399">"zero"</span>
+    <span style="color:#7c6ef6">case</span> 1 to 9:           <span style="color:#34d399">"small number"</span>
+    <span style="color:#7c6ef6">case</span> int that (~ &gt; 9): <span style="color:#34d399">"big number"</span>
+    <span style="color:#7c6ef6">case</span> string:           <span style="color:#34d399">"text: "</span> ++ ~
+    <span style="color:#7c6ef6">case</span> [int]:            <span style="color:#34d399">"int array"</span>
+    <span style="color:#7c6ef6">default</span>:               <span style="color:#34d399">"something else"</span>
+}
+
+<span style="color:#6b7094">// Query operator — like jQuery for data trees</span>
+html?&lt;<span style="color:#38bdf8">img</span>&gt;                    <span style="color:#6b7094">// all images</span>
+html?&lt;<span style="color:#38bdf8">div</span> class: string&gt;      <span style="color:#6b7094">// divs with class</span>
+data?{status: <span style="color:#34d399">"ok"</span>}           <span style="color:#6b7094">// maps with status=="ok"</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">Features</span>
+      <h2>One Runtime. One Data Model. One Pipeline.</h2>
+      <p>Replace stitched-together toolchains with a single, expressive functional language that treats documents as data.</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon purple">λ</div>
+        <h3>Pure Functional Core</h3>
+        <p>Immutable data, first-class functions and types, expressive pipe operator for fluent data transformation pipelines.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon blue">⚡</div>
+        <h3>JIT Compiled Performance</h3>
+        <p>MIR-based JIT compilation delivers near-native speed. Competitive with Node.js V8, 13× faster than CPython.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon green">📄</div>
+        <h3>Multi-Format Document Pipeline</h3>
+        <p>Parse Markdown, HTML, JSON, YAML, LaTeX, PDF, XML, CSV, TOML, and more into a unified node tree representation.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon purple">✓</div>
+        <h3>Schema Validation</h3>
+        <p>Rich type system with schema-based validation for structured data and document trees, including element schemas for HTML/XML.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon blue">🎨</div>
+        <h3>Layout &amp; Rendering Engine</h3>
+        <p>Built-in Radiant HTML/CSS engine with block, inline, flex, grid, and table layout. Render to SVG, PDF, PNG, or JPEG.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon green">🖥</div>
+        <h3>Interactive Viewer</h3>
+        <p>Open HTML, Markdown, LaTeX, SVG, PDF, diagrams, and Lambda scripts in a native viewer with <code>lambda view</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Benchmarks -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">Performance</span>
+      <h2>Near-Native Speed via JIT Compilation</h2>
+      <p>Benchmarked across 56 standard benchmarks (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream).</p>
+    </div>
+
+    <div class="benchmark-table">
+      <table>
+        <thead>
+          <tr>
+            <th>vs. Engine</th>
+            <th>Geo. Mean Ratio</th>
+            <th>Lambda Wins</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Node.js (V8)</strong></td>
+            <td><strong>1.05×</strong></td>
+            <td>28</td>
+            <td>56</td>
+          </tr>
+          <tr>
+            <td><strong>QuickJS</strong></td>
+            <td><strong>0.12×</strong> (8× faster)</td>
+            <td>49</td>
+            <td>53</td>
+          </tr>
+          <tr>
+            <td><strong>CPython 3.13</strong></td>
+            <td><strong>0.08×</strong> (13× faster)</td>
+            <td>47</td>
+            <td>55</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-center text-muted mt-md" style="font-size: 0.85rem;">Ratio &lt; 1.0 = Lambda is faster. Excels on micro-benchmarks, tight numeric loops, and recursive workloads.</p>
+  </div>
+</section>
+
+<!-- Standards & Stats -->
+<section style="background: var(--color-bg-alt);">
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">By the Numbers</span>
+      <h2>Proven &amp; Performant</h2>
+    </div>
+    <div class="stats-row">
+      <div class="stat-item">
+        <div class="stat-value">13×</div>
+        <div class="stat-label">Faster than CPython (geomean)</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">20+</div>
+        <div class="stat-label">Input formats — JSON, HTML, CSS, PDF …</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">9 MB</div>
+        <div class="stat-label">Single binary, zero dependencies</div>
+      </div>
+    </div>
+    <div class="stats-row" style="margin-top: 2rem;">
+      <div class="stat-item">
+        <div class="stat-value">100%</div>
+        <div class="stat-label">HTML5 (html5lib / WPT) · 1,560+ tests</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">98.2%</div>
+        <div class="stat-label">CSS 2.1 (W3C) · 1,788 / 1,821 tests</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">100%</div>
+        <div class="stat-label">CommonMark · 662 / 662 tests</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">100%</div>
+        <div class="stat-label">YAML 1.2 · 231 / 231 tests</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Use Cases -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <span class="section-label">Use Cases</span>
+      <h2>What Can You Build?</h2>
+    </div>
+
+    <div class="card-list">
+      <a href="./recipes/" class="card">
+        <span class="card-tag purple">Pipeline</span>
+        <h3>Format Conversion</h3>
+        <p>Convert between Markdown, HTML, JSON, YAML, LaTeX, XML, PDF, and 15+ other formats with a single command.</p>
+      </a>
+
+      <a href="./recipes/" class="card">
+        <span class="card-tag blue">Validation</span>
+        <h3>Schema Validation</h3>
+        <p>Validate JSON, YAML, XML, and HTML documents against Lambda schemas with detailed error reporting.</p>
+      </a>
+
+      <a href="./recipes/" class="card">
+        <span class="card-tag green">Rendering</span>
+        <h3>Document Rendering</h3>
+        <p>Render HTML, LaTeX, Mermaid, D2, and GraphViz to SVG, PDF, PNG, or JPEG with the Radiant engine.</p>
+      </a>
+
+      <a href="./examples/" class="card">
+        <span class="card-tag purple">Data</span>
+        <h3>Data Transformation</h3>
+        <p>Fluent pipe-based data transformation with vector arithmetic, SQL-like queries, and pattern matching.</p>
+      </a>
+
+      <a href="./examples/" class="card">
+        <span class="card-tag blue">Document</span>
+        <h3>Document Generation</h3>
+        <p>First-class markup literals for generating HTML, XML, and structured documents programmatically.</p>
+      </a>
+
+      <a href="./recipes/" class="card">
+        <span class="card-tag green">Viewer</span>
+        <h3>Interactive Viewing</h3>
+        <p>Open any supported format in a native viewer window — HTML, Markdown, LaTeX, SVG, PDF, diagrams, and more.</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Quick Try -->
+<section style="background: var(--color-bg-alt);">
+  <div class="container text-center">
+    <div class="section-header">
+      <span class="section-label">Try It</span>
+      <h2>Get Running in 30 Seconds</h2>
+      <p>Download the binary, unzip, and run.</p>
+    </div>
+
+    <div class="install-command">
+      <div>
+        <span class="prompt">$</span>
+        <span class="cmd">lambda view</span>
+      </div>
+      <button class="copy-btn">Copy</button>
+    </div>
+
+    <div class="mt-xl">
+      <a href="./download/" class="btn btn-primary">↓ Download Lambda Script</a>
+      <a href="./docs/quickstart/" class="btn btn-secondary" style="margin-left: 0.5rem;">Quick Start Guide →</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="./" class="nav-logo">
+          <span class="logo-symbol">λ</span> Lambda Script
+        </a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="./docs/quickstart/">Quick Start</a></li>
+          <li><a href="./docs/language-tour/">Language Tour</a></li>
+          <li><a href="./docs/cli/">CLI Reference</a></li>
+          <li><a href="./docs/">All Docs</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="./recipes/">Recipes</a></li>
+          <li><a href="./formats/">Formats</a></li>
+          <li><a href="./examples/">Examples</a></li>
+          <li><a href="./blog/">Blog</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="./community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>
