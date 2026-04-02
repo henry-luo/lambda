@@ -68,6 +68,7 @@ Item bash_test_le(Item left, Item right);
 // string comparisons:  == / = , != , < , >
 Item bash_str_eq(Item left, Item right);     // literal strcmp (no glob)
 Item bash_test_str_eq(Item left, Item right);
+Item bash_test_str_eq_noescape(Item left, Item right);  // FNM_NOESCAPE for word patterns
 Item bash_test_str_ne(Item left, Item right);
 Item bash_test_str_lt(Item left, Item right);
 Item bash_test_str_gt(Item left, Item right);
@@ -135,6 +136,7 @@ Item bash_ensure_array(Item name);                  // ensure var is array, crea
 Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
+Item bash_array_concat(Item dest, Item src);        // append all elements of src to dest
 void bash_array_elem_append(Item arr, Item index, Item append_val, Item var_name); // arr[idx]+=val
 Item bash_words_split_into(Item arr, Item words_str); // append IFS-split words from str into arr
 Item bash_ifs_split_into(Item arr, Item val);          // split val by current IFS and append into arr
@@ -172,6 +174,7 @@ void bash_declare_var(Item name, int flags);        // set variable attributes
 void bash_declare_local_var(Item name, int flags);  // set variable attributes in local scope
 int  bash_get_var_attrs(Item name);                 // get variable attribute flags
 bool bash_is_assoc(Item name);                      // check if variable is assoc array
+void bash_declare_print_var(Item name);              // declare -p: print var with attrs
 
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
@@ -184,6 +187,13 @@ Item bash_get_arg_count(void);                      // $#
 Item bash_get_all_args(void);                       // $@ (as array)
 Item bash_get_all_args_string(void);                // $@ / $* (as space-joined string)
 Item bash_shift_args(int n);                        // shift [n]
+
+// argument builder for dynamic $@ expansion in function calls
+void bash_arg_builder_start(void);
+void bash_arg_builder_push(Item arg);
+void bash_arg_builder_push_at(void);
+Item bash_arg_builder_get_ptr(void);
+Item bash_arg_builder_get_count(void);
 
 // Special variables
 Item bash_get_exit_code(void);                      // $?
@@ -230,6 +240,8 @@ void bash_scope_push(void);                         // enter new local scope
 void bash_scope_pop(void);                          // leave scope
 void bash_scope_push_subshell(void);                // snapshot for subshell
 void bash_scope_pop_subshell(void);                 // restore after subshell
+void bash_getopts_push_state(void);                 // save getopts charind state
+void bash_getopts_pop_state(void);                  // restore getopts charind state
 
 // ========================================================================
 // Built-in commands
@@ -353,6 +365,11 @@ bool bash_get_option_nounset(void);                  // -u: error on undefined v
 bool bash_get_option_xtrace(void);                   // -x: trace commands
 bool bash_get_option_pipefail(void);                 // -o pipefail
 bool bash_get_option_extdebug(void);                 // shopt -s extdebug
+
+// errexit suppression
+void bash_errexit_push(void);                        // enter errexit-suppressed context
+void bash_errexit_pop(void);                         // leave errexit-suppressed context
+int bash_check_errexit(void);                        // check if set -e should trigger (returns 1 if should exit)
 
 // ========================================================================
 // Signal handling / trap (Phase 8)

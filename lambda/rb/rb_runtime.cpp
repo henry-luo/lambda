@@ -458,18 +458,65 @@ extern "C" Item rb_case_eq(Item left, Item right) {
 // ============================================================================
 
 extern "C" Item rb_new_object(void) {
-    extern Item js_new_object(void);
-    return js_new_object();
+    Map* m = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    m->type_id = LMD_TYPE_MAP;
+    extern TypeMap EmptyMap;
+    m->type = &EmptyMap;
+    return (Item){.map = m};
 }
 
 extern "C" Item rb_getattr(Item object, Item name) {
-    extern Item js_property_get(Item, Item);
-    return js_property_get(object, name);
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_MAP) {
+        return map_get(object.map, name);
+    }
+    return (Item){.item = ITEM_NULL};
 }
 
 extern "C" void rb_setattr(Item object, Item name, Item value) {
-    extern Item js_property_set(Item, Item, Item);
-    js_property_set(object, name, value);
+    TypeId type = get_type_id(object);
+    if (type != LMD_TYPE_MAP) {
+        log_error("rb_setattr: not a map (type=%d)", type);
+        return;
+    }
+    Map* m = object.map;
+    TypeMap* map_type = (TypeMap*)m->type;
+
+    // try updating existing key via fn_map_set
+    if (map_type && map_type->shape) {
+        String* str_key = it2s(name);
+        if (str_key) {
+            ShapeEntry* found = (map_type->field_count > 0)
+                ? typemap_hash_lookup(map_type, str_key->chars, (int)str_key->len)
+                : nullptr;
+            if (!found) {
+                ShapeEntry* entry = map_type->shape;
+                while (entry) {
+                    if (entry->name && entry->name->length == (size_t)str_key->len
+                        && strncmp(entry->name->str, str_key->chars, str_key->len) == 0) {
+                        found = entry;
+                        break;
+                    }
+                    entry = entry->next;
+                }
+            }
+            if (found) {
+                fn_map_set(object, name, value);
+                return;
+            }
+        }
+    }
+
+    // add new key via map_put
+    Input* input = (Input*)rb_input;
+    if (!input) {
+        log_error("rb_setattr: no rb_input context");
+        return;
+    }
+    String* str_key = it2s(name);
+    if (str_key) {
+        map_put(m, str_key, value, input);
+    }
 }
 
 // ============================================================================

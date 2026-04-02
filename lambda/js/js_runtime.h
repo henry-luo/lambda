@@ -228,6 +228,7 @@ Item js_nullish_coalesce(Item left, Item right);
 // =============================================================================
 
 Item js_object_keys(Item object);
+Item js_for_in_keys(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);

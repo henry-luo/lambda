@@ -242,6 +242,14 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
         return;
     }
 
+    // v17: eval/arguments as binding names in strict mode
+    if (ctx->in_strict) {
+        if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {
+            ee_error(ctx, node, "'%s' cannot be used as a binding name in strict mode", name);
+            return;
+        }
+    }
+
     // check via raw source text for unicode-escaped reserved words
     uint32_t start = ts_node_start_byte(node->node);
     uint32_t end = ts_node_end_byte(node->node);
@@ -397,6 +405,29 @@ static bool detect_strict_mode(JsAstNode* body) {
     return false;
 }
 
+// v17: check if a function has non-simple parameters (defaults, rest, destructuring)
+static bool has_non_simple_params(JsFunctionNode* func) {
+    for (JsAstNode* p = func->params; p; p = p->next) {
+        if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
+            p->node_type == JS_AST_NODE_REST_ELEMENT ||
+            p->node_type == JS_AST_NODE_ARRAY_PATTERN ||
+            p->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// v17: "use strict" in function with non-simple params is SyntaxError
+static void check_strict_non_simple(EarlyErrorCtx* ctx, JsFunctionNode* func) {
+    if (!func->body) return;
+    if (!detect_strict_mode(func->body)) return;
+    if (has_non_simple_params(func)) {
+        ee_error(ctx, (JsAstNode*)func,
+            "Illegal 'use strict' directive in function with non-simple parameter list");
+    }
+}
+
 static void check_duplicate_params(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     // in strict mode or with default/rest/destructuring params, duplicate params are illegal
     if (!func->params) return;
@@ -461,6 +492,11 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT) {
                 check_update_target(ctx, node);
             }
+            // v17: delete <identifier> is SyntaxError in strict mode
+            if (un->op == JS_OP_DELETE && ctx->in_strict && un->operand &&
+                un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                ee_error(ctx, node, "Deleting a variable is not allowed in strict mode");
+            }
             walk_expression(ctx, un->operand);
             break;
         }
@@ -470,6 +506,44 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             // parameters), not in expression (reference) positions. Keywords
             // like 'this', 'null', 'true' may appear as identifiers in the AST.
             break;
+
+        case JS_AST_NODE_LITERAL: {
+            // v17: check for legacy octal literals in strict mode
+            if (ctx->in_strict) {
+                JsLiteralNode* lit = (JsLiteralNode*)node;
+                if (lit->literal_type == JS_LITERAL_NUMBER && ctx->tp->source) {
+                    uint32_t start = ts_node_start_byte(node->node);
+                    uint32_t end = ts_node_end_byte(node->node);
+                    int slen = (int)(end - start);
+                    if (slen >= 2) {
+                        const char* raw = ctx->tp->source + start;
+                        // legacy octal: starts with 0 followed by digits 0-7 (not 0x, 0o, 0b, 0.)
+                        if (raw[0] == '0' && slen >= 2 && raw[1] >= '0' && raw[1] <= '7') {
+                            ee_error(ctx, node, "Octal literals are not allowed in strict mode");
+                        }
+                    }
+                }
+                if (lit->literal_type == JS_LITERAL_STRING && ctx->tp->source) {
+                    uint32_t start = ts_node_start_byte(node->node);
+                    uint32_t end = ts_node_end_byte(node->node);
+                    int slen = (int)(end - start);
+                    const char* raw = ctx->tp->source + start;
+                    // check for octal escapes \0-\7 in string literals
+                    for (int i = 0; i < slen - 1; i++) {
+                        if (raw[i] == '\\' && raw[i+1] >= '1' && raw[i+1] <= '7') {
+                            ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
+                            break;
+                        }
+                        if (raw[i] == '\\' && raw[i+1] == '0' && i + 2 < slen &&
+                            raw[i+2] >= '0' && raw[i+2] <= '9') {
+                            ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
+                            break;
+                        }
+                    }
+                }
+            }
+            break;
+        }
 
         case JS_AST_NODE_BINARY_EXPRESSION: {
             JsBinaryNode* bn = (JsBinaryNode*)node;
@@ -555,6 +629,9 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_strict = ctx->in_strict;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
+
+            // v17: "use strict" with non-simple params is SyntaxError
+            check_strict_non_simple(ctx, fn);
 
             // detect strict mode in function body
             if (fn->body && detect_strict_mode(fn->body)) {
@@ -732,6 +809,54 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_SWITCH_STATEMENT: {
             JsSwitchNode* sw = (JsSwitchNode*)node;
             walk_expression(ctx, sw->discriminant);
+            // v17: all switch case clauses share one block scope for let/const
+            // collect all let/const declarations across all cases for redeclaration check
+            {
+                struct hashmap* switch_scope = hashmap_new(sizeof(BlockScopeEntry), 16, 0, 0, bse_hash, bse_cmp, NULL, NULL);
+                for (JsAstNode* c = sw->cases; c; c = c->next) {
+                    if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
+                        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
+                        for (JsAstNode* s = sc->consequent; s; s = s->next) {
+                            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
+                                if (vd->kind == JS_VAR_VAR) continue;
+                                for (JsAstNode* decl = vd->declarations; decl; decl = decl->next) {
+                                    if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                                    JsVariableDeclaratorNode* vdecl = (JsVariableDeclaratorNode*)decl;
+                                    if (!vdecl->id || vdecl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
+                                    JsIdentifierNode* id = (JsIdentifierNode*)vdecl->id;
+                                    if (!id->name) continue;
+                                    const char* name = id->name->chars;
+                                    BlockScopeEntry probe = {name, 0};
+                                    const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(switch_scope, &probe);
+                                    if (existing) {
+                                        ee_error(ctx, (JsAstNode*)id,
+                                            "Identifier '%s' has already been declared in this scope", name);
+                                    } else {
+                                        BlockScopeEntry entry = {name, vd->kind};
+                                        hashmap_set(switch_scope, &entry);
+                                    }
+                                }
+                            }
+                            if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                                JsClassNode* cls = (JsClassNode*)s;
+                                if (cls->name) {
+                                    const char* name = cls->name->chars;
+                                    BlockScopeEntry probe = {name, 0};
+                                    const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(switch_scope, &probe);
+                                    if (existing) {
+                                        ee_error(ctx, s, "Identifier '%s' has already been declared in this scope", name);
+                                    } else {
+                                        BlockScopeEntry entry = {name, JS_VAR_CONST};
+                                        hashmap_set(switch_scope, &entry);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                hashmap_free(switch_scope);
+            }
             for (JsAstNode* c = sw->cases; c; c = c->next) {
                 if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
                     JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
@@ -749,6 +874,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             bool was_strict = ctx->in_strict;
             ctx->in_generator = fn->is_generator;
             ctx->in_async = fn->is_async;
+
+            // v17: "use strict" with non-simple params is SyntaxError
+            check_strict_non_simple(ctx, fn);
 
             if (fn->body && detect_strict_mode(fn->body)) {
                 ctx->in_strict = true;
@@ -791,8 +919,28 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
+        case JS_AST_NODE_WITH_STATEMENT: {
+            // v17: 'with' statements are forbidden in strict mode
+            if (ctx->in_strict) {
+                ee_error(ctx, node, "Strict mode code may not include a with statement");
+            }
+            break;
+        }
+
         case JS_AST_NODE_LABELED_STATEMENT: {
             JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
+            // v17: labeled class/lexical declarations are SyntaxError
+            if (ls->body) {
+                if (ls->body->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+                    ee_error(ctx, node, "Class declaration cannot be labelled");
+                }
+                if (ls->body->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+                    JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)ls->body;
+                    if (vd->kind == JS_VAR_LET || vd->kind == JS_VAR_CONST) {
+                        ee_error(ctx, node, "Lexical declaration cannot be labelled");
+                    }
+                }
+            }
             walk_statement(ctx, ls->body);
             break;
         }

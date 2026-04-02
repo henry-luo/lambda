@@ -22,6 +22,34 @@
 #include <regex.h>
 
 // ============================================================================
+// getopts state — saved/restored on function scope push/pop
+// ============================================================================
+#define GETOPTS_STATE_STACK_MAX 64
+static int getopts_charind = 0;          // 0-based offset within current option arg
+static int getopts_last_optind = 1;      // track OPTIND changes to detect resets
+static int getopts_charind_stack[GETOPTS_STATE_STACK_MAX];
+static int getopts_optind_stack[GETOPTS_STATE_STACK_MAX];
+static int getopts_state_depth = 0;
+
+extern "C" void bash_getopts_push_state(void) {
+    if (getopts_state_depth < GETOPTS_STATE_STACK_MAX) {
+        getopts_charind_stack[getopts_state_depth] = getopts_charind;
+        getopts_optind_stack[getopts_state_depth] = getopts_last_optind;
+        getopts_state_depth++;
+        getopts_charind = 0;
+        getopts_last_optind = 1;
+    }
+}
+
+extern "C" void bash_getopts_pop_state(void) {
+    if (getopts_state_depth > 0) {
+        getopts_state_depth--;
+        getopts_charind = getopts_charind_stack[getopts_state_depth];
+        getopts_last_optind = getopts_optind_stack[getopts_state_depth];
+    }
+}
+
+// ============================================================================
 // echo
 // ============================================================================
 
@@ -664,14 +692,29 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
         }
     }
 
-    (void)raw_mode; // TODO: handle backslash escaping in non-raw mode
+    // handle backslash escaping in non-raw mode (-r disables this)
+    // in non-raw mode: backslash before any character removes the backslash
+    // (backslash at end of line is line continuation, but we read a single line)
+    char unesc_buf[4096];
+    if (!raw_mode && line && line_len > 0) {
+        int out = 0;
+        for (int i = 0; i < line_len && out < (int)sizeof(unesc_buf) - 1; i++) {
+            if (line[i] == '\\' && i + 1 < line_len) {
+                i++; // skip backslash, take next char
+                unesc_buf[out++] = line[i];
+            } else if (line[i] == '\\' && i + 1 >= line_len) {
+                // trailing backslash: line continuation (discard it)
+            } else {
+                unesc_buf[out++] = line[i];
+            }
+        }
+        line = unesc_buf;
+        line_len = out;
+    }
 
     // if no variable names specified, assign whole line to REPLY
     if (num_vars <= 0) {
-        // strip trailing whitespace for REPLY too
-        while (line_len > 0 && (line[line_len - 1] == ' ' || line[line_len - 1] == '\t')) {
-            line_len--;
-        }
+        // REPLY preserves the full line without any whitespace stripping
         Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
         String* val = heap_create_name(line, line_len);
         bash_set_var(reply_name, (Item){.item = s2it(val)});
@@ -699,10 +742,13 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
         }
     }
 
-    // strip trailing IFS whitespace only (not non-ws IFS) from line
-    while (line_len > 0 && ifs_ws_map[(unsigned char)line[line_len - 1]]) {
-        line_len--;
+    // strip trailing IFS whitespace from line for field splitting
+    // (the last variable gets the remainder, which should not have trailing IFS ws)
+    int trimmed_line_len = line_len;
+    while (trimmed_line_len > 0 && ifs_ws_map[(unsigned char)line[trimmed_line_len - 1]]) {
+        trimmed_line_len--;
     }
+    line_len = trimmed_line_len;
 
     // POSIX IFS splitting for read:
     // - Perform full POSIX split tracking field start/end positions in original line.
@@ -979,11 +1025,41 @@ extern "C" Item bash_builtin_caller(Item* args, int argc) {
 
 // cat: read stdin item and write to stdout (identity pipe stage)
 extern "C" Item bash_builtin_cat(Item* args, int argc) {
-    (void)args; (void)argc;
-    Item input = bash_get_stdin_item();
-    String* s = it2s(bash_to_string(input));
-    if (s && s->len > 0) {
-        bash_raw_write(s->chars, s->len);
+    // if file arguments provided, read and output each file
+    bool had_files = false;
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0) continue;
+        if (arg->chars[0] == '-' && arg->len == 1) {
+            // cat - : read stdin
+            Item input = bash_get_stdin_item();
+            String* s = it2s(bash_to_string(input));
+            if (s && s->len > 0) bash_raw_write(s->chars, s->len);
+            had_files = true;
+            continue;
+        }
+        // read file
+        FILE* f = fopen(arg->chars, "r");
+        if (!f) {
+            fprintf(stderr, "cat: %s: No such file or directory\n", arg->chars);
+            bash_set_exit_code(1);
+            return (Item){.item = i2it(1)};
+        }
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+            bash_raw_write(buf, (int)n);
+        }
+        fclose(f);
+        had_files = true;
+    }
+    // no file args: read stdin
+    if (!had_files) {
+        Item input = bash_get_stdin_item();
+        String* s = it2s(bash_to_string(input));
+        if (s && s->len > 0) {
+            bash_raw_write(s->chars, s->len);
+        }
     }
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
@@ -2655,8 +2731,8 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
     // check if first arg looks like an invalid option to getopts itself
     String* first_str = it2s(bash_to_string(args[0]));
     if (first_str && first_str->len > 0 && first_str->chars[0] == '-') {
-        fprintf(stderr, "%s: %d: getopts: %.*s: invalid option\n",
-                it2s(bash_get_script_name())->chars, 0,
+        fprintf(stderr, "%s: line %d: getopts: %.*s: invalid option\n",
+                it2s(bash_get_script_name())->chars, (int)it2i(bash_get_lineno()),
                 first_str->len, first_str->chars);
         fprintf(stderr, "getopts: usage: getopts optstring name [arg ...]\n");
         bash_set_exit_code(2);
@@ -2675,19 +2751,21 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
     const char* varname = varname_str->chars;
     int varname_len = varname_str->len;
 
-    // validate variable name
+    // validate variable name (print error but still process options for OPTIND tracking)
+    bool bad_varname = false;
     if (varname_len == 0 || !(isalpha((unsigned char)varname[0]) || varname[0] == '_')) {
         fprintf(stderr, "%s: line %d: getopts: `%.*s': not a valid identifier\n",
-                it2s(bash_get_script_name())->chars, 0, varname_len, varname);
-        bash_set_exit_code(1);
-        return (Item){.item = i2it(1)};
+                it2s(bash_get_script_name())->chars, (int)it2i(bash_get_lineno()), varname_len, varname);
+        bad_varname = true;
     }
-    for (int i = 1; i < varname_len; i++) {
-        if (!(isalnum((unsigned char)varname[i]) || varname[i] == '_')) {
-            fprintf(stderr, "%s: line %d: getopts: `%.*s': not a valid identifier\n",
-                    it2s(bash_get_script_name())->chars, 0, varname_len, varname);
-            bash_set_exit_code(1);
-            return (Item){.item = i2it(1)};
+    if (!bad_varname) {
+        for (int i = 1; i < varname_len; i++) {
+            if (!(isalnum((unsigned char)varname[i]) || varname[i] == '_')) {
+                fprintf(stderr, "%s: line %d: getopts: `%.*s': not a valid identifier\n",
+                        it2s(bash_get_script_name())->chars, (int)it2i(bash_get_lineno()), varname_len, varname);
+                bad_varname = true;
+                break;
+            }
         }
     }
 
@@ -2746,10 +2824,11 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
         }
     };
 
-    // static variable for tracking position within combined options (e.g., -abc)
-    // OPTIND tells us which arg we're on, and we need a sub-index for combined opts
-    // bash uses an internal "nextchar" pointer; we use a static sub-index
-    static int getopts_charind = 0;  // 0-based offset within current option arg
+    // if OPTIND was reset externally, reset charind
+    if (optind != getopts_last_optind) {
+        getopts_charind = 0;
+        getopts_last_optind = optind;
+    }
 
     // if optind is out of range, we're done
     if (optind > arg_count) {
@@ -2792,6 +2871,7 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
         Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
         Item optind_val = {.item = s2it(heap_create_name(buf, blen))};
         bash_set_var(optind_name, optind_val);
+        getopts_last_optind = optind;
 
         Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
         Item q_item = {.item = s2it(heap_create_name("?", 1))};
@@ -2815,6 +2895,7 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
             Item optind_name = {.item = s2it(heap_create_name("OPTIND", 6))};
             Item optind_val = {.item = s2it(heap_create_name(buf, blen))};
             bash_set_var(optind_name, optind_val);
+            getopts_last_optind = optind;
             Item name_item = {.item = s2it(heap_create_name(varname, varname_len))};
             Item q_item = {.item = s2it(heap_create_name("?", 1))};
             bash_set_var(name_item, q_item);
@@ -2875,6 +2956,7 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
         Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
         Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
         bash_set_var(optind_name_item, optind_val_item);
+        getopts_last_optind = optind;
 
         bash_set_exit_code(0);
         return (Item){.item = i2it(0)};
@@ -2925,6 +3007,7 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
                 Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
                 Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
                 bash_set_var(optind_name_item, optind_val_item);
+                getopts_last_optind = optind;
                 bash_set_exit_code(0);
                 return (Item){.item = i2it(0)};
             } else {
@@ -2954,7 +3037,12 @@ extern "C" Item bash_builtin_getopts(Item* args, int argc) {
     Item optind_name_item = {.item = s2it(heap_create_name("OPTIND", 6))};
     Item optind_val_item = {.item = s2it(heap_create_name(buf, blen))};
     bash_set_var(optind_name_item, optind_val_item);
+    getopts_last_optind = optind;
 
+    if (bad_varname) {
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
+    }
     bash_set_exit_code(0);
     return (Item){.item = i2it(0)};
 }

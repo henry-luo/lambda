@@ -1521,6 +1521,115 @@ extern "C" Item js_object_keys(Item object) {
 // js_to_string_val — convert any value to string (returns Item)
 // =============================================================================
 
+// v17: for-in enumeration — walks prototype chain to collect all enumerable string keys
+extern "C" Item js_for_in_keys(Item object) {
+    TypeId type = get_type_id(object);
+
+    // for-in over null/undefined: 0 iterations
+    if (object.item == ItemNull.item || type == LMD_TYPE_UNDEFINED) {
+        return js_array_new(0);
+    }
+
+    // for arrays: return indices as string keys (own only, same as before)
+    if (type == LMD_TYPE_ARRAY) {
+        return js_object_keys(object);
+    }
+
+    // for non-map primitives (string, number, bool): coerce
+    if (type == LMD_TYPE_STRING) {
+        // enumerate string indices "0", "1", ... "length-1"
+        String* s = it2s(object);
+        int len = (int)s->len;
+        Item result = js_array_new(len);
+        for (int i = 0; i < len; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", i);
+            Item key_str = (Item){.item = s2it(heap_create_name(buf))};
+            js_array_set(result, (Item){.item = i2it(i)}, key_str);
+        }
+        return result;
+    }
+
+    if (type != LMD_TYPE_MAP) {
+        return js_array_new(0);
+    }
+
+    // walk prototype chain collecting enumerable string keys
+    // use a simple seen-set via hashmap to deduplicate
+    struct SeenEntry { char name[256]; };
+    HashMap* seen = hashmap_new(sizeof(struct SeenEntry), 64, 0, 0,
+        [](const void* item, uint64_t s0, uint64_t s1) -> uint64_t {
+            return hashmap_sip(((const struct SeenEntry*)item)->name,
+                strlen(((const struct SeenEntry*)item)->name), s0, s1);
+        },
+        [](const void* a, const void* b, void*) -> int {
+            return strcmp(((const struct SeenEntry*)a)->name,
+                          ((const struct SeenEntry*)b)->name);
+        },
+        NULL, NULL);
+
+    // collect keys using push (js_array_new(0) starts empty)
+    Item result = js_array_new(0);
+
+    Item current = object;
+    int depth = 0;
+    while (current.item != ItemNull.item && get_type_id(current) == LMD_TYPE_MAP && depth < 64) {
+        Map* m = current.map;
+        if (m && m->type) {
+            TypeMap* tm = (TypeMap*)m->type;
+            ShapeEntry* e = tm->shape;
+            while (e) {
+                const char* s = e->name->str;
+                int len = (int)e->name->length;
+
+                // skip engine-internal properties and constructor
+                bool skip = false;
+                if (len >= 2 && s[0] == '_' && s[1] == '_') {
+                    skip = true;
+                } else if (len == 11 && memcmp(s, "constructor", 11) == 0) {
+                    skip = true;
+                }
+
+                if (!skip) {
+                    // skip deleted properties
+                    Item val = _map_read_field(e, m->data);
+                    if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+                }
+
+                // skip non-enumerable properties
+                if (!skip && len > 0 && len < 200) {
+                    char ne_key[256];
+                    snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", len, s);
+                    bool ne_found = false;
+                    Item ne_val = js_map_get_fast_ext(m, ne_key, (int)strlen(ne_key), &ne_found);
+                    if (ne_found && js_is_truthy(ne_val)) skip = true;
+                }
+
+                if (!skip) {
+                    // deduplicate: only add if not seen before
+                    struct SeenEntry probe;
+                    int nlen = len < 255 ? len : 255;
+                    memcpy(probe.name, s, nlen);
+                    probe.name[nlen] = '\0';
+                    const struct SeenEntry* existing = (const struct SeenEntry*)hashmap_get(seen, &probe);
+                    if (!existing) {
+                        hashmap_set(seen, &probe);
+                        Item key_str = (Item){.item = s2it(heap_create_name(probe.name))};
+                        js_array_push(result, key_str);
+                    }
+                }
+                e = e->next;
+            }
+        }
+        // walk up prototype chain
+        current = js_get_prototype(current);
+        depth++;
+    }
+
+    hashmap_free(seen);
+    return result;
+}
+
 extern "C" Item js_object_get_own_property_symbols(Item object) {
     // Returns an array of all own Symbol keys of an object.
     // In our engine, symbols are stored as string keys "__sym_<N>" in the shape.

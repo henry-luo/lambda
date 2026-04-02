@@ -350,6 +350,8 @@ static BashAstNode* build_command(BashTranspiler* tp, TSNode node) {
                             ((BashWordNode*)heredoc->body)->no_backslash_escape = true;
                         } else if (strcmp(htype, "concatenation") == 0) {
                             heredoc->body = build_concatenation(tp, hchild);
+                        } else if (strcmp(htype, "raw_string") == 0) {
+                            heredoc->body = build_raw_string(tp, hchild);
                         }
                     }
                     heredoc->expand = true;
@@ -1808,8 +1810,7 @@ static BashAstNode* build_while_statement(BashTranspiler* tp, TSNode node) {
         TSNode child = ts_node_named_child(node, i);
         const char* child_type = ts_node_type(child);
 
-        if (strcmp(child_type, "do_group") == 0 ||
-            strcmp(child_type, "compound_statement") == 0) {
+        if (strcmp(child_type, "do_group") == 0) {
             while_node->body = build_block(tp, child);
         } else if (!found_condition) {
             while_node->condition = build_statement(tp, child);
@@ -1837,7 +1838,8 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
             strcmp(child_type, "expansion") == 0 ||
             strcmp(child_type, "string") == 0 ||
             strcmp(child_type, "concatenation") == 0 ||
-            strcmp(child_type, "command_substitution") == 0) {
+            strcmp(child_type, "command_substitution") == 0 ||
+            strcmp(child_type, "ansi_c_string") == 0) {
             if (!case_node->word) {
                 case_node->word = build_expr_node(tp, child);
             }
@@ -1860,7 +1862,8 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
                     strcmp(item_child_type, "expansion") == 0 ||
                     strcmp(item_child_type, "string") == 0 ||
                     strcmp(item_child_type, "concatenation") == 0 ||
-                    strcmp(item_child_type, "raw_string") == 0) {
+                    strcmp(item_child_type, "raw_string") == 0 ||
+                    strcmp(item_child_type, "ansi_c_string") == 0) {
                     BashAstNode* pattern = build_expr_node(tp, item_child);
                     if (pattern) {
                         if (!item->patterns) {
@@ -2121,6 +2124,7 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
     StrView source = bash_node_source(tp, node);
     bool is_local = (source.length >= 5 && strncmp(source.str, "local", 5) == 0);
     bool is_export = (source.length >= 6 && strncmp(source.str, "export", 6) == 0);
+    bool is_readonly = (source.length >= 8 && strncmp(source.str, "readonly", 8) == 0);
     bool is_declare = (source.length >= 7 && strncmp(source.str, "declare", 7) == 0) ||
                       (source.length >= 7 && strncmp(source.str, "typeset", 7) == 0);
     // typeset/declare inside functions create local variables (like local)
@@ -2128,6 +2132,7 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
 
     // parse declare/local flags from source: "declare -Ai var=value" or "local -i var=value"
     int declare_flags = BASH_ATTR_NONE;
+    if (is_readonly) declare_flags |= BASH_ATTR_READONLY;
     if (is_declare || is_local) {
         const char* p = source.str;
         const char* end = source.str + source.length;
@@ -2148,6 +2153,7 @@ static BashAstNode* build_declaration(BashTranspiler* tp, TSNode node) {
                         case 'l': declare_flags |= BASH_ATTR_LOWERCASE; break;
                         case 'u': declare_flags |= BASH_ATTR_UPPERCASE; break;
                         case 'p': declare_flags |= BASH_ATTR_PRINT; break;
+                        case 'n': declare_flags |= BASH_ATTR_NAMEREF; break;
                         default: break;
                     }
                     p++;
@@ -2793,7 +2799,14 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
             }
         }
         heredoc->expand = !quoted;
-        return (BashAstNode*)heredoc;
+
+        // if there are file redirects (e.g., cat > file << EOF), wrap in REDIRECTED
+        if (file_redirect_count > 0) {
+            // fall through to file redirect handling with heredoc as inner
+            inner_cmd = (BashAstNode*)heredoc;
+        } else {
+            return (BashAstNode*)heredoc;
+        }
     }
 
     if (is_cat && has_herestring) {
@@ -2810,10 +2823,17 @@ static BashAstNode* build_redirected(BashTranspiler* tp, TSNode node) {
                 heredoc->body = build_word(tp, hchild);
             } else if (strcmp(htype, "concatenation") == 0) {
                 heredoc->body = build_concatenation(tp, hchild);
+            } else if (strcmp(htype, "raw_string") == 0) {
+                heredoc->body = build_raw_string(tp, hchild);
             }
         }
         heredoc->expand = true;
-        return (BashAstNode*)heredoc;
+
+        if (file_redirect_count > 0) {
+            inner_cmd = (BashAstNode*)heredoc;
+        } else {
+            return (BashAstNode*)heredoc;
+        }
     }
 
     // non-cat command with herestring: wrap command with HERESTRING redirect

@@ -24,6 +24,7 @@ typedef enum RbAstNodeType {
     RB_AST_NODE_EXPRESSION_STATEMENT,
     RB_AST_NODE_ASSIGNMENT,
     RB_AST_NODE_OP_ASSIGNMENT,          // +=, -=, *=, etc.
+    RB_AST_NODE_MULTI_ASSIGNMENT,       // a, b, c = 1, 2, 3
     RB_AST_NODE_RETURN,
     RB_AST_NODE_IF,
     RB_AST_NODE_UNLESS,
@@ -219,6 +220,15 @@ typedef struct RbOpAssignmentNode {
     RbAstNode* target;
     RbAstNode* value;
 } RbOpAssignmentNode;
+
+// multiple assignment (a, b, c = 1, 2, 3)
+typedef struct RbMultiAssignmentNode {
+    RbAstNode base;
+    RbAstNode* targets;         // linked list of target nodes (identifiers, etc.)
+    RbAstNode* values;          // linked list of value expressions
+    int target_count;
+    int value_count;
+} RbMultiAssignmentNode;
 
 // if / unless
 typedef struct RbIfNode {

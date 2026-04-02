@@ -291,13 +291,13 @@ bash temp/run_test262_v2.sh
 
 ## 6. Files
 
-| File | Purpose |
-|------|---------|
-| `lambda/js/js_early_errors.cpp` | Static semantic validator — 6-phase early error detection |
-| `lambda/js/js_transpiler.hpp` | Added `js_check_early_errors()` declaration |
-| `lambda/js/transpile_js_mir.cpp` | Wired early error check after AST build |
-| `lambda/js/js_scope.cpp` | Fixed parser fallback (TypeScript stub → JavaScript) |
-| `lambda/main.cpp` | Fixed exit code handling (was always 0 for JS mode) |
+| File                             | Purpose                                                                     |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| `lambda/js/js_early_errors.cpp`  | Static semantic validator — 6-phase early error detection                   |
+| `lambda/js/js_transpiler.hpp`    | Added `js_check_early_errors()` declaration                                 |
+| `lambda/js/transpile_js_mir.cpp` | Wired early error check after AST build                                     |
+| `lambda/js/js_scope.cpp`         | Fixed parser fallback (TypeScript stub → JavaScript)                        |
+| `lambda/main.cpp`                | Fixed exit code handling (was always 0 for JS mode)                         |
 | `test/test_js_test262_gtest.cpp` | GTest runner with metadata parsing, feature skipping, negative test support |
-| `ref/test262/` | TC39 official test suite (~47K test files) |
-| `build_lambda_config.json` | Added tree-sitter-javascript library for parser fallback |
+| `ref/test262/`                   | TC39 official test suite (~47K test files)                                  |
+| `build_lambda_config.json`       | Added tree-sitter-javascript library for parser fallback                    |

@@ -165,6 +165,7 @@ static uint64_t rb_local_func_hash(const void* item, uint64_t seed0, uint64_t se
 static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr);
 static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt);
 static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs);
+static void rm_transpile_multi_assignment(RbMirTranspiler* mt, RbMultiAssignmentNode* ma);
 
 // ============================================================================
 // Basic MIR helpers
@@ -774,7 +775,16 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
         if (fentry) {
             // direct call to locally compiled function
-            int nargs = call->arg_count;
+            // find the function's full param count for padding optional args
+            int call_nargs = call->arg_count;
+            int func_nparams = call_nargs;
+            for (int fi = 0; fi < mt->func_count; fi++) {
+                if (strcmp(mt->func_entries[fi].name, fname) == 0) {
+                    func_nparams = mt->func_entries[fi].param_count;
+                    break;
+                }
+            }
+            int nargs = (call_nargs < func_nparams) ? func_nparams : call_nargs;
             int nops = 3 + nargs; // proto + func_ref + result + args
 
             // build prototype for the call
@@ -797,10 +807,14 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             ops[2] = MIR_new_reg_op(mt->ctx, result);
 
             RbAstNode* arg = call->args;
-            for (int i = 0; i < nargs && arg; i++) {
+            for (int i = 0; i < call_nargs && arg; i++) {
                 MIR_reg_t av = rm_transpile_expression(mt, arg);
                 ops[3 + i] = MIR_new_reg_op(mt->ctx, av);
                 arg = arg->next;
+            }
+            // pad missing args with ITEM_NULL for default parameters
+            for (int i = call_nargs; i < nargs; i++) {
+                ops[3 + i] = MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL);
             }
 
             rm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, (size_t)nops, ops));
@@ -947,6 +961,10 @@ static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr) {
             }
             return val;
         }
+        case RB_AST_NODE_MULTI_ASSIGNMENT: {
+            rm_transpile_multi_assignment(mt, (RbMultiAssignmentNode*)expr);
+            return rm_emit_null(mt);
+        }
         default:
             log_debug("rb-mir: unhandled expression type: %d", expr->node_type);
             return rm_emit_null(mt);
@@ -1092,6 +1110,42 @@ static void rm_transpile_op_assignment(RbMirTranspiler* mt, RbOpAssignmentNode* 
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
                 MIR_new_reg_op(mt->ctx, new_val)));
         }
+    }
+}
+
+static void rm_transpile_multi_assignment(RbMirTranspiler* mt, RbMultiAssignmentNode* ma) {
+    // evaluate all values first into temp regs
+    int nvals = ma->value_count;
+    MIR_reg_t* val_regs = (MIR_reg_t*)alloca(sizeof(MIR_reg_t) * (nvals > 0 ? nvals : 1));
+    RbAstNode* val = ma->values;
+    for (int i = 0; i < nvals && val; i++) {
+        val_regs[i] = rm_transpile_expression(mt, val);
+        val = val->next;
+    }
+
+    // assign to each target
+    RbAstNode* target = ma->targets;
+    for (int i = 0; i < ma->target_count && target; i++) {
+        MIR_reg_t v = (i < nvals) ? val_regs[i] : rm_emit_null(mt);
+
+        if (target->node_type == RB_AST_NODE_IDENTIFIER) {
+            RbIdentifierNode* id = (RbIdentifierNode*)target;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+            RbMirVarEntry* var = rm_find_var(mt, vname);
+            if (var) {
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg),
+                    MIR_new_reg_op(mt->ctx, v)));
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, vname, MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_reg_op(mt->ctx, v)));
+                rm_set_var(mt, vname, r);
+            }
+        }
+        target = target->next;
     }
 }
 
@@ -1302,6 +1356,9 @@ static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt) {
         case RB_AST_NODE_OP_ASSIGNMENT:
             rm_transpile_op_assignment(mt, (RbOpAssignmentNode*)stmt);
             break;
+        case RB_AST_NODE_MULTI_ASSIGNMENT:
+            rm_transpile_multi_assignment(mt, (RbMultiAssignmentNode*)stmt);
+            break;
         case RB_AST_NODE_IF:
         case RB_AST_NODE_UNLESS:
             rm_transpile_if(mt, (RbIfNode*)stmt);
@@ -1430,6 +1487,31 @@ static void rm_compile_function(RbMirTranspiler* mt, RbFuncCollected* fc) {
         p = p->next;
     }
 
+    // emit default parameter assignments: if param is null, set to default value
+    p = meth->params;
+    for (int i = 0; i < nparams && p; i++) {
+        if (p->node_type == RB_AST_NODE_DEFAULT_PARAMETER) {
+            RbParamNode* pp = (RbParamNode*)p;
+            if (pp->name && pp->default_value) {
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)pp->name->len, pp->name->chars);
+                MIR_reg_t preg = MIR_reg(mt->ctx, params[i].name, mt->current_func);
+
+                // if (param == ITEM_NULL) param = default_value
+                MIR_label_t l_skip = rm_new_label(mt);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, l_skip),
+                    MIR_new_reg_op(mt->ctx, preg),
+                    MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+                MIR_reg_t def_val = rm_transpile_expression(mt, pp->default_value);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, preg),
+                    MIR_new_reg_op(mt->ctx, def_val)));
+                rm_emit(mt, l_skip);
+            }
+        }
+        p = p->next;
+    }
+
     // transpile body
     MIR_reg_t last_result = rm_emit_null(mt);
     RbAstNode* s = meth->body;
@@ -1497,6 +1579,29 @@ static void rm_scan_module_vars(RbMirTranspiler* mt, RbAstNode* root) {
                     mt->global_var_indices[mt->global_var_count] = mt->module_var_count++;
                     mt->global_var_count++;
                 }
+            }
+        } else if (s->node_type == RB_AST_NODE_MULTI_ASSIGNMENT) {
+            RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)s;
+            RbAstNode* target = ma->targets;
+            while (target) {
+                if (target->node_type == RB_AST_NODE_IDENTIFIER) {
+                    RbIdentifierNode* id = (RbIdentifierNode*)target;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                    bool found = false;
+                    for (int i = 0; i < mt->global_var_count; i++) {
+                        if (strcmp(mt->global_var_names[i], vname) == 0) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found && mt->global_var_count < 64) {
+                        snprintf(mt->global_var_names[mt->global_var_count], sizeof(mt->global_var_names[0]), "%s", vname);
+                        mt->global_var_indices[mt->global_var_count] = mt->module_var_count++;
+                        mt->global_var_count++;
+                    }
+                }
+                target = target->next;
             }
         }
         s = s->next;
