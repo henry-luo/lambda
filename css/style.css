@@ -432,7 +432,7 @@ pre code {
 
 /* ===== Hero Section ===== */
 .hero {
-  padding: calc(var(--nav-height) + var(--space-4xl)) 0 var(--space-4xl);
+  padding: calc(var(--nav-height) + var(--space-3xl)) 0 var(--space-4xl);
   text-align: center;
   position: relative;
   overflow: hidden;
@@ -492,6 +492,26 @@ pre code {
   flex-wrap: wrap;
 }
 
+.pipeline-compact {
+  padding: var(--space-lg) 0 0;
+}
+.pipeline-compact .pipeline-step {
+  padding: var(--space-xs) var(--space-sm);
+  min-width: auto;
+  background: transparent;
+  border: none;
+}
+.pipeline-compact .step-label {
+  font-size: 0.55rem;
+}
+.pipeline-compact .step-value {
+  font-size: 0.6rem;
+  font-weight: 500;
+}
+.pipeline-compact .pipeline-arrow {
+  font-size: 0.85rem;
+}
+
 /* ===== Buttons ===== */
 .btn {
   display: inline-flex;
@@ -529,12 +549,12 @@ pre code {
 
 /* ===== Sections ===== */
 section {
-  padding: var(--space-4xl) 0;
+  padding: var(--space-2xl) 0;
 }
 
 .section-header {
   text-align: center;
-  margin-bottom: var(--space-3xl);
+  margin-bottom: var(--space-2xl);
 }
 
 .section-header p {
@@ -608,7 +628,7 @@ section {
 }
 
 .pipeline-step .step-label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-dim);
@@ -617,7 +637,7 @@ section {
 
 .pipeline-step .step-value {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
 
 .pipeline-arrow {
