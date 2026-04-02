@@ -2013,3 +2013,10 @@ bench-compile:
 # Count lines of code in the repository
 count-loc:
 	@./utils/count_loc.sh
+
+# Publish ./site to gh-pages branch
+gh-pages:
+	@echo "Publishing site to gh-pages..."
+	@cd /tmp/lambda-ghpages && rm -rf * && cp -R $(CURDIR)/site/* . && \
+		git add -A && git commit -m "Update site" && git push origin gh-pages
+	@echo "Done. Site published to gh-pages."
