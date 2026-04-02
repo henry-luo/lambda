@@ -31,6 +31,9 @@ typedef struct {
   uint16_t length;
 } TSFieldMapSlice;
 
+// tree-sitter v0.25 renames / adds these types
+typedef TSFieldMapSlice TSMapSlice;
+
 typedef struct {
   bool visible;
   bool named;
@@ -79,6 +82,9 @@ typedef struct {
   uint16_t external_lex_state;
 } TSLexMode;
 
+// tree-sitter v0.25 renamed TSLexMode to TSLexerMode
+typedef TSLexMode TSLexerMode;
+
 typedef union {
   TSParseAction action;
   struct {
@@ -93,7 +99,7 @@ typedef struct {
 } TSCharacterRange;
 
 struct TSLanguage {
-  uint32_t version;
+  uint32_t abi_version;
   uint32_t symbol_count;
   uint32_t alias_count;
   uint32_t token_count;
@@ -101,6 +107,7 @@ struct TSLanguage {
   uint32_t state_count;
   uint32_t large_state_count;
   uint32_t production_id_count;
+  uint32_t supertype_count;
   uint32_t field_count;
   uint16_t max_alias_sequence_length;
   const uint16_t *parse_table;
@@ -109,13 +116,16 @@ struct TSLanguage {
   const TSParseActionEntry *parse_actions;
   const char * const *symbol_names;
   const char * const *field_names;
-  const TSFieldMapSlice *field_map_slices;
+  const TSMapSlice *field_map_slices;
   const TSFieldMapEntry *field_map_entries;
+  const TSMapSlice *supertype_map_slices;
+  const TSSymbol *supertype_map_entries;
+  const TSSymbol *supertype_symbols;
   const TSSymbolMetadata *symbol_metadata;
   const TSSymbol *public_symbol_map;
   const uint16_t *alias_map;
   const TSSymbol *alias_sequences;
-  const TSLexMode *lex_modes;
+  const void *lex_modes;
   bool (*lex_fn)(TSLexer *, TSStateId);
   bool (*keyword_lex_fn)(TSLexer *, TSStateId);
   TSSymbol keyword_capture_token;
@@ -129,6 +139,13 @@ struct TSLanguage {
     void (*deserialize)(void *, const char *, unsigned);
   } external_scanner;
   const TSStateId *primary_state_ids;
+  const char *name;
+  uint32_t max_reserved_word_set_size;
+  struct {
+    uint32_t major_version;
+    uint32_t minor_version;
+    uint32_t patch_version;
+  } metadata;
 };
 
 static inline bool set_contains(TSCharacterRange *ranges, uint32_t len, int32_t lookahead) {
