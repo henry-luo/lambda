@@ -224,6 +224,9 @@ struct MirTranspiler {
     MIR_reg_t view_model_reg;      // register holding model Item for state ops
     const char* view_template_ref; // template ref string for state store keying
     int view_handler_counter;      // counter for generating handler function names
+
+    // Name pool for interning template_ref strings (shared with Transpiler/Input)
+    NamePool* name_pool;
 };
 
 // ============================================================================
@@ -2609,7 +2612,8 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
             return r;
         }
         MIR_reg_t boxed = transpile_box_item(mt, un->operand);
-        return emit_call_1(mt, "fn_not", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        MIR_reg_t bool_result = emit_call_1(mt, "fn_not", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+        return emit_box_bool(mt, bool_result);
     }
     case OPERATOR_POS: {
         if (operand_tid == LMD_TYPE_INT || operand_tid == LMD_TYPE_INT64 || operand_tid == LMD_TYPE_FLOAT) {
@@ -10571,8 +10575,10 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     register_local_func(mt, name_buf, func_item);
 
     // determine template reference string for state store keying
-    // use template name if available, otherwise the generated function name
-    const char* tmpl_ref = view->name ? view->name->chars : name_buf;
+    // use template name if available, otherwise intern the generated function name
+    // via name_pool so the pointer persists after this stack frame returns
+    const char* tmpl_ref = view->name ? view->name->chars
+        : name_pool_create_len(mt->name_pool, name_buf, strlen(name_buf))->chars;
 
     // save outer view context
     bool saved_in_view_context = mt->in_view_context;
@@ -10739,6 +10745,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     register_local_func(mt, handler_name, func_item);
 
     // determine template reference
+    // view_func_name is already interned via name_pool by the caller
     const char* tmpl_ref = view->name ? view->name->chars : view_func_name;
 
     mt->in_view_context = true;
@@ -10999,9 +11006,13 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
                 // (view_counter was already incremented by transpile_view_def)
                 char vname[64];
                 snprintf(vname, sizeof(vname), "_view_%d", mt->view_counter - 1);
+                // intern the name so handlers get a persistent pointer matching
+                // the body function's template_ref (name_pool deduplicates)
+                const char* view_ref = view->name ? view->name->chars
+                    : name_pool_create_len(mt->name_pool, vname, strlen(vname))->chars;
                 int hidx = 0;
                 for (AstEventHandler* h = view->handler; h; h = h->next_handler) {
-                    transpile_handler_def(mt, h, view, vname, hidx++);
+                    transpile_handler_def(mt, h, view, view_ref, hidx++);
                 }
             }
             break;
@@ -11018,7 +11029,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
 // ============================================================================
 
 void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                       ArrayList* type_list, Pool* script_pool) {
+                       ArrayList* type_list, Pool* script_pool, NamePool* name_pool) {
     log_notice("transpile AST to MIR (direct)");
 
     MirTranspiler mt;
@@ -11029,6 +11040,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
     mt.is_main = true;
     mt.type_list = type_list;
     mt.script_pool = script_pool;
+    mt.name_pool = name_pool;
     mt.native_return_tid = LMD_TYPE_ANY;  // P4-3.4: no native return at module level
 
     // Init import cache
@@ -11475,7 +11487,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     if (timing) clock_gettime(CLOCK_MONOTONIC, &pt1);
 #endif
 
-    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->pool);
+    transpile_mir_ast(ctx, ast_root, tp->source, tp->type_list, tp->pool, tp->name_pool);
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
 #ifdef _WIN32

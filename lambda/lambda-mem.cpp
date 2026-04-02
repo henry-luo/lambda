@@ -163,9 +163,13 @@ extern "C" void* heap_data_alloc(size_t size) {
         return NULL;
     }
     gc_heap_t *gc = context->heap->gc;
+    if (!gc) {
+        log_error("heap_data_alloc: gc=%p heap=%p — gc is null", (void*)gc, (void*)context->heap);
+        return NULL;
+    }
     void* ptr = gc_data_alloc(gc, size);
     if (!ptr) {
-        log_error("heap_data_alloc: failed to allocate %zu bytes from data zone", size);
+        log_error("heap_data_alloc: failed to allocate %zu bytes from data zone (gc=%p)", size, (void*)gc);
         return NULL;
     }
     return ptr;

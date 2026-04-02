@@ -92,6 +92,10 @@ void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {
 
     // try current block
     gc_data_block_t* block = dz->current;
+    if (!block) {
+        log_error("gc_data_zone_alloc: current block is NULL, dz=%p", (void*)dz);
+        return NULL;
+    }
     if (block->cursor + size <= block->limit) {
         void* ptr = block->cursor;
         block->cursor += size;
@@ -113,7 +117,11 @@ void* gc_data_zone_alloc(gc_data_zone_t* dz, size_t size) {
 
     // all blocks full — allocate new block
     gc_data_block_t* new_block = allocate_block(dz, size);
-    if (!new_block) return NULL;
+    if (!new_block) {
+        log_error("gc_data_zone_alloc: allocate_block failed for %zu bytes, total_blocks=%zu total_alloc=%zu",
+                  size, dz->total_blocks, dz->total_allocated);
+        return NULL;
+    }
 
     // append to chain
     block->next = new_block;
