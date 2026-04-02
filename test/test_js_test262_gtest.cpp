@@ -58,6 +58,8 @@ static const char* HARNESS_DIR = "ref/test262/harness";
 static const char* TEMP_DIR = "temp";
 
 // Features that LambdaJS does NOT support — skip tests requiring these
+// v17: removed 25 features that are actually implemented (class fields, optional
+// chaining, nullish coalescing, globalThis, logical assignment, etc.)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // Concurrency / SharedMemory
     "Atomics", "SharedArrayBuffer", "Atomics.waitAsync", "Atomics.pause",
@@ -93,7 +95,7 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "regexp-duplicate-named-groups",
     // RegExp features
     "regexp-lookbehind", "regexp-named-groups", "regexp-unicode-property-escapes",
-    "regexp-dotall", "regexp-match-indices", "regexp-v-flag",
+    "regexp-match-indices", "regexp-v-flag",
     "regexp-modifiers",
     // Well-formed JSON.stringify
     "well-formed-json-stringify",
@@ -102,43 +104,23 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "change-array-by-copy",
     // hashbang
     "hashbang",
-    // Symbols
+    // Symbols — well-known symbol protocols not fully implemented
     "Symbol.toPrimitive", "Symbol.species", "Symbol.iterator",
     "Symbol.hasInstance", "Symbol.match", "Symbol.replace", "Symbol.search",
     "Symbol.split", "Symbol.toStringTag", "Symbol.unscopables",
     "Symbol.asyncIterator", "Symbol.matchAll", "Symbol",
-    // Class features
-    "class-fields-private", "class-fields-public",
-    "class-methods-private", "class-static-fields-private",
-    "class-static-fields-public", "class-static-methods-private",
+    // Class static block — parsed but body not executed
     "class-static-block",
-    // Async iteration
+    // Async iteration — event loop semantics diverge from test262 harness
     "async-iteration",
     // Other
     "cross-realm", "IsHTMLDDA", "caller",
     "Uint8Array",
-    // __proto__
-    "__proto__",
-    // globalThis
-    "globalThis",
     // Misc
     "arbitrary-module-namespace-names",
     "json-modules", "source-phase-imports",
-    "string-trimming",
-    "Promise.allSettled", "Promise.any",
     "AggregateError",
-    "logical-assignment-operators",
     "numeric-separator-literal",
-    "optional-chaining",
-    "nullish-coalescing",
-    "coalesce-expression",
-    "optional-catch-binding",
-    "Object.fromEntries",
-    "Array.prototype.flat",
-    "Array.prototype.flatMap",
-    "Array.prototype.includes",
-    "Object.hasOwn",
-    "at",
     "error-cause",
     "symbols-as-weakmap-keys",
     "Set.prototype.intersection",
@@ -148,8 +130,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Set.prototype.isSubsetOf",
     "Set.prototype.isSupersetOf",
     "Set.prototype.isDisjointFrom",
-    "String.prototype.matchAll",
-    "String.prototype.replaceAll",
     "Float16Array",
     "uint8-clamped-array",
 };

@@ -10706,35 +10706,135 @@ static void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode
                             jm_set_var(mt, vname, reg);
                         }
                     } else if (elem->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                        // default: a = defaultVal -> a = src[idx], if null/undef use default
+                        // default: a = defaultVal -> a = src[idx], if undefined use default
                         JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)elem;
+                        MIR_reg_t key = jm_box_int_const(mt, idx);
+                        MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+                        // check if undefined → use default
+                        MIR_label_t l_has_val = jm_new_label(mt);
+                        MIR_label_t l_done = jm_new_label(mt);
+                        MIR_reg_t resolved = jm_new_reg(mt, "dstr_res", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                            MIR_new_label_op(mt->ctx, l_has_val),
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                        // undefined -> evaluate default
+                        {
+                            MIR_reg_t def_val = jm_transpile_box_item(mt, ap->right);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_reg_op(mt->ctx, resolved),
+                                MIR_new_reg_op(mt->ctx, def_val)));
+                        }
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, l_done)));
+                        jm_emit_label(mt, l_has_val);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, resolved),
+                            MIR_new_reg_op(mt->ctx, val)));
+                        jm_emit_label(mt, l_done);
+
                         if (ap->left && ap->left->node_type == JS_AST_NODE_IDENTIFIER) {
                             JsIdentifierNode* id = (JsIdentifierNode*)ap->left;
                             char vname[128];
                             snprintf(vname, sizeof(vname), "_js_%.*s", (int)id->name->len, id->name->chars);
                             MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
-                            MIR_reg_t key = jm_box_int_const(mt, idx);
-                            MIR_reg_t val = jm_call_2(mt, "js_property_access", MIR_T_I64,
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, src),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
-                            // check if undefined, use default (JS: only undefined triggers default, not null)
-                            MIR_label_t l_has_val = jm_new_label(mt);
-                            MIR_reg_t cmp = jm_new_reg(mt, "destr_cmp", MIR_T_I64);
                             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                                 MIR_new_reg_op(mt->ctx, reg),
-                                MIR_new_reg_op(mt->ctx, val)));
-                            // Check if val is undefined → use default (MIR_BNE: 64-bit branch-if-not-equal)
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
-                                MIR_new_label_op(mt->ctx, l_has_val),
-                                MIR_new_reg_op(mt->ctx, val),
-                                MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
-                            // undefined -> use default
-                            MIR_reg_t def_val = jm_transpile_box_item(mt, ap->right);
-                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                                MIR_new_reg_op(mt->ctx, reg),
-                                MIR_new_reg_op(mt->ctx, def_val)));
-                            jm_emit_label(mt, l_has_val);
+                                MIR_new_reg_op(mt->ctx, resolved)));
                             jm_set_var(mt, vname, reg);
+                        } else if (ap->left && ap->left->node_type == JS_AST_NODE_ARRAY_PATTERN) {
+                            // v17: nested array pattern with default: [[...x] = values] = []
+                            JsArrayPatternNode* np = (JsArrayPatternNode*)ap->left;
+                            int ni = 0;
+                            JsAstNode* ne = np->elements;
+                            while (ne) {
+                                if (ne->node_type == JS_AST_NODE_IDENTIFIER) {
+                                    JsIdentifierNode* nid = (JsIdentifierNode*)ne;
+                                    char vname[128];
+                                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)nid->name->len, nid->name->chars);
+                                    MIR_reg_t nreg = jm_new_reg(mt, vname, MIR_T_I64);
+                                    MIR_reg_t nkey = jm_box_int_const(mt, ni);
+                                    MIR_reg_t nval = jm_call_2(mt, "js_property_access", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, nkey));
+                                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_reg_op(mt->ctx, nreg),
+                                        MIR_new_reg_op(mt->ctx, nval)));
+                                    jm_set_var(mt, vname, nreg);
+                                } else if (ne->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+                                    JsSpreadElementNode* sp = (JsSpreadElementNode*)ne;
+                                    if (sp->argument && sp->argument->node_type == JS_AST_NODE_IDENTIFIER) {
+                                        JsIdentifierNode* nid = (JsIdentifierNode*)sp->argument;
+                                        char vname[128];
+                                        snprintf(vname, sizeof(vname), "_js_%.*s", (int)nid->name->len, nid->name->chars);
+                                        MIR_reg_t nreg = jm_new_reg(mt, vname, MIR_T_I64);
+                                        MIR_reg_t nstart = jm_box_int_const(mt, ni);
+                                        MIR_reg_t nval = jm_call_2(mt, "js_array_slice_from", MIR_T_I64,
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                                            MIR_T_I64, MIR_new_reg_op(mt->ctx, nstart));
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, nreg),
+                                            MIR_new_reg_op(mt->ctx, nval)));
+                                        jm_set_var(mt, vname, nreg);
+                                    }
+                                }
+                                ne = ne->next;
+                                ni++;
+                            }
+                        } else if (ap->left && ap->left->node_type == JS_AST_NODE_OBJECT_PATTERN) {
+                            // v17: nested object pattern with default: [{a} = {a:1}] = []
+                            JsObjectPatternNode* nop = (JsObjectPatternNode*)ap->left;
+                            JsAstNode* nprop = nop->properties;
+                            while (nprop) {
+                                if (nprop->node_type == JS_AST_NODE_PROPERTY) {
+                                    JsPropertyNode* p = (JsPropertyNode*)nprop;
+                                    String* key_name = NULL;
+                                    if (p->key && p->key->node_type == JS_AST_NODE_IDENTIFIER)
+                                        key_name = ((JsIdentifierNode*)p->key)->name;
+                                    if (!key_name) { nprop = nprop->next; continue; }
+                                    String* local_name = key_name;
+                                    JsAstNode* bind_target = p->value ? p->value : p->key;
+                                    // handle default: { a = 5 } → assignment pattern
+                                    JsAstNode* default_expr = NULL;
+                                    if (bind_target && bind_target->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+                                        JsAssignmentPatternNode* nap = (JsAssignmentPatternNode*)bind_target;
+                                        default_expr = nap->right;
+                                        bind_target = nap->left;
+                                    }
+                                    if (bind_target && bind_target->node_type == JS_AST_NODE_IDENTIFIER)
+                                        local_name = ((JsIdentifierNode*)bind_target)->name;
+                                    char vname[128];
+                                    snprintf(vname, sizeof(vname), "_js_%.*s", (int)local_name->len, local_name->chars);
+                                    MIR_reg_t vreg = jm_new_reg(mt, vname, MIR_T_I64);
+                                    MIR_reg_t pkey = jm_box_string_literal(mt, key_name->chars, key_name->len);
+                                    MIR_reg_t pval = jm_call_2(mt, "js_property_get", MIR_T_I64,
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, resolved),
+                                        MIR_T_I64, MIR_new_reg_op(mt->ctx, pkey));
+                                    if (default_expr) {
+                                        MIR_label_t pl_has = jm_new_label(mt);
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, vreg),
+                                            MIR_new_reg_op(mt->ctx, pval)));
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                                            MIR_new_label_op(mt->ctx, pl_has),
+                                            MIR_new_reg_op(mt->ctx, pval),
+                                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL)));
+                                        MIR_reg_t dv = jm_transpile_box_item(mt, default_expr);
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, vreg),
+                                            MIR_new_reg_op(mt->ctx, dv)));
+                                        jm_emit_label(mt, pl_has);
+                                    } else {
+                                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                            MIR_new_reg_op(mt->ctx, vreg),
+                                            MIR_new_reg_op(mt->ctx, pval)));
+                                    }
+                                    jm_set_var(mt, vname, vreg);
+                                }
+                                nprop = nprop->next;
+                            }
                         }
                     }
                     elem = elem->next;
@@ -12421,11 +12521,11 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Evaluate right-hand side (the iterable)
     MIR_reg_t iterable = jm_transpile_box_item(mt, fo->right);
 
-    // For for-in: get keys array first; for for-of: drain iterables to array
+    // For for-in: get keys including prototype chain; for for-of: drain iterables to array
     bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
     MIR_reg_t collection = iterable;
     if (is_for_in) {
-        collection = jm_call_1(mt, "js_object_keys", MIR_T_I64,
+        collection = jm_call_1(mt, "js_for_in_keys", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
     } else {
         // for-of: convert generators/iterables to array

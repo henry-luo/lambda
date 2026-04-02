@@ -1196,6 +1196,7 @@ JitImport jit_runtime_imports[] = {
     {"js_nullish_coalesce", FPTR(js_nullish_coalesce)},
     // object utilities
     {"js_object_keys", FPTR(js_object_keys)},
+    {"js_for_in_keys", FPTR(js_for_in_keys)},
     {"js_object_get_own_property_symbols", FPTR(js_object_get_own_property_symbols)},
     {"js_object_create", FPTR(js_object_create)},
     {"js_object_define_property", FPTR(js_object_define_property)},
