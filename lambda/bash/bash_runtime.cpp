@@ -57,6 +57,10 @@ static bool bash_opt_pipefail = false;  // pipefail
 static bool bash_opt_extdebug = false;  // shopt -s extdebug
 static bool bash_opt_functrace = false; // -T / set -o functrace
 
+// errexit suppression depth: >0 means we're inside a context where set -e is suppressed
+// (if/while/until condition, && / || chain, ! negation)
+static int bash_errexit_depth = 0;
+
 static int bash_current_lineno = 0;
 static int bash_debug_trap_lineno = 0;
 static int bash_debug_trap_base_depth = 0;
@@ -132,7 +136,14 @@ static struct hashmap* bash_var_table = NULL;
 
 // Subshell scope stack
 #define BASH_SUBSHELL_STACK_MAX 32
-static struct hashmap* bash_subshell_stack[BASH_SUBSHELL_STACK_MAX];
+struct BashSubshellSaved {
+    struct hashmap* var_table;
+    bool opt_errexit;
+    bool opt_nounset;
+    bool opt_xtrace;
+    bool opt_pipefail;
+};
+static BashSubshellSaved bash_subshell_stack[BASH_SUBSHELL_STACK_MAX];
 static int bash_subshell_depth = 0;
 
 // Function dynamic scope stack (Option A: runtime scope stack)
@@ -619,9 +630,19 @@ extern "C" Item bash_test_str_eq(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    // support glob patterns (*, ?, [) for [[ ]] extended tests
-    bool has_glob = (strchr(r, '*') || strchr(r, '?') || strchr(r, '['));
-    bool result = has_glob ? (fnmatch(r, l, 0) == 0) : (strcmp(l, r) == 0);
+    // use fnmatch: handles glob patterns (*, ?, [) and backslash escapes in pattern
+    bool result = (fnmatch(r, l, 0) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+// pattern match with FNM_NOESCAPE: for word-literal patterns where backslash
+// escapes have already been processed at the quote-removal stage
+extern "C" Item bash_test_str_eq_noescape(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (fnmatch(r, l, FNM_NOESCAPE) == 0);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
@@ -1858,6 +1879,16 @@ extern "C" Item bash_array_append(Item arr, Item value) {
     return arr;
 }
 
+// append all elements from src array to dest array
+extern "C" Item bash_array_concat(Item dest, Item src) {
+    if (!bash_item_is_array(dest) || !bash_item_is_array(src)) return dest;
+    List* src_list = (List*)(uintptr_t)src.item;
+    for (int i = 0; i < src_list->length; i++) {
+        bash_array_append(dest, src_list->items[i]);
+    }
+    return dest;
+}
+
 // arr[idx]+=val — append to array element (string concat or integer add depending on attrs)
 extern "C" void bash_array_elem_append(Item arr, Item index, Item append_val, Item var_name) {
     if (!bash_item_is_array(arr)) return;
@@ -2402,6 +2433,11 @@ done:
     return result;
 }
 
+// forward-declare capture depth so bash_exec_external can check it
+#define BASH_CAPTURE_STACK_MAX 32
+static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
+static int bash_capture_depth = 0;
+
 extern "C" Item bash_exec_external(Item* argv, int argc) {
     if (argc < 1) {
         bash_last_exit_code = 127;
@@ -2468,13 +2504,18 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         }
     }
 
-    // set up stdout pipe to capture output
-    int stdout_pipe[2];
-    if (pipe(stdout_pipe) != 0) {
-        log_error("bash: pipe failed for command '%s'", cmd_name);
-        free(c_argv);
-        bash_last_exit_code = 1;
-        return (Item){.item = i2it(1)};
+    // decide whether to capture stdout: only when in command-sub or pipeline capture
+    bool need_capture = (bash_capture_depth > 0);
+
+    // set up stdout pipe to capture output (only when needed)
+    int stdout_pipe[2] = {-1, -1};
+    if (need_capture) {
+        if (pipe(stdout_pipe) != 0) {
+            log_error("bash: pipe failed for command '%s'", cmd_name);
+            free(c_argv);
+            bash_last_exit_code = 1;
+            return (Item){.item = i2it(1)};
+        }
     }
 
     // set up stdin pipe if stdin_item is set
@@ -2483,8 +2524,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     if (has_stdin) {
         if (pipe(stdin_pipe) != 0) {
             log_error("bash: stdin pipe failed for command '%s'", cmd_name);
-            close(stdout_pipe[0]);
-            close(stdout_pipe[1]);
+            if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
             free(c_argv);
             bash_last_exit_code = 1;
             return (Item){.item = i2it(1)};
@@ -2495,10 +2535,13 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
 
-    // redirect child stdout to our pipe
-    posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
-    posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+    // redirect child stdout to our pipe (only when capturing)
+    if (need_capture) {
+        posix_spawn_file_actions_addclose(&actions, stdout_pipe[0]);
+        posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
+        posix_spawn_file_actions_addclose(&actions, stdout_pipe[1]);
+    }
+    // else: child inherits parent's stdout — keeps natural stderr/stdout ordering
 
     // redirect child stdin from our pipe (if applicable)
     if (has_stdin) {
@@ -2507,6 +2550,9 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         posix_spawn_file_actions_addclose(&actions, stdin_pipe[0]);
     }
 
+    // flush parent stdout before spawn so child output appears in order
+    fflush(stdout);
+
     pid_t pid;
     int spawn_err = posix_spawn(&pid, exec_path, &actions, NULL,
                                  (char* const*)c_argv, environ);
@@ -2514,8 +2560,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
 
     if (spawn_err != 0) {
         log_error("bash: failed to spawn '%s': %s", cmd_name, strerror(spawn_err));
-        close(stdout_pipe[0]);
-        close(stdout_pipe[1]);
+        if (need_capture) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
         if (has_stdin) { close(stdin_pipe[0]); close(stdin_pipe[1]); }
         free(c_argv);
         bash_last_exit_code = 127;
@@ -2523,7 +2568,9 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
     }
 
     // close write end of stdout pipe in parent
-    close(stdout_pipe[1]);
+    if (need_capture) {
+        close(stdout_pipe[1]);
+    }
 
     // write stdin data to child if needed, then close
     if (has_stdin) {
@@ -2536,44 +2583,59 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         close(stdin_pipe[1]);
     }
 
-    // read child's stdout
-    StrBuf* buf = strbuf_new();
-    char tmp[4096];
-    ssize_t n;
-    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
-        strbuf_append_str_n(buf, tmp, (size_t)n);
-    }
-    close(stdout_pipe[0]);
+    if (need_capture) {
+        // read child's stdout
+        StrBuf* buf = strbuf_new();
+        char tmp[4096];
+        ssize_t n;
+        while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
+            strbuf_append_str_n(buf, tmp, (size_t)n);
+        }
+        close(stdout_pipe[0]);
 
-    // wait for child
-    int status = 0;
-    waitpid(pid, &status, 0);
+        // wait for child
+        int status = 0;
+        waitpid(pid, &status, 0);
 
-    int exit_code = 0;
-    if (WIFEXITED(status)) {
-        exit_code = WEXITSTATUS(status);
+        int exit_code = 0;
+        if (WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        } else {
+            exit_code = 128;
+        }
+
+        // write captured output to bash stdout (capture-aware)
+        if (buf->length > 0) {
+            bash_raw_write(buf->str, (int)buf->length);
+        }
+
+        strbuf_free(buf);
+        free(c_argv);
+        bash_last_exit_code = exit_code;
+        return (Item){.item = i2it(exit_code)};
     } else {
-        exit_code = 128;
-    }
+        // no capture — child writes directly to stdout, just wait for exit
+        int status = 0;
+        waitpid(pid, &status, 0);
 
-    // write captured output to bash stdout (capture-aware)
-    if (buf->length > 0) {
-        bash_raw_write(buf->str, (int)buf->length);
-    }
+        int exit_code = 0;
+        if (WIFEXITED(status)) {
+            exit_code = WEXITSTATUS(status);
+        } else {
+            exit_code = 128;
+        }
 
-    strbuf_free(buf);
-    free(c_argv);
-    bash_last_exit_code = exit_code;
-    return (Item){.item = i2it(exit_code)};
+        free(c_argv);
+        bash_last_exit_code = exit_code;
+        return (Item){.item = i2it(exit_code)};
+    }
 }
 
 // ============================================================================
 // Output capture stack (for command substitution)
 // ============================================================================
 
-#define BASH_CAPTURE_STACK_MAX 32
-static StrBuf* bash_capture_bufs[BASH_CAPTURE_STACK_MAX];
-static int bash_capture_depth = 0;
+// (BASH_CAPTURE_STACK_MAX, bash_capture_bufs, bash_capture_depth moved above bash_exec_external)
 // tracks command-substitution nesting depth, for debug-trap suppression
 static int bash_cmd_sub_depth = 0;
 
@@ -2725,6 +2787,8 @@ extern "C" void bash_write_stderr(Item value) {
 // ============================================================================
 
 extern "C" void bash_runtime_init(void) {
+    // ensure stdout is line-buffered so stderr/stdout ordering is correct
+    setvbuf(stdout, NULL, _IOLBF, 0);
     bash_last_exit_code = 0;
     bash_loop_control = 0;
     bash_loop_control_depth = 1;
@@ -2734,6 +2798,7 @@ extern "C" void bash_runtime_init(void) {
     bash_opt_pipefail = false;
     bash_opt_extdebug = false;
     bash_opt_functrace = false;
+    bash_errexit_depth = 0;
     bash_current_lineno = 0;
     bash_debug_trap_lineno = 0;
     bash_debug_trap_base_depth = 0;
@@ -2763,6 +2828,12 @@ extern "C" void bash_runtime_init(void) {
     Item optind_val = {.item = s2it(heap_create_name("1", 1))};
     bash_set_var(optind_name, optind_val);
     log_debug("bash: runtime initialized");
+    // register bash_stdin_item as GC root (BSS memory invisible to stack scanning)
+    static bool statics_rooted = false;
+    if (!statics_rooted) {
+        heap_register_gc_root(&bash_stdin_item.item);
+        statics_rooted = true;
+    }
 }
 
 extern "C" void bash_runtime_cleanup(void) {
@@ -2877,7 +2948,10 @@ extern "C" void bash_set_var(Item name, Item value) {
         const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
         if (found) {
             if (found->attributes & BASH_ATTR_READONLY) {
-                log_error("bash: %.*s: readonly variable", s->len, s->chars);
+                log_debug("bash: %.*s: readonly variable", s->len, s->chars);
+                fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
+                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_last_exit_code = 1;
                 return;
             }
             int attrs = found->attributes;
@@ -2898,7 +2972,10 @@ extern "C" void bash_set_var(Item name, Item value) {
 
     // check readonly
     if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
-        log_error("bash: %.*s: readonly variable", s->len, s->chars);
+        log_debug("bash: %.*s: readonly variable", s->len, s->chars);
+        fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
+                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_last_exit_code = 1;
         return;
     }
 
@@ -3027,6 +3104,14 @@ extern "C" void bash_set_local_var(Item name, Item value) {
         BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
         const BashRtVar* existing = (const BashRtVar*)hashmap_get(frame, &key);
         int attrs = existing ? existing->attributes : BASH_ATTR_NONE;
+        // check readonly
+        if (existing && (attrs & BASH_ATTR_READONLY)) {
+            log_debug("bash: %.*s: readonly variable", s->len, s->chars);
+            fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
+                    bash_error_script_name, bash_current_lineno, s->len, s->chars);
+            bash_last_exit_code = 1;
+            return;
+        }
         Item final_value = value;
         if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
         if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
@@ -3078,12 +3163,27 @@ extern "C" void bash_unset_var(Item name) {
     String* s = it2s(name);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
-    // unset from topmost scope frame first, then global
+    // check readonly in scope frames
     for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
-        if (hashmap_get(bash_func_scope_stack[i], &key)) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            if (found->attributes & BASH_ATTR_READONLY) {
+                fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
+                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_last_exit_code = 1;
+                return;
+            }
             hashmap_delete(bash_func_scope_stack[i], &key);
             return;
         }
+    }
+    // check readonly in global
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
+        fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
+                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_last_exit_code = 1;
+        return;
     }
     hashmap_delete(bash_var_table, &key);
 }
@@ -3105,7 +3205,7 @@ extern "C" void bash_declare_var(Item name, int flags) {
         entry.attributes |= flags;
     } else {
         entry = {.name = s->chars, .name_len = (size_t)s->len,
-                 .value = (Item){.item = s2it(heap_create_name("", 0))},
+                 .value = (Item){.item = s2it(NULL)},
                  .is_export = false, .attributes = flags};
     }
     if (flags & BASH_ATTR_EXPORT) entry.is_export = true;
@@ -3130,7 +3230,7 @@ extern "C" void bash_declare_local_var(Item name, int flags) {
         entry.attributes |= flags;
     } else {
         entry = {.name = s->chars, .name_len = (size_t)s->len,
-                 .value = (Item){.item = s2it(heap_create_name("", 0))},
+                 .value = (Item){.item = s2it(NULL)},
                  .is_export = false, .attributes = flags};
     }
     hashmap_set(frame, &entry);
@@ -3148,6 +3248,84 @@ extern "C" int bash_get_var_attrs(Item name) {
 
 extern "C" bool bash_is_assoc(Item name) {
     return (bash_get_var_attrs(name) & BASH_ATTR_ASSOC_ARRAY) != 0;
+}
+
+// declare -p: print variable with attributes
+extern "C" void bash_declare_print_var(Item name) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    const BashRtVar* found = NULL;
+    int attrs = BASH_ATTR_NONE;
+    Item value = {.item = s2it(heap_create_name("", 0))};
+    bool var_set = false;
+
+    // search scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* f = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (f) { found = f; attrs = f->attributes; value = f->value; var_set = true; break; }
+    }
+    if (!found) {
+        const BashRtVar* g = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+        if (g) { found = g; attrs = g->attributes; value = g->value; var_set = true; }
+    }
+
+    if (!var_set) {
+        // variable not set — bash prints error for declare -p nonexistent
+        fprintf(stderr, "%s: declare: %.*s: not found\n",
+                bash_error_script_name, s->len, s->chars);
+        bash_last_exit_code = 1;
+        return;
+    }
+
+    // build flags string
+    char flags[16];
+    int fi = 0;
+    flags[fi++] = '-';
+    if (attrs & BASH_ATTR_ASSOC_ARRAY)   flags[fi++] = 'A';
+    if ((attrs & BASH_ATTR_INDEXED_ARRAY) || (!(attrs & BASH_ATTR_ASSOC_ARRAY) && bash_item_is_array(value)))
+        flags[fi++] = 'a';
+    if (attrs & BASH_ATTR_INTEGER)        flags[fi++] = 'i';
+    if (attrs & BASH_ATTR_LOWERCASE)      flags[fi++] = 'l';
+    if (attrs & BASH_ATTR_READONLY)       flags[fi++] = 'r';
+    if (attrs & BASH_ATTR_UPPERCASE)      flags[fi++] = 'u';
+    if (found && found->is_export)        flags[fi++] = 'x';
+    if (fi == 1) flags[fi++] = '-'; // no flags: "declare --"
+    flags[fi] = '\0';
+
+    // format value
+    char buf[8192];
+    int n = 0;
+    if (attrs & BASH_ATTR_ASSOC_ARRAY) {
+        // associative array: declare -A name=([key1]="val1" ...)
+        // TODO: iterate assoc entries
+        String* val_str = it2s(bash_to_string(value));
+        n = snprintf(buf, sizeof(buf), "declare %s %.*s=%.*s\n",
+                     flags, s->len, s->chars,
+                     val_str ? val_str->len : 0, val_str ? val_str->chars : "");
+    } else if ((attrs & BASH_ATTR_INDEXED_ARRAY) || bash_item_is_array(value)) {
+        // indexed array: declare -a name=([0]="val0" [1]="val1" ...)
+        int pos = snprintf(buf, sizeof(buf), "declare %s %.*s=(", flags, s->len, s->chars);
+        if (bash_item_is_array(value)) {
+            List* list = (List*)(uintptr_t)value.item;
+            for (int j = 0; j < list->length && pos < (int)sizeof(buf) - 64; j++) {
+                Item elem = list->items[j];
+                String* es = it2s(bash_to_string(elem));
+                if (j > 0) buf[pos++] = ' ';
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=\"%.*s\"",
+                               j, es ? es->len : 0, es ? es->chars : "");
+            }
+        }
+        pos += snprintf(buf + pos, sizeof(buf) - pos, ")\n");
+        n = pos;
+    } else {
+        String* val_str = it2s(bash_to_string(value));
+        n = snprintf(buf, sizeof(buf), "declare %s %.*s=\"%.*s\"\n",
+                     flags, s->len, s->chars,
+                     val_str ? val_str->len : 0, val_str ? val_str->chars : "");
+    }
+    bash_raw_write(buf, n);
 }
 
 // ============================================================================
@@ -3385,6 +3563,40 @@ extern "C" Item bash_shift_args(int n) {
     return (Item){.item = i2it(0)};
 }
 
+// argument builder for dynamic arg expansion (handles $@ splatting)
+static Item bash_arg_builder_buf[256];
+static int bash_arg_builder_count = 0;
+
+extern "C" void bash_arg_builder_start(void) {
+    // register bash_arg_builder_buf as GC root on first use
+    static bool root_registered = false;
+    if (!root_registered) {
+        heap_register_gc_root_range((uint64_t*)bash_arg_builder_buf, 256);
+        root_registered = true;
+    }
+    bash_arg_builder_count = 0;
+}
+
+extern "C" void bash_arg_builder_push(Item arg) {
+    if (bash_arg_builder_count < 256)
+        bash_arg_builder_buf[bash_arg_builder_count++] = arg;
+}
+
+extern "C" void bash_arg_builder_push_at(void) {
+    for (int i = 0; i < bash_positional_count; i++) {
+        if (bash_arg_builder_count < 256)
+            bash_arg_builder_buf[bash_arg_builder_count++] = bash_positional_args[i];
+    }
+}
+
+extern "C" Item bash_arg_builder_get_ptr(void) {
+    return (Item){.item = (uint64_t)(uintptr_t)bash_arg_builder_buf};
+}
+
+extern "C" Item bash_arg_builder_get_count(void) {
+    return (Item){.item = (uint64_t)bash_arg_builder_count};
+}
+
 extern "C" Item bash_get_script_name(void) {
     return (Item){.item = s2it(heap_create_name(bash_script_name))};
 }
@@ -3424,8 +3636,16 @@ extern "C" Item bash_get_last_bg_pid(void) {
 }
 
 extern "C" Item bash_get_shell_flags(void) {
-    // $- returns active shell flags: default is "hB" (hashall + braceexpand)
-    return (Item){.item = s2it(heap_create_name("hB", 2))};
+    // $- returns active shell flags
+    char flags[16];
+    int fi = 0;
+    if (bash_opt_errexit)    flags[fi++] = 'e';
+    flags[fi++] = 'h'; // hashall is always on
+    flags[fi++] = 'B'; // braceexpand is always on
+    if (bash_opt_nounset)    flags[fi++] = 'u';
+    if (bash_opt_xtrace)     flags[fi++] = 'x';
+    flags[fi] = '\0';
+    return (Item){.item = s2it(heap_create_name(flags, fi))};
 }
 
 static String* bash_get_current_source_name(void) {
@@ -3448,6 +3668,7 @@ extern "C" void bash_scope_push(void) {
         sizeof(BashRtVar), 16, 0, 0,
         bash_rt_var_hash, bash_rt_var_cmp, NULL, NULL);
     bash_func_scope_depth++;
+    bash_getopts_push_state();
     log_debug("bash: scope push → depth %d", bash_func_scope_depth);
 }
 
@@ -3459,6 +3680,7 @@ extern "C" void bash_scope_pop(void) {
     bash_func_scope_depth--;
     hashmap_free(bash_func_scope_stack[bash_func_scope_depth]);
     bash_func_scope_stack[bash_func_scope_depth] = NULL;
+    bash_getopts_pop_state();
     log_debug("bash: scope pop → depth %d", bash_func_scope_depth);
 }
 
@@ -3472,20 +3694,30 @@ extern "C" void bash_scope_push_subshell(void) {
     while (hashmap_iter(bash_var_table, &iter, &item)) {
         hashmap_set(copy, item);
     }
-    // push the original onto the stack, use the copy as current
+    // push the original and shell options onto the stack, use the copy as current
     if (bash_subshell_depth < BASH_SUBSHELL_STACK_MAX) {
-        bash_subshell_stack[bash_subshell_depth] = bash_var_table;
+        BashSubshellSaved* saved = &bash_subshell_stack[bash_subshell_depth];
+        saved->var_table = bash_var_table;
+        saved->opt_errexit = bash_opt_errexit;
+        saved->opt_nounset = bash_opt_nounset;
+        saved->opt_xtrace = bash_opt_xtrace;
+        saved->opt_pipefail = bash_opt_pipefail;
         bash_subshell_depth++;
     }
     bash_var_table = copy;
 }
 
 extern "C" void bash_scope_pop_subshell(void) {
-    // restore the saved var table, discard subshell copy
+    // restore the saved var table and shell options, discard subshell copy
     if (bash_subshell_depth > 0) {
         bash_subshell_depth--;
         hashmap_free(bash_var_table);
-        bash_var_table = bash_subshell_stack[bash_subshell_depth];
+        BashSubshellSaved* saved = &bash_subshell_stack[bash_subshell_depth];
+        bash_var_table = saved->var_table;
+        bash_opt_errexit = saved->opt_errexit;
+        bash_opt_nounset = saved->opt_nounset;
+        bash_opt_xtrace = saved->opt_xtrace;
+        bash_opt_pipefail = saved->opt_pipefail;
     }
 }
 
@@ -3711,6 +3943,24 @@ extern "C" bool bash_get_option_pipefail(void) {
 
 extern "C" bool bash_get_option_extdebug(void) {
     return bash_opt_extdebug;
+}
+
+// errexit suppression: push/pop depth counter for contexts where set -e is suppressed
+extern "C" void bash_errexit_push(void) {
+    bash_errexit_depth++;
+}
+
+extern "C" void bash_errexit_pop(void) {
+    if (bash_errexit_depth > 0) bash_errexit_depth--;
+}
+
+// check errexit: if set -e is active and last exit code != 0 and not suppressed, return 1
+extern "C" int bash_check_errexit(void) {
+    if (bash_opt_errexit && bash_last_exit_code != 0 && bash_errexit_depth == 0) {
+        log_debug("bash: errexit: should exit with code %d", bash_last_exit_code);
+        return 1;
+    }
+    return 0;
 }
 
 extern "C" Item bash_get_lineno(void) {

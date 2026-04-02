@@ -49,6 +49,14 @@ static bool py_stop_iteration_initialized = false;
 extern "C" void py_runtime_set_input(void* input) {
     py_input = (Input*)input;
     py_init_builtin_classes();
+    // register static Item variables as GC roots (BSS memory invisible to stack scanning)
+    static bool statics_rooted = false;
+    if (!statics_rooted) {
+        heap_register_gc_root(&py_exception_value.item);
+        heap_register_gc_root(&py_stop_iteration_sentinel.item);
+        heap_register_gc_root_range((uint64_t*)py_module_vars, PY_MODULE_VAR_MAX);
+        statics_rooted = true;
+    }
 }
 
 // ============================================================================

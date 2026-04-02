@@ -11,7 +11,7 @@ let data^err = input('./test/lambda/ui/todos.json', 'json')
 // Todo item component: clicking toggles done/not-done
 view <todo_item> state toggled: false {
   let done = if (toggled) (!it.done) else it.done
-  let check_mark = if (done) "✓" else " "
+  let check_mark = if (done) "✓" else "○"
   let done_class = if (done) "todo-item done" else "todo-item"
   <li class:done_class
     <span class:"checkbox"; check_mark>
@@ -19,7 +19,7 @@ view <todo_item> state toggled: false {
   >
 }
 on click() {
-  toggled = !toggled
+  toggled = not toggled
 }
 
 // Helper: render a list section with its items

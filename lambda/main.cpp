@@ -14,6 +14,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#ifndef _WIN32
+#include <setjmp.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
@@ -784,6 +789,20 @@ int exec_convert(int argc, char* argv[]) {
     pool_destroy(temp_pool);
     return 0;
 }
+
+#ifndef _WIN32
+// per-script timeout support for test-batch mode
+static jmp_buf batch_timeout_jmp;
+static volatile sig_atomic_t batch_timeout_active = 0;
+
+static void batch_alarm_handler(int sig) {
+    (void)sig;
+    if (batch_timeout_active) {
+        batch_timeout_active = 0;
+        longjmp(batch_timeout_jmp, 1);
+    }
+}
+#endif
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
@@ -2422,11 +2441,15 @@ int main(int argc, char *argv[]) {
         log_debug("Entering test-batch command handler");
 
         bool use_mir = true;
+        int batch_timeout = 60; // default per-script timeout in seconds
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--c2mir") == 0) {
                 use_mir = false;
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
+            } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
+                batch_timeout = atoi(argv[i] + 10);
+                if (batch_timeout <= 0) batch_timeout = 60;
             }
         }
 
@@ -2459,7 +2482,32 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            int result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+            int result;
+#ifndef _WIN32
+            if (batch_timeout > 0) {
+                struct sigaction sa, old_sa;
+                sa.sa_handler = batch_alarm_handler;
+                sigemptyset(&sa.sa_mask);
+                sa.sa_flags = 0;
+                sigaction(SIGALRM, &sa, &old_sa);
+                batch_timeout_active = 1;
+                if (setjmp(batch_timeout_jmp) == 0) {
+                    alarm(batch_timeout);
+                    result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+                    alarm(0);
+                    batch_timeout_active = 0;
+                } else {
+                    // timed out
+                    fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
+                    result = 124; // same as coreutils timeout exit code
+                }
+                sigaction(SIGALRM, &old_sa, NULL);
+            } else {
+                result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+            }
+#else
+            result = run_script_file(&runtime, script_path, use_mir, false, run_main);
+#endif
             fflush(stdout);
 
             printf("\x01" "BATCH_END %d\n", result);

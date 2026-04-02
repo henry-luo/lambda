@@ -1,0 +1,11 @@
+{
+  "name": "Todo toggle test",
+  "viewport": {"width": 600, "height": 800},
+  "default_timeout": 0,
+  "events": [
+    {"type": "log", "message": "=== Todo Toggle Test ==="},
+    {"type": "wait", "ms": 200},
+    {"type": "assert_text", "target": {"selector": ".header h1"}, "contains": "My Todo Lists"},
+    {"type": "log", "message": "=== Done ==="}
+  ]
+}

@@ -566,23 +566,28 @@ regression tests pass (758/759 lambda, 32/32 radiant — 1 pre-existing test262 
 | `for..in` / `until` | Loop variants | ✅ Verified |
 | Default params | `def foo(x, y=10)` | ✅ Verified |
 
-### Phase 2: OOP & Blocks (~4K LOC)
+### Phase 2: OOP & Blocks (~4K LOC) — ✅ COMPLETE
 
 **Goal**: Ruby classes, modules, blocks, iterators, closures.
 
-- [ ] `rb_class.cpp` — class definition, instantiation, inheritance
-- [ ] Instance variables (`@x`), class variables (`@@x`)
-- [ ] `initialize` constructor → shaped instance creation
-- [ ] Method dispatch: instance methods, class methods, `self`
-- [ ] `attr_reader`, `attr_writer`, `attr_accessor`
-- [ ] Single inheritance with `super` calls
-- [ ] Blocks: `do..end` and `{ }` syntax, `yield`, `block_given?`
-- [ ] `Proc.new`, `lambda`, `->(){}` stabby lambda
-- [ ] `&block` parameter and `block.call`
-- [ ] Closures: variable capture across nested scopes
-- [ ] `include` for module mixins
-- [ ] Iterator methods via blocks: `each`, `map`, `select`, `reject`, `reduce`, `collect`
-- [ ] `Comparable` mixin support via `<=>`
+**Status**: Implemented and verified. 7,508 LOC total across 9 source files (+1,674 LOC
+from Phase 1). All 3 Ruby tests pass (classes, blocks, yield). Regression: 508/510
+Lambda, 32/32 Radiant (2 pre-existing failures unrelated to Ruby).
+
+- [x] `rb_class.cpp` — class definition, instantiation, inheritance (378 LOC)
+- [x] Instance variables (`@x`) — get/set via `rb_instance_getattr`/`rb_instance_setattr`
+- [x] `initialize` constructor → `rb_class_new_instance` creates Map instance, calls init
+- [x] Method dispatch: `rb_method_lookup` walks `__superclass__` chain
+- [x] `attr_reader`, `attr_writer`, `attr_accessor`
+- [x] Single inheritance with `super` calls via `rb_super_lookup`
+- [x] Blocks: `do..end` and `{ }` syntax, `yield`, `block_given?`
+- [x] `&block` parameter and `rb_block_call` (0–5 arg variants)
+- [ ] `Proc.new`, `lambda`, `->(){}` stabby lambda — deferred to Phase 3
+- [ ] Closures: variable capture across nested scopes — deferred to Phase 3
+- [ ] `include` for module mixins — deferred to Phase 3
+- [x] Iterator methods via blocks: `each`, `map`, `select`, `reject`, `reduce`, `each_with_index`, `any?`, `all?`, `find`
+- [x] Integer iterators: `times`, `upto`, `downto`
+- [ ] `Comparable` mixin support via `<=>` — deferred to Phase 3
 
 **Supported in Phase 2:**
 
@@ -779,11 +784,12 @@ ar rcs libtree-sitter-ruby.a parser.o scanner.o
 
 ### Code Line Delta
 
-| Metric | Estimated | Actual (Phase 1) |
-|--------|----------|-----------------|
-| New Ruby transpiler code | ~15,500 | 5,834 (8 files) |
+| Metric | Estimated | Actual |
+|--------|----------|--------|
+| New Ruby transpiler code | ~15,500 | 7,508 (9 files, Phase 1+2) |
 | Modified existing code | ~200 | ~200 (3 files) |
 | **Phase 1 LOC** | — | **~6,034** |
+| **Phase 2 LOC** | — | **~7,708** (+1,674 from Phase 1) |
 | **Projected Total** | **~15,700** | |
 
 ---
@@ -883,7 +889,7 @@ These cases require Ruby-specific runtime functions rather than reusing Python's
 |-----------|---------|--------|--------|
 | **M1: Hello World** | `./lambda.exe rb script.rb` prints output | ~2K | ✅ Done |
 | **M2: Core Language** | Expressions, control flow, methods, arrays — Phase 1 complete | ~5K | ✅ Done (5,834 LOC) |
-| **M3: OOP** | Classes, inheritance, blocks, iterators — Phase 2 complete | ~9K | Not started |
+| **M3: OOP** | Classes, inheritance, blocks, iterators — Phase 2 complete | ~9K | ✅ Done (7,508 LOC) |
 | **M4: Standard Library** | 40+ built-in methods, regex, file I/O — Phase 3 complete | ~12K | Not started |
 | **M5: Error Handling** | begin/rescue/ensure, custom exceptions — Phase 4 complete | ~14K | Not started |
 | **M6: Cross-Language** | `require_relative` imports .ls/.py/.js modules; verified bidirectional | ~14.5K | Not started |
@@ -955,14 +961,87 @@ Key decisions and lessons from the Phase 1 implementation:
 | Array | `LMD_TYPE_ARRAY` | `it2arr()` → `Array*` |
 | Range | `LMD_TYPE_RANGE` | `it2range()` → `Range*` (start/end/length, no exclusive field) |
 
-### Known Limitations (Phase 1)
+### Known Limitations (After Phase 2)
 
 - Method calls on objects (e.g., `"ruby".upcase`) only support `.length`/`.size`,
   `.push`, `.to_s`, `.to_i`, `.to_f` — other methods return nil.
-- No string interpolation (`"#{expr}"`) — use concatenation with `to_s` instead.
-- No hash literal support yet.
-- No `case`/`when`, `for..in`, `until` loops.
-- No multiple assignment (`a, b = 1, 2`).
-- No symbol (`:name`) literals.
-- No block/proc/lambda support.
-- No class definitions.
+- No `Proc.new`, `lambda`, `->(){}` stabby lambda — blocks work via `yield` only.
+- No closures with variable capture across nested scopes.
+- No `include` for module mixins.
+- No `begin`/`rescue`/`ensure` exception handling.
+- No `Kernel` methods beyond `puts`/`p`/`print`.
+- No `String`/`Array`/`Hash` method dispatch beyond built-in iterators.
+- No regex support.
+- No file I/O.
+- No cross-language `require_relative` imports.
+
+## 16. Implementation Notes (Phase 2)
+
+Key decisions and lessons from the Phase 2 implementation:
+
+### MIR Pre-Compilation Architecture (Critical Constraint)
+
+MIR does not allow creating functions while another function is being built. This
+required a multi-pass pre-compilation architecture:
+
+1. **Phase 1a**: Collect free functions AND class methods into `func_entries[128]`
+2. **Phase 1b**: Collect all blocks into `block_entries[64]` via recursive AST walk (`rm_collect_blocks_r`)
+3. **Phase 2**: Scan module-level variables
+4. **Phase 3a**: Forward-declare free functions
+5. **Phase 3b**: Compile all blocks as standalone MIR functions
+6. **Phase 3c**: Compile all functions (class methods + free functions)
+7. **Phase 4**: `rb_main` — references pre-compiled items, no MIR function creation
+
+At block usage sites, `rm_transpile_block_as_func` looks up the pre-compiled block by
+matching `RbBlockNode*` pointer, wraps it as `Item` via `js_new_function(func_ptr, param_count)`.
+
+### Class/Instance Representation (Map-Based)
+
+- **Class** = Lambda Map with `__rb_class__: ITEM_TRUE`, `__name__`, `__superclass__`,
+  methods as named fields
+- **Instance** = Lambda Map with `__class__` pointing to class Map
+- **Method dispatch** = `rb_method_lookup` → walk `__superclass__` chain
+- **Constructor** = `rb_class_new_instance(cls)` creates instance, looks up + calls `initialize`
+- **self** = first parameter to instance methods (prepended at call site)
+- **@ivar** = `rb_instance_getattr(self, "name")` / `rb_instance_setattr(self, "name", val)`
+
+### Cross-Runtime Dependency
+
+`js_new_function()` uses `js_input->pool` for allocation. The Ruby transpiler must call
+both `rb_runtime_set_input()` AND `js_runtime_set_input()` during initialization —
+omitting the latter causes SIGSEGV at address 0x10 (NULL + offset).
+
+### Key Bugs Fixed
+
+1. **`(Item){.bool_val = true}` creates untagged value 0x1** — not a proper Lambda
+   boolean. Must use `(Item){.item = ITEM_TRUE}` where `ITEM_TRUE = ((uint64_t)LMD_TYPE_BOOL << 56) | 1`.
+2. **Statement-type last nodes in function bodies** — `rm_transpile_expression` was
+   called for `while`/`for` as last body statement. Added `rm_is_statement_node()` helper
+   to route these through `rm_transpile_statement` instead.
+3. **`rb_main` return value** — Ruby scripts use `puts` for output; returning the last
+   expression value caused arrays from iterators to be JSON-printed. Fixed by always
+   returning null from `rb_main`.
+
+### Phase 2 Runtime Functions Added
+
+| Function | Purpose |
+|----------|---------|
+| `rb_class_create(name)` | Create a class Map with `__rb_class__` sentinel |
+| `rb_class_add_method(cls, name, fn)` | Add method to class |
+| `rb_class_new_instance(cls)` | Construct instance, call `initialize` |
+| `rb_is_class(item)` / `rb_is_instance(item)` | Type checks |
+| `rb_instance_getattr(self, name)` / `rb_instance_setattr(self, name, val)` | @ivar access |
+| `rb_method_lookup(instance, name)` | Method resolution with inheritance |
+| `rb_super_lookup(cls, name)` | Find method in superclass chain |
+| `rb_attr_reader(cls, name)` / `rb_attr_writer` / `rb_attr_accessor` | Attribute macros |
+| `rb_block_call(block, args, argc)` | Call block (0–5 arg variants) |
+| `rb_array_each/map/select/reject/reduce/each_with_index/any/all/find` | Array iterators |
+| `rb_int_times/upto/downto` | Integer iterators |
+
+### Phase 2 Test Files
+
+| Test | Covers | Status |
+|------|--------|--------|
+| `test/rb/test_rb_classes.rb` + `.txt` | Classes, inheritance, `super`, `attr_accessor`, `@ivar` | ✅ Pass |
+| `test/rb/test_rb_blocks.rb` + `.txt` | `each`, `map`, `select`, `reject`, `reduce`, `each_with_index`, `times`, `upto`, `downto`, `any?`, `all?`, `find` | ✅ Pass |
+| `test/rb/test_rb_yield.rb` + `.txt` | `yield`, `block_given?`, custom iterators, `while` + `yield` | ✅ Pass |

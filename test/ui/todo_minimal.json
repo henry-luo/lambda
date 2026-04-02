@@ -1,0 +1,8 @@
+{
+  "name": "Minimal Lambda test",
+  "events": [
+    {"type": "log", "message": "=== Minimal test ==="},
+    {"type": "wait", "ms": 100},
+    {"type": "log", "message": "=== Done ==="}
+  ]
+}

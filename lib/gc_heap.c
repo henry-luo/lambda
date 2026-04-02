@@ -387,7 +387,11 @@ void gc_heap_pool_free(gc_heap_t* gc, void* ptr) {
 }
 
 void* gc_data_alloc(gc_heap_t* gc, size_t size) {
-    if (!gc || !gc->data_zone || size == 0) return NULL;
+    if (!gc || !gc->data_zone || size == 0) {
+        log_error("gc_data_alloc: null check failed gc=%p dz=%p size=%zu",
+                  (void*)gc, gc ? (void*)gc->data_zone : NULL, size);
+        return NULL;
+    }
 
     // check if data zone usage exceeds threshold — trigger GC before allocating
     if (!gc->collecting && gc->collect_callback) {
@@ -399,7 +403,12 @@ void* gc_data_alloc(gc_heap_t* gc, size_t size) {
         }
     }
 
-    return gc_data_zone_alloc(gc->data_zone, size);
+    void* result = gc_data_zone_alloc(gc->data_zone, size);
+    if (!result) {
+        log_error("gc_data_alloc: gc_data_zone_alloc returned NULL for %zu bytes, dz=%p dz->current=%p",
+                  size, (void*)gc->data_zone, gc->data_zone ? (void*)gc->data_zone->current : NULL);
+    }
+    return result;
 }
 
 // ============================================================================

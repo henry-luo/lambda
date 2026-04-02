@@ -43,16 +43,12 @@
         "lambda/input/input-prop.cpp",
         "lambda/http_module.cpp",
         "radiant/webdriver/webdriver_server.cpp",
-        "radiant/webdriver/cmd_webdriver.cpp",
-        "lambda/rb/rb_scope.cpp",
-        "lambda/rb/transpile_rb_mir.cpp",
-        "lambda/rb/rb_runtime.cpp",
-        "lambda/rb/rb_print.cpp",
-        "lambda/rb/build_rb_ast.cpp"
+        "radiant/webdriver/cmd_webdriver.cpp"
     ],
     "defines": [
         "SQLITE_THREADSAFE=0",
-        "SQLITE_OMIT_LOAD_EXTENSION"
+        "SQLITE_OMIT_LOAD_EXTENSION",
+        "LAMBDA_RUBY"
     ],
     "includes": [
         ".",
@@ -63,6 +59,7 @@
         "lambda/tree-sitter-typescript/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lambda/tree-sitter-python/bindings/c",
+        "lambda/tree-sitter-ruby/bindings/c",
         "lambda/tree-sitter-bash/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/font/woff2/include",
@@ -104,6 +101,12 @@
             "name": "tree-sitter-python",
             "include": "lambda/tree-sitter-python/bindings/c",
             "lib": "lambda/tree-sitter-python/libtree-sitter-python.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-ruby",
+            "include": "lambda/tree-sitter-ruby/bindings/c",
+            "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
             "link": "static"
         },
         {
@@ -2676,6 +2679,7 @@
                     {
                         "source": "test/test_js_test262_gtest.cpp",
                         "name": "test262 Compliance Tests",
+                        "category": "extended",
                         "dependencies": [],
                         "binary": "test_js_test262_gtest.exe",
                         "libraries": [
@@ -2741,6 +2745,18 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🐍"
+                    },
+                    {
+                        "source": "test/test_rb_gtest.cpp",
+                        "name": "Ruby Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_rb_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "💎",
+                        "category": "extended"
                     },
                     {
                         "source": "test/test_ts_gtest.cpp",

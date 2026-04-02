@@ -131,6 +131,46 @@ Item rb_builtin_require_relative(Item path);
 // ============================================================================
 void rb_runtime_set_input(void* input_ptr);
 
+// ============================================================================
+// Class system (Phase 2)
+// ============================================================================
+Item rb_class_create(Item name, Item superclass);
+void rb_class_add_method(Item cls, Item method_name, Item func);
+Item rb_class_new_instance(Item cls);
+int rb_is_class(Item obj);
+int rb_is_instance(Item obj);
+Item rb_get_class(Item obj);
+Item rb_instance_getattr(Item instance, Item name);
+void rb_instance_setattr(Item instance, Item name, Item value);
+Item rb_method_lookup(Item receiver, Item method_name);
+Item rb_super_lookup(Item cls, Item method_name);
+void rb_attr_reader(Item cls, Item attr_name);
+void rb_attr_writer(Item cls, Item attr_name);
+void rb_attr_accessor(Item cls, Item attr_name);
+
+// ============================================================================
+// Block / Proc / Lambda calling
+// ============================================================================
+Item rb_block_call(Item block, Item* args, int argc);
+Item rb_block_call_1(Item block, Item arg);
+Item rb_block_call_2(Item block, Item arg1, Item arg2);
+
+// ============================================================================
+// Iterator methods (block-based)
+// ============================================================================
+Item rb_array_each(Item array, Item block);
+Item rb_array_map(Item array, Item block);
+Item rb_array_select(Item array, Item block);
+Item rb_array_reject(Item array, Item block);
+Item rb_array_reduce(Item array, Item initial, Item block);
+Item rb_array_each_with_index(Item array, Item block);
+Item rb_array_any(Item array, Item block);
+Item rb_array_all(Item array, Item block);
+Item rb_array_find(Item array, Item block);
+Item rb_int_times(Item n, Item block);
+Item rb_int_upto(Item n, Item m, Item block);
+Item rb_int_downto(Item n, Item m, Item block);
+
 #ifdef __cplusplus
 }
 #endif
