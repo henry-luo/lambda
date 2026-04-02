@@ -4,6 +4,7 @@
 #include "lambda-data.hpp"
 #include "render_map.h"
 #include "template_registry.h"
+#include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/hashmap.h"
 #include <string.h>
@@ -224,6 +225,8 @@ int render_map_retransform(void) {
         }
 
         // re-execute template body with the source item
+        // NOTE: Do NOT call heap_gc_collect() here — the GC doesn't know about
+        // s_doc_root or other static roots, so it would collect live elements.
         typedef Item (*template_body_fn)(Item);
         template_body_fn fn = (template_body_fn)tmpl->body_func;
         Item new_result = fn(entry->key.source_item);
@@ -321,6 +324,13 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out) {
 }
 
 void render_map_set_doc_root(Item root) {
+    // register s_doc_root as a GC root so the doc root element is not collected
+    // by the garbage collector (static variables are invisible to stack scanning)
+    static bool root_registered = false;
+    if (!root_registered) {
+        heap_register_gc_root(&s_doc_root.item);
+        root_registered = true;
+    }
     s_doc_root = root;
 }
 

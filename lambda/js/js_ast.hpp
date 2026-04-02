@@ -142,6 +142,9 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_IMPORT_DECLARATION,
     JS_AST_NODE_EXPORT_DECLARATION,
     JS_AST_NODE_IMPORT_SPECIFIER,
+
+    // v17: with statement (for strict mode rejection)
+    JS_AST_NODE_WITH_STATEMENT,
 } JsAstNodeType;
 
 // JavaScript operators

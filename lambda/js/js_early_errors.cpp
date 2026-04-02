@@ -919,6 +919,14 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
+        case JS_AST_NODE_WITH_STATEMENT: {
+            // v17: 'with' statements are forbidden in strict mode
+            if (ctx->in_strict) {
+                ee_error(ctx, node, "Strict mode code may not include a with statement");
+            }
+            break;
+        }
+
         case JS_AST_NODE_LABELED_STATEMENT: {
             JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
             // v17: labeled class/lexical declarations are SyntaxError

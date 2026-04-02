@@ -116,7 +116,9 @@ Item tmpl_state_get_or_init(Item model_item, const char* template_ref,
     query.key.template_ref = template_ref;
     query.key.state_name = state_name;
     const TemplateStateEntry* found = (const TemplateStateEntry*)hashmap_get(map, &query);
-    if (found) return found->value;
+    if (found) {
+        return found->value;
+    }
     // not found — initialize with default
     TemplateStateEntry entry;
     memset(&entry, 0, sizeof(entry));

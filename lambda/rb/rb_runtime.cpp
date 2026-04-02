@@ -23,6 +23,12 @@ static Item rb_module_vars[RB_MODULE_VAR_MAX];
 
 extern "C" void rb_runtime_set_input(void* input_ptr) {
     rb_input = input_ptr;
+    // register static Item array as GC root (BSS memory invisible to stack scanning)
+    static bool statics_rooted = false;
+    if (!statics_rooted) {
+        heap_register_gc_root_range((uint64_t*)rb_module_vars, RB_MODULE_VAR_MAX);
+        statics_rooted = true;
+    }
 }
 
 // ============================================================================

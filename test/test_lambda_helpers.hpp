@@ -477,10 +477,10 @@ inline void run_sub_batch(
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe test-batch --no-log%s < \"%s\"",
+    snprintf(command, sizeof(command), "lambda.exe test-batch --no-log --timeout=60%s < \"%s\"",
              c2mir_flag, manifest_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe test-batch --no-log%s < \"%s\"",
+    snprintf(command, sizeof(command), "./lambda.exe test-batch --no-log --timeout=60%s < \"%s\"",
              c2mir_flag, manifest_path);
 #endif
 

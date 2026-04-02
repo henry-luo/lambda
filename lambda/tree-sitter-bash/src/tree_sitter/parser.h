@@ -18,6 +18,11 @@ typedef uint16_t TSStateId;
 typedef uint16_t TSSymbol;
 typedef uint16_t TSFieldId;
 typedef struct TSLanguage TSLanguage;
+typedef struct TSLanguageMetadata {
+  uint8_t major_version;
+  uint8_t minor_version;
+  uint8_t patch_version;
+} TSLanguageMetadata;
 #endif
 
 typedef struct {
@@ -26,13 +31,11 @@ typedef struct {
   bool inherited;
 } TSFieldMapEntry;
 
+// Used to index the field and supertype maps.
 typedef struct {
   uint16_t index;
   uint16_t length;
-} TSFieldMapSlice;
-
-// tree-sitter v0.25 renames / adds these types
-typedef TSFieldMapSlice TSMapSlice;
+} TSMapSlice;
 
 typedef struct {
   bool visible;
@@ -82,8 +85,11 @@ typedef struct {
   uint16_t external_lex_state;
 } TSLexMode;
 
-// tree-sitter v0.25 renamed TSLexMode to TSLexerMode
-typedef TSLexMode TSLexerMode;
+typedef struct {
+  uint16_t lex_state;
+  uint16_t external_lex_state;
+  uint16_t reserved_word_set_id;
+} TSLexerMode;
 
 typedef union {
   TSParseAction action;
@@ -141,20 +147,16 @@ struct TSLanguage {
   const TSStateId *primary_state_ids;
   const char *name;
   uint32_t max_reserved_word_set_size;
-  struct {
-    uint32_t major_version;
-    uint32_t minor_version;
-    uint32_t patch_version;
-  } metadata;
+  TSLanguageMetadata metadata;
 };
 
-static inline bool set_contains(TSCharacterRange *ranges, uint32_t len, int32_t lookahead) {
+static inline bool set_contains(const TSCharacterRange *ranges, uint32_t len, int32_t lookahead) {
   uint32_t index = 0;
   uint32_t size = len - index;
   while (size > 1) {
     uint32_t half_size = size / 2;
     uint32_t mid_index = index + half_size;
-    TSCharacterRange *range = &ranges[mid_index];
+    const TSCharacterRange *range = &ranges[mid_index];
     if (lookahead >= range->start && lookahead <= range->end) {
       return true;
     } else if (lookahead > range->end) {
@@ -162,7 +164,7 @@ static inline bool set_contains(TSCharacterRange *ranges, uint32_t len, int32_t 
     }
     size -= half_size;
   }
-  TSCharacterRange *range = &ranges[index];
+  const TSCharacterRange *range = &ranges[index];
   return (lookahead >= range->start && lookahead <= range->end);
 }
 

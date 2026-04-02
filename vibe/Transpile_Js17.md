@@ -529,36 +529,38 @@ Run all negative tests separately and categorize:
 | Phase | Status | Summary |
 |-------|--------|---------|
 | Phase 1: Feature gate cleanup | ✅ Complete | 25 features removed from `UNSUPPORTED_FEATURES` |
-| Phase 2: Early error hardening | ✅ Partial | Labeled declarations, switch scope redeclaration, strict+non-simple params, eval/arguments binding, 2f |
+| Phase 2: Early error hardening | ✅ Partial | Labeled declarations, switch scope redeclaration, strict+non-simple params, eval/arguments binding |
 | Phase 3: TDZ enforcement | ❌ Not started | Deferred to v18 |
 | Phase 4: `for-in` prototype walk | ✅ Complete | `js_for_in_keys()` walks prototype chain with dedup |
 | Phase 5: Nested destructuring fix | ✅ Complete | `ASSIGNMENT_PATTERN` case rewritten for nested array/object patterns |
-| Phase 6: Strict mode completion | ✅ Partial | Octal literals, `delete` identifier, eval/arguments binding, octal string escapes |
+| Phase 6: Strict mode completion | ✅ Partial | `with` rejection, octal literals, `delete` identifier, eval/arguments binding, strict `this` coercion, octal string escapes |
 
 ### Actual Metrics
 
 | Metric | v16 Baseline | v17 Actual | Delta |
 |--------|-------------|------------|-------|
 | Tests executed | 22,497 | 26,259 | +3,762 |
-| Tests passed | 16,319 | 19,097 | **+2,778** |
-| Tests failed | 6,178 | 7,162 | +984 (all from newly unlocked tests) |
+| Tests passed | 16,319 | 19,115 | **+2,796** |
+| Tests failed | 6,178 | 7,144 | +966 (all from newly unlocked tests) |
 | Tests skipped | 16,153 | 12,390 | −3,763 |
-| Pass rate (executed) | 72.5% | 72.7% | +0.2pp |
+| Pass rate (executed) | 72.5% | 72.8% | +0.3pp |
 | JS unit tests | 73/73 | 73/73 | No regression |
 
 ### Key Findings
 
-1. **Zero regressions**: All 984 new failures come from the 3,762 newly unlocked tests. Existing passing tests remained stable (6,178 old failures unchanged).
-2. **Feature gate cleanup dominates**: Phase 1 alone unlocked +3,762 tests, of which 2,778 pass (73.8% pass rate on newly exposed tests).
+1. **Zero regressions**: All 966 new failures come from the 3,762 newly unlocked tests. Existing passing tests remained stable.
+2. **Feature gate cleanup dominates**: Phase 1 alone unlocked +3,762 tests, of which ~2,778 pass (73.8% pass rate on newly exposed tests).
 3. **Early error fixes verified**: Labeled class/let declarations, switch scope redeclaration, strict+non-simple params, eval/arguments binding, octal literals — all confirmed producing SyntaxError.
 4. **for-in fix verified**: `for (k in obj)` now correctly enumerates inherited enumerable properties via prototype chain walk.
 5. **Nested destructuring fix verified**: `[[...x] = values] = []` correctly applies default initializer before descending into nested pattern.
+6. **Strict mode this coercion**: Plain function calls now pass `undefined` as `this`, with save/restore around direct MIR calls. `typeof this === "undefined"` works in strict mode.
+7. **`with` statement rejection**: `with` in strict mode now correctly produces SyntaxError. 34/156 `with` tests pass (strict rejection tests).
 
 ### Remaining for v18
 
 - TDZ enforcement (Phase 3) — expected ~120 additional passes
 - Remaining early errors: for-in/for-of head restrictions, template escape validation, `new.target` assignment
-- Remaining strict mode: `with` rejection, strict `this` coercion, `arguments.callee` restriction
+- Remaining strict mode: `arguments.callee` restriction, strict `this` in sloppy mode should be globalThis
 - Class static blocks codegen (~65 tests)
 - `eval()` implementation (~100 tests)
 
@@ -567,7 +569,7 @@ Run all negative tests separately and categorize:
 | Metric | v16 | v17 Actual | Target |
 |--------|-----|------------|--------|
 | Tests executed | 22,497 | 26,259 | — |
-| Pass rate (executed) | 72.5% | 72.7% | 85% |
+| Pass rate (executed) | 72.5% | 72.8% | 85% |
 | Language pass rate | 81.4% | TBD | 90% |
 | Built-in pass rate | 99.8% | TBD | 99.9% |
 | block-scope | 35.0% | TBD | 85% |
@@ -581,9 +583,11 @@ Run all negative tests separately and categorize:
 | File | Role in v17 |
 |------|-------------|
 | `test/test_js_test262_gtest.cpp` | Feature gate cleanup (Phase 1) |
-| `lambda/js/js_early_errors.cpp` | Early error hardening (Phase 2), strict mode (Phase 6) |
-| `lambda/js/transpile_js_mir.cpp` | TDZ codegen (Phase 3), destructuring fix (Phase 5), strict this (Phase 6) |
-| `lambda/js/js_runtime.cpp` | TDZ sentinel, arguments restrictions (Phase 6) |
-| `lambda/js/js_runtime.h` | TDZ sentinel constant, `js_for_in_keys` declaration |
+| `lambda/js/js_ast.hpp` | `JS_AST_NODE_WITH_STATEMENT` type added (Phase 6) |
+| `lambda/js/build_js_ast.cpp` | `with_statement` CST→AST node building (Phase 6) |
+| `lambda/js/js_early_errors.cpp` | Early error hardening (Phase 2), strict mode `with` rejection (Phase 6) |
+| `lambda/js/transpile_js_mir.cpp` | Destructuring fix (Phase 5), strict `this` coercion (Phase 6) |
+| `lambda/js/js_runtime.h` | `js_for_in_keys` declaration |
 | `lambda/js/js_globals.cpp` | `js_for_in_keys()` implementation (Phase 4) |
-| `lambda/sys_func_registry.c` | MIR import registration for new runtime functions |
+| `lambda/sys_func_registry.c` | MIR import registration for `js_for_in_keys`, `js_set_this` |
+| `build_lambda_config.json` | Removed `LAMBDA_RUBY` define (build fix) |

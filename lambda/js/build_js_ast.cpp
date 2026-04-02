@@ -1667,6 +1667,11 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         return build_js_import_statement(tp, stmt_node);
     } else if (strcmp(node_type, "export_statement") == 0) {
         return build_js_export_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "with_statement") == 0) {
+        // v17: build minimal with-statement node for early error rejection in strict mode
+        JsAstNode* with_stmt = alloc_js_ast_node(tp, JS_AST_NODE_WITH_STATEMENT, stmt_node, sizeof(JsAstNode));
+        with_stmt->type = &TYPE_NULL;
+        return with_stmt;
     } else if (strcmp(node_type, "labeled_statement") == 0) {
         JsLabeledStatementNode* labeled = (JsLabeledStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_LABELED_STATEMENT, stmt_node, sizeof(JsLabeledStatementNode));
         labeled->base.type = &TYPE_NULL;

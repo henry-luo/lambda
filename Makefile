@@ -705,6 +705,8 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter-lambda/src/*.o
 	@rm -f lambda/tree-sitter-javascript/libtree-sitter-javascript.a lambda/tree-sitter-javascript/src/*.o
 	@rm -f lambda/tree-sitter-bash/libtree-sitter-bash.a lambda/tree-sitter-bash/src/*.o
+	@rm -f lambda/tree-sitter-python/libtree-sitter-python.a lambda/tree-sitter-python/src/*.o
+	@rm -f lambda/tree-sitter-typescript/libtree-sitter-typescript.a lambda/tree-sitter-typescript/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
 	@rm -rf build_temp/re2-noabsl/cmake_build

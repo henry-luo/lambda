@@ -515,6 +515,13 @@ static Item make_builtin_exc_class(const char* name, Item base) {
 extern "C" void py_init_builtin_classes(void) {
     if (get_type_id(py_object_class) != LMD_TYPE_NULL) return;  // already done
 
+    // register static Item variables as GC roots (BSS memory invisible to stack scanning)
+    {
+        heap_register_gc_root(&py_object_class.item);
+        heap_register_gc_root(&py_type_class.item);
+        heap_register_gc_root_range((uint64_t*)py_builtin_class_items, PY_BUILTIN_CLASS_MAX);
+    }
+
     // 'object' — base of all classes, no bases
     Item obj_name  = (Item){.item = s2it(heap_create_name("object"))};
     Item obj_bases = py_list_new(0);
