@@ -671,6 +671,13 @@ section {
   text-align: center;
 }
 
+.stat-item {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg) var(--space-md);
+}
+
 .stat-item .stat-value {
   font-size: 2rem;
   font-weight: 700;
