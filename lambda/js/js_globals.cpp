@@ -745,6 +745,20 @@ extern "C" Item js_array_fill(Item arr_item, Item value) {
 // instanceof operator — walks prototype chain
 // =============================================================================
 
+// partial JsFunction layout for accessing function name (used by instanceof fallback)
+struct JsFuncName {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+};
+
 extern "C" Item js_instanceof(Item left, Item right) {
     // right should be a constructor (a class). We check if left's prototype chain
     // contains right's prototype. For our implementation, we check if right has
@@ -785,6 +799,14 @@ extern "C" Item js_instanceof(Item left, Item right) {
             }
             obj = map_get(obj.map, proto_key_item);
             depth++;
+        }
+        // v18c: __ctor__ walk failed — fall through to name-based check using
+        // the function's name (handles built-in constructors like TypeError
+        // passed as variable arguments, e.g. assert.throws(TypeError, fn))
+        JsFuncName* fp = (JsFuncName*)right.function;
+        if (fp->name && fp->name->len > 0) {
+            Item name_item = (Item){.item = s2it(fp->name)};
+            return js_instanceof_classname(left, name_item);
         }
         return (Item){.item = b2it(false)};
     }
@@ -882,6 +904,17 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
             String* on = it2s(obj_name);
             if (on->len == rn->len && strncmp(on->chars, rn->chars, on->len) == 0) {
                 return (Item){.item = b2it(true)};
+            }
+            // error hierarchy: TypeError/RangeError/SyntaxError/ReferenceError/URIError/EvalError instanceof Error
+            if (rn->len == 5 && strncmp(rn->chars, "Error", 5) == 0) {
+                if ((on->len == 9 && strncmp(on->chars, "TypeError", 9) == 0) ||
+                    (on->len == 10 && strncmp(on->chars, "RangeError", 10) == 0) ||
+                    (on->len == 11 && strncmp(on->chars, "SyntaxError", 11) == 0) ||
+                    (on->len == 14 && strncmp(on->chars, "ReferenceError", 14) == 0) ||
+                    (on->len == 8 && strncmp(on->chars, "URIError", 8) == 0) ||
+                    (on->len == 9 && strncmp(on->chars, "EvalError", 9) == 0)) {
+                    return (Item){.item = b2it(true)};
+                }
             }
         }
         // walk up __proto__
@@ -1026,61 +1059,76 @@ extern "C" Item js_object_create(Item proto) {
 // the source instance, chained to the original __proto__ for instanceof support.
 
 extern "C" Item js_get_prototype_of(Item object) {
+    // v18g: Arrays → return Array.prototype
+    if (get_type_id(object) == LMD_TYPE_ARRAY) {
+        Item arr_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Array", 5))});
+        if (get_type_id(arr_ctor) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            return js_property_get(arr_ctor, proto_key);
+        }
+        return ItemNull;
+    }
+    // Functions → return Function.prototype
+    if (get_type_id(object) == LMD_TYPE_FUNC) {
+        Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+        if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            return js_property_get(func_ctor, proto_key);
+        }
+        return ItemNull;
+    }
     if (get_type_id(object) != LMD_TYPE_MAP) return ItemNull;
-    Map* m = object.map;
-    if (!m || !m->type) return js_get_prototype(object);
-    TypeMap* tm = (TypeMap*)m->type;
-    if (!tm->shape) return js_get_prototype(object);
 
-    // Get the raw __proto__
+    // v18h: Check if this is a class object (has __instance_proto__) → return Function.prototype
+    {
+        bool own_ip = false;
+        js_map_get_fast_ext(object.map, "__instance_proto__", 18, &own_ip);
+        if (own_ip) {
+            // Class objects inherit from Function.prototype
+            // Check for __proto__ first (set by extends)
+            Item raw = js_get_prototype(object);
+            if (raw.item != ItemNull.item) return raw;
+            Item func_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Function", 8))});
+            if (get_type_id(func_ctor) == LMD_TYPE_FUNC) {
+                Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+                return js_property_get(func_ctor, proto_key);
+            }
+            return ItemNull;
+        }
+    }
+
+    // v18g: If instance has a constructor with a .prototype property,
+    // AND the object is NOT that prototype itself, return constructor.prototype
+    {
+        Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+        Item ctor = js_property_get(object, ctor_key);
+        if (get_type_id(ctor) == LMD_TYPE_MAP) {
+            // user-defined class: read its "prototype" property
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            Item proto = js_property_get(ctor, proto_key);
+            // Guard: don't return self (prototype objects have constructor.prototype === self)
+            if (get_type_id(proto) == LMD_TYPE_MAP && proto.map != object.map) return proto;
+        } else if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+            // built-in constructor: get .prototype via property_get (triggers lazy init)
+            Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+            Item proto = js_property_get(ctor, proto_key);
+            if (get_type_id(proto) == LMD_TYPE_MAP && proto.map != object.map) {
+                return proto;
+            }
+        }
+    }
+
+    // Fallback: check __proto__ property or return Object.prototype
     Item raw_proto = js_get_prototype(object);
+    if (raw_proto.item != ItemNull.item) return raw_proto;
 
-    // Create a new "rich" prototype object with methods and getters
-    Item rich_proto = js_new_object();
-
-    // Walk shape entries and copy __class_name__, __get_*, __set_*, and
-    // function-valued entries (methods) to the rich prototype
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        const char* s = e->name->str;
-        int len = (int)e->name->length;
-
-        bool copy = false;
-        if (len == 14 && memcmp(s, "__class_name__", 14) == 0) {
-            copy = true;
-        } else if (len > 6 && strncmp(s, "__get_", 6) == 0) {
-            copy = true;
-        } else if (len > 6 && strncmp(s, "__set_", 6) == 0) {
-            copy = true;
-        } else if (len > 6 && strncmp(s, "__sym_", 6) == 0) {
-            // Check if the symbol-keyed entry is a function (getter/method)
-            Item val = _map_read_field(e, m->data);
-            if (get_type_id(val) == LMD_TYPE_FUNC) {
-                copy = true;
-            }
-        } else if (len >= 2 && s[0] != '_') {
-            // Non-underscore-prefixed entry: check if it's a function (regular method)
-            Item val = _map_read_field(e, m->data);
-            if (get_type_id(val) == LMD_TYPE_FUNC) {
-                copy = true;
-            }
-        }
-
-        if (copy) {
-            Item val = _map_read_field(e, m->data);
-            Item key = (Item){.item = s2it(heap_create_name(s, len))};
-            js_property_set(rich_proto, key, val);
-        }
-
-        e = e->next;
+    // No __proto__ found — return Object.prototype for plain objects
+    Item obj_ctor = js_get_constructor((Item){.item = s2it(heap_create_name("Object", 6))});
+    if (get_type_id(obj_ctor) == LMD_TYPE_FUNC) {
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        return js_property_get(obj_ctor, proto_key);
     }
-
-    // Chain the rich prototype to the original __proto__ for instanceof support
-    if (raw_proto.item != ItemNull.item && get_type_id(raw_proto) == LMD_TYPE_MAP) {
-        js_set_prototype(rich_proto, raw_proto);
-    }
-
-    return rich_proto;
+    return ItemNull;
 }
 
 // =============================================================================
@@ -1123,6 +1171,22 @@ extern "C" Item js_reflect_construct(Item target, Item args_array) {
 // Object.getOwnPropertyDescriptor — return descriptor for an own property
 // =============================================================================
 
+// v18: partial JsFunction layout for properties_map access
+struct JsFuncProps {
+    TypeId type_id;
+    void* func_ptr;
+    int param_count;
+    Item* env;
+    int env_size;
+    Item prototype;
+    Item bound_this;
+    Item* bound_args;
+    int bound_argc;
+    String* name;
+    int builtin_id;
+    Item properties_map;
+};
+
 extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
     TypeId type = get_type_id(obj);
 
@@ -1159,6 +1223,22 @@ extern "C" Item js_object_get_own_property_descriptor(Item obj, Item name) {
             js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(false)});
             js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(false)});
             return desc;
+        }
+        // v18: check custom properties backing map
+        {
+            JsFuncProps* fn = (JsFuncProps*)obj.function;
+            if (fn->properties_map.item != 0) {
+                bool own = false;
+                Item val = js_map_get_fast_ext(fn->properties_map.map, name_str->chars, name_str->len, &own);
+                if (own) {
+                    Item desc = js_new_object();
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("value", 5))}, val);
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("writable", 8))}, (Item){.item = b2it(true)});
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("enumerable", 10))}, (Item){.item = b2it(true)});
+                    js_property_set(desc, (Item){.item = s2it(heap_create_name("configurable", 12))}, (Item){.item = b2it(true)});
+                    return desc;
+                }
+            }
         }
         return make_js_undefined();
     }
@@ -1423,6 +1503,69 @@ extern "C" Item js_alert(Item msg) {
 // =============================================================================
 // Object.keys — return array of property names
 // =============================================================================
+
+// Object.getOwnPropertyNames — includes non-enumerable own properties
+extern "C" Item js_object_get_own_property_names(Item object) {
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_ARRAY) {
+        // indices + "length"
+        int len = object.array->length;
+        Item result = js_array_new(len + 1);
+        for (int i = 0; i < len; i++) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d", i);
+            js_array_set(result, (Item){.item = i2it(i)}, (Item){.item = s2it(heap_create_name(buf))});
+        }
+        js_array_set(result, (Item){.item = i2it(len)}, (Item){.item = s2it(heap_create_name("length", 6))});
+        return result;
+    }
+    if (type == LMD_TYPE_FUNC) {
+        // function own properties: length, name, prototype + custom
+        Item result = js_array_new(3);
+        int i = 0;
+        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("length", 6))});
+        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("name", 4))});
+        js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name("prototype", 9))});
+        return result;
+    }
+    if (type != LMD_TYPE_MAP) return js_array_new(0);
+    Map* m = object.map;
+    if (!m || !m->type) return js_array_new(0);
+    TypeMap* tm = (TypeMap*)m->type;
+    // count visible entries (skip engine-internal __ but include non-enumerable)
+    int count = 0;
+    ShapeEntry* e = tm->shape;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) skip = true;
+        }
+        if (!skip) count++;
+        e = e->next;
+    }
+    Item result = js_array_new(count);
+    e = tm->shape;
+    int i = 0;
+    while (e) {
+        const char* s = e->name->str;
+        int len = (int)e->name->length;
+        bool skip = (len >= 2 && s[0] == '_' && s[1] == '_');
+        if (!skip) {
+            Item val = _map_read_field(e, m->data);
+            if (val.item == JS_DELETED_SENTINEL_VAL) { e = e->next; continue; }
+            char nbuf[256];
+            int nlen = len < 255 ? len : 255;
+            memcpy(nbuf, s, nlen);
+            nbuf[nlen] = '\0';
+            js_array_set(result, (Item){.item = i2it(i++)}, (Item){.item = s2it(heap_create_name(nbuf))});
+        }
+        e = e->next;
+    }
+    return result;
+}
 
 extern "C" Item js_object_keys(Item object) {
     TypeId type = get_type_id(object);
@@ -1870,6 +2013,27 @@ extern "C" Item js_object_spread_into(Item target, Item source) {
 // =============================================================================
 
 extern "C" Item js_has_own_property(Item obj, Item key) {
+    // v18: handle function objects — prototype, name, length, and custom properties
+    if (get_type_id(obj) == LMD_TYPE_FUNC) {
+        Item k = js_to_string(key);
+        if (get_type_id(k) != LMD_TYPE_STRING) return (Item){.item = b2it(false)};
+        String* ks = it2s(k);
+        if (!ks) return (Item){.item = b2it(false)};
+        // built-in own properties
+        if ((ks->len == 9 && strncmp(ks->chars, "prototype", 9) == 0) ||
+            (ks->len == 4 && strncmp(ks->chars, "name", 4) == 0) ||
+            (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0)) {
+            return (Item){.item = b2it(true)};
+        }
+        // check custom properties backing map
+        JsFuncProps* fn = (JsFuncProps*)obj.function;
+        if (fn->properties_map.item != 0) {
+            bool own = false;
+            js_map_get_fast_ext(fn->properties_map.map, ks->chars, ks->len, &own);
+            if (own) return (Item){.item = b2it(true)};
+        }
+        return (Item){.item = b2it(false)};
+    }
     if (get_type_id(obj) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
     // Convert symbol keys to their internal string representation
     Item k;
@@ -2486,6 +2650,11 @@ static bool js_ctor_cache_init = false;
 // Dummy func_ptr for constructors (makes typeof return "function")
 static Item js_ctor_placeholder() { return ItemNull; }
 
+// v18: Real constructor functions for type coercion calls (Boolean(x), Number(x), String(x))
+static Item js_ctor_boolean_fn(Item arg) { return js_to_boolean(arg); }
+static Item js_ctor_number_fn(Item arg) { return js_to_number(arg); }
+static Item js_ctor_string_fn(Item arg) { return js_to_string(arg); }
+
 // Forward declaration of JsFunction struct (matches js_runtime.cpp definition)
 struct JsCtor {
     TypeId type_id;
@@ -2499,6 +2668,7 @@ struct JsCtor {
     int bound_argc;
     String* name;
     int builtin_id;
+    Item properties_map; // v18: must match JsFunction layout
 };
 
 static Item js_create_constructor(int ctor_id, const char* name, int param_count) {
@@ -2513,7 +2683,11 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     // caches by func_ptr and all constructors share js_ctor_placeholder.
     JsCtor* fn = (JsCtor*)pool_calloc(js_input->pool, sizeof(JsCtor));
     fn->type_id = LMD_TYPE_FUNC;
-    fn->func_ptr = (void*)js_ctor_placeholder;
+    // v18: Use real function pointers for type coercion constructors
+    if (ctor_id == JS_CTOR_BOOLEAN) fn->func_ptr = (void*)js_ctor_boolean_fn;
+    else if (ctor_id == JS_CTOR_NUMBER) fn->func_ptr = (void*)js_ctor_number_fn;
+    else if (ctor_id == JS_CTOR_STRING) fn->func_ptr = (void*)js_ctor_string_fn;
+    else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
     fn->env = NULL;
     fn->env_size = 0;

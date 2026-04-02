@@ -120,7 +120,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "arbitrary-module-namespace-names",
     "json-modules", "source-phase-imports",
     "AggregateError",
-    "numeric-separator-literal",
     "error-cause",
     "symbols-as-weakmap-keys",
     "Set.prototype.intersection",
@@ -529,7 +528,6 @@ static Test262RunResult run_test262(const std::string& test_path) {
     if (meta.is_async) return {T262_SKIP, "async flag"};
     if (meta.is_module) return {T262_SKIP, "module flag"};
     if (meta.is_raw) return {T262_SKIP, "raw flag"};
-    if (meta.is_strict) return {T262_SKIP, "onlyStrict flag"};
     if (has_unsupported_feature(meta)) return {T262_SKIP, "unsupported feature"};
 
     // check for eval() usage in test body (after frontmatter)
@@ -554,6 +552,9 @@ static Test262RunResult run_test262(const std::string& test_path) {
     }
 
     // append test source
+    if (meta.is_strict) {
+        combined += "\"use strict\";\n";
+    }
     combined += source;
 
     // write to temp file

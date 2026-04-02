@@ -1359,6 +1359,11 @@ JitImport jit_runtime_imports[] = {
     {"js_set_prototype", FPTR(js_set_prototype)},
     {"js_link_base_prototype", FPTR(js_link_base_prototype)},
     {"js_prototype_lookup", FPTR(js_prototype_lookup)},
+    {"js_mark_non_enumerable", FPTR(js_mark_non_enumerable)},
+    {"js_mark_all_non_enumerable", FPTR(js_mark_all_non_enumerable)},
+    {"js_new_number_wrapper", FPTR(js_new_number_wrapper)},
+    {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
+    {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},
 
     // ========================================================================
     // Python runtime functions
