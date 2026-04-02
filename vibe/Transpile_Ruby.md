@@ -555,16 +555,16 @@ regression tests pass (758/759 lambda, 32/32 radiant — 1 pre-existing test262 
 | Output | `puts`, `p`, `print` | ✅ Verified |
 | Arrays | `[1, 2, 3]`, `.length`, subscript access, `.push` | ✅ Verified |
 | Boolean ops | `&&`, `||`, `!` with Ruby truthiness (`0` is truthy) | ✅ Verified |
-| Bitwise | `&`, `|`, `^`, `~`, `<<`, `>>` | Planned |
-| Multiple assignment | `a, b = 1, 2` | Planned |
-| String interpolation | `"#{expr}"` | Planned |
-| Statement mods | `x if cond`, `x unless cond`, `x while cond` | Planned |
-| Hashes | `{a: 1, "b" => 2}`, `[]` access, `keys`, `values` | Planned |
-| Ranges | `1..10`, `1...10`, `to_a` | Planned |
-| `case`/`when` | With `===` case equality dispatch | Planned |
-| `:symbol` literals | Symbols via name pool | Planned |
-| `for..in` / `until` | Loop variants | Planned |
-| Default params | `def foo(x, y=10)` | Planned |
+| Bitwise | `&`, `|`, `^`, `~`, `<<`, `>>` | ✅ Verified |
+| Multiple assignment | `a, b = 1, 2` | ✅ Verified |
+| String interpolation | `"#{expr}"` | ✅ Verified |
+| Statement mods | `x if cond`, `x unless cond`, `x while cond` | ✅ Verified |
+| Hashes | `{a: 1, "b" => 2}`, `[]` access | ✅ Verified |
+| Ranges | `1..10`, `1...10` | ✅ Verified |
+| `case`/`when` | With `===` case equality dispatch | ✅ Verified |
+| `:symbol` literals | Symbols via name pool | ✅ Verified |
+| `for..in` / `until` | Loop variants | ✅ Verified |
+| Default params | `def foo(x, y=10)` | ✅ Verified |
 
 ### Phase 2: OOP & Blocks (~4K LOC)
 

@@ -52,7 +52,8 @@
     ],
     "defines": [
         "SQLITE_THREADSAFE=0",
-        "SQLITE_OMIT_LOAD_EXTENSION"
+        "SQLITE_OMIT_LOAD_EXTENSION",
+        "LAMBDA_RUBY"
     ],
     "includes": [
         ".",

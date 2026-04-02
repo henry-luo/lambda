@@ -62,6 +62,7 @@ typedef enum CssEnumGroup {
     CSS_VALUE_GROUP_TEXT_BOX_TRIM,       // none, trim-start, trim-end, trim-both
     CSS_VALUE_GROUP_TEXT_BOX_EDGE,       // auto, text, cap, ex, ideographic, alphabetic
     CSS_VALUE_GROUP_SPECIAL_TYPE,        // _length, _percentage, _number, _integer, _angle
+    CSS_VALUE_GROUP_SYSTEM_FONT,         // caption, icon, menu, message-box, small-caption, status-bar
     CSS_VALUE_GROUP_MISC,                // other values that don't fit clear categories
     CSS_VALUE_GROUP_RADINT,              // Radiant specific values
 } CssEnumGroup;
@@ -500,6 +501,13 @@ typedef enum CssEnum : int16_t {
     // Background repeat values
     CSS_VALUE_REPEAT,      // background-repeat repeat
     CSS_VALUE_NO_REPEAT,   // background-repeat no-repeat
+    // CSS 2.1 §15.8: System font keywords for font shorthand
+    CSS_VALUE_CAPTION,
+    CSS_VALUE_ICON,
+    CSS_VALUE_MENU,
+    CSS_VALUE_MESSAGE_BOX,
+    CSS_VALUE_SMALL_CAPTION,
+    CSS_VALUE_STATUS_BAR,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY
