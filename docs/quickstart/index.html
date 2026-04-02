@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quick Start — Lambda Script</title>
+  <meta name="description" content="Get up and running with Lambda Script in 15 minutes. Learn to parse, transform, validate, and render documents.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+    <button class="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <ul class="nav-links">
+      <li><a href="/docs/" class="active">Docs</a></li>
+      <li><a href="/docs/language-tour/">Language Tour</a></li>
+      <li><a href="/examples/">Examples</a></li>
+      <li><a href="/blog/">Blog</a></li>
+      <li><a href="/download/" class="nav-cta">Download</a></li>
+    </ul>
+    <button class="theme-toggle" aria-label="Toggle theme">☀</button>
+  </div>
+</nav>
+
+<div class="page-header">
+  <div class="container">
+    <span class="section-label">Quick Start</span>
+    <h1>Your First 15 Minutes with Lambda Script</h1>
+    <p>Download, explore the REPL, transform data, and render a document.</p>
+  </div>
+</div>
+
+<section class="doc-content">
+  <div class="container-narrow">
+
+    <h2>Step 1: Install Lambda Script</h2>
+    <p>Download the binary from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">GitHub Releases</a>, unzip, and add it to your PATH. See <a href="/download/">Download &amp; Install</a> for detailed instructions.</p>
+    <p>Verify the installation:</p>
+<pre><code>lambda --help</code></pre>
+
+    <h2>Step 2: Explore the REPL</h2>
+    <p>Start the interactive REPL by running <code>lambda</code> with no arguments:</p>
+<pre><code>$ lambda
+λ> 1 + 2
+3
+
+λ> [1, 2, 3] | ~ * 10
+[10, 20, 30]
+
+λ> let greeting = "Hello, Lambda Script!"
+"Hello, Lambda Script!"
+
+λ> len(greeting)
+21
+
+λ> quit</code></pre>
+    <p>The REPL supports multi-line input. Type <code>quit</code> or <code>exit</code> to leave.</p>
+
+    <h2>Step 3: Transform Data with Pipes</h2>
+    <p>Create a file called <code>hello.ls</code>:</p>
+<pre><code>// hello.ls — Your first Lambda Script
+let data = [
+  {name: "Alice", age: 30, active: true},
+  {name: "Bob",   age: 25, active: false},
+  {name: "Carol", age: 35, active: true}
+]
+
+// Filter active users, extract names, sort
+data that ~.active | ~.name | sort</code></pre>
+    <p>Run it:</p>
+<pre><code>$ lambda hello.ls
+["Alice", "Carol"]</code></pre>
+
+    <h2>Step 4: Parse and Convert Formats</h2>
+    <p>Lambda Script can parse many formats into a unified tree and convert between them:</p>
+<pre><code>// Convert JSON to YAML
+$ lambda convert data.json -t yaml -o data.yaml
+
+// Convert Markdown to HTML
+$ lambda convert readme.md -t html -o readme.html
+
+// Convert LaTeX to HTML
+$ lambda convert formula.tex -t html -o formula.html --full-document</code></pre>
+
+    <p>You can also parse and transform inside scripts:</p>
+<pre><code>// transform.ls
+let doc = input("readme.md", 'markdown')
+
+// Query all images
+let images = doc?&lt;img&gt;
+images | ~.src</code></pre>
+
+    <h2>Step 5: Validate Data</h2>
+    <p>Define a schema and validate JSON/YAML/HTML:</p>
+<pre><code>// schema.ls — A Lambda schema
+type User = {
+    name: string,
+    age: int that (0 &lt;= ~ &lt;= 150),
+    email: string?
+}</code></pre>
+<pre><code>$ lambda validate users.json -s schema.ls</code></pre>
+    <p>HTML documents are validated automatically against the HTML5 schema (no <code>-s</code> needed):</p>
+<pre><code>$ lambda validate page.html</code></pre>
+
+    <h2>Step 6: Render and View Documents</h2>
+    <p>Open any supported document in the native viewer:</p>
+<pre><code>$ lambda view                   # opens demo page
+$ lambda view page.html         # open an HTML file
+$ lambda view readme.md         # render Markdown
+$ lambda view diagram.mmd       # render a Mermaid diagram
+$ lambda view https://example.com</code></pre>
+
+    <p>Render to image or PDF:</p>
+<pre><code>$ lambda render page.html -o output.svg
+$ lambda render page.html -o output.pdf
+$ lambda render page.html -o screenshot.png -vw 1920 -vh 1080</code></pre>
+
+    <h2>Step 7: Write a Document Pipeline</h2>
+    <p>Combine parsing, transformation, and rendering in a single script:</p>
+<pre><code>// pipeline.ls — End-to-end document pipeline
+let doc = input("report.md", 'markdown')
+
+// Extract all headings
+let headings = doc?&lt;h1&gt; ++ doc?&lt;h2&gt; ++ doc?&lt;h3&gt;
+
+// Build a table of contents
+let toc = &lt;nav class: "toc"
+    &lt;h2 "Table of Contents"&gt;
+    &lt;ul (for (h in headings) &lt;li &lt;a href: ("#" ++ h.id); h[string]&gt;&gt;)&gt;
+&gt;
+
+// Wrap in styled HTML
+&lt;html
+    &lt;head &lt;style "body { max-width: 800px; margin: 0 auto; font-family: sans-serif; }"&gt;&gt;
+    &lt;body toc, doc&gt;
+&gt;</code></pre>
+<pre><code>$ lambda pipeline.ls | lambda render -o report.pdf</code></pre>
+
+    <h2>What's Next?</h2>
+    <div class="card-list" style="margin-top: var(--space-lg);">
+      <a href="/docs/language-tour/" class="card">
+        <span class="card-tag purple">Learn</span>
+        <h3>Language Tour</h3>
+        <p>Deep dive into syntax, types, functions, and expressions.</p>
+      </a>
+      <a href="/docs/cli/" class="card">
+        <span class="card-tag blue">Reference</span>
+        <h3>CLI Reference</h3>
+        <p>Explore all commands, flags, and options.</p>
+      </a>
+      <a href="/recipes/" class="card">
+        <span class="card-tag green">Practical</span>
+        <h3>Recipes</h3>
+        <p>Task-oriented guides: convert, validate, render, transform.</p>
+      </a>
+    </div>
+
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="/" class="nav-logo"><span class="logo-symbol">λ</span> Lambda Script</a>
+        <p>A cross-platform functional scripting language and document processing engine.</p>
+      </div>
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="/docs/quickstart/">Quick Start</a></li>
+          <li><a href="/docs/language-tour/">Language Tour</a></li>
+          <li><a href="/docs/cli/">CLI Reference</a></li>
+          <li><a href="/docs/">All Docs</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Resources</h4>
+        <ul>
+          <li><a href="/recipes/">Recipes</a></li>
+          <li><a href="/formats/">Formats</a></li>
+          <li><a href="/examples/">Examples</a></li>
+          <li><a href="/blog/">Blog</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/henry-luo/lambda" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="/community/">Community</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Lambda Script · MIT License · Built with ♥ by <a href="https://github.com/henry-luo">Henry Luo</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="../../js/main.js"></script>
+</body>
+</html>
