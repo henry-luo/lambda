@@ -1,8 +1,9 @@
 # Reactive UI Phase 2 — End-to-End Interactive Todo App
 
 **Date:** 2026-04-02
-**Status:** Proposal
+**Status:** Phase 6 & 7 complete, Phase 9 partial (toggle test passing)
 **Prerequisite:** Phases 1–4 complete (Reactive_UI.md), Phase 5 event dispatch bridge complete
+**Commit:** `a624cf18` — "reactive ui automated test"
 
 ---
 
@@ -11,6 +12,7 @@
 1. [Objective](#1-objective)
 2. [Current State Assessment](#2-current-state-assessment)
 3. [Gap Analysis](#3-gap-analysis)
+   - [3.1 Bugs Found and Fixed](#31-bugs-found-and-fixed-during-implementation)
 4. [Phase 6: Complete Event Dispatch to Handler Execution](#4-phase-6-complete-event-dispatch-to-handler-execution)
    - [6.1 Handler Invocation Context](#61-handler-invocation-context)
    - [6.2 Event Object Construction](#62-event-object-construction)
@@ -36,6 +38,7 @@
 8. [Architecture Diagram](#8-architecture-diagram)
 9. [Implementation Order](#9-implementation-order)
 10. [Risk Analysis](#10-risk-analysis)
+11. [Files Modified](#11-files-modified)
 
 ---
 
@@ -88,9 +91,9 @@ lambda view test/lambda/ui/todo.ls
 
 ## 3. Gap Analysis
 
-Despite all components being individually implemented, the end-to-end reactive loop has several gaps that prevent interactive behavior:
+Despite all components being individually implemented, the end-to-end reactive loop had several gaps. All critical gaps (1–5, 7) have been resolved. Gaps 4 and 6 are deferred to Phase 8.
 
-### Gap 1: Handler Context Binding
+### Gap 1: Handler Context Binding — ✅ RESOLVED
 
 **Problem:** `dispatch_lambda_handler` invokes `handler_fn(source_item)` with just the source model item. But the handler body needs access to:
 - Template-local **state variables** (e.g., `toggled`) — read and write
@@ -99,13 +102,13 @@ Despite all components being individually implemented, the end-to-end reactive l
 
 **Current state:** MIR-compiled handlers call `tmpl_state_get`/`tmpl_state_set` internally (codegen inserts these calls for state variable reads/writes). The `source_item` argument becomes the `model_item` key for state lookups. However, the handler function signature is `Item handler(Item model)` — it receives only the model and derives `template_ref` from a global set during codegen.
 
-**What to verify:** Confirm that the MIR codegen for handler bodies correctly:
+**Resolution:** Verified that MIR codegen correctly:
 1. Sets `~` (context) to the model parameter
 2. Calls `tmpl_state_get_or_init(model, template_ref, "toggled", default)` for state reads
 3. Calls `tmpl_state_set(model, template_ref, "toggled", new_value)` for state writes
 4. Calls `render_map_mark_dirty(model, template_ref)` after state mutation
 
-### Gap 2: Post-Handler Re-Transform Robustness
+### Gap 2: Post-Handler Re-Transform Robustness — ✅ RESOLVED
 
 **Problem:** `render_map_retransform()` re-executes dirty template bodies and replaces result nodes in the element tree. Then `rebuild_lambda_doc()` does a full DOM rebuild (create DOM tree → CSS parse → cascade → layout → render). But:
 
@@ -113,15 +116,15 @@ Despite all components being individually implemented, the end-to-end reactive l
 - After replacement, the element tree's `parent` pointers may be stale.
 - `rebuild_lambda_doc()` creates an entirely new DOM tree, so stale parent pointers in the Lambda element tree don't affect DOM correctness — but they could cause issues in the next render_map_reverse_lookup if native_element pointers change.
 
-**What to verify:** After `rebuild_lambda_doc()`, the new DOM tree's `DomElement->native_element` pointers must be updated so that the next click's reverse lookup succeeds. Check that `build_dom_tree_from_element()` sets `native_element` correctly for every DOM node.
+**Resolution:** Verified that `build_dom_tree_from_element()` correctly sets `native_element` for every DOM node, enabling reverse lookup after rebuilds. The full DOM rebuild approach ensures correctness on each cycle.
 
-### Gap 3: Render Map Survival Across Rebuilds
+### Gap 3: Render Map Survival Across Rebuilds — ✅ RESOLVED
 
 **Problem:** The render map records `(source_item, template_ref) → result_node`. After retransform replaces a result_node, the forward map's `result_node` pointer is updated. But the **reverse map** (result_node → source_item) uses the result_node's bits as the key. After retransform produces a **new** result element (with a different pointer), the reverse map entry for the **old** pointer is stale.
 
-**Required fix:** `render_map_retransform()` must update the reverse map: remove the old result_node entry and insert the new one. Check if this is already done.
+**Resolution:** `render_map_retransform()` already updates the reverse map: removes the old result_node entry and inserts the new one. Verified working across multiple toggle cycles.
 
-### Gap 4: Event Object Not Passed to Handler
+### Gap 4: Event Object Not Passed to Handler — Deferred to Phase 8
 
 **Problem:** Many handlers declare an event parameter: `on click(evt) { ... }`. However, `dispatch_lambda_handler` calls `handler_fn(source_item)` — no event object is passed. Handlers that inspect `evt.target`, `evt.x`, `evt.y`, etc. will receive incorrect data.
 
@@ -132,19 +135,19 @@ Despite all components being individually implemented, the end-to-end reactive l
 
 **Recommendation:** Option (C) for Phase 6. The todo toggle handler doesn't reference `evt`. Construct a proper event object in a later phase.
 
-### Gap 5: Template Body Re-Execution State Binding
+### Gap 5: Template Body Re-Execution State Binding — ✅ RESOLVED
 
 **Problem:** When `render_map_retransform()` re-executes a template body (`body_func(source_item)`), the body must pick up the **updated** state values. Since state is in the central store keyed by `(model_item, template_ref, state_name)`, and the body calls `tmpl_state_get_or_init()` internally, this should work — but only if the `template_ref` used in the body matches the one used in the handler.
 
-**What to verify:** Both handler and body use the same interned `template_ref` pointer (set during MIR codegen for the TemplateEntry).
+**Resolution:** Both handler and body now use the same interned `template_ref` pointer. Fixed by interning `template_ref` via `name_pool_create_len()` in `transpile-mir.cpp` — see [Bug #1](#bugs-found-and-fixed) below.
 
-### Gap 6: No UI Automation for Lambda Script Documents
+### Gap 6: No UI Automation for Lambda Script Documents — ✅ RESOLVED
 
 **Problem:** The event_sim framework's `"html"` field in JSON tests points to a document file. The `load_doc_by_format()` function already routes `.ls` files to `load_lambda_script_doc()`. However, no existing UI automation test uses a `.ls` file as the document source.
 
-**Required:** Validate that `view_doc_in_window_with_events("todo.ls", "todo_test.json", true)` works in headless mode: loads the Lambda script, renders the todo app, then executes simulated events and assertions.
+**Required:** Validated — `view_doc_in_window_with_events("todo.ls", "todo_toggle.json", true)` works in headless mode. See `test/ui/todo_toggle.json` and test results below.
 
-### Gap 7: Missing Assertions for Reactive State
+### Gap 7: Missing Assertions for Reactive State — ✅ Sufficient
 
 **Problem:** The existing assertion types (`assert_text`, `assert_style`, `assert_rect`, etc.) verify DOM/visual state. For reactive testing, we also need to verify:
 - That clicking an element changes visible text (e.g., checkbox "✓" appears)
@@ -152,6 +155,61 @@ Despite all components being individually implemented, the end-to-end reactive l
 - That new elements appear or disappear after model mutation
 
 **Assessment:** The existing `assert_text`, `assert_style`, and `assert_attribute` assertions may suffice. `assert_text` checks text content after re-render. `assert_attribute` checks the `class` attribute. No new assertion types may be needed — the DOM is fully rebuilt after each handler.
+
+---
+
+## 3.1 Bugs Found and Fixed During Implementation {#bugs-found-and-fixed}
+
+Five critical bugs were discovered and fixed while bringing the reactive loop end-to-end. All fixes are in commit `a624cf18`.
+
+### Bug #1 — template_ref Dangling Pointer (transpile-mir.cpp)
+
+**Symptom:** `render_map_mark_dirty()` never matched — handler and body used different `template_ref` pointers.
+
+**Root cause:** MIR codegen built `template_ref` from a stack-local `char name_buf[64]`. The pointer was baked into MIR as an `int64` constant, but the stack buffer was reclaimed after the compilation function returned, leaving a dangling pointer. The handler's `template_ref` and the body's `template_ref` pointed to different (or garbage) memory, so pointer-equality keying in the render map and state store always failed.
+
+**Fix:** Intern `template_ref` strings via `name_pool_create_len()` in three locations in `transpile-mir.cpp`:
+1. Body function: `tmpl_ref = name_pool_create_len(mt->name_pool, name_buf, strlen(name_buf))->chars`
+2. Handler call site: intern `vname` before passing to `transpile_handler_def`
+3. Added `NamePool* name_pool` field to `MirTranspiler` struct, threaded through from `transpile_mir_ast()`
+
+### Bug #2 — Stale EvalContext After Script Execution (event.cpp)
+
+**Symptom:** SEGV in `heap_data_alloc()` during retransform body re-execution.
+
+**Root cause:** The thread-local `__thread EvalContext* context` (used by GC allocation functions) was set to `&runner->context` during `run_script_mir()`. After the initial script execution returned, the `Runner` was stack-local and its `context` field was reclaimed. When `dispatch_lambda_handler` invoked the handler (which allocates via GC), `context` was a dangling pointer.
+
+**Fix:** In `dispatch_lambda_handler` (event.cpp), create a temporary `EvalContext handler_ctx` populated from `doc->lambda_runtime` (heap, nursery, name_pool, pool). Set `context = &handler_ctx` before handler invocation, restore after.
+
+### Bug #3 — Stale input_context Arena (event.cpp)
+
+**Symptom:** SEGV at `arena_alloc(arena=0x0000000000000001)` during list expansion in retransform.
+
+**Root cause:** The thread-local `__thread Context* input_context` (used by `expand_list()` for arena fallback allocation) was stale from the initial script execution. Its `arena` field contained garbage (0x1).
+
+**Fix:** In `dispatch_lambda_handler`, save and clear `input_context = nullptr` before handler invocation, restore after. When `input_context` is null, the fallback allocation path is skipped.
+
+### Bug #4 — fn_not Return Type Mismatch (transpile-mir.cpp)
+
+**Symptom:** State value never toggled correctly — `not toggled` always produced the same garbage value (`0x360060250`).
+
+**Root cause:** `fn_not()` returns `Bool` (a `uint8_t`), but MIR reads the return register as a full `i64`. The upper 56 bits contained garbage, which was stored as the Item value. Additionally, `!` in Lambda is **type negation** (exclusion), not logical NOT — the correct keyword is `not`.
+
+**Fix:** Two changes:
+1. In `transpile-mir.cpp`, wrapped `fn_not` result with `emit_box_bool()` (zero-extends uint8_t to i64, ORs with BOOL_TAG, handles BOOL_ERROR)
+2. In `test/lambda/ui/todo.ls`, changed `toggled = !toggled` to `toggled = not toggled`
+
+### Bug #5 — GC Collecting Live Doc Root (render_map.cpp)
+
+**Symptom:** After first toggle, second toggle showed stale DOM — new retransform element had same address as old doc root.
+
+**Root cause:** `render_map_retransform()` called `heap_gc_collect()` before re-executing body functions. The GC mark phase didn't know about `s_doc_root` (a file-static variable in `cmd_layout.cpp`), so it collected the live doc root element. The next allocation reused the same address, causing the retransform to appear to produce the "same" element.
+
+**Fix:** Removed `heap_gc_collect()` from `render_map_retransform()`. Added comment: "NOTE: Do NOT call heap_gc_collect() here — the GC doesn't know about s_doc_root or other static roots."
+
+### Known Issue — Whitespace Text Stripping
+
+Single-space `" "` as element text content becomes empty string `""` after DOM rebuild. Workaround: use `"○"` instead of `" "` for the unchecked checkbox indicator. The root cause is in the DOM builder's whitespace handling — low priority.
 
 ---
 
@@ -895,35 +953,67 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 
 ## 9. Implementation Order
 
-| # | Task | Phase | Deps | Effort | Impact |
+| # | Task | Phase | Deps | Effort | Status |
 |---|------|-------|------|--------|--------|
-| 1 | Verify handler MIR codegen binds state correctly | 6 | — | S | Critical |
-| 2 | Verify render_map reverse index updated on retransform | 7 | — | S | Critical |
-| 3 | Run todo.ls headless, click item, verify toggle in log.txt | 6 | 1,2 | S | Validation |
-| 4 | Fix any issues found in steps 1–3 | 6,7 | 3 | M | Critical |
-| 5 | Cache CSS stylesheet in rebuild_lambda_doc | 7 | — | S | Performance |
-| 6 | Implement `assert_count` in event_sim | 9 | — | S | Testing |
-| 7 | Write todo_toggle.json test, run headless | 9 | 3,6 | M | Testing |
-| 8 | Implement `emit()` system function for cross-template events | 8 | 4 | M | Add/Delete |
-| 9 | Build event object for `on click(evt)` handlers | 6 | 4 | M | Text input |
-| 10 | Wire `on input(evt)` to Radiant text input events | 8 | 9 | M | Text input |
-| 11 | Enhance todo.ls with add/delete/input | 8 | 8,10 | M | Feature |
-| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | Testing |
-| 13 | Add `test-reactive-ui` make target | 9 | 12 | S | CI |
+| 1 | Verify handler MIR codegen binds state correctly | 6 | — | S | ✅ Done — verified, fixed Bug #1 (name_pool interning) |
+| 2 | Verify render_map reverse index updated on retransform | 7 | — | S | ✅ Done — already correct |
+| 3 | Run todo.ls headless, click item, verify toggle in log.txt | 6 | 1,2 | S | ✅ Done — toggle works end-to-end |
+| 4 | Fix any issues found in steps 1–3 | 6,7 | 3 | M | ✅ Done — 5 bugs fixed (see §3.1) |
+| 5 | Cache CSS stylesheet in rebuild_lambda_doc | 7 | — | S | Not started |
+| 6 | Implement `assert_count` in event_sim | 9 | — | S | Not started |
+| 7 | Write todo_toggle.json test, run headless | 9 | 3,6 | M | ✅ Done — 4/4 assertions pass |
+| 8 | Implement `emit()` system function for cross-template events | 8 | 4 | M | Not started |
+| 9 | Build event object for `on click(evt)` handlers | 6 | 4 | M | Not started |
+| 10 | Wire `on input(evt)` to Radiant text input events | 8 | 9 | M | Not started |
+| 11 | Enhance todo.ls with add/delete/input | 8 | 8,10 | M | Not started |
+| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | Not started |
+| 13 | Add `test-reactive-ui` make target | 9 | 12 | S | Not started |
 
 **Effort:** S = small (< half day), M = medium (1–2 days)
 
-**Critical path:** Tasks 1 → 2 → 3 → 4 → 7 (toggle working + tested)
+**Critical path:** Tasks 1 → 2 → 3 → 4 → 7 ✅ (toggle working + tested)
+
+**Next priority:** Task 5 (CSS cache), Task 6 (assert_count), then Phase 8 tasks.
 
 ---
 
 ## 10. Risk Analysis
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Handler MIR codegen doesn't bind state correctly | High | Task 1 verifies this; fix in transpile-mir.cpp |
-| Render map reverse index stale after retransform | High | Task 2 verifies; add reverse_map_update if missing |
+| Risk | Severity | Status |
+|------|----------|--------|
+| Handler MIR codegen doesn't bind state correctly | High | ✅ Mitigated — Bug #1 fixed (name_pool interning) |
+| Render map reverse index stale after retransform | High | ✅ Already correct — no fix needed |
 | Full DOM rebuild too slow for complex apps (>500 elements) | Medium | Acceptable for Phase 6-8; incremental patching in Phase 10 |
-| Lambda GC collects elements still referenced by render map | Medium | Runtime is retained on DomDocument (line 4044); GC roots include render map entries |
+| Lambda GC collects elements still referenced by render map | Medium | ✅ Mitigated — Bug #5 fixed (removed premature GC collect) |
+| Stale thread-local contexts after initial script execution | High | ✅ Mitigated — Bugs #2, #3 fixed (EvalContext + input_context) |
+| fn_not return type mismatch (Bool→i64 upper bits garbage) | High | ✅ Mitigated — Bug #4 fixed (emit_box_bool) |
 | Input element value sync between Radiant state store and Lambda template state | Medium | Phase 8 task 10; may need bidirectional sync mechanism |
 | `emit()` cross-template dispatch requires template instance hierarchy | Medium | Use DOM ancestry (already walked in dispatch_lambda_handler) |
+
+---
+
+## 11. Files Modified
+
+All changes committed in `a624cf18`:
+
+| File | Changes |
+|------|---------|
+| `lambda/transpile-mir.cpp` | Bug #1: name_pool interning for template_ref (3 locations). Bug #4: emit_box_bool after fn_not call |
+| `radiant/event.cpp` | Bug #2: EvalContext setup from lambda_runtime. Bug #3: input_context save/clear in dispatch_lambda_handler |
+| `lambda/render_map.cpp` | Bug #5: removed heap_gc_collect() from retransform |
+| `lambda/template_state.cpp` | Debug logging cleanup |
+| `lambda/lambda-mem.cpp` | Defensive null checks in heap_data_alloc |
+| `lib/gc_heap.c` | Defensive null checks in gc_data_alloc |
+| `lib/gc_data_zone.c` | Debug logging cleanup |
+| `test/lambda/ui/todo.ls` | `not toggled` (was `!toggled`), `"○"` (was `" "`) |
+| `test/ui/todo_toggle.json` | New: headless toggle test, 4 assertions |
+
+### Test Results
+
+```
+$ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_toggle.json --headless
+Assertions: 4 passed, 0 failed — PASS
+
+$ make test-lambda-baseline
+504/507 passed (3 pre-existing failures unrelated to these changes)
+```
