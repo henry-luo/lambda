@@ -258,10 +258,10 @@ static void run_std_sub_batch(
     char command[512];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "lambda.exe test-batch --no-log --c2mir < \"%s\"", manifest_path);
+             "lambda.exe test-batch --no-log --timeout=60 --c2mir < \"%s\"", manifest_path);
 #else
     snprintf(command, sizeof(command),
-             "./lambda.exe test-batch --no-log --c2mir < \"%s\"", manifest_path);
+             "./lambda.exe test-batch --no-log --timeout=60 --c2mir < \"%s\"", manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");
