@@ -369,6 +369,7 @@ typedef enum BashVarAttrFlags {
     BASH_ATTR_ASSOC_ARRAY  = 1 << 5,   // -A
     BASH_ATTR_EXPORT       = 1 << 6,   // -x
     BASH_ATTR_PRINT        = 1 << 7,   // -p
+    BASH_ATTR_NAMEREF      = 1 << 8,   // -n (nameref, not fully supported)
 } BashVarAttrFlags;
 
 // Variable assignment: name=value

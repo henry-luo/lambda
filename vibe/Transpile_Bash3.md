@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Lambda's bash transpiler currently passes **4 of 82** GNU official tests (dbg-support2, dstack2, invert, strip). The 137+ runtime C functions and tree-sitter-to-MIR pipeline are architecturally sound, but the failure patterns reveal that many features are implemented only to the depth of the hand-written baseline tests — not to the depth GNU Bash requires for conformance.
+Lambda's bash transpiler currently passes **10 of 82** GNU official tests (dbg-support, dbg-support2, dstack2, dynvar, ifs, invert, nquote4, strip, tilde, tilde2). The 137+ runtime C functions and tree-sitter-to-MIR pipeline are architecturally sound, but the failure patterns reveal that many features are implemented only to the depth of the hand-written baseline tests — not to the depth GNU Bash requires for conformance.
 
 This proposal takes a **bottom-up approach**: survey what the GNU tests demand, design robust C modules to handle each feature area, unit-test those modules for correctness, then wire the transpiler to call them. Instead of chasing tests one at a time, we build solid foundations that make many tests pass simultaneously.
 
@@ -16,12 +16,14 @@ This proposal takes a **bottom-up approach**: survey what the GNU tests demand, 
 
 | Category | Tests | Count |
 |----------|-------|-------|
-| **PASS** | dbg-support2, dstack2, invert, strip | 4 |
-| **Near-pass (≤10 diff lines)** | ifs-posix(2), tilde(2), tilde2(6), ifs(9), dynvar(10) | 5 |
-| **Low diff (11–30)** | coproc(11), printf(11), exportfunc(15), case(18), comsub-eof(19), nquote4(19), posix2(19), appendop(20), parser(21), lastpipe(22), rsh(24), extglob3(25) | 12 |
-| **Medium diff (31–100)** | posixpat(31), procsub(32), herestr(35), posixpipe(35), attr(38), posixexp2(41), casemod(53), nquote3(61), alias(62), intl(63), cprint(68), getopts(69), set-x(74), set-e(75), dstack(77), nquote2(77), nquote5(87), comsub-posix(91), braces(92), iquote(92), comsub(93), nquote(93) | 22 |
-| **High diff (100–500)** | glob-bracket(104), rhs-exp(105), invocation(106), read(106), vredir(120), type(128), jobs(130), nquote1(134), trap(140), quote(147), quotearray(149), mapfile(155), heredoc(163), redir(176), cond(190), comsub2(198), extglob(216), func(249), glob(261), dbg-support(262), histexp(265), posixexp(308), shopt(315), more-exp(335), test(339), errors(345), arith(368), varenv(371), history(387), complete(388), builtins(485), exp(547), nameref(582), globstar(589), new-exp(811) | 35 |
-| **Crash/timeout** | array(0), assoc(0), extglob2(7.4M), arith-for(18.7M) | 4 |
+| **PASS** | dbg-support, dbg-support2, dstack2, dynvar, ifs, invert, nquote4, strip, tilde, tilde2 | 10 |
+| **Near-pass (≤15 diff lines)** | ifs-posix(1†), iquote(13), coproc(14) | 3 |
+| **Low diff (16–35)** | parser(17), comsub-eof(19), lastpipe(22), appendop(23), extglob3(25), posix2(26), rsh(28), posixpat(31), getopts(34), herestr(35), procsub(35) | 11 |
+| **Medium diff (36–100)** | attr(38), set-e(38), posixexp2(40), casemod(45), rhs-exp(45), case(52), exportfunc(53), set-x(62), cprint(66), dstack(65), intl(73), braces(82), nquote3(85), nquote5(87), comsub-posix(92), nquote2(98), read(98) | 17 |
+| **High diff (100–500)** | glob-bracket(104), comsub(125), comsub2(198), nquote(55), nquote1(132), invocation(493), jobs(131), type(131), alias(135), vredir(130), trap(138), quote(146), quotearray(150), mapfile(165), heredoc(163), cond(191), posixexp(198), extglob(201), func(225), glob(279), histexp(280), shopt(316), test(338), errors(347), varenv(364), arith(369), printf(369), complete(442), exp(439), builtins(501), nameref(586), globstar(595), new-exp(811), array(848), assoc(410), history(1076) | 36 |
+| **Crash/timeout** | extglob2(2.3M), arith-for(3.3M) | 2 |
+
+_†ifs-posix shows 1 diff with 10s timeout but actually has 340 internal test failures with longer timeout_
 
 ### 1.2 Root Cause Patterns
 
@@ -37,10 +39,10 @@ Bash defines a strict word expansion order: brace expansion → tilde expansion 
 
 #### RC2: Pattern Matching Incompleteness
 Case statements, `[[ x == pattern ]]`, and parameter expansion patterns (`${var/pattern/}`) all depend on a common glob/extglob matching engine. Current issues:
-- `;&` and `;;&` case fallthrough operators not implemented
 - Extended globs `?(pat)`, `*(pat)`, `+(pat)`, `@(pat)`, `!(pat)` not supported
 - Bracket expression edge cases (`[:class:]`, `[=equiv=]`) incomplete
 - Pattern matching in `[[ ]]` doesn't handle all quoting correctly
+- Backslash quoting in case patterns: `\x` vs `\\x` vs `$x` — quote removal order matters
 
 **Tests affected:** case, casemod, posixpat, extglob, extglob2, extglob3, glob, glob-bracket, globstar, cond (~10 tests)
 
@@ -519,23 +521,23 @@ If all seven modules are implemented and integrated:
 
 | Current | After Phase A | After Phase B | After Phase C+D |
 |---------|--------------|---------------|-----------------|
-| 4/82 PASS | 15–20 PASS | 20–25 PASS | 30–40 PASS |
+| 10/82 PASS | 20–25 PASS | 25–30 PASS | 35–45 PASS |
 
 ### Near-Pass Tests Most Likely to Flip
 
 | Test | Diff | Blocking Issue | Module |
 |------|------|----------------|--------|
-| ifs-posix | 2 | IFS word splitting | Word Expansion |
-| tilde | 2 | `~root` resolves to current user instead of root's home | Special variables (minor) |
-| tilde2 | 6 | POSIX-mode tilde differences | Word Expansion |
-| ifs | 9 | IFS word splitting | Word Expansion |
-| dynvar | 10 | Missing `$BASHPID`, `$EPOCHSECONDS` | Special variables (minor) |
-| coproc | 11 | Coprocess support | Builtins |
-| printf | 11 | Format specifier gaps | Printf |
-| exportfunc | 15 | `export -f` function export | Builtins |
-| case | 18 | `;&` and `;;&` operators | Pattern Matching |
-| appendop | 20 | `-i` attribute + array append | Variable Attributes |
-| posixpat | 31 | Bracket expression edge cases | Pattern Matching |
+| iquote | 13 | DEL char (0x7f) handling in `$'...'` eval context, `\` in printf | Word Expansion |
+| coproc | 14 | Coprocess support (`coproc` builtin) | Builtins |
+| parser | 17 | Error messages for `-c` syntax errors, `${THIS_SH}` sub-script execution | Error Formatting |
+| comsub-eof | 19 | Here-doc delimited by EOF warnings in sub-files | Redirection |
+| lastpipe | 22 | `shopt -s lastpipe` + pipeline exit propagation | Builtins |
+| appendop | 23 | `-i` attribute enforcement, array `+=`, readonly errors | Variable Attributes |
+| extglob3 | 25 | Extended glob patterns `?(pat)`, `*(pat)` etc. | Pattern Matching |
+| posix2 | 26 | `eval` error handling, `chmod`/file operations in `$TMPDIR` | Sub-script gaps |
+| rsh | 28 | Restricted shell mode (`-r`) | Builtins |
+| posixpat | 31 | POSIX bracket expressions `[:class:]`, `[=equiv=]` | Pattern Matching |
+| getopts | 34 | Error format (line number), `getopts` edge cases in sub-files | Error Formatting |
 
 ### Tests That Remain Hard
 
@@ -623,6 +625,61 @@ If all seven modules are implemented and integrated:
 ---
 
 ## 8. Progress Log
+
+### 2025-04-02: Preprocessor `$$` Fix + AST Argument Merge + IFS Flip
+
+**Baseline:** 31/31 passing
+
+**GNU tests:** 10/82 passing (dbg-support, dbg-support2, dstack2, dynvar, **ifs**, invert, nquote4, strip, tilde, tilde2)
+- `ifs` newly passing (was 9 diffs → 0) — fixed by `$$` preprocessor + argument merge
+- `dbg-support` confirmed passing (was miscounted as failing due to stderr not being captured)
+- Previous session total was 9/82; now 10/82
+
+**Bugs fixed:**
+
+1. **`$$` at end-of-word not expanding** (tree-sitter grammar limitation)
+   - `echo test-$$` produced `test-` instead of `test-PID`
+   - Tree-sitter-bash doesn't recognize `$$` as `simple_expansion(special_variable_name)` when at end of a word/line
+   - Parses `echo test-$$` as `(concatenation (word "test-$$"))` — no expansion node
+   - **Fix:** Added `preprocess_dollar_dollar()` preprocessor pass that replaces `$$` with `${$}` outside single quotes before tree-sitter parsing
+   - Handles: escaped chars, single-quote regions, double-quote regions, `$$` followed by identifier (don't replace)
+   - Applied to all 3 parsing paths: main entry, `bash_source_file`, `bash_eval_string`
+   - Files: `transpile_bash_mir.cpp` (~line 4079)
+
+2. **`bash_source_file` using raw source instead of preprocessed text**
+   - `ts_parser_parse_string` in `bash_source_file` was passing raw `source_text` to tree-sitter instead of the preprocessed `tp->source`
+   - This meant the `$$` preprocessor (and multi-assignment preprocessor) had no effect on sourced files
+   - Files: `transpile_bash_mir.cpp` (`bash_source_file`)
+
+3. **`$a/$b/file` splitting into two arguments** (tree-sitter argument splitting)
+   - `echo $a/$b/file` parsed as two nodes: `argument: (concatenation $a /)` + `argument: (word b/file)`
+   - The `$` between is an anonymous tree-sitter child, invisible to `ts_node_named_child` iteration
+   - **Fix:** Added argument merge detection in `build_command()` in `build_bash_ast.cpp`:
+     - Tracks `prev_arg_end_byte` for each argument
+     - Detects adjacent arguments (no whitespace gap) or arguments with a single `$` gap
+     - Detects anonymous trailing `$` from previous concatenation node
+     - Merges into `BashConcatNode`, flattening nested concat nodes to prevent linked-list corruption
+   - Files: `build_bash_ast.cpp` (argument merge in `build_command`)
+
+4. **Extracted `scan_text_for_dollar_vars()` helper**
+   - Scans a text string for embedded `$IDENTIFIER`, `${...}`, `$?`, `$#`, `$$`, etc. patterns
+   - Splits into `BashConcatNode` with `BashVarRefNode` and `BashWordNode` parts
+   - Handles special variables (`$?`, `$#`, `$@`, `$*`, `$$`, `$!`, `$-`, `$0`–`$9`)
+   - Used by both the argument merge code (for `$` gap text reconstruction) and `build_word()` (for tree-sitter word nodes containing `$`)
+   - Replaced ~140 lines of duplicated inline dollar-scanning logic
+   - Files: `build_bash_ast.cpp` (`scan_text_for_dollar_vars`)
+
+5. **Concat flattening during merge**
+   - When merging adjacent arguments where child_ast is itself a `BashConcatNode`, its parts are flattened into the parent concat
+   - Without flattening, the original child concat's `next` pointer created a corrupted linked list that silently ate subsequent command nodes
+   - Symptom: `echo $a-$b-end` followed by `echo done` would only print `done`
+   - Files: `build_bash_ast.cpp` (merge code in `build_command`)
+
+**Key discovery:** Tree-sitter-bash 0.25.1 has a fundamental limitation where `$` is excluded from the `word` token's character set (it's in `SPECIAL_CHARACTERS`). This means any `$var` that tree-sitter doesn't recognize as an expansion gets split into an anonymous `$` token + a `word` token. The AST builder's merge logic compensates for this at the AST level rather than trying to fix the grammar.
+
+**Cleanup:**
+- Removed temp tree-sitter S-expression dump from main transpile entry
+- Removed temp debug logging in argument merge path
 
 ### 2025-03-31: Preprocessor Array Fix + Baseline Recovery
 
