@@ -1099,13 +1099,69 @@ RbAstNode* build_rb_expression(RbTranspiler* tp, TSNode expr_node) {
 // Statement builders
 // ============================================================================
 
-// Build assignment statement (x = expr)
+// Build assignment statement (x = expr) or multiple assignment (a, b = 1, 2)
 static RbAstNode* build_rb_assignment(RbTranspiler* tp, TSNode assign_node) {
-    RbAssignmentNode* assign = (RbAssignmentNode*)alloc_rb_ast_node(
-        tp, RB_AST_NODE_ASSIGNMENT, assign_node, sizeof(RbAssignmentNode));
-
     TSNode left_node = ts_node_child_by_field_name(assign_node, "left", 4);
     TSNode right_node = ts_node_child_by_field_name(assign_node, "right", 5);
+
+    // check for multiple assignment: left is left_assignment_list
+    const char* left_type = ts_node_type(left_node);
+    if (strcmp(left_type, "left_assignment_list") == 0) {
+        RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)alloc_rb_ast_node(
+            tp, RB_AST_NODE_MULTI_ASSIGNMENT, assign_node, sizeof(RbMultiAssignmentNode));
+        ma->targets = NULL;
+        ma->values = NULL;
+        ma->target_count = 0;
+        ma->value_count = 0;
+
+        // build target list from left_assignment_list children
+        RbAstNode* last_target = NULL;
+        int left_count = (int)ts_node_named_child_count(left_node);
+        for (int i = 0; i < left_count; i++) {
+            TSNode child = ts_node_named_child(left_node, (uint32_t)i);
+            RbAstNode* target = build_rb_expression(tp, child);
+            if (target) {
+                if (!ma->targets) ma->targets = target;
+                else last_target->next = target;
+                last_target = target;
+                ma->target_count++;
+
+                // define variables in scope
+                if (target->node_type == RB_AST_NODE_IDENTIFIER) {
+                    RbIdentifierNode* id = (RbIdentifierNode*)target;
+                    rb_scope_define(tp, id->name, target, RB_VAR_LOCAL);
+                }
+            }
+        }
+
+        // build value list from right_assignment_list or single expression
+        const char* right_type = ts_node_type(right_node);
+        RbAstNode* last_value = NULL;
+        if (strcmp(right_type, "right_assignment_list") == 0) {
+            int right_count = (int)ts_node_named_child_count(right_node);
+            for (int i = 0; i < right_count; i++) {
+                TSNode child = ts_node_named_child(right_node, (uint32_t)i);
+                RbAstNode* val = build_rb_expression(tp, child);
+                if (val) {
+                    if (!ma->values) ma->values = val;
+                    else last_value->next = val;
+                    last_value = val;
+                    ma->value_count++;
+                }
+            }
+        } else {
+            // single value on right (e.g. a, b = array_expr)
+            ma->values = build_rb_expression(tp, right_node);
+            ma->value_count = 1;
+        }
+
+        ma->base.type = &TYPE_ANY;
+        return (RbAstNode*)ma;
+    }
+
+    // simple assignment
+    RbAssignmentNode* assign = (RbAssignmentNode*)alloc_rb_ast_node(
+        tp, RB_AST_NODE_ASSIGNMENT, assign_node, sizeof(RbAssignmentNode));
 
     assign->target = build_rb_expression(tp, left_node);
     assign->value = build_rb_expression(tp, right_node);
