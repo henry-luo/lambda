@@ -7257,8 +7257,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
         }
     }
 
-    // window.getComputedStyle(elem, pseudo)
-    if (jm_is_window_getComputedStyle(call)) {
+    // window.getComputedStyle(elem, pseudo) or bare getComputedStyle(elem, pseudo)
+    if (jm_is_window_getComputedStyle(call) ||
+        (call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER &&
+         ((JsIdentifierNode*)call->callee)->name &&
+         ((JsIdentifierNode*)call->callee)->name->len == 16 &&
+         strncmp(((JsIdentifierNode*)call->callee)->name->chars, "getComputedStyle", 16) == 0)) {
         JsAstNode* arg = call->arguments;
         MIR_reg_t elem = arg ? jm_transpile_box_item(mt, arg) : jm_emit_null(mt);
         MIR_reg_t pseudo = (arg && arg->next) ? jm_transpile_box_item(mt, arg->next) : jm_emit_null(mt);
