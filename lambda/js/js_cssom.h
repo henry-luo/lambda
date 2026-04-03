@@ -108,6 +108,16 @@ Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item value);
 Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name);
 
 /**
+ * Set property on a CSSStyleDeclaration wrapper (rule declarations).
+ * Parses the value as CSS and replaces or adds the declaration.
+ * @param decl_item  Wrapped declaration Item
+ * @param prop_name  String Item with property name (camelCase or CSS)
+ * @param value      String Item with CSS value
+ * @return The value that was set
+ */
+Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value);
+
+/**
  * Call method on a CSSStyleDeclaration wrapper.
  * Supported: getPropertyValue(prop), setProperty(prop, value), removeProperty(prop)
  * @param decl_item    Wrapped declaration Item

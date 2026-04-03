@@ -4416,13 +4416,13 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
         }
     }
 
-    // Return undefined instead of hard error — matches V8 behavior where
-    // ReferenceError is thrown at runtime only if the code path is executed
-    MIR_reg_t undef = jm_new_reg(mt, "undef_var", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, undef),
-        MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
-    return undef;
+    // Fallback: look up property on global object (browser-like named access)
+    // This resolves element IDs as globals, module-level assignments, etc.
+    {
+        MIR_reg_t name_reg = jm_box_string_literal(mt, id->name->chars, (int)id->name->len);
+        return jm_call_1(mt, "js_get_global_property", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+    }
 }
 
 // Binary expression: native arithmetic fast path + boxed fallback

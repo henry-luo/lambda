@@ -1957,6 +1957,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (js_is_css_rule(object)) {
             return js_cssom_rule_set_property(object, key, value);
         }
+        // Check if this is a CSSOM rule declaration wrapper (e.g., rule.style.zIndex = "12345")
+        if (js_is_rule_style_decl(object)) {
+            return js_cssom_rule_decl_set_property(object, key, value);
+        }
         // Setter property dispatch: check for __set_<propName> on object or prototype
         // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
         if (get_type_id(key) == LMD_TYPE_STRING) {

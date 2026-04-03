@@ -405,8 +405,10 @@ Item js_escape(Item str_item);
 Item js_atob(Item str_item);
 Item js_btoa(Item str_item);
 
-// globalThis
+// globalThis / global object
 Item js_get_global_this(void);
+Item js_get_global_object(void);
+Item js_get_global_property(Item key);
 
 // URL constructor
 Item js_url_construct(Item input);

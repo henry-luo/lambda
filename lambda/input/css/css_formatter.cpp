@@ -583,9 +583,33 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         break;
                     case CSS_SELECTOR_PSEUDO_NTH_CHILD:
                         stringbuf_append_str(formatter->output, ":nth-child");
-                        if (simple->value) {
+                        if (simple->argument) {
                             stringbuf_append_str(formatter->output, "(");
-                            stringbuf_append_str(formatter->output, simple->value);
+                            stringbuf_append_str(formatter->output, simple->argument);
+                            stringbuf_append_str(formatter->output, ")");
+                        }
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+                        stringbuf_append_str(formatter->output, ":nth-last-child");
+                        if (simple->argument) {
+                            stringbuf_append_str(formatter->output, "(");
+                            stringbuf_append_str(formatter->output, simple->argument);
+                            stringbuf_append_str(formatter->output, ")");
+                        }
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+                        stringbuf_append_str(formatter->output, ":nth-of-type");
+                        if (simple->argument) {
+                            stringbuf_append_str(formatter->output, "(");
+                            stringbuf_append_str(formatter->output, simple->argument);
+                            stringbuf_append_str(formatter->output, ")");
+                        }
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
+                        stringbuf_append_str(formatter->output, ":nth-last-of-type");
+                        if (simple->argument) {
+                            stringbuf_append_str(formatter->output, "(");
+                            stringbuf_append_str(formatter->output, simple->argument);
                             stringbuf_append_str(formatter->output, ")");
                         }
                         break;

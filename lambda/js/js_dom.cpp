@@ -54,6 +54,36 @@ static TypeMap js_computed_style_marker = {};
 static __thread DomDocument* _js_current_document = nullptr;
 
 // ============================================================================
+// Named element access on Window (HTML spec: named access on Window object)
+// Walks DOM tree, registers elements with id as global properties
+// ============================================================================
+
+static void register_named_elements_recursive(DomElement* elem, Item global) {
+    if (!elem) return;
+
+    if (elem->id && elem->id[0] != '\0') {
+        Item key = (Item){.item = s2it(heap_create_name(elem->id))};
+        Item wrapped = js_dom_wrap_element(elem);
+        js_property_set(global, key, wrapped);
+        log_debug("js_dom: registered element id='%s' on global object", elem->id);
+    }
+
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            register_named_elements_recursive(child->as_element(), global);
+        }
+        child = child->next_sibling;
+    }
+}
+
+void js_dom_register_named_elements(DomElement* root) {
+    if (!root) return;
+    Item global = js_get_global_this();
+    register_named_elements_recursive(root, global);
+}
+
+// ============================================================================
 // DOM Context Management
 // ============================================================================
 
@@ -63,6 +93,10 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         DomDocument* doc = (DomDocument*)dom_doc;
         if (doc->pool) {
             css_property_system_init(doc->pool);
+        }
+        // populate global object with element IDs (browser-like named access on Window)
+        if (doc->root) {
+            js_dom_register_named_elements(doc->root);
         }
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
