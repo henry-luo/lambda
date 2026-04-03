@@ -2006,6 +2006,12 @@ JitImport jit_runtime_imports[] = {
     {"rb_int_times", FPTR(rb_int_times)},
     {"rb_int_upto", FPTR(rb_int_upto)},
     {"rb_int_downto", FPTR(rb_int_downto)},
+    // Phase 3: Built-in method dispatchers
+    {"rb_string_method", FPTR(rb_string_method)},
+    {"rb_array_method", FPTR(rb_array_method)},
+    {"rb_hash_method", FPTR(rb_hash_method)},
+    {"rb_int_method", FPTR(rb_int_method)},
+    {"rb_float_method", FPTR(rb_float_method)},
 #endif // LAMBDA_RUBY
 };
 

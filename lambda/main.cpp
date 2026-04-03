@@ -37,6 +37,7 @@
 #include "../radiant/graph_theme.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
+#include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
@@ -130,6 +131,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script);
 extern Element* get_html_root_element(Input* input);
 extern DomDocument* dom_document_create(Input* input);
 extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
+extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 
 // External function declarations
 extern "C" {
@@ -1045,6 +1047,19 @@ int main(int argc, char *argv[]) {
                             if (dom_root) {
                                 dom_doc->root = dom_root;
                                 dom_doc->html_root = html_root;
+
+                                // Extract and parse CSS from <style> elements
+                                // so document.styleSheets and <style>.sheet work
+                                CssEngine* css_engine = css_engine_create(dom_doc->pool);
+                                if (css_engine) {
+                                    int sheet_count = 0;
+                                    CssStylesheet** sheets = extract_and_collect_css(
+                                        html_root, css_engine, html_file, dom_doc->pool, &sheet_count);
+                                    dom_doc->stylesheets = sheets;
+                                    dom_doc->stylesheet_count = sheet_count;
+                                    log_debug("JS document: extracted %d stylesheet(s)", sheet_count);
+                                }
+
                                 runtime.dom_doc = (void*)dom_doc;
                                 log_debug("Loaded HTML document: root=<%s>", dom_root->tag_name);
                             }
