@@ -1108,6 +1108,7 @@ JitImport jit_runtime_imports[] = {
     {"js_property_access", FPTR(js_property_access)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
+    {"js_create_arguments", FPTR(js_create_arguments)},
     {"js_array_get", FPTR(js_array_get)},
     {"js_array_set", FPTR(js_array_set)},
     {"js_array_length", FPTR(js_array_length)},
@@ -1159,6 +1160,9 @@ JitImport jit_runtime_imports[] = {
     {"js_method_call_apply", FPTR(js_method_call_apply)},
     {"js_math_property", FPTR(js_math_property)},
     {"js_math_set_property", FPTR(js_math_set_property)},
+    {"js_get_math_object_value", FPTR(js_get_math_object_value)},
+    {"js_get_json_object_value", FPTR(js_get_json_object_value)},
+    {"js_get_console_object_value", FPTR(js_get_console_object_value)},
     {"js_number_method", FPTR(js_number_method)},
     {"js_get_length", FPTR(js_get_length)},
     // DOM API
@@ -1199,6 +1203,7 @@ JitImport jit_runtime_imports[] = {
     // object utilities
     {"js_object_keys", FPTR(js_object_keys)},
     {"js_for_in_keys", FPTR(js_for_in_keys)},
+    {"js_object_get_own_property_names", FPTR(js_object_get_own_property_names)},
     {"js_object_get_own_property_symbols", FPTR(js_object_get_own_property_symbols)},
     {"js_object_create", FPTR(js_object_create)},
     {"js_object_define_property", FPTR(js_object_define_property)},
@@ -1224,6 +1229,10 @@ JitImport jit_runtime_imports[] = {
     {"js_has_own_property", FPTR(js_has_own_property)},
     {"js_object_freeze", FPTR(js_object_freeze)},
     {"js_object_is_frozen", FPTR(js_object_is_frozen)},
+    {"js_object_seal", FPTR(js_object_seal)},
+    {"js_object_is_sealed", FPTR(js_object_is_sealed)},
+    {"js_object_prevent_extensions", FPTR(js_object_prevent_extensions)},
+    {"js_object_is_extensible", FPTR(js_object_is_extensible)},
     // v9: Number static methods
     {"js_number_is_integer", FPTR(js_number_is_integer)},
     {"js_number_is_finite", FPTR(js_number_is_finite)},

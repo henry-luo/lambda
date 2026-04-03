@@ -2433,6 +2433,7 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         tp, JS_AST_NODE_FIELD_DEFINITION, field_node, sizeof(JsFieldDefinitionNode));
     field->is_static = false;
     field->is_private = false;
+    field->computed = false;
     field->key = NULL;
     field->value = NULL;
 
@@ -2453,6 +2454,9 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         const char* prop_type = ts_node_type(prop_node);
         if (strcmp(prop_type, "private_property_identifier") == 0) {
             field->is_private = true;
+        }
+        if (strcmp(prop_type, "computed_property_name") == 0) {
+            field->computed = true;
         }
         field->key = build_js_expression(tp, prop_node);
     }
@@ -2480,6 +2484,16 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
         JsAstNode* method = NULL;
         if (strcmp(child_type, "field_definition") == 0) {
             method = build_js_field_definition(tp, child_node);
+        } else if (strcmp(child_type, "class_static_block") == 0) {
+            // static { ... } block
+            JsStaticBlockNode* sb = (JsStaticBlockNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_STATIC_BLOCK, child_node, sizeof(JsStaticBlockNode));
+            sb->body = NULL;
+            TSNode body_node = ts_node_child_by_field_name(child_node, "body", strlen("body"));
+            if (!ts_node_is_null(body_node)) {
+                sb->body = build_js_block_statement(tp, body_node);
+            }
+            method = (JsAstNode*)sb;
         } else {
             method = build_js_method_definition(tp, child_node);
         }
