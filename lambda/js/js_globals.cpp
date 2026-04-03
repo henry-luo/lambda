@@ -3119,6 +3119,18 @@ extern "C" Item js_get_global_this() {
     return js_global_this_obj;
 }
 
+// js_get_global_object: alias for js_get_global_this (used by assignment fallback)
+extern "C" Item js_get_global_object() {
+    return js_get_global_this();
+}
+
+// js_get_global_property: look up a property on the global object by name string
+// Used as fallback for unresolved identifiers — implements browser-like named access
+extern "C" Item js_get_global_property(Item key) {
+    Item global = js_get_global_this();
+    return js_property_get(global, key);
+}
+
 // =============================================================================
 // Built-in constructor cache: Array, Object, Function, String, Number, Boolean, etc.
 // These return JsFunction objects so that `typeof Array === "function"` and

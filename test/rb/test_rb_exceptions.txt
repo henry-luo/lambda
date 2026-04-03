@@ -1,0 +1,17 @@
+something went wrong
+caught: inner error
+RuntimeError: runtime problem
+try block
+rescued: oops
+ensure runs
+else: 30
+ensure after else
+default
+inner: deep error
+outer: re-raised
+rescued without variable
+TypeError: wrong type
+succeeded after 3 attempts
+ArgumentError: bad arg
+success path
+ensure after success

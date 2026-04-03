@@ -1092,6 +1092,22 @@ RbAstNode* build_rb_expression(RbTranspiler* tp, TSNode expr_node) {
     }
 
     log_debug("rb: unhandled expression type: %s", node_type);
+
+    // control flow keywords that can appear in expression position (e.g., modifier-if)
+    if (strcmp(node_type, "retry") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_RETRY, expr_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "break") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_BREAK, expr_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "next") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_NEXT, expr_node, sizeof(RbAstNode));
+    }
+    // begin/rescue/end as expression (e.g., x = begin...rescue...end)
+    if (strcmp(node_type, "begin") == 0) {
+        return build_rb_begin_rescue(tp, expr_node);
+    }
+
     return NULL;
 }
 
@@ -1761,6 +1777,9 @@ RbAstNode* build_rb_statement(RbTranspiler* tp, TSNode stmt_node) {
     }
     if (strcmp(node_type, "next") == 0) {
         return alloc_rb_ast_node(tp, RB_AST_NODE_NEXT, stmt_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "retry") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_RETRY, stmt_node, sizeof(RbAstNode));
     }
     if (strcmp(node_type, "yield") == 0) {
         return build_rb_expression(tp, stmt_node);

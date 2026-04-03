@@ -133,6 +133,11 @@ struct RbMirTranspiler {
     MIR_reg_t self_reg;        // Phase 2: register holding 'self' (first param of method)
     bool has_block_param;      // Phase 2: current function has &block parameter
 
+    // Phase 4: exception handling
+    int try_depth;
+    MIR_label_t try_handler_labels[16];
+    MIR_label_t try_retry_labels[16];  // retry jumps back to begin body
+
     const char* filename;
     Runtime* runtime;
 };
@@ -193,6 +198,8 @@ static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt);
 static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs);
 static void rm_transpile_multi_assignment(RbMirTranspiler* mt, RbMultiAssignmentNode* ma);
 static void rm_transpile_class_def(RbMirTranspiler* mt, RbClassDefNode* cls);
+static void rm_transpile_begin_rescue(RbMirTranspiler* mt, RbBeginRescueNode* br);
+static void rm_emit_exc_check(RbMirTranspiler* mt, MIR_label_t handler_label);
 static MIR_reg_t rm_transpile_block_as_func(RbMirTranspiler* mt, RbBlockNode* block);
 static MIR_reg_t rm_transpile_yield(RbMirTranspiler* mt, RbYieldNode* yd);
 static MIR_reg_t rm_transpile_proc_lambda(RbMirTranspiler* mt, RbBlockNode* block);
@@ -740,6 +747,95 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 return recv;
             }
+
+            // Phase 4: obj.respond_to?(:method)
+            if (mlen == 11 && strncmp(mname, "respond_to?", 11) == 0 && call->arg_count >= 1) {
+                MIR_reg_t arg = rm_transpile_expression(mt, call->args);
+                return rm_call_2(mt, "rb_respond_to", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+
+            // Phase 4: obj.send(:method, args...) / obj.public_send(:method, args...)
+            if ((mlen == 4 && strncmp(mname, "send", 4) == 0) ||
+                (mlen == 11 && strncmp(mname, "public_send", 11) == 0)) {
+                if (call->arg_count >= 1) {
+                    MIR_reg_t method_arg = rm_transpile_expression(mt, call->args);
+                    // collect remaining args
+                    int send_argc = call->arg_count - 1;
+                    MIR_reg_t send_args_ptr = rm_new_reg(mt, "sargs", MIR_T_I64);
+                    if (send_argc > 0) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                            MIR_new_reg_op(mt->ctx, send_args_ptr),
+                            MIR_new_int_op(mt->ctx, send_argc * 8)));
+                        RbAstNode* sarg = call->args->next;
+                        for (int i = 0; i < send_argc && sarg; i++) {
+                            MIR_reg_t sv = rm_transpile_expression(mt, sarg);
+                            MIR_reg_t addr = rm_new_reg(mt, "sa", MIR_T_I64);
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                                MIR_new_reg_op(mt->ctx, addr),
+                                MIR_new_reg_op(mt->ctx, send_args_ptr),
+                                MIR_new_int_op(mt->ctx, i * 8)));
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1),
+                                MIR_new_reg_op(mt->ctx, sv)));
+                            sarg = sarg->next;
+                        }
+                    } else {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, send_args_ptr),
+                            MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    return rm_call_4(mt, "rb_send", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, send_args_ptr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, send_argc));
+                }
+            }
+
+            // Phase 4: obj.is_a?(ClassName) / obj.kind_of?(ClassName)
+            if (((mlen == 5 && strncmp(mname, "is_a?", 5) == 0) ||
+                 (mlen == 8 && strncmp(mname, "kind_of?", 8) == 0)) && call->arg_count >= 1) {
+                // check if argument is a known class name
+                MIR_reg_t cls_arg = rm_transpile_expression(mt, call->args);
+                // compare get_class(obj).__name__ == cls_name
+                MIR_reg_t obj_cls = rm_call_1(mt, "rb_get_class", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                return rm_call_2(mt, "rb_eq", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_cls),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_arg));
+            }
+
+            // Phase 4: obj.nil?
+            if (mlen == 4 && strncmp(mname, "nil?", 4) == 0 && call->arg_count == 0) {
+                // nil? returns true only for nil
+                MIR_reg_t is_nil = rm_new_reg(mt, "isnil", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ,
+                    MIR_new_reg_op(mt->ctx, is_nil),
+                    MIR_new_reg_op(mt->ctx, recv),
+                    MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+                // convert boolean to Item
+                MIR_reg_t result = rm_new_reg(mt, "nilr", MIR_T_I64);
+                MIR_label_t l_true = rm_new_label(mt);
+                MIR_label_t l_end = rm_new_label(mt);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_true),
+                    MIR_new_reg_op(mt->ctx, is_nil)));
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_FALSE_VAL)));
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+                rm_emit_label(mt, l_true);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_TRUE_VAL)));
+                rm_emit_label(mt, l_end);
+                return result;
+            }
+
+            // Phase 4: obj.class
+            if (mlen == 5 && strncmp(mname, "class", 5) == 0 && call->arg_count == 0) {
+                return rm_call_1(mt, "rb_builtin_type", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+            }
         }
 
         // Phase 2: iterator methods with blocks
@@ -1154,6 +1250,52 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             return ret;
         }
 
+        // Phase 4: raise — exception handling
+        if (flen == 5 && strncmp(fname, "raise", 5) == 0) {
+            MIR_reg_t exc;
+            if (call->arg_count == 0) {
+                // bare raise — re-raise (pass null)
+                exc = rm_emit_null(mt);
+            } else if (call->arg_count == 1) {
+                // raise "message" or raise ExceptionObj
+                exc = rm_transpile_expression(mt, call->args);
+            } else {
+                // raise ExceptionType, "message"
+                MIR_reg_t type_reg;
+                if (call->args->node_type == RB_AST_NODE_CONST) {
+                    RbConstNode* cn = (RbConstNode*)call->args;
+                    type_reg = rm_box_string_literal(mt, cn->name->chars, (int)cn->name->len);
+                } else {
+                    type_reg = rm_transpile_expression(mt, call->args);
+                }
+                MIR_reg_t msg_reg = rm_transpile_expression(mt, call->args->next);
+                exc = rm_call_2(mt, "rb_new_exception", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, type_reg),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+            }
+            rm_call_void_1(mt, "rb_raise",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc));
+            // jump to handler if inside begin/rescue, otherwise return
+            if (mt->try_depth > 0) {
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, mt->try_handler_labels[mt->try_depth - 1])));
+            } else {
+                rm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+            }
+            return rm_emit_null(mt);
+        }
+
+        // Phase 4: respond_to?
+        if (flen == 11 && strncmp(fname, "respond_to?", 11) == 0 && call->arg_count >= 1) {
+            MIR_reg_t arg = rm_transpile_expression(mt, call->args);
+            // if called without receiver, check self
+            MIR_reg_t self_r = mt->in_method ? mt->self_reg : rm_emit_null(mt);
+            return rm_call_2(mt, "rb_respond_to", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, self_r),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
         // check for user-defined function
         char vname[128];
         snprintf(vname, sizeof(vname), "_rb_%.*s", flen, fname);
@@ -1379,6 +1521,56 @@ static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr) {
         case RB_AST_NODE_PROC_LAMBDA:
         case RB_AST_NODE_BLOCK:
             return rm_transpile_proc_lambda(mt, (RbBlockNode*)expr);
+        case RB_AST_NODE_BEGIN_RESCUE: {
+            // begin/rescue as expression — inline rescue or begin/rescue block with value
+            RbBeginRescueNode* br = (RbBeginRescueNode*)expr;
+            MIR_reg_t result = rm_new_reg(mt, "brr", MIR_T_I64);
+            MIR_label_t l_handler = rm_new_label(mt);
+            MIR_label_t l_end = rm_new_label(mt);
+
+            // push try handler
+            if (mt->try_depth < 16) {
+                mt->try_handler_labels[mt->try_depth] = l_handler;
+                mt->try_retry_labels[mt->try_depth] = rm_new_label(mt); // unused for inline
+                mt->try_depth++;
+            }
+
+            // emit body expression (single expression for inline rescue)
+            {
+                MIR_reg_t body_val = rm_transpile_expression(mt, br->body);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, body_val)));
+                // check for exception
+                rm_emit_exc_check(mt, l_handler);
+            }
+
+            if (mt->try_depth > 0) mt->try_depth--;
+
+            // no exception → jump to end
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, l_end)));
+
+            // handler
+            rm_emit_label(mt, l_handler);
+            {
+                MIR_reg_t exc = rm_call_0(mt, "rb_clear_exception", MIR_T_I64);
+                (void)exc;
+                // evaluate rescue handler expression
+                if (br->rescues && br->rescues->node_type == RB_AST_NODE_RESCUE) {
+                    RbRescueNode* resc = (RbRescueNode*)br->rescues;
+                    if (resc->body) {
+                        MIR_reg_t handler_val = rm_transpile_expression(mt, resc->body);
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_reg_op(mt->ctx, handler_val)));
+                    }
+                }
+            }
+
+            rm_emit_label(mt, l_end);
+            return result;
+        }
         case RB_AST_NODE_ATTRIBUTE: {
             // obj.attr — use rb_instance_getattr for instances
             RbAttributeNode* attr = (RbAttributeNode*)expr;
@@ -1787,6 +1979,213 @@ static void rm_transpile_case(RbMirTranspiler* mt, RbCaseNode* cs) {
 }
 
 // ============================================================================
+// Phase 4: begin/rescue/ensure — exception handling
+// ============================================================================
+
+// emit exception check after a statement inside a try body
+static void rm_emit_exc_check(RbMirTranspiler* mt, MIR_label_t handler_label) {
+    MIR_reg_t chk = rm_call_0(mt, "rb_check_exception", MIR_T_I64);
+    MIR_reg_t chk_t = rm_call_1(mt, "rb_is_truthy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, chk));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, handler_label),
+        MIR_new_reg_op(mt->ctx, chk_t)));
+}
+
+static void rm_transpile_begin_rescue(RbMirTranspiler* mt, RbBeginRescueNode* br) {
+    MIR_label_t l_handler = rm_new_label(mt);
+    MIR_label_t l_end = rm_new_label(mt);
+    MIR_label_t l_else = br->else_body ? rm_new_label(mt) : l_end;
+    MIR_label_t l_finally = br->ensure_body ? rm_new_label(mt) : l_end;
+    MIR_label_t l_retry = rm_new_label(mt);
+
+    // push try handler
+    if (mt->try_depth < 16) {
+        mt->try_handler_labels[mt->try_depth] = l_handler;
+        mt->try_retry_labels[mt->try_depth] = l_retry;
+        mt->try_depth++;
+    }
+
+    // retry label — retry jumps back here
+    rm_emit_label(mt, l_retry);
+
+    // emit try body — check exception after each statement
+    {
+        RbAstNode* s = br->body;
+        while (s) {
+            rm_transpile_statement(mt, s);
+            rm_emit_exc_check(mt, l_handler);
+            s = s->next;
+        }
+    }
+
+    // pop try depth
+    int saved_try_depth = mt->try_depth;
+    MIR_label_t saved_retry = l_retry;
+    if (mt->try_depth > 0) mt->try_depth--;
+
+    // no exception → jump past handlers to else or finally/end
+    if (br->else_body) {
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_else)));
+    } else {
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_finally)));
+    }
+
+    // handler label
+    rm_emit_label(mt, l_handler);
+
+    // push retry label back so `retry` in handler can find it
+    // but handler label points to outer handler (not self) to avoid infinite loops
+    if (mt->try_depth < 16) {
+        mt->try_retry_labels[mt->try_depth] = saved_retry;
+        mt->try_handler_labels[mt->try_depth] = (mt->try_depth > 0)
+            ? mt->try_handler_labels[mt->try_depth - 1] : l_handler; // fallback
+        mt->try_depth++;
+    }
+
+    if (br->rescues) {
+        // clear exception and get the value
+        MIR_reg_t exc_val = rm_call_0(mt, "rb_clear_exception", MIR_T_I64);
+
+        RbAstNode* handler = br->rescues;
+        while (handler) {
+            if (handler->node_type == RB_AST_NODE_RESCUE) {
+                RbRescueNode* resc = (RbRescueNode*)handler;
+                MIR_label_t l_next_handler = rm_new_label(mt);
+
+                if (resc->exception_classes) {
+                    // typed rescue: rescue ExceptionType => var
+                    bool catch_all = false;
+                    RbAstNode* eclass = resc->exception_classes;
+                    MIR_label_t l_body = rm_new_label(mt);
+
+                    while (eclass) {
+                        // check if this catches StandardError or Exception (catch-all)
+                        if (eclass->node_type == RB_AST_NODE_CONST) {
+                            RbConstNode* cn = (RbConstNode*)eclass;
+                            if ((cn->name->len == 9 && strncmp(cn->name->chars, "Exception", 9) == 0) ||
+                                (cn->name->len == 13 && strncmp(cn->name->chars, "StandardError", 13) == 0) ||
+                                (cn->name->len == 12 && strncmp(cn->name->chars, "RuntimeError", 12) == 0)) {
+                                catch_all = true;
+                            }
+                        }
+
+                        if (!catch_all) {
+                            // get exception type name
+                            MIR_reg_t exc_type = rm_call_1(mt, "rb_exception_get_type", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+
+                            // get expected type name string
+                            MIR_reg_t expected;
+                            if (eclass->node_type == RB_AST_NODE_CONST) {
+                                RbConstNode* cn = (RbConstNode*)eclass;
+                                expected = rm_box_string_literal(mt, cn->name->chars, (int)cn->name->len);
+                            } else {
+                                expected = rm_transpile_expression(mt, eclass);
+                            }
+
+                            // compare
+                            MIR_reg_t match = rm_call_2(mt, "rb_eq", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_type),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, expected));
+                            MIR_reg_t match_t = rm_call_1(mt, "rb_is_truthy", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, match));
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                                MIR_new_label_op(mt->ctx, l_body),
+                                MIR_new_reg_op(mt->ctx, match_t)));
+                        }
+                        eclass = eclass->next;
+                    }
+
+                    if (!catch_all) {
+                        // no match → try next handler
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                            MIR_new_label_op(mt->ctx, l_next_handler)));
+                    }
+
+                    rm_emit_label(mt, l_body);
+                }
+                // bare rescue (no type) catches everything
+
+                // bind exception to variable if present
+                if (resc->variable_name) {
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_rb_%.*s",
+                        (int)resc->variable_name->len, resc->variable_name->chars);
+                    RbMirVarEntry* var = rm_find_var(mt, vname);
+                    if (var) {
+                        // get message for simple display
+                        MIR_reg_t msg = rm_call_1(mt, "rb_exception_get_message", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, var->reg),
+                            MIR_new_reg_op(mt->ctx, msg)));
+                    } else {
+                        MIR_reg_t reg = rm_new_reg(mt, vname, MIR_T_I64);
+                        MIR_reg_t msg = rm_call_1(mt, "rb_exception_get_message", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, reg),
+                            MIR_new_reg_op(mt->ctx, msg)));
+                        rm_set_var(mt, vname, reg);
+                    }
+                }
+
+                // emit handler body
+                RbAstNode* bs = resc->body;
+                while (bs) {
+                    rm_transpile_statement(mt, bs);
+                    bs = bs->next;
+                }
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, l_finally)));
+
+                rm_emit_label(mt, l_next_handler);
+            }
+            handler = handler->next;
+        }
+
+        // no handler matched → re-raise
+        rm_call_void_1(mt, "rb_raise",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, exc_val));
+        // pop the temporary retry depth before re-raising
+        if (mt->try_depth > 0) mt->try_depth--;
+        if (mt->try_depth > 0) {
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, mt->try_handler_labels[mt->try_depth - 1])));
+        } else {
+            rm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+        }
+    } else {
+        // no rescue handlers — pop the temporary retry depth
+        if (mt->try_depth > 0) mt->try_depth--;
+    }
+
+    // else body (runs when no exception occurred)
+    if (br->else_body) {
+        rm_emit_label(mt, l_else);
+        RbAstNode* es = br->else_body;
+        while (es) {
+            rm_transpile_statement(mt, es);
+            es = es->next;
+        }
+    }
+
+    // ensure/finally (always runs)
+    if (br->ensure_body) {
+        rm_emit_label(mt, l_finally);
+        RbAstNode* fs = br->ensure_body;
+        while (fs) {
+            rm_transpile_statement(mt, fs);
+            fs = fs->next;
+        }
+    }
+
+    rm_emit_label(mt, l_end);
+}
+
+// ============================================================================
 // Statement dispatcher
 // ============================================================================
 
@@ -1840,6 +2239,16 @@ static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt) {
             break;
         case RB_AST_NODE_MODULE_DEF:
             // module support: treat like class for now
+            break;
+        case RB_AST_NODE_BEGIN_RESCUE:
+            rm_transpile_begin_rescue(mt, (RbBeginRescueNode*)stmt);
+            break;
+        case RB_AST_NODE_RETRY:
+            // retry — jump back to begin body start
+            if (mt->try_depth > 0) {
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                    MIR_new_label_op(mt->ctx, mt->try_retry_labels[mt->try_depth - 1])));
+            }
             break;
         default:
             // treat as expression statement
@@ -2823,7 +3232,9 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
             s->node_type == RB_AST_NODE_BREAK ||
             s->node_type == RB_AST_NODE_NEXT ||
             s->node_type == RB_AST_NODE_CLASS_DEF ||
-            s->node_type == RB_AST_NODE_MODULE_DEF) {
+            s->node_type == RB_AST_NODE_MODULE_DEF ||
+            s->node_type == RB_AST_NODE_BEGIN_RESCUE ||
+            s->node_type == RB_AST_NODE_RETRY) {
             rm_transpile_statement(mt, s);
         } else {
             // expression statement

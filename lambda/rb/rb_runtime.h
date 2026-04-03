@@ -137,6 +137,22 @@ Item rb_int_method(Item self, Item method_name, Item* args, int argc);
 Item rb_float_method(Item self, Item method_name, Item* args, int argc);
 
 // ============================================================================
+// Exception handling (Phase 4)
+// ============================================================================
+void rb_raise(Item exception);
+Item rb_check_exception(void);
+Item rb_clear_exception(void);
+Item rb_new_exception(Item type_name, Item message);
+Item rb_exception_get_type(Item exception);
+Item rb_exception_get_message(Item exception);
+
+// ============================================================================
+// Dynamic dispatch / introspection (Phase 4)
+// ============================================================================
+Item rb_respond_to(Item obj, Item method_name);
+Item rb_send(Item obj, Item method_name, Item* args, int argc);
+
+// ============================================================================
 // Runtime initialization
 // ============================================================================
 void rb_runtime_set_input(void* input_ptr);

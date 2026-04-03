@@ -42,6 +42,7 @@ typedef enum RbAstNodeType {
     RB_AST_NODE_RESCUE,
     RB_AST_NODE_ENSURE,
     RB_AST_NODE_RAISE,
+    RB_AST_NODE_RETRY,
     RB_AST_NODE_YIELD,
     RB_AST_NODE_BLOCK,                  // do..end or { } block body
 
@@ -416,6 +417,12 @@ typedef struct RbRescueNode {
     String* variable_name;         // => var name (can be NULL)
     RbAstNode* body;
 } RbRescueNode;
+
+// raise statement
+typedef struct RbRaiseNode {
+    RbAstNode base;
+    RbAstNode* exception;          // exception expression (NULL for bare re-raise)
+} RbRaiseNode;
 
 // splat expression (*expr)
 typedef struct RbSplatNode {
