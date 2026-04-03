@@ -601,3 +601,150 @@ The test262 runner reports two different totals — this is expected:
 | **Failed** | 16,129 | Custom summary in test runner |
 
 GTest XML reports `tests="38649" failures="16129"` — it counts skipped tests as "not failed" (i.e., 38,649 − 16,129 = 22,520 includes both passed AND skipped). The custom `test262 Compliance Summary` box printed at the end correctly separates skipped from passed, giving the accurate **10,838 / 26,967 (40.2%)** figure.
+
+---
+
+## Parallel Test262 Runner (2026-04-03)
+
+### Problem
+
+The test262 suite ran **sequentially** — each of the 38,649 tests was executed one at a time via `popen()` → `pclose()` in a single GTest thread. Total wall-clock time: **~18m 43s** (1,123s).
+
+### Changes (`test/test_js_test262_gtest.cpp`)
+
+Converted to a **parallel pre-run + cached reporting** architecture:
+
+1. **Thread pool**: Uses `std::thread::hardware_concurrency()` worker threads (8 on MacBook Air M2). Each thread atomically picks the next test from a shared index counter.
+
+2. **Unique temp files**: Each `run_test262()` invocation writes to a uniquely-numbered temp file (`temp/_test262_run_<N>.js`) instead of the shared `temp/_test262_run.js`, eliminating write races.
+
+3. **Result cache**: All `Test262RunResult` structs are stored in a `std::unordered_map<std::string, Test262RunResult>` protected by a mutex. The parallel phase runs to completion before GTest starts.
+
+4. **GTest reporting phase**: `TEST_P(Test262Suite, Run)` reads from the cache instead of executing `lambda.exe`. This phase takes ~0.3s (just map lookups + GTest bookkeeping).
+
+5. **Progress reporting**: Prints to stderr every 2,000 tests completed, with elapsed time.
+
+### Timing Results
+
+| Metric | Sequential | Parallel (8 threads) |
+|--------|-----------|---------------------|
+| Wall clock | **18m 43s** (1,123s) | **5m 13s** (313s) |
+| CPU time (user) | ~18m | 998s |
+| CPU time (system) | — | 610s |
+| CPU utilization | ~100% (1 core) | **514%** (~5 cores avg) |
+| **Speedup** | 1× | **3.6×** |
+
+### Result Correctness
+
+Results are identical before and after parallelization:
+
+| Metric | Sequential | Parallel |
+|--------|-----------|---------|
+| Passed | 10,838 | 10,838 |
+| Failed | 16,129 | 16,129 |
+| Skipped | 11,682 | 11,682 |
+
+---
+
+## Implementation Status Audit (2026-04-03)
+
+Verified each proposed phase against the current build using the Appendix §16 micro-tests.
+
+| Phase | Enhancement | Status | Evidence |
+|-------|-------------|--------|----------|
+| 1 | Property descriptors on class prototypes | ✅ Fixed | `getOwnPropertyDescriptor(C.prototype, "m")` → `{writable: true, enumerable: false, configurable: true}` + value is function |
+| 2 | `finally` block with break/continue | ✅ Fixed | `try { break; } finally { x=1; }` → `x === 1` |
+| 3 | Bare `return` produces `undefined` | ✅ Fixed | `typeof f()` → `"undefined"` |
+| 4A | Non-callable TypeError | ✅ Fixed | `true()` throws `TypeError` |
+| 4B | `Boolean()` returns `false` | ✅ Fixed | `Boolean()` → `false`, `typeof` → `"boolean"` |
+| 4C | Sparse array holes | ✅ Fixed | `[1,,3].length` → `3` |
+| 5 | Computed class field installation | ✅ Fixed | `var k="x"; class A{[k]=42} new A()[k]` → `42` (computed + literal fields both work) |
+| 6 | RegExp flag property accessors | ✅ Fixed | `/a/i.ignoreCase` → `true` |
+| 7 | Function name inference | ✅ Fixed | `var f=function(){}; f.name` → `"f"` |
+| 8 | Labeled break/continue in nested loops | ✅ Fixed | `break outer` → `i=0, j=1` |
+| 9 | Switch case expression evaluation | ⚠️ Invalid | The NaN example was correct JS behavior: `isNaN(NaN)` → `true`, then `NaN === true` → `false` (fallthrough to default). Expression case evaluation works for non-NaN cases. |
+| 10A | `numeric-separator-literal` | ✅ Ungated | Removed from `UNSUPPORTED_FEATURES`; `1_000_000` parses correctly |
+| 10B | `onlyStrict` tests | ✅ Unlocked | Runner prepends `"use strict";` for `is_strict` tests |
+| 10C | `class-static-block` | ✅ Fixed | Removed from `UNSUPPORTED_FEATURES`; `static { C.x = 42; }` → `C.x === 42` |
+
+### Summary
+
+- **All 10 phases fully implemented** (Phases 1–8, 10A/B/C)
+- **Phase 9 retracted**: The original NaN switch example was actually correct `===` semantics, not a bug
+
+### Current test262 Results (post all fixes)
+
+| Metric | Count |
+|--------|-------|
+| Total tests | 38,649 |
+| Passed | 10,982 |
+| Failed | 16,048 |
+| Skipped | 11,619 |
+| **Pass rate (executed)** | **40.6%** (10,982 / 27,030) |
+| **Git base** | `3402b2fca` + computed fields/static blocks (uncommitted) |
+
+**Note:** The pass rate (40.6%) is significantly lower than the v18 proposal baseline (67.6% / 17,740 passed). The proposal numbers were from a different test262 runner configuration or codebase version. The current numbers reflect the actual state of the parallel test262 runner.
+
+---
+
+## Progress Checkpoint: Computed Class Fields + Static Blocks (2026-04-03)
+
+**Git base:** `3402b2fca` (master) + uncommitted changes in `js_ast.hpp`, `build_js_ast.cpp`, `transpile_js_mir.cpp`, `test_js_test262_gtest.cpp`
+
+### Phase 5: Computed Class Fields
+
+**Problem:** Class fields with computed property names (`[expr] = value`) were silently dropped. The collection phase required `JS_AST_NODE_IDENTIFIER` as the key type, so computed keys (wrapped in `computed_property_name`) were ignored. Instance field installation and static field initialization only handled string-literal names.
+
+**Root cause:** `JsFieldDefinitionNode` in `js_ast.hpp` had no `computed` flag. `JsStaticFieldEntry` and `JsInstanceFieldEntry` in the transpiler only stored `String* name` — no way to represent a runtime-evaluated key expression.
+
+**Changes (3 files, 5 code paths):**
+
+| File | Change |
+|------|--------|
+| `lambda/js/js_ast.hpp` | Added `bool computed` flag to `JsFieldDefinitionNode` |
+| `lambda/js/build_js_ast.cpp` | Detect `computed_property_name` node type → set `computed = true`, store raw key expression |
+| `lambda/js/transpile_js_mir.cpp` | Added `JsAstNode* key_expr` + `bool computed` to `JsStaticFieldEntry` and `JsInstanceFieldEntry` |
+
+**Transpiler code paths updated:**
+1. **Collection phase** (~line 3003): Computed fields now collected with `key_expr` (name stays NULL)
+2. **Top-level static field init** (~line 17604): Computed → `js_property_set(cls_obj, eval(key_expr), val)` at runtime
+3. **Statement-level static field init** (~line 13578): Same dual-path (computed → property set, non-computed → module var)
+4. **Class expression static field init** (~line 10610): Added static field init + static block emission (was completely missing)
+5. **Instance field install during `new`** (~line 12430): Both parent-chain and own-class loops now branch on `inf->computed`
+
+### Phase 10C: Class Static Blocks
+
+**Problem:** `class_static_block` had no AST node type, no builder handler, and no codegen. The Tree-sitter grammar parses `static { ... }` with a `body` field pointing to `statement_block`, but the AST builder had no case for it, and the transpiler never emitted the block body.
+
+**Changes:**
+
+| File | Change |
+|------|--------|
+| `lambda/js/js_ast.hpp` | Added `JS_AST_NODE_STATIC_BLOCK` enum value, new `JsStaticBlockNode` struct with `JsAstNode* body` |
+| `lambda/js/build_js_ast.cpp` | Added `class_static_block` handler in `build_js_class_body` — creates `JsStaticBlockNode`, builds body via `build_js_block_statement` |
+| `lambda/js/transpile_js_mir.cpp` | Added `JsAstNode* static_blocks[8]` + `int static_block_count` to `JsClassEntry`; collection stores block bodies; emission calls `jm_transpile_statement` after static field init |
+| `test/test_js_test262_gtest.cpp` | Removed `"class-static-block"` from `UNSUPPORTED_FEATURES` |
+
+### Test Results
+
+| Version | Passed | Failed | Skipped | Total | Rate |
+|---------|--------|--------|---------|-------|------|
+| v18 baseline (pre-destructuring) | 10,903 | — | — | 26,967 | 40.4% |
+| v18 destructuring fix | 10,838 | 16,129 | 11,682 | 38,649 | 40.2% |
+| **v18 computed fields + static blocks** | **10,982** | **16,048** | **11,619** | **38,649** | **40.6%** |
+
+**Delta vs destructuring fix:** +144 passed, −81 failed, −63 skipped (newly un-skipped from `class-static-block` removal)
+
+### Unit Test
+
+Added `test/js/v18_computed_fields.js` + `.txt` — 10 test patterns covering:
+1. Computed instance field (`[k] = 42`)
+2. Computed static field (`static ["y"] = 99`)
+3. Expression key (`["a" + "b"] = 100`)
+4. Mixed computed + regular fields
+5. Static block basic (`static { E.x = 10; }`)
+6. Static block with loop computation
+7. Multiple static blocks
+8. Variable-based computed key with method access
+9. Computed static field + static block interaction
+10. Inheritance with computed fields

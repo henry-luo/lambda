@@ -144,15 +144,19 @@ struct JsClassMethodEntry {
 
 // Static field entry for class
 struct JsStaticFieldEntry {
-    String* name;                   // field name
+    String* name;                   // field name (NULL if computed)
+    JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression
-    int module_var_index;           // index into js_module_vars[]
+    int module_var_index;           // index into js_module_vars[] (-1 for computed)
+    bool computed;                  // whether this is a computed property name
 };
 
 // Instance field entry for class (non-static field initializers)
 struct JsInstanceFieldEntry {
-    String* name;                   // field name (already __private_ prefixed if private)
+    String* name;                   // field name (already __private_ prefixed if private, NULL if computed)
+    JsAstNode* key_expr;            // key expression for computed fields
     JsAstNode* initializer;         // initializer expression (NULL if no initializer)
+    bool computed;                  // whether this is a computed property name
 };
 
 // Class info for transpiler
@@ -168,6 +172,8 @@ struct JsClassEntry {
     int static_field_count;
     JsInstanceFieldEntry instance_fields[32]; // instance field definitions
     int instance_field_count;
+    JsAstNode* static_blocks[8];            // static { ... } block bodies
+    int static_block_count;
 };
 
 // Try/catch context for handling return-in-try and exception flow
@@ -2999,30 +3005,55 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             JsAstNode* m = body->statements;
             ce->static_field_count = 0;
             ce->instance_field_count = 0;
+            ce->static_block_count = 0;
             while (m) {
                 if (m->node_type == JS_AST_NODE_FIELD_DEFINITION) {
                     JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)m;
-                    if (fd->is_static && fd->key && fd->key->node_type == JS_AST_NODE_IDENTIFIER && ce->static_field_count < 16) {
+                    if (fd->is_static && fd->key && ce->static_field_count < 16) {
                         JsStaticFieldEntry* sf = &ce->static_fields[ce->static_field_count];
-                        sf->name = ((JsIdentifierNode*)fd->key)->name;
+                        sf->computed = fd->computed;
+                        sf->key_expr = fd->key;
+                        if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                            sf->name = ((JsIdentifierNode*)fd->key)->name;
+                        } else {
+                            sf->name = NULL;
+                        }
                         sf->initializer = fd->value;
-                        sf->module_var_index = -1; // assigned later in Phase 1.1
+                        sf->module_var_index = -1; // assigned later in Phase 1.1 (only for non-computed)
                         // if the initializer contains functions, collect them
                         if (fd->value) jm_collect_functions(mt, fd->value);
                         ce->static_field_count++;
-                        log_debug("js-mir: class '%.*s' static field '%.*s'",
+                        log_debug("js-mir: class '%.*s' static field %s'%.*s'",
                             cls->name ? (int)cls->name->len : 5, cls->name ? cls->name->chars : "anon?",
-                            (int)sf->name->len, sf->name->chars);
-                    } else if (!fd->is_static && fd->key && fd->key->node_type == JS_AST_NODE_IDENTIFIER && ce->instance_field_count < 32) {
+                            fd->computed ? "[computed] " : "",
+                            sf->name ? (int)sf->name->len : 0, sf->name ? sf->name->chars : "");
+                    } else if (!fd->is_static && fd->key && ce->instance_field_count < 32) {
                         // Instance field (public or private — private already renamed to __private_)
                         JsInstanceFieldEntry* inf = &ce->instance_fields[ce->instance_field_count];
-                        inf->name = ((JsIdentifierNode*)fd->key)->name;
+                        inf->computed = fd->computed;
+                        inf->key_expr = fd->key;
+                        if (!fd->computed && fd->key->node_type == JS_AST_NODE_IDENTIFIER) {
+                            inf->name = ((JsIdentifierNode*)fd->key)->name;
+                        } else {
+                            inf->name = NULL;
+                        }
                         inf->initializer = fd->value;
                         if (fd->value) jm_collect_functions(mt, fd->value);
                         ce->instance_field_count++;
-                        log_debug("js-mir: class '%.*s' instance field '%.*s'",
+                        log_debug("js-mir: class '%.*s' instance field %s'%.*s'",
                             cls->name ? (int)cls->name->len : 5, cls->name ? cls->name->chars : "anon?",
-                            (int)inf->name->len, inf->name->chars);
+                            fd->computed ? "[computed] " : "",
+                            inf->name ? (int)inf->name->len : 0, inf->name ? inf->name->chars : "");
+                    }
+                } else if (m->node_type == JS_AST_NODE_STATIC_BLOCK) {
+                    // class static block: static { ... }
+                    JsStaticBlockNode* sb = (JsStaticBlockNode*)m;
+                    if (sb->body && ce->static_block_count < 8) {
+                        ce->static_blocks[ce->static_block_count++] = sb->body;
+                        jm_collect_functions(mt, sb->body);
+                        log_debug("js-mir: class '%.*s' static block #%d",
+                            cls->name ? (int)cls->name->len : 5, cls->name ? cls->name->chars : "anon?",
+                            ce->static_block_count);
                     }
                 } else if (m->node_type == JS_AST_NODE_METHOD_DEFINITION) {
                     JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)m;
@@ -10583,6 +10614,38 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                         inner_vname, (int)inner_mc->int_val);
                 }
             }
+
+            // Emit static field initializers for class expressions
+            for (int fi = 0; fi < ce->static_field_count; fi++) {
+                JsStaticFieldEntry* sf = &ce->static_fields[fi];
+                if (sf->computed && sf->key_expr) {
+                    MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
+                    MIR_reg_t val;
+                    if (sf->initializer) {
+                        val = jm_transpile_box_item(mt, sf->initializer);
+                    } else {
+                        val = jm_new_reg(mt, "sf_undef", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, val),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                    }
+                    jm_call_3(mt, "js_property_set", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                } else if (sf->initializer && sf->module_var_index >= 0) {
+                    MIR_reg_t val = jm_transpile_box_item(mt, sf->initializer);
+                    jm_call_void_2(mt, "js_set_module_var",
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sf->module_var_index),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
+            }
+            // Emit static blocks for class expressions
+            for (int si = 0; si < ce->static_block_count; si++) {
+                if (ce->static_blocks[si]) {
+                    jm_transpile_statement(mt, ce->static_blocks[si]);
+                }
+            }
         }
         log_debug("js-mir: class expression evaluated with __class_name__");
         return cls_obj;
@@ -12397,7 +12460,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 JsClassEntry* fc_ce = field_chain[ci];
                 for (int fi = 0; fi < fc_ce->instance_field_count; fi++) {
                     JsInstanceFieldEntry* inf = &fc_ce->instance_fields[fi];
-                    MIR_reg_t key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                    MIR_reg_t key;
+                    if (inf->computed && inf->key_expr) {
+                        key = jm_transpile_box_item(mt, inf->key_expr);
+                    } else {
+                        key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                    }
                     MIR_reg_t val;
                     if (inf->initializer) {
                         val = jm_transpile_box_item(mt, inf->initializer);
@@ -12416,7 +12484,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             // Own class instance fields
             for (int fi = 0; fi < ce->instance_field_count; fi++) {
                 JsInstanceFieldEntry* inf = &ce->instance_fields[fi];
-                MIR_reg_t key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                MIR_reg_t key;
+                if (inf->computed && inf->key_expr) {
+                    key = jm_transpile_box_item(mt, inf->key_expr);
+                } else {
+                    key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                }
                 MIR_reg_t val;
                 if (inf->initializer) {
                     val = jm_transpile_box_item(mt, inf->initializer);
@@ -13536,11 +13609,32 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     // Emit static field initializers
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
-                        if (sf->initializer && sf->module_var_index >= 0) {
+                        if (sf->computed && sf->key_expr) {
+                            MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
+                            MIR_reg_t val;
+                            if (sf->initializer) {
+                                val = jm_transpile_box_item(mt, sf->initializer);
+                            } else {
+                                val = jm_new_reg(mt, "sf_undef", MIR_T_I64);
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_reg_op(mt->ctx, val),
+                                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                            }
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                        } else if (sf->initializer && sf->module_var_index >= 0) {
                             MIR_reg_t val = jm_transpile_box_item(mt, sf->initializer);
                             jm_call_void_2(mt, "js_set_module_var",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sf->module_var_index),
                                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                        }
+                    }
+                    // Emit static blocks
+                    for (int si = 0; si < ce->static_block_count; si++) {
+                        if (ce->static_blocks[si]) {
+                            jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
                 }
@@ -17562,7 +17656,23 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     // Static fields may reference functions/variables declared before.
                     for (int fi = 0; fi < ce->static_field_count; fi++) {
                         JsStaticFieldEntry* sf = &ce->static_fields[fi];
-                        if (sf->initializer && sf->module_var_index >= 0) {
+                        if (sf->computed && sf->key_expr) {
+                            // computed static field: evaluate key and value, set on class object
+                            MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
+                            MIR_reg_t val;
+                            if (sf->initializer) {
+                                val = jm_transpile_box_item(mt, sf->initializer);
+                            } else {
+                                val = jm_new_reg(mt, "sf_undef", MIR_T_I64);
+                                jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                    MIR_new_reg_op(mt->ctx, val),
+                                    MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED)));
+                            }
+                            jm_call_3(mt, "js_property_set", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                        } else if (sf->initializer && sf->module_var_index >= 0) {
                             MIR_reg_t val = jm_transpile_box_item(mt, sf->initializer);
                             jm_call_void_2(mt, "js_set_module_var",
                                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sf->module_var_index),
@@ -17571,6 +17681,13 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 (int)ce->name->len, ce->name->chars,
                                 (int)sf->name->len, sf->name->chars,
                                 sf->module_var_index);
+                        }
+                    }
+
+                    // Emit static block bodies
+                    for (int si = 0; si < ce->static_block_count; si++) {
+                        if (ce->static_blocks[si]) {
+                            jm_transpile_statement(mt, ce->static_blocks[si]);
                         }
                     }
                 }
