@@ -37,6 +37,20 @@ void js_dom_set_document(void* dom_doc);
 void* js_dom_get_document(void);
 
 // =============================================================================
+// Named Element Access on Window
+// =============================================================================
+
+/**
+ * Register all elements with 'id' attributes as properties on the global object.
+ * Implements browser-like named access on the Window object.
+ * @param root  DomElement* root of the DOM tree (void* for C linkage in header)
+ */
+#ifdef __cplusplus
+struct DomElement;
+void js_dom_register_named_elements(DomElement* root);
+#endif
+
+// =============================================================================
 // DOM Wrapping / Unwrapping
 // =============================================================================
 

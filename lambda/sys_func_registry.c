@@ -1298,6 +1298,9 @@ JitImport jit_runtime_imports[] = {
     {"js_native_sha384", FPTR(js_native_sha384)},
     {"js_native_sha512", FPTR(js_native_sha512)},
     {"js_get_global_this", FPTR(js_get_global_this)},
+    {"js_get_global_object", FPTR(js_get_global_object)},
+    {"js_get_global_property", FPTR(js_get_global_property)},
+
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},

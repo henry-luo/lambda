@@ -560,6 +560,75 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
 }
 
 // =============================================================================
+// CSSStyleDeclaration (rule) Property Set
+// =============================================================================
+
+extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value) {
+    CssRule* rule = unwrap_rule_decl(decl_item);
+    if (!rule || rule->type != CSS_RULE_STYLE) return value;
+
+    const char* prop = fn_to_cstr(prop_name);
+    if (!prop) return value;
+
+    const char* val_str = fn_to_cstr(value);
+    if (!val_str) val_str = "";
+
+    Pool* pool = rule->pool;
+    if (!pool) pool = get_document_pool();
+    if (!pool) return value;
+
+    // convert camelCase to CSS property
+    char css_prop[128];
+    cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+
+    // parse the value as a CSS declaration: "property: value"
+    char decl_text[512];
+    snprintf(decl_text, sizeof(decl_text), "%s: %s", css_prop, val_str);
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(decl_text, strlen(decl_text), pool, &token_count);
+    if (!tokens || token_count == 0) return value;
+
+    int pos = 0;
+    CssDeclaration* new_decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
+    if (!new_decl) {
+        // parse error — silently ignore (per CSSOM spec)
+        log_debug("js_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
+        return value;
+    }
+
+    // find and replace existing declaration with same property
+    CssPropertyId prop_id = css_property_id_from_name(css_prop);
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* d = rule->data.style_rule.declarations[i];
+        if (!d) continue;
+        bool match = false;
+        if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
+        else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
+
+        if (match) {
+            rule->data.style_rule.declarations[i] = new_decl;
+            log_debug("js_cssom_rule_decl_set_property: replaced '%s' = '%s'", css_prop, val_str);
+            return value;
+        }
+    }
+
+    // not found — append new declaration
+    size_t count = rule->data.style_rule.declaration_count;
+    CssDeclaration** new_decls = (CssDeclaration**)pool_calloc(pool, (count + 1) * sizeof(CssDeclaration*));
+    if (new_decls) {
+        if (rule->data.style_rule.declarations && count > 0) {
+            memcpy(new_decls, rule->data.style_rule.declarations, count * sizeof(CssDeclaration*));
+        }
+        new_decls[count] = new_decl;
+        rule->data.style_rule.declarations = new_decls;
+        rule->data.style_rule.declaration_count = count + 1;
+    }
+    log_debug("js_cssom_rule_decl_set_property: added '%s' = '%s'", css_prop, val_str);
+    return value;
+}
+
+// =============================================================================
 // CSSStyleDeclaration (rule) Method Dispatch
 // =============================================================================
 
