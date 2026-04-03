@@ -372,6 +372,12 @@ void js_runtime_set_input(void* input);
 void js_set_module_var(int index, Item value);
 Item js_get_module_var(int index);
 void js_reset_module_vars(void);
+
+/**
+ * Reset all JS runtime global state between batch test runs.
+ * Clears module vars, exception state, event loop, DOM context, and Input context.
+ */
+void js_batch_reset(void);
 Item js_constructor_create_object(Item callee);
 Item js_new_from_class_object(Item callee, Item* args, int argc);
 

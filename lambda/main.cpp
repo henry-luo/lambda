@@ -2537,6 +2537,103 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    // Handle js-test-batch command: run multiple JS scripts in one process for test performance
+    if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
+        // batch mode always disables logging for maximum throughput
+        log_disable_all();
+
+        int batch_timeout = 10; // default per-script timeout in seconds
+        for (int i = 2; i < argc; i++) {
+            if (strncmp(argv[i], "--timeout=", 10) == 0) {
+                batch_timeout = atoi(argv[i] + 10);
+                if (batch_timeout <= 0) batch_timeout = 10;
+            }
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        char line[4096];
+        while (fgets(line, sizeof(line), stdin)) {
+            // trim trailing whitespace
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
+                line[--len] = '\0';
+            if (len == 0) continue;
+
+            char* script_path = line;
+            if (*script_path == '\0') continue;
+
+            printf("\x01" "BATCH_START %s\n", script_path);
+            fflush(stdout);
+
+            if (!file_exists(script_path)) {
+                fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
+                printf("\x01" "BATCH_END 1\n");
+                fflush(stdout);
+                continue;
+            }
+
+            char* js_source = read_text_file(script_path);
+            if (!js_source) {
+                fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
+                printf("\x01" "BATCH_END 1\n");
+                fflush(stdout);
+                continue;
+            }
+
+            int result = 0;
+#ifndef _WIN32
+            if (batch_timeout > 0) {
+                struct sigaction sa, old_sa;
+                sa.sa_handler = batch_alarm_handler;
+                sigemptyset(&sa.sa_mask);
+                sa.sa_flags = 0;
+                sigaction(SIGALRM, &sa, &old_sa);
+                batch_timeout_active = 1;
+                if (setjmp(batch_timeout_jmp) == 0) {
+                    alarm(batch_timeout);
+                    Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                    alarm(0);
+                    batch_timeout_active = 0;
+                    if (res.item == ITEM_ERROR || js_check_exception()) {
+                        result = 1;
+                    }
+                } else {
+                    // timed out
+                    fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
+                    result = 124;
+                }
+                sigaction(SIGALRM, &old_sa, NULL);
+            } else {
+                Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                if (res.item == ITEM_ERROR || js_check_exception()) {
+                    result = 1;
+                }
+            }
+#else
+            Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+            if (res.item == ITEM_ERROR || js_check_exception()) {
+                result = 1;
+            }
+#endif
+            free(js_source);
+            fflush(stdout);
+
+            printf("\x01" "BATCH_END %d\n", result);
+            fflush(stdout);
+
+            // reset all JS global state for next script
+            js_batch_reset();
+            // reset GC heap/nursery/name_pool
+            runtime_reset_heap(&runtime);
+        }
+
+        runtime_cleanup(&runtime);
+        return 0;
+    }
+
     // Handle run command
     log_debug("Checking for run command");
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {

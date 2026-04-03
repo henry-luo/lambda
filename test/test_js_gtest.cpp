@@ -7,6 +7,9 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
+#include <thread>
+#include <atomic>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -283,6 +286,113 @@ void test_js_dom_script_against_file(const char* script_path, const char* html_p
 }
 
 // ---------------------------------------------------------------------------
+// Batch mode infrastructure for js-test-batch
+// ---------------------------------------------------------------------------
+
+struct JsBatchResult {
+    std::string output;
+    int status;
+};
+
+// Max scripts per lambda.exe js-test-batch process
+static const size_t JS_BATCH_CHUNK_SIZE = 50;
+
+static void run_js_sub_batch(
+    const std::vector<std::string>& scripts,
+    size_t start, size_t end,
+    int batch_id,
+    std::unordered_map<std::string, JsBatchResult>& results)
+{
+    // write manifest for this chunk
+    char manifest_path[256];
+    snprintf(manifest_path, sizeof(manifest_path), "./temp/js_batch_%d_%d.txt", (int)getpid(), batch_id);
+    FILE* manifest = fopen(manifest_path, "w");
+    if (!manifest) return;
+
+    for (size_t i = start; i < end; i++) {
+        fprintf(manifest, "%s\n", scripts[i].c_str());
+    }
+    fclose(manifest);
+
+    char command[512];
+#ifdef _WIN32
+    snprintf(command, sizeof(command), "lambda.exe js-test-batch --timeout=10 < \"%s\"", manifest_path);
+#else
+    snprintf(command, sizeof(command), "./lambda.exe js-test-batch --timeout=10 < \"%s\"", manifest_path);
+#endif
+
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        unlink(manifest_path);
+        return;
+    }
+
+    char buffer[4096];
+    std::string current_script;
+    std::string current_output;
+    bool in_script = false;
+
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        if (buffer[0] == '\x01') {
+            if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
+                current_script = std::string(buffer + 13);
+                while (!current_script.empty() &&
+                       (current_script.back() == '\n' || current_script.back() == '\r'))
+                    current_script.pop_back();
+                current_output.clear();
+                in_script = true;
+            } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
+                int status = atoi(buffer + 11);
+                results[current_script] = {current_output, status};
+                in_script = false;
+            }
+        } else if (in_script) {
+            current_output += buffer;
+        }
+    }
+
+    pclose(pipe);
+    unlink(manifest_path);
+}
+
+static std::unordered_map<std::string, JsBatchResult> execute_js_batch(
+    const std::vector<std::string>& scripts,
+    size_t chunk_size = JS_BATCH_CHUNK_SIZE)
+{
+    std::unordered_map<std::string, JsBatchResult> results;
+    if (scripts.empty()) return results;
+
+    // build list of sub-batch ranges
+    struct SubBatch { size_t start; size_t end; int id; };
+    std::vector<SubBatch> batches;
+    int batch_id = 0;
+    for (size_t start = 0; start < scripts.size(); start += chunk_size) {
+        size_t end = std::min(start + chunk_size, scripts.size());
+        batches.push_back({start, end, batch_id++});
+    }
+
+    // run sub-batches in parallel
+    std::vector<std::unordered_map<std::string, JsBatchResult>> thread_results(batches.size());
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < batches.size(); i++) {
+        threads.emplace_back([&, i]() {
+            run_js_sub_batch(scripts, batches[i].start, batches[i].end,
+                             batches[i].id, thread_results[i]);
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    // merge results
+    for (auto& partial : thread_results) {
+        for (auto& kv : partial) {
+            results[kv.first] = std::move(kv.second);
+        }
+    }
+
+    return results;
+}
+
+// ---------------------------------------------------------------------------
 // Dynamic test discovery — std::string/vector used here for GTest API only
 // ---------------------------------------------------------------------------
 
@@ -375,19 +485,73 @@ static std::vector<JsTestParam> discover_all_js_tests() {
 }
 
 // ---------------------------------------------------------------------------
-// Parameterised test — one test case per discovered .js file
+// Parameterised test — one test case per discovered .js file (batch mode)
 // ---------------------------------------------------------------------------
 
-class JsFileTest : public testing::TestWithParam<JsTestParam> {};
+class JsFileTest : public testing::TestWithParam<JsTestParam> {
+public:
+    static std::unordered_map<std::string, JsBatchResult> batch_results;
+    static bool batch_executed;
+
+    static void SetUpTestSuite() {
+        if (batch_executed) return;
+
+        // collect non-DOM scripts for batch execution
+        auto all = discover_all_js_tests();
+        std::vector<std::string> batch_scripts;
+        for (const auto& t : all) {
+            if (t.html_path.empty()) {
+                batch_scripts.push_back(t.script_path);
+            }
+        }
+
+        if (!batch_scripts.empty()) {
+            batch_results = execute_js_batch(batch_scripts);
+        }
+        batch_executed = true;
+    }
+};
+
+std::unordered_map<std::string, JsBatchResult> JsFileTest::batch_results;
+bool JsFileTest::batch_executed = false;
 
 TEST_P(JsFileTest, Run) {
     const auto& p = GetParam();
+
     if (!p.html_path.empty()) {
+        // DOM tests: use subprocess fallback (--document flag)
         test_js_dom_script_against_file(
             p.script_path.c_str(), p.html_path.c_str(), p.expected_path.c_str());
-    } else {
-        test_js_script_against_file(p.script_path.c_str(), p.expected_path.c_str());
+        return;
     }
+
+    // non-DOM tests: use batch result
+    auto it = batch_results.find(p.script_path);
+    ASSERT_TRUE(it != batch_results.end())
+        << "Script not found in batch results: " << p.script_path;
+
+    const JsBatchResult& br = it->second;
+    ASSERT_EQ(br.status, 0) << "Script execution failed (exit " << br.status << "): " << p.script_path;
+
+    // extract output (handle ##### Script marker)
+    std::string actual = br.output;
+    const char* marker = strstr(actual.c_str(), "##### Script");
+    if (marker) {
+        const char* nl = strchr(marker, '\n');
+        if (nl) actual = std::string(nl + 1);
+    }
+
+    // trim trailing whitespace
+    while (!actual.empty() && isspace((unsigned char)actual.back()))
+        actual.pop_back();
+
+    char* expected_output = read_expected_output(p.expected_path.c_str());
+    ASSERT_NE(expected_output, nullptr) << "Could not read expected: " << p.expected_path;
+
+    ASSERT_STREQ(expected_output, actual.c_str())
+        << "Output mismatch for: " << p.script_path;
+
+    free(expected_output);
 }
 
 INSTANTIATE_TEST_SUITE_P(
