@@ -127,6 +127,16 @@ Item rb_builtin_rand(Item max);
 Item rb_builtin_require_relative(Item path);
 
 // ============================================================================
+// Built-in method dispatchers (Phase 3)
+// Returns ITEM_ERROR when method not found (sentinel for dispatch chain).
+// ============================================================================
+Item rb_string_method(Item self, Item method_name, Item* args, int argc);
+Item rb_array_method(Item self, Item method_name, Item* args, int argc);
+Item rb_hash_method(Item self, Item method_name, Item* args, int argc);
+Item rb_int_method(Item self, Item method_name, Item* args, int argc);
+Item rb_float_method(Item self, Item method_name, Item* args, int argc);
+
+// ============================================================================
 // Runtime initialization
 // ============================================================================
 void rb_runtime_set_input(void* input_ptr);

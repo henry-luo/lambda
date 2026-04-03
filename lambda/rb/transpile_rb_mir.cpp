@@ -48,6 +48,7 @@ extern "C" char* read_text_file(const char* filename);
 // Constants
 // ============================================================================
 static const uint64_t RB_ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
+static const uint64_t RB_ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
 static const uint64_t RB_ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
 static const uint64_t RB_ITEM_FALSE_VAL = ((uint64_t)LMD_TYPE_BOOL << 56) | 0;
 static const uint64_t RB_ITEM_INT_TAG   = (uint64_t)LMD_TYPE_INT << 56;
@@ -299,6 +300,20 @@ static MIR_reg_t rm_call_3(RbMirTranspiler* mt, const char* fn_name,
         MIR_new_ref_op(mt->ctx, ie->proto),
         MIR_new_ref_op(mt->ctx, ie->import),
         MIR_new_reg_op(mt->ctx, res), a1, a2, a3));
+    return res;
+}
+
+static MIR_reg_t rm_call_4(RbMirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4) {
+    MIR_var_t args[4] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}};
+    RbImportCacheEntry* ie = rm_ensure_import(mt, fn_name, ret_type, 4, args, 1);
+    MIR_reg_t res = rm_new_reg(mt, fn_name, ret_type);
+    rm_emit(mt, MIR_new_call_insn(mt->ctx, 7,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4));
     return res;
 }
 
@@ -717,34 +732,13 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             const char* mname = call->method_name->chars;
             int mlen = (int)call->method_name->len;
 
-            // .length / .size
-            if ((mlen == 6 && strncmp(mname, "length", 6) == 0) ||
-                (mlen == 4 && strncmp(mname, "size", 4) == 0)) {
-                return rm_call_1(mt, "rb_array_length", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
-            }
-            // .push / .<<
+            // .push / .<< (returns self, handled specially)
             if ((mlen == 4 && strncmp(mname, "push", 4) == 0) && call->arg_count >= 1) {
                 MIR_reg_t arg = rm_transpile_expression(mt, call->args);
                 rm_call_void_2(mt, "rb_array_push",
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
                 return recv;
-            }
-            // .to_s
-            if (mlen == 4 && strncmp(mname, "to_s", 4) == 0) {
-                return rm_call_1(mt, "rb_to_s", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
-            }
-            // .to_i
-            if (mlen == 4 && strncmp(mname, "to_i", 4) == 0) {
-                return rm_call_1(mt, "rb_to_i", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
-            }
-            // .to_f
-            if (mlen == 4 && strncmp(mname, "to_f", 4) == 0) {
-                return rm_call_1(mt, "rb_to_f", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
             }
         }
 
@@ -926,24 +920,142 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                 return inst; // .new always returns the instance
             }
 
-            // Phase 2: generic method call on object (dynamic dispatch)
-            // Look up method via rb_method_lookup, then call with self prepended
+            // Phase 3: built-in method dispatchers + dynamic dispatch fallback
+            // Chain: rb_string_method → rb_array_method → rb_hash_method →
+            //        rb_int_method → rb_float_method → rb_method_lookup
             MIR_reg_t method_name_reg = rm_box_string_literal(mt,
                 call->method_name->chars, (int)call->method_name->len);
+
+            // collect args into a stack-allocated Item* array
+            int argc = 0;
+            RbAstNode* arg_node = call->args;
+            MIR_reg_t arg_regs[16];
+            while (arg_node && argc < 16) {
+                arg_regs[argc++] = rm_transpile_expression(mt, arg_node);
+                arg_node = arg_node->next;
+            }
+
+            MIR_reg_t args_ptr = rm_new_reg(mt, "bargs", MIR_T_I64);
+            if (argc > 0) {
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                    MIR_new_reg_op(mt->ctx, args_ptr),
+                    MIR_new_int_op(mt->ctx, argc * 8)));
+                for (int i = 0; i < argc; i++) {
+                    MIR_reg_t addr = rm_new_reg(mt, "ba", MIR_T_I64);
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                        MIR_new_reg_op(mt->ctx, addr),
+                        MIR_new_reg_op(mt->ctx, args_ptr),
+                        MIR_new_int_op(mt->ctx, i * 8)));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, addr, 0, 1),
+                        MIR_new_reg_op(mt->ctx, arg_regs[i])));
+                }
+            } else {
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, args_ptr),
+                    MIR_new_int_op(mt->ctx, 0)));
+            }
+
+            MIR_reg_t builtin_result = rm_new_reg(mt, "bres", MIR_T_I64);
+            MIR_reg_t is_err = rm_new_reg(mt, "iserr", MIR_T_I64);
+            MIR_label_t l_try_array = rm_new_label(mt);
+            MIR_label_t l_try_hash = rm_new_label(mt);
+            MIR_label_t l_try_int = rm_new_label(mt);
+            MIR_label_t l_try_float = rm_new_label(mt);
+            MIR_label_t l_try_dynamic = rm_new_label(mt);
+            MIR_label_t l_dispatch_end = rm_new_label(mt);
+
+            // try rb_string_method
+            MIR_reg_t str_res = rm_call_4(mt, "rb_string_method", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, str_res),
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_ERROR_VAL)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_array),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
+                MIR_new_reg_op(mt->ctx, str_res)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
+
+            // try rb_array_method
+            rm_emit_label(mt, l_try_array);
+            MIR_reg_t arr_res = rm_call_4(mt, "rb_array_method", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, arr_res),
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_ERROR_VAL)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_hash),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
+                MIR_new_reg_op(mt->ctx, arr_res)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
+
+            // try rb_hash_method
+            rm_emit_label(mt, l_try_hash);
+            MIR_reg_t hash_res = rm_call_4(mt, "rb_hash_method", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, hash_res),
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_ERROR_VAL)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_int),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
+                MIR_new_reg_op(mt->ctx, hash_res)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
+
+            // try rb_int_method
+            rm_emit_label(mt, l_try_int);
+            MIR_reg_t int_res = rm_call_4(mt, "rb_int_method", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, int_res),
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_ERROR_VAL)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_float),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
+                MIR_new_reg_op(mt->ctx, int_res)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
+
+            // try rb_float_method
+            rm_emit_label(mt, l_try_float);
+            MIR_reg_t float_res = rm_call_4(mt, "rb_float_method", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_ptr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, argc));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, float_res),
+                MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_ERROR_VAL)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_try_dynamic),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
+                MIR_new_reg_op(mt->ctx, float_res)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
+
+            // fallback: dynamic dispatch via rb_method_lookup (class/instance methods)
+            rm_emit_label(mt, l_try_dynamic);
             MIR_reg_t method_fn = rm_call_2(mt, "rb_method_lookup", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg));
-
-            // get function pointer
             MIR_reg_t fptr = rm_call_1(mt, "js_function_get_ptr", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, method_fn));
 
-            // check if method found (fptr != 0)
             MIR_label_t l_found = rm_new_label(mt);
             MIR_label_t l_not_found = rm_new_label(mt);
-            MIR_label_t l_call_end = rm_new_label(mt);
-            MIR_reg_t call_result = rm_new_reg(mt, "mcr", MIR_T_I64);
-            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, call_result),
+            // default to nil
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, builtin_result),
                 MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
 
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_found),
@@ -968,14 +1080,14 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                 MIR_op_t* ops = (MIR_op_t*)alloca(sizeof(MIR_op_t) * nops);
                 ops[0] = MIR_new_ref_op(mt->ctx, proto);
                 ops[1] = MIR_new_reg_op(mt->ctx, fptr);
-                ops[2] = MIR_new_reg_op(mt->ctx, call_result);
+                ops[2] = MIR_new_reg_op(mt->ctx, builtin_result);
                 ops[3] = MIR_new_reg_op(mt->ctx, recv); // self
 
-                RbAstNode* arg = call->args;
-                for (int i = 0; i < call->arg_count && arg; i++) {
-                    MIR_reg_t av = rm_transpile_expression(mt, arg);
+                RbAstNode* darg = call->args;
+                for (int i = 0; i < call->arg_count && darg; i++) {
+                    MIR_reg_t av = rm_transpile_expression(mt, darg);
                     ops[4 + i] = MIR_new_reg_op(mt->ctx, av);
-                    arg = arg->next;
+                    darg = darg->next;
                 }
 
                 if (has_block) {
@@ -985,13 +1097,12 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
                 rm_emit(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, (size_t)nops, ops));
             }
-            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_call_end)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
 
             rm_emit_label(mt, l_not_found);
-            // method not found — log and return nil
-            rm_emit_label(mt, l_call_end);
+            rm_emit_label(mt, l_dispatch_end);
 
-            return call_result;
+            return builtin_result;
         }
 
         return rm_emit_null(mt);
