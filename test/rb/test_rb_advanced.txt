@@ -1,0 +1,17 @@
+true
+false
+false
+Integer
+String
+TrueClass
+NilClass
+Array
+true
+false
+true
+HELLO
+2
+true
+false
+hello
+42

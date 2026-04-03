@@ -54,6 +54,8 @@
     #include <unistd.h>
     #include <sys/wait.h>
     #include <dirent.h>
+    #include <fcntl.h>
+    #include <spawn.h>
 #endif
 
 // =============================================================================
@@ -62,7 +64,6 @@
 
 static const char* TEST262_ROOT = "ref/test262";
 static const char* HARNESS_DIR = "ref/test262/harness";
-static const char* TEMP_DIR = "temp";
 
 // Features that LambdaJS does NOT support — skip tests requiring these
 // v17: removed 25 features that are actually implemented (class fields, optional
@@ -519,116 +520,354 @@ static bool has_unsupported_feature(const Test262Metadata& meta) {
     return false;
 }
 
-static Test262RunResult run_test262(const std::string& test_path) {
-    // read test source
-    std::string source = read_file_contents(test_path);
-    if (source.empty()) {
-        return {T262_SKIP, "could not read test file"};
-    }
+// =============================================================================
+// Batch mode: prepare temp files, run through js-test-batch, evaluate
+// =============================================================================
 
-    // parse metadata
-    Test262Metadata meta = parse_metadata(source);
+// Cached harness sources (loaded once)
+static std::string g_harness_sta;
+static std::string g_harness_assert;
+static std::mutex  g_harness_mutex;
+static std::unordered_map<std::string, std::string> g_harness_cache;
 
-    // skip unsupported
-    if (meta.is_async) return {T262_SKIP, "async flag"};
-    if (meta.is_module) return {T262_SKIP, "module flag"};
-    if (meta.is_raw) return {T262_SKIP, "raw flag"};
-    if (has_unsupported_feature(meta)) return {T262_SKIP, "unsupported feature"};
+static const std::string& get_harness_file(const std::string& name) {
+    std::lock_guard<std::mutex> lock(g_harness_mutex);
+    auto it = g_harness_cache.find(name);
+    if (it != g_harness_cache.end()) return it->second;
+    std::string path = std::string(HARNESS_DIR) + "/" + name;
+    g_harness_cache[name] = read_file_contents(path);
+    return g_harness_cache[name];
+}
 
-    // check for eval() usage in test body (after frontmatter)
-    // We don't skip all eval tests — only the eval-code category is excluded via dir selection
+// Per-test prepared data (after Phase 1: metadata parsing only)
+// Source assembly is deferred to Phase 2 workers to avoid ~1.3GB peak memory.
+struct Test262Prepared {
+    std::string test_name;       // GTest param name
+    std::string test_path;       // path to .js test file (for lazy read)
+    std::vector<std::string> includes; // harness includes (e.g. "propertyHelper.js")
+    bool is_strict;              // add "use strict" prefix
+    Test262Result skip_result;   // T262_SKIP if test should be skipped
+    std::string skip_message;
+    bool is_negative;
+    std::string negative_type;
+};
 
-    // build combined source: harness + includes + test
+// Assemble combined source on-the-fly from metadata.
+// Reads test file from disk (OS-cached) and prepends harness files.
+static std::string assemble_combined_source(const Test262Prepared& p) {
+    std::string source = read_file_contents(p.test_path);
+    if (source.empty()) return "";
+
     std::string combined;
+    combined.reserve(g_harness_sta.size() + g_harness_assert.size() + source.size() + 4096);
+    combined += g_harness_sta;
+    combined += '\n';
+    combined += g_harness_assert;
+    combined += '\n';
 
-    // always prepend sta.js and assert.js (unless raw)
-    std::string sta = read_file_contents(std::string(HARNESS_DIR) + "/sta.js");
-    std::string assert_js = read_file_contents(std::string(HARNESS_DIR) + "/assert.js");
-    combined += sta + "\n" + assert_js + "\n";
-
-    // additional includes
-    for (auto& inc : meta.includes) {
-        std::string harness_path = std::string(HARNESS_DIR) + "/" + inc;
-        std::string harness_src = read_file_contents(harness_path);
-        if (harness_src.empty()) {
-            return {T262_SKIP, "missing harness: " + inc};
+    for (auto& inc : p.includes) {
+        const std::string& harness_src = get_harness_file(inc);
+        if (!harness_src.empty()) {
+            combined += harness_src;
+            combined += '\n';
         }
-        combined += harness_src + "\n";
     }
 
-    // append test source
-    if (meta.is_strict) {
+    if (p.is_strict) {
         combined += "\"use strict\";\n";
     }
     combined += source;
+    return combined;
+}
 
-    // write to temp file (use thread-unique path for parallel execution)
-    static std::atomic<int> temp_counter{0};
-    int my_id = temp_counter.fetch_add(1, std::memory_order_relaxed);
-    std::string temp_path = std::string(TEMP_DIR) + "/_test262_run_" + std::to_string(my_id % 256) + ".js";
-    {
-        std::ofstream out(temp_path);
-        if (!out.is_open()) {
-            return {T262_FAIL, "could not create temp file"};
-        }
-        out << combined;
-    }
-
-    // execute
-    char command[1024];
-#ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe js \"%s\" --no-log 2>&1", temp_path.c_str());
-#else
-    snprintf(command, sizeof(command), "timeout 10 ./lambda.exe js \"%s\" --no-log 2>&1", temp_path.c_str());
-#endif
-
-    FILE* pipe = popen(command, "r");
-    if (!pipe) {
-        return {T262_FAIL, "could not execute lambda.exe"};
-    }
-
+// Batch output from js-test-batch
+struct BatchResult {
     std::string output;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        output += buffer;
+    int exit_code;
+};
+
+static const size_t T262_BATCH_CHUNK_SIZE = 5;
+static const size_t T262_MAX_PARALLEL_BATCHES = 6;
+
+// Phase 1: Prepare all tests — parse metadata, determine skips.
+//          Source assembly is deferred to Phase 2 workers (lazy assembly).
+//          This keeps peak memory ~10MB instead of ~1.3GB.
+static void prepare_all_tests(
+    const std::vector<Test262Param>& tests,
+    std::vector<Test262Prepared>& prepared,
+    std::vector<size_t>& batch_indices)
+{
+    // pre-load common harness files
+    g_harness_sta = read_file_contents(std::string(HARNESS_DIR) + "/sta.js");
+    g_harness_assert = read_file_contents(std::string(HARNESS_DIR) + "/assert.js");
+
+    prepared.resize(tests.size());
+    std::atomic<int> prep_count{0};
+
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+
+    std::atomic<size_t> next_idx{0};
+    auto worker = [&]() {
+        while (true) {
+            size_t i = next_idx.fetch_add(1, std::memory_order_relaxed);
+            if (i >= tests.size()) break;
+
+            const Test262Param& param = tests[i];
+            Test262Prepared& p = prepared[i];
+            p.test_name = param.test_name;
+            p.test_path = param.test_path;
+            p.skip_result = T262_PASS; // not skipped by default
+            p.is_negative = false;
+            p.is_strict = false;
+
+            // read test source for metadata parsing only
+            std::string source = read_file_contents(param.test_path);
+            if (source.empty()) {
+                p.skip_result = T262_SKIP;
+                p.skip_message = "could not read test file";
+                continue;
+            }
+
+            // parse metadata
+            Test262Metadata meta = parse_metadata(source);
+
+            // skip unsupported
+            if (meta.is_async)   { p.skip_result = T262_SKIP; p.skip_message = "async flag"; continue; }
+            if (meta.is_module)  { p.skip_result = T262_SKIP; p.skip_message = "module flag"; continue; }
+            if (meta.is_raw)     { p.skip_result = T262_SKIP; p.skip_message = "raw flag"; continue; }
+            if (has_unsupported_feature(meta)) { p.skip_result = T262_SKIP; p.skip_message = "unsupported feature"; continue; }
+
+            // check harness includes exist
+            bool missing_harness = false;
+            for (auto& inc : meta.includes) {
+                const std::string& harness_src = get_harness_file(inc);
+                if (harness_src.empty()) {
+                    p.skip_result = T262_SKIP;
+                    p.skip_message = "missing harness: " + inc;
+                    missing_harness = true;
+                    break;
+                }
+            }
+            if (missing_harness) continue;
+
+            // store metadata for lazy assembly in Phase 2
+            p.is_negative = meta.is_negative;
+            p.negative_type = meta.negative_type;
+            p.is_strict = meta.is_strict;
+            p.includes = std::move(meta.includes);
+
+            prep_count.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for (unsigned int t = 0; t < num_threads; t++) {
+        threads.emplace_back(worker);
+    }
+    for (auto& t : threads) t.join();
+
+    // collect batch indices (only non-skipped tests)
+    for (size_t i = 0; i < prepared.size(); i++) {
+        if (prepared[i].skip_result == T262_SKIP) continue;
+        batch_indices.push_back(i);
     }
 
-    int status = pclose(pipe);
-    int exit_code = WEXITSTATUS(status);
+    fprintf(stderr, "[test262] Prepared %zu test files (%zu skipped, %zu to batch)\n",
+            tests.size(), tests.size() - batch_indices.size(), batch_indices.size());
+}
 
-    // cleanup temp file
-    unlink(temp_path.c_str());
+// Run a sub-batch of tests from a pre-written manifest file + stdout pipe
+// Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
+static void run_t262_sub_batch(
+    const char* manifest_path,
+    std::unordered_map<std::string, BatchResult>& results)
+{
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) != 0) return;
+    fcntl(stdout_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(stdout_pipe[1], F_SETFD, FD_CLOEXEC);
 
-    // interpret results
-    if (meta.is_negative) {
-        // negative tests expect an error
-        if (exit_code != 0 || output.find("Error") != std::string::npos ||
-            output.find("error") != std::string::npos) {
+    int manifest_fd = open(manifest_path, O_RDONLY);
+    if (manifest_fd < 0) {
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        return;
+    }
+    fcntl(manifest_fd, F_SETFD, FD_CLOEXEC);
+
+    // Use posix_spawn instead of fork+exec. On macOS, posix_spawn uses a
+    // kernel-optimized path that creates the child process directly without
+    // copying the parent's page tables. This is critical when the parent holds
+    // ~1.3GB of test source data — fork() would copy all those page tables
+    // 5400+ times, adding ~500s of system time.
+    posix_spawn_file_actions_t file_actions;
+    posix_spawn_file_actions_init(&file_actions);
+    posix_spawn_file_actions_adddup2(&file_actions, manifest_fd, STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&file_actions, stdout_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&file_actions, stdout_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&file_actions, manifest_fd);
+    posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
+    posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
+
+    char* const argv[] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL
+    };
+    extern char** environ;
+    pid_t pid;
+    int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&file_actions);
+
+    close(manifest_fd);
+    close(stdout_pipe[1]);
+
+    if (ret != 0) {
+        close(stdout_pipe[0]);
+        return;
+    }
+
+    FILE* fp = fdopen(stdout_pipe[0], "r");
+    if (fp) {
+        char buffer[4096];
+        std::string current_script;
+        std::string current_output;
+        bool in_script = false;
+
+        while (fgets(buffer, sizeof(buffer), fp) != nullptr) {
+            if (buffer[0] == '\x01') {
+                if (strncmp(buffer + 1, "BATCH_START ", 12) == 0) {
+                    current_script = std::string(buffer + 13);
+                    while (!current_script.empty() &&
+                           (current_script.back() == '\n' || current_script.back() == '\r'))
+                        current_script.pop_back();
+                    current_output.clear();
+                    in_script = true;
+                } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
+                    int status = atoi(buffer + 11);
+                    results[current_script] = {current_output, status};
+                    in_script = false;
+                }
+            } else if (in_script) {
+                current_output += buffer;
+            }
+        }
+        fclose(fp);
+    } else {
+        close(stdout_pipe[0]);
+    }
+
+    int wstatus;
+    waitpid(pid, &wstatus, 0);
+}
+
+// Phase 2: Execute all prepared tests through js-test-batch (reusable manifest files + stdout pipes)
+static std::unordered_map<std::string, BatchResult> execute_t262_batch(
+    const std::vector<Test262Prepared>& prepared,
+    const std::vector<size_t>& indices)
+{
+    std::unordered_map<std::string, BatchResult> results;
+    if (indices.empty()) return results;
+
+    // split into chunks
+    struct SubBatch { size_t start; size_t end; };
+    std::vector<SubBatch> batches;
+    for (size_t s = 0; s < indices.size(); s += T262_BATCH_CHUNK_SIZE) {
+        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, indices.size());
+        batches.push_back({s, e});
+    }
+
+    // Run sub-batches with limited parallelism.
+    // Each worker reuses ONE temp manifest file (6 workers = 6 files total).
+    // For each sub-batch: truncate → write source data → fork/exec → read stdout.
+    // This avoids per-batch file create/unlink overhead while keeping fast file-based stdin.
+    std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
+    std::atomic<size_t> next_batch{0};
+    size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, batches.size());
+    std::vector<std::thread> threads;
+    for (size_t w = 0; w < num_workers; w++) {
+        threads.emplace_back([&, w]() {
+            // Each worker has its own reusable manifest file
+            char manifest_path[256];
+            snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_worker_%zu.manifest", w);
+            while (true) {
+                size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
+                if (i >= batches.size()) break;
+
+                // Write manifest for this sub-batch (assemble source on-the-fly)
+                FILE* mf = fopen(manifest_path, "wb");
+                if (!mf) continue;
+                for (size_t idx = batches[i].start; idx < batches[i].end; idx++) {
+                    size_t pi = indices[idx];
+                    const auto& p = prepared[pi];
+                    std::string combined = assemble_combined_source(p);
+                    fprintf(mf, "source:%s:%zu\n",
+                            p.test_name.c_str(), combined.size());
+                    fwrite(combined.data(), 1, combined.size(), mf);
+                    fputc('\n', mf);
+                }
+                fclose(mf);
+
+                // Execute: fork/exec with stdin from manifest, read stdout via pipe
+                run_t262_sub_batch(manifest_path, thread_results[i]);
+            }
+            unlink(manifest_path);
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    // merge
+    for (auto& partial : thread_results) {
+        for (auto& kv : partial) {
+            results[kv.first] = std::move(kv.second);
+        }
+    }
+
+    return results;
+}
+
+// Phase 3: Evaluate batch results against metadata expectations
+static Test262RunResult evaluate_batch_result(
+    const Test262Prepared& prep,
+    const std::unordered_map<std::string, BatchResult>& batch_results)
+{
+    if (prep.skip_result == T262_SKIP) {
+        return {T262_SKIP, prep.skip_message};
+    }
+
+    auto it = batch_results.find(prep.test_name);
+    if (it == batch_results.end()) {
+        return {T262_FAIL, "not found in batch results"};
+    }
+
+    const BatchResult& br = it->second;
+
+    if (prep.is_negative) {
+        if (br.exit_code != 0 || br.output.find("Error") != std::string::npos ||
+            br.output.find("error") != std::string::npos) {
             return {T262_PASS, ""};
         } else {
-            return {T262_FAIL, "negative test did not throw (expected " + meta.negative_type + ")"};
+            return {T262_FAIL, "negative test did not throw (expected " + prep.negative_type + ")"};
         }
     }
 
-    // timeout check (exit code 124 on macOS/Linux from `timeout` command)
-    if (exit_code == 124) {
+    // timeout (exit code 124 from batch handler)
+    if (br.exit_code == 124) {
         return {T262_TIMEOUT, "test timed out (10s)"};
     }
 
-    // crash check
-    if (exit_code > 128) {
-        return {T262_CRASH, "crashed with signal " + std::to_string(exit_code - 128)};
+    // crash (signalled)
+    if (br.exit_code > 128) {
+        return {T262_CRASH, "crashed with signal " + std::to_string(br.exit_code - 128)};
     }
 
-    // normal test: should succeed (exit 0, no Test262Error)
-    if (exit_code != 0) {
-        // trim output for error message
-        std::string msg = output.substr(0, 200);
-        return {T262_FAIL, "exit code " + std::to_string(exit_code) + ": " + msg};
+    // normal test: exit 0 and no Test262Error
+    if (br.exit_code != 0) {
+        std::string msg = br.output.substr(0, 200);
+        return {T262_FAIL, "exit code " + std::to_string(br.exit_code) + ": " + msg};
     }
 
-    if (output.find("Test262Error") != std::string::npos) {
-        std::string msg = output.substr(0, 200);
+    if (br.output.find("Test262Error") != std::string::npos) {
+        std::string msg = br.output.substr(0, 200);
         return {T262_FAIL, msg};
     }
 
@@ -636,57 +875,46 @@ static Test262RunResult run_test262(const std::string& test_path) {
 }
 
 // =============================================================================
-// Parallel pre-run: execute all tests in a thread pool, cache results
+// Batch pre-run: prepare, execute, evaluate — cache all results
 // =============================================================================
 
 static std::unordered_map<std::string, Test262RunResult> g_cached_results;
 static std::mutex g_results_mutex;
 static bool g_parallel_done = false;
 
-static void parallel_run_all_tests(const std::vector<Test262Param>& tests) {
-    unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
-    fprintf(stderr, "[test262] Running %zu tests with %u threads...\n", tests.size(), num_threads);
-
-    std::atomic<size_t> next_index{0};
-    std::atomic<int> done_count{0};
+static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     auto start_time = std::chrono::steady_clock::now();
 
-    auto worker = [&]() {
-        while (true) {
-            size_t idx = next_index.fetch_add(1, std::memory_order_relaxed);
-            if (idx >= tests.size()) break;
+    // Phase 1: parse metadata only (lazy assembly defers source to Phase 2)
+    std::vector<Test262Prepared> prepared;
+    std::vector<size_t> batch_indices;
+    prepare_all_tests(tests, prepared, batch_indices);
 
-            const Test262Param& param = tests[idx];
-            Test262RunResult result = run_test262(param.test_path);
+    auto prep_time = std::chrono::steady_clock::now();
+    double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch\n",
+            prep_secs, batch_indices.size());
 
-            {
-                std::lock_guard<std::mutex> lock(g_results_mutex);
-                g_cached_results[param.test_name] = result;
-            }
+    // Phase 2: execute through js-test-batch (lazy assembly + manifest files)
+    auto batch_results = execute_t262_batch(prepared, batch_indices);
 
-            int completed = done_count.fetch_add(1, std::memory_order_relaxed) + 1;
-            if (completed % 2000 == 0) {
-                auto elapsed = std::chrono::steady_clock::now() - start_time;
-                double secs = std::chrono::duration<double>(elapsed).count();
-                fprintf(stderr, "[test262] %d / %zu tests completed (%.1fs)\n",
-                        completed, tests.size(), secs);
-            }
-        }
-    };
+    auto exec_time = std::chrono::steady_clock::now();
+    double exec_secs = std::chrono::duration<double>(exec_time - prep_time).count();
+    fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
+            exec_secs, batch_results.size());
 
-    std::vector<std::thread> threads;
-    threads.reserve(num_threads);
-    for (unsigned int i = 0; i < num_threads; i++) {
-        threads.emplace_back(worker);
-    }
-    for (auto& t : threads) {
-        t.join();
+    // Phase 3: evaluate results and cache
+    for (size_t i = 0; i < prepared.size(); i++) {
+        Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
+
+        std::lock_guard<std::mutex> lock(g_results_mutex);
+        g_cached_results[prepared[i].test_name] = result;
     }
 
-    auto elapsed = std::chrono::steady_clock::now() - start_time;
-    double secs = std::chrono::duration<double>(elapsed).count();
-    fprintf(stderr, "[test262] All %zu tests completed in %.1fs\n", tests.size(), secs);
+    auto total_time = std::chrono::steady_clock::now();
+    double total_secs = std::chrono::duration<double>(total_time - start_time).count();
+    fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + exec %.1fs + eval <0.1s)\n",
+            tests.size(), total_secs, prep_secs, exec_secs);
     g_parallel_done = true;
 }
 
@@ -701,7 +929,7 @@ TEST_P(Test262Suite, Run) {
 
     // look up cached result from parallel pre-run
     Test262RunResult result;
-    if (g_parallel_done) {
+    {
         std::lock_guard<std::mutex> lock(g_results_mutex);
         auto it = g_cached_results.find(param.test_name);
         if (it != g_cached_results.end()) {
@@ -709,9 +937,6 @@ TEST_P(Test262Suite, Run) {
         } else {
             result = {T262_FAIL, "not found in cache"};
         }
-    } else {
-        // fallback: run sequentially (shouldn't happen)
-        result = run_test262(param.test_path);
     }
 
     switch (result.result) {
@@ -792,9 +1017,9 @@ int main(int argc, char** argv) {
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new Test262ReportListener());
 
-    // pre-run all tests in parallel
+    // pre-run all tests in batch mode
     auto all_tests = discover_all_tests();
-    parallel_run_all_tests(all_tests);
+    batch_run_all_tests(all_tests);
 
     return RUN_ALL_TESTS();
 }

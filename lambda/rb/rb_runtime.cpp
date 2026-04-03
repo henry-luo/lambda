@@ -14,11 +14,18 @@
 // push_d boxes a double into an Item via GC nursery allocation (C linkage)
 extern "C" Item push_d(double dval);
 
+// forward declarations
+extern String* heap_create_name(const char* str, size_t len);
+
 // global state
 static void* rb_input = NULL;
 
 #define RB_MODULE_VAR_MAX 1024
 static Item rb_module_vars[RB_MODULE_VAR_MAX];
+
+// exception state — simple flag-based model (same pattern as Python transpiler)
+static bool rb_exception_pending = false;
+static Item rb_exception_value = {0};
 
 // ============================================================================
 // Runtime initialization
@@ -30,8 +37,12 @@ extern "C" void rb_runtime_set_input(void* input_ptr) {
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root_range((uint64_t*)rb_module_vars, RB_MODULE_VAR_MAX);
+        heap_register_gc_root(&rb_exception_value.item);
         statics_rooted = true;
     }
+    // clear exception state on new script execution
+    rb_exception_pending = false;
+    rb_exception_value = (Item){.item = ITEM_NULL};
 }
 
 // ============================================================================
@@ -867,4 +878,149 @@ extern "C" Item rb_to_i(Item value) {
 // Alias for rb_to_float matching Ruby convention
 extern "C" Item rb_to_f(Item value) {
     return rb_to_float(value);
+}
+
+// ============================================================================
+// Exception handling (Phase 4)
+// ============================================================================
+
+extern "C" void rb_raise(Item exception) {
+    rb_exception_pending = true;
+    rb_exception_value = exception;
+}
+
+extern "C" Item rb_check_exception(void) {
+    return (Item){.item = b2it(rb_exception_pending)};
+}
+
+extern "C" Item rb_clear_exception(void) {
+    rb_exception_pending = false;
+    Item val = rb_exception_value;
+    rb_exception_value = (Item){.item = ITEM_NULL};
+    return val;
+}
+
+extern "C" Item rb_new_exception(Item type_name, Item message) {
+    Item obj = rb_new_object();
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("type", 4))}, type_name);
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("message", 7))}, message);
+    return obj;
+}
+
+extern "C" Item rb_exception_get_type(Item exception) {
+    // if the exception is a plain string, treat it as RuntimeError message
+    TypeId tid = get_type_id(exception);
+    if (tid == LMD_TYPE_STRING) {
+        return (Item){.item = s2it(heap_create_name("RuntimeError", 12))};
+    }
+    // for exception objects created by rb_new_exception, get the "type" attribute
+    Item type_attr = rb_getattr(exception, (Item){.item = s2it(heap_create_name("type", 4))});
+    if (get_type_id(type_attr) != LMD_TYPE_NULL) {
+        return type_attr;
+    }
+    // for class instances (e.g. CustomError.new("msg")), use __rb_class__.__name__
+    Item cls = rb_getattr(exception, (Item){.item = s2it(heap_create_name("__rb_class__", 12))});
+    if (get_type_id(cls) != LMD_TYPE_NULL) {
+        Item name = rb_getattr(cls, (Item){.item = s2it(heap_create_name("__name__", 8))});
+        if (get_type_id(name) != LMD_TYPE_NULL) return name;
+    }
+    return (Item){.item = s2it(heap_create_name("RuntimeError", 12))};
+}
+
+extern "C" Item rb_exception_get_message(Item exception) {
+    TypeId tid = get_type_id(exception);
+    if (tid == LMD_TYPE_STRING) {
+        return exception;
+    }
+    Item msg = rb_getattr(exception, (Item){.item = s2it(heap_create_name("message", 7))});
+    if (get_type_id(msg) != LMD_TYPE_NULL) {
+        return msg;
+    }
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item rb_respond_to(Item obj, Item method_name) {
+    TypeId tid = get_type_id(obj);
+    const char* mname = NULL;
+    size_t mlen = 0;
+    TypeId mtid = get_type_id(method_name);
+    if (mtid == LMD_TYPE_STRING) {
+        String* s = it2s(method_name);
+        mname = s->chars;
+        mlen = s->len;
+    } else if (mtid == LMD_TYPE_SYMBOL) {
+        String* s = it2s(method_name);
+        mname = s->chars;
+        mlen = s->len;
+    }
+    if (!mname) return (Item){.item = b2it(false)};
+
+    // check built-in type methods
+    // strings
+    if (tid == LMD_TYPE_STRING) {
+        Item test_args[1] = {method_name};
+        Item result = rb_string_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // arrays
+    if (tid == LMD_TYPE_ARRAY) {
+        Item test_args[1] = {method_name};
+        Item result = rb_array_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // integers
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) {
+        Item test_args[1] = {method_name};
+        Item result = rb_int_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // floats
+    if (tid == LMD_TYPE_FLOAT) {
+        Item test_args[1] = {method_name};
+        Item result = rb_float_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // hashes
+    if (tid == LMD_TYPE_MAP) {
+        Item test_args[1] = {method_name};
+        Item result = rb_hash_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // check instance/class methods
+    if (tid == LMD_TYPE_MAP) {
+        Item lookup = rb_method_lookup(obj, method_name);
+        if (get_type_id(lookup) != LMD_TYPE_NULL) return (Item){.item = b2it(true)};
+    }
+    // common methods all objects have
+    if ((mlen == 4 && strncmp(mname, "to_s", 4) == 0) ||
+        (mlen == 5 && strncmp(mname, "class", 5) == 0) ||
+        (mlen == 4 && strncmp(mname, "nil?", 4) == 0) ||
+        (mlen == 5 && strncmp(mname, "is_a?", 5) == 0) ||
+        (mlen == 7 && strncmp(mname, "frozen?", 7) == 0)) {
+        return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item rb_send(Item obj, Item method_name, Item* args, int argc) {
+    // dynamic dispatch — try built-in dispatchers then class method lookup
+    Item result;
+    result = rb_string_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_array_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_hash_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_int_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_float_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    // class instance method lookup
+    Item func = rb_method_lookup(obj, method_name);
+    if (get_type_id(func) == LMD_TYPE_FUNC) {
+        return rb_block_call(func, args, argc);
+    }
+    log_error("rb: NoMethodError: undefined method '%s'",
+        get_type_id(method_name) == LMD_TYPE_STRING ? it2s(method_name)->chars : "?");
+    return (Item){.item = ITEM_NULL};
 }
