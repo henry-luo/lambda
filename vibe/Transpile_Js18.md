@@ -548,3 +548,56 @@ echo 'outer:for(var i=0;i<3;i++){for(var j=0;j<3;j++){if(j===1)break outer;}} co
 echo 'switch(NaN){case isNaN(NaN):console.log("match");break;default:console.log("no");}' > temp/t.js
 ./lambda.exe js temp/t.js --no-log  # → no (should be match)
 ```
+
+---
+
+## Progress Checkpoint: Destructuring Assignment Fix (2026-04-03)
+
+### Problem
+
+Top-level `var` declarations are stored as **module variables** (`MCONST_MODVAR` in the `module_consts` hashmap), accessed via `js_get_module_var(idx)` / `js_set_module_var(idx, val)`. They are NOT local variables in `var_scopes`.
+
+The destructuring assignment code paths only used `jm_find_var()`, which searches local `var_scopes` — returning NULL for module vars. This caused all destructuring assignments to top-level variables to silently produce `undefined`.
+
+**Affected patterns:**
+```js
+var a, b; [a, b] = [1, 2];           // → undefined undefined (should be 1 2)
+var x, y; ({x, y} = {x: 10, y: 20}); // → undefined undefined (should be 10 20)
+[p = 100, q = 200] = [42];           // defaults broken
+for ([v = 10, ...] of [[2, null]])    // for-of destructuring broken
+```
+
+### Fix Applied (`lambda/js/transpile_js_mir.cpp`)
+
+Added module var fallback pattern to all 4 destructuring code paths:
+
+| Code Path | Location | Changes |
+|-----------|----------|---------|
+| Standalone array destructuring | `jm_transpile_assignment` | `jm_assign_to_var` helper: local var → module var → global property fallback |
+| Standalone object destructuring | `jm_transpile_assignment` | Same helper + `jm_emit_default_check` for defaults |
+| For-of array extraction | `jm_transpile_for_of` | Added `ASSIGNMENT_PATTERN` handling + module var fallback for IDENTIFIER, nested OBJECT_PATTERN, SPREAD_ELEMENT |
+| For-of object extraction | `jm_transpile_for_of` | Added default value handling + module var fallback |
+
+### Result
+
+| Version | Passed | Executed | Rate | vs Baseline |
+|---------|--------|----------|------|-------------|
+| v18 baseline (commit `3cff26eef`) | 10,903 | 26,967 | 40.4% | — |
+| Before fix (master HEAD) | 10,784 | 26,967 | 40.0% | −119 |
+| **After destructuring fix** | **10,838** | **26,967** | **40.2%** | **−65** |
+
+**+54 tests recovered.** Gap to baseline reduced from −119 to −65.
+
+### Note on Test Counts
+
+The test262 runner reports two different totals — this is expected:
+
+| Metric | Count | Source |
+|--------|-------|--------|
+| **Total test files discovered** | 38,649 | GTest parameterized test count |
+| **Skipped** (unsupported features) | 11,682 | Tests requiring Proxy, Temporal, SharedArrayBuffer, etc. |
+| **Executed** (pass + fail) | 26,967 | `38,649 − 11,682` |
+| **Passed** | 10,838 | Custom summary in test runner |
+| **Failed** | 16,129 | Custom summary in test runner |
+
+GTest XML reports `tests="38649" failures="16129"` — it counts skipped tests as "not failed" (i.e., 38,649 − 16,129 = 22,520 includes both passed AND skipped). The custom `test262 Compliance Summary` box printed at the end correctly separates skipped from passed, giving the accurate **10,838 / 26,967 (40.2%)** figure.
