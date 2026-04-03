@@ -11,6 +11,9 @@
 #include <cstdlib>
 #include <cmath>
 
+// push_d boxes a double into an Item via GC nursery allocation (C linkage)
+extern "C" Item push_d(double dval);
+
 // global state
 static void* rb_input = NULL;
 
@@ -88,21 +91,21 @@ extern "C" Item rb_to_int(Item value) {
 extern "C" Item rb_to_float(Item value) {
     TypeId type = get_type_id(value);
     switch (type) {
-        case LMD_TYPE_NULL: return (Item){.item = d2it(0.0)};
-        case LMD_TYPE_BOOL: return (Item){.item = d2it(it2b(value) ? 1.0 : 0.0)};
-        case LMD_TYPE_INT: return (Item){.item = d2it((double)it2i(value))};
-        case LMD_TYPE_INT64: return (Item){.item = d2it((double)it2i(value))};
+        case LMD_TYPE_NULL: return (Item)push_d(0.0);
+        case LMD_TYPE_BOOL: return (Item)push_d(it2b(value) ? 1.0 : 0.0);
+        case LMD_TYPE_INT: return (Item)push_d((double)it2i(value));
+        case LMD_TYPE_INT64: return (Item)push_d((double)it2i(value));
         case LMD_TYPE_FLOAT: return value;
         case LMD_TYPE_STRING: {
             String* str = it2s(value);
-            if (!str || !str->chars) return (Item){.item = d2it(0.0)};
+            if (!str || !str->chars) return (Item)push_d(0.0);
             char* end;
             double val = strtod(str->chars, &end);
-            if (end == str->chars) return (Item){.item = d2it(0.0)};
-            return (Item){.item = d2it(val)};
+            if (end == str->chars) return (Item)push_d(0.0);
+            return (Item)push_d(val);
         }
         default:
-            return (Item){.item = d2it(0.0)};
+            return (Item)push_d(0.0);
     }
 }
 
@@ -181,7 +184,7 @@ extern "C" Item rb_add(Item left, Item right) {
     // float arithmetic
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) + rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) + rb_get_number(right));
     }
     // string concatenation
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
@@ -216,7 +219,7 @@ extern "C" Item rb_subtract(Item left, Item right) {
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) - rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) - rb_get_number(right));
     }
     log_error("rb: TypeError: no implicit conversion in rb_subtract");
     return (Item){.item = ITEM_NULL};
@@ -230,7 +233,7 @@ extern "C" Item rb_multiply(Item left, Item right) {
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) * rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) * rb_get_number(right));
     }
     // string * int → repetition
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_INT) {
@@ -263,7 +266,7 @@ extern "C" Item rb_divide(Item left, Item right) {
             log_error("rb: ZeroDivisionError: divided by 0");
             return (Item){.item = ITEM_NULL};
         }
-        return (Item){.item = d2it(rb_get_number(left) / d)};
+        return (Item)push_d(rb_get_number(left) / d);
     }
     log_error("rb: TypeError: no implicit conversion in rb_divide");
     return (Item){.item = ITEM_NULL};
@@ -290,7 +293,7 @@ extern "C" Item rb_modulo(Item left, Item right) {
             log_error("rb: ZeroDivisionError: divided by 0");
             return (Item){.item = ITEM_NULL};
         }
-        return (Item){.item = d2it(fmod(rb_get_number(left), b))};
+        return (Item)push_d(fmod(rb_get_number(left), b));
     }
     log_error("rb: TypeError: no implicit conversion in rb_modulo");
     return (Item){.item = ITEM_NULL};
@@ -302,7 +305,7 @@ extern "C" Item rb_power(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t exp = it2i(right);
         if (exp < 0) {
-            return (Item){.item = d2it(pow((double)it2i(left), (double)exp))};
+            return (Item)push_d(pow((double)it2i(left), (double)exp));
         }
         int64_t base = it2i(left);
         int64_t result = 1;
@@ -311,14 +314,14 @@ extern "C" Item rb_power(Item left, Item right) {
         }
         return (Item){.item = i2it(result)};
     }
-    return (Item){.item = d2it(pow(rb_get_number(left), rb_get_number(right)))};
+    return (Item)push_d(pow(rb_get_number(left), rb_get_number(right)));
 }
 
 extern "C" Item rb_negate(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) return (Item){.item = i2it(-it2i(value))};
     if (type == LMD_TYPE_INT64) return (Item){.item = i2it(-it2i(value))};
-    if (type == LMD_TYPE_FLOAT) return (Item){.item = d2it(-it2d(value))};
+    if (type == LMD_TYPE_FLOAT) return (Item)push_d(-it2d(value));
     return (Item){.item = ITEM_NULL};
 }
 
@@ -822,7 +825,7 @@ extern "C" Item rb_builtin_type(Item obj) {
 
 extern "C" Item rb_builtin_rand(Item max) {
     if (get_type_id(max) == LMD_TYPE_NULL) {
-        return (Item){.item = d2it((double)rand() / RAND_MAX)};
+        return (Item)push_d((double)rand() / RAND_MAX);
     }
     int64_t n = it2i(max);
     if (n <= 0) return (Item){.item = i2it(0)};
