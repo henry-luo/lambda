@@ -199,7 +199,9 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
         // Skip whitespace between rules
         while (token_index < token_count &&
                (tokens[token_index].type == CSS_TOKEN_WHITESPACE ||
-                tokens[token_index].type == CSS_TOKEN_COMMENT)) {
+                tokens[token_index].type == CSS_TOKEN_COMMENT ||
+                tokens[token_index].type == CSS_TOKEN_CDC ||
+                tokens[token_index].type == CSS_TOKEN_CDO)) {
             token_index++;
         }
 
@@ -208,6 +210,32 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
         // Skip EOF token - nothing left to parse
         if (tokens[token_index].type == CSS_TOKEN_EOF) {
             break;
+        }
+
+        // Per CSS syntax spec: discard rules whose prelude starts with <dashed-ident><colon>
+        // These look like custom property declarations and should be ignored at top level
+        if (tokens[token_index].type == CSS_TOKEN_CUSTOM_PROPERTY) {
+            int next = token_index + 1;
+            while (next < (int)token_count && tokens[next].type == CSS_TOKEN_WHITESPACE) next++;
+            if (next < (int)token_count && tokens[next].type == CSS_TOKEN_COLON) {
+                // skip to end of block or semicolon
+                int brace_depth = 0;
+                token_index = next + 1;
+                while (token_index < (int)token_count) {
+                    if (tokens[token_index].type == CSS_TOKEN_LEFT_BRACE) {
+                        brace_depth++;
+                    } else if (tokens[token_index].type == CSS_TOKEN_RIGHT_BRACE) {
+                        if (brace_depth > 0) { brace_depth--; if (brace_depth == 0) { token_index++; break; } }
+                        else break;
+                    } else if (brace_depth == 0 && tokens[token_index].type == CSS_TOKEN_SEMICOLON) {
+                        token_index++;
+                        break;
+                    }
+                    token_index++;
+                }
+                rules_skipped++;
+                continue;
+            }
         }
 
         // Parse a rule

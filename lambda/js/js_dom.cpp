@@ -24,6 +24,7 @@
 #include "../input/css/dom_node.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style_node.hpp"
+#include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -33,6 +34,7 @@
 // Forward declarations
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
+static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // ============================================================================
@@ -300,7 +302,41 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
 
     // look up the CSS property ID
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
-    if (prop_id == CSS_PROPERTY_UNKNOWN) {
+    if (prop_id == CSS_PROPERTY_UNKNOWN || prop_id == 0) {
+        // check for CSS custom properties (--foo)
+        // note: css_property_get_id_by_name returns 0 for not-found, CSS_PROPERTY_UNKNOWN is -1
+        if (css_prop[0] == '-' && css_prop[1] == '-') {
+            // on-demand matching for custom property
+            CssDeclaration* decl = js_match_custom_property(elem, css_prop);
+            if (decl && (decl->value || decl->value_text)) {
+                const char* val = nullptr;
+
+                // prefer raw value text for faithful serialization
+                if (decl->value_text && decl->value_text_len > 0) {
+                    val = decl->value_text;
+                } else if (decl->value) {
+                    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                    if (!pool) return (Item){.item = s2it(heap_create_name(""))};
+                    CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+                    if (!fmt) return (Item){.item = s2it(heap_create_name(""))};
+                    css_format_value(fmt, decl->value);
+                    String* result = stringbuf_to_string(fmt->output);
+                    val = (result && result->chars) ? result->chars : "";
+                }
+                if (!val) val = "";
+                // trim leading/trailing whitespace per CSS spec
+                while (*val == ' ' || *val == '\t' || *val == '\n' || *val == '\r') val++;
+                size_t vlen = strlen(val);
+                while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t' || val[vlen-1] == '\n' || val[vlen-1] == '\r')) vlen--;
+                Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                if (pool) {
+                    char* trimmed = (char*)pool_alloc(pool, vlen + 1);
+                    if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
+                }
+                return (Item){.item = s2it(heap_create_name(val))};
+            }
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
         log_debug("js_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
                   css_prop, js_prop);
         return (Item){.item = s2it(heap_create_name(""))};
@@ -445,6 +481,77 @@ static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId
     if (best_decl) {
         log_debug("js_match_element_property: found property %d for <%s> pseudo=%d via on-demand matching",
                   prop_id, elem->tag_name ? elem->tag_name : "?", pseudo_type);
+    }
+
+    return best_decl;
+}
+
+/**
+ * On-demand matching for CSS custom properties (--variable-name).
+ * Matches element against all stylesheets and returns the best-matching
+ * declaration for the given custom property name.
+ */
+static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name) {
+    if (!elem || !elem->doc || !prop_name) return nullptr;
+
+    DomDocument* doc = elem->doc;
+    if (!doc->stylesheets || doc->stylesheet_count <= 0) return nullptr;
+
+    Pool* pool = doc->pool;
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) return nullptr;
+
+    CssDeclaration* best_decl = nullptr;
+    CssSpecificity best_spec = {0, 0, 0, 0, false};
+
+    for (int s = 0; s < doc->stylesheet_count; s++) {
+        CssStylesheet* sheet = doc->stylesheets[s];
+        if (!sheet) continue;
+
+        for (size_t r = 0; r < sheet->rule_count; r++) {
+            CssRule* rule = sheet->rules[r];
+            if (!rule || rule->type != CSS_RULE_STYLE) continue;
+            if (rule->data.style_rule.declaration_count == 0) continue;
+
+            bool matched = false;
+            CssSpecificity match_spec = {0, 0, 0, 0, false};
+
+            CssSelectorGroup* group = rule->data.style_rule.selector_group;
+            CssSelector* single_sel = rule->data.style_rule.selector;
+
+            if (group && group->selector_count > 0) {
+                for (size_t si = 0; si < group->selector_count; si++) {
+                    CssSelector* sel = group->selectors[si];
+                    if (!sel) continue;
+                    MatchResult result;
+                    if (selector_matcher_matches(matcher, sel, elem, &result)) {
+                        matched = true;
+                        match_spec = result.specificity;
+                        break;
+                    }
+                }
+            } else if (single_sel) {
+                MatchResult result;
+                if (selector_matcher_matches(matcher, single_sel, elem, &result)) {
+                    matched = true;
+                    match_spec = result.specificity;
+                }
+            }
+
+            if (!matched) continue;
+
+            // find matching custom property by name
+            for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
+                CssDeclaration* decl = rule->data.style_rule.declarations[d];
+                if (!decl || !decl->property_name) continue;
+                if (strcmp(decl->property_name, prop_name) != 0) continue;
+
+                if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
+                    best_decl = decl;
+                    best_spec = match_spec;
+                }
+            }
+        }
     }
 
     return best_decl;

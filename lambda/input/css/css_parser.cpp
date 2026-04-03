@@ -36,6 +36,364 @@ static CssSelectorType css_functional_pseudo_type(const char* func_name) {
     return CSS_SELECTOR_PSEUDO_NOT;                   // unknown — default fallback
 }
 
+// ============================================================================
+// An+B Token-Level Parser (CSS Syntax Level 3 §6.1)
+// ============================================================================
+// Strict token-level parsing of the An+B microsyntax.
+// Returns true if the token sequence [start, end) is a valid An+B value
+// and fills *formula accordingly. Returns false for parse errors.
+//
+// Grammar (token-level, simplified):
+//   <an+b> =
+//     odd | even
+//   | <integer>                              -- e.g., "5"
+//   | <n-dimension>                          -- e.g., "2n"
+//   | <n-dimension> <signed-integer>         -- e.g., "2n" "+3" (signed number token)
+//   | <n-dimension> ['+' | '-'] <signless-integer>  -- e.g., "2n" "+" "3"
+//   | <ndashdigit-dimension>                 -- e.g., "2n-3" (single token)
+//   | '+'?'n'                                -- bare "n" or "+n" (sign + ident, NO space)
+//   | '-n'                                   -- ident "-n"
+//   | '+'?'n' <signed-integer>
+//   | '-n' <signed-integer>
+//   | '+'?'n' ['+' | '-'] <signless-integer>
+//   | '-n' ['+' | '-'] <signless-integer>
+//   | '+'? <ndashdigit-ident>                -- e.g., "+n-3" or "n-3" (single ident)
+//   | <dashndashdigit-ident>                 -- e.g., "-n-3" (single ident)
+//
+// Key constraints enforced:
+//   - No whitespace between '+'/'-' sign and 'n' when they are separate tokens
+//   - After 'n' or dimension, only one sign token is allowed before the integer
+//   - <signless-integer> must not have a sign; <signed-integer> must have one
+//
+static bool css_parse_anb_from_tokens(const CssToken* tokens, int start, int end,
+                                       CssNthFormula* formula) {
+    formula->a = 0;
+    formula->b = 0;
+    formula->odd = false;
+    formula->even = false;
+
+    // skip leading whitespace
+    int pos = start;
+    while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+    if (pos >= end) return false;
+
+    // helper: check remaining tokens are just whitespace
+    #define EXPECT_END(p) do { \
+        int _p = (p); \
+        while (_p < end && tokens[_p].type == CSS_TOKEN_WHITESPACE) _p++; \
+        if (_p != end) return false; \
+    } while(0)
+
+    // helper: get lowercase ident value
+    const CssToken* t = &tokens[pos];
+
+    // ---- odd / even ----
+    if (t->type == CSS_TOKEN_IDENT) {
+        const char* v = t->value ? t->value : "";
+        size_t vlen = strlen(v);
+        if (vlen == 3 && (v[0] == 'o' || v[0] == 'O') && (v[1] == 'd' || v[1] == 'D') && (v[2] == 'd' || v[2] == 'D')) {
+            formula->odd = true;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+        if (vlen == 4 && (v[0] == 'e' || v[0] == 'E') && (v[1] == 'v' || v[1] == 'V')
+            && (v[2] == 'e' || v[2] == 'E') && (v[3] == 'n' || v[3] == 'N')) {
+            formula->even = true;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+    }
+
+    // ---- <integer> (bare number, no n) ----
+    if (t->type == CSS_TOKEN_NUMBER) {
+        double nv = t->data.number_value;
+        if (nv != (int)nv) return false; // must be integer
+        formula->a = 0;
+        formula->b = (int)nv;
+        EXPECT_END(pos + 1);
+        return true;
+    }
+
+    // ---- Patterns starting with DIMENSION (e.g., "2n", "2n-3") ----
+    if (t->type == CSS_TOKEN_DIMENSION) {
+        // the dimension must have unit "n" (case-insensitive)
+        const char* raw = t->start;
+        size_t raw_len = t->length;
+        // find 'n' or 'N' in the token — the unit part
+        // numeric value is at the start, 'n' follows
+        const char* n_pos_ptr = NULL;
+        for (size_t i = 0; i < raw_len; i++) {
+            if (raw[i] == 'n' || raw[i] == 'N') {
+                n_pos_ptr = raw + i;
+                break;
+            }
+        }
+        if (!n_pos_ptr) return false;
+
+        // check if digits follow 'n' in same token (ndashdigit-dimension: "2n-3")
+        size_t after_n = (n_pos_ptr - raw) + 1;
+        if (after_n < raw_len) {
+            // there's stuff after 'n', should be "-" followed by digits (dash-then-digits)
+            if (raw[after_n] == '-') {
+                // parse the integer after the dash
+                int b_val = 0;
+                size_t di = after_n + 1;
+                if (di >= raw_len) {
+                    // "5n-" with no digit in this token: treat as <n-dimension> '-' <signless-integer>
+                    // The '-' is baked into the dimension token; the integer follows as next token
+                    formula->a = (int)t->data.dimension.value;
+                    pos++;
+                    // skip whitespace between the trailing dash and the integer
+                    while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+                    if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+                    double bv = tokens[pos].data.number_value;
+                    if (bv != (int)bv) return false;
+                    const char* ns = tokens[pos].start;
+                    if (ns && (*ns == '+' || *ns == '-')) return false; // must be signless
+                    formula->b = -(int)bv;
+                    EXPECT_END(pos + 1);
+                    return true;
+                }
+                while (di < raw_len) {
+                    if (raw[di] < '0' || raw[di] > '9') return false;
+                    b_val = b_val * 10 + (raw[di] - '0');
+                    di++;
+                }
+                formula->a = (int)t->data.dimension.value;
+                formula->b = -b_val;
+                EXPECT_END(pos + 1);
+                return true;
+            }
+            return false; // unexpected chars after 'n'
+        }
+
+        // plain n-dimension like "2n"
+        formula->a = (int)t->data.dimension.value;
+        pos++;
+
+        // skip whitespace
+        while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+        if (pos >= end) {
+            // just "2n" with no b
+            return true;
+        }
+
+        // check for <signed-integer> (e.g., "+3" or "-3" as a single number token)
+        if (tokens[pos].type == CSS_TOKEN_NUMBER) {
+            double bv = tokens[pos].data.number_value;
+            if (bv != (int)bv) return false;
+            // signed-integer: the token must include the sign
+            const char* ns = tokens[pos].start;
+            if (ns && *ns != '+' && *ns != '-') return false; // signless not allowed here
+            formula->b = (int)bv;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+
+        // check for ['+' | '-'] <signless-integer>
+        if (tokens[pos].type == CSS_TOKEN_DELIM &&
+            (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
+            int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
+            pos++;
+            // skip whitespace between sign and integer
+            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+            if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+            double bv = tokens[pos].data.number_value;
+            if (bv != (int)bv) return false;
+            // signless-integer: must NOT have a sign
+            const char* ns = tokens[pos].start;
+            if (ns && (*ns == '+' || *ns == '-')) return false;
+            formula->b = sign * (int)bv;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+
+        return false; // unexpected token after dimension
+    }
+
+    // ---- Patterns starting with IDENT: "n", "-n", "n-3", "-n-3" ----
+    if (t->type == CSS_TOKEN_IDENT) {
+        const char* v = t->value ? t->value : "";
+        size_t vlen = strlen(v);
+
+        // check for "n" or "-n" (possibly with dash-digits: "n-3", "-n-3")
+        bool negated = false;
+        const char* after_sign = v;
+        if (vlen > 0 && v[0] == '-') {
+            negated = true;
+            after_sign = v + 1;
+        }
+
+        // must start with 'n' or 'N' after optional leading '-'
+        if (*after_sign != 'n' && *after_sign != 'N') return false;
+        const char* rest = after_sign + 1;
+        size_t rest_len = vlen - (rest - v);
+
+        if (rest_len > 0) {
+            // ndashdigit-ident: "n-3" or "-n-3", or "n-"/ "-n-" (dash with no inline digit)
+            if (*rest != '-') return false;
+            rest++;
+            rest_len--;
+            if (rest_len == 0) {
+                // "n-" or "-n-" with no digits in the ident token
+                // Treat as bare n/−n with '-' baked in; next token should be signless integer
+                formula->a = negated ? -1 : 1;
+                pos++;
+                while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+                if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+                double bv = tokens[pos].data.number_value;
+                if (bv != (int)bv) return false;
+                const char* ns = tokens[pos].start;
+                if (ns && (*ns == '+' || *ns == '-')) return false; // must be signless
+                formula->b = -(int)bv;
+                EXPECT_END(pos + 1);
+                return true;
+            }
+            int b_val = 0;
+            for (size_t i = 0; i < rest_len; i++) {
+                if (rest[i] < '0' || rest[i] > '9') return false;
+                b_val = b_val * 10 + (rest[i] - '0');
+            }
+            formula->a = negated ? -1 : 1;
+            formula->b = -b_val;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+
+        // bare "n" or "-n"
+        formula->a = negated ? -1 : 1;
+        pos++;
+
+        // skip whitespace
+        while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+        if (pos >= end) return true; // just "n" or "-n"
+
+        // check for <signed-integer>
+        if (tokens[pos].type == CSS_TOKEN_NUMBER) {
+            double bv = tokens[pos].data.number_value;
+            if (bv != (int)bv) return false;
+            const char* ns = tokens[pos].start;
+            if (ns && *ns != '+' && *ns != '-') return false; // must be signed
+            formula->b = (int)bv;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+
+        // check for ['+' | '-'] <signless-integer>
+        if (tokens[pos].type == CSS_TOKEN_DELIM &&
+            (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
+            int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
+            pos++;
+            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+            if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+            double bv = tokens[pos].data.number_value;
+            if (bv != (int)bv) return false;
+            const char* ns = tokens[pos].start;
+            if (ns && (*ns == '+' || *ns == '-')) return false; // must be signless
+            formula->b = sign * (int)bv;
+            EXPECT_END(pos + 1);
+            return true;
+        }
+
+        return false;
+    }
+
+    // ---- Patterns starting with '+' DELIM: "+n", "+n-3", "+n" <signed-integer> etc. ----
+    if (t->type == CSS_TOKEN_DELIM && t->data.delimiter == '+') {
+        pos++;
+        // NO whitespace allowed between '+' and 'n'/ident
+        if (pos >= end) return false;
+        if (tokens[pos].type == CSS_TOKEN_WHITESPACE) return false; // "+ n" is parse error
+
+        if (tokens[pos].type == CSS_TOKEN_IDENT) {
+            const char* v = tokens[pos].value ? tokens[pos].value : "";
+            size_t vlen = strlen(v);
+            if (vlen == 0 || (*v != 'n' && *v != 'N')) return false;
+
+            // check for ndashdigit-ident: "+n-3"
+            const char* rest = v + 1;
+            size_t rest_len = vlen - 1;
+            if (rest_len > 0) {
+                if (*rest != '-') return false;
+                rest++;
+                rest_len--;
+                if (rest_len == 0) {
+                    // "+n-" with no inline digits: e.g. "+n- 5"
+                    formula->a = 1;
+                    pos++;
+                    while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+                    if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+                    double bv = tokens[pos].data.number_value;
+                    if (bv != (int)bv) return false;
+                    const char* ns = tokens[pos].start;
+                    if (ns && (*ns == '+' || *ns == '-')) return false; // must be signless
+                    formula->b = -(int)bv;
+                    EXPECT_END(pos + 1);
+                    return true;
+                }
+                int b_val = 0;
+                for (size_t i = 0; i < rest_len; i++) {
+                    if (rest[i] < '0' || rest[i] > '9') return false;
+                    b_val = b_val * 10 + (rest[i] - '0');
+                }
+                formula->a = 1;
+                formula->b = -b_val;
+                EXPECT_END(pos + 1);
+                return true;
+            }
+
+            // bare "+n"
+            formula->a = 1;
+            pos++;
+            while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+            if (pos >= end) return true;
+
+            // <signed-integer>
+            if (tokens[pos].type == CSS_TOKEN_NUMBER) {
+                double bv = tokens[pos].data.number_value;
+                if (bv != (int)bv) return false;
+                const char* ns = tokens[pos].start;
+                if (ns && *ns != '+' && *ns != '-') return false;
+                formula->b = (int)bv;
+                EXPECT_END(pos + 1);
+                return true;
+            }
+
+            // ['+' | '-'] <signless-integer>
+            if (tokens[pos].type == CSS_TOKEN_DELIM &&
+                (tokens[pos].data.delimiter == '+' || tokens[pos].data.delimiter == '-')) {
+                int sign = (tokens[pos].data.delimiter == '-') ? -1 : 1;
+                pos++;
+                while (pos < end && tokens[pos].type == CSS_TOKEN_WHITESPACE) pos++;
+                if (pos >= end || tokens[pos].type != CSS_TOKEN_NUMBER) return false;
+                double bv = tokens[pos].data.number_value;
+                if (bv != (int)bv) return false;
+                const char* ns = tokens[pos].start;
+                if (ns && (*ns == '+' || *ns == '-')) return false;
+                formula->b = sign * (int)bv;
+                EXPECT_END(pos + 1);
+                return true;
+            }
+            return false;
+        }
+
+        // + followed by a number: "+1" → just an integer with leading +
+        // But the tokenizer would have returned this as a signed number token, not '+' '1'
+        return false;
+    }
+
+    #undef EXPECT_END
+    return false;
+}
+
+// Helper: check if a selector type is an nth-* pseudo-class
+static bool css_is_nth_pseudo(CssSelectorType type) {
+    return type == CSS_SELECTOR_PSEUDO_NTH_CHILD ||
+           type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD ||
+           type == CSS_SELECTOR_PSEUDO_NTH_OF_TYPE ||
+           type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
+}
+
 // Helper: Skip whitespace and comment tokens
 int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count) {
     int pos = start;
@@ -819,8 +1177,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
     bool matched = false;  // Track if we found a valid selector
 
     // Parse based on token type
-    if (token->type == CSS_TOKEN_IDENT) {
-        // Element selector: div, span, etc.
+    if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_CUSTOM_PROPERTY) {
+        // Element/type selector: div, span, --foo, etc.
         selector->type = CSS_SELECTOR_TYPE_ELEMENT;
         // Extract selector value from token
         if (token->value) {
@@ -978,22 +1336,36 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         selector->value = func_name;
         selector->argument = pseudo_arg;
 
-        // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
-        if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
-            selector->type == CSS_SELECTOR_PSEUDO_IS ||
-            selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
-            selector->type == CSS_SELECTOR_PSEUDO_HAS) {
-            int sub_pos = arg_start;
-            CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
-            if (sub_group && sub_group->selector_count > 0) {
-                selector->function_selectors = sub_group->selectors;
-                selector->function_selector_count = sub_group->selector_count;
+        // For nth-* pseudo-classes: validate An+B and populate nth_formula
+        if (css_is_nth_pseudo(selector->type)) {
+            if (!css_parse_anb_from_tokens(tokens, arg_start, arg_end, &selector->nth_formula)) {
+                // invalid An+B → parse error: reject this selector
+                log_debug("[CSS Parser] An+B parse error for '%s(%s)'",
+                         func_name, pseudo_arg ? pseudo_arg : "");
+                // matched stays false → caller treats as parse error
+            } else {
+                log_debug(" Functional pseudo-class: '%s(%s)'",
+                       func_name, pseudo_arg ? pseudo_arg : "");
+                matched = true;
             }
-        }
+        } else {
+            // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+            if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+                selector->type == CSS_SELECTOR_PSEUDO_IS ||
+                selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+                selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+                int sub_pos = arg_start;
+                CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+                if (sub_group && sub_group->selector_count > 0) {
+                    selector->function_selectors = sub_group->selectors;
+                    selector->function_selector_count = sub_group->selector_count;
+                }
+            }
 
-        log_debug(" Functional pseudo-class: '%s(%s)'",
-               func_name, pseudo_arg ? pseudo_arg : "");
-        matched = true;
+            log_debug(" Functional pseudo-class: '%s(%s)'",
+                   func_name, pseudo_arg ? pseudo_arg : "");
+            matched = true;
+        }
     } else if (token->type == CSS_TOKEN_COLON) {
         // Pseudo-class selector: :hover, :nth-child(), etc.
         (*pos)++;
@@ -1262,22 +1634,35 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 selector->value = func_name;
                 selector->argument = pseudo_arg;
 
-                // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
-                if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
-                    selector->type == CSS_SELECTOR_PSEUDO_IS ||
-                    selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
-                    selector->type == CSS_SELECTOR_PSEUDO_HAS) {
-                    int sub_pos = arg_start;
-                    CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
-                    if (sub_group && sub_group->selector_count > 0) {
-                        selector->function_selectors = sub_group->selectors;
-                        selector->function_selector_count = sub_group->selector_count;
+                // For nth-* pseudo-classes: validate An+B and populate nth_formula
+                if (css_is_nth_pseudo(selector->type)) {
+                    if (!css_parse_anb_from_tokens(tokens, arg_start, arg_end, &selector->nth_formula)) {
+                        log_debug("[CSS Parser] An+B parse error for ':%s(%s)'",
+                                 func_name, pseudo_arg ? pseudo_arg : "");
+                        // matched stays false → caller treats as parse error
+                    } else {
+                        log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
+                               func_name, pseudo_arg ? pseudo_arg : "");
+                        matched = true;
                     }
-                }
+                } else {
+                    // For :not(), :is(), :where(), :has(): parse argument tokens as selector list
+                    if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
+                        selector->type == CSS_SELECTOR_PSEUDO_IS ||
+                        selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
+                        selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+                        int sub_pos = arg_start;
+                        CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(tokens, &sub_pos, arg_end, pool);
+                        if (sub_group && sub_group->selector_count > 0) {
+                            selector->function_selectors = sub_group->selectors;
+                            selector->function_selector_count = sub_group->selector_count;
+                        }
+                    }
 
-                log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
-                       func_name, pseudo_arg ? pseudo_arg : "");
-                matched = true;
+                    log_debug(" Functional pseudo-class after colon: ':%s(%s)'",
+                           func_name, pseudo_arg ? pseudo_arg : "");
+                    matched = true;
+                }
             }
         }
     } else if (token->type == CSS_TOKEN_LEFT_BRACKET) {
@@ -1473,23 +1858,45 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     int value_start = *pos;
     int value_count = 0;
     bool is_important = false;
+    int brace_depth = 0;  // track {}-blocks inside values
+    int value_end_before_important = -1;  // track end of value before !important
 
     while (*pos < token_count) {
         CssTokenType t = tokens[*pos].type;
 
         // Check for !important (whitespace allowed between ! and important per CSS spec)
-        if (t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
+        if (brace_depth == 0 && t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
             int next = css_skip_whitespace_tokens(tokens, *pos + 1, token_count);
             if (next < token_count && tokens[next].type == CSS_TOKEN_IDENT &&
                 strcmp(tokens[next].value, "important") == 0) {
                 is_important = true;
+                value_end_before_important = *pos;  // position of '!' — value ends before this
                 *pos = next + 1;
                 break;
             }
         }
 
-        // Stop at semicolon, closing brace, or EOF
-        if (t == CSS_TOKEN_SEMICOLON || t == CSS_TOKEN_RIGHT_BRACE || t == CSS_TOKEN_EOF) {
+        // Opening brace inside a value — track nested {}-blocks
+        if (t == CSS_TOKEN_LEFT_BRACE) {
+            brace_depth++;
+            value_count++;
+            (*pos)++;
+            continue;
+        }
+
+        // Closing brace: if inside a {}-block, close it; otherwise stop
+        if (t == CSS_TOKEN_RIGHT_BRACE) {
+            if (brace_depth > 0) {
+                brace_depth--;
+                value_count++;
+                (*pos)++;
+                continue;
+            }
+            break;  // end of declaration block
+        }
+
+        // Stop at semicolon or EOF (only at top level, not inside {}-blocks)
+        if (brace_depth == 0 && (t == CSS_TOKEN_SEMICOLON || t == CSS_TOKEN_EOF)) {
             break;
         }
 
@@ -1538,6 +1945,25 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // Store original property name (important for vendor-prefixed properties where property_id = -1)
     decl->property_name = property_name;
+
+    // Capture raw value text from source tokens (for faithful CSSOM serialization)
+    // Find last non-whitespace token in value range (excluding !important)
+    {
+        int val_end = (value_end_before_important >= 0) ? value_end_before_important - 1 : *pos - 1;
+        while (val_end >= value_start && tokens[val_end].type == CSS_TOKEN_WHITESPACE) val_end--;
+        if (val_end >= value_start && tokens[value_start].start && tokens[val_end].start) {
+            const char* raw_start = tokens[value_start].start;
+            const char* raw_end = tokens[val_end].start + tokens[val_end].length;
+            size_t raw_len = raw_end - raw_start;
+            char* raw_buf = (char*)pool_calloc(pool, raw_len + 1);
+            if (raw_buf) {
+                memcpy(raw_buf, raw_start, raw_len);
+                raw_buf[raw_len] = '\0';
+                decl->value_text = raw_buf;
+                decl->value_text_len = raw_len;
+            }
+        }
+    }
 
     // Debug: Print property name and ID for troubleshooting
     log_debug("[CSS Parser] Property: '%s' -> ID: %d, important=%d, value_count=%d",
@@ -1703,6 +2129,40 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
                 // per CSS spec, return NULL to prevent invalid declaration from entering cascade
                 log_debug("[CSS Parse] Rejecting negative value for property ID %d",
                        decl->property_id);
+                return NULL;
+            }
+        }
+    }
+
+    // Validate: for standard properties, {}-blocks are only valid if the entire
+    // value is wrapped in a single {} block (per CSS syntax spec / csswg-drafts#9317).
+    // Custom properties (--*) allow arbitrary {}-blocks.
+    if (decl->value && decl->property_id > 0) {
+        // check if value contains any brace tokens
+        bool has_braces = false;
+        if (decl->value->type == CSS_VALUE_TYPE_LIST) {
+            for (int i = 0; i < decl->value->data.list.count; i++) {
+                CssValue* v = decl->value->data.list.values[i];
+                if (v && v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name) {
+                    if (strcmp(v->data.custom_property.name, "{") == 0 || strcmp(v->data.custom_property.name, "}") == 0) {
+                        has_braces = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (has_braces) {
+            // braces are only valid if: first item is "{" and last item is "}" (whole-value block)
+            int cnt = decl->value->data.list.count;
+            CssValue* first = (cnt > 0) ? decl->value->data.list.values[0] : nullptr;
+            CssValue* last = (cnt > 0) ? decl->value->data.list.values[cnt - 1] : nullptr;
+            bool first_is_open = first && first->type == CSS_VALUE_TYPE_CUSTOM &&
+                first->data.custom_property.name && strcmp(first->data.custom_property.name, "{") == 0;
+            bool last_is_close = last && last->type == CSS_VALUE_TYPE_CUSTOM &&
+                last->data.custom_property.name && strcmp(last->data.custom_property.name, "}") == 0;
+            if (!first_is_open || !last_is_close) {
+                log_debug("[CSS Parse] Rejecting standard property '%s': {}-block not wrapping entire value",
+                          property_name);
                 return NULL;
             }
         }

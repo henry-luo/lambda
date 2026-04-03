@@ -750,6 +750,10 @@ typedef struct CssDeclaration {
     int source_line;          // Source line (for debugging)
     const char* property_name; // Original property name (for unknown/vendor properties)
 
+    // Raw value text from source (for faithful CSSOM serialization)
+    const char* value_text;
+    size_t value_text_len;
+
     // Memory management and validation
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
