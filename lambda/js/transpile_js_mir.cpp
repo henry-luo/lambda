@@ -18560,6 +18560,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     transpile_js_mir_ast(mt, ast);
 
 #ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP")) {
     create_dir_recursive("temp");
     FILE* mir_dump = fopen("temp/ts_mir_dump.txt", "w");
     if (mir_dump) {
@@ -18592,6 +18593,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         }
         fclose(mir_dump);
     }
+    } // JS_MIR_DUMP
 #endif
 
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
@@ -18615,10 +18617,10 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
 
     // execute
-    log_notice("js-mir-ast: executing JIT compiled code");
+    log_debug("js-mir-ast: executing JIT compiled code");
     js_reset_module_vars();
     Item result = js_main((Context*)context);
-    log_notice("js-mir-ast: execution returned (type=%d)", get_type_id(result));
+    log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
     // handle result
     Item final_result;
@@ -18733,7 +18735,10 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     // Discovers dependency graph, compiles modules by depth level using thread pool,
     // then executes serially.  jm_load_imports() below will skip already-loaded modules.
 #ifndef _WIN32
-    jm_precompile_js_imports(runtime, js_source, filename);
+    // fast-path: skip import precompile for scripts with no imports
+    if (strstr(js_source, "import ") != NULL || strstr(js_source, "import{") != NULL) {
+        jm_precompile_js_imports(runtime, js_source, filename);
+    }
 #endif
 
     // Load imported modules before main compilation (recursive)
@@ -18780,6 +18785,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     transpile_js_mir_ast(mt, js_ast);
 
 #ifndef NDEBUG
+    if (getenv("JS_MIR_DUMP")) {
     // Dump MIR for debugging (guard against NULL labels that crash output)
     create_dir_recursive("temp");
     FILE* mir_dump = fopen("temp/js_mir_dump.txt", "w");
@@ -18815,6 +18821,7 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         }
         fclose(mir_dump);
     }
+    } // JS_MIR_DUMP
 #endif
 
     // Link and generate
@@ -18848,15 +18855,15 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     }
 
     // Execute
-    log_notice("js-mir: executing JIT compiled code");
+    log_debug("js-mir: executing JIT compiled code");
     js_reset_module_vars();
     Item result = js_main((Context*)context);
-    log_notice("js-mir: JIT execution returned (type=%d)", get_type_id(result));
+    log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
 
     // v14: drain the event loop while JIT module is still alive
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
-    log_notice("js-mir: event loop drained");
+    log_debug("js-mir: event loop drained");
 
     // Handle result (same logic as js_transpiler_compile)
     Item final_result;

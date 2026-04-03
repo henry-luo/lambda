@@ -2580,22 +2580,52 @@ int main(int argc, char *argv[]) {
             char* script_path = line;
             if (*script_path == '\0') continue;
 
+            // support inline source protocol: source:<name>:<length>
+            // reads <length> bytes of JS source directly from stdin
+            char* js_source = NULL;
+            bool inline_source = false;
+            if (strncmp(line, "source:", 7) == 0) {
+                // parse source:<name>:<length>
+                char* name_start = line + 7;
+                char* colon = strrchr(name_start, ':');
+                if (!colon) continue;
+                *colon = '\0';
+                script_path = name_start;
+                size_t source_len = (size_t)atol(colon + 1);
+                if (source_len == 0 || source_len > 10 * 1024 * 1024) continue; // sanity check
+                js_source = (char*)malloc(source_len + 1);
+                if (!js_source) continue;
+                size_t total_read = 0;
+                while (total_read < source_len) {
+                    size_t n = fread(js_source + total_read, 1, source_len - total_read, stdin);
+                    if (n == 0) break;
+                    total_read += n;
+                }
+                js_source[total_read] = '\0';
+                // consume trailing newline after source blob
+                int ch = fgetc(stdin);
+                if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
+                inline_source = true;
+            }
+
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
-            if (!file_exists(script_path)) {
-                fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
-                printf("\x01" "BATCH_END 1\n");
-                fflush(stdout);
-                continue;
-            }
+            if (!inline_source) {
+                if (!file_exists(script_path)) {
+                    fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
+                    printf("\x01" "BATCH_END 1\n");
+                    fflush(stdout);
+                    continue;
+                }
 
-            char* js_source = read_text_file(script_path);
-            if (!js_source) {
-                fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
-                printf("\x01" "BATCH_END 1\n");
-                fflush(stdout);
-                continue;
+                js_source = read_text_file(script_path);
+                if (!js_source) {
+                    fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
+                    printf("\x01" "BATCH_END 1\n");
+                    fflush(stdout);
+                    continue;
+                }
             }
 
             int result = 0;
