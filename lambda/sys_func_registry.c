@@ -2012,6 +2012,16 @@ JitImport jit_runtime_imports[] = {
     {"rb_hash_method", FPTR(rb_hash_method)},
     {"rb_int_method", FPTR(rb_int_method)},
     {"rb_float_method", FPTR(rb_float_method)},
+    // Phase 4: Exception handling
+    {"rb_raise", FPTR(rb_raise)},
+    {"rb_check_exception", FPTR(rb_check_exception)},
+    {"rb_clear_exception", FPTR(rb_clear_exception)},
+    {"rb_new_exception", FPTR(rb_new_exception)},
+    {"rb_exception_get_type", FPTR(rb_exception_get_type)},
+    {"rb_exception_get_message", FPTR(rb_exception_get_message)},
+    // Phase 4: Dynamic dispatch / introspection
+    {"rb_respond_to", FPTR(rb_respond_to)},
+    {"rb_send", FPTR(rb_send)},
 #endif // LAMBDA_RUBY
 };
 
