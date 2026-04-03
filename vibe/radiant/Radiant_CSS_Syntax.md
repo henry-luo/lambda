@@ -1,9 +1,9 @@
 # Proposal: WPT CSS-Syntax Conformance Testing for Radiant
 
 **Date:** 2026-04-03
-**Status:** In Progress — Phase 1 Complete
+**Status:** In Progress — Phase 3 Complete (185/430, 43%)
 **Goal:** Run WPT `css-syntax` tests against Radiant's CSS parser, achieve 100% pass rate
-**Commit:** `0290b074` (`master`)
+**Commit:** `873cb09e` (`master`)
 
 ---
 
@@ -63,7 +63,7 @@ All infrastructure is built and operational. The GTest runner discovers and exec
 | `CSSStyleSheet.cssRules` / `.rules` | ✅ | Returns array of CSSStyleRule wrappers |
 | `CSSStyleSheet.insertRule()` | ✅ | Parses rule text via css_tokenize + css_parse_rule_from_tokens |
 | `CSSStyleSheet.deleteRule()` | ✅ | Removes rule at index, shifts array |
-| `CSSStyleRule.selectorText` (read) | ✅ | Uses css_format_selector_group (has An+B serialization bug) |
+| `CSSStyleRule.selectorText` (read) | ✅ | Uses css_format_selector_group (An+B bug fixed) |
 | `CSSStyleRule.selectorText` (write) | ✅ | Tokenizes + parses new selector, replaces on rule |
 | `CSSStyleRule.cssText` | ✅ | Uses css_format_rule for full rule serialization |
 | `CSSStyleRule.style` | ✅ | Returns CSSStyleDeclaration wrapper for rule declarations |
@@ -72,6 +72,7 @@ All infrastructure is built and operational. The GTest runner discovers and exec
 | `CSSStyleDeclaration.<prop>` | ✅ | camelCase → hyphenated CSS property lookup |
 | `CSSStyleDeclaration.length` | ✅ | Declaration count |
 | `CSSStyleDeclaration.getPropertyValue()` | ✅ | Lookup by property name |
+| `CSSStyleDeclaration.<prop>` (set) | ✅ | Parses value, replaces or appends declaration |
 
 #### Bugs Fixed During Implementation
 
@@ -81,17 +82,267 @@ All infrastructure is built and operational. The GTest runner discovers and exec
 | `css_parse_rule` linker error | Function declared in header but never defined | Replaced with `css_tokenize()` + `css_parse_rule_from_tokens()` |
 | `css_tokenize` signature mismatch | Passed `int*` for token_count, API expects `size_t*` | Fixed type |
 | **Stack overflow on selectorText** | `Map.data_cap` is `int` (32-bit) — storing 64-bit `Pool*` pointer truncated it, corrupting memory | Removed `data_cap` pool storage; use `CssRule::pool` / `CssStylesheet::pool` directly |
+| **An+B serialization** | `CSS_SELECTOR_PSEUDO_NTH_CHILD` case output `simple->value` (func name "nth-child") instead of `simple->argument` (formula "2n+1") | Changed to use `simple->argument`; added explicit cases for `NTH_LAST_CHILD`, `NTH_OF_TYPE`, `NTH_LAST_OF_TYPE` |
+| **inclusive_ranges crash** | `rule.style.zIndex = "12345"` hit assertion `mp->data_cap > 0` — rule_decl sentinel Map had `data_cap=0`, fell through to regular map SET | Added `js_cssom_rule_decl_set_property()` and dispatch in `js_runtime.cpp` |
+| **Unresolved element IDs** | WPT tests use bare element IDs as globals (`s.sheet`); transpiler returned `undefined` for unresolved identifiers | Implemented browser-like Window named access: walk DOM tree at document load, register element IDs on global object, fallback to `js_get_global_property()` |
 
 ---
 
-## 1c. Test Results (2026-04-03, commit `0290b074`)
+## 1c. Test Results
 
-**Overall: 51 / 394 sub-tests passing (13%) across 25 test files**
+### Run 3 (2026-04-04) — 185/430 (43.0%)
 
-```
-make build && cd build/premake && make config=debug_native test_wpt_css_syntax_gtest
-./test/test_wpt_css_syntax_gtest.exe
-```
+| Test File | Pass/Total | Status | Δ from Run 2 |
+|-----------|-----------|--------|---------------|
+| `anb_parsing` | **67/67** | ✅ 100% | **+45** (was 22) |
+| `anb_serialization` | **20/20** | ✅ 100% | **+15** (was 5) |
+| `cdc_vs_ident_tokens` | **1/1** | ✅ 100% | **+1** (was 0) |
+| `declarations_trim_whitespace` | **9/9** | ✅ 100% | **+9** (was 0) |
+| `input_preprocessing` | **10/10** | ✅ 100% | **+10** (was 0) |
+| `serialize_escape_identifiers` | **1/1** | ✅ 100% | — |
+| `trailing_braces` | **1/1** | ✅ 100% | **+1** (was 0) |
+| `unclosed_constructs` | **4/4** | ✅ 100% | — |
+| `unclosed_url_at_eof` | **2/2** | ✅ 100% | — |
+| `var_with_blocks` | **14/14** | ✅ 100% | **+13** (was 1) |
+| `whitespace` | 26/31 | 84% | — |
+| `non_ascii_codepoints` | 15/32 | 47% | — |
+| `inclusive_ranges` | 10/38 | 26% | — |
+| `decimal_points_in_numbers` | 2/6 | 33% | — |
+| `custom_property_rule_ambiguity` | 2/4 | 50% | — |
+| `urange_parsing` | 1/95 | 1% | — |
+| `at_rule_in_declaration_list` | 0/6 | 0% | — |
+| `charset_is_not_a_rule` | 0/1 | 0% | — |
+| `escaped_eof` | 0/5 | 0% | — |
+| `ident_three_code_points` | 0/8 | 0% | — |
+| `invalid_nested_rules` | 0/1 | 0% | — |
+| `serialize_consecutive_tokens` | 0/72 | 0% | — |
+| `unicode_range_selector` | 0/1 | 0% | — |
+| `url_whitespace_consumption` | 0/1 | 0% | — |
+| `missing_semicolon` | —/— | ⬚ No scripts | visual ref test |
+
+Detailed Failure Breakdown (245 failing sub-tests)
+
+#### `whitespace` — 26/31 (5 failures)
+
+All 5 failures are object comparison issues — `assert_equals: got {}, expected {}`. The test compares rule objects via deep equality; our serialization returns structurally identical objects but JS `===` comparison fails on object references.
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | U+0009 is CSS whitespace | `got {}, expected {}` |
+| 2 | U+000a is CSS whitespace | `got {}, expected {}` |
+| 3 | U+000c is CSS whitespace | `got {}, expected {}` |
+| 4 | U+000d is CSS whitespace | `got {}, expected {}` |
+| 5 | U+0020 is CSS whitespace | `got {}, expected {}` |
+
+**Root cause:** Tests use `assert_equals` on parsed rule objects. Our shim likely needs deep object comparison (`assert_object_equals`) or the CSSOM needs to return structurally comparable values. All 5 test the same pattern with different whitespace characters.
+
+---
+
+#### `non_ascii_codepoints` — 15/32 (17 failures)
+
+Tests whether specific Unicode codepoints are valid in CSS identifiers by setting `document.head.style.animationName = "f"+String.fromCodePoint(cp)+"oo"` and checking if the value persists. The 17 failures are codepoints that our CSS parser incorrectly rejects or accepts.
+
+**Root cause:** Two issues: (1) `animationName` property may not be mapped in our CSSOM layer, (2) the CSS tokenizer's `is_name_code_point()` check may not match the CSS Syntax spec's definition of "non-ASCII ident code point" (any codepoint ≥ U+00B7 in the valid ranges, including U+00B7, U+00C0-U+00D6, U+00D8-U+00F6, U+00F8-U+02FF, etc.).
+
+---
+
+#### `inclusive_ranges` — 10/38 (28 failures)
+
+All 28 failures follow the same pattern: `assert_equals: got "foo", expected "parse error"`. The tests set a CSS property to an out-of-range value (e.g., `zIndex` to a value outside the inclusive range) and expect that the parser rejects it (returning the previous value "parse error" / empty string).
+
+| Pattern | Count | Error |
+|---------|-------|-------|
+| `"foo" becomes "parse error"` | 27 | `got "foo", expected "parse error"` |
+| `"fo" becomes "parse error"` | 1 | `got "foo", expected "parse error"` |
+
+**Root cause:** The `setProperty` path on rule.style declarations doesn't validate property values against CSS grammar. It accepts any syntactically valid CSS tokens, even if the value is semantically invalid for the property (e.g., `z-index: foo` should be rejected since `z-index` only accepts integers/auto). Needs property-level value validation in `js_cssom_rule_decl_set_property()`.
+
+---
+
+#### `decimal_points_in_numbers` — 2/6 (4 failures)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | decimal point between digits is valid in a number | `got "", expected "1"` |
+| 2 | decimal point before digits is valid in a number | `got "", expected "0.1"` |
+| 3 | decimal point between digits is valid in a dimension | `got "", expected "1px"` |
+| 4 | decimal point before digits is valid in a dimension | `got "", expected "0.1px"` |
+
+**Root cause:** These tests use `rule.style.setProperty("--foo", "1.0")` on rule declarations. The `setProperty` method is not yet dispatched for rule.style wrappers (only inline style `setProperty` works). The rule.style SET path goes through `js_cssom_rule_decl_set_property()` which handles `rule.style.prop = "value"` assignment but not the explicit `setProperty("name", "value")` method call. The 2 passing tests use `getComputedStyle` without `setProperty`.
+
+---
+
+#### `custom_property_rule_ambiguity` — 2/4 (2 failures)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | Nested rule that looks like a custom property declaration | `got 2, expected 1` |
+| 2 | Nested rule that looks like an invalid custom property declaration | `got 2, expected 1` |
+
+**Root cause:** Tests check `sheet.cssRules.length` expecting 1 rule (the outer rule, with the `--custom: ...` parsed as a nested rule inside it). We return 2 rules because CSS nesting support (`CSSNestedDeclarations`) is not implemented — the parser creates the outer rule + an extra rule from the nested content instead of treating the nested declaration as part of the outer rule's declaration list.
+
+---
+
+#### `at_rule_in_declaration_list` — 0/6 (6 failures)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | Allow @-rule with block inside style rule | `Cannot read properties of null (reading 'cssRules')` |
+| 2 | Allow @-rule with semi-colon inside style rule | `Cannot read properties of null (reading 'cssRules')` |
+| 3 | Allow @-rule with block inside page rule | `Cannot read properties of null (reading 'cssRules')` |
+| 4 | Allow @-rule with semi-colon inside page rule | `Cannot read properties of null (reading 'cssRules')` |
+| 5 | Allow @-rule with block inside font-face rule | `Cannot read properties of null (reading 'cssRules')` |
+| 6 | Allow @-rule with semi-colon inside font-face rule | `Cannot read properties of null (reading 'cssRules')` |
+
+**Root cause:** Tests use `insertRule()` to add style/@page/@font-face rules containing nested @-rules, then access `rule.cssRules` to verify nested rules are preserved. `insertRule` returns `null` for @page/@font-face rules (not implemented as CSSOM wrappers), and even for style rules, the `.cssRules` property of individual rules isn't exposed (needed for CSS Nesting / nested rules API).
+
+---
+
+#### `escaped_eof` — 0/5 (5 failures)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | Escaped EOF → U+FFFD in hash token (ID type) | `assert_throws_dom: expected SyntaxError but no exception thrown` |
+| 2 | Escaped EOF → U+FFFD in ident token | `is not a function` |
+| 3 | Escaped EOF → U+FFFD in dimension token | `is not a function` |
+| 4 | Escaped EOF → U+FFFD in url token | `is not a function` |
+| 5 | Escaped EOF in string is ignored | `is not a function` |
+
+**Root cause:** Two issues: (1) Test #1 needs `assert_throws_dom` support — our shim doesn't throw `SyntaxError` for invalid selectors. (2) Tests #2-5 call `CSS.supports()` which is not implemented (`CSS` is not a function/object in our JS environment). The `CSS.supports()` API needs to be added.
+
+---
+
+#### `ident_three_code_points` — 0/8 (8 failures)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | one should be green | `got "red", expected "rgb(0, 128, 0)"` |
+| 2 | two should be green | `got "red", expected "rgb(0, 128, 0)"` |
+| 3-8 | three-eight should be green | `got "green", expected "rgb(0, 128, 0)"` |
+
+**Root cause:** Two distinct issues: (1) Tests 1-2 return `"red"` — the CSS tokenizer doesn't recognize certain 3-codepoint sequences as valid ident-start (e.g., `--` followed by a non-ASCII char, or `\` escape at start). The selector doesn't match, so the element keeps its red default. (2) Tests 3-8 return `"green"` — the selector matches correctly but `getComputedStyle` returns the named color `"green"` instead of the canonical `"rgb(0, 128, 0)"` form. Needs color value normalization in computed style.
+
+---
+
+#### `serialize_consecutive_tokens` — 0/72 (72 failures)
+
+All 72 failures return empty string `""` instead of the expected serialized value. The test pattern is:
+1. Set `--t1` custom property to token A, `--t2` to token B
+2. Set `--result` to `var(--t1) var(--t2)` (or with comments)
+3. Read back `getComputedStyle(elem).getPropertyValue("--result")`
+4. Expect correct serialization with necessary whitespace/comments between ambiguous token pairs
+
+| Token A group | × Token B variants | Failures |
+|---------------|-------------------|----------|
+| `foo` (ident) | bar, bar(), url(bar), -, 123, 123%, 123em, -->, () | 9 |
+| `@foo` (at-keyword) | bar, bar(), url(bar), -, 123, 123%, 123em, --> | 8 |
+| `#foo` (hash) | bar, bar(), url(bar), -, 123, 123%, 123em, --> | 8 |
+| `123foo` (dimension) | bar, bar(), url(bar), -, 123, 123%, 123em, --> | 8 |
+| `#` (delim hash) | bar, bar(), url(bar), -, 123, 123%, 123em | 7 |
+| `-` (delim minus) | bar, bar(), url(bar), -, 123, 123%, 123em | 7 |
+| `123` (number) | bar, bar(), url(bar), 123, 123%, 123em, % | 7 |
+| `@` (delim at) | bar, bar(), url(bar), - | 4 |
+| `.` (delim dot) | 123, 123%, 123em | 3 |
+| `+` (delim plus) | 123, 123%, 123em | 3 |
+| `/` (delim slash) | * | 1 |
+| Comment-related | various var() compositions | 7 |
+
+**Root cause:** The `getComputedStyle` for custom properties with `var()` references returns empty string instead of performing CSS variable substitution. The `var()` resolution engine is not implemented — `getComputedStyle` doesn't substitute `var(--t1)` with the computed value of `--t1`. This is the largest remaining gap (72 sub-tests). Implementing `var()` resolution would unblock all 65 token-pair tests, plus the 7 comment-handling tests need additional serialization logic per CSS Syntax spec §9.2.
+
+---
+
+#### `urange_parsing` — 1/95 (94 failures)
+
+All 94 failures return `null` (no matching selector) instead of the expected `U+XXXX` range string. The test pattern:
+1. Insert a `@font-face` rule with `unicode-range: <value>`
+2. Read back the canonical form via CSSOM
+
+| Category | Count | Example |
+|----------|-------|---------|
+| Simple hex values (`u+abc` → `U+ABC`) | 20 | `"u+abc" => "U+ABC"` |
+| Wildcard ranges (`u+a?` → `U+A0-AF`) | 12 | `"u+a??" => "U+A00-AFF"` |
+| Explicit ranges (`u+0-1` → `U+0-1`) | 15 | `"u+0-10ffff" => "U+0-10FFFF"` |
+| Zero-padded values (`u+0a` → `U+A`) | 15 | `"u+00000a" => "U+A"` |
+| Invalid (should fallback) | 28 | `"u+efg" is invalid` → expect `U+1357` |
+| With CSS comments (`u/**/+/**/a/**/?" → "U+A0-AF"`) | 4 | `"u/**/+0/**/?" => "U+0-F"` |
+
+**Root cause:** `@font-face` rules are not wrapped as CSSOM objects. `insertRule` with `@font-face { unicode-range: ... }` doesn't produce a CSSFontFaceRule wrapper, so accessing `.style.unicodeRange` returns null. Needs: (1) CSSFontFaceRule CSSOM wrapper, (2) unicode-range descriptor parsing and canonical serialization.
+
+---
+
+#### `charset_is_not_a_rule` — 0/1 (1 failure)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | @charset isn't a valid rule | `got 4, expected 1` |
+
+**Root cause:** CSS parser treats `@charset "utf-8";` as an at-rule and creates a CssRule for it. Per spec, `@charset` is not a real CSS rule and should be silently consumed by the parser without creating a rule object. The stylesheet reports 4 rules instead of 1.
+
+---
+
+#### `invalid_nested_rules` — 0/1 (1 failure)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | Continues parsing after block on invalid rule error | `got 0, expected 1` |
+
+**Root cause:** An invalid nested rule causes the parser to stop processing the stylesheet. After encountering an error recovery block, it should continue parsing subsequent valid rules. The stylesheet reports 0 rules instead of 1.
+
+---
+
+#### `unicode_range_selector` — 0/1 (1 failure)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | Unicode range is not a token | `got "green", expected "rgb(0, 128, 0)"` |
+
+**Root cause:** Same as `ident_three_code_points` tests 3-8 — selector matches correctly (element gets green) but `getComputedStyle` returns named color `"green"` instead of canonical `"rgb(0, 128, 0)"`. Needs color normalization.
+
+---
+
+#### `url_whitespace_consumption` — 0/1 (1 failure)
+
+| # | Sub-test | Error |
+|---|----------|-------|
+| 1 | whitespace optional between url( and string | `got "", expected "url(\"foo\")"` |
+
+**Root cause:** Test uses `rule.style.getPropertyValue("background-image")` after `insertRule`. The background-image value containing `url( "foo")` (with whitespace) is not returned. Likely the `getPropertyValue` path for standard properties doesn't work correctly on rule.style wrappers, or the CSS parser drops the URL value during parsing.
+
+</details>
+
+### Run 2 (2026-04-03, commit `873cb09e`) — 91/430 (21%)
+
+| Test File | Pass/Total | Status | Δ from Run 1 |
+|-----------|-----------|--------|---------------|
+| `serialize_escape_identifiers` | **1/1** | ✅ 100% | — |
+| `unclosed_constructs` | **4/4** | ✅ 100% | — |
+| `unclosed_url_at_eof` | **2/2** | ✅ 100% | — |
+| `whitespace` | 26/31 | 84% | — |
+| `anb_parsing` | 22/67 | 33% | **+22** (was 0) |
+| `non_ascii_codepoints` | 15/32 | 47% | — |
+| `inclusive_ranges` | 10/38 | 26% | **+10** (was crash) |
+| `anb_serialization` | 5/20 | 25% | **+5** (was 0) |
+| `decimal_points_in_numbers` | 2/6 | 33% | — |
+| `custom_property_rule_ambiguity` | 2/4 | 50% | **+2** (was 0) |
+| `urange_parsing` | 1/95 | 1% | — |
+| `var_with_blocks` | 1/14 | 7% | **+1** (was 0) |
+| `at_rule_in_declaration_list` | 0/6 | 0% | — |
+| `cdc_vs_ident_tokens` | 0/1 | 0% | — |
+| `charset_is_not_a_rule` | 0/1 | 0% | — |
+| `declarations_trim_whitespace` | 0/9 | 0% | — |
+| `escaped_eof` | 0/5 | 0% | — |
+| `ident_three_code_points` | 0/8 | 0% | — |
+| `input_preprocessing` | 0/10 | 0% | — |
+| `invalid_nested_rules` | 0/1 | 0% | — |
+| `serialize_consecutive_tokens` | 0/72 | 0% | — |
+| `trailing_braces` | 0/1 | 0% | — |
+| `unicode_range_selector` | 0/1 | 0% | — |
+| `url_whitespace_consumption` | 0/1 | 0% | — |
+| `missing_semicolon` | —/— | ⬚ No scripts | visual ref test |
+
+### Run 1 (2026-04-03, commit `0290b074`) — 51/394 (13%)
+
+<details><summary>Expand Run 1 results</summary>
 
 | Test File | Pass/Total | Status |
 |-----------|-----------|--------|
@@ -104,89 +355,100 @@ make build && cd build/premake && make config=debug_native test_wpt_css_syntax_g
 | `urange_parsing` | 1/95 | 1% |
 | `anb_parsing` | 0/67 | 0% — An+B serialization bug |
 | `anb_serialization` | 0/20 | 0% — An+B serialization bug |
-| `at_rule_in_declaration_list` | 0/6 | 0% |
-| `cdc_vs_ident_tokens` | 0/1 | 0% |
-| `charset_is_not_a_rule` | 0/1 | 0% |
 | `custom_property_rule_ambiguity` | 0/4 | 0% |
-| `declarations_trim_whitespace` | 0/9 | 0% |
-| `escaped_eof` | 0/5 | 0% |
-| `ident_three_code_points` | 0/8 | 0% |
-| `input_preprocessing` | 0/10 | 0% |
-| `invalid_nested_rules` | 0/1 | 0% |
-| `serialize_consecutive_tokens` | 0/72 | 0% |
-| `trailing_braces` | 0/1 | 0% |
-| `unicode_range_selector` | 0/1 | 0% |
-| `url_whitespace_consumption` | 0/1 | 0% |
-| `var_with_blocks` | 0/14 | 0% |
-| `inclusive_ranges` | —/— | ❌ Crash (no WPT_RESULT) |
-| `missing_semicolon` | —/— | ❌ Crash (no WPT_RESULT) |
+| `inclusive_ranges` | —/— | ❌ Crash |
+| `missing_semicolon` | —/— | ❌ Crash |
+| *(12 more at 0%)* | | |
 
-### Failure Categories
+</details>
+
+### Remaining Failure Categories (after Run 3)
 
 | Category | Sub-tests Blocked | Root Cause |
 |----------|-------------------|------------|
-| **An+B serialization** | ~87 | `css_format_selector_group` outputs pseudo name ("nth-child") instead of An+B value ("2n+1") for `:nth-child()`. `simple->value` stores the name, not the argument. |
-| **Element-ID-as-global** | ~30+ | WPT tests use `plain_var.sheet` where `plain_var` is `<style id="plain_var">`. Browsers create global JS variables for elements with IDs. Not supported. |
-| **Declaration value serialization** | ~20+ | `rule.style.color` returns raw CSS values but some tests expect normalized forms (e.g., named colors → `rgb()`, whitespace trimming). |
-| **CSS tokenizer edge cases** | ~15 | Surrogate replacement, NULL handling, CDC token classification. |
-| **Custom property var() with blocks** | 14 | `var()` values containing `{}` blocks need special tokenizer handling. |
-| **insertRule parsing** | ~10 | Some rule types (at-rules, nested rules) not parsed correctly by `css_parse_rule_from_tokens`. |
-| **JS crashes** | 2 | `inclusive_ranges` and `missing_semicolon` crash before producing output. |
+| **Serialize consecutive tokens** | 72 | `serialize_consecutive_tokens` 0/72 — needs token-level reserialization with insertion of whitespace/comments between ambiguous token pairs per CSS spec §9.2 |
+| **Unicode range parsing** | 94 | `urange_parsing` 1/95 — need `@font-face` unicode-range descriptor parsing (`U+0-7F`, `U+???`, `U+0025-00FF`) |
+| **Inclusive ranges edge cases** | 28 | `inclusive_ranges` 10/38 — remaining failures likely need `setProperty()` on rule.style or additional CSSOM property normalization |
+| **Non-ASCII codepoints** | 17 | `non_ascii_codepoints` 15/32 — escape roundtripping and non-printable code point handling |
+| **Ident three code points** | 8 | `ident_three_code_points` 0/8 — `would-start-an-identifier` check with non-printable codepoints |
+| **At-rule in declaration list** | 6 | `at_rule_in_declaration_list` 0/6 — at-rules inside declaration blocks not handled |
+| **Whitespace** | 5 | `whitespace` 26/31 — object comparison issues in remaining 5 |
+| **Escaped EOF** | 5 | `escaped_eof` 0/5 — backslash at EOF handling |
+| **Decimal points** | 4 | `decimal_points_in_numbers` 2/6 — likely needs `setProperty` CSSOM method to be dispatched |
+| **Custom property ambiguity** | 2 | `custom_property_rule_ambiguity` 2/4 — remaining 2 edge cases |
+| **Other** | 4 | `charset_is_not_a_rule` (1), `invalid_nested_rules` (1), `unicode_range_selector` (1), `url_whitespace_consumption` (1) |
 
 ---
 
 ## 1d. Next Actions
 
-### Priority 1: Fix An+B Serialization (~87 sub-tests blocked)
+### ~~Priority 1: Fix An+B Serialization~~ ✅ DONE
 
-The biggest single fix. `css_format_selector_group()` in `css_formatter.cpp` serializes `:nth-child()` by outputting `simple->value`, but that field stores the pseudo-class *name* ("nth-child"), not the An+B *argument* ("2n+1"). The An+B argument is likely stored in a separate field on the selector simple (e.g., `simple->nth_a`, `simple->nth_b`, or a child node).
+Fixed `css_format_selector_group()` to use `simple->argument` instead of `simple->value`. Added explicit cases for `NTH_LAST_CHILD`, `NTH_OF_TYPE`, `NTH_LAST_OF_TYPE`. Result: `anb_parsing` 0→22/67, `anb_serialization` 0→5/20.
 
-**Action:** Investigate `CssSelectorSimple` struct for An+B storage, then fix `css_format_selector_group` to output the canonical An+B form per CSSOM spec (e.g., `2n+1`, `even` → `2n`, `odd` → `2n+1`).
+### ~~Priority 2: Element-ID-as-Global Variables~~ ✅ DONE
 
-**Unblocks:** `anb_parsing` (67 tests), `anb_serialization` (20 tests).
+Implemented browser-like Window named access. `js_dom_register_named_elements()` walks DOM tree at `js_dom_set_document()` and registers each element with an `id` as a property on the global object via `js_get_global_this()`. Changed transpiler identifier fallback from returning `undefined` to calling `js_get_global_property()`. Result: `custom_property_rule_ambiguity` 0→2/4, `var_with_blocks` 0→1/14.
 
-### Priority 2: Element-ID-as-Global Variables (~30+ sub-tests blocked)
+### ~~Priority 3: Fix Crashing Tests~~ ✅ DONE
 
-WPT tests rely on browsers creating global JS variables for elements with `id` attributes (e.g., `<style id="s">` makes `s` accessible as a global). Our JS transpiler doesn't support this.
+- **`inclusive_ranges`**: Crash was `rule.style.zIndex = "12345"` writing to sentinel Map with `data_cap=0`. Added `js_cssom_rule_decl_set_property()` and runtime dispatch. Now runs: 10/38.
+- **`missing_semicolon`**: Visual reference test with no inline scripts. Runner correctly skips.
 
-**Action:** In the GTest runner (`test_wpt_css_syntax_gtest.cpp`), when extracting scripts, also scan the HTML for elements with `id` attributes and prepend `var id = document.getElementById("id");` lines to the composed JS. This avoids modifying the JS transpiler.
+### ~~Priority 4: An+B Canonical Normalization~~ ✅ DONE
 
-**Unblocks:** Tests using `plain_var.sheet`, `s.sheet.cssRules`, etc.
+Added `css_format_anb_canonical()` using `CssNthFormula` struct for canonical An+B output. Added strict token-level `css_parse_anb_from_tokens()` parser (~230 lines) handling dimension, ident, and DELIM edge cases. Result: `anb_parsing` 22→**67/67**, `anb_serialization` 5→**20/20**. (+60 sub-tests)
 
-### Priority 3: Fix Crashing Tests (2 tests)
+### ~~Priority 5: CSS Tokenizer Edge Cases~~ ✅ DONE
 
-`inclusive_ranges` and `missing_semicolon` crash before producing any output.
+- **Input preprocessing**: Added mutable buffer copy with NULL→U+FFFD and lone surrogate→U+FFFD replacement. Result: `input_preprocessing` 0→**10/10**.
+- **CDC token**: Added `-->` check before `--` in tokenizer, CDC/CDO skip in engine rule parsing. Result: `cdc_vs_ident_tokens` 0→**1/1**.
+- (+11 sub-tests)
 
-**Action:** Run each test in isolation under `lldb` to get backtrace. Likely a CSS parser crash on unusual input, or an unhandled at-rule type.
+### ~~Priority 6: Declaration Value Serialization~~ ✅ DONE
 
-### Priority 4: CSS Tokenizer Edge Cases (~15 sub-tests)
+Fixed critical bug: `css_property_get_id_by_name()` returns `0` for unknown properties (not `-1`/`CSS_PROPERTY_UNKNOWN`). Added `prop_id == 0` check alongside `CSS_PROPERTY_UNKNOWN`. Implemented custom property matching via `js_match_custom_property()` with selector matching and specificity. Added whitespace trimming. Result: `declarations_trim_whitespace` 0→**9/9**. (+9 sub-tests)
 
-- `input_preprocessing` (10 tests): NULL → U+FFFD replacement, surrogate handling
-- `cdc_vs_ident_tokens` (1 test): CDC (`-->`) token classification
-- `whitespace` (5 remaining failures): Whitespace normalization in specific contexts
+### ~~Priority 7: `var()` with `{}` Blocks~~ ✅ DONE
 
-**Action:** Review CSS tokenizer in `css_tokenizer.cpp` against spec for NULL/surrogate handling. Add `U+FFFD` replacement for NULL bytes. Check CDC token production.
+Added `value_text`/`value_text_len` fields to `CssDeclaration` for raw source text preservation. Modified serialization to prefer raw text. Added `!important` exclusion from raw value. Added standard property `{}` block validation (reject braces that don't wrap entire value). Result: `var_with_blocks` 1→**14/14**, `trailing_braces` 0→**1/1**. (+14 sub-tests)
 
-### Priority 5: Declaration Value Serialization (~20+ sub-tests)
+### Priority 8: Serialize Consecutive Tokens (72 sub-tests)
 
-Tests expect specific normalized forms for CSS values (e.g., `rgb()` for named colors, trimmed whitespace).
+`serialize_consecutive_tokens` 0/72 — needs token-level reserialization with insertion of whitespace/comments between ambiguous token pairs per CSS Syntax spec §9.2.
 
-**Action:** Improve `css_format_value()` output to match CSSOM canonical forms. Lower priority since this requires many small fixes.
+**Action:** Implement `serialize_a_css_component_value()` and the "if the two tokens would be ambiguous" insertion logic.
 
-### Priority 6: `var()` with `{}` Blocks (14 sub-tests)
+### Priority 9: Unicode Range Parsing (94 sub-tests)
 
-Custom property values containing `{}` blocks need the tokenizer to preserve matched braces.
+`urange_parsing` 1/95 — need `@font-face` unicode-range descriptor parsing.
 
-**Action:** Investigate `var_with_blocks` test expectations and modify CSS tokenizer/parser to handle block preservation in custom properties.
+**Action:** Implement unicode-range value type (`U+0-7F`, `U+???`, `U+0025-00FF`) in CSS parser.
+
+### Priority 10: Inclusive Ranges Remaining (28 sub-tests)
+
+`inclusive_ranges` 10/38 — remaining failures likely need `setProperty()` on `rule.style` or CSSOM property normalization.
+
+**Action:** Investigate remaining failures, likely need declaration `setProperty` method dispatch from rule style wrapper.
+
+### Priority 11: Non-ASCII & Escape Handling (30 sub-tests)
+
+- `non_ascii_codepoints` 15/32 — escape roundtripping, non-printable code points
+- `ident_three_code_points` 0/8 — `would-start-an-identifier` check
+- `escaped_eof` 0/5 — backslash at EOF
+
+**Action:** Review CSS tokenizer escape handling and non-printable code point rejection.
 
 ### Estimated Impact
 
-| After Fix | Projected Pass Rate |
-|-----------|-------------------|
-| Priority 1 (An+B) | ~35% (138/394) |
-| Priority 1+2 (+ element ID globals) | ~45% (170/394) |
-| Priority 1+2+4 (+ tokenizer fixes) | ~55% (200/394) |
-| All priorities | ~75-85% |
+| Milestone | Pass Rate |
+|-----------|-----------|
+| Run 1 (Phase 1 baseline) | 13% (51/394) |
+| Run 2 (Phase 2: P1-P3) | 21% (91/430) |
+| **Run 3 (Phase 3: P4-P7)** | **43% (185/430)** |
+| + Priority 8 (serialize tokens) | ~60% (~258/430) |
+| + Priority 9 (urange) | ~80% (~344/430) |
+| + Priority 10-11 (ranges, escapes) | ~90%+ |
 
 ---
 
@@ -223,7 +485,7 @@ Expose the document's parsed stylesheets as a JS-accessible array.
 
 **Status:** ✅ Implemented. Read uses `css_format_selector_group()`. Write uses `css_tokenize()` + `css_parse_selector_group_from_tokens()`.
 
-**Known bug:** An+B arguments inside `:nth-child()` are not serialized correctly (outputs pseudo name instead of argument).
+**Fixed:** An+B arguments inside `:nth-child()` now use `simple->argument`. Remaining issue: raw argument string is output but not canonicalized (e.g., `-1n-1` should become `-n-1`).
 
 #### D. `CSSStyleSheet.insertRule()` / `deleteRule()` (Used by ~5 tests)
 
@@ -240,7 +502,13 @@ Walks DOM tree counting `<style>` elements to find index into `DomDocument::styl
 
 #### G. `CSSStyleRule.style` (Declaration Block) (Used by ~10 tests)
 
-**Status:** ✅ Implemented as `js_rule_decl_marker` sentinel wrapper. Supports camelCase property access, `.length`, `.cssText`, `.getPropertyValue()`.
+**Status:** ✅ Implemented as `js_rule_decl_marker` sentinel wrapper. Supports camelCase property access (read & write), `.length`, `.cssText`, `.getPropertyValue()`.
+
+**Phase 2 fix:** Added `js_cssom_rule_decl_set_property()` for property SET (e.g., `rule.style.zIndex = "12345"`). Parses value as CSS, replaces or appends declaration on the underlying `CssRule`.
+
+#### H. Window Named Access (Element-ID-as-Global) (Used by ~30+ tests)
+
+**Status:** ✅ Implemented (Phase 2). `js_dom_register_named_elements()` walks DOM tree at document load and registers elements with `id` attributes as properties on the global object (`js_get_global_this()`). Transpiler identifier resolution now falls back to `js_get_global_property()` for unresolved names.
 
 ### 2.3 Low Priority (Needed for Full 100%)
 

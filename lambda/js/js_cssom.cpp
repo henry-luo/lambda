@@ -201,7 +201,14 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
 // =============================================================================
 
 static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool) {
-    if (!decl || !decl->value || !pool) return "";
+    if (!decl || !pool) return "";
+
+    // prefer raw source text for faithful serialization (preserves whitespace around {} blocks etc.)
+    if (decl->value_text && decl->value_text_len > 0) {
+        return decl->value_text;
+    }
+
+    if (!decl->value) return "";
 
     CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!fmt) return "";
@@ -440,15 +447,18 @@ extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item 
     if (!prop) return ItemNull;
 
     if (strcmp(prop, "selectorText") == 0 && rule->type == CSS_RULE_STYLE) {
-        const char* new_text = fn_to_cstr(value);
-        if (!new_text) return value;
+        // Use String* to get actual length (handles embedded NULLs)
+        String* val_string = it2s(value);
+        const char* new_text = val_string ? val_string->chars : fn_to_cstr(value);
+        size_t new_text_len = val_string ? val_string->len : (new_text ? strlen(new_text) : 0);
+        if (!new_text || new_text_len == 0) return value;
 
         Pool* pool = (rule && rule->pool) ? rule->pool : get_document_pool();
         if (!pool) return value;
 
         // tokenize
         size_t token_count = 0;
-        CssToken* tokens = css_tokenize(new_text, strlen(new_text), pool, &token_count);
+        CssToken* tokens = css_tokenize(new_text, new_text_len, pool, &token_count);
         if (!tokens || token_count == 0) {
             log_debug("js_cssom_rule_set_property: failed to tokenize selectorText '%s'", new_text);
             return value;  // per spec, silently ignore parse failures
@@ -532,9 +542,10 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
     char css_prop[128];
     cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
 
-    // search declarations for this property
+    // search declarations for this property — last matching wins (CSS cascade)
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
 
+    CssDeclaration* last_match = nullptr;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* decl = rule->data.style_rule.declarations[i];
         if (!decl) continue;
@@ -548,10 +559,14 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
         }
 
         if (match) {
-            const char* val = serialize_declaration_value(decl, pool);
-            log_debug("js_cssom_rule_decl_get_property: '%s' -> '%s'", prop, val);
-            return make_string_item(val);
+            last_match = decl;
         }
+    }
+
+    if (last_match) {
+        const char* val = serialize_declaration_value(last_match, pool);
+        log_debug("js_cssom_rule_decl_get_property: '%s' -> '%s'", prop, val);
+        return make_string_item(val);
     }
 
     // not found — return empty string (per CSSOM spec)

@@ -771,8 +771,51 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                                    CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;
 
-    // Simple tokenizer implementation for testing
-    // This is a basic implementation to break the recursion and allow tests to pass
+    // CSS Syntax §3.3: Preprocess the input stream
+    // Replace U+0000 NULL with U+FFFD, and UTF-8 encoded surrogates (U+D800-U+DFFF) with U+FFFD
+    const char* orig_input = input;
+    bool needs_preprocess = false;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char c = (unsigned char)input[i];
+        if (c == 0x00) { needs_preprocess = true; break; }
+        // UTF-8 surrogates: ED A0 80 .. ED BF BF
+        if (c == 0xED && i + 2 < length && ((unsigned char)input[i+1] & 0xE0) == 0xA0) {
+            needs_preprocess = true; break;
+        }
+    }
+    if (needs_preprocess) {
+        // Count null bytes to compute new length (each 1-byte NULL → 3-byte U+FFFD)
+        size_t new_len = 0;
+        for (size_t i = 0; i < length; i++) {
+            unsigned char c = (unsigned char)input[i];
+            if (c == 0x00) {
+                new_len += 3; // U+FFFD = EF BF BD
+            } else if (c == 0xED && i + 2 < length && ((unsigned char)input[i+1] & 0xE0) == 0xA0) {
+                new_len += 3; // replace 3-byte surrogate with 3-byte U+FFFD
+                i += 2;
+            } else {
+                new_len++;
+            }
+        }
+        char* pp = (char*)pool_alloc(tokenizer->pool, new_len + 1);
+        if (pp) {
+            size_t j = 0;
+            for (size_t i = 0; i < length; i++) {
+                unsigned char c = (unsigned char)input[i];
+                if (c == 0x00) {
+                    pp[j++] = (char)0xEF; pp[j++] = (char)0xBF; pp[j++] = (char)0xBD;
+                } else if (c == 0xED && i + 2 < length && ((unsigned char)input[i+1] & 0xE0) == 0xA0) {
+                    pp[j++] = (char)0xEF; pp[j++] = (char)0xBF; pp[j++] = (char)0xBD;
+                    i += 2;
+                } else {
+                    pp[j++] = (char)c;
+                }
+            }
+            pp[j] = '\0';
+            input = pp;
+            length = j;
+        }
+    }
 
     // Allocate token array (estimate maximum tokens)
     size_t max_tokens = length + 10; // Conservative estimate
@@ -975,8 +1018,14 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 }
                 break;
             case '-':
+                // Check for CDC token (-->)
+                if (pos + 2 < length && input[pos + 1] == '-' && input[pos + 2] == '>') {
+                    token->type = CSS_TOKEN_CDC;
+                    token->length = 3;
+                    pos += 3;
+                }
                 // Check for CSS custom property (--name)
-                if (pos + 1 < length && input[pos + 1] == '-') {
+                else if (pos + 1 < length && input[pos + 1] == '-') {
                     // CSS Custom Property: starts with --
                     size_t start = pos;
                     pos += 2; // Skip --

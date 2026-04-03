@@ -4325,6 +4325,14 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
     if (js_is_rule_style_decl(obj)) {
         return js_cssom_rule_decl_method(obj, method_name, args, argc);
     }
+    // Computed style getPropertyValue
+    if (js_is_computed_style_item(obj)) {
+        String* method = it2s(method_name);
+        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
+            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+            return js_computed_style_get_property(obj, args[0]);
+        }
+    }
     // DataView methods
     if (js_is_dataview(obj)) {
         return js_dataview_method(obj, method_name, args, argc);

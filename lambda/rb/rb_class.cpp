@@ -142,8 +142,15 @@ extern "C" Item rb_method_lookup(Item receiver, Item method_name) {
         return rb_getattr(receiver, method_name);
     }
 
-    // look up on instance → class chain
-    return rb_instance_getattr(receiver, method_name);
+    // For instances: skip own fields (instance variables like @name stored as "name"
+    // would shadow methods of the same name). Walk class hierarchy only.
+    Item cls = rb_map_get_cstr(receiver, "__class__");
+    if (cls.item == ITEM_NULL) return (Item){.item = ITEM_NULL};
+
+    String* s = it2s(method_name);
+    if (!s) return (Item){.item = ITEM_NULL};
+
+    return rb_superclass_lookup(cls, s->chars, (int)s->len);
 }
 
 // ============================================================================
@@ -191,6 +198,26 @@ extern "C" void rb_attr_accessor(Item cls, Item attr_name) {
 }
 
 // ============================================================================
+// Module include — copy methods from module to class
+// ============================================================================
+
+extern "C" void rb_module_include(Item cls, Item module) {
+    if (get_type_id(cls) != LMD_TYPE_MAP || get_type_id(module) != LMD_TYPE_MAP) return;
+
+    // insert module into the superclass chain between cls and its current superclass
+    // cls.__superclass__ = module, module.__superclass__ = old_super
+    Item old_super = rb_map_get_cstr(cls, "__superclass__");
+    rb_map_set_cstr(cls, "__superclass__", module);
+    if (old_super.item != ITEM_NULL) {
+        // only set if the module doesn't already have a superclass
+        Item mod_super = rb_map_get_cstr(module, "__superclass__");
+        if (mod_super.item == ITEM_NULL) {
+            rb_map_set_cstr(module, "__superclass__", old_super);
+        }
+    }
+}
+
+// ============================================================================
 // Block / Proc call
 // ============================================================================
 
@@ -224,6 +251,11 @@ extern "C" Item rb_block_call(Item block, Item* args, int argc) {
             return ((RbFunc5)fptr)(args[0], args[1], args[2], args[3], args[4]);
         }
     }
+}
+
+// Convenience: call block with 0 args
+extern "C" Item rb_block_call_0(Item block) {
+    return rb_block_call(block, NULL, 0);
 }
 
 // Convenience: call block with 1 arg
