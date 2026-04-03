@@ -103,6 +103,7 @@ Item js_property_access(Item object, Item key);
 
 Item js_array_new(int length);
 Item js_array_new_from_item(Item arg);
+Item js_create_arguments(void);
 Item js_array_get(Item array, Item index);
 Item js_array_set(Item array, Item index, Item value);
 Item js_array_get_int(Item array, int64_t index);
@@ -165,6 +166,9 @@ Item js_math_method(Item method_name, Item* args, int argc);
 Item js_math_apply(Item method_name, Item args_array);
 Item js_math_property(Item prop_name);
 Item js_math_set_property(Item key, Item value);
+Item js_get_math_object_value(void);
+Item js_get_json_object_value(void);
+Item js_get_console_object_value(void);
 
 // =============================================================================
 // v5: Process I/O
@@ -229,6 +233,7 @@ Item js_nullish_coalesce(Item left, Item right);
 
 Item js_object_keys(Item object);
 Item js_for_in_keys(Item object);
+Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
 Item js_number_property(Item prop_name);
@@ -285,6 +290,10 @@ Item js_object_spread_into(Item target, Item source);
 Item js_has_own_property(Item obj, Item key);
 Item js_object_freeze(Item obj);
 Item js_object_is_frozen(Item obj);
+Item js_object_seal(Item obj);
+Item js_object_is_sealed(Item obj);
+Item js_object_prevent_extensions(Item obj);
+Item js_object_is_extensible(Item obj);
 
 // =============================================================================
 // v9: Number static methods

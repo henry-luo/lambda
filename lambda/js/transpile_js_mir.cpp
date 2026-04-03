@@ -121,6 +121,7 @@ struct JsFuncCollected {
     // P3: Constructor flag (set for class constructor methods only)
     bool is_constructor;            // true if this function is a class constructor
     bool has_rest_param;            // true if last param is ...rest
+    bool uses_arguments;            // v18q: true if function body references 'arguments'
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
@@ -1479,6 +1480,9 @@ static void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
 
+    // v18q: Check if function uses 'arguments' keyword
+    fc->uses_arguments = !fn->is_arrow && jm_name_set_has(refs, "_js_arguments");
+
     hashmap_free(params);
     hashmap_free(locals);
     hashmap_free(refs);
@@ -2037,7 +2041,15 @@ static TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         case JS_OP_MINUS: case JS_OP_SUB: {
             TypeId t = jm_get_effective_type(mt, un->operand);
             if (t == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
-            if (t == LMD_TYPE_INT)   return LMD_TYPE_INT;
+            if (t == LMD_TYPE_INT) {
+                // v18p: -0 produces FLOAT (-0.0), not INT
+                if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* lit = (JsLiteralNode*)un->operand;
+                    if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0)
+                        return LMD_TYPE_FLOAT;
+                }
+                return LMD_TYPE_INT;
+            }
             return LMD_TYPE_ANY;
         }
         case JS_OP_INCREMENT: case JS_OP_DECREMENT: {
@@ -2749,6 +2761,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (mt->func_count < 4096) {
             int my_index = mt->func_count;
             JsFuncCollected* e = &mt->func_entries[my_index];
+            memset(e, 0, sizeof(JsFuncCollected));
             e->node = fn;
             jm_make_fn_name(e->name, sizeof(e->name), fn, mt);
             e->func_item = NULL; // set during creation
@@ -3025,6 +3038,7 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                         if (mt->func_count < 4096) {
                             int method_index = mt->func_count;
                             JsFuncCollected* fc = &mt->func_entries[mt->func_count];
+                            memset(fc, 0, sizeof(JsFuncCollected));
                             fc->node = fn;
                             fc->parent_index = -1; // class methods are at top level
                             // Name: ClassName_methodName
@@ -4221,6 +4235,14 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
         return jm_call_0(mt, "js_get_this", MIR_T_I64);
     }
 
+    // v18q: Handle 'arguments' keyword: return the function's arguments array-like object
+    if (id->name->len == 9 && strncmp(id->name->chars, "arguments", 9) == 0) {
+        JsMirVarEntry* var = jm_find_var(mt, "_js_arguments");
+        if (var) return var->reg;
+        // Fallback: return undefined (arrow functions inherit from outer scope)
+        return jm_emit_undefined(mt);
+    }
+
     // Handle 'undefined' keyword: return JS undefined value
     if (id->name->len == 9 && strncmp(id->name->chars, "undefined", 9) == 0) {
         MIR_reg_t r = jm_new_reg(mt, "undef", MIR_T_I64);
@@ -4333,6 +4355,18 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     }
 
     log_debug("js-mir: undefined variable '%s' — checking built-in constructors", vname);
+
+    // v18n: Handle global namespace objects (Math, JSON, console) as values
+    if (id->name->len == 4 && strncmp(id->name->chars, "Math", 4) == 0) {
+        return jm_call_0(mt, "js_get_math_object_value", MIR_T_I64);
+    }
+    if (id->name->len == 4 && strncmp(id->name->chars, "JSON", 4) == 0) {
+        return jm_call_0(mt, "js_get_json_object_value", MIR_T_I64);
+    }
+    if (id->name->len == 7 && strncmp(id->name->chars, "console", 7) == 0) {
+        return jm_call_0(mt, "js_get_console_object_value", MIR_T_I64);
+    }
+
     // Check for built-in constructors: Array, Object, Function, String, etc.
     {
         static const char* builtins[] = {
@@ -4816,6 +4850,17 @@ static MIR_reg_t jm_transpile_unary(JsMirTranspiler* mt, JsUnaryNode* un) {
     case JS_OP_SUB: {
         TypeId op_type = jm_get_effective_type(mt, un->operand);
         if (op_type == LMD_TYPE_INT) {
+            // v18p: literal 0 must produce float -0.0 per ES spec
+            if (un->operand && un->operand->node_type == JS_AST_NODE_LITERAL) {
+                JsLiteralNode* lit = (JsLiteralNode*)un->operand;
+                if (lit->literal_type == JS_LITERAL_NUMBER && lit->value.number_value == 0.0) {
+                    MIR_reg_t r = jm_new_reg(mt, "dnegz", MIR_T_D);
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                        MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_double_op(mt->ctx, -0.0)));
+                    return r;
+                }
+            }
             MIR_reg_t val = jm_transpile_as_native(mt, un->operand, op_type, LMD_TYPE_INT);
             MIR_reg_t r = jm_new_reg(mt, "neg", MIR_T_I64);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_NEG,
@@ -6937,12 +6982,21 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_object_get_own_property_descriptors", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-            // Object.create(proto)
+            // Object.create(proto) or Object.create(proto, properties)
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
                 prop->name && prop->name->len == 6 && strncmp(prop->name->chars, "create", 6) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
-                return jm_call_1(mt, "js_object_create", MIR_T_I64,
+                MIR_reg_t result = jm_call_1(mt, "js_object_create", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+                // If 2nd argument given, apply Object.defineProperties
+                JsAstNode* a2 = call->arguments ? call->arguments->next : NULL;
+                if (a2) {
+                    MIR_reg_t props_arg = jm_transpile_box_item(mt, a2);
+                    result = jm_call_2(mt, "js_object_define_properties", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, props_arg));
+                }
+                return result;
             }
             // Object.defineProperty(obj, name, descriptor)
             if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Object", 6) == 0 &&
@@ -13744,8 +13798,10 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // Phase 4: Check if this function qualifies for a native version.
     // Requirements: no captures, all params inferred as INT or FLOAT,
     //               return type is INT or FLOAT, param_count <= 16.
+    // Also respect has_native_version flag (Phase 1.76 may have revoked it).
     bool generate_native = false;
-    if (!has_captures && param_count > 0 && param_count <= 16 &&
+    if (fc->has_native_version &&
+        !has_captures && param_count > 0 && param_count <= 16 &&
         (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT)) {
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
@@ -15169,6 +15225,28 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
+        // v18q: Create 'arguments' array-like object for non-arrow functions
+        if (fc->uses_arguments && param_count > 0) {
+            MIR_reg_t args_arr = jm_call_1(mt, "js_array_new", MIR_T_I64,
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)param_count));
+            JsAstNode* pn = fn->params;
+            for (int i = 0; i < param_count; i++) {
+                if (pn) {
+                    char pvname[128];
+                    jm_get_param_name(pn, i, pvname, sizeof(pvname));
+                    JsMirVarEntry* pvar = jm_find_var(mt, pvname);
+                    if (pvar) {
+                        jm_call_3(mt, "js_array_set_int", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr),
+                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)i),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pvar->reg));
+                    }
+                    pn = pn->next;
+                }
+            }
+            jm_set_var(mt, "_js_arguments", args_arr);
+        }
+
         // Transpile body
         if (fn->body) {
             if (fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -15457,6 +15535,24 @@ static void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
                 arg = arg->next;
             }
         }
+        // v18l: Revoke native version for function expressions passed as callback
+        // arguments. The caller (e.g. reduce, map, forEach) may pass any type,
+        // so unboxing to native int/float inside the boxed wrapper is unsafe.
+        {
+            JsAstNode* cb_arg = call->arguments;
+            while (cb_arg) {
+                if (cb_arg->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+                    cb_arg->node_type == JS_AST_NODE_ARROW_FUNCTION) {
+                    JsFuncCollected* cb_fc = jm_find_collected_func(mt, (JsFunctionNode*)cb_arg);
+                    if (cb_fc && cb_fc->has_native_version) {
+                        log_debug("js-mir P3.5 callsite: revoking native for callback '%s' (passed as argument)",
+                            cb_fc->name);
+                        cb_fc->has_native_version = false;
+                    }
+                }
+                cb_arg = cb_arg->next;
+            }
+        }
         // Recurse into callee (for method calls)
         jm_callsite_scan_node(mt, call->callee);
         break;
@@ -15522,16 +15618,68 @@ static void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
         while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
         break;
     }
+    case JS_AST_NODE_FOR_STATEMENT: {
+        JsForNode* f = (JsForNode*)node;
+        jm_callsite_scan_node(mt, f->init);
+        jm_callsite_scan_node(mt, f->test);
+        jm_callsite_scan_node(mt, f->update);
+        jm_callsite_scan_node(mt, f->body);
+        break;
+    }
+    case JS_AST_NODE_WHILE_STATEMENT: {
+        JsWhileNode* w = (JsWhileNode*)node;
+        jm_callsite_scan_node(mt, w->test);
+        jm_callsite_scan_node(mt, w->body);
+        break;
+    }
+    case JS_AST_NODE_FOR_IN_STATEMENT:
+    case JS_AST_NODE_FOR_OF_STATEMENT: {
+        JsForInNode* fi = (JsForInNode*)node;
+        jm_callsite_scan_node(mt, fi->right);
+        jm_callsite_scan_node(mt, fi->body);
+        break;
+    }
+    case JS_AST_NODE_SWITCH_STATEMENT: {
+        JsSwitchNode* sw = (JsSwitchNode*)node;
+        jm_callsite_scan_node(mt, sw->discriminant);
+        JsAstNode* c = sw->cases;
+        while (c) { jm_callsite_scan_node(mt, c); c = c->next; }
+        break;
+    }
+    case JS_AST_NODE_SWITCH_CASE: {
+        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
+        jm_callsite_scan_node(mt, sc->test);
+        JsAstNode* s = sc->consequent;
+        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
+        break;
+    }
+    case JS_AST_NODE_TRY_STATEMENT: {
+        JsTryNode* t = (JsTryNode*)node;
+        jm_callsite_scan_node(mt, t->block);
+        jm_callsite_scan_node(mt, t->handler);
+        jm_callsite_scan_node(mt, t->finalizer);
+        break;
+    }
+    case JS_AST_NODE_CATCH_CLAUSE: {
+        JsCatchNode* cc = (JsCatchNode*)node;
+        jm_callsite_scan_node(mt, cc->body);
+        break;
+    }
     default:
         break;
     }
 }
 
-static void jm_callsite_propagate(JsMirTranspiler* mt) {
+static void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (fc->node && fc->node->body)
             jm_callsite_scan_node(mt, (JsAstNode*)fc->node->body);
+    }
+    // v18l: Also scan top-level program statements (not inside any function)
+    if (program_body) {
+        JsAstNode* s = program_body;
+        while (s) { jm_callsite_scan_node(mt, s); s = s->next; }
     }
 }
 
@@ -15655,7 +15803,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                                 JsModuleConstEntry mce;
                                 memset(&mce, 0, sizeof(mce));
                                 snprintf(mce.name, sizeof(mce.name), "%s", vname);
-                                if (result == (int64_t)result && result >= -1e15 && result <= 1e15) {
+                                if (result == (int64_t)result && result >= -1e15 && result <= 1e15
+                                    && !(result == 0.0 && signbit(result))) {
                                     mce.is_int = true;
                                     mce.const_type = MCONST_INT;
                                     mce.int_val = (int64_t)result;
@@ -16650,7 +16799,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Phase 1.76: Call-site propagation — scan all function bodies for call
     // expressions that pass literal arguments contradicting inferred param types.
     // Widen mismatched params to ANY and revoke native eligibility.
-    jm_callsite_propagate(mt);
+    jm_callsite_propagate(mt, program->body);
     for (int i = 0; i < mt->func_count; i++) {
         JsFuncCollected* fc = &mt->func_entries[i];
         if (!fc->func_item) {
