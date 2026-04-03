@@ -220,8 +220,12 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         return result;
     }
 
-    // .gsub(pattern, replacement)
+    // .gsub(pattern, replacement) — supports regex and string patterns
     if (strcmp(m, "gsub") == 0 && argc >= 2) {
+        // if pattern is a regex, delegate to rb_regex_gsub
+        if (rb_is_regex(args[0])) {
+            return rb_regex_gsub(args[0], self, args[1]);
+        }
         String* pat = it2s(args[0]);
         String* rep = it2s(args[1]);
         if (!pat || !rep || pat->len == 0) return self;
@@ -244,8 +248,12 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         return result;
     }
 
-    // .sub(pattern, replacement) — first occurrence only
+    // .sub(pattern, replacement) — first occurrence only, supports regex
     if (strcmp(m, "sub") == 0 && argc >= 2) {
+        // if pattern is a regex, delegate to rb_regex_sub
+        if (rb_is_regex(args[0])) {
+            return rb_regex_sub(args[0], self, args[1]);
+        }
         String* pat = it2s(args[0]);
         String* rep = it2s(args[1]);
         if (!pat || !rep || pat->len == 0) return self;
@@ -261,6 +269,25 @@ extern "C" Item rb_string_method(Item self, Item method_name, Item* args, int ar
         Item result = rb_sitem(buf->str);
         strbuf_free(buf);
         return result;
+    }
+
+    // .match(regex_or_str) — returns matched string or nil
+    if (strcmp(m, "match") == 0 && argc >= 1) {
+        if (rb_is_regex(args[0])) {
+            return rb_regex_match(args[0], self);
+        }
+        // plain string: create regex from string pattern
+        Item regex = rb_regex_new(args[0]);
+        return rb_regex_match(regex, self);
+    }
+
+    // .scan(regex_or_str) — returns array of all matches
+    if (strcmp(m, "scan") == 0 && argc >= 1) {
+        if (rb_is_regex(args[0])) {
+            return rb_regex_scan(args[0], self);
+        }
+        Item regex = rb_regex_new(args[0]);
+        return rb_regex_scan(regex, self);
     }
 
     // .count(substr)

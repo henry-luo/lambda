@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <re2/re2.h>
 
 // push_d boxes a double into an Item via GC nursery allocation (C linkage)
 extern "C" Item push_d(double dval);
@@ -746,11 +747,18 @@ extern "C" Item rb_puts(Item* args, int argc) {
         TypeId type = get_type_id(str);
         if (type == LMD_TYPE_STRING) {
             String* s = it2s(str);
-            if (s && s->chars) {
+            if (s && s->chars && s->len > 0) {
                 printf("%.*s", (int)s->len, s->chars);
+                // Ruby: puts suppresses trailing newline if string already ends with \n
+                if (s->chars[s->len - 1] != '\n') {
+                    printf("\n");
+                }
+            } else {
+                printf("\n");
             }
+        } else {
+            printf("\n");
         }
-        printf("\n");
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -847,6 +855,13 @@ extern "C" Item rb_builtin_require_relative(Item path) {
     // stub — cross-language import handled at transpile time
     (void)path;
     return (Item){.item = ITEM_NULL};
+}
+
+// defined?(var) runtime check — returns "local-variable" if non-nil, else nil
+extern "C" Item rb_defined(Item value) {
+    TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_NULL) return (Item){.item = ITEM_NULL};
+    return (Item){.item = s2it(heap_create_name("local-variable", 14))};
 }
 
 // ============================================================================
@@ -1023,4 +1038,262 @@ extern "C" Item rb_send(Item obj, Item method_name, Item* args, int argc) {
     log_error("rb: NoMethodError: undefined method '%s'",
         get_type_id(method_name) == LMD_TYPE_STRING ? it2s(method_name)->chars : "?");
     return (Item){.item = ITEM_NULL};
+}
+
+// ============================================================================
+// File I/O
+// ============================================================================
+extern "C" char* read_text_file(const char* filename);
+extern "C" void write_text_file(const char* filename, const char* content);
+extern "C" bool file_exists(const char* path);
+
+extern "C" Item rb_file_read(Item path) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(path);
+    if (!s || !s->chars) return (Item){.item = ITEM_NULL};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)s->len, s->chars);
+    char* content = read_text_file(filepath);
+    if (!content) return (Item){.item = ITEM_NULL};
+    size_t len = strlen(content);
+    Item result = (Item){.item = s2it(heap_create_name(content, len))};
+    free(content);
+    return result;
+}
+
+extern "C" Item rb_file_write(Item path, Item content) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    if (get_type_id(content) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* p = it2s(path);
+    String* c = it2s(content);
+    if (!p || !c) return (Item){.item = ITEM_NULL};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)p->len, p->chars);
+    char* buf = (char*)malloc(c->len + 1);
+    memcpy(buf, c->chars, c->len);
+    buf[c->len] = '\0';
+    write_text_file(filepath, buf);
+    free(buf);
+    return (Item){.item = i2it(c->len)};
+}
+
+extern "C" Item rb_file_exist(Item path) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
+    String* s = it2s(path);
+    if (!s || !s->chars) return (Item){.item = b2it(BOOL_FALSE)};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)s->len, s->chars);
+    return (Item){.item = b2it(file_exists(filepath) ? BOOL_TRUE : BOOL_FALSE)};
+}
+
+// ============================================================================
+// Regex (via RE2)
+// ============================================================================
+
+// rb_regex_new(pattern_str) — compile a regex pattern, return as Map with __regex__ marker
+extern "C" Item rb_regex_new(Item pattern) {
+    if (get_type_id(pattern) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(pattern);
+    if (!s) return (Item){.item = ITEM_NULL};
+
+    // create RE2 regex
+    std::string pat(s->chars, s->len);
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    re2::RE2* re = new re2::RE2(pat, opts);
+    if (!re->ok()) {
+        log_error("rb: Regexp compile error: %s", re->error().c_str());
+        delete re;
+        return (Item){.item = ITEM_NULL};
+    }
+
+    // store as Map with __regex__ = pointer (as int64), __source__ = pattern string
+    Item obj = rb_new_object();
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__regex__", 9))},
+        (Item){.item = i2it((int64_t)(uintptr_t)re)});
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__source__", 10))}, pattern);
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__rb_regex__", 12))},
+        (Item){.item = b2it(BOOL_TRUE)});
+    return obj;
+}
+
+// helper: extract RE2 from regex map
+static re2::RE2* rb_get_re2(Item regex) {
+    Item ptr = rb_getattr(regex, (Item){.item = s2it(heap_create_name("__regex__", 9))});
+    if (get_type_id(ptr) == LMD_TYPE_INT || get_type_id(ptr) == LMD_TYPE_INT64) {
+        return (re2::RE2*)(uintptr_t)it2i(ptr);
+    }
+    return nullptr;
+}
+
+// check if item is a regex
+extern "C" int rb_is_regex(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return 0;
+    Item marker = rb_getattr(item, (Item){.item = s2it(heap_create_name("__rb_regex__", 12))});
+    return (get_type_id(marker) == LMD_TYPE_BOOL && marker.item == b2it(BOOL_TRUE)) ? 1 : 0;
+}
+
+// rb_regex_match(regex_or_pattern, string) — returns matched string or nil
+extern "C" Item rb_regex_match(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(str);
+    if (!s) return (Item){.item = ITEM_NULL};
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        // string pattern — compile inline
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return (Item){.item = ITEM_NULL}; }
+    } else {
+        return (Item){.item = ITEM_NULL};
+    }
+
+    re2::StringPiece input(s->chars, s->len);
+    re2::StringPiece match;
+    bool found = re->Match(input, 0, s->len, re2::RE2::UNANCHORED, &match, 1);
+    if (owns_re) delete re;
+    if (!found) return (Item){.item = ITEM_NULL};
+
+    return (Item){.item = s2it(heap_create_name(match.data(), match.size()))};
+}
+
+// rb_regex_test(regex_or_pattern, string) — returns true/false
+extern "C" Item rb_regex_test(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
+    String* s = it2s(str);
+    if (!s) return (Item){.item = b2it(BOOL_FALSE)};
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return (Item){.item = b2it(BOOL_FALSE)}; }
+    } else {
+        return (Item){.item = b2it(BOOL_FALSE)};
+    }
+
+    bool found = re2::RE2::PartialMatch(re2::StringPiece(s->chars, s->len), *re);
+    if (owns_re) delete re;
+    return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+}
+
+// rb_regex_scan(regex_or_pattern, string) — returns array of all matches
+extern "C" Item rb_regex_scan(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return rb_array_new();
+    String* s = it2s(str);
+    if (!s) return rb_array_new();
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return rb_array_new(); }
+    } else {
+        return rb_array_new();
+    }
+
+    Item arr = rb_array_new();
+    re2::StringPiece input(s->chars, s->len);
+    re2::StringPiece match;
+    size_t pos = 0;
+    while (pos <= (size_t)s->len) {
+        bool found = re->Match(input, (int)pos, s->len, re2::RE2::UNANCHORED, &match, 1);
+        if (!found) break;
+        Item m = (Item){.item = s2it(heap_create_name(match.data(), match.size()))};
+        rb_array_push(arr, m);
+        size_t new_pos = (size_t)(match.data() - s->chars) + match.size();
+        if (new_pos == pos) new_pos++; // avoid infinite loop on zero-length match
+        pos = new_pos;
+    }
+    if (owns_re) delete re;
+    return arr;
+}
+
+// rb_regex_gsub(regex_or_pattern, string, replacement) — replace all matches
+extern "C" Item rb_regex_gsub(Item regex, Item str, Item replacement) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return str;
+    if (get_type_id(replacement) != LMD_TYPE_STRING) return str;
+    String* s = it2s(str);
+    String* r = it2s(replacement);
+    if (!s || !r) return str;
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return str; }
+    } else {
+        return str;
+    }
+
+    std::string result(s->chars, s->len);
+    std::string repl(r->chars, r->len);
+    re2::RE2::GlobalReplace(&result, *re, repl);
+    if (owns_re) delete re;
+    return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
+}
+
+// rb_regex_sub(regex_or_pattern, string, replacement) — replace first match
+extern "C" Item rb_regex_sub(Item regex, Item str, Item replacement) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return str;
+    if (get_type_id(replacement) != LMD_TYPE_STRING) return str;
+    String* s = it2s(str);
+    String* r = it2s(replacement);
+    if (!s || !r) return str;
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return str; }
+    } else {
+        return str;
+    }
+
+    std::string result(s->chars, s->len);
+    std::string repl(r->chars, r->len);
+    re2::RE2::Replace(&result, *re, repl);
+    if (owns_re) delete re;
+    return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
 }

@@ -1994,6 +1994,7 @@ JitImport jit_runtime_imports[] = {
     {"rb_attr_accessor", FPTR(rb_attr_accessor)},
     // Phase 2: Block / Proc / Lambda
     {"rb_block_call", FPTR(rb_block_call)},
+    {"rb_block_call_0", FPTR(rb_block_call_0)},
     {"rb_block_call_1", FPTR(rb_block_call_1)},
     {"rb_block_call_2", FPTR(rb_block_call_2)},
     // Phase 2: Iterator methods
@@ -2025,6 +2026,21 @@ JitImport jit_runtime_imports[] = {
     // Phase 4: Dynamic dispatch / introspection
     {"rb_respond_to", FPTR(rb_respond_to)},
     {"rb_send", FPTR(rb_send)},
+    // defined? keyword
+    {"rb_defined", FPTR(rb_defined)},
+    // File I/O
+    {"rb_file_read", FPTR(rb_file_read)},
+    {"rb_file_write", FPTR(rb_file_write)},
+    {"rb_file_exist", FPTR(rb_file_exist)},
+    // Regex
+    {"rb_regex_new", FPTR(rb_regex_new)},
+    {"rb_regex_match", FPTR(rb_regex_match)},
+    {"rb_regex_test", FPTR(rb_regex_test)},
+    {"rb_regex_scan", FPTR(rb_regex_scan)},
+    {"rb_regex_gsub", FPTR(rb_regex_gsub)},
+    {"rb_regex_sub", FPTR(rb_regex_sub)},
+    {"rb_is_regex", FPTR(rb_is_regex)},
+    {"rb_module_include", FPTR(rb_module_include)},
 #endif // LAMBDA_RUBY
 };
 

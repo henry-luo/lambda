@@ -75,6 +75,8 @@ typedef enum RbAstNodeType {
     RB_AST_NODE_TERNARY,                // cond ? a : b
     RB_AST_NODE_SYMBOL,                 // :symbol
 
+    RB_AST_NODE_DEFINED,                // defined?(expr)
+
     RB_AST_NODE_COUNT
 } RbAstNodeType;
 
@@ -103,6 +105,8 @@ typedef enum RbOperator {
     RB_OP_BIT_NOT,          // ~
     RB_OP_LSHIFT,           // <<
     RB_OP_RSHIFT,           // >>
+    RB_OP_MATCH,            // =~
+    RB_OP_NOT_MATCH,        // !~
     RB_OP_NEGATE,           // unary -
     RB_OP_POSITIVE,         // unary +
 } RbOperator;
@@ -115,6 +119,7 @@ typedef enum RbLiteralType {
     RB_LITERAL_SYMBOL,
     RB_LITERAL_BOOLEAN,
     RB_LITERAL_NIL,
+    RB_LITERAL_REGEX,
 } RbLiteralType;
 
 // ============================================================================
@@ -435,3 +440,9 @@ typedef struct RbBlockPassNode {
     RbAstNode base;
     RbAstNode* value;           // expression being passed as block
 } RbBlockPassNode;
+
+// defined?(expr) — returns string describing the expression type or nil
+typedef struct RbDefinedNode {
+    RbAstNode base;
+    RbAstNode* operand;
+} RbDefinedNode;
