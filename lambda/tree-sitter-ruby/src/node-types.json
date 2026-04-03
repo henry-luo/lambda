@@ -2015,7 +2015,6 @@
   {
     "type": "heredoc_body",
     "named": true,
-    "extra": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -2907,6 +2906,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "_arg",
+            "named": true
+          },
           {
             "type": "_statement",
             "named": true
@@ -3880,8 +3883,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "def",
