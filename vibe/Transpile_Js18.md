@@ -681,7 +681,7 @@ Verified each proposed phase against the current build using the Appendix §16 m
 | Failed | 16,048 |
 | Skipped | 11,619 |
 | **Pass rate (executed)** | **40.6%** (10,982 / 27,030) |
-| **Git base** | `3402b2fca` + computed fields/static blocks (uncommitted) |
+| **Git commit** | `98a35a07c` |
 
 **Note:** The pass rate (40.6%) is significantly lower than the v18 proposal baseline (67.6% / 17,740 passed). The proposal numbers were from a different test262 runner configuration or codebase version. The current numbers reflect the actual state of the parallel test262 runner.
 
@@ -689,7 +689,7 @@ Verified each proposed phase against the current build using the Appendix §16 m
 
 ## Progress Checkpoint: Computed Class Fields + Static Blocks (2026-04-03)
 
-**Git base:** `3402b2fca` (master) + uncommitted changes in `js_ast.hpp`, `build_js_ast.cpp`, `transpile_js_mir.cpp`, `test_js_test262_gtest.cpp`
+**Git commit:** `98a35a07c`
 
 ### Phase 5: Computed Class Fields
 
