@@ -421,9 +421,9 @@ fn build_spaced(filtered, i, prev_type, acc, context) {
          let space = sp_table.get_spacing(prev_type, current.type, context.style),
          let space_cls = sp_table.spacing_class(space),
          let with_space = if (space_cls != null)
-             concat(acc, [box.box_cls(space_cls, 0.0, 0.0, space, "skip"), current])
+             acc ++ [box.box_cls(space_cls, 0.0, 0.0, space, "skip"), current]
          else
-             concat(acc, [current]),
+             acc ++ [current],
          build_spaced(filtered, i + 1, current.type, with_space, context))
 }
 

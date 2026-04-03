@@ -2613,7 +2613,13 @@ static MIR_reg_t transpile_unary(MirTranspiler* mt, AstUnaryNode* un) {
         }
         MIR_reg_t boxed = transpile_box_item(mt, un->operand);
         MIR_reg_t bool_result = emit_call_1(mt, "fn_not", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-        return emit_box_bool(mt, bool_result);
+        // fn_not returns uint8_t Bool — zero-extend to native i64 (0 or 1).
+        // Must return native bool (not boxed Item) because get_effective_type
+        // advertises OPERATOR_NOT as LMD_TYPE_BOOL, and transpile_if uses the
+        // value directly with MIR_BF (branch-if-false) without calling is_truthy.
+        // A boxed bool (e.g. 0x0200000000000000 for false) is always non-zero,
+        // which would make MIR_BF never branch — breaking `if not x` for non-bool x.
+        return emit_uext8(mt, bool_result);
     }
     case OPERATOR_POS: {
         if (operand_tid == LMD_TYPE_INT || operand_tid == LMD_TYPE_INT64 || operand_tid == LMD_TYPE_FLOAT) {

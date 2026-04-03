@@ -27,6 +27,13 @@
 #include <fstream>
 #include <sstream>
 #include <set>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <unordered_map>
+#include <queue>
+#include <functional>
+#include <chrono>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -109,8 +116,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Symbol.hasInstance", "Symbol.match", "Symbol.replace", "Symbol.search",
     "Symbol.split", "Symbol.toStringTag", "Symbol.unscopables",
     "Symbol.asyncIterator", "Symbol.matchAll", "Symbol",
-    // Class static block — parsed but body not executed
-    "class-static-block",
     // Async iteration — event loop semantics diverge from test262 harness
     "async-iteration",
     // Other
@@ -120,7 +125,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "arbitrary-module-namespace-names",
     "json-modules", "source-phase-imports",
     "AggregateError",
-    "numeric-separator-literal",
     "error-cause",
     "symbols-as-weakmap-keys",
     "Set.prototype.intersection",
@@ -529,7 +533,6 @@ static Test262RunResult run_test262(const std::string& test_path) {
     if (meta.is_async) return {T262_SKIP, "async flag"};
     if (meta.is_module) return {T262_SKIP, "module flag"};
     if (meta.is_raw) return {T262_SKIP, "raw flag"};
-    if (meta.is_strict) return {T262_SKIP, "onlyStrict flag"};
     if (has_unsupported_feature(meta)) return {T262_SKIP, "unsupported feature"};
 
     // check for eval() usage in test body (after frontmatter)
@@ -554,10 +557,15 @@ static Test262RunResult run_test262(const std::string& test_path) {
     }
 
     // append test source
+    if (meta.is_strict) {
+        combined += "\"use strict\";\n";
+    }
     combined += source;
 
-    // write to temp file
-    std::string temp_path = std::string(TEMP_DIR) + "/_test262_run.js";
+    // write to temp file (use thread-unique path for parallel execution)
+    static std::atomic<int> temp_counter{0};
+    int my_id = temp_counter.fetch_add(1, std::memory_order_relaxed);
+    std::string temp_path = std::string(TEMP_DIR) + "/_test262_run_" + std::to_string(my_id % 256) + ".js";
     {
         std::ofstream out(temp_path);
         if (!out.is_open()) {
@@ -628,14 +636,83 @@ static Test262RunResult run_test262(const std::string& test_path) {
 }
 
 // =============================================================================
-// GTest parameterized test
+// Parallel pre-run: execute all tests in a thread pool, cache results
+// =============================================================================
+
+static std::unordered_map<std::string, Test262RunResult> g_cached_results;
+static std::mutex g_results_mutex;
+static bool g_parallel_done = false;
+
+static void parallel_run_all_tests(const std::vector<Test262Param>& tests) {
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+    fprintf(stderr, "[test262] Running %zu tests with %u threads...\n", tests.size(), num_threads);
+
+    std::atomic<size_t> next_index{0};
+    std::atomic<int> done_count{0};
+    auto start_time = std::chrono::steady_clock::now();
+
+    auto worker = [&]() {
+        while (true) {
+            size_t idx = next_index.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= tests.size()) break;
+
+            const Test262Param& param = tests[idx];
+            Test262RunResult result = run_test262(param.test_path);
+
+            {
+                std::lock_guard<std::mutex> lock(g_results_mutex);
+                g_cached_results[param.test_name] = result;
+            }
+
+            int completed = done_count.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (completed % 2000 == 0) {
+                auto elapsed = std::chrono::steady_clock::now() - start_time;
+                double secs = std::chrono::duration<double>(elapsed).count();
+                fprintf(stderr, "[test262] %d / %zu tests completed (%.1fs)\n",
+                        completed, tests.size(), secs);
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for (unsigned int i = 0; i < num_threads; i++) {
+        threads.emplace_back(worker);
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - start_time;
+    double secs = std::chrono::duration<double>(elapsed).count();
+    fprintf(stderr, "[test262] All %zu tests completed in %.1fs\n", tests.size(), secs);
+    g_parallel_done = true;
+}
+
+// =============================================================================
+// GTest parameterized test (reads from cache)
 // =============================================================================
 
 class Test262Suite : public testing::TestWithParam<Test262Param> {};
 
 TEST_P(Test262Suite, Run) {
     const Test262Param& param = GetParam();
-    Test262RunResult result = run_test262(param.test_path);
+
+    // look up cached result from parallel pre-run
+    Test262RunResult result;
+    if (g_parallel_done) {
+        std::lock_guard<std::mutex> lock(g_results_mutex);
+        auto it = g_cached_results.find(param.test_name);
+        if (it != g_cached_results.end()) {
+            result = it->second;
+        } else {
+            result = {T262_FAIL, "not found in cache"};
+        }
+    } else {
+        // fallback: run sequentially (shouldn't happen)
+        result = run_test262(param.test_path);
+    }
 
     switch (result.result) {
         case T262_PASS:
@@ -714,6 +791,10 @@ int main(int argc, char** argv) {
     // register summary listener
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new Test262ReportListener());
+
+    // pre-run all tests in parallel
+    auto all_tests = discover_all_tests();
+    parallel_run_all_tests(all_tests);
 
     return RUN_ALL_TESTS();
 }

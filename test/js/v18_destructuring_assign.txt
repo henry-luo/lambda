@@ -1,0 +1,14 @@
+arr assign: 1 2
+arr defaults: 42 200
+arr no-default: null 0
+arr elision: 2 4
+obj assign: 10 20
+obj rename: 100 200
+decl array: 7 8 9
+decl obj: hello world
+for-of defaults: 1:2 3:99
+for-of obj: Alice=95 Bob=0
+for-of rest: 1,4 2,3
+swap: world hello
+func return: 3 7
+sequential: 10 20 30

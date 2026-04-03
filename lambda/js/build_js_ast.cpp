@@ -186,13 +186,23 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                 break;
             }
         }
-        // Create null-terminated string for strtod
+        // Create null-terminated string, stripping numeric separators (_)
         char* temp_str = (char*)malloc(source.length + 1);
         if (temp_str) {
-            memcpy(temp_str, source.str, source.length);
-            temp_str[source.length] = '\0';
+            size_t j = 0;
+            for (size_t i = 0; i < source.length; i++) {
+                if (source.str[i] != '_') temp_str[j++] = source.str[i];
+            }
+            temp_str[j] = '\0';
             char* endptr;
-            literal->value.number_value = strtod(temp_str, &endptr);
+            // strtod handles decimal and 0x hex, but not 0b binary or 0o octal
+            if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'b' || temp_str[1] == 'B')) {
+                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 2);
+            } else if (j > 2 && temp_str[0] == '0' && (temp_str[1] == 'o' || temp_str[1] == 'O')) {
+                literal->value.number_value = (double)strtoull(temp_str + 2, &endptr, 8);
+            } else {
+                literal->value.number_value = strtod(temp_str, &endptr);
+            }
             free(temp_str);
         } else {
             literal->value.number_value = 0.0;
@@ -555,17 +565,35 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
 JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node) {
     JsArrayNode* array = (JsArrayNode*)alloc_js_ast_node(tp, JS_AST_NODE_ARRAY_EXPRESSION, array_node, sizeof(JsArrayNode));
 
-    uint32_t element_count = ts_node_named_child_count(array_node);
-    array->length = element_count;
+    // v18: Use all children (including unnamed commas) to correctly handle elisions [1,,3]
+    uint32_t total_children = ts_node_child_count(array_node);
 
     JsAstNode* prev_element = NULL;
     uint32_t actual_count = 0;
-    for (uint32_t i = 0; i < element_count; i++) {
-        TSNode element_node = ts_node_named_child(array_node, i);
-        const char* child_type = ts_node_type(element_node);
+    bool expect_elem = true; // true = next non-comma token should be an element
+    for (uint32_t i = 0; i < total_children; i++) {
+        TSNode child = ts_node_child(array_node, i);
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) continue;
+        if (strcmp(child_type, ",") == 0) {
+            if (expect_elem) {
+                // consecutive comma or leading comma = elision: insert undefined hole
+                JsAstNode* elision = (JsAstNode*)alloc_js_ast_node(
+                    tp, JS_AST_NODE_NULL, child, sizeof(JsAstNode));
+                elision->type = &TYPE_ANY;
+                if (!prev_element) array->elements = elision;
+                else prev_element->next = elision;
+                prev_element = elision;
+                actual_count++;
+            } else {
+                expect_elem = true;
+            }
+            continue;
+        }
         // skip comment nodes inside array literals
         if (strcmp(child_type, "comment") == 0) continue;
-        JsAstNode* element = build_js_expression(tp, element_node);
+        expect_elem = false;
+        JsAstNode* element = build_js_expression(tp, child);
         if (!element) continue;
 
         if (!prev_element) {
@@ -2186,18 +2214,14 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
             // Get consequent statements
             JsAstNode* prev_stmt = NULL;
             uint32_t stmt_count = ts_node_named_child_count(child);
+            // Determine position of the value node so we can skip it in the body
+            TSNode case_value = ts_node_child_by_field_name(child, "value", strlen("value"));
+            uint32_t value_start = ts_node_is_null(case_value) ? UINT32_MAX : ts_node_start_byte(case_value);
             for (uint32_t j = 0; j < stmt_count; j++) {
                 TSNode stmt_child = ts_node_named_child(child, j);
-                const char* stmt_type = ts_node_type(stmt_child);
-                // Skip the value node itself
-                if (strcmp(stmt_type, "number") == 0 || strcmp(stmt_type, "string") == 0 ||
-                    strcmp(stmt_type, "identifier") == 0 || strcmp(stmt_type, "true") == 0 ||
-                    strcmp(stmt_type, "false") == 0) {
-                    // Check if this is the case value by position
-                    TSNode value = ts_node_child_by_field_name(child, "value", strlen("value"));
-                    if (!ts_node_is_null(value) && ts_node_start_byte(stmt_child) == ts_node_start_byte(value)) {
-                        continue;
-                    }
+                // Skip the value node itself (any expression type)
+                if (ts_node_start_byte(stmt_child) == value_start) {
+                    continue;
                 }
                 JsAstNode* stmt = build_js_statement(tp, stmt_child);
                 if (!stmt) continue;
@@ -2409,6 +2433,7 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         tp, JS_AST_NODE_FIELD_DEFINITION, field_node, sizeof(JsFieldDefinitionNode));
     field->is_static = false;
     field->is_private = false;
+    field->computed = false;
     field->key = NULL;
     field->value = NULL;
 
@@ -2429,6 +2454,9 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         const char* prop_type = ts_node_type(prop_node);
         if (strcmp(prop_type, "private_property_identifier") == 0) {
             field->is_private = true;
+        }
+        if (strcmp(prop_type, "computed_property_name") == 0) {
+            field->computed = true;
         }
         field->key = build_js_expression(tp, prop_node);
     }
@@ -2456,6 +2484,16 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
         JsAstNode* method = NULL;
         if (strcmp(child_type, "field_definition") == 0) {
             method = build_js_field_definition(tp, child_node);
+        } else if (strcmp(child_type, "class_static_block") == 0) {
+            // static { ... } block
+            JsStaticBlockNode* sb = (JsStaticBlockNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_STATIC_BLOCK, child_node, sizeof(JsStaticBlockNode));
+            sb->body = NULL;
+            TSNode body_node = ts_node_child_by_field_name(child_node, "body", strlen("body"));
+            if (!ts_node_is_null(body_node)) {
+                sb->body = build_js_block_statement(tp, body_node);
+            }
+            method = (JsAstNode*)sb;
         } else {
             method = build_js_method_definition(tp, child_node);
         }
