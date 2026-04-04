@@ -1068,7 +1068,10 @@ struct JsFunction {
     String* name;    // Function name (NULL if anonymous)
     int builtin_id;  // >0 for built-in method dispatch (0 = user function)
     Item properties_map; // v18: backing map for arbitrary properties (0 if none)
+    uint8_t flags;   // v20: bit 0 = is_generator
 };
+
+#define JS_FUNC_FLAG_GENERATOR 1
 
 // Built-in method IDs for prototype method dispatch
 enum JsBuiltinId {
@@ -1505,8 +1508,8 @@ static Item js_get_proto_key() {
     return js_proto_key_item;
 }
 
-// Forward declaration for builtin method lookup
-static Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+// Forward declaration for builtin method lookup (extern — used by js_globals.cpp too)
+extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len);
 static Item js_get_or_create_builtin(int builtin_id, const char* name, int param_count);
 static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
                                           const char* prop_name, int prop_len);
@@ -1805,9 +1808,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                         int nl = (int)fn->name->len;
                         // Set __class_name__ for known constructors
                         bool needs_class_name = 
+                            (nl == 5 && strncmp(nm, "Array", 5) == 0) ||
                             (nl == 6 && strncmp(nm, "String", 6) == 0) ||
                             (nl == 6 && strncmp(nm, "Number", 6) == 0) ||
                             (nl == 7 && strncmp(nm, "Boolean", 7) == 0) ||
+                            (nl == 6 && strncmp(nm, "Object", 6) == 0) ||
+                            (nl == 8 && strncmp(nm, "Function", 8) == 0) ||
+                            (nl == 4 && strncmp(nm, "Date", 4) == 0) ||
                             (nl == 6 && strncmp(nm, "RegExp", 6) == 0);
                         if (needs_class_name) {
                             Item cnk = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
@@ -1831,6 +1838,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, mk, mv);
                         }
                     }
+                }
+                // v20: Set constructor property (non-enumerable, writable, configurable)
+                // Skip for generator functions — generator prototypes have no constructor
+                if (!(fn->flags & JS_FUNC_FLAG_GENERATOR)) {
+                    Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
+                    js_property_set(fn->prototype, ctor_key, object);
+                    js_mark_non_enumerable(fn->prototype, ctor_key);
                 }
                 return fn->prototype;
             }
@@ -2519,7 +2533,7 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
 }
 
 // Lookup built-in method by name for a given receiver type
-static Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
+extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
     // Object.prototype methods (available on all objects and arrays)
     if (len == 14 && strncmp(name, "hasOwnProperty", 14) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, "hasOwnProperty", 1);
@@ -2629,6 +2643,20 @@ static Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
         }
     }
 
+    // Number.prototype methods
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+        if (len == 8 && strncmp(name, "toString", 8) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_STRING, "toString", 1);
+        if (len == 7 && strncmp(name, "valueOf", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_VALUE_OF, "valueOf", 0);
+        if (len == 7 && strncmp(name, "toFixed", 7) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_FIXED, "toFixed", 1);
+        if (len == 11 && strncmp(name, "toPrecision", 11) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_PRECISION, "toPrecision", 1);
+        if (len == 13 && strncmp(name, "toExponential", 13) == 0)
+            return js_get_or_create_builtin(JS_BUILTIN_NUM_TO_EXPONENTIAL, "toExponential", 1);
+    }
+
     return ItemNull;
 }
 
@@ -2675,6 +2703,13 @@ extern "C" Item* js_alloc_env(int count) {
     Item* env = (Item*)pool_calloc(js_input->pool, count * sizeof(Item));
     heap_register_gc_root_range((uint64_t*)env, count);
     return env;
+}
+
+// v20: Mark a function as a generator (generator prototype has no constructor)
+extern "C" void js_mark_generator_func(Item fn_item) {
+    if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
+    JsFunction* fn = (JsFunction*)fn_item.function;
+    fn->flags |= JS_FUNC_FLAG_GENERATOR;
 }
 
 // Set the name of a JsFunction (called from transpiler after js_new_function/js_new_closure)
@@ -2876,20 +2911,40 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return js_has_own_property(this_val, arg0);
     case JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE: {
         // Check if the property exists and is enumerable
-        Item has = js_has_own_property(this_val, arg0);
-        if (!it2b(has)) return (Item){.item = ITEM_FALSE};
-        // Check __ne_<propName> non-enumerable marker
+        // v20: Virtual builtin methods are non-enumerable — check map shape directly
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
             Item k = js_to_string(arg0);
             if (get_type_id(k) == LMD_TYPE_STRING) {
                 String* ks = it2s(k);
-                char ne_buf[256];
-                snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
-                bool ne_found = false;
-                Item ne_val = js_map_get_fast_ext(this_val.map, ne_buf, (int)strlen(ne_buf), &ne_found);
-                if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
+                Map* m = this_val.map;
+                if (m && m->type) {
+                    // Check if property exists in actual map shape
+                    bool found_in_shape = false;
+                    TypeMap* tm = (TypeMap*)m->type;
+                    ShapeEntry* e = tm->shape;
+                    while (e) {
+                        if (e->name && e->name->length == (size_t)ks->len &&
+                            strncmp(e->name->str, ks->chars, ks->len) == 0) {
+                            Item val = _map_read_field(e, m->data);
+                            if (val.item != JS_DELETED_SENTINEL_VAL)
+                                found_in_shape = true;
+                            break;
+                        }
+                        e = e->next;
+                    }
+                    if (!found_in_shape) return (Item){.item = ITEM_FALSE};
+                    // Check __ne_ marker
+                    char ne_buf[256];
+                    snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
+                    bool ne_found = false;
+                    Item ne_val = js_map_get_fast_ext(m, ne_buf, (int)strlen(ne_buf), &ne_found);
+                    if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
+                    return (Item){.item = ITEM_TRUE};
+                }
             }
         }
+        Item has = js_has_own_property(this_val, arg0);
+        if (!it2b(has)) return (Item){.item = ITEM_FALSE};
         return (Item){.item = ITEM_TRUE};
     }
     case JS_BUILTIN_OBJ_TO_STRING: {

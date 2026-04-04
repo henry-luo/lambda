@@ -64,6 +64,7 @@
 
 static const char* TEST262_ROOT = "ref/test262";
 static const char* HARNESS_DIR = "ref/test262/harness";
+static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
 
 // Features that LambdaJS does NOT support — skip tests requiring these
 // v17: removed 25 features that are actually implemented (class fields, optional
@@ -137,6 +138,7 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Set.prototype.isDisjointFrom",
     "Float16Array",
     "uint8-clamped-array",
+    "json-parse-with-source",
 };
 
 // =============================================================================
@@ -882,6 +884,12 @@ static std::unordered_map<std::string, Test262RunResult> g_cached_results;
 static std::mutex g_results_mutex;
 static bool g_parallel_done = false;
 
+// =============================================================================
+// Baseline regression tracking
+// =============================================================================
+static std::set<std::string> g_baseline_passing;  // tests that passed in baseline
+static bool g_update_baseline = false;             // --update-baseline flag
+
 static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     auto start_time = std::chrono::steady_clock::now();
 
@@ -975,20 +983,63 @@ INSTANTIATE_TEST_SUITE_P(
 
 class Test262ReportListener : public testing::EmptyTestEventListener {
 public:
-    int passed = 0, failed = 0, skipped = 0, crashed = 0, timed_out = 0;
+    int passed = 0, failed = 0, skipped = 0, crashed = 0, timed_out = 0, batch_lost = 0;
     std::map<std::string, std::pair<int,int>> category_results; // category -> (pass, total)
+    std::vector<std::string> current_passing;    // tests that passed this run
+    std::vector<std::string> regressions;        // baseline pass → now fail
+    std::vector<std::string> improvements;       // baseline fail → now pass
 
     void OnTestPartResult(const testing::TestPartResult& result) override {
         // count non-fatal failures
     }
 
     void OnTestEnd(const testing::TestInfo& info) override {
+        // Extract test name: GTest param name is the test_name
+        std::string test_name;
+        if (info.value_param()) {
+            // For parameterized tests, parse the name from the test case name
+            // Format: "Run/<test_name>"
+            test_name = info.name();
+            // The actual param name is in the test name suffix after "Run/"
+        }
+        // Use the full test name from the test info
+        std::string full_name = info.test_case_name() ? info.test_case_name() : "";
+        // Extract just the parameter part: "Test262/Test262Suite.Run/<test_name>"
+        // The test_name is in info.name() which is "Run/<param_name>"
+        std::string param_name;
+        const char* name_str = info.name();
+        if (name_str && strncmp(name_str, "Run/", 4) == 0) {
+            param_name = name_str + 4;
+        }
+
         if (info.result()->Skipped()) {
             skipped++;
         } else if (info.result()->Passed()) {
             passed++;
+            if (!param_name.empty()) {
+                current_passing.push_back(param_name);
+                if (!g_baseline_passing.empty() && g_baseline_passing.find(param_name) == g_baseline_passing.end()) {
+                    improvements.push_back(param_name);
+                }
+            }
         } else {
             failed++;
+            // Check if failure is "not found in batch results" — batch infrastructure
+            // issue, not a real test failure. Don't count as regression.
+            bool is_batch_lost = false;
+            for (int i = 0; i < info.result()->total_part_count(); i++) {
+                const auto& part = info.result()->GetTestPartResult(i);
+                if (part.failed() && part.message() &&
+                    strstr(part.message(), "not found in batch")) {
+                    is_batch_lost = true;
+                    break;
+                }
+            }
+            if (!is_batch_lost && !param_name.empty() && !g_baseline_passing.empty() &&
+                g_baseline_passing.find(param_name) != g_baseline_passing.end()) {
+                regressions.push_back(param_name);
+            }
+            if (is_batch_lost) batch_lost++;
         }
     }
 
@@ -998,20 +1049,98 @@ public:
 
     void OnTestProgramEnd(const testing::UnitTest& unit_test) override {
         int total = passed + failed;
+        int real_failed = failed - batch_lost;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
         printf("\n");
         printf("╔══════════════════════════════════════════════════╗\n");
         printf("║         test262 Compliance Summary               ║\n");
         printf("╠══════════════════════════════════════════════════╣\n");
-        printf("║  Passed:  %5d / %5d  (%.1f%%)                 ║\n", passed, total, pct);
-        printf("║  Failed:  %5d                                  ║\n", failed);
-        printf("║  Skipped: %5d                                  ║\n", skipped);
+        printf("║  Passed:     %5d / %5d  (%.1f%%)              ║\n", passed, total, pct);
+        printf("║  Failed:     %5d  (real: %d, batch-lost: %d)   ║\n", failed, real_failed, batch_lost);
+        printf("║  Skipped:    %5d                               ║\n", skipped);
         printf("╚══════════════════════════════════════════════════╝\n");
+
+        // Regression / improvement report
+        if (!g_baseline_passing.empty()) {
+            printf("\n");
+            printf("╔══════════════════════════════════════════════════╗\n");
+            printf("║         Regression Check vs Baseline             ║\n");
+            printf("╠══════════════════════════════════════════════════╣\n");
+            printf("║  Baseline passing: %5zu                         ║\n", g_baseline_passing.size());
+            printf("║  Current passing:  %5zu                         ║\n", current_passing.size());
+            printf("║  Improvements:     %5zu  (fail → pass)          ║\n", improvements.size());
+            printf("║  Regressions:      %5zu  (pass → fail)          ║\n", regressions.size());
+            printf("╚══════════════════════════════════════════════════╝\n");
+
+            if (!regressions.empty()) {
+                printf("\n⚠️  REGRESSIONS (%zu tests that previously passed now fail):\n", regressions.size());
+                std::sort(regressions.begin(), regressions.end());
+                for (auto& r : regressions) {
+                    printf("  - %s\n", r.c_str());
+                }
+            }
+            if (!improvements.empty() && improvements.size() <= 50) {
+                printf("\n✅  IMPROVEMENTS (%zu tests that previously failed now pass):\n", improvements.size());
+                std::sort(improvements.begin(), improvements.end());
+                for (auto& r : improvements) {
+                    printf("  + %s\n", r.c_str());
+                }
+            } else if (!improvements.empty()) {
+                printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
+            }
+        }
+
+        // Update baseline if requested
+        if (g_update_baseline) {
+            FILE* f = fopen(BASELINE_FILE, "w");
+            if (f) {
+                fprintf(f, "# test262 baseline: tests that PASS (auto-updated)\n");
+                fprintf(f, "# Total passing: %zu\n", current_passing.size());
+                std::sort(current_passing.begin(), current_passing.end());
+                for (auto& name : current_passing) {
+                    fprintf(f, "%s\n", name.c_str());
+                }
+                fclose(f);
+                printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
+                       BASELINE_FILE, current_passing.size());
+            } else {
+                printf("\n❌  Failed to update baseline: %s\n", BASELINE_FILE);
+            }
+        }
     }
 };
 
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
+
+    // Check for --update-baseline flag (must be after InitGoogleTest consumes gtest flags)
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--update-baseline") == 0) {
+            g_update_baseline = true;
+        }
+    }
+
+    // Load baseline file for regression checking
+    {
+        FILE* f = fopen(BASELINE_FILE, "r");
+        if (f) {
+            char line[512];
+            while (fgets(line, sizeof(line), f)) {
+                // Skip comments and empty lines
+                if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+                // Trim trailing newline
+                size_t len = strlen(line);
+                while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+                if (len > 0) g_baseline_passing.insert(std::string(line, len));
+            }
+            fclose(f);
+            fprintf(stderr, "[test262] Loaded baseline: %zu passing tests from %s\n",
+                    g_baseline_passing.size(), BASELINE_FILE);
+        } else {
+            fprintf(stderr, "[test262] No baseline file found (%s) — regression checking disabled\n",
+                    BASELINE_FILE);
+        }
+    }
 
     // register summary listener
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();

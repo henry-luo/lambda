@@ -1,8 +1,7 @@
 # Lambda Dev on DigitalOcean Droplet
 
 Packer-based workflow to create a pre-built DigitalOcean snapshot with all Lambda build
-dependencies. Launch a ready-to-code droplet in ~60 seconds, connect with VS Code Remote SSH
-and GitHub Copilot. Auto powers off after 30 minutes of inactivity to save costs.
+dependencies. Launch a ready-to-code droplet in ~60 seconds, connect with VS Code Remote SSH and GitHub Copilot. Auto powers off after 30 minutes of inactivity to save costs.
 
 ## Prerequisites
 

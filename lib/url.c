@@ -798,6 +798,75 @@ char* url_encode_component(const char* str, size_t len) {
     return encoded;
 }
 
+// Percent-encode a string per ECMAScript encodeURI rules.
+// Preserves URI-structural chars: ; , / ? : @ & = + $ # and the unreserved set.
+char* url_encode_uri(const char* str, size_t len) {
+    if (!str) return NULL;
+    static const char hex[] = "0123456789ABCDEF";
+    char* encoded = malloc(len * 3 + 1);
+    if (!encoded) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)str[i];
+        // unreserved: A-Z a-z 0-9 - _ . ~ ! ' ( ) *
+        // URI reserved (preserved by encodeURI): ; , / ? : @ & = + $ #
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' ||
+            c == '.' || c == '~' || c == '!' || c == '\'' ||
+            c == '(' || c == ')' || c == '*' ||
+            c == ';' || c == ',' || c == '/' || c == '?' ||
+            c == ':' || c == '@' || c == '&' || c == '=' ||
+            c == '+' || c == '$' || c == '#') {
+            encoded[j++] = c;
+        } else {
+            encoded[j++] = '%';
+            encoded[j++] = hex[c >> 4];
+            encoded[j++] = hex[c & 0x0F];
+        }
+    }
+    encoded[j] = '\0';
+    return encoded;
+}
+
+// Percent-decode a string per ECMAScript decodeURI rules.
+// Does NOT decode escape sequences for reserved URI characters.
+char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
+    if (!str) return NULL;
+    char* decoded = malloc(len + 1);
+    if (!decoded) return NULL;
+    // reserved chars that decodeURI must NOT decode
+    static const char reserved[] = "#$&+,/:;=?@";
+    size_t i = 0, j = 0;
+    while (i < len) {
+        if (str[i] == '%' && i + 2 < len) {
+            int high = url_hex_to_int(str[i + 1]);
+            int low  = url_hex_to_int(str[i + 2]);
+            if (high >= 0 && low >= 0) {
+                char ch = (char)((high << 4) | low);
+                // check if this is a reserved char — if so, keep encoded
+                int is_reserved = 0;
+                for (const char* r = reserved; *r; r++) {
+                    if (ch == *r) { is_reserved = 1; break; }
+                }
+                if (is_reserved) {
+                    decoded[j++] = str[i];
+                    decoded[j++] = str[i + 1];
+                    decoded[j++] = str[i + 2];
+                    i += 3;
+                } else {
+                    decoded[j++] = ch;
+                    i += 3;
+                }
+                continue;
+            }
+        }
+        decoded[j++] = str[i++];
+    }
+    decoded[j] = '\0';
+    if (out_len) *out_len = j;
+    return decoded;
+}
+
 // Percent-decode a string: %XX -> byte.
 char* url_decode_component(const char* str, size_t len, size_t* out_len) {
     if (!str) return NULL;
