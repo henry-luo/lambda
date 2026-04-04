@@ -104,6 +104,7 @@ extern bool target_equal(Target* a, Target* b);
 #ifdef LAMBDA_BASH
 #include "bash/bash_runtime.h"
 #include "bash/bash_expand.h"
+#include "bash/bash_errors.h"
 #endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
@@ -1756,7 +1757,27 @@ JitImport jit_runtime_imports[] = {
     {"bash_cmd_sub_exit", FPTR(bash_cmd_sub_exit)},
     {"bash_raw_write", FPTR(bash_raw_write)},
     {"bash_write_heredoc", FPTR(bash_write_heredoc)},
+    {"bash_write_stderr", FPTR(bash_write_stderr)},
     {"bash_raw_putc", FPTR(bash_raw_putc)},
+    // error formatting (Module 4)
+    {"bash_errmsg", FPTR(bash_errmsg)},
+    {"bash_errmsg_at", FPTR(bash_errmsg_at)},
+    {"bash_err_readonly", FPTR(bash_err_readonly)},
+    {"bash_err_bad_substitution", FPTR(bash_err_bad_substitution)},
+    {"bash_err_unbound_variable", FPTR(bash_err_unbound_variable)},
+    {"bash_err_not_found", FPTR(bash_err_not_found)},
+    {"bash_err_syntax", FPTR(bash_err_syntax)},
+    {"bash_err_numeric_arg", FPTR(bash_err_numeric_arg)},
+    {"bash_err_invalid_option", FPTR(bash_err_invalid_option)},
+    {"bash_err_too_many_args", FPTR(bash_err_too_many_args)},
+    {"bash_err_not_valid_identifier", FPTR(bash_err_not_valid_identifier)},
+    {"bash_err_ambiguous_redirect", FPTR(bash_err_ambiguous_redirect)},
+    {"bash_err_division_by_zero", FPTR(bash_err_division_by_zero)},
+    {"bash_err_unset_readonly", FPTR(bash_err_unset_readonly)},
+    {"bash_err_circular_nameref", FPTR(bash_err_circular_nameref)},
+    {"bash_err_declare_not_found", FPTR(bash_err_declare_not_found)},
+    {"bash_err_no_such_file", FPTR(bash_err_no_such_file)},
+    {"bash_err_param_not_set", FPTR(bash_err_param_not_set)},
     // pipeline stdin item passing
     {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
     {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
@@ -1791,6 +1812,7 @@ JitImport jit_runtime_imports[] = {
     // built-in commands
     {"bash_builtin_echo", FPTR(bash_builtin_echo)},
     {"bash_builtin_printf", FPTR(bash_builtin_printf)},
+    {"bash_process_escapes", FPTR(bash_process_escapes)},
     {"bash_builtin_let", FPTR(bash_builtin_let)},
     {"bash_builtin_type", FPTR(bash_builtin_type)},
     {"bash_builtin_command", FPTR(bash_builtin_command)},
