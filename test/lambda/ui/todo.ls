@@ -67,12 +67,14 @@ on click(evt) {
   }
 }
 on input(evt) {
-  new_text = new_text ++ evt.char
+  let pos = evt.caret_pos
+  new_text = slice(new_text, 0, pos) ++ evt.char ++ slice(new_text, pos, len(new_text))
 }
 on keydown(evt) {
   if (evt.key == "Backspace") {
-    if (len(new_text) > 0) {
-      new_text = slice(new_text, 0, len(new_text) - 1)
+    let pos = evt.caret_pos
+    if (pos > 0) {
+      new_text = slice(new_text, 0, pos - 1) ++ slice(new_text, pos, len(new_text))
     }
   }
   if (evt.key == "Enter") {

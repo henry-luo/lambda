@@ -779,11 +779,20 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
     if (strcmp(prop, "selectorText") == 0) {
         if (rule->type != CSS_RULE_STYLE) return make_string_item("");
         const char* sel_text = serialize_selector_text(rule, pool);
+        // CSS Nesting: nested rules get '& ' prefix
+        if (rule->parent && sel_text && sel_text[0] != '\0') {
+            // Always prepend '& ' for nested selectors
+            size_t len = strlen(sel_text);
+            char* nested_text = (char*)pool_calloc(pool, len + 3);
+            memcpy(nested_text, "& ", 2);
+            memcpy(nested_text + 2, sel_text, len + 1);
+            return make_string_item(nested_text);
+        }
         return make_string_item(sel_text);
     }
 
     if (strcmp(prop, "style") == 0) {
-        if (rule->type == CSS_RULE_STYLE) {
+        if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTED_DECLARATIONS) {
             return wrap_rule_decl(rule, pool);
         }
         // font-face and page rules also expose .style
@@ -792,6 +801,40 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
             if (shadow) {
                 return wrap_rule_decl(shadow, pool);
             }
+        }
+        return ItemNull;
+    }
+
+    // cssRules on CSSStyleRule — returns nested rules (CSS Nesting)
+    if (strcmp(prop, "cssRules") == 0 || strcmp(prop, "rules") == 0) {
+        if (rule->type == CSS_RULE_STYLE) {
+            Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
+            arr->type_id = LMD_TYPE_ARRAY;
+            arr->items = nullptr;
+            arr->length = 0;
+            arr->capacity = 0;
+            size_t nr_count = rule->data.style_rule.nested_rule_count;
+            CssRule** nr = rule->data.style_rule.nested_rules;
+            for (size_t i = 0; i < nr_count; i++) {
+                if (!nr[i]) continue;
+                if (nr[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
+                    // Wrap as plain Map with __class_name__ and style property
+                    // (not a js_css_rule_marker wrapper, so __class_name__ is readable
+                    // by js_instanceof_classname via low-level map_get)
+                    Item style_decl = wrap_rule_decl(nr[i], pool);
+                    // Build a plain JS object: { __class_name__: "CSSNestedDeclarations", style: ... }
+                    Item nd_obj = js_new_object();
+                    Item class_key = make_string_item("__class_name__");
+                    Item class_val = make_string_item("CSSNestedDeclarations");
+                    js_property_set(nd_obj, class_key, class_val);
+                    Item style_key = make_string_item("style");
+                    js_property_set(nd_obj, style_key, style_decl);
+                    array_push(arr, nd_obj);
+                } else {
+                    array_push(arr, js_cssom_wrap_rule(nr[i], pool));
+                }
+            }
+            return (Item){.array = arr};
         }
         return ItemNull;
     }
@@ -904,7 +947,7 @@ extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item 
 
 extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) {
     CssRule* rule = unwrap_rule_decl(decl_item);
-    if (!rule || rule->type != CSS_RULE_STYLE) return make_string_item("");
+    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return make_string_item("");
 
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return make_string_item("");
@@ -990,7 +1033,7 @@ extern "C" Item js_cssom_rule_decl_get_property(Item decl_item, Item prop_name) 
 
 extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, Item value) {
     CssRule* rule = unwrap_rule_decl(decl_item);
-    if (!rule || rule->type != CSS_RULE_STYLE) return value;
+    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return value;
 
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return value;
@@ -1102,7 +1145,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
 
 extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item* args, int argc) {
     CssRule* rule = unwrap_rule_decl(decl_item);
-    if (!rule || rule->type != CSS_RULE_STYLE) return ItemNull;
+    if (!rule || (rule->type != CSS_RULE_STYLE && rule->type != CSS_RULE_NESTED_DECLARATIONS)) return ItemNull;
 
     const char* method = fn_to_cstr(method_name);
     if (!method) return ItemNull;
@@ -1125,7 +1168,7 @@ extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item
         if (!prop) return make_string_item("");
 
         CssRule* rm_rule = unwrap_rule_decl(decl_item);
-        if (!rm_rule || rm_rule->type != CSS_RULE_STYLE) return make_string_item("");
+        if (!rm_rule || (rm_rule->type != CSS_RULE_STYLE && rm_rule->type != CSS_RULE_NESTED_DECLARATIONS)) return make_string_item("");
 
         // convert camelCase if needed
         char css_prop[128];

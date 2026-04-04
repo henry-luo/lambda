@@ -430,6 +430,31 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("key", key_name);
     }
 
+    // add caret position (as character index) for input and keydown events
+    if (evcon && (strcmp(event_name, "input") == 0 || strcmp(event_name, "keydown") == 0)) {
+        RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
+        if (st && st->caret) {
+            int byte_off = st->caret->char_offset;
+            // use 'target' (the focused element passed to us, valid before retransform)
+            // to convert byte offset → character index for Lambda
+            int char_idx = byte_off;  // default: same (correct for ASCII)
+            if (target && target->is_element()) {
+                DomElement* el = (DomElement*)target;
+                if (el->item_prop_type == DomElement::ITEM_PROP_FORM && el->form) {
+                    const char* val = el->form->value;
+                    if (val && byte_off > 0) {
+                        int val_len = (int)strlen(val);
+                        int safe_off = byte_off <= val_len ? byte_off : val_len;
+                        char_idx = (int)str_utf8_count(val, safe_off);
+                    } else {
+                        char_idx = 0;
+                    }
+                }
+            }
+            mb.put("caret_pos", (int64_t)char_idx);
+        }
+    }
+
     return mb.final();
 }
 
@@ -2289,17 +2314,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     const char* value = target_elem->form->value;
                     int value_len = value ? (int)strlen(value) : 0;
 
-                    // Place caret at end of text
-                    caret_set(state, evcon.target, value_len);
-
-                    // Compute text width for caret positioning
+                    // Compute text area geometry
                     float border = (input_block->bound && input_block->bound->border)
                         ? input_block->bound->border->width.left : 1.0f;
                     float padding = input_block->bound
                         ? input_block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
 
-                    float text_width = 0;
-                    if (value && *value && input_block->font) {
+                    // Calculate char offset from click position within text area
+                    float rel_x = evcon.offset_x - border - padding;  // click X relative to text start (CSS px)
+                    int char_offset = value_len;  // default: end of text
+
+                    if (value && *value && input_block->font && rel_x >= 0) {
                         FontBox fbox = {0};
                         setup_font(evcon.ui_context, &fbox, input_block->font);
                         if (fbox.font_handle) {
@@ -2307,6 +2332,41 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 ? evcon.ui_context->pixel_ratio : 1.0f;
                             const unsigned char* p = (const unsigned char*)value;
                             const unsigned char* p_end = p + value_len;
+                            float accum_w = 0;
+                            int byte_off = 0;
+                            while (p < p_end) {
+                                uint32_t codepoint;
+                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                                if (bytes <= 0) { p++; byte_off++; continue; }
+                                FontStyleDesc sd = font_style_desc_from_prop(input_block->font);
+                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
+                                // if click is before midpoint of this glyph, caret goes before it
+                                if (rel_x < accum_w + gw / 2.0f) {
+                                    char_offset = byte_off;
+                                    break;
+                                }
+                                accum_w += gw;
+                                p += bytes;
+                                byte_off += bytes;
+                            }
+                        }
+                    } else if (rel_x < 0) {
+                        char_offset = 0;
+                    }
+
+                    caret_set(state, evcon.target, char_offset);
+
+                    // Compute caret visual position by measuring text up to char_offset
+                    float text_width_to_caret = 0;
+                    if (value && char_offset > 0 && input_block->font) {
+                        FontBox fbox = {0};
+                        setup_font(evcon.ui_context, &fbox, input_block->font);
+                        if (fbox.font_handle) {
+                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
+                                ? evcon.ui_context->pixel_ratio : 1.0f;
+                            const unsigned char* p = (const unsigned char*)value;
+                            const unsigned char* p_end = p + char_offset;
                             while (p < p_end) {
                                 uint32_t codepoint;
                                 int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
@@ -2314,15 +2374,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 p += bytes;
                                 FontStyleDesc sd = font_style_desc_from_prop(input_block->font);
                                 LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
-                                if (glyph) {
-                                    text_width += glyph->advance_x / pixel_ratio;
-                                }
+                                if (glyph) text_width_to_caret += glyph->advance_x / pixel_ratio;
                             }
                         }
                     }
 
                     float font_size = input_block->font ? input_block->font->font_size : 16.0f;
-                    float caret_x = input_block->x + border + padding + text_width;
+                    float caret_x = input_block->x + border + padding + text_width_to_caret;
                     float caret_y = input_block->y + border +
                         (input_block->height - 2*border - font_size) / 2;
                     float caret_height = font_size;
@@ -2348,8 +2406,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         state->caret->iframe_offset_y = evcon.block.y - chain_y;
                     }
 
-                    log_info("INPUT CARET: x=%.1f y=%.1f height=%.1f text_width=%.1f",
-                        caret_x, caret_y, caret_height, text_width);
+                    log_info("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
+                        char_offset, caret_x, caret_y, caret_height);
                     evcon.need_repaint = true;
 
                 } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
@@ -2590,6 +2648,65 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (dispatch_lambda_handler(&evcon, focused, "keydown")) {
                 evcon.need_repaint = true;
             }
+            // Re-fetch focused element (dispatch may have rebuilt the DOM)
+            focused = focus_get(state);
+        }
+
+        // Handle arrow keys and caret adjustment for text input form controls
+        if (focused && focused->is_element() && state->caret) {
+            DomElement* focus_elem = (DomElement*)focused;
+            if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                focus_elem->form &&
+                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
+
+                const char* value = focus_elem->form->value;
+                int value_len = value ? (int)strlen(value) : 0;
+                int cur = state->caret->char_offset;
+
+                if (key_event->key == RDT_KEY_LEFT) {
+                    // move caret left by one UTF-8 character
+                    if (cur > 0 && value) {
+                        int new_off = cur - 1;
+                        // walk back to UTF-8 character boundary
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_RIGHT) {
+                    // move caret right by one UTF-8 character
+                    if (cur < value_len && value) {
+                        uint32_t cp;
+                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
+                        if (bytes > 0)
+                            state->caret->char_offset = cur + bytes;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_HOME) {
+                    state->caret->char_offset = 0;
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_END) {
+                    state->caret->char_offset = value_len;
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_BACKSPACE) {
+                    // Lambda handler deleted char before caret; move caret back by 1 char
+                    if (cur > 0 && value) {
+                        int new_off = cur - 1;
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                        // clamp to new value length
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                    }
+                    evcon.need_repaint = true;
+                    // don't break — let other backspace handling continue if needed
+                }
+            }
         }
 
         // Handle caret/selection navigation when we have a caret with a view
@@ -2787,8 +2904,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // For form text inputs, caret is drawn at render time based on focus
-        // state and form value — no need to call caret_move
+        // Re-fetch focused element (dispatch may have rebuilt the DOM)
+        focused = focus_get(state);
+
+        // For form text inputs, advance caret by the typed character's byte length
         bool is_form_input = false;
         if (focused && focused->is_element()) {
             DomElement* elem = (DomElement*)focused;
@@ -2796,6 +2915,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 elem->form &&
                 elem->form->control_type == FORM_CONTROL_TEXT) {
                 is_form_input = true;
+                if (state->caret) {
+                    uint32_t cp = text_event->codepoint;
+                    int char_bytes = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
+                    int new_off = state->caret->char_offset + char_bytes;
+                    // clamp to current value length
+                    const char* val = elem->form->value;
+                    int val_len = val ? (int)strlen(val) : 0;
+                    state->caret->char_offset = new_off <= val_len ? new_off : val_len;
+                }
             }
         }
 

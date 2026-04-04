@@ -1491,14 +1491,14 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
                 prop->base.type = &TYPE_ANY;
                 elem = (JsAstNode*)prop;
             } else if (strcmp(child_type, "pair_pattern") == 0) {
-                // {a: b} or {a: b = default}
+                // {a: b} or {a: b = default} or {[expr]: b}
                 JsPropertyNode* prop = (JsPropertyNode*)alloc_js_ast_node(
                     tp, JS_AST_NODE_PROPERTY, child, sizeof(JsPropertyNode));
                 TSNode key_node = ts_node_child_by_field_name(child, "key", 3);
                 TSNode value_node = ts_node_child_by_field_name(child, "value", 5);
                 if (!ts_node_is_null(key_node)) prop->key = build_js_expression(tp, key_node);
                 if (!ts_node_is_null(value_node)) prop->value = build_js_expression(tp, value_node);
-                prop->computed = false;
+                prop->computed = (!ts_node_is_null(key_node) && strcmp(ts_node_type(key_node), "computed_property_name") == 0);
                 prop->method = false;
                 prop->base.type = &TYPE_ANY;
                 elem = (JsAstNode*)prop;
