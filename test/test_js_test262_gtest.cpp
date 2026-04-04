@@ -985,6 +985,34 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         double retry_secs = std::chrono::duration<double>(retry_time - exec_time).count();
         fprintf(stderr, "[test262] Phase 2b (retry): %.1fs — recovered %zu of %zu lost tests\n",
                 retry_secs, recovered, lost_indices.size());
+
+        // Log still-lost tests (genuine crashers + collateral) to temp/_t262_crashers.txt
+        // After retry, tests can be:
+        //   - missing from batch_results: process crashed before BATCH_END (crasher or collateral)
+        //   - present with exit_code > 128: crash was caught by batch handler
+        FILE* crasher_log = fopen("temp/_t262_crashers.txt", "w");
+        if (crasher_log) {
+            size_t still_lost = 0;
+            size_t crash_exit = 0;
+            for (size_t idx : lost_indices) {
+                const auto& p = prepared[idx];
+                auto it = batch_results.find(p.test_name);
+                if (it == batch_results.end()) {
+                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    still_lost++;
+                } else if (it->second.exit_code > 128) {
+                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
+                            p.test_name.c_str(), p.test_path.c_str());
+                    crash_exit++;
+                }
+            }
+            fclose(crasher_log);
+            if (still_lost + crash_exit > 0) {
+                fprintf(stderr, "[test262] Crasher log: %zu missing + %zu crash-exit → temp/_t262_crashers.txt\n",
+                        still_lost, crash_exit);
+            }
+        }
+
         exec_time = retry_time;  // update for total calculation
     }
 

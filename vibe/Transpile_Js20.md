@@ -839,3 +839,99 @@ Batch size 50 is optimal: the time saved from fewer spawns outweighs the retry o
 # Update baseline after improvements
 ./test/test_js_test262_gtest.exe --update-baseline
 ```
+
+## 10. Batch Crash Root-Cause Fixes
+
+### Problem
+
+With the Phase 2b crash recovery in place (Section 9), ~968 tests remained permanently lost — they crashed `lambda.exe` (SIGSEGV/SIGABRT/SIGBUS) even when retried individually. These crashes also caused **collateral damage**: each crash killed the entire batch, losing up to 49 co-batched tests per incident.
+
+A full individual scan of all 968 batch-lost tests confirmed **208 genuine crashers** (the rest were collateral from sharing a batch with a crasher).
+
+### Analysis
+
+Crash reports from macOS `.ips` diagnostic files were parsed to extract stack traces. The crashes clustered into several categories:
+
+| Category | Crash Count | Root Cause |
+|----------|:-----------:|------------|
+| Class expr in destructuring defaults | ~89 | SIGSEGV in `jm_transpile_expression` — NULL `ce` pointer |
+| String-literal class fields | ~16 | SIGSEGV in instance field emission — NULL `inf->name` |
+| `Array.prototype` runtime | ~39 | `Item::get_double()` / `Item::type_id()` type errors |
+| `Object.*` builtins | ~30 | defineProperty / prototype crashes |
+| Yield in destructuring | ~12 | `[x = yield] = vals` pattern not handled |
+| MIR list corruption | ~8 | `DLIST_MIR_insn_t_append` at `mir.h:290` |
+| Other (Function, new_expr, etc.) | ~14 | Various |
+
+The top two categories (class expr in defaults + string-literal fields) were the most impactful and fixable without deep architectural changes.
+
+### Fix 1: Class Expressions in Destructuring Parameter Defaults
+
+**File**: `lambda/js/transpile_js_mir.cpp` — `jm_collect_functions()`
+
+**Root cause**: The function pre-pass (`jm_collect_functions`) that hoists class expressions only traversed `fn->body`, never `fn->params`. When a class expression appeared as a destructuring default in a parameter:
+
+```javascript
+var f = ([cls = class {}, xCls = class X {}]) => { /* ... */ };
+```
+
+The class was never collected during the pre-pass, so `ce` (class expression struct) was NULL when `jm_transpile_expression` later tried to emit it, causing a SIGSEGV at an offset ~0x1420 from NULL.
+
+**Fix**: Added parameter traversal before the body traversal in `jm_collect_functions` for `FUNCTION_DECLARATION`, `FUNCTION_EXPRESSION`, and `ARROW_FUNCTION` cases:
+
+```cpp
+// collect functions in params (for class expressions in destructuring defaults)
+JsAstNode* param = fn->params;
+while (param) {
+    jm_collect_functions(mt, param);
+    param = param->next;
+}
+```
+
+Also added NULL guards on `ce` in three downstream emission sites (`.length` property, static fields, static blocks).
+
+### Fix 2: String-Literal Class Field Names
+
+**File**: `lambda/js/transpile_js_mir.cpp` — instance field emission
+
+**Root cause**: Instance field emission assumed `inf->name` (the identifier node) was always set. But string-literal field names like `"a"` or `'b'` have no identifier — only a `key_expr`:
+
+```javascript
+class C {
+    "a" = 42;   // inf->name is NULL, inf->key_expr is the string literal
+    'b' = 99;
+}
+```
+
+Accessing `inf->name->chars` when `inf->name` was NULL caused SIGSEGV.
+
+**Fix**: Added a fallback cascade in both parent-chain and own-class instance field emission:
+
+```cpp
+if (inf->name) {
+    key = jm_box_string_literal(mt, inf->name->chars, inf->name->length);
+} else if (inf->key_expr) {
+    key = jm_transpile_box_item(mt, inf->key_expr);
+} else {
+    continue;  // skip malformed field
+}
+```
+
+### Results
+
+| Metric | Before Fixes | After Fixes | Change |
+|--------|:------------:|:-----------:|:------:|
+| Phase 2 results collected | 21,131 | 23,507 | +2,376 |
+| Batch-lost tests | 5,788 | 3,412 | −41% |
+| Genuine crashers (individual) | 208 | 186 | −11% |
+| Batch-lost collateral | 968 | 611 | −37% |
+| Baseline regressions | — | 0 | ✓ |
+
+### Remaining Crash Categories
+
+The 186 remaining genuine crashers require deeper fixes:
+
+- **`Array.prototype` runtime crashes** (~39): Runtime type checking issues (`Item::get_double()`, `Item::type_id()`) in array method callbacks — needs runtime guard improvements
+- **`Object.*` builtin crashes** (~30): `defineProperty`, `defineProperties`, `seal`, `assign` — needs descriptor infrastructure hardening
+- **Yield-in-destructuring** (~12): `[x = yield] = vals` pattern inside generators — needs transpiler support for yield as destructuring default
+- **MIR list corruption** (~8): `DLIST_MIR_insn_t_append` crashes — likely emitting MIR instructions in wrong context
+- **`Function.prototype` crashes** (~12): `bind`/`call`/`apply` edge cases
