@@ -113,7 +113,9 @@ Type* resolve_native_ret_type(AstFuncNode* fn_node);
 
 extern"C" {
 MIR_context_t jit_init(unsigned int optimize_level);
+#ifdef LAMBDA_C2MIR
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
+#endif
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
@@ -149,6 +151,8 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 // Used for cross-language imports (Lambda → JS).
 Item load_js_module(Runtime* runtime, const char* js_path);
 
+#ifdef LAMBDA_PYTHON
 // Compile a Python file as a module and return the namespace object.
 // Used for cross-language imports (Lambda/JS/Python → Python).
 Item load_py_module(Runtime* runtime, const char* py_path);
+#endif

@@ -31,7 +31,7 @@
     #define popen _popen
     #define pclose _pclose
     #define WEXITSTATUS(status) (status)
-    #define LAMBDA_EXE "lambda.exe"
+    #define LAMBDA_EXE "lambda-jube.exe"
     #define PATH_SEP "\\"
 #else
     #include <unistd.h>
@@ -39,7 +39,7 @@
     #include <sys/wait.h>
     #include <dirent.h>
     #include <sys/stat.h>
-    #define LAMBDA_EXE "./lambda.exe"
+    #define LAMBDA_EXE "./lambda-jube.exe"
     #define PATH_SEP "/"
 #endif
 

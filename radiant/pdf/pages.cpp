@@ -222,7 +222,7 @@ static void collect_pages(Map* pdf_data, Item node_item, Array* pages_array, Poo
 
         if (contents_item.item != ITEM_NULL || mediabox_item.item != ITEM_NULL) {
             // This looks like a leaf Page node - add to array
-            fprintf(stderr, "Found Page node (no Type field but has Contents/MediaBox), adding to collection\n");
+            log_debug("Found Page node (no Type field but has Contents/MediaBox), adding to collection");
 
             // Use array_append to add the item
             array_append(pages_array, node_item, pool, arena);
@@ -348,8 +348,7 @@ int pdf_get_page_count_from_data(Map* pdf_data) {
 
         collect_pages(pdf_data, {.item = (uint64_t)pages_dict}, pages_array, temp_pool, arena_create_default(temp_pool));
         int count = pages_array->length;
-        fprintf(stderr, "Counted %d pages by tree traversal (array length=%d, capacity=%d)\n", count, pages_array->length, pages_array->capacity);
-        log_info("Counted %d pages by tree traversal", count);
+        log_info("Counted %d pages by tree traversal (array length=%d, capacity=%d)", count, pages_array->length, pages_array->capacity);
         pool_destroy(temp_pool);
         return count;
     }

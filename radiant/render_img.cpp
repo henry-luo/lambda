@@ -72,7 +72,7 @@ void save_surface_to_png(ImageSurface* surface, const char* filename) {
     png_destroy_write_struct(&png_ptr, &info_ptr);
     fclose(fp);
 
-    printf("Successfully saved PNG: %s\n", filename);
+    log_info("Successfully saved PNG: %s", filename);
 }
 
 // Save surface to JPEG using TurboJPEG
@@ -135,7 +135,7 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     if (written != jpeg_size) {
         log_error("Failed to write complete JPEG data to file: %s", filename);
     } else {
-        printf("Successfully saved JPEG: %s (quality: %d)\n", filename, quality);
+        log_info("Successfully saved JPEG: %s (quality: %d)", filename, quality);
     }
 
     // Clean up

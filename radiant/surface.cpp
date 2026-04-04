@@ -298,7 +298,7 @@ bool image_entry_free(const void *item, void *udata) {
 void image_cache_cleanup(UiContext* uicon) {
     // loop through the hashmap and free the images
     if (uicon->image_cache) {
-        printf("Cleaning up cached images\n");
+        log_debug("Cleaning up cached images");
         hashmap_scan(uicon->image_cache, image_entry_free, NULL);
         hashmap_free(uicon->image_cache);
         uicon->image_cache = NULL;
