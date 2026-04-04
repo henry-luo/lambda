@@ -50,6 +50,8 @@ extern "C" {
 #include "../radiant/view.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
+#include "../radiant/state_store.hpp"
+#include "../radiant/form_control.hpp"
 #include "../radiant/pdf/pdf_to_view.hpp"
 #include "../radiant/script_runner.h"
 #include "../lambda/render_map.h"
@@ -4064,6 +4066,41 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
  * handler has modified state and render_map_retransform() has updated the
  * Lambda element tree. Rebuilds DOM, re-applies CSS, and triggers relayout.
  */
+
+// helper: walk view tree to find a form text input matching tag + class
+static View* find_matching_input(View* root, const char* match_tag, const char* match_class) {
+    if (!root) return nullptr;
+    if (root->is_element()) {
+        DomElement* elem = (DomElement*)root;
+        if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+            elem->form &&
+            elem->form->control_type == FORM_CONTROL_TEXT) {
+            bool tag_ok = (!match_tag || (elem->tag_name && strcmp(elem->tag_name, match_tag) == 0));
+            bool class_ok = true;
+            if (match_class) {
+                class_ok = false;
+                for (int i = 0; i < elem->class_count; i++) {
+                    if (elem->class_names[i] && strcmp(elem->class_names[i], match_class) == 0) {
+                        class_ok = true;
+                        break;
+                    }
+                }
+            }
+            if (tag_ok && class_ok) return root;
+        }
+        // recurse into children
+        DomNode* child = elem->first_child;
+        while (child) {
+            if (child->node_type == DOM_NODE_ELEMENT) {
+                View* found = find_matching_input((View*)child, match_tag, match_class);
+                if (found) return found;
+            }
+            child = child->next_sibling;
+        }
+    }
+    return nullptr;
+}
+
 void rebuild_lambda_doc(UiContext* uicon) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc: no document");
@@ -4078,6 +4115,22 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
 
     log_info("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
+
+    // Save focus info before rebuild so we can restore it on the new tree
+    RadiantState* state = (RadiantState*)doc->state;
+    const char* focus_tag = nullptr;
+    const char* focus_class = nullptr;
+    bool had_focus = false;
+    if (state && state->focus && state->focus->current) {
+        View* focused = state->focus->current;
+        if (focused->is_element()) {
+            DomElement* felem = (DomElement*)focused;
+            focus_tag = felem->tag_name;
+            if (felem->class_count > 0 && felem->class_names)
+                focus_class = felem->class_names[0];
+            had_focus = true;
+        }
+    }
 
     // ensure CSS property system is initialized
     css_property_system_init(doc->pool);
@@ -4128,6 +4181,18 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     // trigger relayout + repaint
     layout_html_doc(uicon, doc, false);
+
+    // Restore focus to matching element in new view tree
+    if (had_focus && state && doc->view_tree && doc->view_tree->root) {
+        View* new_focused = find_matching_input(
+            (View*)doc->view_tree->root, focus_tag, focus_class);
+        if (new_focused) {
+            state->focus->current = new_focused;
+            log_info("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
+                     new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
+        }
+    }
+
     if (doc->view_tree) {
         render_html_doc(uicon, doc->view_tree, NULL);
     }

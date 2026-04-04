@@ -1,7 +1,7 @@
 # Reactive UI Phase 2 — End-to-End Interactive Todo App
 
 **Date:** 2026-04-02 (updated 2026-04-04)
-**Status:** Phases 6–9 complete. All 13 tasks done. Toggle, delete, clear completed, CSS cache, assert_count, input event wiring, CI target all working.
+**Status:** Phases 6–9 complete. All 13 tasks done. Toggle, delete, clear completed, add item (text input), CSS cache, assert_count, input/keydown event dispatch, CI target all working.
 **Prerequisite:** Phases 1–4 complete (Reactive_UI.md), Phase 5 event dispatch bridge complete
 **Commit:** `a624cf18` — "reactive ui automated test"
 
@@ -1043,6 +1043,14 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 
 **Fix:** Added runtime type dispatch in `edit_map_update()`: if `get_type_id(map) == LMD_TYPE_ELEMENT`, routes to `elmt_update_attr()` instead.
 
+#### Bug #8 — Stale Reverse Map After Retransform Breaks Subsequent Event Dispatch
+
+**Symptom:** `on input(evt)` handler never found after clicking an `<input>` element inside an edit template. The click triggered retransform, after which TEXT_INPUT events walked the old DOM tree but reverse_map lookups failed.
+
+**Root cause:** `render_map_retransform()` removed old reverse-map entries and added new ones for the re-executed template's output. But the DomElement tree still had `native_element` pointers to the OLD Lambda Elements (DOM rebuild happens later during repaint). Subsequent events (TEXT_INPUT) walked the old DOM, found old `native_element` pointers, and reverse_map lookup returned false because those entries had been deleted.
+
+**Fix:** `render_map_retransform()` no longer deletes old reverse-map entries. Old entries remain valid (pointing to the same `source_item` and `template_ref`) until the DOM is rebuilt with new elements. This is safe because the old entries map to the same template, so handler invocation works correctly even from stale DomElement pointers.
+
 ### Phase 9 Changes (2026-04-04) — CSS Cache, assert_count, Input Wiring, CI Target
 
 | File | Changes |
@@ -1051,10 +1059,14 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 | `radiant/cmd_layout.cpp` | `rebuild_lambda_doc()` now caches parsed `CssStylesheet**` and `CssEngine*` on first call, skips `extract_and_collect_css()` on subsequent rebuilds |
 | `radiant/event_sim.hpp` | Added `SIM_EVENT_ASSERT_COUNT` to `SimEventType` enum. Added `assert_count_expected`, `assert_count_min`, `assert_count_max` fields to `SimEvent` |
 | `radiant/event_sim.cpp` | Added `assert_count` JSON parsing block. Added `sim_count_visitor` + `count_elements_by_selector()` (traverses all matches, unlike `find_element_by_selector` which stops on first). Added execution case for `SIM_EVENT_ASSERT_COUNT`. Updated both assertion range checks (`SIM_EVENT_ASSERT_ATTRIBUTE` → `SIM_EVENT_ASSERT_COUNT`) |
-| `radiant/event.cpp` | Wired `dispatch_lambda_handler(&evcon, focused, "input")` in `RDT_EVENT_TEXT_INPUT` case for `on input(evt)` Lambda handler dispatch |
-| `Makefile` | Added `test-reactive-ui` phony target: runs `todo_toggle.json` + `todo_delete.json` via headless `lambda.exe view`. Added help text |
+| `radiant/event.cpp` | Wired `dispatch_lambda_handler(&evcon, focused, "input")` in `RDT_EVENT_TEXT_INPUT` case. Added `codepoint_to_utf8()` and `key_code_to_name()` helpers. `build_lambda_event_map()` now adds `char` field for input events and `key` field for keydown events. Added keydown dispatch for Backspace/Delete/Enter/Escape in `RDT_EVENT_KEY_DOWN` |
+| `radiant/event_sim.cpp` | Added `"equals"` as alias for `"count"` in `assert_count` JSON parsing |
+| `lambda/render_map.cpp` | **Bug #8 fix:** `render_map_retransform()` no longer removes old reverse-map entries — old DomElement `native_element` pointers remain valid until DOM rebuild, preventing stale reverse-lookup failures for subsequent events (e.g., TEXT_INPUT after click-triggered retransform) |
+| `Makefile` | `test-reactive-ui` target now runs 3 tests: `todo_toggle.json`, `todo_delete.json`, `todo_add_item.json` |
+| `test/lambda/ui/todo.ls` | Added `state new_text` to edit template, `<input>` + "Add" button, `on input(evt)` handler (char accumulation), `on keydown(evt)` handler (Backspace/Enter), CSS for add-row/input/button |
 | `test/ui/todo_toggle.json` | 8 assertions: header text, initial count=8, first item text, checkbox ○, toggled ✓, untoggled ○, count unchanged, footer text. Added `"html"` field for GTest auto-discovery |
 | `test/ui/todo_delete.json` | 8 assertions: initial count=8, first item text, delete button, after delete count=7, new first item, clear button, after clear count=6, remaining item. Added `"html"` field for GTest auto-discovery |
+| `test/ui/todo_add_item.json` | New: 5 assertions — initial count=8, add button text, input field count=3, type+click→count=9, list count updated to 1/4 |
 
 ### Test Results
 
@@ -1065,8 +1077,11 @@ Assertions: 8 passed, 0 failed — PASS
 $ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_delete.json --headless
 Assertions: 8 passed, 0 failed — PASS
 
+$ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_add_item.json --headless
+Assertions: 5 passed, 0 failed — PASS
+
 $ make test-reactive-ui
-Reactive UI: 2/2 passed
+Reactive UI: 3/3 passed
 
 $ make test-lambda-baseline
 540/560 passed (20 pre-existing failures unrelated to these changes)

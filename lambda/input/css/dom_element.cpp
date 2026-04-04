@@ -397,8 +397,16 @@ const char* dom_element_get_attribute(DomElement* element, const char* name) {
 
     // Use ElementReader for read-only access
     if (element->native_element) {
+        // Try shape-typed fast path first (covers fields with compile-time LMD_TYPE_STRING)
         ElementReader reader(element->native_element);
-        return reader.get_attr_string(lower_name);
+        const char* result = reader.get_attr_string(lower_name);
+        if (result) return result;
+
+        // Fallback: check runtime Item type (handles fields where compile-time type
+        // differs from runtime type, e.g. state-bound template attributes)
+        ConstItem attr_value = element->native_element->get_attr(lower_name);
+        String* string_value = attr_value.string();
+        if (string_value) return string_value->chars;
     }
 
     return nullptr;

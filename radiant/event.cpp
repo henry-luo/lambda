@@ -313,8 +313,59 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
 // ============================================================================
 
 /**
+ * Convert a Unicode codepoint to a UTF-8 encoded string.
+ * buf must have at least 5 bytes of space.
+ */
+static void codepoint_to_utf8(uint32_t cp, char* buf) {
+    if (cp < 0x80) {
+        buf[0] = (char)cp;
+        buf[1] = 0;
+    } else if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        buf[2] = 0;
+    } else if (cp < 0x10000) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        buf[3] = 0;
+    } else if (cp <= 0x10FFFF) {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        buf[4] = 0;
+    } else {
+        buf[0] = 0; // invalid codepoint
+    }
+}
+
+/**
+ * Convert a key code to a human-readable key name string.
+ * Returns a static string (no allocation needed).
+ */
+static const char* key_code_to_name(int key) {
+    switch (key) {
+        case RDT_KEY_BACKSPACE: return "Backspace";
+        case RDT_KEY_DELETE:    return "Delete";
+        case RDT_KEY_ENTER:     return "Enter";
+        case RDT_KEY_TAB:       return "Tab";
+        case RDT_KEY_ESCAPE:    return "Escape";
+        case RDT_KEY_LEFT:      return "ArrowLeft";
+        case RDT_KEY_RIGHT:     return "ArrowRight";
+        case RDT_KEY_UP:        return "ArrowUp";
+        case RDT_KEY_DOWN:      return "ArrowDown";
+        case RDT_KEY_HOME:      return "Home";
+        case RDT_KEY_END:       return "End";
+        default:                return "";
+    }
+}
+
+/**
  * Build a Lambda map Item representing an event object.
  * Contains: {type, target_class, target_tag, x, y}
+ * For "input" events: adds "char" (typed character as UTF-8 string)
+ * For "keydown" events: adds "key" (key name string, e.g. "Backspace", "Enter")
  * Uses doc->input (created during load_lambda_script_doc) for allocation.
  */
 static Item build_lambda_event_map(DomDocument* doc, View* target,
@@ -360,6 +411,23 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     if (evcon) {
         mb.put("x", (int64_t)evcon->event.mouse_button.x);
         mb.put("y", (int64_t)evcon->event.mouse_button.y);
+    }
+
+    // for "input" events: add typed character as UTF-8 string
+    if (evcon && strcmp(event_name, "input") == 0) {
+        uint32_t cp = evcon->event.text_input.codepoint;
+        if (cp > 0) {
+            char utf8_buf[5];
+            codepoint_to_utf8(cp, utf8_buf);
+            mb.put("char", utf8_buf);
+        }
+    }
+
+    // for "keydown" events: add key name string
+    if (evcon && strcmp(event_name, "keydown") == 0) {
+        int key = evcon->event.key.key;
+        const char* key_name = key_code_to_name(key);
+        mb.put("key", key_name);
     }
 
     return mb.final();
@@ -2210,13 +2278,82 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.font = saved_font;
                 evcon.need_repaint = true;
             } else if (evcon.target->is_element()) {
-                // Non-text element target within body
-                // Browser behavior: clicking on replaced elements (img, svg, video,
-                // input, button, etc.) clears text caret; clicking on content blocks
-                // (div, p, li) does NOT clear caret since browsers place caret at
-                // nearest text position within the block.
                 DomElement* target_elem = (DomElement*)evcon.target;
-                if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
+
+                // Text input form controls: place caret inside the input
+                if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                    target_elem->form &&
+                    target_elem->form->control_type == FORM_CONTROL_TEXT) {
+
+                    ViewBlock* input_block = (ViewBlock*)target_elem;
+                    const char* value = target_elem->form->value;
+                    int value_len = value ? (int)strlen(value) : 0;
+
+                    // Place caret at end of text
+                    caret_set(state, evcon.target, value_len);
+
+                    // Compute text width for caret positioning
+                    float border = (input_block->bound && input_block->bound->border)
+                        ? input_block->bound->border->width.left : 1.0f;
+                    float padding = input_block->bound
+                        ? input_block->bound->padding.left : FormDefaults::TEXT_PADDING_H;
+
+                    float text_width = 0;
+                    if (value && *value && input_block->font) {
+                        FontBox fbox = {0};
+                        setup_font(evcon.ui_context, &fbox, input_block->font);
+                        if (fbox.font_handle) {
+                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
+                                ? evcon.ui_context->pixel_ratio : 1.0f;
+                            const unsigned char* p = (const unsigned char*)value;
+                            const unsigned char* p_end = p + value_len;
+                            while (p < p_end) {
+                                uint32_t codepoint;
+                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                                if (bytes <= 0) { p++; continue; }
+                                p += bytes;
+                                FontStyleDesc sd = font_style_desc_from_prop(input_block->font);
+                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                                if (glyph) {
+                                    text_width += glyph->advance_x / pixel_ratio;
+                                }
+                            }
+                        }
+                    }
+
+                    float font_size = input_block->font ? input_block->font->font_size : 16.0f;
+                    float caret_x = input_block->x + border + padding + text_width;
+                    float caret_y = input_block->y + border +
+                        (input_block->height - 2*border - font_size) / 2;
+                    float caret_height = font_size;
+
+                    if (state->caret) {
+                        state->caret->x = caret_x;
+                        state->caret->y = caret_y;
+                        state->caret->height = caret_height;
+
+                        // Compute iframe offset (same as text caret)
+                        float chain_x = 0, chain_y = 0;
+                        View* parent = evcon.target->parent;
+                        while (parent) {
+                            if (parent->view_type == RDT_VIEW_BLOCK ||
+                                parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                                parent->view_type == RDT_VIEW_LIST_ITEM) {
+                                chain_x += ((ViewBlock*)parent)->x;
+                                chain_y += ((ViewBlock*)parent)->y;
+                            }
+                            parent = parent->parent;
+                        }
+                        state->caret->iframe_offset_x = evcon.block.x - chain_x;
+                        state->caret->iframe_offset_y = evcon.block.y - chain_y;
+                    }
+
+                    log_info("INPUT CARET: x=%.1f y=%.1f height=%.1f text_width=%.1f",
+                        caret_x, caret_y, caret_height, text_width);
+                    evcon.need_repaint = true;
+
+                } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
+                    // Non-text replaced elements: clear caret
                     caret_clear(state);
                     selection_clear(state);
                     evcon.need_repaint = true;
@@ -2445,6 +2582,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
+        // dispatch "keydown" event to Lambda handler for actionable keys
+        if (focused && (key_event->key == RDT_KEY_BACKSPACE ||
+                        key_event->key == RDT_KEY_DELETE ||
+                        key_event->key == RDT_KEY_ENTER ||
+                        key_event->key == RDT_KEY_ESCAPE)) {
+            if (dispatch_lambda_handler(&evcon, focused, "keydown")) {
+                evcon.need_repaint = true;
+            }
+        }
+
         // Handle caret/selection navigation when we have a caret with a view
         // The caret view is set when clicking on text, which may not be a focusable element
         View* caret_view = (state->caret && state->caret->view) ? state->caret->view : nullptr;
@@ -2640,7 +2787,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        if (focused && state->caret) {
+        // For form text inputs, caret is drawn at render time based on focus
+        // state and form value — no need to call caret_move
+        bool is_form_input = false;
+        if (focused && focused->is_element()) {
+            DomElement* elem = (DomElement*)focused;
+            if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                elem->form &&
+                elem->form->control_type == FORM_CONTROL_TEXT) {
+                is_form_input = true;
+            }
+        }
+
+        if (!is_form_input && focused && state->caret) {
             // Delete any existing selection first
             if (selection_has(state)) {
                 // TODO: delete selected text
@@ -2652,8 +2811,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             // Move caret forward
             caret_move(state, 1);
-            evcon.need_repaint = true;
         }
+        evcon.need_repaint = true;
         break;
     }
     default:
