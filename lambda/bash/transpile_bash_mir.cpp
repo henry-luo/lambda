@@ -147,6 +147,7 @@ static const SpecialVarEntry special_vars[] = {
     {"BASH_LINENO", 11, "bash_get_bash_lineno", NULL,                      "bash_get_bash_lineno_count", NULL,                  false},
     {"BASH_ARGV",   9,  "bash_get_bash_argv",   "bash_get_bash_argv_all",  "bash_get_bash_argv_count",   NULL,                  false},
     {"BASH_ARGC",   9,  "bash_get_bash_argc",   NULL,                      "bash_get_bash_argc_count",   NULL,                  false},
+    {"BASH_REMATCH",12, "bash_get_rematch",     "bash_get_rematch_all",    "bash_get_rematch_count",     "bash_get_rematch",    true },
     {"LINENO",      6,  NULL,                   NULL,                      NULL,                         "bash_get_lineno",     false},
     {NULL, 0, NULL, NULL, NULL, NULL, false}
 };
@@ -1310,8 +1311,11 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         case BASH_TEST_STR_NE: func = "bash_test_str_ne"; break;
         case BASH_TEST_STR_LT: func = "bash_test_str_lt"; break;
         case BASH_TEST_STR_GT: func = "bash_test_str_gt"; break;
-        case BASH_TEST_STR_MATCH: func = "bash_test_regex"; break;
-        case BASH_TEST_STR_GLOB: func = "bash_test_glob"; break;
+        case BASH_TEST_STR_MATCH: func = "bash_cond_regex"; break;
+        case BASH_TEST_STR_GLOB: func = "bash_cond_pattern"; break;
+        case BASH_TEST_NT:     func = "bash_test_nt"; break;
+        case BASH_TEST_OT:     func = "bash_test_ot"; break;
+        case BASH_TEST_EF:     func = "bash_test_ef"; break;
         default: func = "bash_test_str_eq"; break;
         }
         MIR_reg_t result = bm_emit_call_2(mt, func, left, right);
@@ -2389,8 +2393,23 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     // trap — register signal/event handlers
     if (cmd_len == 4 && memcmp(cmd_name, "trap", 4) == 0) {
         if (cmd->args) {
-            MIR_op_t handler_val = bm_transpile_cmd_arg(mt, cmd->args);
-            BashAstNode* sig_arg = cmd->args->next;
+            BashAstNode* first = cmd->args;
+            // check for 'trap -p [signal]' — print traps
+            if (first->node_type == BASH_AST_NODE_WORD) {
+                BashWordNode* w = (BashWordNode*)first;
+                if (w->text && w->text->len == 2 && memcmp(w->text->chars, "-p", 2) == 0) {
+                    BashAstNode* sig_arg = first->next;
+                    if (sig_arg) {
+                        MIR_op_t sig_val = bm_transpile_cmd_arg(mt, sig_arg);
+                        bm_emit_call_void_1(mt, "bash_trap_print_one", sig_val);
+                    } else {
+                        bm_emit_call_void_0(mt, "bash_trap_print_all");
+                    }
+                    return bm_emit_int_literal(mt, 0);
+                }
+            }
+            MIR_op_t handler_val = bm_transpile_cmd_arg(mt, first);
+            BashAstNode* sig_arg = first->next;
             if (!sig_arg) {
                 // trap with only handler (no signal) — treat as reset all or print; no-op
             } else {
@@ -2402,6 +2421,16 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
         }
         return bm_emit_int_literal(mt, 0);
+    }
+
+    // exec — replace shell process or apply redirections
+    if (cmd_len == 4 && memcmp(cmd_name, "exec", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_exec_builtin", cmd);
+    }
+
+    // wait — wait for background processes
+    if (cmd_len == 4 && memcmp(cmd_name, "wait", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_wait", cmd);
     }
 
     // set — shell options
@@ -2634,6 +2663,27 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
             }
         }
         return bm_emit_varargs_builtin(mt, "bash_builtin_getopts", cmd);
+    }
+
+    // mapfile / readarray — read lines into an array
+    if ((cmd_len == 7 && memcmp(cmd_name, "mapfile", 7) == 0) ||
+        (cmd_len == 9 && memcmp(cmd_name, "readarray", 9) == 0)) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_mapfile", cmd);
+    }
+
+    // hash — remember/forget command locations
+    if (cmd_len == 4 && memcmp(cmd_name, "hash", 4) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_hash", cmd);
+    }
+
+    // enable — enable/disable builtins
+    if (cmd_len == 6 && memcmp(cmd_name, "enable", 6) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_enable", cmd);
+    }
+
+    // umask — set/display file creation mask
+    if (cmd_len == 5 && memcmp(cmd_name, "umask", 5) == 0) {
+        return bm_emit_varargs_builtin(mt, "bash_builtin_umask", cmd);
     }
 
     // builtin keyword — just pass through to the actual builtin

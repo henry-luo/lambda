@@ -176,6 +176,11 @@ typedef enum BashTestOp {
     BASH_TEST_S,            // -s (non-zero size)
     BASH_TEST_L,            // -L (symlink)
 
+    // file comparison (binary)
+    BASH_TEST_NT,           // -nt (newer than)
+    BASH_TEST_OT,           // -ot (older than)
+    BASH_TEST_EF,           // -ef (same file)
+
     // logical
     BASH_TEST_AND,          // &&
     BASH_TEST_OR,           // ||
