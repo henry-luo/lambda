@@ -7629,7 +7629,10 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // INDEX_EXPR fast paths may return ITEM_NULL for out-of-bounds access.
     // Check at runtime to preserve NULL (suppressed in output) instead of
     // re-boxing it as a native 0 value (e.g. emit_box_int(ITEM_NULL) → boxed INT 0).
-    if (node->node_type == AST_NODE_INDEX_EXPR) {
+    // Only for integer-typed results — float fast paths return 0.0 in a double register
+    // which can't be compared with MIR_BNE against an int operand.
+    if (node->node_type == AST_NODE_INDEX_EXPR &&
+        tid != LMD_TYPE_FLOAT && tid != LMD_TYPE_ARRAY_FLOAT) {
         MIR_label_t l_not_null = MIR_new_label(mt->ctx);
         MIR_label_t l_done = MIR_new_label(mt->ctx);
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;

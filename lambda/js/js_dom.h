@@ -75,6 +75,36 @@ void* js_dom_unwrap_element(Item item);
  */
 bool js_is_dom_node(Item item);
 
+/**
+ * Check if an Item is a document proxy object.
+ * @param item  Item to test
+ * @return true if item is the document proxy
+ */
+bool js_is_document_proxy(Item item);
+
+/**
+ * Get the document proxy object for bare 'document' identifier resolution.
+ * Returns a singleton Map-based proxy that routes method calls and property
+ * access through js_document_method / js_document_get_property.
+ * @return Document proxy Item
+ */
+Item js_get_document_object_value(void);
+
+/**
+ * Dispatch method call on document proxy (routes to js_document_method).
+ */
+Item js_document_proxy_method(Item method_name, Item* args, int argc);
+
+/**
+ * Dispatch property access on document proxy (routes to js_document_get_property).
+ */
+Item js_document_proxy_get_property(Item prop_name);
+
+/**
+ * Dispatch property set on document proxy.
+ */
+Item js_document_proxy_set_property(Item prop_name, Item value);
+
 // =============================================================================
 // Document Method Dispatcher
 // =============================================================================

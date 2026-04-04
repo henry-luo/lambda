@@ -32,6 +32,7 @@
 #include <cctype>
 
 // Forward declarations
+extern "C" void heap_register_gc_root(uint64_t* slot);
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
@@ -48,6 +49,13 @@ static TypeMap js_dom_type_marker = {};
 // Sentinel used in Map::type to distinguish computed style wrappers.
 // Map::data stores the DomElement*, Map::data_cap stores pseudo-element type (0=none, 1=before, 2=after).
 static TypeMap js_computed_style_marker = {};
+
+// Sentinel used in Map::type to distinguish document proxy objects.
+// Map::data is unused (the document is accessed via _js_current_document).
+static TypeMap js_document_proxy_marker = {};
+
+// Cached singleton document proxy object
+static Item js_document_proxy_item = {.item = ITEM_NULL};
 
 // ============================================================================
 // Thread-local DOM document context
@@ -149,6 +157,57 @@ extern "C" bool js_is_dom_node(Item item) {
     if (tid != LMD_TYPE_MAP) return false;
     Map* m = item.map;
     return m->type == (void*)&js_dom_type_marker;
+}
+
+// ============================================================================
+// Document Proxy Object
+// ============================================================================
+
+extern "C" bool js_is_document_proxy(Item item) {
+    TypeId tid = get_type_id(item);
+    if (tid != LMD_TYPE_MAP) return false;
+    Map* m = item.map;
+    return m->type == (void*)&js_document_proxy_marker;
+}
+
+extern "C" Item js_get_document_object_value() {
+    if (js_document_proxy_item.item != ITEM_NULL) return js_document_proxy_item;
+    Map* wrapper = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    wrapper->type_id = LMD_TYPE_MAP;
+    wrapper->type = (void*)&js_document_proxy_marker;
+    wrapper->data = nullptr;
+    wrapper->data_cap = 0;
+    js_document_proxy_item = (Item){.map = wrapper};
+    heap_register_gc_root(&js_document_proxy_item.item);
+    return js_document_proxy_item;
+}
+
+// Dispatch method calls on the document proxy object.
+// Routes to js_document_method which handles getElementById, querySelector, etc.
+extern "C" Item js_document_proxy_method(Item method_name, Item* args, int argc) {
+    return js_document_method(method_name, args, argc);
+}
+
+// Dispatch property access on the document proxy object.
+// Routes to js_document_get_property which handles body, documentElement, etc.
+extern "C" Item js_document_proxy_get_property(Item prop_name) {
+    return js_document_get_property(prop_name);
+}
+
+// Dispatch property set on the document proxy object.
+extern "C" Item js_document_proxy_set_property(Item prop_name, Item value) {
+    // For now, title is the only writable document property
+    if (get_type_id(prop_name) == LMD_TYPE_STRING) {
+        String* s = it2s(prop_name);
+        if (s && s->len == 5 && strncmp(s->chars, "title", 5) == 0) {
+            // Store title on the proxy Map itself
+            if (js_document_proxy_item.item != ITEM_NULL) {
+                js_property_set(js_document_proxy_item, prop_name, value);
+            }
+            return value;
+        }
+    }
+    return ItemNull;
 }
 
 // ============================================================================
@@ -1597,9 +1656,51 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
+    // readyState — always "complete" since scripts run after parse
+    if (strcmp(prop, "readyState") == 0) {
+        return (Item){.item = s2it(heap_create_name("complete"))};
+    }
+
+    // compatMode
+    if (strcmp(prop, "compatMode") == 0) {
+        return (Item){.item = s2it(heap_create_name("CSS1Compat"))};
+    }
+
+    // characterSet / charset
+    if (strcmp(prop, "characterSet") == 0 || strcmp(prop, "charset") == 0) {
+        return (Item){.item = s2it(heap_create_name("UTF-8"))};
+    }
+
+    // contentType
+    if (strcmp(prop, "contentType") == 0) {
+        return (Item){.item = s2it(heap_create_name("text/html"))};
+    }
+
+    // nodeType — DOCUMENT_NODE = 9
+    if (strcmp(prop, "nodeType") == 0) {
+        return (Item){.item = i2it(9)};
+    }
+
+    // nodeName
+    if (strcmp(prop, "nodeName") == 0) {
+        return (Item){.item = s2it(heap_create_name("#document"))};
+    }
+
     // styleSheets — collection of parsed CSSStyleSheet objects
     if (strcmp(prop, "styleSheets") == 0) {
         return js_cssom_get_document_stylesheets();
+    }
+
+    // ownerDocument — the document itself has no owner (returns null)
+    if (strcmp(prop, "ownerDocument") == 0) {
+        return ItemNull;
+    }
+
+    // defaultView — returns window (the global object)
+    // Sizzle accesses document.defaultView for getComputedStyle
+    if (strcmp(prop, "defaultView") == 0) {
+        // Return the window object from module var if available
+        return ItemNull;
     }
 
     log_debug("js_document_get_property: unknown property '%s'", prop);
@@ -1795,6 +1896,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
             return js_dom_wrap_element(parent->as_element());
         }
         return ItemNull;
+    }
+
+    // ownerDocument — returns the document proxy for any element
+    if (strcmp(prop, "ownerDocument") == 0) {
+        return js_get_document_object_value();
     }
 
     // firstChild (any node type, not just elements)

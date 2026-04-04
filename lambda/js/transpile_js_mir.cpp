@@ -2776,7 +2776,13 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsFunctionNode* fn = (JsFunctionNode*)node;
         // Record how many functions exist before recursion — those are NOT our children
         int children_start = mt->func_count;
-        // recurse into body first (post-order)
+        // recurse into parameters first — default values may contain class/function expressions
+        // e.g. ([cls = class {}]) => {} or function f(x = function(){}) {}
+        {
+            JsAstNode* param = fn->params;
+            while (param) { jm_collect_functions(mt, param); param = param->next; }
+        }
+        // recurse into body (post-order)
         if (fn->body) jm_collect_functions(mt, fn->body);
         int children_end = mt->func_count;
         // add this function
@@ -4412,6 +4418,9 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     }
     if (id->name->len == 7 && strncmp(id->name->chars, "console", 7) == 0) {
         return jm_call_0(mt, "js_get_console_object_value", MIR_T_I64);
+    }
+    if (id->name->len == 8 && strncmp(id->name->chars, "document", 8) == 0) {
+        return jm_call_0(mt, "js_get_document_object_value", MIR_T_I64);
     }
 
     // Check for built-in constructors: Array, Object, Function, String, etc.
@@ -8380,6 +8389,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             }
             if (direct_has_spread) fc = NULL;  // nullify so we fall through to fallback
             if (fc && fc->has_rest_param) fc = NULL;  // rest-param functions need runtime arg collection
+            if (fc && fc->uses_arguments) fc = NULL;  // uses_arguments needs runtime pending args from js_invoke_fn
 
             if (fc && (fc->func_item || fc->native_func_item) && fc->capture_count == 0) {
                 // Phase 4: Check if we can call the native version
@@ -10834,7 +10844,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // v18g: Set class .length property (constructor parameter count)
             {
                 int ctor_len = 0;
-                if (ce->constructor && ce->constructor->fc)
+                if (ce && ce->constructor && ce->constructor->fc)
                     ctor_len = ce->constructor->param_count;
                 MIR_reg_t len_key = jm_box_string_literal(mt, "length", 6);
                 MIR_reg_t len_val = jm_new_reg(mt, "cls_len", MIR_T_I64);
@@ -10867,7 +10877,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             }
 
             // Emit static field initializers for class expressions
-            for (int fi = 0; fi < ce->static_field_count; fi++) {
+            for (int fi = 0; ce && fi < ce->static_field_count; fi++) {
                 JsStaticFieldEntry* sf = &ce->static_fields[fi];
                 if (sf->computed && sf->key_expr) {
                     MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
@@ -10892,7 +10902,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
             // Emit static blocks for class expressions
-            for (int si = 0; si < ce->static_block_count; si++) {
+            for (int si = 0; ce && si < ce->static_block_count; si++) {
                 if (ce->static_blocks[si]) {
                     jm_transpile_statement(mt, ce->static_blocks[si]);
                 }
@@ -12220,8 +12230,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t key;
                     if (inf->computed && inf->key_expr) {
                         key = jm_transpile_box_item(mt, inf->key_expr);
-                    } else {
+                    } else if (inf->name) {
                         key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                    } else if (inf->key_expr) {
+                        key = jm_transpile_box_item(mt, inf->key_expr);
+                    } else {
+                        continue;
                     }
                     MIR_reg_t val;
                     if (inf->initializer) {
@@ -12244,8 +12258,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t key;
                 if (inf->computed && inf->key_expr) {
                     key = jm_transpile_box_item(mt, inf->key_expr);
-                } else {
+                } else if (inf->name) {
                     key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                } else if (inf->key_expr) {
+                    key = jm_transpile_box_item(mt, inf->key_expr);
+                } else {
+                    continue;
                 }
                 MIR_reg_t val;
                 if (inf->initializer) {
@@ -15042,24 +15060,9 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // v18q: Create 'arguments' array-like object for non-arrow functions
-        if (fc->uses_arguments && param_count > 0) {
-            MIR_reg_t args_arr = jm_call_1(mt, "js_array_new", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)param_count));
-            JsAstNode* pn = fn->params;
-            for (int i = 0; i < param_count; i++) {
-                if (pn) {
-                    char pvname[128];
-                    jm_get_param_name(pn, i, pvname, sizeof(pvname));
-                    JsMirVarEntry* pvar = jm_find_var(mt, pvname);
-                    if (pvar) {
-                        jm_call_3(mt, "js_array_set_int", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)i),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, pvar->reg));
-                    }
-                    pn = pn->next;
-                }
-            }
+        if (fc->uses_arguments) {
+            // Build arguments object from the actual call-site args (stored by js_invoke_fn)
+            MIR_reg_t args_arr = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
             jm_set_var(mt, "_js_arguments", args_arr);
         }
 
@@ -16403,6 +16406,16 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         const char* cap_name = child->captures[ci].name;
                         if (strcmp(cap_name, "_js_this") == 0) continue; // handled specially
                         if (jm_name_set_has(parent_own, cap_name)) continue; // parent already has it
+
+                        // Skip self-reference captures: a named function expression's name
+                        // is only visible inside its own body (JS spec), not in the parent scope.
+                        // Don't propagate it upward — the function resolves it from its own closure env.
+                        if (child->node && child->node->name && child->node->name->chars) {
+                            char child_self_name[128];
+                            snprintf(child_self_name, sizeof(child_self_name), "_js_%.*s",
+                                (int)child->node->name->len, child->node->name->chars);
+                            if (strcmp(cap_name, child_self_name) == 0) continue;
+                        }
 
                         // Check module_consts — no need to propagate compile-time constants
                         if (mt->module_consts) {
