@@ -1,0 +1,17 @@
+default IFS: 3 words: hello world tab
+colon IFS: 3 words: one two three
+empty field: 3 words: 'a' '' 'b'
+trimmed: 2 words: hello world
+empty IFS: 1 words: 'hello world'
+mixed IFS: 3 words: one two three
+hello world
+hello world
+hello world
+tab:	here
+newline:
+here
+ABC
+ABC
+ABC
+back\slash
+single'quote

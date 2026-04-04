@@ -103,6 +103,7 @@ extern bool target_equal(Target* a, Target* b);
 #endif
 #ifdef LAMBDA_BASH
 #include "bash/bash_runtime.h"
+#include "bash/bash_expand.h"
 #endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
@@ -1767,6 +1768,12 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_brace", FPTR(bash_expand_brace)},
     {"bash_words_split_into", FPTR(bash_words_split_into)},
     {"bash_ifs_split_into", FPTR(bash_ifs_split_into)},
+    // word expansion (Module 1)
+    {"bash_word_split", FPTR(bash_word_split)},
+    {"bash_word_split_into", FPTR(bash_word_split_into)},
+    {"bash_quote_remove", FPTR(bash_quote_remove)},
+    {"bash_process_ansi_escapes", FPTR(bash_process_ansi_escapes)},
+    {"bash_expand_word", FPTR(bash_expand_word)},
     {"bash_set_positional_from_array", FPTR(bash_set_positional_from_array)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
