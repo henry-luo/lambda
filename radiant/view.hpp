@@ -398,6 +398,10 @@ struct FontProp {
     bool has_kerning;  // whether the font has kerning
     struct FontHandle* font_handle; // unified font handle (populated by setup_font)
     TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
+    CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
+    Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
+    float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
+    float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
 };
 
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
@@ -522,6 +526,7 @@ struct InlineProp {
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
+    CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 };
 
 typedef struct Spacing {
@@ -635,6 +640,7 @@ typedef struct {
     // Multiple gradient layers (for stacked gradients)
     RadialGradient** radial_layers;  // array of additional radial gradients
     int radial_layer_count;
+    CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
 
 /**
@@ -979,6 +985,7 @@ typedef struct BlockProp {
     float first_line_max_descender;
     float last_line_max_ascender;
     float last_line_max_descender;
+    CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
 } BlockProp;
 
 typedef struct FontBox {
