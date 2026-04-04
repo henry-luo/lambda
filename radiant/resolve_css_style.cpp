@@ -3712,8 +3712,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->in_line->vertical_align_offset = offset;
                 log_debug("[CSS] Vertical-align length: %.2f px", offset);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // Percentage values relative to element's computed line-height
-                float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : lycon->font.current_font_size;
+                // CSS 2.1 §10.8.1: Percentage values refer to the element's OWN computed
+                // line-height, not the parent's. Look up the element's specified line-height
+                // first; fall back to the block context's line-height (which is the
+                // element's inherited value if no explicit declaration exists).
+                float line_height = 0;
+                // Check if the element already has a resolved line-height on span->blk
+                if (span->blk && span->blk->line_height) {
+                    line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, span->blk->line_height);
+                }
+                // If not yet resolved, look up from the element's specified style
+                if (line_height <= 0) {
+                    DomElement* elem = (DomElement*)lycon->view;
+                    if (elem && elem->specified_style) {
+                        CssDeclaration* lh_decl = style_tree_get_declaration(
+                            elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                        if (lh_decl && lh_decl->value) {
+                            line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
+                        }
+                    }
+                }
+                // Fall back to the block context line-height (inherited value)
+                if (line_height <= 0) {
+                    line_height = lycon->block.line_height > 0 ? lycon->block.line_height : lycon->font.current_font_size;
+                }
                 float offset = value->data.percentage.value * line_height / 100.0f;
                 span->in_line->vertical_align = CSS_VALUE_BASELINE;
                 span->in_line->vertical_align_offset = offset;
