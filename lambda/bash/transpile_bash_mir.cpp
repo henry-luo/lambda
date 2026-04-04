@@ -642,8 +642,11 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
             // analyze redirects to determine what wrapping we need
             bool has_stdout_redir = false;
             bool has_stdin_redir = false;
+            bool has_stderr_redir = false;
+            bool has_stderr_to_stdout = false;
             BashRedirectNode* stdout_redir = NULL;
             BashRedirectNode* stdin_redir = NULL;
+            BashRedirectNode* stderr_redir = NULL;
 
             BashAstNode* redir = cmd->redirects;
             while (redir) {
@@ -658,12 +661,22 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                         stdin_redir = r;
                     } else if (r->fd == 2 &&
                                (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
-                        // stderr redirect (2>/dev/null etc.) — no-op for now
+                        has_stderr_redir = true;
+                        stderr_redir = r;
                     } else if (r->mode == BASH_REDIR_DUP) {
-                        // fd duplication (>&2, 2>&1) — no-op for now
+                        // 2>&1: merge stderr into stdout
+                        if (r->fd == 2) {
+                            has_stderr_to_stdout = true;
+                        }
                     }
                 }
                 redir = redir->next;
+            }
+
+            // push I/O state for scoped redirections
+            bool needs_io_scope = has_stderr_redir || has_stderr_to_stdout;
+            if (needs_io_scope) {
+                bm_emit_call_void_0(mt, "bash_io_push");
             }
 
             // before command: set up stdin from file
@@ -672,6 +685,16 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 MIR_reg_t content = bm_emit_call_1(mt, "bash_redirect_read", filename);
                 bm_emit_call_void_1(mt, "bash_set_stdin_item",
                     MIR_new_reg_op(mt->ctx, content));
+            }
+
+            // before command: set up stderr routing
+            if (has_stderr_to_stdout) {
+                bm_emit_call_void_0(mt, "bash_redir_stderr_to_stdout");
+            } else if (has_stderr_redir && stderr_redir->target) {
+                MIR_op_t filename = bm_transpile_node(mt, stderr_redir->target);
+                int append = (stderr_redir->mode == BASH_REDIR_APPEND) ? 1 : 0;
+                bm_emit_call_void_2(mt, "bash_redir_stderr_to_file",
+                    filename, MIR_new_int_op(mt->ctx, append));
             }
 
             // before command: start capture for stdout redirect
@@ -691,6 +714,15 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 bm_emit_call_2(mt, func, filename, MIR_new_reg_op(mt->ctx, captured));
             }
 
+            // after command: handle stderr file redirect flush
+            // Note: bash_io_pop will restore stderr routing; the captured stderr
+            // is flushed to the file automatically by bash_io_pop when stderr_route == TO_FILE
+
+            // restore I/O state
+            if (needs_io_scope) {
+                bm_emit_call_void_0(mt, "bash_io_pop");
+            }
+
             // after command: clean up stdin
             if (has_stdin_redir) {
                 bm_emit_call_void_0(mt, "bash_clear_stdin_item");
@@ -707,10 +739,13 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         bool has_stdin_redir = false;
         bool has_herestring_redir = false;
         bool has_heredoc_redir = false;
+        bool has_stderr_redir = false;
+        bool has_stderr_to_stdout = false;
         BashRedirectNode* stdout_redir = NULL;
         BashRedirectNode* stdin_redir = NULL;
         BashRedirectNode* herestring_redir = NULL;
         BashRedirectNode* heredoc_redir = NULL;
+        BashRedirectNode* stderr_redir = NULL;
 
         BashAstNode* redir = red->redirects;
         while (redir) {
@@ -729,10 +764,21 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
                 } else if (r->mode == BASH_REDIR_HEREDOC) {
                     has_heredoc_redir = true;
                     heredoc_redir = r;
+                } else if (r->fd == 2 &&
+                           (r->mode == BASH_REDIR_WRITE || r->mode == BASH_REDIR_APPEND)) {
+                    has_stderr_redir = true;
+                    stderr_redir = r;
+                } else if (r->mode == BASH_REDIR_DUP && r->fd == 2) {
+                    has_stderr_to_stdout = true;
                 }
-                // stderr redirect and fd dup (2>&1) are treated as no-ops for now
             }
             redir = redir->next;
+        }
+
+        // push I/O state for scoped redirections
+        bool needs_io_scope = has_stderr_redir || has_stderr_to_stdout;
+        if (needs_io_scope) {
+            bm_emit_call_void_0(mt, "bash_io_push");
         }
 
         if (has_stdin_redir && stdin_redir->target) {
@@ -752,6 +798,16 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
         if (has_heredoc_redir && heredoc_redir->target) {
             MIR_op_t body_val = bm_transpile_node(mt, heredoc_redir->target);
             bm_emit_call_void_1(mt, "bash_set_stdin_item", body_val);
+        }
+
+        // set up stderr routing
+        if (has_stderr_to_stdout) {
+            bm_emit_call_void_0(mt, "bash_redir_stderr_to_stdout");
+        } else if (has_stderr_redir && stderr_redir->target) {
+            MIR_op_t filename = bm_transpile_node(mt, stderr_redir->target);
+            int append = (stderr_redir->mode == BASH_REDIR_APPEND) ? 1 : 0;
+            bm_emit_call_void_2(mt, "bash_redir_stderr_to_file",
+                filename, MIR_new_int_op(mt->ctx, append));
         }
 
         if (has_stdout_redir) {
@@ -774,6 +830,11 @@ static void bm_transpile_statement(BashMirTranspiler* mt, BashAstNode* node) {
 
         if (has_stdin_redir || has_herestring_redir || has_heredoc_redir) {
             bm_emit_call_void_0(mt, "bash_clear_stdin_item");
+        }
+
+        // restore I/O state
+        if (needs_io_scope) {
+            bm_emit_call_void_0(mt, "bash_io_pop");
         }
         break;
     }
@@ -4050,10 +4111,37 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARITH_UNARY: {
         BashArithUnaryNode* unary = (BashArithUnaryNode*)node;
+
+        if (unary->op == BASH_OP_INC || unary->op == BASH_OP_DEC) {
+            // prefix ++x or --x: modify variable and return NEW value
+            // the operand should be a variable node
+            if (unary->operand && unary->operand->node_type == BASH_AST_NODE_ARITH_VARIABLE) {
+                BashArithVariableNode* var = (BashArithVariableNode*)unary->operand;
+                if (var->name) {
+                    MIR_op_t cur = bm_emit_get_var(mt, var->name->chars);
+                    MIR_op_t one = bm_emit_int_literal(mt, 1);
+                    const char* fn = (unary->op == BASH_OP_INC) ? "bash_add" : "bash_subtract";
+                    MIR_reg_t result = bm_emit_call_2(mt, fn, cur, one);
+                    bm_emit_set_var(mt, var->name->chars, MIR_new_reg_op(mt->ctx, result));
+                    return MIR_new_reg_op(mt->ctx, result); // prefix: return new value
+                }
+            }
+            // fallback: just evaluate the operand
+            return bm_transpile_arith(mt, unary->operand);
+        }
+
         MIR_op_t operand = bm_transpile_arith(mt, unary->operand);
 
         if (unary->op == BASH_OP_NEGATE || unary->op == BASH_OP_SUB) {
             MIR_reg_t result = bm_emit_call_1(mt, "bash_negate", operand);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (unary->op == BASH_OP_BIT_NOT) {
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_bit_not", operand);
+            return MIR_new_reg_op(mt->ctx, result);
+        }
+        if (unary->op == BASH_OP_LOGICAL_NOT) {
+            MIR_reg_t result = bm_emit_call_1(mt, "bash_logical_not", operand);
             return MIR_new_reg_op(mt->ctx, result);
         }
         return operand;
@@ -4096,6 +4184,38 @@ static MIR_op_t bm_transpile_arith(BashMirTranspiler* mt, BashAstNode* node) {
         MIR_reg_t result = bm_emit_call_2(mt, fn, cur, rhs);
         bm_emit_set_var(mt, assign->name->chars, MIR_new_reg_op(mt->ctx, result));
         return MIR_new_reg_op(mt->ctx, result);
+    }
+    case BASH_AST_NODE_ARITH_TERNARY: {
+        BashArithTernaryNode* tern = (BashArithTernaryNode*)node;
+        MIR_reg_t result_reg = bm_new_temp(mt);
+        MIR_label_t else_label = bm_new_label(mt);
+        MIR_label_t end_label = bm_new_label(mt);
+
+        // evaluate condition
+        MIR_op_t cond = bm_transpile_arith(mt, tern->condition);
+        MIR_reg_t cond_int = bm_emit_call_1(mt, "bash_to_int", cond);
+        MIR_op_t zero = MIR_new_uint_op(mt->ctx, i2it(0));
+
+        // if condition == 0, jump to else
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, else_label),
+                         MIR_new_reg_op(mt->ctx, cond_int), zero));
+
+        // then branch
+        MIR_op_t then_val = bm_transpile_arith(mt, tern->then_expr);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), then_val));
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, end_label)));
+
+        // else branch
+        MIR_append_insn(mt->ctx, mt->current_func_item, else_label);
+        MIR_op_t else_val = bm_transpile_arith(mt, tern->else_expr);
+        MIR_append_insn(mt->ctx, mt->current_func_item,
+            MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result_reg), else_val));
+
+        MIR_append_insn(mt->ctx, mt->current_func_item, end_label);
+        return MIR_new_reg_op(mt->ctx, result_reg);
     }
     default:
         return bm_transpile_node(mt, node);

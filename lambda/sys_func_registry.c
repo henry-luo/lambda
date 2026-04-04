@@ -105,6 +105,8 @@ extern bool target_equal(Target* a, Target* b);
 #include "bash/bash_runtime.h"
 #include "bash/bash_expand.h"
 #include "bash/bash_errors.h"
+#include "bash/bash_arith.h"
+#include "bash/bash_redir.h"
 #endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
@@ -1607,6 +1609,16 @@ JitImport jit_runtime_imports[] = {
     {"bash_arith_le", FPTR(bash_arith_le)},
     {"bash_arith_gt", FPTR(bash_arith_gt)},
     {"bash_arith_ge", FPTR(bash_arith_ge)},
+    {"bash_logical_not", FPTR(bash_logical_not)},
+    // runtime arithmetic evaluator
+    {"bash_arith_eval_string", FPTR(bash_arith_eval_string)},
+    // redirection engine
+    {"bash_io_push", FPTR(bash_io_push)},
+    {"bash_io_pop", FPTR(bash_io_pop)},
+    {"bash_redir_stderr_to_stdout", FPTR(bash_redir_stderr_to_stdout)},
+    {"bash_redir_stderr_to_null", FPTR(bash_redir_stderr_to_null)},
+    {"bash_redir_stderr_to_file", FPTR(bash_redir_stderr_to_file)},
+    {"bash_redir_stderr_restore", FPTR(bash_redir_stderr_restore)},
     // test operators
     {"bash_test_eq", FPTR(bash_test_eq)},
     {"bash_test_ne", FPTR(bash_test_ne)},
