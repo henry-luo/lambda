@@ -1581,10 +1581,45 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             // 3. If the result is truly unitless for line-height, the caller should handle it
             // This matches browser behavior where calc(1.5) returns a dimensionless value,
             // and calc(10px + 8px) returns a length value.
+        } else if (strcmp(func->name, "min") == 0 && func->args && func->arg_count >= 1) {
+            // min(a, b, ...) — return the smallest resolved value
+            uintptr_t raw_prop = (uintptr_t)(-(intptr_t)property);
+            result = INFINITY;
+            for (int i = 0; i < func->arg_count; i++) {
+                if (!func->args[i]) continue;
+                float val = resolve_length_value(lycon, raw_prop, func->args[i]);
+                if (!isnan(val) && val < result) result = val;
+            }
+            if (isinf(result)) result = NAN;
+            log_debug("CSS min() result: %.2f", result);
+        } else if (strcmp(func->name, "max") == 0 && func->args && func->arg_count >= 1) {
+            // max(a, b, ...) — return the largest resolved value
+            uintptr_t raw_prop = (uintptr_t)(-(intptr_t)property);
+            result = -INFINITY;
+            for (int i = 0; i < func->arg_count; i++) {
+                if (!func->args[i]) continue;
+                float val = resolve_length_value(lycon, raw_prop, func->args[i]);
+                if (!isnan(val) && val > result) result = val;
+            }
+            if (isinf(result)) result = NAN;
+            log_debug("CSS max() result: %.2f", result);
+        } else if (strcmp(func->name, "clamp") == 0 && func->args && func->arg_count >= 3) {
+            // clamp(min, val, max) = max(min, min(val, max))
+            uintptr_t raw_prop = (uintptr_t)(-(intptr_t)property);
+            float cmin = resolve_length_value(lycon, raw_prop, func->args[0]);
+            float cval = resolve_length_value(lycon, raw_prop, func->args[1]);
+            float cmax = resolve_length_value(lycon, raw_prop, func->args[2]);
+            if (!isnan(cmin) && !isnan(cval) && !isnan(cmax)) {
+                result = fmaxf(cmin, fminf(cval, cmax));
+            } else {
+                result = NAN;
+            }
+            log_debug("CSS clamp(%.2f, %.2f, %.2f) result: %.2f", cmin, cval, cmax, result);
         } else if (strcmp(func->name, "min") == 0 || strcmp(func->name, "max") == 0 ||
                    strcmp(func->name, "clamp") == 0) {
-            // min(), max(), clamp() functions
-            log_debug("CSS function %s() not yet implemented, treating as unset", func->name);
+            // insufficient arguments
+            log_debug("CSS function %s() with insufficient arguments (%d), treating as unset",
+                      func->name, func->arg_count);
             result = NAN;
         } else if (strcmp(func->name, "var") == 0) {
             // var(--custom-property-name) or var(--custom-property-name, fallback)
@@ -3688,6 +3723,64 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             break;
         }
 
+        case CSS_PROPERTY_TEXT_DECORATION_LINE: {
+            log_debug("[CSS] Processing text-decoration-line property");
+            if (!span->font) {
+                span->font = alloc_font_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum deco_value = value->data.keyword;
+                if (deco_value != CSS_VALUE__UNDEF) {
+                    span->font->text_deco = deco_value;
+                    log_debug("[CSS] text-decoration-line: %s", css_enum_info(deco_value)->name);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION_STYLE: {
+            log_debug("[CSS] Processing text-decoration-style property");
+            if (!span->font) {
+                span->font = alloc_font_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum style_value = value->data.keyword;
+                if (style_value != CSS_VALUE__UNDEF) {
+                    span->font->text_deco_style = style_value;
+                    log_debug("[CSS] text-decoration-style: %s", css_enum_info(style_value)->name);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION_COLOR: {
+            log_debug("[CSS] Processing text-decoration-color property");
+            if (!span->font) {
+                span->font = alloc_font_prop(lycon);
+            }
+            Color c = resolve_color_value(lycon, value);
+            if (c.a > 0) {
+                span->font->text_deco_color = c;
+                log_debug("[CSS] text-decoration-color: #%08x", c.c);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION_THICKNESS: {
+            log_debug("[CSS] Processing text-decoration-thickness property");
+            if (!span->font) {
+                span->font = alloc_font_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                float thickness = resolve_length_value(lycon, CSS_PROPERTY_TEXT_DECORATION_THICKNESS, value);
+                if (!isnan(thickness) && thickness > 0) {
+                    span->font->text_deco_thickness = thickness;
+                    log_debug("[CSS] text-decoration-thickness: %.2f px", thickness);
+                }
+            }
+            break;
+        }
+
         case CSS_PROPERTY_VERTICAL_ALIGN: {
             log_debug("[CSS] Processing vertical-align property");
             if (!span->in_line) {
@@ -3712,8 +3805,30 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->in_line->vertical_align_offset = offset;
                 log_debug("[CSS] Vertical-align length: %.2f px", offset);
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
-                // Percentage values relative to element's computed line-height
-                float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : lycon->font.current_font_size;
+                // CSS 2.1 §10.8.1: Percentage values refer to the element's OWN computed
+                // line-height, not the parent's. Look up the element's specified line-height
+                // first; fall back to the block context's line-height (which is the
+                // element's inherited value if no explicit declaration exists).
+                float line_height = 0;
+                // Check if the element already has a resolved line-height on span->blk
+                if (span->blk && span->blk->line_height) {
+                    line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, span->blk->line_height);
+                }
+                // If not yet resolved, look up from the element's specified style
+                if (line_height <= 0) {
+                    DomElement* elem = (DomElement*)lycon->view;
+                    if (elem && elem->specified_style) {
+                        CssDeclaration* lh_decl = style_tree_get_declaration(
+                            elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                        if (lh_decl && lh_decl->value) {
+                            line_height = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lh_decl->value);
+                        }
+                    }
+                }
+                // Fall back to the block context line-height (inherited value)
+                if (line_height <= 0) {
+                    line_height = lycon->block.line_height > 0 ? lycon->block.line_height : lycon->font.current_font_size;
+                }
                 float offset = value->data.percentage.value * line_height / 100.0f;
                 span->in_line->vertical_align = CSS_VALUE_BASELINE;
                 span->in_line->vertical_align_offset = offset;
@@ -4582,9 +4697,24 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             }
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-                // Values: normal, multiply, screen, overlay, darken, lighten, etc.
-                log_debug("[CSS] background-blend-mode: %s", css_enum_info(value->data.keyword)->name);
-                // TODO: Store blend mode when BackgroundProp is extended
+                CssEnum mode = value->data.keyword;
+                span->bound->background->blend_mode = mode;
+                log_debug("[CSS] background-blend-mode: %s", css_enum_info(mode)->name);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MIX_BLEND_MODE: {
+            log_debug("[CSS] Processing mix-blend-mode property");
+            if (!span->in_line) {
+                span->in_line = alloc_inline_prop(lycon);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum mode = value->data.keyword;
+                if (mode != CSS_VALUE__UNDEF) {
+                    span->in_line->mix_blend_mode = mode;
+                    log_debug("[CSS] mix-blend-mode: %s", css_enum_info(mode)->name);
+                }
             }
             break;
         }
@@ -7748,10 +7878,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
 
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum val = value->data.keyword;
-                if (val > 0) {
-                    // Note: Adding text_overflow field to BlockProp would be needed
-                    log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
-                             css_enum_info(value->data.keyword)->name, val);
+                if (val != CSS_VALUE__UNDEF) {
+                    block->blk->text_overflow = val;
+                    log_debug("[CSS] text-overflow: %s -> 0x%04X",
+                             css_enum_info(val)->name, val);
                 }
             }
             break;

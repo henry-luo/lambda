@@ -1,0 +1,13 @@
+undefined
+2
+1
+undefined
+2
+10
+true
+3
+function
+42
+1
+1
+99

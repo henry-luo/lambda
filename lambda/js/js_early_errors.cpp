@@ -609,6 +609,16 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
+        case JS_AST_NODE_TAGGED_TEMPLATE: {
+            JsTaggedTemplateNode* tt = (JsTaggedTemplateNode*)node;
+            walk_expression(ctx, tt->tag);
+            if (tt->quasi) {
+                for (JsAstNode* e = tt->quasi->expressions; e; e = e->next)
+                    walk_expression(ctx, e);
+            }
+            break;
+        }
+
         case JS_AST_NODE_SPREAD_ELEMENT:
             walk_expression(ctx, ((JsSpreadElementNode*)node)->argument);
             break;

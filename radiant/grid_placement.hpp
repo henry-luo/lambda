@@ -183,28 +183,26 @@ struct GridPlacement {
     LineSpan to_origin_zero(uint16_t explicit_track_count) const {
         // Convert CSS grid lines to origin-zero coordinates
         // CSS: 1 = first line of explicit grid
-        //     -1 = last line of explicit grid
+        //     -1 = last line of explicit grid (before resolution)
+        //      0 = before explicit grid start (after negative line resolution)
         // OriginZero: 0 = first line of explicit grid
 
-        int16_t oz_start, oz_end;
+        int16_t oz_start;
         uint16_t explicit_line_count = explicit_track_count + 1;
 
-        if (start > 0) {
-            oz_start = start - 1;
-        } else if (start < 0) {
+        if (has_negative_start && start < 0) {
+            // Unresolved negative CSS line: convert using explicit grid size
             oz_start = start + static_cast<int16_t>(explicit_line_count);
         } else {
-            oz_start = 0; // Auto - will be resolved later
+            // Resolved CSS line number: direct conversion
+            // CSS line N maps to OriginZero N-1 (works for positive, zero, and negative resolved values)
+            // CSS line 0 = OriginZero -1 (before explicit grid, creates negative implicit track)
+            oz_start = start - 1;
         }
 
-        if (end > 0) {
-            oz_end = end - 1;
-        } else if (end < 0) {
-            oz_end = end + static_cast<int16_t>(explicit_line_count);
-        } else {
-            // Auto - use start + span
-            oz_end = oz_start + span;
-        }
+        // Always compute end from start + span for robustness
+        // This correctly handles cases where CSS start == end (zero-span clamped to span=1)
+        int16_t oz_end = oz_start + span;
 
         return LineSpan(OriginZeroLine(oz_start), OriginZeroLine(oz_end));
     }

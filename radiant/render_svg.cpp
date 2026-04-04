@@ -274,6 +274,67 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (text_rect) { goto NEXT_RECT; }
 }
 
+// ── SVG rounded-rect path helper ─────────────────────────────────────────────
+
+// Kappa constant for circular arcs using cubic Bézier curves
+#define SVG_KAPPA 0.5522847498f
+
+/**
+ * Append SVG path data for a rounded rectangle with per-corner radii.
+ * Uses cubic Bézier curves (C commands) matching the raster backend's
+ * build_rounded_rect_path() logic.
+ */
+static void svg_append_rounded_rect_path(StrBuf* buf, float x, float y, float w, float h,
+                                          float r_tl, float r_tr, float r_br, float r_bl) {
+    // start after top-left corner arc
+    strbuf_append_format(buf, "M%.2f,%.2f", x + r_tl, y);
+    // top edge
+    strbuf_append_format(buf, " L%.2f,%.2f", x + w - r_tr, y);
+    // top-right corner
+    if (r_tr > 0) {
+        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
+            x + w - r_tr + r_tr * SVG_KAPPA, y,
+            x + w, y + r_tr - r_tr * SVG_KAPPA,
+            x + w, y + r_tr);
+    }
+    // right edge
+    strbuf_append_format(buf, " L%.2f,%.2f", x + w, y + h - r_br);
+    // bottom-right corner
+    if (r_br > 0) {
+        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
+            x + w, y + h - r_br + r_br * SVG_KAPPA,
+            x + w - r_br + r_br * SVG_KAPPA, y + h,
+            x + w - r_br, y + h);
+    }
+    // bottom edge
+    strbuf_append_format(buf, " L%.2f,%.2f", x + r_bl, y + h);
+    // bottom-left corner
+    if (r_bl > 0) {
+        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
+            x + r_bl - r_bl * SVG_KAPPA, y + h,
+            x, y + h - r_bl + r_bl * SVG_KAPPA,
+            x, y + h - r_bl);
+    }
+    // left edge
+    strbuf_append_format(buf, " L%.2f,%.2f", x, y + r_tl);
+    // top-left corner
+    if (r_tl > 0) {
+        strbuf_append_format(buf, " C%.2f,%.2f %.2f,%.2f %.2f,%.2f",
+            x, y + r_tl - r_tl * SVG_KAPPA,
+            x + r_tl - r_tl * SVG_KAPPA, y,
+            x + r_tl, y);
+    }
+    strbuf_append_str(buf, " Z");
+}
+
+/**
+ * Convenience: test whether a border has any non-zero corner radius.
+ */
+static bool svg_has_border_radius(BorderProp* border) {
+    return border && (border->radius.top_left > 0 || border->radius.top_right > 0 ||
+                      border->radius.bottom_right > 0 || border->radius.bottom_left > 0);
+}
+
 // ── SVG border style helpers ─────────────────────────────────────────────────
 
 /**
@@ -489,13 +550,20 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 float shadow_h = height + 2 * shadow->spread_radius;
 
                 svg_indent(ctx);
-                if (view->bound->border && view->bound->border->radius.top_left > 0) {
-                    float rx = view->bound->border->radius.top_left + shadow->spread_radius;
-                    if (rx < 0) rx = 0;
+                if (svg_has_border_radius(view->bound->border)) {
+                    BorderProp* border = view->bound->border;
+                    float spread = shadow->spread_radius;
+                    float r_tl = fmaxf(0, border->radius.top_left + spread);
+                    float r_tr = fmaxf(0, border->radius.top_right + spread);
+                    float r_br = fmaxf(0, border->radius.bottom_right + spread);
+                    float r_bl = fmaxf(0, border->radius.bottom_left + spread);
                     strbuf_append_format(ctx->svg_content,
-                        "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
-                        "fill=\"%s\" filter=\"url(#%s)\" />\n",
-                        shadow_x, shadow_y, shadow_w, shadow_h, rx, rx, shadow_color, filter_id);
+                        "<path d=\"");
+                    svg_append_rounded_rect_path(ctx->svg_content,
+                        shadow_x, shadow_y, shadow_w, shadow_h, r_tl, r_tr, r_br, r_bl);
+                    strbuf_append_format(ctx->svg_content,
+                        "\" fill=\"%s\" filter=\"url(#%s)\" />\n",
+                        shadow_color, filter_id);
                 } else {
                     strbuf_append_format(ctx->svg_content,
                         "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
@@ -516,16 +584,13 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         svg_indent(ctx);
 
         // Check for border radius
-        if (view->bound->border && (view->bound->border->radius.top_left > 0 ||
-            view->bound->border->radius.top_right > 0 ||
-            view->bound->border->radius.bottom_left > 0 ||
-            view->bound->border->radius.bottom_right > 0)) {
-
-            float rx = view->bound->border->radius.top_left;
-            float ry = view->bound->border->radius.top_left;
-            strbuf_append_format(ctx->svg_content,
-                "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" fill=\"%s\" />\n",
-                x, y, width, height, rx, ry, bg_color);
+        if (svg_has_border_radius(view->bound->border)) {
+            BorderProp* border = view->bound->border;
+            strbuf_append_format(ctx->svg_content, "<path d=\"");
+            svg_append_rounded_rect_path(ctx->svg_content, x, y, width, height,
+                border->radius.top_left, border->radius.top_right,
+                border->radius.bottom_right, border->radius.bottom_left);
+            strbuf_append_format(ctx->svg_content, "\" fill=\"%s\" />\n", bg_color);
         } else {
             strbuf_append_format(ctx->svg_content,
                 "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" fill=\"%s\" />\n",
@@ -784,13 +849,17 @@ void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
 
             svg_indent(ctx);
             // Use rounded rect if border has radius
-            if (view->bound->border && view->bound->border->radius.top_left > 0) {
-                float rx = view->bound->border->radius.top_left + expand;
-                if (rx < 0) rx = 0;
+            if (svg_has_border_radius(view->bound->border)) {
+                BorderProp* border = view->bound->border;
+                float r_tl = fmaxf(0, border->radius.top_left + expand);
+                float r_tr = fmaxf(0, border->radius.top_right + expand);
+                float r_br = fmaxf(0, border->radius.bottom_right + expand);
+                float r_bl = fmaxf(0, border->radius.bottom_left + expand);
+                strbuf_append_format(ctx->svg_content, "<path d=\"");
+                svg_append_rounded_rect_path(ctx->svg_content, ox, oy, ow, oh, r_tl, r_tr, r_br, r_bl);
                 strbuf_append_format(ctx->svg_content,
-                    "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" rx=\"%.2f\" ry=\"%.2f\" "
-                    "fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
-                    ox, oy, ow, oh, rx, rx, outline_color, outline->width, dash_attr);
+                    "\" fill=\"none\" stroke=\"%s\" stroke-width=\"%.1f\"%s />\n",
+                    outline_color, outline->width, dash_attr);
             } else {
                 strbuf_append_format(ctx->svg_content,
                     "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" "
