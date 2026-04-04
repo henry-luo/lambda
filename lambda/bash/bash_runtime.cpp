@@ -2916,7 +2916,10 @@ static void bash_ensure_var_table(void) {
 
 extern "C" void bash_set_var(Item name, Item value) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
 
     // FUNCNAME, GROUPS: noassign — silently ignore
@@ -2955,10 +2958,7 @@ extern "C" void bash_set_var(Item name, Item value) {
                 return;
             }
             int attrs = found->attributes;
-            Item final_value = value;
-            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-            if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-            if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+            Item final_value = bash_apply_attrs(value, attrs);
             BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                                .value = final_value, .is_export = found->is_export,
                                .attributes = attrs};
@@ -2983,10 +2983,7 @@ extern "C" void bash_set_var(Item name, Item value) {
     bool was_export = existing ? existing->is_export : false;
 
     // apply attribute transformations
-    Item final_value = value;
-    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-    if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-    if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+    Item final_value = bash_apply_attrs(value, attrs);
 
     BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                        .value = final_value, .is_export = was_export,
@@ -2996,7 +2993,10 @@ extern "C" void bash_set_var(Item name, Item value) {
 
 extern "C" Item bash_get_var(Item name) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
 
     // dynamic variables: computed on the fly
@@ -3095,7 +3095,10 @@ extern "C" Item bash_get_var(Item name) {
 
 extern "C" void bash_set_local_var(Item name, Item value) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
 
     if (bash_func_scope_depth > 0) {
@@ -3112,10 +3115,7 @@ extern "C" void bash_set_local_var(Item name, Item value) {
             bash_last_exit_code = 1;
             return;
         }
-        Item final_value = value;
-        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-        if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-        if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+        Item final_value = bash_apply_attrs(value, attrs);
         BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                            .value = final_value, .is_export = false,
                            .attributes = attrs};
@@ -3160,7 +3160,10 @@ extern "C" void bash_export_var(Item name) {
 
 extern "C" void bash_unset_var(Item name) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
     // check readonly in scope frames
@@ -3241,9 +3244,41 @@ extern "C" int bash_get_var_attrs(Item name) {
     String* s = it2s(name);
     if (!s) return BASH_ATTR_NONE;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    // search scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found->attributes;
+    }
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->attributes;
     return BASH_ATTR_NONE;
+}
+
+// declare -n name=target: set nameref attribute and store target name without resolving
+extern "C" void bash_declare_nameref(Item name, Item target) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = target, .is_export = false,
+                       .attributes = BASH_ATTR_NAMEREF};
+    hashmap_set(bash_var_table, &entry);
+}
+
+// local -n name=target: set nameref attribute in the current function scope
+extern "C" void bash_declare_local_nameref(Item name, Item target) {
+    if (bash_func_scope_depth <= 0) {
+        bash_declare_nameref(name, target);
+        return;
+    }
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    struct hashmap* frame = bash_func_scope_stack[bash_func_scope_depth - 1];
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = target, .is_export = false,
+                       .attributes = BASH_ATTR_NAMEREF};
+    hashmap_set(frame, &entry);
 }
 
 extern "C" bool bash_is_assoc(Item name) {
@@ -3326,6 +3361,161 @@ extern "C" void bash_declare_print_var(Item name) {
                      val_str ? val_str->len : 0, val_str ? val_str->chars : "");
     }
     bash_raw_write(buf, n);
+}
+
+// ============================================================================
+// Variable attribute operations (Phase A — Module 3)
+// ============================================================================
+
+// helper: look up a BashRtVar by name across scope stack + global table
+// does NOT resolve namerefs
+static const BashRtVar* bash_lookup_var_entry(const char* name, int name_len) {
+    BashRtVar key = {.name = name, .name_len = (size_t)name_len};
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found;
+    }
+    return (const BashRtVar*)hashmap_get(bash_var_table, &key);
+}
+
+// apply attribute transformations to a value: INTEGER → arith eval, LOWERCASE, UPPERCASE
+extern "C" Item bash_apply_attrs(Item value, int attrs) {
+    Item result = value;
+    if (attrs & BASH_ATTR_INTEGER)   result = bash_arith_eval_value(result);
+    if (attrs & BASH_ATTR_LOWERCASE) result = bash_string_lower(bash_to_string(result), true);
+    if (attrs & BASH_ATTR_UPPERCASE) result = bash_string_upper(bash_to_string(result), true);
+    return result;
+}
+
+// follow -n nameref chain to target variable name
+// returns the final resolved variable name (the name, not its value)
+// if not a nameref, returns the original name unchanged
+extern "C" Item bash_resolve_nameref(Item var_name) {
+    bash_ensure_var_table();
+    String* s = it2s(var_name);
+    if (!s) return var_name;
+
+    for (int depth = 0; depth < 10; depth++) {
+        const BashRtVar* found = bash_lookup_var_entry(s->chars, s->len);
+        if (!found || !(found->attributes & BASH_ATTR_NAMEREF))
+            return (Item){.item = s2it(s)};
+
+        // value of a nameref variable is the target variable name
+        Item target = found->value;
+        String* target_s = it2s(target);
+        if (!target_s || target_s->len == 0)
+            return var_name;  // empty nameref — return original
+
+        // check for self-reference
+        if (target_s->len == s->len && memcmp(target_s->chars, s->chars, s->len) == 0)
+            break;  // circular: a -> a
+
+        s = target_s;
+    }
+
+    // circular nameref chain detected
+    String* orig = it2s(var_name);
+    fprintf(stderr, "%s: warning: %.*s: circular name reference\n",
+            bash_error_script_name, orig ? orig->len : 0, orig ? orig->chars : "");
+    return var_name;
+}
+
+// check if a variable is readonly; returns 1 and prints an error if so
+extern "C" int bash_check_readonly(Item var_name) {
+    bash_ensure_var_table();
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return 0;
+
+    const BashRtVar* found = bash_lookup_var_entry(s->chars, s->len);
+    if (found && (found->attributes & BASH_ATTR_READONLY)) {
+        fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
+                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_last_exit_code = 1;
+        return 1;
+    }
+    return 0;
+}
+
+// add attribute flags to an existing variable
+extern "C" void bash_add_attrs(Item var_name, int add_flags) {
+    bash_ensure_var_table();
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return;
+
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // check scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            BashRtVar updated = *found;
+            updated.attributes |= add_flags;
+            if (add_flags & BASH_ATTR_EXPORT) updated.is_export = true;
+            hashmap_set(bash_func_scope_stack[i], &updated);
+            return;
+        }
+    }
+
+    // global table
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (existing) {
+        BashRtVar updated = *existing;
+        updated.attributes |= add_flags;
+        if (add_flags & BASH_ATTR_EXPORT) updated.is_export = true;
+        hashmap_set(bash_var_table, &updated);
+    } else {
+        BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                           .value = (Item){.item = s2it(NULL)},
+                           .is_export = (add_flags & BASH_ATTR_EXPORT) != 0,
+                           .attributes = add_flags};
+        hashmap_set(bash_var_table, &entry);
+    }
+}
+
+// remove attribute flags from a variable (declare +i, declare +r, etc.)
+extern "C" void bash_remove_attrs(Item var_name, int rm_flags) {
+    bash_ensure_var_table();
+    // note: cannot remove readonly from a readonly variable in bash
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return;
+
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // check scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            if ((found->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
+                fprintf(stderr, "%s: line %d: declare: %.*s: readonly variable\n",
+                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_last_exit_code = 1;
+                return;
+            }
+            BashRtVar updated = *found;
+            updated.attributes &= ~rm_flags;
+            if (rm_flags & BASH_ATTR_EXPORT) updated.is_export = false;
+            hashmap_set(bash_func_scope_stack[i], &updated);
+            return;
+        }
+    }
+
+    // global table
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (existing) {
+        if ((existing->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
+            fprintf(stderr, "%s: line %d: declare: %.*s: readonly variable\n",
+                    bash_error_script_name, bash_current_lineno, s->len, s->chars);
+            bash_last_exit_code = 1;
+            return;
+        }
+        BashRtVar updated = *existing;
+        updated.attributes &= ~rm_flags;
+        if (rm_flags & BASH_ATTR_EXPORT) updated.is_export = false;
+        hashmap_set(bash_var_table, &updated);
+    }
 }
 
 // ============================================================================

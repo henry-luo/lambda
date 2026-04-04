@@ -271,6 +271,49 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     return ctx.result;
 }
 
+// Count visitor context for assert_count
+typedef struct {
+    CssSelector* selector;
+    SelectorMatcher* matcher;
+    int count;
+} SimCountCtx;
+
+static bool sim_count_visitor(View* view, void* udata) {
+    SimCountCtx* ctx = (SimCountCtx*)udata;
+    if (!view->is_element()) return true;
+    DomElement* dom_elem = (DomElement*)view;
+    if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
+        ctx->count++;
+    }
+    return true;  // continue traversal (count all matches)
+}
+
+// Count elements matching a CSS selector in the document
+static int count_elements_by_selector(DomDocument* doc, const char* selector_text) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return 0;
+
+    Pool* pool = doc->pool;
+    if (!pool) return 0;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(selector_text, strlen(selector_text), pool, &token_count);
+    if (!tokens || token_count == 0) return 0;
+    int pos = 0;
+    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
+    if (!selector) return 0;
+
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    if (!matcher) return 0;
+
+    SimCountCtx ctx = {0};
+    ctx.selector = selector;
+    ctx.matcher = matcher;
+    ctx.count = 0;
+
+    sim_traverse_views((View*)doc->view_tree->root, sim_count_visitor, &ctx);
+    return ctx.count;
+}
+
 // Get absolute position center of an element
 static void get_element_center_abs(View* view, float* cx, float* cy) {
     if (!view) { *cx = 0; *cy = 0; return; }
@@ -1089,6 +1132,22 @@ static SimEvent* parse_sim_event(MapReader& reader) {
             return NULL;
         }
     }
+    else if (strcmp(type_str, "assert_count") == 0) {
+        ev->type = SIM_EVENT_ASSERT_COUNT;
+        parse_target(reader, ev);
+        ev->assert_count_expected = -1;
+        ev->assert_count_min = -1;
+        ev->assert_count_max = -1;
+        if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
+        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
+        if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
+        if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
+        if (!ev->target_selector) {
+            log_error("event_sim: assert_count requires 'target' CSS selector");
+            mem_free(ev);
+            return NULL;
+        }
+    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -1136,7 +1195,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
     }
 
     // Parse optional auto-waiting fields for assertion events
-    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_ATTRIBUTE) {
+    if (ev->type >= SIM_EVENT_ASSERT_CARET && ev->type <= SIM_EVENT_ASSERT_COUNT) {
         ev->assert_timeout = reader.get("timeout").asInt32();
         ev->assert_interval = reader.get("interval").asInt32();
         if (ev->assert_interval <= 0) ev->assert_interval = 100; // default 100ms
@@ -2393,6 +2452,41 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
+        case SIM_EVENT_ASSERT_COUNT: {
+            DomDocument* doc = uicon->document;
+            if (!doc) {
+                log_error("event_sim: assert_count - no document");
+                ctx->fail_count++;
+                break;
+            }
+            int actual = count_elements_by_selector(doc, ev->target_selector);
+            bool passed = true;
+            if (ev->assert_count_expected >= 0) {
+                if (actual != ev->assert_count_expected) {
+                    log_error("event_sim: assert_count FAIL - '%s' expected %d, got %d",
+                        ev->target_selector, ev->assert_count_expected, actual);
+                    passed = false;
+                }
+            }
+            if (ev->assert_count_min >= 0 && actual < ev->assert_count_min) {
+                log_error("event_sim: assert_count FAIL - '%s' expected min %d, got %d",
+                    ev->target_selector, ev->assert_count_min, actual);
+                passed = false;
+            }
+            if (ev->assert_count_max >= 0 && actual > ev->assert_count_max) {
+                log_error("event_sim: assert_count FAIL - '%s' expected max %d, got %d",
+                    ev->target_selector, ev->assert_count_max, actual);
+                passed = false;
+            }
+            if (passed) {
+                log_info("event_sim: assert_count PASS - '%s' count=%d", ev->target_selector, actual);
+                ctx->pass_count++;
+            } else {
+                ctx->fail_count++;
+            }
+            break;
+        }
+
         // ===== Navigation =====
 
         case SIM_EVENT_NAVIGATE: {
@@ -2525,7 +2619,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 // Auto-waiting wrapper: retries assertion events until they pass or timeout expires
 static void process_sim_event_with_retry(EventSimContext* ctx, SimEvent* ev, UiContext* uicon, GLFWwindow* window) {
     // Non-assertion events execute directly
-    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_ATTRIBUTE) {
+    if (ev->type < SIM_EVENT_ASSERT_CARET || ev->type > SIM_EVENT_ASSERT_COUNT) {
         process_sim_event(ctx, ev, uicon, window);
         return;
     }

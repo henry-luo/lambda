@@ -3007,12 +3007,26 @@ static void bm_transpile_assignment(BashMirTranspiler* mt, BashAssignmentNode* n
         return;
     }
 
-    // handle declare flags: declare -A creates assoc array, declare -i/-r/-l/-u sets attrs
+    // handle declare flags: declare -A creates assoc array, declare -i/-r/-l/-u/-n sets attrs
     if (node->declare_flags) {
-        // nameref (-n) is not fully supported; silently skip the assignment
-        if (node->declare_flags & BASH_ATTR_NAMEREF) return;
 
         MIR_op_t name_op = bm_emit_string_literal(mt, node->name->chars, node->name->len);
+
+        // nameref (-n): store target name directly, bypass normal assignment resolution
+        if (node->declare_flags & BASH_ATTR_NAMEREF) {
+            if (node->value) {
+                MIR_op_t val = bm_transpile_node(mt, node->value);
+                const char* fn = node->is_local ? "bash_declare_local_nameref" : "bash_declare_nameref";
+                bm_emit_call_void_2(mt, fn, name_op, val);
+            } else {
+                // declare -n ref (no value yet): just set NAMEREF flag
+                const char* declare_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
+                bm_emit_call_void_2(mt, declare_fn, name_op,
+                    MIR_new_int_op(mt->ctx, BASH_ATTR_NAMEREF));
+            }
+            return;
+        }
+
         // use local-scope declare for local variables
         const char* declare_fn = node->is_local ? "bash_declare_local_var" : "bash_declare_var";
 

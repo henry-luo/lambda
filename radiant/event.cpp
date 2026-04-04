@@ -2633,6 +2633,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* focused = focus_get(state);
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
 
+        // dispatch "input" event to Lambda handler if registered
+        if (focused) {
+            if (dispatch_lambda_handler(&evcon, focused, "input")) {
+                evcon.need_repaint = true;
+            }
+        }
+
         if (focused && state->caret) {
             // Delete any existing selection first
             if (selection_has(state)) {
