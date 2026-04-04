@@ -9,7 +9,11 @@ Split the current monolithic `build_lambda_config.json` into two distinct build 
 | **lambda** | `lambda.exe` | Lambda + JS/TS + Radiant (HTML/CSS/SVG/JS) |
 | **lambda-jube** | `lambda-jube.exe` | Polyglot runtime — everything in Lambda plus Python, Bash, Ruby, and future languages |
 
-"Jube" = **J**avaScript, r**U**by, **B**ash, python — a polyglot **jube** (gem/jewel) that wraps all supported language runtimes into one binary.
+**Why "Jube"?**
+
+1. **Joy & jubilee** — programming should be joyful; vibe coding in a polyglot runtime.
+2. **Candy/gummy of language runtimes** — a jube is a small, self-contained sweet. Each language runtime is a sandboxed "jube" bundled into one binary. In the same spirit as Java Bean, Ruby Gem, and Docker Pod.
+3. **Backronym** — **J**avaScript, r**U**by, **B**ash, Typ**E**script. The four extra language runtimes beyond core Lambda. (suggested by Opus)
 
 ---
 
@@ -302,11 +306,11 @@ lambda/serve/wsgi_bridge.py
 
 ## Estimated Size Impact
 
-| Build | Tree-sitter libs | Source files | Est. binary (release) |
-|-------|-----------------|-------------|----------------------|
-| Lambda (current) | 9 | ~350+ | ~8MB |
-| Lambda (focused) | 6 | ~310 | ~6.5MB |
-| Lambda Jube | 9 | ~350+ | ~8MB |
+| Build            | Tree-sitter libs | Source files | Est. binary (release) |
+| ---------------- | ---------------- | ------------ | --------------------- |
+| Lambda (current) | 9                | ~350+        | ~16MB                 |
+| Lambda (focused) | 6                | ~310         | ~11MB                 |
+| Lambda Jube      | 9                | ~350+        | ~16MB                 |
 
 ---
 
