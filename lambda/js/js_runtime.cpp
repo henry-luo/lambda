@@ -43,6 +43,11 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
 
+// Pending arguments for building 'arguments' object inside JIT-compiled functions.
+// Set by js_invoke_fn before each call, read by js_build_arguments_object().
+static Item* js_pending_call_args = NULL;
+static int js_pending_call_argc = 0;
+
 // Module-level variable table for top-level bindings accessible from any function.
 // Populated during js_main execution, read by class method closures.
 #define JS_MAX_MODULE_VARS 2048
@@ -324,6 +329,20 @@ extern "C" Item js_get_this() {
 
 extern "C" void js_set_this(Item this_val) {
     js_current_this = this_val;
+}
+
+// Build the 'arguments' array-like object from the pending call args.
+// Called at the top of JIT-compiled functions that reference 'arguments'.
+extern "C" Item js_build_arguments_object() {
+    int argc = js_pending_call_argc;
+    Item* args = js_pending_call_args;
+    Item arr = js_array_new(0);
+    for (int i = 0; i < argc; i++) {
+        js_array_push(arr, args ? args[i] : ItemNull);
+    }
+    // Set .length explicitly (js_array_new + push should handle this, but be safe)
+    // Also set callee to undefined (strict mode compatible)
+    return arr;
 }
 
 extern TypeMap EmptyMap;
@@ -1643,6 +1662,10 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
             return (Item){.item = ITEM_NULL};
         }
+        // Check if this is a document proxy object
+        if (js_is_document_proxy(object)) {
+            return js_document_proxy_get_property(key);
+        }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
             return js_dom_get_property(object, key);
@@ -1790,6 +1813,12 @@ extern "C" Item js_property_get(Item object, Item key) {
                     Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
                     return js_get_constructor(arr_name);
                 }
+                // Check built-in array methods (push, slice, concat, etc.)
+                Item builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, str_key->len);
+                if (builtin.item != ItemNull.item) return builtin;
+                // Check Object.prototype methods (toString, hasOwnProperty, etc.)
+                builtin = js_lookup_builtin_method(LMD_TYPE_MAP, str_key->chars, str_key->len);
+                if (builtin.item != ItemNull.item) return builtin;
                 return make_js_undefined();
             }
         }
@@ -2009,6 +2038,10 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     return value; // silently reject write to non-writable property
                 }
             }
+        }
+        // Check if this is a document proxy object
+        if (js_is_document_proxy(object)) {
+            return js_document_proxy_set_property(key, value);
         }
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
@@ -2749,6 +2782,11 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
 
 // Invoke a JsFunction with args, handling env if it's a closure
 static Item js_invoke_fn(JsFunction* fn, Item* args, int arg_count) {
+    // Store pending args so js_build_arguments_object() can access them.
+    // Called at function entry before any nested calls, so no save/restore needed.
+    js_pending_call_args = args;
+    js_pending_call_argc = arg_count;
+
     typedef Item (*P0)();
     typedef Item (*P1)(Item);
     typedef Item (*P2)(Item, Item);
@@ -3514,7 +3552,20 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
 // Function.prototype.apply(thisArg, argsArray)
 extern "C" Item js_apply_function(Item func_item, Item this_val, Item args_array) {
     if (get_type_id(func_item) != LMD_TYPE_FUNC) {
+        // Support objects with .apply method (e.g. Sizzle's push polyfill)
+        if (get_type_id(func_item) == LMD_TYPE_MAP) {
+            bool found = false;
+            Item apply_fn = js_map_get_fast(func_item.map, "apply", 5, &found);
+            if (found && get_type_id(apply_fn) == LMD_TYPE_FUNC) {
+                Item args[2] = { this_val, args_array };
+                return js_call_function(apply_fn, func_item, args, 2);
+            }
+        }
         log_error("js_apply_function: not a function (type=%d)", get_type_id(func_item));
+        Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item msg = (Item){.item = s2it(heap_create_name("apply called on non-function"))};
+        Item error = js_new_error_with_name(type_name, msg);
+        js_throw_value(error);
         return ItemNull;
     }
     // Extract args from array
@@ -4398,6 +4449,10 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // Document proxy methods (getElementById, querySelector, etc.)
+    if (js_is_document_proxy(obj)) {
+        return js_document_proxy_method(method_name, args, argc);
+    }
     // CSSOM wrapper methods
     if (js_is_stylesheet(obj)) {
         return js_cssom_stylesheet_method(obj, method_name, args, argc);

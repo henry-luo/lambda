@@ -134,6 +134,7 @@ Item js_regex_exec(Item regex, Item str);
 Item js_debug_check_callee(Item callee, int64_t site_id);
 Item js_get_this();
 void js_set_this(Item this_val);
+Item js_build_arguments_object(void);
 
 // Get the native function pointer from a JsFunction Item (handles JsFunction layout)
 void* js_function_get_ptr(Item fn_item);

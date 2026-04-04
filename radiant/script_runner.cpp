@@ -235,8 +235,13 @@ static void collect_scripts_recursive(Element* elem, StrBuf* script_buf, StrBuf*
             const char* resolved = resolve_script_url(src_attr, base_url, &is_http);
             char* content = load_script_content(resolved, is_http);
             if (content) {
+                // Wrap external scripts in try/catch to prevent library feature-detection
+                // exceptions (e.g. jQuery testing browser capabilities) from aborting
+                // the entire script execution. Feature detection errors are expected and
+                // non-fatal in real browsers.
+                strbuf_append_str(script_buf, "try {\n");
                 strbuf_append_str(script_buf, content);
-                strbuf_append_str(script_buf, "\n");
+                strbuf_append_str(script_buf, "\n} catch(_ext_err) {}\n");
                 free(content);
                 loaded_external_scripts++;
             } else {
@@ -303,18 +308,24 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
 
     // Wrap script code with window object support:
     // 1. Prepend: var window = {};  (provides window.onload, window.setTimeout etc.)
-    // 2. Append: auto-call window.onload() if set by scripts
-    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 512);
+    // 2. Append: extract library globals (jQuery/$) from window, then call window.onload
+    StrBuf* wrapped_buf = strbuf_new_cap(script_buf->length + 1024);
     // Preamble: provide browser globals
     strbuf_append_str(wrapped_buf,
         "var window = {};\n"
+        "var navigator = {userAgent: ''};\n"
+        "window.navigator = navigator;\n"
+        "window.document = document;\n"
         "function setTimeout(fn, delay) { if (typeof fn === 'function') fn(); }\n"
         "function setInterval(fn, delay) { if (typeof fn === 'function') fn(); }\n"
         "window.setTimeout = setTimeout;\n"
         "window.setInterval = setInterval;\n"
     );
     strbuf_append_str_n(wrapped_buf, script_buf->str, script_buf->length);
-    strbuf_append_str(wrapped_buf, "\nif (window.onload) { window.onload(); }\n");
+    // Postamble: call window.onload if set by scripts
+    strbuf_append_str(wrapped_buf,
+        "\nif (window.onload) { window.onload(); }\n"
+    );
     strbuf_free(script_buf);
     script_buf = wrapped_buf;
 
