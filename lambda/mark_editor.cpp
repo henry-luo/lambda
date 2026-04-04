@@ -111,10 +111,7 @@ void MarkEditor::set_mode(EditMode mode) {
 //==============================================================================
 
 int MarkEditor::commit(const char* description) {
-    if (mode_ != EDIT_MODE_IMMUTABLE) {
-        return 0;  // no-op for inline mode
-    }
-
+    // version tracking works in both inline and immutable modes
     Item current_root = input_->root;
     EditVersion* version = create_version(current_root, description);
     if (!version) {
