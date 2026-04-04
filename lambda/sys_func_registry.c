@@ -1684,6 +1684,13 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_upper_all", FPTR(bash_expand_upper_all)},
     {"bash_expand_lower_first", FPTR(bash_expand_lower_first)},
     {"bash_expand_lower_all", FPTR(bash_expand_lower_all)},
+    {"bash_expand_toggle_first", FPTR(bash_expand_toggle_first)},
+    {"bash_expand_toggle_all", FPTR(bash_expand_toggle_all)},
+    {"bash_expand_indirect", FPTR(bash_expand_indirect)},
+    {"bash_expand_prefix_names", FPTR(bash_expand_prefix_names)},
+    {"bash_procsub_in", FPTR(bash_procsub_in)},
+    {"bash_procsub_out", FPTR(bash_procsub_out)},
+    {"bash_procsub_wait_all", FPTR(bash_procsub_wait_all)},
     // array operations
     {"bash_int_to_item", FPTR(bash_int_to_item)},
     {"bash_array_new", FPTR(bash_array_new)},

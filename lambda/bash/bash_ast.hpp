@@ -89,6 +89,9 @@ typedef enum BashAstNodeType {
     BASH_AST_NODE_CONTINUE,             // continue [n]
     BASH_AST_NODE_EXIT,                 // exit [n]
 
+    // process substitution
+    BASH_AST_NODE_PROCESS_SUB,          // <(cmd) / >(cmd)
+
     // argument list (for function calls, builtins)
     BASH_AST_NODE_ARGUMENT_LIST,
 
@@ -208,6 +211,9 @@ typedef enum BashExpansionType {
     BASH_EXPAND_LOWER_ALL,          // ${var,,}
     BASH_EXPAND_SUBSTRING,          // ${var:off:len}
     BASH_EXPAND_INDIRECT,           // ${!var}
+    BASH_EXPAND_TOGGLE_FIRST,       // ${var~}
+    BASH_EXPAND_TOGGLE_ALL,         // ${var~~}
+    BASH_EXPAND_PREFIX_NAMES,       // ${!prefix@} / ${!prefix*}
 
     BASH_EXPAND_COUNT
 } BashExpansionType;
@@ -608,6 +614,13 @@ typedef struct BashControlNode {
     BashAstNode base;
     BashAstNode* value;             // optional return value / exit code / nesting level
 } BashControlNode;
+
+// Process substitution: <(cmd) or >(cmd)
+typedef struct BashProcessSubNode {
+    BashAstNode base;
+    BashAstNode* body;              // command(s) inside <(...) or >(...)
+    bool is_output;                 // false = <(cmd) (input), true = >(cmd) (output)
+} BashProcessSubNode;
 
 // Block of statements
 typedef struct BashBlockNode {
