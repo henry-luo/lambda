@@ -1828,6 +1828,33 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
     uint32_t child_count = ts_node_named_child_count(node);
     BashAstNode* items_tail = NULL;
 
+    // check if the case statement source contains extglob operators
+    // that tree-sitter may have misparsed
+    StrView case_src = bash_node_source(tp, node);
+    bool case_has_extglob = false;
+    for (size_t si = 0; si + 1 < case_src.length; si++) {
+        char c = case_src.str[si];
+        if ((c == '@' || c == '?' || c == '+' || c == '!') && case_src.str[si + 1] == '(') {
+            case_has_extglob = true;
+            break;
+        }
+    }
+
+    // find the byte offset of the end of "in" keyword in the case statement
+    // by scanning the anonymous children
+    uint32_t in_end_byte = 0;
+    {
+        uint32_t all_count = ts_node_child_count(node);
+        for (uint32_t k = 0; k < all_count; k++) {
+            TSNode anon = ts_node_child(node, k);
+            StrView sv = bash_node_source(tp, anon);
+            if (sv.length == 2 && memcmp(sv.str, "in", 2) == 0) {
+                in_end_byte = ts_node_end_byte(anon);
+                break;
+            }
+        }
+    }
+
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         const char* child_type = ts_node_type(child);
@@ -1851,6 +1878,209 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
             BashAstNode* patterns_tail = NULL;
             bool found_patterns = false;
 
+            // check for gap text that tree-sitter dropped before this case_item
+            // (e.g., "/dev/@" was consumed before the case_item started)
+            const char* gap_prefix = NULL;
+            int gap_prefix_len = 0;
+            if (case_has_extglob && in_end_byte > 0) {
+                uint32_t item_start = ts_node_start_byte(child);
+                // look at text between the anchor and the case_item start
+                const char* gap = tp->source + in_end_byte;
+                size_t gap_len = item_start - in_end_byte;
+                // skip leading whitespace
+                size_t gstart = 0;
+                while (gstart < gap_len && (gap[gstart] == ' ' || gap[gstart] == '\t' ||
+                       gap[gstart] == '\n' || gap[gstart] == '\r'))
+                    gstart++;
+                if (gstart < gap_len) {
+                    gap_prefix = gap + gstart;
+                    gap_prefix_len = (int)(gap_len - gstart);
+                }
+            }
+
+            // build patterns and body using raw source when extglob + gap detected
+            if (gap_prefix && gap_prefix_len > 0) {
+                // extract the full pattern by combining gap_prefix + case_item raw source
+                StrView item_src = bash_node_source(tp, child);
+                // the pattern area: gap_prefix + item_src up to the closing ) at depth 0
+                // allocate a combined buffer
+                size_t combined_len = gap_prefix_len + item_src.length;
+                char* combined = (char*)alloca(combined_len + 1);
+                memcpy(combined, gap_prefix, gap_prefix_len);
+                memcpy(combined + gap_prefix_len, item_src.str, item_src.length);
+                combined[combined_len] = '\0';
+
+                // find the pattern end (closing ) at depth 0), tracking extglob parens
+                int depth = 0;
+                size_t pat_start = 0;
+                size_t pat_end = combined_len;
+                for (size_t si = 0; si < combined_len; si++) {
+                    char c = combined[si];
+                    if (c == '\\' && si + 1 < combined_len) { si++; continue; }
+                    if ((c == '@' || c == '?' || c == '+' || c == '*' || c == '!') &&
+                        si + 1 < combined_len && combined[si + 1] == '(') {
+                        depth++;
+                        si++; // skip '('
+                        continue;
+                    }
+                    if (c == '(' && depth > 0) { depth++; continue; }
+                    if (c == ')' && depth > 0) { depth--; continue; }
+                    if (depth == 0 && c == ')') {
+                        pat_end = si;
+                        break;
+                    }
+                    if (depth == 0 && c == '|') {
+                        // pattern separator
+                        size_t plen = si - pat_start;
+                        if (plen > 0) {
+                            BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                            word->text = name_pool_create_len(tp->name_pool,
+                                combined + pat_start, (int)plen);
+                            if (!item->patterns) {
+                                item->patterns = (BashAstNode*)word;
+                            } else {
+                                patterns_tail->next = (BashAstNode*)word;
+                            }
+                            patterns_tail = (BashAstNode*)word;
+                        }
+                        pat_start = si + 1;
+                    }
+                }
+                // emit last pattern
+                if (pat_end > pat_start) {
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool,
+                        combined + pat_start, (int)(pat_end - pat_start));
+                    if (!item->patterns) {
+                        item->patterns = (BashAstNode*)word;
+                    } else {
+                        patterns_tail->next = (BashAstNode*)word;
+                    }
+                    patterns_tail = (BashAstNode*)word;
+                }
+                found_patterns = (item->patterns != NULL);
+
+                // build body from non-pattern children
+                for (uint32_t j = 0; j < item_children; j++) {
+                    TSNode item_child = ts_node_named_child(child, j);
+                    const char* item_child_type = ts_node_type(item_child);
+                    if (strcmp(item_child_type, "word") == 0 ||
+                        strcmp(item_child_type, "number") == 0 ||
+                        strcmp(item_child_type, "extglob_pattern") == 0 ||
+                        strcmp(item_child_type, "simple_expansion") == 0 ||
+                        strcmp(item_child_type, "expansion") == 0 ||
+                        strcmp(item_child_type, "string") == 0 ||
+                        strcmp(item_child_type, "concatenation") == 0 ||
+                        strcmp(item_child_type, "raw_string") == 0 ||
+                        strcmp(item_child_type, "ansi_c_string") == 0) {
+                        continue;
+                    }
+                    BashAstNode* stmt = build_statement(tp, item_child);
+                    if (stmt) {
+                        if (!item->body) {
+                            item->body = stmt;
+                        } else {
+                            BashAstNode* tail = item->body;
+                            while (tail->next) tail = tail->next;
+                            tail->next = stmt;
+                        }
+                    }
+                }
+            } else {
+            // check if the case_item itself contains extglob operators
+            StrView item_src = bash_node_source(tp, child);
+            bool has_extglob_in_item = false;
+            bool has_dollar_in_item = false;
+            for (size_t si = 0; si + 1 < item_src.length; si++) {
+                char c = item_src.str[si];
+                if ((c == '@' || c == '?' || c == '+' || c == '!') && item_src.str[si + 1] == '(') {
+                    has_extglob_in_item = true;
+                }
+                if (c == '$') has_dollar_in_item = true;
+            }
+
+            if (has_extglob_in_item && !has_dollar_in_item) {
+                // extract patterns from case_item raw source
+                const char* src = item_src.str;
+                size_t len = item_src.length;
+                int depth = 0;
+                size_t pat_start = 0;
+                size_t pat_end = len;
+
+                for (size_t si = 0; si < len; si++) {
+                    char c = src[si];
+                    if (c == '\\' && si + 1 < len) { si++; continue; }
+                    if ((c == '@' || c == '?' || c == '+' || c == '*' || c == '!') &&
+                        si + 1 < len && src[si + 1] == '(') {
+                        depth++;
+                        si++;
+                        continue;
+                    }
+                    if (c == '(' && depth > 0) { depth++; continue; }
+                    if (c == ')' && depth > 0) { depth--; continue; }
+                    if (depth == 0 && c == ')') {
+                        pat_end = si;
+                        break;
+                    }
+                    if (depth == 0 && c == '|') {
+                        size_t plen = si - pat_start;
+                        if (plen > 0) {
+                            BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                                tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                            word->text = name_pool_create_len(tp->name_pool,
+                                src + pat_start, (int)plen);
+                            if (!item->patterns) {
+                                item->patterns = (BashAstNode*)word;
+                            } else {
+                                patterns_tail->next = (BashAstNode*)word;
+                            }
+                            patterns_tail = (BashAstNode*)word;
+                        }
+                        pat_start = si + 1;
+                    }
+                }
+                if (pat_end > pat_start) {
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, child, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool,
+                        src + pat_start, (int)(pat_end - pat_start));
+                    if (!item->patterns) {
+                        item->patterns = (BashAstNode*)word;
+                    } else {
+                        patterns_tail->next = (BashAstNode*)word;
+                    }
+                    patterns_tail = (BashAstNode*)word;
+                }
+                found_patterns = (item->patterns != NULL);
+
+                for (uint32_t j = 0; j < item_children; j++) {
+                    TSNode item_child = ts_node_named_child(child, j);
+                    const char* item_child_type = ts_node_type(item_child);
+                    if (strcmp(item_child_type, "word") == 0 ||
+                        strcmp(item_child_type, "number") == 0 ||
+                        strcmp(item_child_type, "extglob_pattern") == 0 ||
+                        strcmp(item_child_type, "simple_expansion") == 0 ||
+                        strcmp(item_child_type, "expansion") == 0 ||
+                        strcmp(item_child_type, "string") == 0 ||
+                        strcmp(item_child_type, "concatenation") == 0 ||
+                        strcmp(item_child_type, "raw_string") == 0 ||
+                        strcmp(item_child_type, "ansi_c_string") == 0) {
+                        continue;
+                    }
+                    BashAstNode* stmt = build_statement(tp, item_child);
+                    if (stmt) {
+                        if (!item->body) {
+                            item->body = stmt;
+                        } else {
+                            BashAstNode* tail = item->body;
+                            while (tail->next) tail = tail->next;
+                            tail->next = stmt;
+                        }
+                    }
+                }
+            } else {
             for (uint32_t j = 0; j < item_children; j++) {
                 TSNode item_child = ts_node_named_child(child, j);
                 const char* item_child_type = ts_node_type(item_child);
@@ -1888,6 +2118,13 @@ static BashAstNode* build_case_statement(BashTranspiler* tp, TSNode node) {
                         }
                     }
                 }
+            }
+            } // end else no-extglob in item
+            } // end else no-gap
+
+            // update the anchor for gap detection on subsequent items
+            if (case_has_extglob) {
+                in_end_byte = ts_node_end_byte(child);
             }
 
             // detect terminator type (;;, ;&, ;;&) from anonymous children
@@ -2532,7 +2769,44 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
         }
         TSNode bin_right = ts_node_child_by_field_name(node, "right", 5);
         if (!ts_node_is_null(bin_right)) {
-            bin->right = build_test_expression(tp, bin_right);
+            // for == and != operators, the right side is a glob pattern:
+            // tree-sitter may fail to parse patterns like a@(b)c as a single
+            // extglob token. recover by extracting raw text from after the
+            // operator to end of the binary_expression.
+            if ((bin->op == BASH_TEST_STR_EQ || bin->op == BASH_TEST_STR_NE) &&
+                !ts_node_is_null(op_node)) {
+                uint32_t op_end = ts_node_end_byte(op_node);
+                uint32_t expr_end = ts_node_end_byte(node);
+                // skip whitespace after operator
+                while (op_end < expr_end && (tp->source[op_end] == ' ' || tp->source[op_end] == '\t'))
+                    op_end++;
+                const char* raw = tp->source + op_end;
+                size_t raw_len = expr_end - op_end;
+                // trim trailing whitespace
+                while (raw_len > 0 && (raw[raw_len - 1] == ' ' || raw[raw_len - 1] == '\t'))
+                    raw_len--;
+                bool has_extglob_op = false;
+                for (size_t i = 0; i + 1 < raw_len; i++) {
+                    char c = raw[i];
+                    if ((c == '@' || c == '?' || c == '+' || c == '*' || c == '!') &&
+                        raw[i + 1] == '(') {
+                        has_extglob_op = true;
+                        break;
+                    }
+                }
+                if (has_extglob_op && !memchr(raw, '$', raw_len)) {
+                    // pure literal + extglob pattern: use raw source as-is
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, bin_right, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool, raw, (int)raw_len);
+                    bin->right = (BashAstNode*)word;
+                    bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_GLOB : BASH_TEST_STR_NE;
+                } else {
+                    bin->right = build_test_expression(tp, bin_right);
+                }
+            } else {
+                bin->right = build_test_expression(tp, bin_right);
+            }
         }
         return (BashAstNode*)bin;
     } else if (strcmp(type, "unary_expression") == 0) {

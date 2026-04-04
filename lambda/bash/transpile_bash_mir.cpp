@@ -128,6 +128,62 @@ static int bm_user_func_cmp(const void *a, const void *b, void *udata) {
 }
 
 // ============================================================================
+// Special variable registry — eliminates repetitive memcmp chains
+// ============================================================================
+
+struct SpecialVarEntry {
+    const char* name;
+    int         name_len;
+    const char* access_fn;     // var[idx] → fn(idx)     — NULL if not a special array
+    const char* all_fn;        // ${var[@]} → fn()        — NULL if not supported
+    const char* count_fn;      // ${#var[@]} → fn()       — NULL if not supported
+    const char* scalar_fn;     // $var → fn() or fn(0)    — NULL if not intercepted
+    bool        scalar_takes_idx; // true if scalar_fn takes an int(0) argument
+};
+
+static const SpecialVarEntry special_vars[] = {
+    {"FUNCNAME",    8,  "bash_get_funcname",    "bash_get_funcname_all",    "bash_get_funcname_count",    "bash_get_funcname",   true },
+    {"BASH_SOURCE", 11, "bash_get_bash_source", NULL,                      "bash_get_bash_source_count", NULL,                  false},
+    {"BASH_LINENO", 11, "bash_get_bash_lineno", NULL,                      "bash_get_bash_lineno_count", NULL,                  false},
+    {"BASH_ARGV",   9,  "bash_get_bash_argv",   "bash_get_bash_argv_all",  "bash_get_bash_argv_count",   NULL,                  false},
+    {"BASH_ARGC",   9,  "bash_get_bash_argc",   NULL,                      "bash_get_bash_argc_count",   NULL,                  false},
+    {"LINENO",      6,  NULL,                   NULL,                      NULL,                         "bash_get_lineno",     false},
+    {NULL, 0, NULL, NULL, NULL, NULL, false}
+};
+
+static const SpecialVarEntry* bm_find_special_var(const char* name, int len) {
+    for (const SpecialVarEntry* e = special_vars; e->name; e++) {
+        if (e->name_len == len && memcmp(name, e->name, len) == 0) return e;
+    }
+    return NULL;
+}
+
+// ============================================================================
+// IFS dispatch skip table — commands with special transpiler-level handling
+// ============================================================================
+
+static bool bm_cmd_skips_ifs_dispatch(const char* name, int len) {
+    // single-char builtins: :, [, .
+    if (len == 1 && (name[0] == ':' || name[0] == '[' || name[0] == '.')) return true;
+    // table of command names that skip IFS array dispatch
+    static const struct { const char* cmd; int len; } skip_table[] = {
+        {"cd",       2}, {"bg",      2}, {"fg",      2},
+        {"set",      3}, {"pwd",     3},
+        {"eval",     4}, {"exit",    4},
+        {"local",    5}, {"shift",   5}, {"unset",   5},
+        {"export",   6}, {"return",  6}, {"source",  6},
+        {"declare",  7}, {"typeset", 7},
+        {"readonly", 8},
+        {NULL, 0}
+    };
+    for (int i = 0; skip_table[i].cmd; i++) {
+        if (skip_table[i].len == len && memcmp(name, skip_table[i].cmd, len) == 0)
+            return true;
+    }
+    return false;
+}
+
+// ============================================================================
 // Forward declarations
 // ============================================================================
 
@@ -1290,30 +1346,14 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_ACCESS: {
         BashArrayAccessNode* access = (BashArrayAccessNode*)node;
-        if (access->name && access->name->len == 8 && memcmp(access->name->chars, "FUNCNAME", 8) == 0) {
-            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_funcname", idx_val);
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (access->name && access->name->len == 11 && memcmp(access->name->chars, "BASH_SOURCE", 11) == 0) {
-            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_source", idx_val);
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (access->name && access->name->len == 11 && memcmp(access->name->chars, "BASH_LINENO", 11) == 0) {
-            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_lineno", idx_val);
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (access->name && access->name->len == 9 && memcmp(access->name->chars, "BASH_ARGV", 9) == 0) {
-            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_argv", idx_val);
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (access->name && access->name->len == 9 && memcmp(access->name->chars, "BASH_ARGC", 9) == 0) {
-            MIR_op_t idx_val = bm_transpile_node(mt, access->index);
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_bash_argc", idx_val);
-            return MIR_new_reg_op(mt->ctx, result);
+        // special variable registry lookup (FUNCNAME, BASH_SOURCE, etc.)
+        if (access->name) {
+            const SpecialVarEntry* sv = bm_find_special_var(access->name->chars, access->name->len);
+            if (sv && sv->access_fn) {
+                MIR_op_t idx_val = bm_transpile_node(mt, access->index);
+                MIR_reg_t result = bm_emit_call_1(mt, sv->access_fn, idx_val);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, access->name->chars);
         // array subscripts are arithmetic contexts in bash
@@ -1333,15 +1373,12 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_ALL: {
         BashArrayAllNode* all_node = (BashArrayAllNode*)node;
-        if (all_node->name && all_node->name->len == 8 && memcmp(all_node->name->chars, "FUNCNAME", 8) == 0) {
-            // ${FUNCNAME[@]} — build from funcname stack
-            // For now, return all funcnames as a list
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_funcname_all");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (all_node->name && all_node->name->len == 9 && memcmp(all_node->name->chars, "BASH_ARGV", 9) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_argv_all");
-            return MIR_new_reg_op(mt->ctx, result);
+        if (all_node->name) {
+            const SpecialVarEntry* sv = bm_find_special_var(all_node->name->chars, all_node->name->len);
+            if (sv && sv->all_fn) {
+                MIR_reg_t result = bm_emit_call_0(mt, sv->all_fn);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, all_node->name->chars);
         const char* fn = bm_is_assoc_var(mt, all_node->name->chars)
@@ -1357,25 +1394,12 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
     }
     case BASH_AST_NODE_ARRAY_LENGTH: {
         BashArrayLengthNode* len_node = (BashArrayLengthNode*)node;
-        if (len_node->name && len_node->name->len == 8 && memcmp(len_node->name->chars, "FUNCNAME", 8) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_funcname_count");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (len_node->name && len_node->name->len == 11 && memcmp(len_node->name->chars, "BASH_SOURCE", 11) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_source_count");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (len_node->name && len_node->name->len == 11 && memcmp(len_node->name->chars, "BASH_LINENO", 11) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_lineno_count");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (len_node->name && len_node->name->len == 9 && memcmp(len_node->name->chars, "BASH_ARGV", 9) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_argv_count");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        if (len_node->name && len_node->name->len == 9 && memcmp(len_node->name->chars, "BASH_ARGC", 9) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_bash_argc_count");
-            return MIR_new_reg_op(mt->ctx, result);
+        if (len_node->name) {
+            const SpecialVarEntry* sv = bm_find_special_var(len_node->name->chars, len_node->name->len);
+            if (sv && sv->count_fn) {
+                MIR_reg_t result = bm_emit_call_0(mt, sv->count_fn);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
         }
         MIR_op_t arr_val = bm_emit_get_var(mt, len_node->name->chars);
         const char* fn = bm_is_assoc_var(mt, len_node->name->chars)
@@ -1573,15 +1597,16 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
 
 static MIR_op_t bm_transpile_varref(BashMirTranspiler* mt, BashVarRefNode* node) {
     if (node->name) {
-        if (node->name->len == 6 && memcmp(node->name->chars, "LINENO", 6) == 0) {
-            MIR_reg_t result = bm_emit_call_0(mt, "bash_get_lineno");
-            return MIR_new_reg_op(mt->ctx, result);
-        }
-        // $FUNCNAME without index → FUNCNAME[0]
-        if (node->name->len == 8 && memcmp(node->name->chars, "FUNCNAME", 8) == 0) {
-            MIR_op_t idx = MIR_new_uint_op(mt->ctx, i2it(0));
-            MIR_reg_t result = bm_emit_call_1(mt, "bash_get_funcname", idx);
-            return MIR_new_reg_op(mt->ctx, result);
+        const SpecialVarEntry* sv = bm_find_special_var(node->name->chars, node->name->len);
+        if (sv && sv->scalar_fn) {
+            if (sv->scalar_takes_idx) {
+                MIR_op_t idx = MIR_new_uint_op(mt->ctx, i2it(0));
+                MIR_reg_t result = bm_emit_call_1(mt, sv->scalar_fn, idx);
+                return MIR_new_reg_op(mt->ctx, result);
+            } else {
+                MIR_reg_t result = bm_emit_call_0(mt, sv->scalar_fn);
+                return MIR_new_reg_op(mt->ctx, result);
+            }
         }
         return bm_emit_get_var(mt, node->name->chars);
     }
@@ -1932,20 +1957,7 @@ static MIR_op_t bm_transpile_command(BashMirTranspiler* mt, BashCommandNode* cmd
     // Commands NOT handled here: :, eval, [, source, export, local, declare,
     // return, exit, shift, cd, pwd — these have special transpiler-level handling.
     if (cmd->arg_count > 0 && cmd_has_unquoted_expansion(cmd)) {
-        // skip IFS dispatch for commands with special transpiler handling
-        bool skip_ifs_dispatch = false;
-        if (cmd_len == 1 && (cmd_name[0] == ':' || cmd_name[0] == '[' || cmd_name[0] == '.')) skip_ifs_dispatch = true;
-        else if (cmd_len == 4 && memcmp(cmd_name, "eval", 4) == 0) skip_ifs_dispatch = true;
-        else if (cmd_len == 3 && memcmp(cmd_name, "set", 3) == 0) skip_ifs_dispatch = true;
-        else if (cmd_len == 5 && (memcmp(cmd_name, "local", 5) == 0 || memcmp(cmd_name, "shift", 5) == 0)) skip_ifs_dispatch = true;
-        else if (cmd_len == 5 && memcmp(cmd_name, "unset", 5) == 0) skip_ifs_dispatch = true;
-        else if (cmd_len == 6 && (memcmp(cmd_name, "export", 6) == 0 || memcmp(cmd_name, "return", 6) == 0 || memcmp(cmd_name, "source", 6) == 0)) skip_ifs_dispatch = true;
-        else if (cmd_len == 4 && memcmp(cmd_name, "exit", 4) == 0) skip_ifs_dispatch = true;
-        else if (cmd_len == 7 && (memcmp(cmd_name, "declare", 7) == 0 || memcmp(cmd_name, "typeset", 7) == 0)) skip_ifs_dispatch = true;
-        else if (cmd_len == 2 && (memcmp(cmd_name, "cd", 2) == 0 || memcmp(cmd_name, "bg", 2) == 0 || memcmp(cmd_name, "fg", 2) == 0)) skip_ifs_dispatch = true;
-        else if (cmd_len == 3 && memcmp(cmd_name, "pwd", 3) == 0) skip_ifs_dispatch = true;
-        else if (cmd_len == 8 && memcmp(cmd_name, "readonly", 8) == 0) skip_ifs_dispatch = true;
-        if (!skip_ifs_dispatch) {
+        if (!bm_cmd_skips_ifs_dispatch(cmd_name, cmd_len)) {
             return bm_emit_ifs_split_cmd(mt, cmd_name, cmd_len, cmd);
         }
     }
@@ -3369,16 +3381,16 @@ static void bm_transpile_for(BashMirTranspiler* mt, BashForNode* node) {
             MIR_op_t map_val = bm_emit_get_var(mt, array_name->chars);
             MIR_reg_t vals_reg = bm_emit_call_1(mt, "bash_assoc_values", map_val);
             arr_val = MIR_new_reg_op(mt->ctx, vals_reg);
-        } else if (array_name->len == 9 && memcmp(array_name->chars, "BASH_ARGV", 9) == 0) {
-            MIR_reg_t r = bm_emit_call_0(mt, "bash_get_bash_argv_all");
-            arr_val = MIR_new_reg_op(mt->ctx, r);
-            is_special_array = true;
-        } else if (array_name->len == 8 && memcmp(array_name->chars, "FUNCNAME", 8) == 0) {
-            MIR_reg_t r = bm_emit_call_0(mt, "bash_get_funcname_all");
-            arr_val = MIR_new_reg_op(mt->ctx, r);
-            is_special_array = true;
         } else {
-            arr_val = bm_emit_get_var(mt, array_name->chars);
+            // check special variable registry for array-like pseudo-vars
+            const SpecialVarEntry* sv = bm_find_special_var(array_name->chars, array_name->len);
+            if (sv && sv->all_fn) {
+                MIR_reg_t r = bm_emit_call_0(mt, sv->all_fn);
+                arr_val = MIR_new_reg_op(mt->ctx, r);
+                is_special_array = true;
+            } else {
+                arr_val = bm_emit_get_var(mt, array_name->chars);
+            }
         }
 
         // for assoc/keys/special, store materialized array in temp var
@@ -3830,17 +3842,14 @@ static void bm_transpile_case(BashMirTranspiler* mt, BashCaseNode* node) {
 
             MIR_op_t pat_val = bm_transpile_node(mt, pattern);
             // choose match function based on pattern type:
-            // - quoted patterns ("..." or '...'): literal comparison
-            // - word patterns (already backslash-processed): glob match with FNM_NOESCAPE
-            // - variable/expansion patterns: glob match with backslash escapes
+            // - quoted patterns ("..." or '...'): literal string comparison
+            // - word/expansion patterns: glob match via bash_pattern_match() (extglob enabled)
             const char* match_fn;
             if (pattern->node_type == BASH_AST_NODE_STRING
                 || pattern->node_type == BASH_AST_NODE_RAW_STRING) {
                 match_fn = "bash_str_eq";
-            } else if (pattern->node_type == BASH_AST_NODE_WORD) {
-                match_fn = "bash_test_str_eq_noescape";
             } else {
-                match_fn = "bash_test_str_eq";
+                match_fn = "bash_test_glob";
             }
             MIR_reg_t cmp_result = bm_emit_call_2(mt, match_fn, value, pat_val);
 
