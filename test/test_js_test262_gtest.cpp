@@ -588,8 +588,15 @@ struct BatchResult {
     int exit_code;
 };
 
-static const size_t T262_BATCH_CHUNK_SIZE = 5;
-static const size_t T262_MAX_PARALLEL_BATCHES = 6;
+static const size_t T262_BATCH_CHUNK_SIZE = 50;
+static const size_t T262_MAX_PARALLEL_BATCHES = 8;
+
+struct SubBatch { size_t start; size_t end; };
+
+// Forward declarations for globals used in prepare phase
+static std::set<std::string> g_baseline_passing;
+static bool g_update_baseline = false;
+static bool g_baseline_only = false;
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
 //          Source assembly is deferred to Phase 2 workers (lazy assembly).
@@ -673,6 +680,13 @@ static void prepare_all_tests(
     // collect batch indices (only non-skipped tests)
     for (size_t i = 0; i < prepared.size(); i++) {
         if (prepared[i].skip_result == T262_SKIP) continue;
+        // In baseline-only mode, only run tests that passed in the baseline
+        if (g_baseline_only && !g_baseline_passing.empty() &&
+            g_baseline_passing.find(prepared[i].test_name) == g_baseline_passing.end()) {
+            prepared[i].skip_result = T262_SKIP;
+            prepared[i].skip_message = "not in baseline (--baseline-only)";
+            continue;
+        }
         batch_indices.push_back(i);
     }
 
@@ -771,7 +785,6 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     if (indices.empty()) return results;
 
     // split into chunks
-    struct SubBatch { size_t start; size_t end; };
     std::vector<SubBatch> batches;
     for (size_t s = 0; s < indices.size(); s += T262_BATCH_CHUNK_SIZE) {
         size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, indices.size());
@@ -884,12 +897,6 @@ static std::unordered_map<std::string, Test262RunResult> g_cached_results;
 static std::mutex g_results_mutex;
 static bool g_parallel_done = false;
 
-// =============================================================================
-// Baseline regression tracking
-// =============================================================================
-static std::set<std::string> g_baseline_passing;  // tests that passed in baseline
-static bool g_update_baseline = false;             // --update-baseline flag
-
 static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     auto start_time = std::chrono::steady_clock::now();
 
@@ -911,6 +918,76 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
             exec_secs, batch_results.size());
 
+    // Phase 2b: retry batch-lost tests in small batches (crash recovery)
+    // When a test crashes, it kills the whole batch process and all remaining
+    // tests in that batch are lost. Re-run those in small batches of 5.
+    std::vector<size_t> lost_indices;
+    for (size_t idx : batch_indices) {
+        const auto& p = prepared[idx];
+        if (batch_results.find(p.test_name) == batch_results.end()) {
+            lost_indices.push_back(idx);
+        }
+    }
+    if (!lost_indices.empty()) {
+        fprintf(stderr, "[test262] Phase 2b (retry): %zu batch-lost tests, re-running in small batches...\n",
+                lost_indices.size());
+
+        static const size_t RETRY_BATCH_SIZE = 5;
+        auto retry_results = [&]() {
+            std::unordered_map<std::string, BatchResult> results;
+            std::vector<SubBatch> retry_batches;
+            for (size_t s = 0; s < lost_indices.size(); s += RETRY_BATCH_SIZE) {
+                size_t e = std::min(s + RETRY_BATCH_SIZE, lost_indices.size());
+                retry_batches.push_back({s, e});
+            }
+            std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
+            std::atomic<size_t> next_batch{0};
+            size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, retry_batches.size());
+            std::vector<std::thread> threads;
+            for (size_t w = 0; w < num_workers; w++) {
+                threads.emplace_back([&, w]() {
+                    char manifest_path[256];
+                    snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_retry_%zu.manifest", w);
+                    while (true) {
+                        size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
+                        if (i >= retry_batches.size()) break;
+                        FILE* mf = fopen(manifest_path, "wb");
+                        if (!mf) continue;
+                        for (size_t idx = retry_batches[i].start; idx < retry_batches[i].end; idx++) {
+                            size_t pi = lost_indices[idx];
+                            const auto& p = prepared[pi];
+                            std::string combined = assemble_combined_source(p);
+                            fprintf(mf, "source:%s:%zu\n", p.test_name.c_str(), combined.size());
+                            fwrite(combined.data(), 1, combined.size(), mf);
+                            fputc('\n', mf);
+                        }
+                        fclose(mf);
+                        run_t262_sub_batch(manifest_path, thread_results[i]);
+                    }
+                    unlink(manifest_path);
+                });
+            }
+            for (auto& t : threads) t.join();
+            for (auto& partial : thread_results) {
+                for (auto& kv : partial) results[kv.first] = std::move(kv.second);
+            }
+            return results;
+        }();
+
+        // merge retry results into main results
+        size_t recovered = 0;
+        for (auto& kv : retry_results) {
+            if (batch_results.find(kv.first) == batch_results.end()) recovered++;
+            batch_results[kv.first] = std::move(kv.second);
+        }
+
+        auto retry_time = std::chrono::steady_clock::now();
+        double retry_secs = std::chrono::duration<double>(retry_time - exec_time).count();
+        fprintf(stderr, "[test262] Phase 2b (retry): %.1fs — recovered %zu of %zu lost tests\n",
+                retry_secs, recovered, lost_indices.size());
+        exec_time = retry_time;  // update for total calculation
+    }
+
     // Phase 3: evaluate results and cache
     for (size_t i = 0; i < prepared.size(); i++) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
@@ -922,7 +999,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     auto total_time = std::chrono::steady_clock::now();
     double total_secs = std::chrono::duration<double>(total_time - start_time).count();
     fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + exec %.1fs + eval <0.1s)\n",
-            tests.size(), total_secs, prep_secs, exec_secs);
+            tests.size(), total_secs, prep_secs,
+            std::chrono::duration<double>(exec_time - prep_time).count());
     g_parallel_done = true;
 }
 
@@ -1117,6 +1195,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--update-baseline") == 0) {
             g_update_baseline = true;
+        }
+        if (strcmp(argv[i], "--baseline-only") == 0) {
+            g_baseline_only = true;
         }
     }
 
