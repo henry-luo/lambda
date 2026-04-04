@@ -370,6 +370,14 @@ class PremakeGenerator:
         if 'build_dir' in variant_config:
             self.config['build_dir'] = variant_config['build_dir']
 
+        # Append additional libraries from variant (e.g., jube adds tree-sitter-python/ruby/bash)
+        if 'additional_libraries' in variant_config:
+            existing_libs = self.config.get('libraries', [])
+            for lib in variant_config['additional_libraries']:
+                existing_libs.append(lib)
+            self.config['libraries'] = existing_libs
+            print(f"DEBUG: Variant added {len(variant_config['additional_libraries'])} additional libraries")
+
     def _get_consolidated_includes(self) -> List[str]:
         """Get consolidated include directories from global and platform-specific configurations"""
         includes = []

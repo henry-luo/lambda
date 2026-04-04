@@ -7466,6 +7466,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         declare_module_import(tp, ast_node);
                     }
                 } else {
+#ifdef LAMBDA_PYTHON
                     // .js failed — try .py fallback for cross-language import
                     buf->str[buf->length - 2] = 'p';
                     buf->str[buf->length - 1] = 'y';
@@ -7478,6 +7479,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                             declare_module_import(tp, ast_node);
                         }
                     } else {
+#endif
                     // restore .ls extension for error message
                     buf->str[buf->length - 2] = 'l';
                     buf->str[buf->length - 1] = 's';
@@ -7490,7 +7492,9 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         (int)ast_node->module.length, ast_node->module.str, buf->str,
                         tp->reference ? tp->reference : "<unknown>");
                 #ifndef SIMPLE_SCHEMA_PARSER
+#ifdef LAMBDA_PYTHON
                     }
+#endif
                 }
                 #endif
             }
@@ -7559,6 +7563,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         declare_module_import(tp, ast_node);
                     }
                 } else {
+#ifdef LAMBDA_PYTHON
                     // .js failed — try .py fallback for cross-language import
                     buf->str[buf->length - 2] = 'p';
                     buf->str[buf->length - 1] = 'y';
@@ -7571,6 +7576,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                             declare_module_import(tp, ast_node);
                         }
                     } else {
+#endif
                     // restore .ls extension for error message
                     buf->str[buf->length - 2] = 'l';
                     buf->str[buf->length - 1] = 's';
@@ -7581,7 +7587,9 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
                         "  Resolved path: %s\n",
                         (int)ast_node->module.length, ast_node->module.str, buf->str);
                 #ifndef SIMPLE_SCHEMA_PARSER
+#ifdef LAMBDA_PYTHON
                     }
+#endif
                 }
                 #endif
             }

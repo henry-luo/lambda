@@ -94,12 +94,16 @@ extern bool target_equal(Target* a, Target* b);
 // JS runtime functions
 #include "js/js_runtime.h"
 #include "ts/ts_runtime.h"
+#ifdef LAMBDA_PYTHON
 #include "py/py_runtime.h"
 #include "py/py_class.h"
 #include "py/py_bigint.h"
 #include "py/py_async.h"
 #include "py/py_stdlib.h"
+#endif
+#ifdef LAMBDA_BASH
 #include "bash/bash_runtime.h"
+#endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
 #endif
@@ -1382,6 +1386,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
     {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},
 
+#ifdef LAMBDA_PYTHON
     // ========================================================================
     // Python runtime functions
     // ========================================================================
@@ -1556,7 +1561,9 @@ JitImport jit_runtime_imports[] = {
     {"py_asyncio_run", FPTR(py_asyncio_run)},
     {"py_asyncio_sleep", FPTR(py_asyncio_sleep)},
     {"py_asyncio_gather", FPTR(py_asyncio_gather)},
+#endif // LAMBDA_PYTHON
 
+#ifdef LAMBDA_BASH
     // ========================================================================
     // Bash runtime functions
     // ========================================================================
@@ -1826,6 +1833,7 @@ JitImport jit_runtime_imports[] = {
     {"bash_run_debug_trap", FPTR(bash_run_debug_trap)},
     {"bash_run_return_trap", FPTR(bash_run_return_trap)},
     {"bash_eval_string", FPTR(bash_eval_string)},
+#endif // LAMBDA_BASH
 
     // ========================================================================
     // MIR JIT wrappers for RetItem-returning functions

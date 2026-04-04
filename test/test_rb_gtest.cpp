@@ -119,10 +119,10 @@ static RbTestResult run_rb_script(const std::string& script_path) {
     char command[512];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "lambda.exe rb --no-log \"%s\" 2>&1", script_path.c_str());
+             "lambda-jube.exe rb --no-log \"%s\" 2>&1", script_path.c_str());
 #else
     snprintf(command, sizeof(command),
-             "./lambda.exe rb --no-log \"%s\" 2>&1", script_path.c_str());
+             "./lambda-jube.exe rb --no-log \"%s\" 2>&1", script_path.c_str());
 #endif
 
     FILE* pipe = popen(command, "r");

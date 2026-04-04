@@ -84,7 +84,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
     }
     if (headless) {
         // Headless mode: no window creation
-        printf("Running in headless mode (no window)\n");
+        log_info("Running in headless mode (no window)");
         uicon->window = NULL;
         uicon->pixel_ratio = 1.0;  // Default pixel ratio for headless
         uicon->window_width = window_width;
@@ -118,15 +118,14 @@ int ui_context_init(UiContext* uicon, bool headless) {
         glfwGetFramebufferSize(uicon->window, &pixel_w, &pixel_h);
         float scale_x = (float)pixel_w / window_width;
         float scale_y = (float)pixel_h / window_height;
-        printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-        printf("ui_context_init: framebuffer size: %d x %d\n", pixel_w, pixel_h);
+        log_info("ui_context_init: scale factor: %.2f x %.2f, framebuffer size: %d x %d", scale_x, scale_y, pixel_w, pixel_h);
         uicon->pixel_ratio = scale_x;
         uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
         // viewport_width/height store the intended CSS viewport (for vh/vw units)
         // These are the logical (CSS) pixels we requested, not the actual framebuffer size
         uicon->viewport_width = window_width;   // CSS pixels (e.g., 1200)
         uicon->viewport_height = window_height; // CSS pixels (e.g., 800)
-        printf("ui_context_init: viewport=%dx%d (CSS), framebuffer=%dx%d (physical)\n",
+        log_info("ui_context_init: viewport=%dx%d (CSS), framebuffer=%dx%d (physical)",
                (int)uicon->viewport_width, (int)uicon->viewport_height,
                (int)uicon->window_width, (int)uicon->window_height);
     }

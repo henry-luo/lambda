@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LAMBDA_EXE="$PROJECT_DIR/lambda.exe"
+LAMBDA_EXE="${LAMBDA_EXE:-$PROJECT_DIR/lambda.exe}"
 TEST_DIR="$PROJECT_DIR/test/bash"
 
 # Colors for output

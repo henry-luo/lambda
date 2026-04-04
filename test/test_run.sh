@@ -15,6 +15,7 @@ fi
 
 # Parse command line arguments
 TARGET_SUITE=""
+EXCLUDE_SUITE=""
 TARGET_CATEGORY=""
 RAW_OUTPUT=false
 PARALLEL_EXECUTION=true  # Default to parallel execution
@@ -27,6 +28,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --target)
             TARGET_SUITE="$2"
+            shift 2
+            ;;
+        --exclude-target=*)
+            EXCLUDE_SUITE="${1#*=}"
+            shift
+            ;;
+        --exclude-target)
+            EXCLUDE_SUITE="$2"
             shift 2
             ;;
         --category=*)
@@ -50,8 +59,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [--target=SUITE] [--category=CATEGORY] [--raw] [--sequential] [--parallel]"
-            echo "  --target=SUITE     Run only tests from specified suite (library, input, mir, lambda, validator, radiant)"
+            echo "Usage: $0 [--target=SUITE] [--exclude-target=SUITE] [--category=CATEGORY] [--raw] [--sequential] [--parallel]"
+            echo "  --target=SUITE     Run only tests from specified suite (library, input, mir, lambda, validator, radiant, jube)"
+            echo "  --exclude-target=S Exclude tests from specified suite (e.g. jube)"
             echo "  --category=CAT     Run only tests from specified category (baseline, extended)"
             echo "  --raw              Show raw test output without formatting"
             echo "  --sequential       Run tests sequentially (default: parallel)"
@@ -782,9 +792,22 @@ if [ -n "$TARGET_SUITE" ]; then
 
     if [ ${#test_executables[@]} -eq 0 ]; then
         echo "❌ No test executables found for target suite: $TARGET_SUITE"
-        echo "   Available suites: library, input, mir, lambda, lambda-std, validator, radiant"
+        echo "   Available suites: library, input, mir, lambda, lambda-std, validator, radiant, jube"
         exit 1
     fi
+fi
+
+# Exclude executables by target suite if specified
+if [ -n "$EXCLUDE_SUITE" ]; then
+    filtered_executables=()
+    for test_exe in "${test_executables[@]}"; do
+        base_name=$(basename "$test_exe" .exe)
+        suite_category=$(get_test_suite_category "$base_name")
+        if [ "$suite_category" != "$EXCLUDE_SUITE" ]; then
+            filtered_executables+=("$test_exe")
+        fi
+    done
+    test_executables=("${filtered_executables[@]}")
 fi
 
 # Filter executables by category if specified

@@ -203,7 +203,9 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void ensure_jit_imports_initialized(void);
 }
+#ifdef LAMBDA_C2MIR
 void transpile_ast_root(Transpiler* tp, AstScript *script);
+#endif
 void ensure_sys_func_maps_initialized(void);
 void check_memory_leak();
 void print_heap_entries();
@@ -417,7 +419,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
     log_leave();
 }
 
+#ifdef LAMBDA_C2MIR
 extern unsigned int lambda_lambda_h_len;
+#endif
 
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
@@ -447,8 +451,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     if (profiling) profile_get_time(&p1);
 
+#ifndef NDEBUG
     // print the syntax tree as an s-expr
     print_ts_root(tp->source, tp->syntax_tree);
+#endif
 
     // check if the syntax tree is valid
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
@@ -525,6 +531,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         return;
     }
 
+#ifdef LAMBDA_C2MIR
     // print the AST for debugging
     log_debug("AST: %s ---------", tp->reference);
     print_ast_root(tp);
@@ -615,6 +622,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     script->main_func = tp->main_func;
 
     print_elapsed_time("JIT compiling", start, end);
+#else
+    // C2MIR not available — this should not be reached
+    log_error("C2MIR path not available in this build (use MIR Direct)");
+#endif // LAMBDA_C2MIR
 }
 
 // ============================================================================

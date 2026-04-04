@@ -120,10 +120,10 @@ static PyTestResult run_py_script(const std::string& script_path) {
     char command[512];
 #ifdef _WIN32
     snprintf(command, sizeof(command),
-             "lambda.exe py --no-log \"%s\" 2>&1", script_path.c_str());
+             "lambda-jube.exe py --no-log \"%s\" 2>&1", script_path.c_str());
 #else
     snprintf(command, sizeof(command),
-             "./lambda.exe py --no-log \"%s\" 2>&1", script_path.c_str());
+             "./lambda-jube.exe py --no-log \"%s\" 2>&1", script_path.c_str());
 #endif
 
     FILE* pipe = popen(command, "r");
