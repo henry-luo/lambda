@@ -257,6 +257,7 @@ void bash_getopts_pop_state(void);                  // restore getopts charind s
 // ========================================================================
 Item bash_builtin_echo(Item* args, int argc);
 Item bash_builtin_printf(Item* all_args, int total_argc);
+Item bash_process_escapes(Item input);
 Item bash_builtin_let(Item* args, int argc);
 Item bash_builtin_type(Item* args, int argc);
 Item bash_builtin_command(Item* args, int argc);

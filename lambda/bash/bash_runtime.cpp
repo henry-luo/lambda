@@ -12,6 +12,7 @@
  */
 #include "bash_runtime.h"
 #include "bash_ast.hpp"
+#include "bash_errors.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -38,7 +39,8 @@ static int bash_last_exit_code = 0;
 static const char* bash_script_name = "";
 
 // original script name for error reporting (not affected by BASH_ARGV0)
-static char bash_error_script_name[4096] = "";
+// non-static: shared with bash_errors.cpp
+char bash_error_script_name[4096] = "";
 
 // SECONDS tracking: start time and user-set offset
 static time_t bash_seconds_start = 0;
@@ -61,7 +63,8 @@ static bool bash_opt_functrace = false; // -T / set -o functrace
 // (if/while/until condition, && / || chain, ! negation)
 static int bash_errexit_depth = 0;
 
-static int bash_current_lineno = 0;
+// non-static: shared with bash_errors.cpp
+int bash_current_lineno = 0;
 static int bash_debug_trap_lineno = 0;
 static int bash_debug_trap_base_depth = 0;
 
@@ -453,10 +456,7 @@ extern "C" Item bash_divide(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        // print error to stderr in bash format
-        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
-            bash_error_script_name, bash_current_lineno,
-            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_err_division_by_zero(bash_arith_expr_text, (long long)b);
         bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
@@ -467,9 +467,7 @@ extern "C" Item bash_modulo(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
-            bash_error_script_name, bash_current_lineno,
-            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_err_division_by_zero(bash_arith_expr_text, (long long)b);
         bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
@@ -842,7 +840,9 @@ extern "C" Item bash_expand_alt(Item val, Item alt) {
 extern "C" Item bash_expand_error(Item val, Item msg) {
     if (bash_item_is_empty(val)) {
         String* m = it2s(bash_to_string(msg));
-        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+        const char* text = (m && m->len > 0) ? m->chars : "parameter null or not set";
+        bash_errmsg("%s", text);
+        bash_set_exit_code(1);
     }
     return val;
 }
@@ -872,7 +872,9 @@ extern "C" Item bash_expand_alt_nocolon(Item val, Item alt) {
 extern "C" Item bash_expand_error_nocolon(Item val, Item msg) {
     if (bash_item_is_unset(val)) {
         String* m = it2s(bash_to_string(msg));
-        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+        const char* text = (m && m->len > 0) ? m->chars : "parameter null or not set";
+        bash_errmsg("%s", text);
+        bash_set_exit_code(1);
     }
     return val;
 }
@@ -2487,8 +2489,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         }
         if (!found) {
             log_debug("bash: %s: command not found", cmd_name);
-            // write error to stderr like real bash
-            fprintf(stderr, "%s: command not found\n", cmd_name);
+            bash_err_not_found(cmd_name);
             free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
@@ -2497,7 +2498,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         // absolute or relative path — check it exists
         if (access(cmd_name, X_OK) != 0) {
             log_debug("bash: %s: No such file or directory", cmd_name);
-            fprintf(stderr, "%s: No such file or directory\n", cmd_name);
+            bash_err_no_such_file("", cmd_name);
             free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
@@ -2952,8 +2953,7 @@ extern "C" void bash_set_var(Item name, Item value) {
         if (found) {
             if (found->attributes & BASH_ATTR_READONLY) {
                 log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-                fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_err_readonly(s->chars);
                 bash_last_exit_code = 1;
                 return;
             }
@@ -2973,8 +2973,7 @@ extern "C" void bash_set_var(Item name, Item value) {
     // check readonly
     if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
         log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-        fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_err_readonly(s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -3110,8 +3109,7 @@ extern "C" void bash_set_local_var(Item name, Item value) {
         // check readonly
         if (existing && (attrs & BASH_ATTR_READONLY)) {
             log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-            fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                    bash_error_script_name, bash_current_lineno, s->len, s->chars);
+            bash_err_readonly(s->chars);
             bash_last_exit_code = 1;
             return;
         }
@@ -3171,8 +3169,7 @@ extern "C" void bash_unset_var(Item name) {
         const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
         if (found) {
             if (found->attributes & BASH_ATTR_READONLY) {
-                fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
-                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_err_unset_readonly("unset", s->chars);
                 bash_last_exit_code = 1;
                 return;
             }
@@ -3183,8 +3180,7 @@ extern "C" void bash_unset_var(Item name) {
     // check readonly in global
     const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
-        fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
-                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_err_unset_readonly("unset", s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -3308,8 +3304,7 @@ extern "C" void bash_declare_print_var(Item name) {
 
     if (!var_set) {
         // variable not set — bash prints error for declare -p nonexistent
-        fprintf(stderr, "%s: declare: %.*s: not found\n",
-                bash_error_script_name, s->len, s->chars);
+        bash_err_declare_not_found(s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -3415,8 +3410,7 @@ extern "C" Item bash_resolve_nameref(Item var_name) {
 
     // circular nameref chain detected
     String* orig = it2s(var_name);
-    fprintf(stderr, "%s: warning: %.*s: circular name reference\n",
-            bash_error_script_name, orig ? orig->len : 0, orig ? orig->chars : "");
+    bash_err_circular_nameref(orig ? orig->chars : "");
     return var_name;
 }
 
@@ -3429,8 +3423,7 @@ extern "C" int bash_check_readonly(Item var_name) {
 
     const BashRtVar* found = bash_lookup_var_entry(s->chars, s->len);
     if (found && (found->attributes & BASH_ATTR_READONLY)) {
-        fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_err_readonly(s->chars);
         bash_last_exit_code = 1;
         return 1;
     }
@@ -3489,8 +3482,7 @@ extern "C" void bash_remove_attrs(Item var_name, int rm_flags) {
         const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
         if (found) {
             if ((found->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
-                fprintf(stderr, "%s: line %d: declare: %.*s: readonly variable\n",
-                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_errmsg_at("declare: %s: readonly variable", s->chars);
                 bash_last_exit_code = 1;
                 return;
             }
@@ -3506,8 +3498,7 @@ extern "C" void bash_remove_attrs(Item var_name, int rm_flags) {
     const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (existing) {
         if ((existing->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
-            fprintf(stderr, "%s: line %d: declare: %.*s: readonly variable\n",
-                    bash_error_script_name, bash_current_lineno, s->len, s->chars);
+            bash_errmsg_at("declare: %s: readonly variable", s->chars);
             bash_last_exit_code = 1;
             return;
         }

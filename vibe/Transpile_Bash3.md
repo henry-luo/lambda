@@ -737,7 +737,93 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 #### Next steps
 
 - **Transpiler wiring:** Update `transpile_bash_mir.cpp` to call `bash_pattern_match()` instead of `fnmatch()` for case statements and `[[ == ]]` conditionals
-- **Phase B:** Error Formatting Engine + Printf Engine
+- **Phase C:** Arithmetic Engine + Redirection Engine
+
+---
+
+### 2025-04-04: Phase B Complete — Error Formatting Engine + Printf Engine
+
+**Baseline:** 33/34 passing. 0 regressions. 51 pattern GTests still passing.
+
+**Phase B status:** ✅ Both modules implemented, tested, and registered.
+
+#### Module 4: Error Formatting Engine (`bash_errors.h` / `bash_errors.cpp`) — ✅ Complete
+
+**Files created:**
+- `lambda/bash/bash_errors.h` (92 lines) — Error formatting API
+- `lambda/bash/bash_errors.cpp` (~210 lines) — Full implementation
+
+**Implementation:**
+- `bash_errmsg(fmt, ...)` — Generic error: `"shell: message\n"` → stderr
+- `bash_errmsg_at(fmt, ...)` — Error with line number: `"shell: line N: message\n"` → stderr
+- `bash_error_set_shell_name(name)` / `bash_error_get_shell_name()` — Shell identity for error prefix
+- `bash_error_set_lineno(line)` / `bash_error_get_lineno()` — Line number for error context
+- 15 specific error producers with exact GNU Bash format:
+  - `bash_err_readonly(var)` — `"shell: line N: var: readonly variable"`
+  - `bash_err_bad_substitution(expr)` — `"shell: expr: bad substitution"`
+  - `bash_err_unbound_variable(var)` — `"shell: line N: var: unbound variable"`
+  - `bash_err_not_found(cmd)` — `"shell: line N: cmd: command not found"`
+  - `bash_err_syntax(token)` — `"shell: line N: syntax error near unexpected token 'token'"`
+  - `bash_err_numeric_arg(func, arg)` — `"shell: func: arg: numeric argument required"`
+  - `bash_err_invalid_option(cmd, opt)` — `"shell: line N: cmd: opt: invalid option"`
+  - `bash_err_too_many_args(cmd)` — `"shell: cmd: too many arguments"`
+  - `bash_err_not_valid_identifier(cmd, name)` — `"shell: line N: cmd: 'name': not a valid identifier"`
+  - `bash_err_ambiguous_redirect(target)` — `"shell: target: ambiguous redirect"`
+  - `bash_err_division_by_zero(expr, val)` — `"shell: line N: ((: expr : division by 0 (error token is \"val \")"`
+  - `bash_err_unset_readonly(builtin, var)` — `"shell: line N: builtin: var: cannot unset: readonly variable"`
+  - `bash_err_circular_nameref(var)` — `"shell: warning: var: circular name reference"`
+  - `bash_err_declare_not_found(var)` — `"shell: declare: var: not found"`
+  - `bash_err_no_such_file(cmd, path)` — `"shell: [cmd: ]path: No such file or directory"`
+  - `bash_err_param_not_set(var, msg)` — `"shell: var: msg"` or `"shell: var: parameter null or not set"`
+
+**Refactored callsites:**
+- `bash_runtime.cpp`: All 10+ `fprintf(stderr, ...)` error calls replaced with centralized functions
+  - Division by zero (2 sites), readonly variable (4 sites), command not found, no such file, unset readonly (2 sites), declare not found, circular nameref, declare readonly (2 sites)
+- `bash_expand_error()` and `bash_expand_error_nocolon()` fixed: changed from `log_error()` to `bash_errmsg()` + `bash_set_exit_code(1)` — bug fix vs real bash behavior
+- Made `bash_error_script_name[4096]` and `bash_current_lineno` non-static for cross-file access
+
+**Registered in `sys_func_registry.c`:** 17 error functions + `bash_write_stderr`
+
+#### Module 5: Printf Engine Enhancements — ✅ Complete
+
+**Files modified:**
+- `lambda/bash/bash_builtins.cpp` — Enhanced printf + shared escape processor
+
+**New features added to printf:**
+- **`%(fmt)T`** — strftime-based date/time formatting. Supports arbitrary strftime format strings (e.g., `%(Y-%m-%d)T`). Arguments: -1 or -2 = current time, positive integer = epoch seconds, no argument = current time.
+- **`\xHH`** — Hex escape sequences in format strings (1-2 hex digits)
+- **`\uHHHH`** — Unicode escape sequences in format strings (up to 4 hex digits, UTF-8 encoded)
+- **`\UHHHHHHHH`** — Unicode escape sequences in format strings (up to 8 hex digits, UTF-8 encoded)
+- **`\e` / `\E`** — ESC character (0x1B) escape in format strings
+- **`\c`** — Stop processing escape in both format strings and `%b` specifier
+
+**Shared escape processor (`bash_process_escapes`):**
+- `process_escape_sequences(src, len, out)` — Internal function handling all escapes: `\a \b \e \E \f \n \r \t \v \\ \' \" \c \0NNN \xHH \uHHHH \UHHHHHHHH`
+- `bash_process_escapes(input)` — Public API returning new Lambda string with escapes resolved
+- `utf8_encode(codepoint, buf)` — UTF-8 encoding helper for Unicode escapes
+- Used by: echo -e, printf %b, printf format string escapes, and available for `$'...'` processing
+
+**Echo -e improvements:**
+- Replaced inline escape handler with shared `process_escape_sequences()` call
+- Now supports all escape types: `\xHH`, `\uHHHH`, `\UHHHHHHHH`, `\e`, `\0NNN`, `\c` (stop output)
+- `\c` correctly suppresses trailing newline and all subsequent output
+
+**Printf %b improvements:**
+- Replaced inline escape handler with shared `process_escape_sequences()` call
+- `\c` in `%b` argument stops all printf output (returns immediately)
+
+**Registered in `sys_func_registry.c`:** `bash_process_escapes`
+
+#### Summary of changes (Phase B)
+
+| File | Action | Description |
+|------|--------|-------------|
+| `lambda/bash/bash_errors.h` | Created | Error formatting API (92 lines) |
+| `lambda/bash/bash_errors.cpp` | Created | 15 error producers + 2 generic formatters (~210 lines) |
+| `lambda/bash/bash_builtins.cpp` | Modified | +shared escape processor, +%(fmt)T, +\xHH/\uHHHH/\UHHHHHHHH, +\e, +\c, echo -e upgraded |
+| `lambda/bash/bash_runtime.h` | Modified | +1 declaration (bash_process_escapes) |
+| `lambda/bash/bash_runtime.cpp` | Modified | +include bash_errors.h, 10+ error sites refactored, expand_error bug fixed, script_name/lineno non-static |
+| `lambda/sys_func_registry.c` | Modified | +18 new function registrations (17 error + 1 escape processor) |
 - **GNU test re-evaluation:** Re-run the 82-test suite to measure how many tests flip with the new modules
 
 **Baseline:** 31/31 passing
