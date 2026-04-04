@@ -8,6 +8,9 @@
 
 #include <cstring>
 #include <cstdio>
+
+// forward declaration from rb_class.cpp
+extern "C" Item rb_call_spaceship(Item left, Item right);
 #include <cstdlib>
 #include <cmath>
 #include <re2/re2.h>
@@ -20,6 +23,8 @@ extern String* heap_create_name(const char* str, size_t len);
 
 // global state
 static void* rb_input = NULL;
+static const char* rb_current_file = NULL;  // current executing file path
+static void* rb_runtime_ptr = NULL;  // Runtime pointer for require_relative
 
 #define RB_MODULE_VAR_MAX 1024
 static Item rb_module_vars[RB_MODULE_VAR_MAX];
@@ -44,6 +49,14 @@ extern "C" void rb_runtime_set_input(void* input_ptr) {
     // clear exception state on new script execution
     rb_exception_pending = false;
     rb_exception_value = (Item){.item = ITEM_NULL};
+}
+
+extern "C" void rb_runtime_set_current_file(const char* path) {
+    rb_current_file = path;
+}
+
+extern "C" void rb_runtime_set_runtime(void* runtime) {
+    rb_runtime_ptr = runtime;
 }
 
 // ============================================================================
@@ -416,6 +429,13 @@ extern "C" Item rb_lt(Item left, Item right) {
         if (cmp == 0) return (Item){.item = b2it(a->len < b->len)};
         return (Item){.item = b2it(cmp < 0)};
     }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        Item cmp = rb_call_spaceship(left, right);
+        if (cmp.item != ITEM_NULL && get_type_id(cmp) == LMD_TYPE_INT) {
+            return (Item){.item = b2it(it2i(cmp) < 0)};
+        }
+    }
     return (Item){.item = ITEM_NULL};
 }
 
@@ -432,6 +452,13 @@ extern "C" Item rb_le(Item left, Item right) {
         int cmp = memcmp(a->chars, b->chars, a->len < b->len ? a->len : b->len);
         if (cmp == 0) return (Item){.item = b2it(a->len <= b->len)};
         return (Item){.item = b2it(cmp <= 0)};
+    }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        Item cmp = rb_call_spaceship(left, right);
+        if (cmp.item != ITEM_NULL && get_type_id(cmp) == LMD_TYPE_INT) {
+            return (Item){.item = b2it(it2i(cmp) <= 0)};
+        }
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -465,6 +492,10 @@ extern "C" Item rb_cmp(Item left, Item right) {
             return (Item){.item = i2it(0)};
         }
         return (Item){.item = i2it(cmp < 0 ? -1 : 1)};
+    }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        return rb_call_spaceship(left, right);
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -852,9 +883,82 @@ extern "C" Item rb_builtin_rand(Item max) {
 }
 
 extern "C" Item rb_builtin_require_relative(Item path) {
-    // stub — cross-language import handled at transpile time
-    (void)path;
-    return (Item){.item = ITEM_NULL};
+    String* path_str = it2s(path);
+    if (!path_str || !path_str->chars) {
+        log_error("require_relative: invalid path argument");
+        return (Item){.item = ITEM_NULL};
+    }
+
+    // resolve path relative to current file's directory
+    char resolved[1024];
+    if (rb_current_file) {
+        // get directory of current file
+        char dir[1024];
+        strncpy(dir, rb_current_file, sizeof(dir) - 1);
+        dir[sizeof(dir) - 1] = '\0';
+        char* last_sep = strrchr(dir, '/');
+        if (!last_sep) last_sep = strrchr(dir, '\\');
+        if (last_sep) {
+            *(last_sep + 1) = '\0';
+        } else {
+            dir[0] = '.';
+            dir[1] = '/';
+            dir[2] = '\0';
+        }
+        snprintf(resolved, sizeof(resolved), "%s%.*s", dir,
+            (int)path_str->len, path_str->chars);
+    } else {
+        snprintf(resolved, sizeof(resolved), "%.*s",
+            (int)path_str->len, path_str->chars);
+    }
+
+    // add .rb extension if no extension present
+    const char* ext = strrchr(resolved, '.');
+    if (!ext || (ext < strrchr(resolved, '/'))) {
+        strncat(resolved, ".rb", sizeof(resolved) - strlen(resolved) - 1);
+    }
+
+    // read the file
+    FILE* f = fopen(resolved, "r");
+    if (!f) {
+        log_error("require_relative: cannot open '%s'", resolved);
+        return (Item){.item = ITEM_NULL};
+    }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* source = (char*)malloc(fsize + 1);
+    if (!source) {
+        fclose(f);
+        log_error("require_relative: out of memory");
+        return (Item){.item = ITEM_NULL};
+    }
+    size_t nread = fread(source, 1, fsize, f);
+    source[nread] = '\0';
+    fclose(f);
+
+    // save and restore current file context
+    const char* prev_file = rb_current_file;
+    rb_current_file = resolved;
+
+    // determine language by extension and compile+execute
+    ext = strrchr(resolved, '.');
+    Item result = (Item){.item = ITEM_NULL};
+
+    if (ext && strcmp(ext, ".rb") == 0) {
+        // Ruby file — use the transpile pipeline
+        if (rb_runtime_ptr) {
+            result = transpile_rb_to_mir((Runtime*)rb_runtime_ptr, source, resolved);
+        } else {
+            log_error("require_relative: no runtime available for .rb import");
+        }
+    } else {
+        log_error("require_relative: unsupported file type '%s'", ext ? ext : "(none)");
+    }
+
+    free(source);
+    rb_current_file = prev_file;
+    return result;
 }
 
 // defined?(var) runtime check — returns "local-variable" if non-nil, else nil

@@ -1,0 +1,5 @@
+You called: hello
+You called: anything
+Hi from say_hi
+real
+missing: fake_method

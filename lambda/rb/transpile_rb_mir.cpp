@@ -86,6 +86,10 @@ struct RbBlockCollected {
     MIR_item_t func_item;     // compiled MIR function
     int param_count;
     int id;                    // unique block id
+    // closure capture info
+    char captures[16][128];    // captured variable names (with _rb_ prefix)
+    int capture_count;
+    bool is_closure;           // true if captures outer variables
 };
 
 // Phase 2: class info stored during class compilation
@@ -1020,6 +1024,51 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, m),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
             }
+            // array.flat_map { |x| } / collect_concat
+            if ((mlen == 8 && strncmp(mname, "flat_map", 8) == 0) ||
+                (mlen == 14 && strncmp(mname, "collect_concat", 14) == 0)) {
+                return rm_call_2(mt, "rb_array_flat_map", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.each_with_object(obj) { |x, obj| }
+            if (mlen == 16 && strncmp(mname, "each_with_object", 16) == 0 && call->arg_count >= 1) {
+                MIR_reg_t obj = rm_transpile_expression(mt, call->args);
+                return rm_call_3(mt, "rb_array_each_with_object", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.sort_by { |x| }
+            if (mlen == 7 && strncmp(mname, "sort_by", 7) == 0) {
+                return rm_call_2(mt, "rb_array_sort_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.min_by { |x| }
+            if (mlen == 6 && strncmp(mname, "min_by", 6) == 0) {
+                return rm_call_2(mt, "rb_array_min_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.max_by { |x| }
+            if (mlen == 6 && strncmp(mname, "max_by", 6) == 0) {
+                return rm_call_2(mt, "rb_array_max_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.reduce { |acc, x| } (no initial value)
+            if (mlen == 6 && strncmp(mname, "reduce", 6) == 0 && call->arg_count == 0) {
+                return rm_call_2(mt, "rb_array_reduce_no_init", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.inject { |acc, x| } (no initial value, alias)
+            if (mlen == 6 && strncmp(mname, "inject", 6) == 0 && call->arg_count == 0) {
+                return rm_call_2(mt, "rb_array_reduce_no_init", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
 
             // generic method call with block — look up method, call with block
             // (will be handled below in dynamic dispatch)
@@ -1065,6 +1114,22 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                             return rm_transpile_block_as_func(mt, (RbBlockNode*)call->block);
                         }
                         return rm_emit_null(mt);
+                    }
+
+                    // Struct.new(:field1, :field2, ...) — create struct class
+                    if (cn->name->len == 6 && strncmp(cn->name->chars, "Struct", 6) == 0) {
+                        // build array of field names from symbol arguments
+                        MIR_reg_t fields = rm_call_0(mt, "rb_array_new", MIR_T_I64);
+                        RbAstNode* arg = call->args;
+                        while (arg) {
+                            MIR_reg_t field_val = rm_transpile_expression(mt, arg);
+                            rm_call_2(mt, "rb_array_push", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fields),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_val));
+                            arg = arg->next;
+                        }
+                        return rm_call_1(mt, "rb_struct_new", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fields));
                     }
                 }
 
@@ -1123,6 +1188,36 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
                 rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
                 rm_emit_label(mt, l_no_init);
+
+                // No initialize method — try struct initialization
+                // Build args array on stack for rb_struct_init
+                {
+                    int s_argc = call->arg_count;
+                    MIR_reg_t s_args = rm_new_reg(mt, "sargs", MIR_T_I64);
+                    if (s_argc > 0) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                            MIR_new_reg_op(mt->ctx, s_args),
+                            MIR_new_int_op(mt->ctx, s_argc * 8)));
+                        RbAstNode* sa = call->args;
+                        for (int si = 0; si < s_argc && sa; si++) {
+                            MIR_reg_t sav = rm_transpile_expression(mt, sa);
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, si * 8, s_args, 0, 1),
+                                MIR_new_reg_op(mt->ctx, sav)));
+                            sa = sa->next;
+                        }
+                    } else {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, s_args),
+                            MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    rm_call_4(mt, "rb_struct_init", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inst),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, s_args),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, s_argc));
+                }
+
                 rm_emit_label(mt, l_done);
 
                 return inst; // .new always returns the instance
@@ -1308,6 +1403,56 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
 
             rm_emit_label(mt, l_not_found);
+            {
+                // fallback 1: try attribute access for zero-arg calls (struct fields, etc.)
+                MIR_label_t l_mm_check = rm_new_label(mt);
+                if (call->arg_count == 0) {
+                    MIR_reg_t attr_val = rm_call_2(mt, "rb_instance_getattr", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg));
+                    // if attr found, use it
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, l_mm_check),
+                        MIR_new_reg_op(mt->ctx, attr_val),
+                        MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, builtin_result),
+                        MIR_new_reg_op(mt->ctx, attr_val)));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_dispatch_end)));
+                }
+                // fallback 2: try method_missing
+                rm_emit_label(mt, l_mm_check);
+                {
+                    int mm_argc = call->arg_count;
+                    MIR_reg_t mm_args = rm_new_reg(mt, "mmargs", MIR_T_I64);
+                    if (mm_argc > 0) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                            MIR_new_reg_op(mt->ctx, mm_args),
+                            MIR_new_int_op(mt->ctx, mm_argc * 8)));
+                        RbAstNode* ma = call->args;
+                        for (int mi = 0; mi < mm_argc && ma; mi++) {
+                            MIR_reg_t mav = rm_transpile_expression(mt, ma);
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, mi * 8, mm_args, 0, 1),
+                                MIR_new_reg_op(mt->ctx, mav)));
+                            ma = ma->next;
+                        }
+                    } else {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, mm_args),
+                            MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    MIR_reg_t mm_result = rm_call_4(mt, "rb_call_method_missing", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mm_args),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, mm_argc));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, builtin_result),
+                        MIR_new_reg_op(mt->ctx, mm_result)));
+                }
+            }
             rm_emit_label(mt, l_dispatch_end);
 
             return builtin_result;
@@ -1407,6 +1552,13 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             return rm_call_2(mt, "rb_respond_to", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, self_r),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
+        // require_relative — cross-language module import
+        if (flen == 16 && strncmp(fname, "require_relative", 16) == 0 && call->arg_count >= 1) {
+            MIR_reg_t path_arg = rm_transpile_expression(mt, call->args);
+            return rm_call_1(mt, "rb_builtin_require_relative", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg));
         }
 
         // lambda { |x| ... } or proc { |x| ... } — return block as function value
@@ -1839,6 +1991,22 @@ static void rm_transpile_assignment(RbMirTranspiler* mt, RbAssignmentNode* assig
         RbIdentifierNode* id = (RbIdentifierNode*)assign->target;
         char vname[128];
         snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+
+        RbMirVarEntry* var = rm_find_var(mt, vname);
+        if (var) {
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, val)));
+        } else {
+            MIR_reg_t r = rm_new_reg(mt, vname, MIR_T_I64);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_reg_op(mt->ctx, val)));
+            rm_set_var(mt, vname, r);
+        }
+    } else if (assign->target && assign->target->node_type == RB_AST_NODE_CONST) {
+        // Constant assignment: Point = ... → treat like variable with _rb_ prefix
+        RbConstNode* cn = (RbConstNode*)assign->target;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)cn->name->len, cn->name->chars);
 
         RbMirVarEntry* var = rm_find_var(mt, vname);
         if (var) {
@@ -2442,9 +2610,34 @@ static MIR_reg_t rm_transpile_block_as_func(RbMirTranspiler* mt, RbBlockNode* bl
             MIR_reg_t fn_ptr = rm_new_reg(mt, "bfptr", MIR_T_I64);
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fn_ptr),
                 MIR_new_ref_op(mt->ctx, bc->func_item)));
-            return rm_call_2(mt, "js_new_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, nparams));
+
+            if (bc->is_closure && bc->capture_count > 0) {
+                // allocate env and populate with captured variables
+                MIR_reg_t env = rm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bc->capture_count));
+                for (int ci = 0; ci < bc->capture_count; ci++) {
+                    RbMirVarEntry* cvar = rm_find_var(mt, bc->captures[ci]);
+                    if (cvar) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env, 0, 1),
+                            MIR_new_reg_op(mt->ctx, cvar->reg)));
+                    } else {
+                        // capture doesn't resolve — store null
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env, 0, 1),
+                            MIR_new_int_op(mt->ctx, ITEM_NULL)));
+                    }
+                }
+                return rm_call_4(mt, "js_new_closure", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, nparams),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bc->capture_count));
+            } else {
+                return rm_call_2(mt, "js_new_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, nparams));
+            }
         }
     }
 
@@ -2476,12 +2669,359 @@ static bool rm_is_statement_node(RbAstNodeType t) {
     }
 }
 
+// ============================================================================
+// Closure analysis: find free variables in a block
+// ============================================================================
+
+struct RbNameSet {
+    char names[64][128];
+    int count;
+};
+
+static bool rb_nameset_contains(RbNameSet* s, const char* name) {
+    for (int i = 0; i < s->count; i++) {
+        if (strcmp(s->names[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static void rb_nameset_add(RbNameSet* s, const char* name) {
+    if (s->count >= 64 || rb_nameset_contains(s, name)) return;
+    snprintf(s->names[s->count], sizeof(s->names[0]), "%s", name);
+    s->count++;
+}
+
+// collect all variable names defined locally in a block (params + assignments)
+static void rb_collect_locals(RbAstNode* node, RbNameSet* locals) {
+    if (!node) return;
+    switch (node->node_type) {
+        case RB_AST_NODE_ASSIGNMENT: {
+            RbAssignmentNode* a = (RbAssignmentNode*)node;
+            if (a->target && a->target->node_type == RB_AST_NODE_IDENTIFIER) {
+                RbIdentifierNode* id = (RbIdentifierNode*)a->target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                rb_nameset_add(locals, vname);
+            }
+            break;
+        }
+        case RB_AST_NODE_MULTI_ASSIGNMENT: {
+            RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)node;
+            RbAstNode* t = ma->targets;
+            while (t) {
+                if (t->node_type == RB_AST_NODE_IDENTIFIER) {
+                    RbIdentifierNode* id = (RbIdentifierNode*)t;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                    rb_nameset_add(locals, vname);
+                }
+                t = t->next;
+            }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* f = (RbForNode*)node;
+            if (f->variable && f->variable->node_type == RB_AST_NODE_IDENTIFIER) {
+                RbIdentifierNode* id = (RbIdentifierNode*)f->variable;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                rb_nameset_add(locals, vname);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    // recurse into children but NOT into nested blocks (they have their own scope)
+    switch (node->node_type) {
+        case RB_AST_NODE_IF:
+        case RB_AST_NODE_UNLESS: {
+            RbIfNode* n = (RbIfNode*)node;
+            RbAstNode* s = n->then_body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            s = n->else_body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_WHILE:
+        case RB_AST_NODE_UNTIL: {
+            RbWhileNode* n = (RbWhileNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* n = (RbForNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_CASE: {
+            RbCaseNode* n = (RbCaseNode*)node;
+            RbAstNode* w = n->whens;
+            while (w) {
+                if (w->node_type == RB_AST_NODE_WHEN) {
+                    RbAstNode* s = ((RbWhenNode*)w)->body;
+                    while (s) { rb_collect_locals(s, locals); s = s->next; }
+                }
+                w = w->next;
+            }
+            if (n->else_body) {
+                RbAstNode* s = n->else_body;
+                while (s) { rb_collect_locals(s, locals); s = s->next; }
+            }
+            break;
+        }
+        case RB_AST_NODE_BEGIN_RESCUE: {
+            RbBeginRescueNode* n = (RbBeginRescueNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// collect all identifier references in a block body (excluding nested block bodies)
+static void rb_collect_refs(RbAstNode* node, RbNameSet* refs) {
+    if (!node) return;
+    if (node->node_type == RB_AST_NODE_IDENTIFIER) {
+        RbIdentifierNode* id = (RbIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+        rb_nameset_add(refs, vname);
+        return;
+    }
+    // skip nested blocks — they are separate closures
+    if (node->node_type == RB_AST_NODE_BLOCK || node->node_type == RB_AST_NODE_PROC_LAMBDA)
+        return;
+    // skip method/class/module defs — they don't capture
+    if (node->node_type == RB_AST_NODE_METHOD_DEF || node->node_type == RB_AST_NODE_CLASS_DEF ||
+        node->node_type == RB_AST_NODE_MODULE_DEF)
+        return;
+
+    // recurse into all child nodes
+    switch (node->node_type) {
+        case RB_AST_NODE_ASSIGNMENT: {
+            RbAssignmentNode* a = (RbAssignmentNode*)node;
+            rb_collect_refs(a->target, refs);
+            rb_collect_refs(a->value, refs);
+            break;
+        }
+        case RB_AST_NODE_OP_ASSIGNMENT: {
+            RbOpAssignmentNode* oa = (RbOpAssignmentNode*)node;
+            rb_collect_refs(oa->target, refs);
+            rb_collect_refs(oa->value, refs);
+            break;
+        }
+        case RB_AST_NODE_MULTI_ASSIGNMENT: {
+            RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)node;
+            RbAstNode* t = ma->targets; while (t) { rb_collect_refs(t, refs); t = t->next; }
+            RbAstNode* v = ma->values; while (v) { rb_collect_refs(v, refs); v = v->next; }
+            break;
+        }
+        case RB_AST_NODE_BINARY_OP: {
+            RbBinaryNode* b = (RbBinaryNode*)node;
+            rb_collect_refs(b->left, refs);
+            rb_collect_refs(b->right, refs);
+            break;
+        }
+        case RB_AST_NODE_UNARY_OP: {
+            RbUnaryNode* u = (RbUnaryNode*)node;
+            rb_collect_refs(u->operand, refs);
+            break;
+        }
+        case RB_AST_NODE_CALL: {
+            RbCallNode* c = (RbCallNode*)node;
+            rb_collect_refs(c->receiver, refs);
+            RbAstNode* a = c->args; while (a) { rb_collect_refs(a, refs); a = a->next; }
+            // recurse into block body (but it's a separate closure, so skip)
+            break;
+        }
+        case RB_AST_NODE_IF:
+        case RB_AST_NODE_UNLESS: {
+            RbIfNode* n = (RbIfNode*)node;
+            rb_collect_refs(n->condition, refs);
+            RbAstNode* s = n->then_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            s = n->else_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_WHILE:
+        case RB_AST_NODE_UNTIL: {
+            RbWhileNode* w = (RbWhileNode*)node;
+            rb_collect_refs(w->condition, refs);
+            RbAstNode* s = w->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* f = (RbForNode*)node;
+            rb_collect_refs(f->variable, refs);
+            rb_collect_refs(f->collection, refs);
+            RbAstNode* s = f->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_RETURN: {
+            RbReturnNode* r = (RbReturnNode*)node;
+            rb_collect_refs(r->value, refs);
+            break;
+        }
+        case RB_AST_NODE_SUBSCRIPT: {
+            RbSubscriptNode* sub = (RbSubscriptNode*)node;
+            rb_collect_refs(sub->object, refs);
+            rb_collect_refs(sub->index, refs);
+            break;
+        }
+        case RB_AST_NODE_STRING_INTERPOLATION: {
+            RbStringInterpNode* si = (RbStringInterpNode*)node;
+            RbAstNode* p = si->parts; while (p) { rb_collect_refs(p, refs); p = p->next; }
+            break;
+        }
+        case RB_AST_NODE_ARRAY: {
+            RbArrayNode* arr = (RbArrayNode*)node;
+            RbAstNode* e = arr->elements; while (e) { rb_collect_refs(e, refs); e = e->next; }
+            break;
+        }
+        case RB_AST_NODE_HASH: {
+            RbHashNode* h = (RbHashNode*)node;
+            RbAstNode* p = h->pairs; while (p) { rb_collect_refs(p, refs); p = p->next; }
+            break;
+        }
+        case RB_AST_NODE_PAIR: {
+            RbPairNode* p = (RbPairNode*)node;
+            rb_collect_refs(p->key, refs);
+            rb_collect_refs(p->value, refs);
+            break;
+        }
+        case RB_AST_NODE_RANGE: {
+            RbRangeNode* r = (RbRangeNode*)node;
+            rb_collect_refs(r->start, refs);
+            rb_collect_refs(r->end, refs);
+            break;
+        }
+        case RB_AST_NODE_TERNARY: {
+            RbTernaryNode* t = (RbTernaryNode*)node;
+            rb_collect_refs(t->condition, refs);
+            rb_collect_refs(t->true_expr, refs);
+            rb_collect_refs(t->false_expr, refs);
+            break;
+        }
+        case RB_AST_NODE_CASE: {
+            RbCaseNode* c = (RbCaseNode*)node;
+            rb_collect_refs(c->subject, refs);
+            RbAstNode* w = c->whens;
+            while (w) {
+                if (w->node_type == RB_AST_NODE_WHEN) {
+                    RbWhenNode* wn = (RbWhenNode*)w;
+                    RbAstNode* v = wn->patterns; while (v) { rb_collect_refs(v, refs); v = v->next; }
+                    RbAstNode* s = wn->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+                }
+                w = w->next;
+            }
+            if (c->else_body) {
+                RbAstNode* s = c->else_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            }
+            break;
+        }
+        case RB_AST_NODE_BEGIN_RESCUE: {
+            RbBeginRescueNode* b = (RbBeginRescueNode*)node;
+            RbAstNode* s = b->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_YIELD: {
+            RbYieldNode* y = (RbYieldNode*)node;
+            RbAstNode* a = y->args; while (a) { rb_collect_refs(a, refs); a = a->next; }
+            break;
+        }
+        case RB_AST_NODE_ATTRIBUTE: {
+            RbAttributeNode* attr = (RbAttributeNode*)node;
+            rb_collect_refs(attr->object, refs);
+            break;
+        }
+        case RB_AST_NODE_DEFINED: {
+            RbDefinedNode* d = (RbDefinedNode*)node;
+            rb_collect_refs(d->operand, refs);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// Analyze a block for free variables (captured from enclosing scope)
+static void rb_analyze_block_captures(RbBlockCollected* bc, RbMirTranspiler* mt) {
+    RbBlockNode* block = bc->node;
+
+    // 1. Collect params as locals
+    RbNameSet locals;
+    memset(&locals, 0, sizeof(locals));
+    RbAstNode* p = block->params;
+    while (p) {
+        if (p->node_type == RB_AST_NODE_PARAMETER || p->node_type == RB_AST_NODE_DEFAULT_PARAMETER) {
+            RbParamNode* pp = (RbParamNode*)p;
+            if (pp->name) {
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)pp->name->len, pp->name->chars);
+                rb_nameset_add(&locals, vname);
+            }
+        } else if (p->node_type == RB_AST_NODE_IDENTIFIER) {
+            RbIdentifierNode* id = (RbIdentifierNode*)p;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+            rb_nameset_add(&locals, vname);
+        }
+        p = p->next;
+    }
+
+    // 2. Collect assignments in the block body as locals
+    RbAstNode* s = block->body;
+    while (s) { rb_collect_locals(s, &locals); s = s->next; }
+
+    // 3. Collect all identifier references
+    RbNameSet refs;
+    memset(&refs, 0, sizeof(refs));
+    s = block->body;
+    while (s) { rb_collect_refs(s, &refs); s = s->next; }
+
+    // 4. Free variables = refs that are not locals (potential captures from enclosing scope)
+    // Skip well-known Ruby constants that are never captures
+    bc->capture_count = 0;
+    bc->is_closure = false;
+    for (int i = 0; i < refs.count && bc->capture_count < 16; i++) {
+        if (rb_nameset_contains(&locals, refs.names[i])) continue;
+
+        // skip common Ruby keywords/constants (already prefixed with _rb_)
+        const char* name = refs.names[i];
+        if (strcmp(name, "_rb_nil") == 0 || strcmp(name, "_rb_true") == 0 ||
+            strcmp(name, "_rb_false") == 0 || strcmp(name, "_rb_self") == 0 ||
+            strcmp(name, "_rb_ARGV") == 0 || strcmp(name, "_rb_STDOUT") == 0 ||
+            strcmp(name, "_rb_STDERR") == 0 || strcmp(name, "_rb_STDIN") == 0)
+            continue;
+
+        snprintf(bc->captures[bc->capture_count], sizeof(bc->captures[0]),
+            "%s", refs.names[i]);
+        bc->capture_count++;
+        bc->is_closure = true;
+    }
+
+    if (bc->is_closure) {
+        log_debug("rb-mir: block_%d captures %d vars", bc->id, bc->capture_count);
+    }
+}
+
 // Pre-compile a block as a standalone MIR function (called before rb_main).
 static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     RbBlockNode* block = bc->node;
     int nparams = block->param_count;
 
-    MIR_var_t* params = nparams > 0 ? (MIR_var_t*)alloca(sizeof(MIR_var_t) * nparams) : NULL;
+    // closures get _rb__env as hidden first parameter
+    int mir_param_count = nparams + (bc->is_closure ? 1 : 0);
+    MIR_var_t* params = mir_param_count > 0 ?
+        (MIR_var_t*)alloca(sizeof(MIR_var_t) * mir_param_count) : NULL;
+    int offset = 0;
+
+    if (bc->is_closure) {
+        char* env_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
+        strcpy(env_name, "_rb__env");
+        params[0] = {MIR_T_I64, env_name, 0};
+        offset = 1;
+    }
+
     RbAstNode* p = block->params;
     for (int i = 0; i < nparams && p; i++) {
         char pname[128];
@@ -2498,7 +3038,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
         }
         char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
         strcpy(stable_name, pname);
-        params[i] = {MIR_T_I64, stable_name, 0};
+        params[i + offset] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
 
@@ -2506,7 +3046,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     snprintf(fn_name, sizeof(fn_name), "rbu_block_%d", bc->id);
 
     MIR_type_t res_type = MIR_T_I64;
-    bc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type, nparams, params);
+    bc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type, mir_param_count, params);
 
     MIR_item_t saved_func_item = mt->current_func_item;
     MIR_func_t saved_func = mt->current_func;
@@ -2526,17 +3066,29 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
             if (pp->name) {
                 char vname[128];
                 snprintf(vname, sizeof(vname), "_rb_%.*s", (int)pp->name->len, pp->name->chars);
-                MIR_reg_t preg = MIR_reg(mt->ctx, params[i].name, mt->current_func);
+                MIR_reg_t preg = MIR_reg(mt->ctx, params[i + offset].name, mt->current_func);
                 rm_set_var(mt, vname, preg);
             }
         } else if (p->node_type == RB_AST_NODE_IDENTIFIER) {
             RbIdentifierNode* id = (RbIdentifierNode*)p;
             char vname[128];
             snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
-            MIR_reg_t preg = MIR_reg(mt->ctx, params[i].name, mt->current_func);
+            MIR_reg_t preg = MIR_reg(mt->ctx, params[i + offset].name, mt->current_func);
             rm_set_var(mt, vname, preg);
         }
         p = p->next;
+    }
+
+    // load captured variables from env (closure support)
+    if (bc->is_closure) {
+        MIR_reg_t env_reg = MIR_reg(mt->ctx, "_rb__env", mt->current_func);
+        for (int ci = 0; ci < bc->capture_count; ci++) {
+            MIR_reg_t var_reg = rm_new_reg(mt, "cvar", MIR_T_I64);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env_reg, 0, 1)));
+            rm_set_var(mt, bc->captures[ci], var_reg);
+        }
     }
 
     MIR_reg_t last_result = rm_emit_null(mt);
@@ -3489,7 +4041,10 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
         hashmap_set(mt->local_funcs, &lfe);
     }
 
-    // Phase 3b: compile all blocks (before any functions that reference them)
+    // Phase 3b: analyze block captures and compile all blocks
+    for (int i = 0; i < mt->block_count; i++) {
+        rb_analyze_block_captures(&mt->block_entries[i], mt);
+    }
     for (int i = 0; i < mt->block_count; i++) {
         rm_compile_block(mt, &mt->block_entries[i]);
     }
@@ -3691,6 +4246,8 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     // execute
     log_notice("rb-mir: executing JIT compiled Ruby code");
     rb_reset_module_vars();
+    rb_runtime_set_current_file(filename);
+    rb_runtime_set_runtime(runtime);
     Item result = rb_main((Context*)context);
 
     // cleanup

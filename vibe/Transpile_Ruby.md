@@ -583,11 +583,11 @@ Lambda, 32/32 Radiant (2 pre-existing failures unrelated to Ruby).
 - [x] Blocks: `do..end` and `{ }` syntax, `yield`, `block_given?`
 - [x] `&block` parameter and `rb_block_call` (0–5 arg variants)
 - [x] `Proc.new`, `lambda`, `->(){}` stabby lambda — `rb_block_call_0/1/2`, `rm_transpile_block_as_func`
-- [ ] Closures: variable capture across nested scopes — deferred to Phase 3
+- [x] Closures: variable capture across nested scopes — `rb_analyze_block_captures`, `js_new_closure`, `js_alloc_env`
 - [x] `include` for module mixins — `rb_module_include` inserts module into superclass chain
 - [x] Iterator methods via blocks: `each`, `map`, `select`, `reject`, `reduce`, `each_with_index`, `any?`, `all?`, `find`
 - [x] Integer iterators: `times`, `upto`, `downto`
-- [ ] `Comparable` mixin support via `<=>` — deferred to Phase 3
+- [x] `Comparable` mixin support via `<=>` — `rb_call_spaceship`, custom `<=>` fallback in `rb_lt`/`rb_le`/`rb_cmp`
 
 **Supported in Phase 2:**
 
@@ -650,7 +650,7 @@ Regression: 760/762 Lambda, 32/32 Radiant (2 pre-existing JS failures unrelated 
 - [x] `Kernel` methods: `puts`, `p`, `print`, `rand`, `raise`, `require_relative`
 - [x] File I/O: `File.read`, `File.write`, `File.exist?`/`File.exists?` — `rb_file_read`, `rb_file_write`, `rb_file_exist`
 - [x] Regex: `=~`, `!~`, `.match`, `.scan`, `.gsub(regex)`, `.sub(regex)` via RE2 — `rb_regex_new`, `rb_regex_test`
-- [ ] Cross-language module imports via `require_relative` — deferred
+- [x] Cross-language module imports via `require_relative` — `rb_builtin_require_relative` (loads .rb files at runtime)
 
 ### Phase 4: Error Handling & Advanced Features (~2K LOC) — ✅ COMPLETE
 
@@ -676,12 +676,12 @@ failures unrelated to Ruby).
 - [x] `nil?` — `MIR_EQ` against `RB_ITEM_NULL_VAL` with boolean conversion
 - [x] `obj.class` — returns type name via `rb_builtin_type`
 - [x] `is_a?` / `kind_of?` — `rb_get_class` + `rb_eq` comparison
-- [ ] `Enumerator` protocol: `each` + `Enumerator::Yielder` — deferred
-- [ ] `Struct` — named struct creation — deferred
+- [x] Extended iterators: `flat_map`, `sort_by`, `min_by`, `max_by`, `each_with_object`, `reduce` (no-init), hash `each`/`map`/`select`
+- [x] `Struct` — named struct creation — `Struct.new(:field1, :field2)`, `rb_struct_new`, `rb_struct_init`
 - [x] Heredocs (`<<HEREDOC`, `<<~HEREDOC`, `<<'HEREDOC'`) — parsed by tree-sitter, transpiled as string literals
 - [x] `defined?` keyword — returns `"local-variable"`, `"expression"`, or nil
 - [x] `freeze` / `frozen?` — `rb_freeze`, `rb_frozen` (no-op freeze, tracks frozen state)
-- [ ] `method_missing` (basic support) — deferred
+- [x] `method_missing` (basic support) — `rb_call_method_missing` fallback in dispatch chain
 
 ### Phase 5: Performance Optimization (~1.5K LOC)
 
@@ -918,12 +918,12 @@ The following Ruby features are explicitly **not targeted** for the initial impl
 | `require` (gem loading) | Only `require_relative` for local files; no RubyGems |
 | C extensions / FFI | Lambda provides its own native function mechanism |
 | Open classes / monkey-patching | Classes are closed after definition |
-| `method_missing` (Phase 4 stretch) | Complex to implement correctly with JIT; deferred |
+| `method_missing` (advanced: `respond_to_missing?`, recursion) | Basic `method_missing` works; advanced features deferred |
 | Refinements | Scoped monkey-patching — unnecessary with closed classes |
 | `Encoding` / multi-encoding strings | Lambda uses UTF-8 throughout |
 | `TracePoint`, `set_trace_func` | No debugging hooks in JIT mode |
 | Frozen string literals pragma | All Lambda strings are effectively immutable |
-| `Comparable`, `Enumerable` as full mixins | Individual methods implemented directly instead |
+| `Comparable`, `Enumerable` as full mixins | `<=>` and iterator methods implemented directly; mixin `include` not needed |
 
 ---
 
@@ -971,17 +971,13 @@ Key decisions and lessons from the Phase 1 implementation:
 
 ### Known Limitations (After Phase 4)
 
-- No `Proc.new`, `lambda`, `->(){}` stabby lambda — blocks work via `yield` only.
-- No closures with variable capture across nested scopes.
-- No `include` for module mixins.
-- No regex support (`=~`, `match`, `scan`, `gsub`, `sub`).
-- No file I/O (`File.read`, `File.write`, etc.).
-- No cross-language `require_relative` imports.
-- No `Enumerator` protocol or lazy evaluation.
-- No `Struct`, `Comparable` as full mixins.
-- No `defined?`, `freeze`/`frozen?`, `method_missing`.
+- No lazy enumerators (`lazy`, `force`) or `Enumerator::Yielder` coroutine protocol.
+- No cross-language `require_relative` for `.ls`/`.py`/`.js` — only `.rb` files supported so far.
+- `method_missing` basic support only — no `respond_to_missing?` or recursive dispatch.
+- Closures capture by value, not reference — mutations inside blocks don't propagate to outer scope.
 - Exception handling uses flag-based model (no `setjmp`/`longjmp`) — division by zero
   and other runtime errors don't automatically raise exceptions (only explicit `raise`).
+- Constant assignment works but constants are mutable (no freeze enforcement).
 
 ## 16. Implementation Notes (Phase 2)
 
