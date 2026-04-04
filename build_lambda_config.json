@@ -19,10 +19,7 @@
         "lambda/format",
         "lambda/validator",
         "lambda/js",
-        "lambda/py",
-        "lambda/bash",
         "lambda/ts",
-        "lambda/rb",
         "lambda/network",
         "radiant",
         "radiant/pdf",
@@ -34,6 +31,8 @@
     "sqlite_version": "3.45.3",
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
+        "lambda/transpile.cpp",
+        "lambda/transpile-call.cpp",
         "radiant/radiant.cpp",
         "radiant/render_dvi.cpp",
         "radiant/render_texnode.cpp",
@@ -48,8 +47,7 @@
     ],
     "defines": [
         "SQLITE_THREADSAFE=0",
-        "SQLITE_OMIT_LOAD_EXTENSION",
-        "LAMBDA_RUBY"
+        "SQLITE_OMIT_LOAD_EXTENSION"
     ],
     "includes": [
         ".",
@@ -59,9 +57,6 @@
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-typescript/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
-        "lambda/tree-sitter-python/bindings/c",
-        "lambda/tree-sitter-ruby/bindings/c",
-        "lambda/tree-sitter-bash/bindings/c",
         "mac-deps/rpmalloc-install/include",
         "lib/font/woff2/include",
         "mac-deps/thorvg/src/bindings/capi"
@@ -101,27 +96,6 @@
             "version": "0.23.1",
             "include": "lambda/tree-sitter-javascript/bindings/c",
             "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-python",
-            "version": "0.25.0",
-            "include": "lambda/tree-sitter-python/bindings/c",
-            "lib": "lambda/tree-sitter-python/libtree-sitter-python.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-ruby",
-            "version": "0.23.1",
-            "include": "lambda/tree-sitter-ruby/bindings/c",
-            "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-bash",
-            "version": "0.25.1",
-            "include": "lambda/tree-sitter-bash/bindings/c",
-            "lib": "lambda/tree-sitter-bash/libtree-sitter-bash.a",
             "link": "static"
         },
         {
@@ -562,6 +536,96 @@
             ],
             "linker_flags": [],
             "build_dir": "build_cli",
+            "debug": false
+        },
+        "jube": {
+            "description": "Polyglot runtime: Lambda + JS/TS + Python + Bash + Ruby + Radiant",
+            "output": "lambda-jube.exe",
+            "source_dirs": [
+                "lib",
+                "lib/font",
+                "lib/font/woff2",
+                "lambda",
+                "lambda/input",
+                "lambda/input/css",
+                "lambda/input/html5",
+                "lambda/input/markup",
+                "lambda/input/markup/block",
+                "lambda/input/markup/inline",
+                "lambda/input/markup/format",
+                "lambda/format",
+                "lambda/validator",
+                "lambda/js",
+                "lambda/py",
+                "lambda/bash",
+                "lambda/ts",
+                "lambda/rb",
+                "lambda/network",
+                "radiant",
+                "radiant/pdf",
+                "radiant/webdriver"
+            ],
+            "includes": [
+                ".",
+                "include",
+                "build_temp/re2-noabsl",
+                "lambda/tree-sitter/lib/include",
+                "lambda/tree-sitter-lambda/bindings/c",
+                "lambda/tree-sitter-typescript/bindings/c",
+                "lambda/tree-sitter-javascript/bindings/c",
+                "lambda/tree-sitter-python/bindings/c",
+                "lambda/tree-sitter-ruby/bindings/c",
+                "lambda/tree-sitter-bash/bindings/c",
+                "mac-deps/rpmalloc-install/include",
+                "lib/font/woff2/include",
+                "mac-deps/thorvg/src/bindings/capi"
+            ],
+            "additional_libraries": [
+                {
+                    "name": "tree-sitter-python",
+                    "version": "0.25.0",
+                    "include": "lambda/tree-sitter-python/bindings/c",
+                    "lib": "lambda/tree-sitter-python/libtree-sitter-python.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-ruby",
+                    "version": "0.23.1",
+                    "include": "lambda/tree-sitter-ruby/bindings/c",
+                    "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-bash",
+                    "version": "0.25.1",
+                    "include": "lambda/tree-sitter-bash/bindings/c",
+                    "lib": "lambda/tree-sitter-bash/libtree-sitter-bash.a",
+                    "link": "static"
+                }
+            ],
+            "defines": [
+                "LAMBDA_JUBE",
+                "LAMBDA_C2MIR",
+                "LAMBDA_PYTHON",
+                "LAMBDA_BASH",
+                "LAMBDA_RUBY"
+            ],
+            "build_dir": "build_jube",
+            "exclude_source_files": [
+                "lambda/schema_builder.cpp",
+                "lambda/transpile_shared.cpp",
+                "radiant/radiant.cpp",
+                "radiant/render_dvi.cpp",
+                "radiant/render_texnode.cpp",
+                "lambda/format/format_latex_html_v2.cpp",
+                "lambda/input/input-adoc.cpp",
+                "lib/font_config.c",
+                "lambda/input/input-ini.cpp",
+                "lambda/input/input-prop.cpp",
+                "lambda/http_module.cpp",
+                "radiant/webdriver/webdriver_server.cpp",
+                "radiant/webdriver/cmd_webdriver.cpp"
+            ],
             "debug": false
         },
         "windows": {
@@ -2730,29 +2794,6 @@
                         "icon": "🎨"
                     },
                     {
-                        "source": "test/test_c2mir_gtest.cpp",
-                        "name": "C2MIR JIT Execution Tests",
-                        "dependencies": [],
-                        "binary": "test_c2mir_gtest.exe",
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "⚡"
-                    },
-                    {
-                        "source": "test/test_transpile_patterns_gtest.cpp",
-                        "name": "Transpile Pattern Tests",
-                        "dependencies": [],
-                        "binary": "test_transpile_patterns_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🔍"
-                    },
-                    {
                         "source": "test/test_math_parser_gtest.cpp",
                         "name": "Math Parser Tests",
                         "dependencies": [
@@ -2776,29 +2817,6 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🧪"
-                    },
-                    {
-                        "source": "test/test_py_gtest.cpp",
-                        "name": "Python Transpiler Tests",
-                        "dependencies": [],
-                        "binary": "test_py_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🐍"
-                    },
-                    {
-                        "source": "test/test_rb_gtest.cpp",
-                        "name": "Ruby Transpiler Tests",
-                        "dependencies": [],
-                        "binary": "test_rb_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "💎",
-                        "category": "extended"
                     },
                     {
                         "source": "test/test_ts_gtest.cpp",
@@ -2881,17 +2899,6 @@
                         "icon": "🐑"
                     },
                     {
-                        "source": "test/test_bash_official_gtest.cpp",
-                        "name": "Bash Official Test Suite",
-                        "dependencies": [],
-                        "binary": "test_bash_official_gtest.exe",
-                        "libraries": [
-                            "gtest"
-                        ],
-                        "requires_lambda_exe": true,
-                        "icon": "🐚"
-                    },
-                    {
                         "source": "test/test_ui_automation_gtest.cpp",
                         "name": "UI Automation Tests",
                         "dependencies": [],
@@ -2905,6 +2912,77 @@
                     }
                 ],
                 "type": "extended",
+                "uses_build_config": true,
+                "requires_lambda_exe": true,
+                "parallel": true
+            },
+            {
+                "suite": "jube",
+                "name": "🌐 Jube Polyglot Tests",
+                "category": "baseline",
+                "tests": [
+                    {
+                        "source": "test/test_py_gtest.cpp",
+                        "name": "Python Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_py_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "requires_jube_exe": true,
+                        "icon": "🐍"
+                    },
+                    {
+                        "source": "test/test_rb_gtest.cpp",
+                        "name": "Ruby Transpiler Tests",
+                        "dependencies": [],
+                        "binary": "test_rb_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "requires_jube_exe": true,
+                        "icon": "💎"
+                    },
+                    {
+                        "source": "test/test_bash_official_gtest.cpp",
+                        "name": "Bash Official Test Suite",
+                        "dependencies": [],
+                        "binary": "test_bash_official_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "requires_jube_exe": true,
+                        "icon": "🐚"
+                    },
+                    {
+                        "source": "test/test_c2mir_gtest.cpp",
+                        "name": "C2MIR JIT Execution Tests",
+                        "dependencies": [],
+                        "binary": "test_c2mir_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "requires_jube_exe": true,
+                        "icon": "⚡"
+                    },
+                    {
+                        "source": "test/test_transpile_patterns_gtest.cpp",
+                        "name": "Transpile Pattern Tests",
+                        "dependencies": [],
+                        "binary": "test_transpile_patterns_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_jube_exe": true,
+                        "icon": "🔍"
+                    }
+                ],
+                "type": "jube",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
                 "parallel": true

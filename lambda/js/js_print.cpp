@@ -1,3 +1,4 @@
+#ifndef NDEBUG
 #include "js_transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstdio>
@@ -173,3 +174,4 @@ void print_js_ast_node(JsAstNode* node, int indent) {
             break;
     }
 }
+#endif // NDEBUG

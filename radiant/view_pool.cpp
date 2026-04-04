@@ -699,6 +699,7 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
     log_debug("=================\n");
     // only write text side-channel files when no explicit output_path is given
     if (!output_path) {
+#ifndef NDEBUG
         char vfile[1024];  const char *last_slash;
         if (url && url->pathname && url->pathname->chars) {
             last_slash = strrchr((const char*)url->pathname->chars, '/');
@@ -706,6 +707,7 @@ void print_view_tree(ViewElement* view_root, Url* url, const char* output_path) 
             write_string_to_file(vfile, buf->str);
         }
         write_string_to_file("./view_tree.txt", buf->str);
+#endif
     }
     strbuf_free(buf);
 
@@ -2305,6 +2307,7 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     strbuf_append_str(json_buf, "\n}\n");
 
     // Write to file in ./test_output/ only when no explicit output_path is given
+#ifndef NDEBUG
     char buf[1024];  const char *last_slash;
     if (!output_path && url && url->pathname && url->pathname->chars) {
         last_slash = strrchr((const char*)url->pathname->chars, '/');
@@ -2312,9 +2315,16 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
         log_debug("Writing JSON layout data to: %s", buf);
         write_string_to_file(buf, json_buf->str);
     }
-    // Write to custom output path if specified, otherwise default to /tmp/view_tree.json
-    const char* json_output = output_path ? output_path : "/tmp/view_tree.json";
-    write_string_to_file(json_output, json_buf->str);
+#endif
+    // Write to custom output path if specified, otherwise default to temp/view_tree.json
+    if (output_path) {
+        write_string_to_file(output_path, json_buf->str);
+    }
+#ifndef NDEBUG
+    else {
+        write_string_to_file("./temp/view_tree.json", json_buf->str);
+    }
+#endif
     strbuf_free(json_buf);
 }
 

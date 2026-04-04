@@ -136,18 +136,19 @@ inline bool is_slow_benchmark(const std::string& test_name) {
 inline char* execute_lambda_script(const char* script_path, bool is_procedural = false, bool use_mir = false) {
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
+    const char* exe = use_mir ? "lambda.exe" : "lambda-jube.exe";
     const char* no_log_flag = " --no-log";  // always disable logging in tests for performance
 #ifdef _WIN32
     if (is_procedural) {
-        snprintf(command, sizeof(command), "lambda.exe run%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "%s run%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "lambda.exe%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "%s%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
     }
 #else
     if (is_procedural) {
-        snprintf(command, sizeof(command), "./lambda.exe run%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "./%s run%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
     } else {
-        snprintf(command, sizeof(command), "./lambda.exe%s%s \"%s\"", no_log_flag, c2mir_flag, script_path);
+        snprintf(command, sizeof(command), "./%s%s%s \"%s\"", exe, no_log_flag, c2mir_flag, script_path);
     }
 #endif
 
@@ -476,12 +477,13 @@ inline void run_sub_batch(
 
     char command[512];
     const char* c2mir_flag = use_mir ? "" : " --c2mir";
+    const char* exe = use_mir ? "lambda.exe" : "lambda-jube.exe";
 #ifdef _WIN32
-    snprintf(command, sizeof(command), "lambda.exe test-batch --no-log --timeout=60%s < \"%s\"",
-             c2mir_flag, manifest_path);
+    snprintf(command, sizeof(command), "%s test-batch --no-log --timeout=60%s < \"%s\"",
+             exe, c2mir_flag, manifest_path);
 #else
-    snprintf(command, sizeof(command), "./lambda.exe test-batch --no-log --timeout=60%s < \"%s\"",
-             c2mir_flag, manifest_path);
+    snprintf(command, sizeof(command), "./%s test-batch --no-log --timeout=60%s < \"%s\"",
+             exe, c2mir_flag, manifest_path);
 #endif
 
     FILE* pipe = popen(command, "r");

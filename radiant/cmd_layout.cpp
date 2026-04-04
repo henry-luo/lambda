@@ -4042,6 +4042,9 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // The GC heap, JIT code, and name pool remain live for the session.
     dom_doc->lambda_runtime = runtime;
 
+    // Create Input context for event object construction (used by dispatch_lambda_handler)
+    dom_doc->input = Input::create(pool, script_url);
+
     // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 
     auto total_end = std::chrono::high_resolution_clock::now();
@@ -4089,20 +4092,30 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // replace old DOM root
     doc->root = new_root;
 
-    // re-extract and apply inline <style> elements
-    CssEngine* css_engine = css_engine_create(doc->pool);
-    if (css_engine) {
-        int inline_count = 0;
-        CssStylesheet** inline_sheets = extract_and_collect_css(
-            html_elem, css_engine, nullptr, doc->pool, &inline_count);
+    // apply cached CSS stylesheets (parse once, reuse on subsequent rebuilds)
+    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
+    int inline_count = doc->cached_inline_sheet_count;
+    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
 
+    if (!inline_sheets) {
+        // first rebuild: parse and cache stylesheets
+        css_engine = css_engine_create(doc->pool);
+        if (css_engine) {
+            inline_sheets = extract_and_collect_css(
+                html_elem, css_engine, nullptr, doc->pool, &inline_count);
+            doc->cached_inline_sheets = inline_sheets;
+            doc->cached_inline_sheet_count = inline_count;
+            doc->cached_css_engine = css_engine;
+            log_info("rebuild_lambda_doc: cached %d inline stylesheet(s)", inline_count);
+        }
+    }
+
+    if (css_engine && inline_sheets && inline_count > 0) {
         SelectorMatcher* matcher = selector_matcher_create(doc->pool);
-        if (inline_sheets && inline_count > 0) {
-            for (int i = 0; i < inline_count; i++) {
-                if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
-                    apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
-                                                      matcher, doc->pool, css_engine);
-                }
+        for (int i = 0; i < inline_count; i++) {
+            if (inline_sheets[i] && inline_sheets[i]->rule_count > 0) {
+                apply_stylesheet_to_dom_tree_fast(new_root, inline_sheets[i],
+                                                  matcher, doc->pool, css_engine);
             }
         }
     }

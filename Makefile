@@ -15,6 +15,7 @@ BUILD_LINUX_DIR = build_linux
 # Output executables
 LAMBDA_EXE = lambda.exe
 LAMBDA_CLI_EXE = lambda-cli.exe
+LAMBDA_JUBE_EXE = lambda-jube.exe
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
@@ -26,15 +27,18 @@ ifeq ($(OS),Darwin)
 	NPROCS := $(shell sysctl -n hw.ncpu)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
+	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc)
 	PREMAKE_FILE := premake5.lin.lua
 	PREMAKE_CLI_FILE := premake5.cli.lin.lua
+	PREMAKE_JUBE_FILE := premake5.jube.lin.lua
 else
 	# Windows/MSYS2 detection
 	NPROCS := $(shell nproc 2>/dev/null || echo 4)
 	PREMAKE_FILE := premake5.win.lua
 	PREMAKE_CLI_FILE := premake5.cli.win.lua
+	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
 # Optimize parallel jobs: use all cores for compilation, limit linking to 1
@@ -381,34 +385,41 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_RUBY_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# Core: only parsers needed by lambda.exe (Lambda, JS, TS, LaTeX)
+tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+
+# All: includes jube-only parsers (Python, Bash, Ruby)
+tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
 
 # Default target
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
-	    lambda lambda-cli build-cli format lint check docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
-	    tree-sitter-libs \
+	    tree-sitter-libs tree-sitter-core-libs \
 	    verify-windows verify-linux \
-	    generate-premake clean-premake build-test build-test-linux \
+	    generate-premake clean-premake build-test build-test-linux build-jube-test test-jube \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
-	    test-ui-automation
+	    test-ui-automation test-reactive-ui
 
 # Help target - shows available commands
 help:
 	@echo "$(PROJECT_NAME) - Available Make Targets:"
 	@echo ""
 	@echo "Build Targets (Premake-based):"
-	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
+	@echo "  build         - Build lambda (core) using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Uses CLANG64 Clang (avoids Universal CRT)"
 	@echo "                  All platforms use Clang as the default compiler"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
-	@echo "  release       - Build optimized release version using Premake"
+	@echo "  build-release - Build optimized release version using Premake"
+	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  build-jube    - Build polyglot runtime (Lambda + JS/TS + Python + Bash + Ruby + Radiant)"
+	@echo "  release-jube  - Build optimized polyglot release version"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
@@ -424,7 +435,8 @@ help:
 	@echo "Premake Build System:"
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
-	@echo "  build-test    - Build all test projects using Premake"
+	@echo "  build-test    - Build all test executables using Premake"
+	@echo "  build-jube-test - Build lambda-jube and all test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -440,6 +452,7 @@ help:
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
+	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -519,7 +532,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
+build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -586,7 +599,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs $(RE2_LIB)
+build-release-compile: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-core-libs $(RE2_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -627,6 +640,47 @@ else
 endif
 	@echo "✅ CLI build completed. Executable: lambda-cli.exe"
 	@ls -lh lambda-cli.exe 2>/dev/null || true
+
+# Polyglot Jube build (Lambda + JS/TS + Python + Bash + Ruby + Radiant)
+# Produces lambda-jube.exe with all language runtimes
+lambda-jube: build-jube
+
+build-jube: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Lambda Jube (polyglot runtime) using Premake build system..."
+	@echo "Includes: Lambda, JS, TS, Python, Bash, Ruby + Radiant"
+	$(PYTHON) utils/generate_premake.py --variant jube --output $(PREMAKE_JUBE_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_JUBE_FILE)
+	@echo "Building lambda-jube executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_native lambda-jube -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	@echo "✅ Jube build completed. Executable: lambda-jube.exe"
+	@ls -lh lambda-jube.exe 2>/dev/null || true
+
+release-jube: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Lambda Jube release (polyglot runtime, optimized)..."
+	$(PYTHON) utils/generate_premake.py --variant jube --output $(PREMAKE_JUBE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_JUBE_FILE)
+	$(MAKE) -C build/premake config=release_native lambda-jube -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+ifeq ($(OS),Darwin)
+	@strip -x lambda-jube.exe 2>/dev/null || true
+else
+	@strip lambda-jube.exe 2>/dev/null || true
+endif
+	@echo "✅ Jube release build completed. Executable: lambda-jube.exe"
+	@ls -lh lambda-jube.exe 2>/dev/null || true
+
+# Build lambda-jube and all test executables
+build-jube-test: build-jube build-test
+
+# Run jube-specific tests only (Python, Bash, Ruby)
+test-jube: build-jube-test
+	@echo "Running jube-specific test suites (Python, Bash, Ruby)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=jube --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
 
 # Force rebuild (clean + build)
 rebuild: clean-all
@@ -760,7 +814,16 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test: test-all
+test: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
+	@echo "Running lambda (core) test suites (excluding jube)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --exclude-target=jube --parallel; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
@@ -795,9 +858,9 @@ test-lambda-baseline: build-test
 		exit 1; \
 	fi
 
-test-bash-baseline: build
-	@echo "Running Bash transpiler baseline tests..."
-	@bash test/test_bash_run.sh
+test-bash-baseline: build-jube-test
+	@echo "Running Bash transpiler baseline tests (requires lambda-jube)..."
+	@LAMBDA_EXE=./lambda-jube.exe bash test/test_bash_run.sh
 
 test-c2mir: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
@@ -946,6 +1009,25 @@ test-ui-automation: build-test
 		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
+
+test-reactive-ui: build
+	@echo "Running Reactive UI test suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/todo_toggle.json test/ui/todo_delete.json; do \
+		name=$$(basename $$json .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		echo "--- $$name ---"; \
+		if ./lambda.exe view test/lambda/ui/todo.ls --event-file $$json --headless; then \
+			PASS=$$((PASS + 1)); \
+		else \
+			FAIL=$$((FAIL + 1)); \
+			echo "FAIL: $$name"; \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:

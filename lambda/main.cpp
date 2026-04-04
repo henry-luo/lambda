@@ -41,9 +41,13 @@
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
+#ifdef LAMBDA_PYTHON
 #include "py/py_transpiler.hpp"      // Python transpiler
+#endif
+#ifdef LAMBDA_BASH
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
+#endif
 #include "ts/ts_transpiler.hpp"      // TypeScript transpiler
 #ifdef LAMBDA_RUBY
 #include "rb/rb_transpiler.hpp"      // Ruby transpiler
@@ -209,7 +213,11 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 #endif
 
 void run_repl(Runtime *runtime, bool use_mir) {
+#ifdef LAMBDA_C2MIR
     printf("Lambda Script REPL v1.0%s\n", use_mir ? "" : " (C2MIR)");
+#else
+    printf("Lambda Script REPL v1.0\n");
+#endif
     printf("Type help for commands, quit to exit\n");
     printf("Multi-line input: use continuation prompt (.. ) for incomplete statements\n");
 
@@ -302,8 +310,10 @@ void run_repl(Runtime *runtime, bool use_mir) {
             // transpile using MIR
             output_input = run_script_mir(runtime, repl_history->str, script_path, false);
         } else {
+#ifdef LAMBDA_C2MIR
             // transpile using C2MIR
             output_input = run_script(runtime, repl_history->str, script_path, false);
+#endif
         }
 
         if (output_input) {
@@ -357,7 +367,9 @@ int run_script_file(Runtime *runtime, const char *script_path, bool use_mir, boo
     if (use_mir) {
         output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
     } else {
+#ifdef LAMBDA_C2MIR
         output_input = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
+#endif
     }
 
     log_debug("run_script_file: output_input = %p", output_input);
@@ -1089,6 +1101,7 @@ int main(int argc, char *argv[]) {
         return js_had_error ? 1 : 0;
     }
 
+#ifdef LAMBDA_PYTHON
     // Handle Python command
     log_debug("Checking for py command");
     if (argc >= 2 && strcmp(argv[1], "py") == 0) {
@@ -1150,6 +1163,7 @@ int main(int argc, char *argv[]) {
         log_finish();
         return 0;
     }
+#endif // LAMBDA_PYTHON
 
 #ifdef LAMBDA_RUBY
     // Handle Ruby command
@@ -1215,6 +1229,7 @@ int main(int argc, char *argv[]) {
     }
 #endif // LAMBDA_RUBY
 
+#ifdef LAMBDA_BASH
     // Handle Bash command — either explicit "bash" subcommand or auto-detect
     log_debug("Checking for bash command");
     // auto-detect bash mode: lambda.exe -c 'cmd', lambda.exe -o option, lambda.exe script.sh
@@ -1375,6 +1390,7 @@ int main(int argc, char *argv[]) {
         log_finish();
         return bash_exit;
     }
+#endif // LAMBDA_BASH
 
     // Handle TypeScript command
     log_debug("Checking for ts command");
@@ -2161,9 +2177,11 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
 
-            const char* temp_svg = "/tmp/lambda_graph_view.svg";
+            const char* temp_svg = "./temp/lambda_graph_view.svg";
             write_text_file(temp_svg, svg_str->chars);
-            write_text_file("/tmp/lambda_graph_debug.svg", svg_str->chars);  // debug copy
+#ifndef NDEBUG
+            write_text_file("./temp/lambda_graph_debug.svg", svg_str->chars);  // debug copy
+#endif
             free_graph_layout(layout);
 
             // View the temp SVG file
@@ -2458,9 +2476,12 @@ int main(int argc, char *argv[]) {
         bool use_mir = true;
         int batch_timeout = 60; // default per-script timeout in seconds
         for (int i = 2; i < argc; i++) {
+#ifdef LAMBDA_C2MIR
             if (strcmp(argv[i], "--c2mir") == 0) {
                 use_mir = false;
-            } else if (strcmp(argv[i], "--no-log") == 0) {
+            } else
+#endif
+            if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
@@ -2687,9 +2708,14 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Script Runner v1.0\n\n");
+#ifdef LAMBDA_C2MIR
             printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
             printf("\nOptions:\n");
             printf("  --c2mir        Use C2MIR JIT compilation (default: MIR Direct)\n");
+#else
+            printf("Usage: %s run <script>\n", argv[0]);
+            printf("\nOptions:\n");
+#endif
             printf("  -h, --help     Show this help message\n");
             printf("\nDescription:\n");
             printf("  The 'run' command executes a Lambda script with run_main context enabled.\n");
@@ -2697,7 +2723,9 @@ int main(int argc, char *argv[]) {
             printf("  automatically executed during script execution.\n");
             printf("\nExamples:\n");
             printf("  %s run script.ls                 # Run script with MIR Direct JIT (default)\n", argv[0]);
+#ifdef LAMBDA_C2MIR
             printf("  %s run --c2mir script.ls         # Run script with C2MIR JIT compilation\n", argv[0]);
+#endif
             log_finish();  // Cleanup logging before exit
             return 0;
         }
@@ -2707,12 +2735,9 @@ int main(int argc, char *argv[]) {
         char* script_file = NULL;
 
         for (int i = 2; i < argc; i++) {
+#ifdef LAMBDA_C2MIR
             if (strcmp(argv[i], "--c2mir") == 0) {
                 use_mir = false;
-            } else if (strcmp(argv[i], "--mir") == 0) {
-                use_mir = true;  // backward compat (already default)
-            } else if (strcmp(argv[i], "--no-log") == 0) {
-                // already handled early in main()
             } else if (strcmp(argv[i], "--transpile-dir") == 0) {
                 if (i + 1 < argc) {
                     runtime.transpile_dir = argv[++i];
@@ -2722,6 +2747,12 @@ int main(int argc, char *argv[]) {
                     log_finish();
                     return 1;
                 }
+            } else
+#endif
+            if (strcmp(argv[i], "--mir") == 0) {
+                use_mir = true;  // backward compat (already default)
+            } else if (strcmp(argv[i], "--no-log") == 0) {
+                // already handled early in main()
             } else if (argv[i][0] != '-') {
                 if (script_file == NULL) {
                     script_file = argv[i];
@@ -2739,7 +2770,11 @@ int main(int argc, char *argv[]) {
 
         if (!script_file) {
             printf("Error: run command requires a script file\n");
+#ifdef LAMBDA_C2MIR
             printf("Usage: %s run [--c2mir] <script>\n", argv[0]);
+#else
+            printf("Usage: %s run <script>\n", argv[0]);
+#endif
             log_finish();
             return 1;
         }
@@ -2771,14 +2806,9 @@ int main(int argc, char *argv[]) {
     // Parse arguments
     int ret_code = 0;
     for (int i = 1; i < argc; i++) {
+#ifdef LAMBDA_C2MIR
         if (strcmp(argv[i], "--c2mir") == 0) {
             use_mir = false;
-        }
-        else if (strcmp(argv[i], "--mir") == 0) {
-            use_mir = true;  // backward compat (already default)
-        }
-        else if (strcmp(argv[i], "--help") == 0) {
-            help_only = true;
         }
         else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
@@ -2792,6 +2822,14 @@ int main(int argc, char *argv[]) {
                 help_only = true;
                 ret_code = 1;
             }
+        }
+        else
+#endif
+        if (strcmp(argv[i], "--mir") == 0) {
+            use_mir = true;  // backward compat (already default)
+        }
+        else if (strcmp(argv[i], "--help") == 0) {
+            help_only = true;
         }
         else if (strcmp(argv[i], "--max-errors") == 0) {
             if (i + 1 < argc) {

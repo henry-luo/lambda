@@ -1396,14 +1396,14 @@ const TSLanguage *ts_wasm_store_load_language(
     );
   }
 
-  if (language->version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES) {
+  if (language->abi_version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES) {
     language->primary_state_ids = copy(
       &memory[wasm_language.primary_state_ids],
       wasm_language.state_count * sizeof(TSStateId)
     );
   }
 
-  if (language->version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS) {
+  if (language->abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS) {
     language->name = copy_string(memory, wasm_language.name);
     language->reserved_words = copy(
         &memory[wasm_language.reserved_words],

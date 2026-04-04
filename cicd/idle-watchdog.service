@@ -1,0 +1,16 @@
+[Unit]
+Description=Lambda Dev Idle Watchdog — auto power-off after 30 min inactivity
+After=multi-user.target sshd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/idle-watchdog.sh
+Restart=on-failure
+RestartSec=10
+Environment=IDLE_TIMEOUT=1800
+Environment=CHECK_INTERVAL=60
+StandardOutput=append:/var/log/idle-watchdog.log
+StandardError=append:/var/log/idle-watchdog.log
+
+[Install]
+WantedBy=multi-user.target

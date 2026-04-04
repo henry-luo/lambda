@@ -690,12 +690,12 @@ MIR emission for hot paths.
 
 Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 
-- [ ] **P5a**: Type inference infrastructure — track `type_hint` on variables
-- [ ] **P5b**: Native integer arithmetic — `MIR_ADD`/`MIR_SUB`/`MIR_MUL` for typed ints
-- [ ] **P5c**: Native comparisons — `MIR_LTS`/`MIR_LES` for typed int/float
-- [ ] **P5d**: Integer loop optimization — `n.times {}`, `for i in 0..n` → native counter
-- [ ] **P5e**: Shaped slot property access — `@ivar` on known classes → O(1) indexed read
-- [ ] **P5f**: Direct method dispatch — statically resolve method calls on known types
+- [x] **P5a**: Type inference infrastructure — `rm_get_effective_type`, `type_hint` on variables, box/unbox helpers
+- [x] **P5b**: Native integer arithmetic — `MIR_ADD`/`MIR_SUB`/`MIR_MUL`/`MIR_DIV`/`MIR_MOD` for typed ints, `MIR_DADD`/`MIR_DSUB`/`MIR_DMUL`/`MIR_DDIV` for floats
+- [x] **P5c**: Native comparisons — `MIR_LTS`/`MIR_LES`/`MIR_GTS`/`MIR_GES`/`MIR_EQ`/`MIR_NE` for typed int/float
+- [x] **P5d**: Integer loop optimization — `for i in 0..n` → native counter loop with `MIR_ADD` increment; type-propagated `+=` uses native arithmetic
+- [ ] **P5e**: Shaped slot property access — `@ivar` on known classes → O(1) indexed read (deferred)
+- [ ] **P5f**: Direct method dispatch — statically resolve method calls on known types (deferred)
 
 ---
 
@@ -708,7 +708,7 @@ Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 | `rb_ast.hpp` | ~300 | 437 | ✅ Done | AST node types (70+), operator enums, struct definitions |
 | `rb_transpiler.hpp` | ~120 | 112 | ✅ Done | Transpiler context struct, scope types, API declarations |
 | `build_rb_ast.cpp` | ~2,500 | 1,858 | ✅ Done | Tree-sitter CST → Ruby AST conversion |
-| `transpile_rb_mir.cpp` | ~6,000 | 3,408 | ✅ Phase 4 | AST → MIR IR emission (core + OOP + builtins + exceptions) |
+| `transpile_rb_mir.cpp` | ~6,000 | ~4,900 | ✅ Phase 5 | AST → MIR IR emission (core + OOP + builtins + exceptions + native optimizations) |
 | `rb_runtime.cpp` | ~2,000 | 1,026 | ✅ Phase 4 | Ruby operator dispatch, truthiness, type conversion, exceptions |
 | `rb_runtime.h` | ~100 | 202 | ✅ Done | Runtime function declarations (extern "C") |
 | `rb_scope.cpp` | ~400 | 230 | ✅ Done | Scope management: local, global, constant |
@@ -901,7 +901,7 @@ These cases require Ruby-specific runtime functions rather than reusing Python's
 | **M4: Standard Library** | 40+ built-in methods, type dispatchers — Phase 3 complete | ~12K | ✅ Done (9,421 LOC) |
 | **M5: Error Handling** | begin/rescue/ensure, custom exceptions, retry, respond_to?, send — Phase 4 complete | ~14K | ✅ Done (9,421 LOC) |
 | **M6: Cross-Language** | `require_relative` imports .ls/.py/.js modules; verified bidirectional | ~14.5K | Not started |
-| **M7: Performance** | Type inference + native MIR emission; benchmark suite — Phase 5 complete | ~15.5K | Not started |
+| **M7: Performance** | Type inference + native MIR emission; benchmark suite — Phase 5 complete | ~15.5K | ✅ Done (P5a-P5d) |
 | **M8: Baseline Tests** | 100% pass rate on `test-ruby-baseline` (60+ tests) | ~15.5K | Not started |
 
 ---
