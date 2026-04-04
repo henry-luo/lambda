@@ -10667,7 +10667,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
 // ============================================================================
 // Event handler compilation
-// Compiles an event handler as a MIR function: Item _handler_N_M(Item model)
+// Compiles an event handler as a MIR function: Item _handler_N_M(Item model, Item event)
 // Handlers use procedural semantics. State variables are loaded from the
 // central state store at function entry and written back on assignment.
 // ============================================================================
@@ -10703,16 +10703,18 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->block_returned = false;
     mt->func_body = handler->body;
 
-    // create MIR function: Item _handler_N_M(Item _model) -> Item (i64)
+    // create MIR function: Item _handler_N_M(Item _model, Item _event) -> Item (i64)
     MIR_type_t ret_type = MIR_T_I64;
-    MIR_var_t params[1] = {{MIR_T_I64, strdup("_model"), 0}};
+    MIR_var_t params[2] = {{MIR_T_I64, strdup("_model"), 0}, {MIR_T_I64, strdup("_event"), 0}};
     char* param_name_copy = (char*)params[0].name;
+    char* event_name_copy = (char*)params[1].name;
 
-    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, handler_name, 1, &ret_type, 1, params);
+    MIR_item_t func_item = MIR_new_func_arr(mt->ctx, handler_name, 1, &ret_type, 2, params);
     MIR_func_t func = MIR_get_item_func(mt->ctx, func_item);
     mt->current_func_item = func_item;
     mt->current_func = func;
     free(param_name_copy);
+    free(event_name_copy);
 
     // load runtime context from _lambda_rt
     MIR_item_t rt_import = MIR_new_import(mt->ctx, "_lambda_rt");
@@ -10764,6 +10766,12 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     MIR_reg_t model_reg = MIR_reg(mt->ctx, "_model", func);
     set_var(mt, "it", model_reg, MIR_T_I64, LMD_TYPE_ANY);
     mt->view_model_reg = model_reg;
+
+    // bind event parameter if declared: on click(evt) { evt.target_class ... }
+    if (handler->param && handler->param->name) {
+        MIR_reg_t event_reg = MIR_reg(mt->ctx, "_event", func);
+        set_var(mt, handler->param->name->chars, event_reg, MIR_T_I64, LMD_TYPE_ANY);
+    }
 
     // load state variables from the central state store
     for (AstStateEntry* se = view->state; se; se = se->next_state) {

@@ -112,8 +112,7 @@ void MarkEditor::set_mode(EditMode mode) {
 
 int MarkEditor::commit(const char* description) {
     if (mode_ != EDIT_MODE_IMMUTABLE) {
-        log_warn("commit: only available in immutable mode");
-        return -1;
+        return 0;  // no-op for inline mode
     }
 
     Item current_root = input_->root;

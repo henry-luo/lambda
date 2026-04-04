@@ -1817,7 +1817,6 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Expect property name (identifier or custom property)
     if (tokens[*pos].type != CSS_TOKEN_IDENT && tokens[*pos].type != CSS_TOKEN_CUSTOM_PROPERTY) {
         log_debug("[CSS Parser] Expected IDENT or CUSTOM_PROPERTY for property, got token type %d", tokens[*pos].type);
-        // Skip to next semicolon or right brace to avoid infinite loop
         while (*pos < token_count &&
                tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
                tokens[*pos].type != CSS_TOKEN_RIGHT_BRACE) {
@@ -1839,7 +1838,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         property_name = name_buf;
     } else {
         log_debug("[CSS Parser] No property name in token");
-        return NULL; // No valid property name
+        return NULL;
     }
 
     (*pos)++;
@@ -1904,7 +1903,7 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
         // Colons should only appear after property names, not in values
         if (t == CSS_TOKEN_COLON) {
             log_debug("[CSS Parser] Unexpected colon in value, stopping parse (malformed CSS)");
-            return NULL;  // Invalid declaration
+            return NULL;
         }
 
         // Handle function tokens - skip entire function as one value
@@ -2045,7 +2044,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     }
 
     // reject declaration if no valid value was parsed (e.g. unknown unit like "300x")
-    if (!decl->value) {
+    // BUT: custom properties accept any token sequence, so skip this check for custom props
+    if (!decl->value && !(decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-')) {
         log_debug("[CSS Parse] Rejecting declaration for property '%s': no valid value parsed",
                   property_name);
         return NULL;

@@ -52,6 +52,12 @@ Item rb_cmp(Item left, Item right);     // <=> spaceship
 Item rb_case_eq(Item left, Item right); // === case equality
 
 // ============================================================================
+// Method dispatch
+// ============================================================================
+Item rb_send_1(Item receiver, const char* method_name, Item arg);
+Item rb_call_spaceship(Item left, Item right);
+
+// ============================================================================
 // Object/attribute operations
 // ============================================================================
 Item rb_getattr(Item object, Item name);
@@ -125,6 +131,8 @@ Item rb_builtin_len(Item obj);
 Item rb_builtin_type(Item obj);
 Item rb_builtin_rand(Item max);
 Item rb_builtin_require_relative(Item path);
+void rb_runtime_set_current_file(const char* path);
+void rb_runtime_set_runtime(void* runtime);
 
 // ============================================================================
 // Built-in method dispatchers (Phase 3)
@@ -199,6 +207,16 @@ void rb_attr_accessor(Item cls, Item attr_name);
 void rb_module_include(Item cls, Item module);
 
 // ============================================================================
+// Struct
+// ============================================================================
+Item rb_call_method_missing(Item receiver, Item method_name, Item* args, int argc);
+
+Item rb_struct_new(Item fields_array);
+Item rb_struct_init(Item instance, Item cls, Item* args, int argc);
+Item rb_is_struct(Item cls);
+Item rb_struct_members(Item instance);
+
+// ============================================================================
 // Block / Proc / Lambda calling
 // ============================================================================
 Item rb_block_call(Item block, Item* args, int argc);
@@ -221,6 +239,15 @@ Item rb_array_find(Item array, Item block);
 Item rb_int_times(Item n, Item block);
 Item rb_int_upto(Item n, Item m, Item block);
 Item rb_int_downto(Item n, Item m, Item block);
+Item rb_array_flat_map(Item array, Item block);
+Item rb_array_each_with_object(Item array, Item obj, Item block);
+Item rb_array_sort_by(Item array, Item block);
+Item rb_array_min_by(Item array, Item block);
+Item rb_array_max_by(Item array, Item block);
+Item rb_array_reduce_no_init(Item array, Item block);
+Item rb_hash_each(Item hash, Item block);
+Item rb_hash_map(Item hash, Item block);
+Item rb_hash_select(Item hash, Item block);
 
 #ifdef __cplusplus
 }

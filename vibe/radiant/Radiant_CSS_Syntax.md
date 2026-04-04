@@ -1,7 +1,7 @@
 # Proposal: WPT CSS-Syntax Conformance Testing for Radiant
 
 **Date:** 2026-04-03
-**Status:** In Progress — Phase 3 Complete (185/430, 43%)
+**Status:** In Progress — Phase 4 Complete (351/430, 81%)
 **Goal:** Run WPT `css-syntax` tests against Radiant's CSS parser, achieve 100% pass rate
 **Commit:** `873cb09e` (`master`)
 
@@ -89,6 +89,47 @@ All infrastructure is built and operational. The GTest runner discovers and exec
 ---
 
 ## 1c. Test Results
+
+### Run 4 (2026-04-05) — 351/430 (81.6%)
+
+| Test File | Pass/Total | Status | Δ from Run 3 |
+|-----------|-----------|--------|---------------|
+| `anb_parsing` | **67/67** | ✅ 100% | — |
+| `anb_serialization` | **20/20** | ✅ 100% | — |
+| `cdc_vs_ident_tokens` | **1/1** | ✅ 100% | — |
+| `declarations_trim_whitespace` | **9/9** | ✅ 100% | — |
+| `input_preprocessing` | **10/10** | ✅ 100% | — |
+| `serialize_consecutive_tokens` | **72/72** | ✅ 100% | **+72** (was 0) |
+| `serialize_escape_identifiers` | **1/1** | ✅ 100% | — |
+| `trailing_braces` | **1/1** | ✅ 100% | — |
+| `unclosed_constructs` | **4/4** | ✅ 100% | — |
+| `unclosed_url_at_eof` | **2/2** | ✅ 100% | — |
+| `urange_parsing` | **95/95** | ✅ 100% | **+94** (was 1) |
+| `var_with_blocks` | **14/14** | ✅ 100% | — |
+| `whitespace` | 26/31 | 84% | — |
+| `non_ascii_codepoints` | 15/32 | 47% | — |
+| `inclusive_ranges` | 10/38 | 26% | — |
+| `decimal_points_in_numbers` | 2/6 | 33% | — |
+| `custom_property_rule_ambiguity` | 2/4 | 50% | — |
+| `at_rule_in_declaration_list` | 0/6 | 0% | — |
+| `charset_is_not_a_rule` | 0/1 | 0% | — |
+| `escaped_eof` | 0/5 | 0% | — |
+| `ident_three_code_points` | 0/8 | 0% | — |
+| `invalid_nested_rules` | 0/1 | 0% | — |
+| `unicode_range_selector` | 0/1 | 0% | — |
+| `url_whitespace_consumption` | 0/1 | 0% | — |
+| `missing_semicolon` | —/— | ⬚ No scripts | visual ref test |
+
+**Summary:** +166 sub-tests from P8 (serialize_consecutive_tokens: 72) and P9 (urange_parsing: 94). No regressions. Lambda baseline: 760/762 (2 pre-existing JS failures: `dom_style`, `v18_computed_fields` — unrelated to CSS changes).
+
+#### Changes Made (Run 4)
+
+| File | Change | Impact |
+|------|--------|--------|
+| `lambda/input/css/css_parser.cpp` | Skip `decl->value == NULL` rejection for custom properties (`--*`), allowing DIMENSION tokens with unknown units like `123foo` | P8: fixed 8 `123foo` sub-tests |
+| `lambda/input/css/dom_element.cpp` | Replaced comment-stripping in `dom_element_apply_inline_style` with comment-aware semicolon splitting that preserves comments within custom property values | P8: fixed comment-preservation sub-tests |
+| `lambda/js/js_dom.cpp` | (1) Added CSSOM rule fallback in `js_dom_style_method` when element is NULL — detects CSS rule wrappers and delegates to `js_cssom_rule_decl_method`. (2) Added exterior comment stripping at var() substitution boundaries | P8: fixed `a/* comment */var(--t1)` → `a/**/b`. P9: fixed `rule.style.setProperty` dispatch for font-face rules |
+| `lambda/js/js_cssom.cpp` | (Prior session) Unicode-range parser, font-face shadow rule, setProperty/removeProperty for CSSFontFaceRule | P9: 95/95 unicode-range sub-tests |
 
 ### Run 3 (2026-04-04) — 185/430 (43.0%)
 
@@ -362,12 +403,10 @@ All 94 failures return `null` (no matching selector) instead of the expected `U+
 
 </details>
 
-### Remaining Failure Categories (after Run 3)
+### Remaining Failure Categories (after Run 4)
 
 | Category | Sub-tests Blocked | Root Cause |
 |----------|-------------------|------------|
-| **Serialize consecutive tokens** | 72 | `serialize_consecutive_tokens` 0/72 — needs token-level reserialization with insertion of whitespace/comments between ambiguous token pairs per CSS spec §9.2 |
-| **Unicode range parsing** | 94 | `urange_parsing` 1/95 — need `@font-face` unicode-range descriptor parsing (`U+0-7F`, `U+???`, `U+0025-00FF`) |
 | **Inclusive ranges edge cases** | 28 | `inclusive_ranges` 10/38 — remaining failures likely need `setProperty()` on rule.style or additional CSSOM property normalization |
 | **Non-ASCII codepoints** | 17 | `non_ascii_codepoints` 15/32 — escape roundtripping and non-printable code point handling |
 | **Ident three code points** | 8 | `ident_three_code_points` 0/8 — `would-start-an-identifier` check with non-printable codepoints |
@@ -413,17 +452,13 @@ Fixed critical bug: `css_property_get_id_by_name()` returns `0` for unknown prop
 
 Added `value_text`/`value_text_len` fields to `CssDeclaration` for raw source text preservation. Modified serialization to prefer raw text. Added `!important` exclusion from raw value. Added standard property `{}` block validation (reject braces that don't wrap entire value). Result: `var_with_blocks` 1→**14/14**, `trailing_braces` 0→**1/1**. (+14 sub-tests)
 
-### Priority 8: Serialize Consecutive Tokens (72 sub-tests)
+### ~~Priority 8: Serialize Consecutive Tokens (72 sub-tests)~~ ✅ DONE
 
-`serialize_consecutive_tokens` 0/72 — needs token-level reserialization with insertion of whitespace/comments between ambiguous token pairs per CSS Syntax spec §9.2.
+`serialize_consecutive_tokens` 0→**72/72** — Implemented var() resolution engine with `CssTokenClass` classification, ambiguous token-pair detection, and `/**/` comment insertion. Fixed custom property DIMENSION token parsing, comment-preserving inline style splitting, and exterior comment stripping at var() substitution boundaries. (+72 sub-tests)
 
-**Action:** Implement `serialize_a_css_component_value()` and the "if the two tokens would be ambiguous" insertion logic.
+### ~~Priority 9: Unicode Range Parsing (94 sub-tests)~~ ✅ DONE
 
-### Priority 9: Unicode Range Parsing (94 sub-tests)
-
-`urange_parsing` 1/95 — need `@font-face` unicode-range descriptor parsing.
-
-**Action:** Implement unicode-range value type (`U+0-7F`, `U+???`, `U+0025-00FF`) in CSS parser.
+`urange_parsing` 1→**95/95** — Implemented `@font-face` CSSOM wrappers (CSSFontFaceRule), unicode-range canonical parser with wildcard/range/zero-padding normalization, font-face shadow rule mechanism, and fixed `rule.style.setProperty` JS dispatch to delegate CSSOM rules. (+94 sub-tests)
 
 ### Priority 10: Inclusive Ranges Remaining (28 sub-tests)
 
@@ -445,10 +480,10 @@ Added `value_text`/`value_text_len` fields to `CssDeclaration` for raw source te
 |-----------|-----------|
 | Run 1 (Phase 1 baseline) | 13% (51/394) |
 | Run 2 (Phase 2: P1-P3) | 21% (91/430) |
-| **Run 3 (Phase 3: P4-P7)** | **43% (185/430)** |
-| + Priority 8 (serialize tokens) | ~60% (~258/430) |
-| + Priority 9 (urange) | ~80% (~344/430) |
-| + Priority 10-11 (ranges, escapes) | ~90%+ |
+| Run 3 (Phase 3: P4-P7) | 43% (185/430) |
+| **Run 4 (Phase 4: P8-P9)** | **81% (351/430)** |
+| + Priority 10 (inclusive ranges) | ~88% (~379/430) |
+| + Priority 11 (non-ASCII, escapes) | ~95%+ |
 
 ---
 

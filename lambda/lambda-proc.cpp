@@ -122,6 +122,16 @@ Item pn_print(Item item) {
     return ItemNull;
 }
 
+/**
+ * emit(event_name, event_data) — Dispatch a custom event to the nearest
+ * parent template handler that matches the event name.
+ * Delegates to dispatch_emit() which lives in radiant/event.cpp and has
+ * access to DOM tree and handler context.
+ */
+Item pn_emit(Item event_name, Item event_data) {
+    return dispatch_emit(event_name, event_data);
+}
+
 double pn_clock() {
     struct timespec ts;
 #ifdef __APPLE__

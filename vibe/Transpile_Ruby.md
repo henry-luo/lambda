@@ -583,11 +583,11 @@ Lambda, 32/32 Radiant (2 pre-existing failures unrelated to Ruby).
 - [x] Blocks: `do..end` and `{ }` syntax, `yield`, `block_given?`
 - [x] `&block` parameter and `rb_block_call` (0–5 arg variants)
 - [x] `Proc.new`, `lambda`, `->(){}` stabby lambda — `rb_block_call_0/1/2`, `rm_transpile_block_as_func`
-- [ ] Closures: variable capture across nested scopes — deferred to Phase 3
+- [x] Closures: variable capture across nested scopes — `rb_analyze_block_captures`, `js_new_closure`, `js_alloc_env`
 - [x] `include` for module mixins — `rb_module_include` inserts module into superclass chain
 - [x] Iterator methods via blocks: `each`, `map`, `select`, `reject`, `reduce`, `each_with_index`, `any?`, `all?`, `find`
 - [x] Integer iterators: `times`, `upto`, `downto`
-- [ ] `Comparable` mixin support via `<=>` — deferred to Phase 3
+- [x] `Comparable` mixin support via `<=>` — `rb_call_spaceship`, custom `<=>` fallback in `rb_lt`/`rb_le`/`rb_cmp`
 
 **Supported in Phase 2:**
 
@@ -650,7 +650,7 @@ Regression: 760/762 Lambda, 32/32 Radiant (2 pre-existing JS failures unrelated 
 - [x] `Kernel` methods: `puts`, `p`, `print`, `rand`, `raise`, `require_relative`
 - [x] File I/O: `File.read`, `File.write`, `File.exist?`/`File.exists?` — `rb_file_read`, `rb_file_write`, `rb_file_exist`
 - [x] Regex: `=~`, `!~`, `.match`, `.scan`, `.gsub(regex)`, `.sub(regex)` via RE2 — `rb_regex_new`, `rb_regex_test`
-- [ ] Cross-language module imports via `require_relative` — deferred
+- [x] Cross-language module imports via `require_relative` — `rb_builtin_require_relative` (loads .rb files at runtime)
 
 ### Phase 4: Error Handling & Advanced Features (~2K LOC) — ✅ COMPLETE
 
@@ -676,12 +676,12 @@ failures unrelated to Ruby).
 - [x] `nil?` — `MIR_EQ` against `RB_ITEM_NULL_VAL` with boolean conversion
 - [x] `obj.class` — returns type name via `rb_builtin_type`
 - [x] `is_a?` / `kind_of?` — `rb_get_class` + `rb_eq` comparison
-- [ ] `Enumerator` protocol: `each` + `Enumerator::Yielder` — deferred
-- [ ] `Struct` — named struct creation — deferred
+- [x] Extended iterators: `flat_map`, `sort_by`, `min_by`, `max_by`, `each_with_object`, `reduce` (no-init), hash `each`/`map`/`select`
+- [x] `Struct` — named struct creation — `Struct.new(:field1, :field2)`, `rb_struct_new`, `rb_struct_init`
 - [x] Heredocs (`<<HEREDOC`, `<<~HEREDOC`, `<<'HEREDOC'`) — parsed by tree-sitter, transpiled as string literals
 - [x] `defined?` keyword — returns `"local-variable"`, `"expression"`, or nil
 - [x] `freeze` / `frozen?` — `rb_freeze`, `rb_frozen` (no-op freeze, tracks frozen state)
-- [ ] `method_missing` (basic support) — deferred
+- [x] `method_missing` (basic support) — `rb_call_method_missing` fallback in dispatch chain
 
 ### Phase 5: Performance Optimization (~1.5K LOC)
 
@@ -690,12 +690,12 @@ MIR emission for hot paths.
 
 Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 
-- [ ] **P5a**: Type inference infrastructure — track `type_hint` on variables
-- [ ] **P5b**: Native integer arithmetic — `MIR_ADD`/`MIR_SUB`/`MIR_MUL` for typed ints
-- [ ] **P5c**: Native comparisons — `MIR_LTS`/`MIR_LES` for typed int/float
-- [ ] **P5d**: Integer loop optimization — `n.times {}`, `for i in 0..n` → native counter
-- [ ] **P5e**: Shaped slot property access — `@ivar` on known classes → O(1) indexed read
-- [ ] **P5f**: Direct method dispatch — statically resolve method calls on known types
+- [x] **P5a**: Type inference infrastructure — `rm_get_effective_type`, `type_hint` on variables, box/unbox helpers
+- [x] **P5b**: Native integer arithmetic — `MIR_ADD`/`MIR_SUB`/`MIR_MUL`/`MIR_DIV`/`MIR_MOD` for typed ints, `MIR_DADD`/`MIR_DSUB`/`MIR_DMUL`/`MIR_DDIV` for floats
+- [x] **P5c**: Native comparisons — `MIR_LTS`/`MIR_LES`/`MIR_GTS`/`MIR_GES`/`MIR_EQ`/`MIR_NE` for typed int/float
+- [x] **P5d**: Integer loop optimization — `for i in 0..n` → native counter loop with `MIR_ADD` increment; type-propagated `+=` uses native arithmetic
+- [ ] **P5e**: Shaped slot property access — `@ivar` on known classes → O(1) indexed read (deferred)
+- [ ] **P5f**: Direct method dispatch — statically resolve method calls on known types (deferred)
 
 ---
 
@@ -708,7 +708,7 @@ Following the proven 6-phase approach from Python (see `Transpile_Py6.md`):
 | `rb_ast.hpp` | ~300 | 437 | ✅ Done | AST node types (70+), operator enums, struct definitions |
 | `rb_transpiler.hpp` | ~120 | 112 | ✅ Done | Transpiler context struct, scope types, API declarations |
 | `build_rb_ast.cpp` | ~2,500 | 1,858 | ✅ Done | Tree-sitter CST → Ruby AST conversion |
-| `transpile_rb_mir.cpp` | ~6,000 | 3,408 | ✅ Phase 4 | AST → MIR IR emission (core + OOP + builtins + exceptions) |
+| `transpile_rb_mir.cpp` | ~6,000 | ~4,900 | ✅ Phase 5 | AST → MIR IR emission (core + OOP + builtins + exceptions + native optimizations) |
 | `rb_runtime.cpp` | ~2,000 | 1,026 | ✅ Phase 4 | Ruby operator dispatch, truthiness, type conversion, exceptions |
 | `rb_runtime.h` | ~100 | 202 | ✅ Done | Runtime function declarations (extern "C") |
 | `rb_scope.cpp` | ~400 | 230 | ✅ Done | Scope management: local, global, constant |
@@ -901,7 +901,7 @@ These cases require Ruby-specific runtime functions rather than reusing Python's
 | **M4: Standard Library** | 40+ built-in methods, type dispatchers — Phase 3 complete | ~12K | ✅ Done (9,421 LOC) |
 | **M5: Error Handling** | begin/rescue/ensure, custom exceptions, retry, respond_to?, send — Phase 4 complete | ~14K | ✅ Done (9,421 LOC) |
 | **M6: Cross-Language** | `require_relative` imports .ls/.py/.js modules; verified bidirectional | ~14.5K | Not started |
-| **M7: Performance** | Type inference + native MIR emission; benchmark suite — Phase 5 complete | ~15.5K | Not started |
+| **M7: Performance** | Type inference + native MIR emission; benchmark suite — Phase 5 complete | ~15.5K | ✅ Done (P5a-P5d) |
 | **M8: Baseline Tests** | 100% pass rate on `test-ruby-baseline` (60+ tests) | ~15.5K | Not started |
 
 ---
@@ -918,12 +918,12 @@ The following Ruby features are explicitly **not targeted** for the initial impl
 | `require` (gem loading) | Only `require_relative` for local files; no RubyGems |
 | C extensions / FFI | Lambda provides its own native function mechanism |
 | Open classes / monkey-patching | Classes are closed after definition |
-| `method_missing` (Phase 4 stretch) | Complex to implement correctly with JIT; deferred |
+| `method_missing` (advanced: `respond_to_missing?`, recursion) | Basic `method_missing` works; advanced features deferred |
 | Refinements | Scoped monkey-patching — unnecessary with closed classes |
 | `Encoding` / multi-encoding strings | Lambda uses UTF-8 throughout |
 | `TracePoint`, `set_trace_func` | No debugging hooks in JIT mode |
 | Frozen string literals pragma | All Lambda strings are effectively immutable |
-| `Comparable`, `Enumerable` as full mixins | Individual methods implemented directly instead |
+| `Comparable`, `Enumerable` as full mixins | `<=>` and iterator methods implemented directly; mixin `include` not needed |
 
 ---
 
@@ -971,17 +971,13 @@ Key decisions and lessons from the Phase 1 implementation:
 
 ### Known Limitations (After Phase 4)
 
-- No `Proc.new`, `lambda`, `->(){}` stabby lambda — blocks work via `yield` only.
-- No closures with variable capture across nested scopes.
-- No `include` for module mixins.
-- No regex support (`=~`, `match`, `scan`, `gsub`, `sub`).
-- No file I/O (`File.read`, `File.write`, etc.).
-- No cross-language `require_relative` imports.
-- No `Enumerator` protocol or lazy evaluation.
-- No `Struct`, `Comparable` as full mixins.
-- No `defined?`, `freeze`/`frozen?`, `method_missing`.
+- No lazy enumerators (`lazy`, `force`) or `Enumerator::Yielder` coroutine protocol.
+- No cross-language `require_relative` for `.ls`/`.py`/`.js` — only `.rb` files supported so far.
+- `method_missing` basic support only — no `respond_to_missing?` or recursive dispatch.
+- Closures capture by value, not reference — mutations inside blocks don't propagate to outer scope.
 - Exception handling uses flag-based model (no `setjmp`/`longjmp`) — division by zero
   and other runtime errors don't automatically raise exceptions (only explicit `raise`).
+- Constant assignment works but constants are mutable (no freeze enforcement).
 
 ## 16. Implementation Notes (Phase 2)
 

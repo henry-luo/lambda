@@ -690,6 +690,10 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
+
+    // reactive UI: emit event to parent template handler
+    {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header
@@ -1986,6 +1990,7 @@ JitImport jit_runtime_imports[] = {
     {"rb_builtin_len", FPTR(rb_builtin_len)},
     {"rb_builtin_type", FPTR(rb_builtin_type)},
     {"rb_builtin_rand", FPTR(rb_builtin_rand)},
+    {"rb_builtin_require_relative", FPTR(rb_builtin_require_relative)},
     // Phase 2: Class system
     {"rb_class_create", FPTR(rb_class_create)},
     {"rb_class_add_method", FPTR(rb_class_add_method)},
@@ -2018,6 +2023,15 @@ JitImport jit_runtime_imports[] = {
     {"rb_int_times", FPTR(rb_int_times)},
     {"rb_int_upto", FPTR(rb_int_upto)},
     {"rb_int_downto", FPTR(rb_int_downto)},
+    {"rb_array_flat_map", FPTR(rb_array_flat_map)},
+    {"rb_array_each_with_object", FPTR(rb_array_each_with_object)},
+    {"rb_array_sort_by", FPTR(rb_array_sort_by)},
+    {"rb_array_min_by", FPTR(rb_array_min_by)},
+    {"rb_array_max_by", FPTR(rb_array_max_by)},
+    {"rb_array_reduce_no_init", FPTR(rb_array_reduce_no_init)},
+    {"rb_hash_each", FPTR(rb_hash_each)},
+    {"rb_hash_map", FPTR(rb_hash_map)},
+    {"rb_hash_select", FPTR(rb_hash_select)},
     // Phase 3: Built-in method dispatchers
     {"rb_string_method", FPTR(rb_string_method)},
     {"rb_array_method", FPTR(rb_array_method)},
@@ -2049,6 +2063,13 @@ JitImport jit_runtime_imports[] = {
     {"rb_regex_sub", FPTR(rb_regex_sub)},
     {"rb_is_regex", FPTR(rb_is_regex)},
     {"rb_module_include", FPTR(rb_module_include)},
+    // method_missing
+    {"rb_call_method_missing", FPTR(rb_call_method_missing)},
+    // Struct
+    {"rb_struct_new", FPTR(rb_struct_new)},
+    {"rb_struct_init", FPTR(rb_struct_init)},
+    {"rb_is_struct", FPTR(rb_is_struct)},
+    {"rb_struct_members", FPTR(rb_struct_members)},
 #endif // LAMBDA_RUBY
 };
 

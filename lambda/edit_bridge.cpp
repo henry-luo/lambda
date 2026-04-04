@@ -42,8 +42,8 @@ int edit_bridge_init(void* input_ptr) {
         s_editor_input = input;
         log_debug("edit_bridge_init: created Input from runtime pool");
     }
-    s_editor = new MarkEditor(input, EDIT_MODE_IMMUTABLE);
-    log_debug("edit_bridge_init: editor created (immutable mode)");
+    s_editor = new MarkEditor(input, EDIT_MODE_INLINE);
+    log_debug("edit_bridge_init: editor created (inline mode)");
     return 0;
 }
 
@@ -67,6 +67,12 @@ Item edit_map_update(Item map, const char* key, Item value) {
     if (!s_editor) {
         log_error("edit_map_update: no editor active");
         return map;
+    }
+    // handle both maps and elements — the transpiler may not know the
+    // runtime type at compile time (model typed as ANY)
+    TypeId tid = get_type_id(map);
+    if (tid == LMD_TYPE_ELEMENT) {
+        return s_editor->elmt_update_attr(map, key, value);
     }
     return s_editor->map_update(map, key, value);
 }

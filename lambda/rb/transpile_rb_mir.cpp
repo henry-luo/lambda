@@ -62,6 +62,7 @@ static const uint64_t RB_MASK56         = 0x00FFFFFFFFFFFFFFULL;
 struct RbMirVarEntry {
     MIR_reg_t reg;
     MIR_type_t mir_type;
+    TypeId type_hint;       // Phase 5: LMD_TYPE_INT, LMD_TYPE_FLOAT, or LMD_TYPE_NULL (unknown)
 };
 
 struct RbLoopLabels {
@@ -86,6 +87,10 @@ struct RbBlockCollected {
     MIR_item_t func_item;     // compiled MIR function
     int param_count;
     int id;                    // unique block id
+    // closure capture info
+    char captures[16][128];    // captured variable names (with _rb_ prefix)
+    int capture_count;
+    bool is_closure;           // true if captures outer variables
 };
 
 // Phase 2: class info stored during class compilation
@@ -377,6 +382,19 @@ static void rm_set_var(RbMirTranspiler* mt, const char* name, MIR_reg_t reg) {
     snprintf(entry.name, sizeof(entry.name), "%s", name);
     entry.var.reg = reg;
     entry.var.mir_type = MIR_T_I64;
+    entry.var.type_hint = LMD_TYPE_NULL;
+    hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
+}
+
+// Phase 5: set variable with type hint for native arithmetic paths
+static void rm_set_var_with_type(RbMirTranspiler* mt, const char* name,
+                                  MIR_reg_t reg, TypeId type_hint) {
+    RbVarScopeEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    snprintf(entry.name, sizeof(entry.name), "%s", name);
+    entry.var.reg = reg;
+    entry.var.mir_type = MIR_T_I64;
+    entry.var.type_hint = type_hint;
     hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
 }
 
@@ -447,6 +465,312 @@ static MIR_reg_t rm_emit_bool(RbMirTranspiler* mt, bool value) {
     rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)bval)));
     return r;
+}
+
+// ============================================================================
+// Phase 5: Type inference and native arithmetic helpers
+// ============================================================================
+
+// Forward declaration
+static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* node);
+
+// Infer the type of an expression at compile time.
+// Returns LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING,
+// or LMD_TYPE_NULL for unknown/polymorphic.
+static TypeId rm_get_effective_type(RbMirTranspiler* mt, RbAstNode* node) {
+    if (!node) return LMD_TYPE_NULL;
+
+    switch (node->node_type) {
+    case RB_AST_NODE_LITERAL: {
+        RbLiteralNode* lit = (RbLiteralNode*)node;
+        switch (lit->literal_type) {
+        case RB_LITERAL_INT:     return LMD_TYPE_INT;
+        case RB_LITERAL_FLOAT:   return LMD_TYPE_FLOAT;
+        case RB_LITERAL_BOOLEAN: return LMD_TYPE_BOOL;
+        case RB_LITERAL_STRING:  return LMD_TYPE_STRING;
+        case RB_LITERAL_SYMBOL:  return LMD_TYPE_STRING;
+        case RB_LITERAL_NIL:     return LMD_TYPE_NULL;
+        default: return LMD_TYPE_NULL;
+        }
+    }
+
+    case RB_AST_NODE_IDENTIFIER: {
+        RbIdentifierNode* id = (RbIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+        RbMirVarEntry* var = rm_find_var(mt, vname);
+        if (var && var->type_hint != LMD_TYPE_NULL) return var->type_hint;
+        return LMD_TYPE_NULL;
+    }
+
+    case RB_AST_NODE_BINARY_OP: {
+        RbBinaryNode* bin = (RbBinaryNode*)node;
+        TypeId lt = rm_get_effective_type(mt, bin->left);
+        TypeId rt = rm_get_effective_type(mt, bin->right);
+        switch (bin->op) {
+        case RB_OP_ADD: case RB_OP_SUB: case RB_OP_MUL:
+            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            return LMD_TYPE_NULL;
+        case RB_OP_DIV:
+            // Ruby integer division: 7/2 → 3 (stays int)
+            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+            return LMD_TYPE_NULL;
+        case RB_OP_MOD:
+            if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) return LMD_TYPE_INT;
+            return LMD_TYPE_NULL;
+        case RB_OP_POW:
+            if (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT) return LMD_TYPE_FLOAT;
+            return LMD_TYPE_NULL;  // int**int can overflow
+        case RB_OP_BIT_AND: case RB_OP_BIT_OR: case RB_OP_BIT_XOR:
+        case RB_OP_LSHIFT: case RB_OP_RSHIFT:
+            return LMD_TYPE_INT;
+        default: return LMD_TYPE_NULL;
+        }
+    }
+
+    case RB_AST_NODE_COMPARISON: {
+        return LMD_TYPE_BOOL;
+    }
+
+    case RB_AST_NODE_UNARY_OP: {
+        RbUnaryNode* un = (RbUnaryNode*)node;
+        if (un->op == RB_OP_NEGATE || un->op == RB_OP_POSITIVE) {
+            TypeId t = rm_get_effective_type(mt, un->operand);
+            if (t == LMD_TYPE_INT || t == LMD_TYPE_FLOAT) return t;
+        }
+        if (un->op == RB_OP_BIT_NOT) return LMD_TYPE_INT;
+        return LMD_TYPE_NULL;
+    }
+
+    case RB_AST_NODE_BOOLEAN_OP:
+        return LMD_TYPE_NULL;  // && / || return one of their operands
+
+    case RB_AST_NODE_TERNARY: {
+        // cond ? a : b — if both branches same type, result is that type
+        RbAstNode* children = ((RbAstNode*)node);
+        // ternary is not easily accessible without the struct, skip for now
+        return LMD_TYPE_NULL;
+    }
+
+    default:
+        return LMD_TYPE_NULL;
+    }
+}
+
+// Box a native int64_t register into an Item (with INT56 overflow check)
+static MIR_reg_t rm_box_int_reg(RbMirTranspiler* mt, MIR_reg_t val) {
+    int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
+    int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+
+    MIR_reg_t result = rm_new_reg(mt, "boxi", MIR_T_I64);
+    MIR_reg_t masked = rm_new_reg(mt, "mask", MIR_T_I64);
+    MIR_reg_t tagged = rm_new_reg(mt, "tag", MIR_T_I64);
+    MIR_reg_t le_max = rm_new_reg(mt, "le", MIR_T_I64);
+    MIR_reg_t ge_min = rm_new_reg(mt, "ge", MIR_T_I64);
+    MIR_reg_t in_range = rm_new_reg(mt, "rng", MIR_T_I64);
+
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
+        MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, (int64_t)RB_MASK56)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
+        MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_INT_TAG), MIR_new_reg_op(mt->ctx, masked)));
+
+    MIR_label_t l_ok = rm_new_label(mt);
+    MIR_label_t l_end = rm_new_label(mt);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
+        MIR_new_reg_op(mt->ctx, in_range)));
+    // overflow: promote to float
+    MIR_reg_t d_ovf = rm_new_reg(mt, "i2d_ovf", MIR_T_D);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
+    MIR_reg_t float_boxed = rm_call_1(mt, "push_d", MIR_T_I64,
+        MIR_T_D, MIR_new_reg_op(mt->ctx, d_ovf));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, float_boxed)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+    rm_emit_label(mt, l_ok);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, tagged)));
+    rm_emit_label(mt, l_end);
+    return result;
+}
+
+// Unbox Item → native int64_t: sign-extend lower 56 bits
+static MIR_reg_t rm_emit_unbox_int(RbMirTranspiler* mt, MIR_reg_t item) {
+    MIR_reg_t result = rm_new_reg(mt, "ubi", MIR_T_I64);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_LSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, item), MIR_new_int_op(mt->ctx, 8)));
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, result), MIR_new_int_op(mt->ctx, 8)));
+    return result;
+}
+
+// Unbox Item → native double via it2d runtime function
+static MIR_reg_t rm_emit_unbox_float(RbMirTranspiler* mt, MIR_reg_t item) {
+    MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->current_func);
+    if (rt == MIR_T_D) return item;
+    return rm_call_1(mt, "it2d", MIR_T_D, MIR_T_I64, MIR_new_reg_op(mt->ctx, item));
+}
+
+// Convert native int64_t → native double
+static MIR_reg_t rm_emit_int_to_double(RbMirTranspiler* mt, MIR_reg_t int_reg) {
+    MIR_reg_t result = rm_new_reg(mt, "i2d", MIR_T_D);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, int_reg)));
+    return result;
+}
+
+// Convert native double → native int64_t (truncate)
+static MIR_reg_t rm_emit_double_to_int(RbMirTranspiler* mt, MIR_reg_t d_reg) {
+    MIR_reg_t result = rm_new_reg(mt, "d2i", MIR_T_I64);
+    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_D2I, MIR_new_reg_op(mt->ctx, result),
+        MIR_new_reg_op(mt->ctx, d_reg)));
+    return result;
+}
+
+// Ensure a register is native int64_t
+static MIR_reg_t rm_ensure_native_int(RbMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    if (src_type == LMD_TYPE_INT) return reg;
+    if (src_type == LMD_TYPE_FLOAT) return rm_emit_double_to_int(mt, reg);
+    return rm_call_1(mt, "it2i", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, reg));
+}
+
+// Ensure a register is native double
+static MIR_reg_t rm_ensure_native_float(RbMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
+    if (src_type == LMD_TYPE_FLOAT) return reg;
+    if (src_type == LMD_TYPE_INT) return rm_emit_int_to_double(mt, reg);
+    return rm_emit_unbox_float(mt, reg);
+}
+
+// Box native value back to Item
+static MIR_reg_t rm_box_native(RbMirTranspiler* mt, MIR_reg_t reg, TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_INT:   return rm_box_int_reg(mt, reg);
+    case LMD_TYPE_FLOAT: return rm_box_float(mt, reg);
+    case LMD_TYPE_BOOL: {
+        MIR_reg_t result = rm_new_reg(mt, "boxb", MIR_T_I64);
+        uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)BOOL_TAG), MIR_new_reg_op(mt->ctx, reg)));
+        return result;
+    }
+    default: return reg;
+    }
+}
+
+// Transpile an expression and return a native (unboxed) register of the target type.
+// For literals and typed variables, avoids boxing then immediately unboxing.
+static MIR_reg_t rm_transpile_as_native(RbMirTranspiler* mt, RbAstNode* expr,
+                                         TypeId expr_type, TypeId target_type) {
+    // Literals: emit native constant directly
+    if (expr && expr->node_type == RB_AST_NODE_LITERAL) {
+        RbLiteralNode* lit = (RbLiteralNode*)expr;
+        if (lit->literal_type == RB_LITERAL_INT) {
+            if (target_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t r = rm_new_reg(mt, "dlit", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_double_op(mt->ctx, (double)lit->value.int_value)));
+                return r;
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, "ilit", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, lit->value.int_value)));
+                return r;
+            }
+        }
+        if (lit->literal_type == RB_LITERAL_FLOAT) {
+            if (target_type == LMD_TYPE_FLOAT) {
+                MIR_reg_t r = rm_new_reg(mt, "dlit", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_double_op(mt->ctx, lit->value.float_value)));
+                return r;
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, "ilit", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, r),
+                    MIR_new_int_op(mt->ctx, (int64_t)lit->value.float_value)));
+                return r;
+            }
+        }
+    }
+
+    // Typed variables: unbox directly
+    if (expr && expr->node_type == RB_AST_NODE_IDENTIFIER) {
+        RbIdentifierNode* id = (RbIdentifierNode*)expr;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+        RbMirVarEntry* var = rm_find_var(mt, vname);
+        if (var && (var->type_hint == LMD_TYPE_INT || var->type_hint == LMD_TYPE_FLOAT)) {
+            // Variable is boxed Item but we know its type — unbox inline
+            if (target_type == LMD_TYPE_FLOAT) {
+                if (var->type_hint == LMD_TYPE_INT) {
+                    MIR_reg_t unboxed = rm_emit_unbox_int(mt, var->reg);
+                    return rm_emit_int_to_double(mt, unboxed);
+                }
+                return rm_emit_unbox_float(mt, var->reg);
+            } else {
+                if (var->type_hint == LMD_TYPE_INT)
+                    return rm_emit_unbox_int(mt, var->reg);
+                MIR_reg_t as_dbl = rm_emit_unbox_float(mt, var->reg);
+                return rm_emit_double_to_int(mt, as_dbl);
+            }
+        }
+    }
+
+    // Sub-expressions that can produce native results directly (avoid box→unbox)
+    if (expr && expr->node_type == RB_AST_NODE_BINARY_OP) {
+        RbBinaryNode* bin = (RbBinaryNode*)expr;
+        TypeId lt = rm_get_effective_type(mt, bin->left);
+        TypeId rt = rm_get_effective_type(mt, bin->right);
+        bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
+                            (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+        if (both_numeric) {
+            bool use_float = (lt == LMD_TYPE_FLOAT || rt == LMD_TYPE_FLOAT);
+            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+
+            switch (bin->op) {
+            case RB_OP_ADD: mir_op = use_float ? MIR_DADD : MIR_ADD; break;
+            case RB_OP_SUB: mir_op = use_float ? MIR_DSUB : MIR_SUB; break;
+            case RB_OP_MUL: mir_op = use_float ? MIR_DMUL : MIR_MUL; break;
+            case RB_OP_DIV: mir_op = use_float ? MIR_DDIV : MIR_DIV; break;
+            case RB_OP_MOD: if (!use_float) mir_op = MIR_MOD; break;
+            default: break;
+            }
+
+            if (mir_op) {
+                MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, lt, arith_t);
+                MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, rt, arith_t);
+                MIR_reg_t r = rm_new_reg(mt, "nbin", use_float ? MIR_T_D : MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, mir_op,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl),
+                    MIR_new_reg_op(mt->ctx, fr)));
+                if (target_type == LMD_TYPE_FLOAT)
+                    return rm_ensure_native_float(mt, r, arith_t);
+                else
+                    return rm_ensure_native_int(mt, r, arith_t);
+            }
+        }
+    }
+
+    // Fallback: transpile as boxed, then unbox
+    MIR_reg_t boxed = rm_transpile_expression(mt, expr);
+    if (target_type == LMD_TYPE_FLOAT)
+        return rm_emit_unbox_float(mt, boxed);
+    else {
+        MIR_reg_t as_dbl = rm_emit_unbox_float(mt, boxed);
+        return rm_emit_double_to_int(mt, as_dbl);
+    }
 }
 
 // ============================================================================
@@ -576,6 +900,100 @@ static MIR_reg_t rm_transpile_identifier(RbMirTranspiler* mt, RbIdentifierNode* 
 }
 
 static MIR_reg_t rm_transpile_binary(RbMirTranspiler* mt, RbBinaryNode* bin) {
+    // Phase 5: Native arithmetic fast path
+    TypeId left_type  = rm_get_effective_type(mt, bin->left);
+    TypeId right_type = rm_get_effective_type(mt, bin->right);
+
+    bool both_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+                        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+
+    if (both_numeric) {
+        bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
+        bool both_int  = (left_type == LMD_TYPE_INT && right_type == LMD_TYPE_INT);
+
+        switch (bin->op) {
+        case RB_OP_ADD: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            if (use_float) {
+                MIR_reg_t r = rm_new_reg(mt, "add", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DADD,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_float(mt, r);
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, "add", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_int_reg(mt, r);
+            }
+        }
+        case RB_OP_SUB: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            if (use_float) {
+                MIR_reg_t r = rm_new_reg(mt, "sub", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DSUB,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_float(mt, r);
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, "sub", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_SUB,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_int_reg(mt, r);
+            }
+        }
+        case RB_OP_MUL: {
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, arith_t);
+            MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, arith_t);
+            if (use_float) {
+                MIR_reg_t r = rm_new_reg(mt, "mul", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMUL,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_float(mt, r);
+            } else {
+                MIR_reg_t r = rm_new_reg(mt, "mul", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MUL,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_int_reg(mt, r);
+            }
+        }
+        case RB_OP_DIV: {
+            if (both_int) {
+                MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+                MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+                MIR_reg_t r = rm_new_reg(mt, "div", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DIV,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_int_reg(mt, r);
+            } else {
+                MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_FLOAT);
+                MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_FLOAT);
+                MIR_reg_t r = rm_new_reg(mt, "div", MIR_T_D);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_DDIV,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_float(mt, r);
+            }
+        }
+        case RB_OP_MOD: {
+            if (both_int) {
+                MIR_reg_t fl = rm_transpile_as_native(mt, bin->left, left_type, LMD_TYPE_INT);
+                MIR_reg_t fr = rm_transpile_as_native(mt, bin->right, right_type, LMD_TYPE_INT);
+                MIR_reg_t r = rm_new_reg(mt, "mod", MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOD,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+                return rm_box_int_reg(mt, r);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    // Boxed fallback
     MIR_reg_t left = rm_transpile_expression(mt, bin->left);
     MIR_reg_t right = rm_transpile_expression(mt, bin->right);
     const char* fn = rm_binary_op_func(bin->op);
@@ -585,21 +1003,21 @@ static MIR_reg_t rm_transpile_binary(RbMirTranspiler* mt, RbBinaryNode* bin) {
 }
 
 static MIR_reg_t rm_transpile_comparison(RbMirTranspiler* mt, RbBinaryNode* cmp) {
-    MIR_reg_t left = rm_transpile_expression(mt, cmp->left);
-    MIR_reg_t right = rm_transpile_expression(mt, cmp->right);
-
     // =~ : call rb_regex_test(right_regex, left_string)
     if (cmp->op == RB_OP_MATCH) {
+        MIR_reg_t left = rm_transpile_expression(mt, cmp->left);
+        MIR_reg_t right = rm_transpile_expression(mt, cmp->right);
         return rm_call_2(mt, "rb_regex_test", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, right),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, left));
     }
     // !~ : negate rb_regex_test result
     if (cmp->op == RB_OP_NOT_MATCH) {
+        MIR_reg_t left = rm_transpile_expression(mt, cmp->left);
+        MIR_reg_t right = rm_transpile_expression(mt, cmp->right);
         MIR_reg_t match_result = rm_call_2(mt, "rb_regex_test", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, right),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, left));
-        // negate: if truthy → false, else → true
         MIR_reg_t truthy = rm_call_1(mt, "rb_is_truthy", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, match_result));
         MIR_reg_t result = rm_new_reg(mt, "nm", MIR_T_I64);
@@ -617,6 +1035,49 @@ static MIR_reg_t rm_transpile_comparison(RbMirTranspiler* mt, RbBinaryNode* cmp)
         return result;
     }
 
+    // Phase 5: Native comparison fast path for numeric operands
+    TypeId left_type  = rm_get_effective_type(mt, cmp->left);
+    TypeId right_type = rm_get_effective_type(mt, cmp->right);
+    bool both_numeric = (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT) &&
+                        (right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT);
+
+    if (both_numeric && cmp->op != RB_OP_CMP && cmp->op != RB_OP_CASE_EQ) {
+        bool use_float = (left_type == LMD_TYPE_FLOAT || right_type == LMD_TYPE_FLOAT);
+        TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+        MIR_reg_t fl = rm_transpile_as_native(mt, cmp->left, left_type, arith_t);
+        MIR_reg_t fr = rm_transpile_as_native(mt, cmp->right, right_type, arith_t);
+        MIR_reg_t cmp_r = rm_new_reg(mt, "cmp", MIR_T_I64);
+        MIR_insn_code_t op;
+        switch (cmp->op) {
+        case RB_OP_LT:  op = use_float ? MIR_DLT : MIR_LTS; break;
+        case RB_OP_LE:  op = use_float ? MIR_DLE : MIR_LES; break;
+        case RB_OP_GT:  op = use_float ? MIR_DGT : MIR_GTS; break;
+        case RB_OP_GE:  op = use_float ? MIR_DGE : MIR_GES; break;
+        case RB_OP_EQ:  op = use_float ? MIR_DEQ : MIR_EQ;  break;
+        case RB_OP_NEQ: op = use_float ? MIR_DNE : MIR_NE;  break;
+        default: goto boxed_comparison;
+        }
+        rm_emit(mt, MIR_new_insn(mt->ctx, op,
+            MIR_new_reg_op(mt->ctx, cmp_r), MIR_new_reg_op(mt->ctx, fl), MIR_new_reg_op(mt->ctx, fr)));
+        // Convert 0/1 result to boxed bool Item
+        MIR_reg_t result = rm_new_reg(mt, "bcmp", MIR_T_I64);
+        MIR_label_t l_true = rm_new_label(mt);
+        MIR_label_t l_end = rm_new_label(mt);
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_true),
+            MIR_new_reg_op(mt->ctx, cmp_r)));
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_FALSE_VAL)));
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        rm_emit_label(mt, l_true);
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_TRUE_VAL)));
+        rm_emit_label(mt, l_end);
+        return result;
+    }
+
+boxed_comparison:;
+    MIR_reg_t left = rm_transpile_expression(mt, cmp->left);
+    MIR_reg_t right = rm_transpile_expression(mt, cmp->right);
     const char* fn = rm_comparison_func(cmp->op);
     return rm_call_2(mt, fn, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
@@ -1020,6 +1481,51 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, m),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
             }
+            // array.flat_map { |x| } / collect_concat
+            if ((mlen == 8 && strncmp(mname, "flat_map", 8) == 0) ||
+                (mlen == 14 && strncmp(mname, "collect_concat", 14) == 0)) {
+                return rm_call_2(mt, "rb_array_flat_map", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.each_with_object(obj) { |x, obj| }
+            if (mlen == 16 && strncmp(mname, "each_with_object", 16) == 0 && call->arg_count >= 1) {
+                MIR_reg_t obj = rm_transpile_expression(mt, call->args);
+                return rm_call_3(mt, "rb_array_each_with_object", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.sort_by { |x| }
+            if (mlen == 7 && strncmp(mname, "sort_by", 7) == 0) {
+                return rm_call_2(mt, "rb_array_sort_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.min_by { |x| }
+            if (mlen == 6 && strncmp(mname, "min_by", 6) == 0) {
+                return rm_call_2(mt, "rb_array_min_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.max_by { |x| }
+            if (mlen == 6 && strncmp(mname, "max_by", 6) == 0) {
+                return rm_call_2(mt, "rb_array_max_by", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.reduce { |acc, x| } (no initial value)
+            if (mlen == 6 && strncmp(mname, "reduce", 6) == 0 && call->arg_count == 0) {
+                return rm_call_2(mt, "rb_array_reduce_no_init", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
+            // array.inject { |acc, x| } (no initial value, alias)
+            if (mlen == 6 && strncmp(mname, "inject", 6) == 0 && call->arg_count == 0) {
+                return rm_call_2(mt, "rb_array_reduce_no_init", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, block_reg));
+            }
 
             // generic method call with block — look up method, call with block
             // (will be handled below in dynamic dispatch)
@@ -1065,6 +1571,22 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                             return rm_transpile_block_as_func(mt, (RbBlockNode*)call->block);
                         }
                         return rm_emit_null(mt);
+                    }
+
+                    // Struct.new(:field1, :field2, ...) — create struct class
+                    if (cn->name->len == 6 && strncmp(cn->name->chars, "Struct", 6) == 0) {
+                        // build array of field names from symbol arguments
+                        MIR_reg_t fields = rm_call_0(mt, "rb_array_new", MIR_T_I64);
+                        RbAstNode* arg = call->args;
+                        while (arg) {
+                            MIR_reg_t field_val = rm_transpile_expression(mt, arg);
+                            rm_call_2(mt, "rb_array_push", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, fields),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, field_val));
+                            arg = arg->next;
+                        }
+                        return rm_call_1(mt, "rb_struct_new", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fields));
                     }
                 }
 
@@ -1123,6 +1645,36 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
                 rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_done)));
                 rm_emit_label(mt, l_no_init);
+
+                // No initialize method — try struct initialization
+                // Build args array on stack for rb_struct_init
+                {
+                    int s_argc = call->arg_count;
+                    MIR_reg_t s_args = rm_new_reg(mt, "sargs", MIR_T_I64);
+                    if (s_argc > 0) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                            MIR_new_reg_op(mt->ctx, s_args),
+                            MIR_new_int_op(mt->ctx, s_argc * 8)));
+                        RbAstNode* sa = call->args;
+                        for (int si = 0; si < s_argc && sa; si++) {
+                            MIR_reg_t sav = rm_transpile_expression(mt, sa);
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, si * 8, s_args, 0, 1),
+                                MIR_new_reg_op(mt->ctx, sav)));
+                            sa = sa->next;
+                        }
+                    } else {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, s_args),
+                            MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    rm_call_4(mt, "rb_struct_init", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, inst),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, s_args),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, s_argc));
+                }
+
                 rm_emit_label(mt, l_done);
 
                 return inst; // .new always returns the instance
@@ -1308,6 +1860,56 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_dispatch_end)));
 
             rm_emit_label(mt, l_not_found);
+            {
+                // fallback 1: try attribute access for zero-arg calls (struct fields, etc.)
+                MIR_label_t l_mm_check = rm_new_label(mt);
+                if (call->arg_count == 0) {
+                    MIR_reg_t attr_val = rm_call_2(mt, "rb_instance_getattr", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg));
+                    // if attr found, use it
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, l_mm_check),
+                        MIR_new_reg_op(mt->ctx, attr_val),
+                        MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL)));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, builtin_result),
+                        MIR_new_reg_op(mt->ctx, attr_val)));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_dispatch_end)));
+                }
+                // fallback 2: try method_missing
+                rm_emit_label(mt, l_mm_check);
+                {
+                    int mm_argc = call->arg_count;
+                    MIR_reg_t mm_args = rm_new_reg(mt, "mmargs", MIR_T_I64);
+                    if (mm_argc > 0) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ALLOCA,
+                            MIR_new_reg_op(mt->ctx, mm_args),
+                            MIR_new_int_op(mt->ctx, mm_argc * 8)));
+                        RbAstNode* ma = call->args;
+                        for (int mi = 0; mi < mm_argc && ma; mi++) {
+                            MIR_reg_t mav = rm_transpile_expression(mt, ma);
+                            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                MIR_new_mem_op(mt->ctx, MIR_T_I64, mi * 8, mm_args, 0, 1),
+                                MIR_new_reg_op(mt->ctx, mav)));
+                            ma = ma->next;
+                        }
+                    } else {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, mm_args),
+                            MIR_new_int_op(mt->ctx, 0)));
+                    }
+                    MIR_reg_t mm_result = rm_call_4(mt, "rb_call_method_missing", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mm_args),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, mm_argc));
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, builtin_result),
+                        MIR_new_reg_op(mt->ctx, mm_result)));
+                }
+            }
             rm_emit_label(mt, l_dispatch_end);
 
             return builtin_result;
@@ -1407,6 +2009,13 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             return rm_call_2(mt, "rb_respond_to", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, self_r),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
+        // require_relative — cross-language module import
+        if (flen == 16 && strncmp(fname, "require_relative", 16) == 0 && call->arg_count >= 1) {
+            MIR_reg_t path_arg = rm_transpile_expression(mt, call->args);
+            return rm_call_1(mt, "rb_builtin_require_relative", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg));
         }
 
         // lambda { |x| ... } or proc { |x| ... } — return block as function value
@@ -1833,12 +2442,32 @@ static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs) {
 // ============================================================================
 
 static void rm_transpile_assignment(RbMirTranspiler* mt, RbAssignmentNode* assign) {
+    // Phase 5: Infer type of RHS for type propagation
+    TypeId rhs_type = rm_get_effective_type(mt, assign->value);
     MIR_reg_t val = rm_transpile_expression(mt, assign->value);
 
     if (assign->target && assign->target->node_type == RB_AST_NODE_IDENTIFIER) {
         RbIdentifierNode* id = (RbIdentifierNode*)assign->target;
         char vname[128];
         snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+
+        RbMirVarEntry* var = rm_find_var(mt, vname);
+        if (var) {
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, val)));
+            // Phase 5: update type hint
+            var->type_hint = rhs_type;
+        } else {
+            MIR_reg_t r = rm_new_reg(mt, vname, MIR_T_I64);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_reg_op(mt->ctx, val)));
+            rm_set_var_with_type(mt, vname, r, rhs_type);
+        }
+    } else if (assign->target && assign->target->node_type == RB_AST_NODE_CONST) {
+        // Constant assignment: Point = ... → treat like variable with _rb_ prefix
+        RbConstNode* cn = (RbConstNode*)assign->target;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)cn->name->len, cn->name->chars);
 
         RbMirVarEntry* var = rm_find_var(mt, vname);
         if (var) {
@@ -1897,23 +2526,68 @@ static void rm_transpile_assignment(RbMirTranspiler* mt, RbAssignmentNode* assig
 
 static void rm_transpile_op_assignment(RbMirTranspiler* mt, RbOpAssignmentNode* opas) {
     // x += val → x = x <op> val
+    // Phase 5: Use native arithmetic when both sides are typed numeric
+    if (opas->target && opas->target->node_type == RB_AST_NODE_IDENTIFIER) {
+        RbIdentifierNode* id = (RbIdentifierNode*)opas->target;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+        RbMirVarEntry* var = rm_find_var(mt, vname);
+
+        TypeId var_type = (var && var->type_hint != LMD_TYPE_NULL) ? var->type_hint : LMD_TYPE_NULL;
+        TypeId rhs_type = rm_get_effective_type(mt, opas->value);
+        bool both_numeric = (var_type == LMD_TYPE_INT || var_type == LMD_TYPE_FLOAT) &&
+                            (rhs_type == LMD_TYPE_INT || rhs_type == LMD_TYPE_FLOAT);
+
+        if (both_numeric && var) {
+            bool use_float = (var_type == LMD_TYPE_FLOAT || rhs_type == LMD_TYPE_FLOAT);
+            TypeId arith_t = use_float ? LMD_TYPE_FLOAT : LMD_TYPE_INT;
+            MIR_insn_code_t mir_op = (MIR_insn_code_t)0;
+
+            switch (opas->op) {
+            case RB_OP_ADD: mir_op = use_float ? MIR_DADD : MIR_ADD; break;
+            case RB_OP_SUB: mir_op = use_float ? MIR_DSUB : MIR_SUB; break;
+            case RB_OP_MUL: mir_op = use_float ? MIR_DMUL : MIR_MUL; break;
+            case RB_OP_DIV: mir_op = use_float ? MIR_DDIV : MIR_DIV; break;
+            case RB_OP_MOD: if (!use_float) mir_op = MIR_MOD; break;
+            default: break;
+            }
+
+            if (mir_op) {
+                MIR_reg_t lhs_native = rm_transpile_as_native(mt, opas->target, var_type, arith_t);
+                MIR_reg_t rhs_native = rm_transpile_as_native(mt, opas->value, rhs_type, arith_t);
+                MIR_reg_t r = rm_new_reg(mt, "opa", use_float ? MIR_T_D : MIR_T_I64);
+                rm_emit(mt, MIR_new_insn(mt->ctx, mir_op,
+                    MIR_new_reg_op(mt->ctx, r), MIR_new_reg_op(mt->ctx, lhs_native),
+                    MIR_new_reg_op(mt->ctx, rhs_native)));
+                MIR_reg_t boxed = use_float ? rm_box_float(mt, r) : rm_box_int_reg(mt, r);
+                rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, var->reg), MIR_new_reg_op(mt->ctx, boxed)));
+                return;
+            }
+        }
+
+        // Boxed fallback
+        MIR_reg_t old_val = rm_transpile_expression(mt, opas->target);
+        MIR_reg_t rhs = rm_transpile_expression(mt, opas->value);
+        const char* fn = rm_binary_op_func(opas->op);
+        MIR_reg_t new_val = rm_call_2(mt, fn, MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
+        if (var) {
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
+                MIR_new_reg_op(mt->ctx, new_val)));
+        }
+        return;
+    }
+
+    // Non-identifier target: always boxed
     MIR_reg_t old_val = rm_transpile_expression(mt, opas->target);
     MIR_reg_t rhs = rm_transpile_expression(mt, opas->value);
     const char* fn = rm_binary_op_func(opas->op);
     MIR_reg_t new_val = rm_call_2(mt, fn, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, old_val),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, rhs));
-
-    if (opas->target && opas->target->node_type == RB_AST_NODE_IDENTIFIER) {
-        RbIdentifierNode* id = (RbIdentifierNode*)opas->target;
-        char vname[128];
-        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
-        RbMirVarEntry* var = rm_find_var(mt, vname);
-        if (var) {
-            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_reg_op(mt->ctx, new_val)));
-        }
-    }
+    // store back (subscript, ivar targets handled on assignment paths)
 }
 
 static void rm_transpile_multi_assignment(RbMirTranspiler* mt, RbMultiAssignmentNode* ma) {
@@ -2039,6 +2713,77 @@ static void rm_transpile_while(RbMirTranspiler* mt, RbWhileNode* wh) {
 }
 
 static void rm_transpile_for(RbMirTranspiler* mt, RbForNode* f) {
+    // Phase 5: Detect `for i in start..end` and emit native counter loop
+    if (f->collection && f->collection->node_type == RB_AST_NODE_RANGE &&
+        f->variable && f->variable->node_type == RB_AST_NODE_IDENTIFIER) {
+        RbRangeNode* range = (RbRangeNode*)f->collection;
+        TypeId start_type = rm_get_effective_type(mt, range->start);
+        TypeId end_type = rm_get_effective_type(mt, range->end);
+
+        if ((start_type == LMD_TYPE_INT || start_type == LMD_TYPE_NULL) &&
+            (end_type == LMD_TYPE_INT || end_type == LMD_TYPE_NULL)) {
+            // Native range-for loop
+            RbIdentifierNode* id = (RbIdentifierNode*)f->variable;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+
+            // Evaluate bounds ONCE before loop
+            MIR_reg_t counter = rm_new_reg(mt, "ri", MIR_T_I64);
+            MIR_reg_t bound_native = rm_transpile_as_native(mt, range->end, end_type, LMD_TYPE_INT);
+            MIR_reg_t start_native = rm_transpile_as_native(mt, range->start, start_type, LMD_TYPE_INT);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, counter),
+                MIR_new_reg_op(mt->ctx, start_native)));
+
+            // Create or find loop variable with INT type hint
+            MIR_reg_t loop_var;
+            RbMirVarEntry* var = rm_find_var(mt, vname);
+            if (var) {
+                loop_var = var->reg;
+                var->type_hint = LMD_TYPE_INT;
+            } else {
+                loop_var = rm_new_reg(mt, vname, MIR_T_I64);
+                rm_set_var_with_type(mt, vname, loop_var, LMD_TYPE_INT);
+            }
+
+            MIR_label_t l_test = rm_new_label(mt);
+            MIR_label_t l_break = rm_new_label(mt);
+            mt->loop_stack[mt->loop_depth].continue_label = l_test;
+            mt->loop_stack[mt->loop_depth].break_label = l_break;
+            mt->loop_depth++;
+
+            rm_emit_label(mt, l_test);
+            // Native comparison: counter < bound (or <= for inclusive)
+            MIR_reg_t cmp = rm_new_reg(mt, "rcmp", MIR_T_I64);
+            MIR_insn_code_t cmp_op = range->exclusive ? MIR_GES : MIR_GTS;
+            rm_emit(mt, MIR_new_insn(mt->ctx, cmp_op, MIR_new_reg_op(mt->ctx, cmp),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_reg_op(mt->ctx, bound_native)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_break),
+                MIR_new_reg_op(mt->ctx, cmp)));
+
+            // Box counter into loop variable for use in body
+            MIR_reg_t boxed_i = rm_box_int_reg(mt, counter);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, loop_var),
+                MIR_new_reg_op(mt->ctx, boxed_i)));
+
+            // Body
+            RbAstNode* stmt = f->body;
+            while (stmt) {
+                rm_transpile_statement(mt, stmt);
+                stmt = stmt->next;
+            }
+
+            // Increment: counter += 1 (native)
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, counter),
+                MIR_new_reg_op(mt->ctx, counter), MIR_new_int_op(mt->ctx, 1)));
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
+            rm_emit_label(mt, l_break);
+
+            mt->loop_depth--;
+            return;
+        }
+    }
+
+    // Fallback: iterator-based for loop
     MIR_label_t l_top = rm_new_label(mt);
     MIR_label_t l_break = rm_new_label(mt);
 
@@ -2442,9 +3187,34 @@ static MIR_reg_t rm_transpile_block_as_func(RbMirTranspiler* mt, RbBlockNode* bl
             MIR_reg_t fn_ptr = rm_new_reg(mt, "bfptr", MIR_T_I64);
             rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fn_ptr),
                 MIR_new_ref_op(mt->ctx, bc->func_item)));
-            return rm_call_2(mt, "js_new_function", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, nparams));
+
+            if (bc->is_closure && bc->capture_count > 0) {
+                // allocate env and populate with captured variables
+                MIR_reg_t env = rm_call_1(mt, "js_alloc_env", MIR_T_I64,
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bc->capture_count));
+                for (int ci = 0; ci < bc->capture_count; ci++) {
+                    RbMirVarEntry* cvar = rm_find_var(mt, bc->captures[ci]);
+                    if (cvar) {
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env, 0, 1),
+                            MIR_new_reg_op(mt->ctx, cvar->reg)));
+                    } else {
+                        // capture doesn't resolve — store null
+                        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env, 0, 1),
+                            MIR_new_int_op(mt->ctx, ITEM_NULL)));
+                    }
+                }
+                return rm_call_4(mt, "js_new_closure", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, nparams),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, env),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, bc->capture_count));
+            } else {
+                return rm_call_2(mt, "js_new_function", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, nparams));
+            }
         }
     }
 
@@ -2476,12 +3246,359 @@ static bool rm_is_statement_node(RbAstNodeType t) {
     }
 }
 
+// ============================================================================
+// Closure analysis: find free variables in a block
+// ============================================================================
+
+struct RbNameSet {
+    char names[64][128];
+    int count;
+};
+
+static bool rb_nameset_contains(RbNameSet* s, const char* name) {
+    for (int i = 0; i < s->count; i++) {
+        if (strcmp(s->names[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static void rb_nameset_add(RbNameSet* s, const char* name) {
+    if (s->count >= 64 || rb_nameset_contains(s, name)) return;
+    snprintf(s->names[s->count], sizeof(s->names[0]), "%s", name);
+    s->count++;
+}
+
+// collect all variable names defined locally in a block (params + assignments)
+static void rb_collect_locals(RbAstNode* node, RbNameSet* locals) {
+    if (!node) return;
+    switch (node->node_type) {
+        case RB_AST_NODE_ASSIGNMENT: {
+            RbAssignmentNode* a = (RbAssignmentNode*)node;
+            if (a->target && a->target->node_type == RB_AST_NODE_IDENTIFIER) {
+                RbIdentifierNode* id = (RbIdentifierNode*)a->target;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                rb_nameset_add(locals, vname);
+            }
+            break;
+        }
+        case RB_AST_NODE_MULTI_ASSIGNMENT: {
+            RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)node;
+            RbAstNode* t = ma->targets;
+            while (t) {
+                if (t->node_type == RB_AST_NODE_IDENTIFIER) {
+                    RbIdentifierNode* id = (RbIdentifierNode*)t;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                    rb_nameset_add(locals, vname);
+                }
+                t = t->next;
+            }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* f = (RbForNode*)node;
+            if (f->variable && f->variable->node_type == RB_AST_NODE_IDENTIFIER) {
+                RbIdentifierNode* id = (RbIdentifierNode*)f->variable;
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                rb_nameset_add(locals, vname);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    // recurse into children but NOT into nested blocks (they have their own scope)
+    switch (node->node_type) {
+        case RB_AST_NODE_IF:
+        case RB_AST_NODE_UNLESS: {
+            RbIfNode* n = (RbIfNode*)node;
+            RbAstNode* s = n->then_body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            s = n->else_body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_WHILE:
+        case RB_AST_NODE_UNTIL: {
+            RbWhileNode* n = (RbWhileNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* n = (RbForNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_CASE: {
+            RbCaseNode* n = (RbCaseNode*)node;
+            RbAstNode* w = n->whens;
+            while (w) {
+                if (w->node_type == RB_AST_NODE_WHEN) {
+                    RbAstNode* s = ((RbWhenNode*)w)->body;
+                    while (s) { rb_collect_locals(s, locals); s = s->next; }
+                }
+                w = w->next;
+            }
+            if (n->else_body) {
+                RbAstNode* s = n->else_body;
+                while (s) { rb_collect_locals(s, locals); s = s->next; }
+            }
+            break;
+        }
+        case RB_AST_NODE_BEGIN_RESCUE: {
+            RbBeginRescueNode* n = (RbBeginRescueNode*)node;
+            RbAstNode* s = n->body; while (s) { rb_collect_locals(s, locals); s = s->next; }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// collect all identifier references in a block body (excluding nested block bodies)
+static void rb_collect_refs(RbAstNode* node, RbNameSet* refs) {
+    if (!node) return;
+    if (node->node_type == RB_AST_NODE_IDENTIFIER) {
+        RbIdentifierNode* id = (RbIdentifierNode*)node;
+        char vname[128];
+        snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+        rb_nameset_add(refs, vname);
+        return;
+    }
+    // skip nested blocks — they are separate closures
+    if (node->node_type == RB_AST_NODE_BLOCK || node->node_type == RB_AST_NODE_PROC_LAMBDA)
+        return;
+    // skip method/class/module defs — they don't capture
+    if (node->node_type == RB_AST_NODE_METHOD_DEF || node->node_type == RB_AST_NODE_CLASS_DEF ||
+        node->node_type == RB_AST_NODE_MODULE_DEF)
+        return;
+
+    // recurse into all child nodes
+    switch (node->node_type) {
+        case RB_AST_NODE_ASSIGNMENT: {
+            RbAssignmentNode* a = (RbAssignmentNode*)node;
+            rb_collect_refs(a->target, refs);
+            rb_collect_refs(a->value, refs);
+            break;
+        }
+        case RB_AST_NODE_OP_ASSIGNMENT: {
+            RbOpAssignmentNode* oa = (RbOpAssignmentNode*)node;
+            rb_collect_refs(oa->target, refs);
+            rb_collect_refs(oa->value, refs);
+            break;
+        }
+        case RB_AST_NODE_MULTI_ASSIGNMENT: {
+            RbMultiAssignmentNode* ma = (RbMultiAssignmentNode*)node;
+            RbAstNode* t = ma->targets; while (t) { rb_collect_refs(t, refs); t = t->next; }
+            RbAstNode* v = ma->values; while (v) { rb_collect_refs(v, refs); v = v->next; }
+            break;
+        }
+        case RB_AST_NODE_BINARY_OP: {
+            RbBinaryNode* b = (RbBinaryNode*)node;
+            rb_collect_refs(b->left, refs);
+            rb_collect_refs(b->right, refs);
+            break;
+        }
+        case RB_AST_NODE_UNARY_OP: {
+            RbUnaryNode* u = (RbUnaryNode*)node;
+            rb_collect_refs(u->operand, refs);
+            break;
+        }
+        case RB_AST_NODE_CALL: {
+            RbCallNode* c = (RbCallNode*)node;
+            rb_collect_refs(c->receiver, refs);
+            RbAstNode* a = c->args; while (a) { rb_collect_refs(a, refs); a = a->next; }
+            // recurse into block body (but it's a separate closure, so skip)
+            break;
+        }
+        case RB_AST_NODE_IF:
+        case RB_AST_NODE_UNLESS: {
+            RbIfNode* n = (RbIfNode*)node;
+            rb_collect_refs(n->condition, refs);
+            RbAstNode* s = n->then_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            s = n->else_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_WHILE:
+        case RB_AST_NODE_UNTIL: {
+            RbWhileNode* w = (RbWhileNode*)node;
+            rb_collect_refs(w->condition, refs);
+            RbAstNode* s = w->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_FOR: {
+            RbForNode* f = (RbForNode*)node;
+            rb_collect_refs(f->variable, refs);
+            rb_collect_refs(f->collection, refs);
+            RbAstNode* s = f->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_RETURN: {
+            RbReturnNode* r = (RbReturnNode*)node;
+            rb_collect_refs(r->value, refs);
+            break;
+        }
+        case RB_AST_NODE_SUBSCRIPT: {
+            RbSubscriptNode* sub = (RbSubscriptNode*)node;
+            rb_collect_refs(sub->object, refs);
+            rb_collect_refs(sub->index, refs);
+            break;
+        }
+        case RB_AST_NODE_STRING_INTERPOLATION: {
+            RbStringInterpNode* si = (RbStringInterpNode*)node;
+            RbAstNode* p = si->parts; while (p) { rb_collect_refs(p, refs); p = p->next; }
+            break;
+        }
+        case RB_AST_NODE_ARRAY: {
+            RbArrayNode* arr = (RbArrayNode*)node;
+            RbAstNode* e = arr->elements; while (e) { rb_collect_refs(e, refs); e = e->next; }
+            break;
+        }
+        case RB_AST_NODE_HASH: {
+            RbHashNode* h = (RbHashNode*)node;
+            RbAstNode* p = h->pairs; while (p) { rb_collect_refs(p, refs); p = p->next; }
+            break;
+        }
+        case RB_AST_NODE_PAIR: {
+            RbPairNode* p = (RbPairNode*)node;
+            rb_collect_refs(p->key, refs);
+            rb_collect_refs(p->value, refs);
+            break;
+        }
+        case RB_AST_NODE_RANGE: {
+            RbRangeNode* r = (RbRangeNode*)node;
+            rb_collect_refs(r->start, refs);
+            rb_collect_refs(r->end, refs);
+            break;
+        }
+        case RB_AST_NODE_TERNARY: {
+            RbTernaryNode* t = (RbTernaryNode*)node;
+            rb_collect_refs(t->condition, refs);
+            rb_collect_refs(t->true_expr, refs);
+            rb_collect_refs(t->false_expr, refs);
+            break;
+        }
+        case RB_AST_NODE_CASE: {
+            RbCaseNode* c = (RbCaseNode*)node;
+            rb_collect_refs(c->subject, refs);
+            RbAstNode* w = c->whens;
+            while (w) {
+                if (w->node_type == RB_AST_NODE_WHEN) {
+                    RbWhenNode* wn = (RbWhenNode*)w;
+                    RbAstNode* v = wn->patterns; while (v) { rb_collect_refs(v, refs); v = v->next; }
+                    RbAstNode* s = wn->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+                }
+                w = w->next;
+            }
+            if (c->else_body) {
+                RbAstNode* s = c->else_body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            }
+            break;
+        }
+        case RB_AST_NODE_BEGIN_RESCUE: {
+            RbBeginRescueNode* b = (RbBeginRescueNode*)node;
+            RbAstNode* s = b->body; while (s) { rb_collect_refs(s, refs); s = s->next; }
+            break;
+        }
+        case RB_AST_NODE_YIELD: {
+            RbYieldNode* y = (RbYieldNode*)node;
+            RbAstNode* a = y->args; while (a) { rb_collect_refs(a, refs); a = a->next; }
+            break;
+        }
+        case RB_AST_NODE_ATTRIBUTE: {
+            RbAttributeNode* attr = (RbAttributeNode*)node;
+            rb_collect_refs(attr->object, refs);
+            break;
+        }
+        case RB_AST_NODE_DEFINED: {
+            RbDefinedNode* d = (RbDefinedNode*)node;
+            rb_collect_refs(d->operand, refs);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// Analyze a block for free variables (captured from enclosing scope)
+static void rb_analyze_block_captures(RbBlockCollected* bc, RbMirTranspiler* mt) {
+    RbBlockNode* block = bc->node;
+
+    // 1. Collect params as locals
+    RbNameSet locals;
+    memset(&locals, 0, sizeof(locals));
+    RbAstNode* p = block->params;
+    while (p) {
+        if (p->node_type == RB_AST_NODE_PARAMETER || p->node_type == RB_AST_NODE_DEFAULT_PARAMETER) {
+            RbParamNode* pp = (RbParamNode*)p;
+            if (pp->name) {
+                char vname[128];
+                snprintf(vname, sizeof(vname), "_rb_%.*s", (int)pp->name->len, pp->name->chars);
+                rb_nameset_add(&locals, vname);
+            }
+        } else if (p->node_type == RB_AST_NODE_IDENTIFIER) {
+            RbIdentifierNode* id = (RbIdentifierNode*)p;
+            char vname[128];
+            snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+            rb_nameset_add(&locals, vname);
+        }
+        p = p->next;
+    }
+
+    // 2. Collect assignments in the block body as locals
+    RbAstNode* s = block->body;
+    while (s) { rb_collect_locals(s, &locals); s = s->next; }
+
+    // 3. Collect all identifier references
+    RbNameSet refs;
+    memset(&refs, 0, sizeof(refs));
+    s = block->body;
+    while (s) { rb_collect_refs(s, &refs); s = s->next; }
+
+    // 4. Free variables = refs that are not locals (potential captures from enclosing scope)
+    // Skip well-known Ruby constants that are never captures
+    bc->capture_count = 0;
+    bc->is_closure = false;
+    for (int i = 0; i < refs.count && bc->capture_count < 16; i++) {
+        if (rb_nameset_contains(&locals, refs.names[i])) continue;
+
+        // skip common Ruby keywords/constants (already prefixed with _rb_)
+        const char* name = refs.names[i];
+        if (strcmp(name, "_rb_nil") == 0 || strcmp(name, "_rb_true") == 0 ||
+            strcmp(name, "_rb_false") == 0 || strcmp(name, "_rb_self") == 0 ||
+            strcmp(name, "_rb_ARGV") == 0 || strcmp(name, "_rb_STDOUT") == 0 ||
+            strcmp(name, "_rb_STDERR") == 0 || strcmp(name, "_rb_STDIN") == 0)
+            continue;
+
+        snprintf(bc->captures[bc->capture_count], sizeof(bc->captures[0]),
+            "%s", refs.names[i]);
+        bc->capture_count++;
+        bc->is_closure = true;
+    }
+
+    if (bc->is_closure) {
+        log_debug("rb-mir: block_%d captures %d vars", bc->id, bc->capture_count);
+    }
+}
+
 // Pre-compile a block as a standalone MIR function (called before rb_main).
 static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     RbBlockNode* block = bc->node;
     int nparams = block->param_count;
 
-    MIR_var_t* params = nparams > 0 ? (MIR_var_t*)alloca(sizeof(MIR_var_t) * nparams) : NULL;
+    // closures get _rb__env as hidden first parameter
+    int mir_param_count = nparams + (bc->is_closure ? 1 : 0);
+    MIR_var_t* params = mir_param_count > 0 ?
+        (MIR_var_t*)alloca(sizeof(MIR_var_t) * mir_param_count) : NULL;
+    int offset = 0;
+
+    if (bc->is_closure) {
+        char* env_name = (char*)pool_alloc(mt->tp->ast_pool, 16);
+        strcpy(env_name, "_rb__env");
+        params[0] = {MIR_T_I64, env_name, 0};
+        offset = 1;
+    }
+
     RbAstNode* p = block->params;
     for (int i = 0; i < nparams && p; i++) {
         char pname[128];
@@ -2498,7 +3615,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
         }
         char* stable_name = (char*)pool_alloc(mt->tp->ast_pool, strlen(pname) + 1);
         strcpy(stable_name, pname);
-        params[i] = {MIR_T_I64, stable_name, 0};
+        params[i + offset] = {MIR_T_I64, stable_name, 0};
         p = p->next;
     }
 
@@ -2506,7 +3623,7 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
     snprintf(fn_name, sizeof(fn_name), "rbu_block_%d", bc->id);
 
     MIR_type_t res_type = MIR_T_I64;
-    bc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type, nparams, params);
+    bc->func_item = MIR_new_func_arr(mt->ctx, fn_name, 1, &res_type, mir_param_count, params);
 
     MIR_item_t saved_func_item = mt->current_func_item;
     MIR_func_t saved_func = mt->current_func;
@@ -2526,17 +3643,29 @@ static void rm_compile_block(RbMirTranspiler* mt, RbBlockCollected* bc) {
             if (pp->name) {
                 char vname[128];
                 snprintf(vname, sizeof(vname), "_rb_%.*s", (int)pp->name->len, pp->name->chars);
-                MIR_reg_t preg = MIR_reg(mt->ctx, params[i].name, mt->current_func);
+                MIR_reg_t preg = MIR_reg(mt->ctx, params[i + offset].name, mt->current_func);
                 rm_set_var(mt, vname, preg);
             }
         } else if (p->node_type == RB_AST_NODE_IDENTIFIER) {
             RbIdentifierNode* id = (RbIdentifierNode*)p;
             char vname[128];
             snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
-            MIR_reg_t preg = MIR_reg(mt->ctx, params[i].name, mt->current_func);
+            MIR_reg_t preg = MIR_reg(mt->ctx, params[i + offset].name, mt->current_func);
             rm_set_var(mt, vname, preg);
         }
         p = p->next;
+    }
+
+    // load captured variables from env (closure support)
+    if (bc->is_closure) {
+        MIR_reg_t env_reg = MIR_reg(mt->ctx, "_rb__env", mt->current_func);
+        for (int ci = 0; ci < bc->capture_count; ci++) {
+            MIR_reg_t var_reg = rm_new_reg(mt, "cvar", MIR_T_I64);
+            rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, var_reg),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, ci * 8, env_reg, 0, 1)));
+            rm_set_var(mt, bc->captures[ci], var_reg);
+        }
     }
 
     MIR_reg_t last_result = rm_emit_null(mt);
@@ -3489,7 +4618,10 @@ static void rm_transpile_ast(RbMirTranspiler* mt, RbAstNode* root) {
         hashmap_set(mt->local_funcs, &lfe);
     }
 
-    // Phase 3b: compile all blocks (before any functions that reference them)
+    // Phase 3b: analyze block captures and compile all blocks
+    for (int i = 0; i < mt->block_count; i++) {
+        rb_analyze_block_captures(&mt->block_entries[i], mt);
+    }
     for (int i = 0; i < mt->block_count; i++) {
         rm_compile_block(mt, &mt->block_entries[i]);
     }
@@ -3691,6 +4823,8 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
     // execute
     log_notice("rb-mir: executing JIT compiled Ruby code");
     rb_reset_module_vars();
+    rb_runtime_set_current_file(filename);
+    rb_runtime_set_runtime(runtime);
     Item result = rb_main((Context*)context);
 
     // cleanup

@@ -26,6 +26,251 @@
 static Pool* get_document_pool();
 
 // =============================================================================
+// Unicode-Range Parsing & Canonical Serialization
+// =============================================================================
+
+static bool is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static uint32_t hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+// format a code point as uppercase hex, stripping leading zeros
+// e.g., 0x00ABC → "ABC", 0 → "0"
+static int format_codepoint(uint32_t cp, char* buf, size_t buf_size) {
+    if (cp == 0) {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return 1;
+    }
+    char tmp[8];
+    int len = 0;
+    uint32_t val = cp;
+    while (val > 0 && len < 6) {
+        int d = val & 0xF;
+        tmp[len++] = (d < 10) ? ('0' + d) : ('A' + d - 10);
+        val >>= 4;
+    }
+    // reverse
+    for (int i = 0; i < len && (size_t)i < buf_size - 1; i++) {
+        buf[i] = tmp[len - 1 - i];
+    }
+    buf[len] = '\0';
+    return len;
+}
+
+/**
+ * Parse a CSS unicode-range value and return canonical form.
+ * Returns pool-allocated string like "U+ABC" or "U+A0-AF", or NULL if invalid.
+ *
+ * Grammar (CSS Syntax spec §9.1):
+ *   <urange> = u '+' <ident-token> '?'*
+ *            | u <dimension-token> '?'*
+ *            | u <number-token> '?'*
+ *            | u <number-token> <dimension-token>
+ *            | u <number-token> <number-token>
+ *            | u '+' '?'+
+ *
+ * In practice, the tokenizer sees these as various token sequences because
+ * `u+abc` tokenizes as IDENT(u) + DELIM(+) + ... or as DIMENSION, etc.
+ * We handle this by working directly on the raw text.
+ */
+static const char* css_parse_unicode_range_canonical(const char* input, Pool* pool) {
+    if (!input || !pool) return nullptr;
+
+    const char* p = input;
+    // skip leading whitespace
+    while (*p == ' ' || *p == '\t') p++;
+
+    // must start with 'u' or 'U' (case insensitive)
+    if (*p != 'u' && *p != 'U') return nullptr;
+    p++;
+
+    // skip CSS comments ONLY between 'u' and '+' (not whitespace — "u +abc" is invalid)
+    while (*p == '/' && *(p+1) == '*') {
+        p += 2;
+        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+        if (*p) p += 2;
+    }
+
+    // must have '+' next
+    if (*p != '+') return nullptr;
+    p++;
+
+    // skip CSS comments ONLY (not whitespace) between '+' and value
+    // per spec, spaces are not allowed: "u+ abc" is invalid
+    while (*p == '/' && *(p+1) == '*') {
+        p += 2;
+        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+        if (*p) p += 2;
+    }
+
+    // now parse the hex digits, '?' wildcards, and '-' range separator
+    char hex_chars[8]; // max 6 hex + null
+    int hex_count = 0;
+    int wild_count = 0;
+
+    // first, collect hex digits
+    // collect up to 6 hex digits (CSS unicode-range max)
+    while (is_hex_digit(*p) && hex_count < 6) {
+        hex_chars[hex_count++] = *p;
+        p++;
+    }
+
+    // skip CSS comments between hex chars and wildcards
+    while (*p == '/' && *(p+1) == '*') {
+        p += 2;
+        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+        if (*p) p += 2;
+    }
+
+    // then collect ? wildcards
+    while (*p == '?') {
+        wild_count++;
+        p++;
+    }
+
+    // total must be 1-6
+    int total = hex_count + wild_count;
+    if (total == 0 || total > 6) return nullptr;
+
+    // skip CSS comments after value
+    while (*p == '/' && *(p+1) == '*') {
+        p += 2;
+        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+        if (*p) p += 2;
+    }
+
+    // if we have wildcards, compute range and return
+    if (wild_count > 0) {
+        // no characters after '?' (except whitespace/end)
+        const char* rest = p;
+        while (*rest == ' ' || *rest == '\t') rest++;
+        if (*rest != '\0' && *rest != ';' && *rest != '}') {
+            // wildcards can't be followed by anything — reject "-", hex, alpha
+            return nullptr;
+        }
+
+        hex_chars[hex_count] = '\0';
+        // compute start and end of wildcard range
+        // "a?" → start=a0, end=af
+        // "a??" → start=a00, end=aff
+        uint32_t start_cp = 0;
+        for (int i = 0; i < hex_count; i++) {
+            start_cp = (start_cp << 4) | hex_val(hex_chars[i]);
+        }
+        for (int i = 0; i < wild_count; i++) {
+            start_cp = start_cp << 4;
+        }
+
+        uint32_t end_cp = 0;
+        for (int i = 0; i < hex_count; i++) {
+            end_cp = (end_cp << 4) | hex_val(hex_chars[i]);
+        }
+        for (int i = 0; i < wild_count; i++) {
+            end_cp = (end_cp << 4) | 0xF;
+        }
+
+        // validate range
+        if (start_cp > 0x10FFFF || end_cp > 0x10FFFF) return nullptr;
+
+        char result[32];
+        char start_str[8], end_str[8];
+        format_codepoint(start_cp, start_str, sizeof(start_str));
+        format_codepoint(end_cp, end_str, sizeof(end_str));
+        snprintf(result, sizeof(result), "U+%s-%s", start_str, end_str);
+        char* out = (char*)pool_alloc(pool, strlen(result) + 1);
+        strcpy(out, result);
+        return out;
+    }
+
+    // no wildcards: either a single value or a range with '-'
+    hex_chars[hex_count] = '\0';
+
+    // parse the first value
+    uint32_t start_cp = 0;
+    for (int i = 0; i < hex_count; i++) {
+        start_cp = (start_cp << 4) | hex_val(hex_chars[i]);
+    }
+
+    // check for range separator '-'
+    bool has_range = false;
+    uint32_t end_cp = 0;
+
+    // skip CSS comments
+    while (*p == '/' && *(p+1) == '*') {
+        p += 2;
+        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+        if (*p) p += 2;
+    }
+
+    if (*p == '-') {
+        p++;
+        has_range = true;
+
+        // skip CSS comments
+        while (*p == '/' && *(p+1) == '*') {
+            p += 2;
+            while (*p && !(*p == '*' && *(p+1) == '/')) p++;
+            if (*p) p += 2;
+        }
+
+        // parse end value hex digits
+        int end_hex_count = 0;
+        char end_hex[8];
+        while (is_hex_digit(*p) && end_hex_count < 6) {
+            end_hex[end_hex_count++] = *p;
+            p++;
+        }
+        if (end_hex_count == 0 || end_hex_count > 6) return nullptr;
+        end_hex[end_hex_count] = '\0';
+
+        // reject if more hex chars follow (>6 total)
+        if (is_hex_digit(*p)) return nullptr;
+
+        // no wildcards allowed in range end
+        if (*p == '?') return nullptr;
+
+        for (int i = 0; i < end_hex_count; i++) {
+            end_cp = (end_cp << 4) | hex_val(end_hex[i]);
+        }
+    }
+
+    // validate
+    if (start_cp > 0x10FFFF) return nullptr;
+    if (has_range && end_cp > 0x10FFFF) return nullptr;
+
+    // check for trailing garbage
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '\0' && *p != ';' && *p != '}') {
+        // any trailing content makes the value invalid
+        return nullptr;
+    }
+
+    // format canonical output
+    char result[32];
+    char start_str[8];
+    format_codepoint(start_cp, start_str, sizeof(start_str));
+
+    if (has_range) {
+        char end_str[8];
+        format_codepoint(end_cp, end_str, sizeof(end_str));
+        snprintf(result, sizeof(result), "U+%s-%s", start_str, end_str);
+    } else {
+        snprintf(result, sizeof(result), "U+%s", start_str);
+    }
+
+    char* out = (char*)pool_alloc(pool, strlen(result) + 1);
+    strcpy(out, result);
+    return out;
+}
+
+// =============================================================================
 // Sentinel Markers for CSSOM Types
 // =============================================================================
 
@@ -100,6 +345,100 @@ extern "C" Item js_cssom_wrap_stylesheet(void* stylesheet) {
 static CssStylesheet* unwrap_stylesheet(Item item) {
     if (!js_is_stylesheet(item)) return nullptr;
     return (CssStylesheet*)item.map->data;
+}
+
+// =============================================================================
+// Font-Face Declaration Parsing (lazy on .style access)
+// =============================================================================
+
+// Use the CssRule's legacy compatibility fields to cache parsed declarations
+// for font-face rules. property_count stores declaration count, property_names
+// is repurposed to store CssDeclaration** (cast).
+static CssRule* get_font_face_as_style_rule(CssRule* rule) {
+    if (!rule || rule->type != CSS_RULE_FONT_FACE) return nullptr;
+
+    Pool* pool = rule->pool ? rule->pool : get_document_pool();
+    if (!pool) return nullptr;
+
+    // check if we already parsed declarations (cached in property_count)
+    if (rule->property_count > 0 && rule->property_names) {
+        // already parsed - return a shadow style rule using cached data
+        // we store the shadow CssRule* in property_values[0]
+        return (CssRule*)rule->property_values;
+    }
+
+    // parse the content of the font-face rule
+    const char* content = rule->data.generic_rule.content;
+    if (!content) return nullptr;
+
+    // the content includes the braces, e.g.: { font-family: foo; src: url(...); }
+    // find the content between { and }
+    const char* start = strchr(content, '{');
+    const char* end = nullptr;
+    if (start) {
+        start++;
+        end = strrchr(content, '}');
+        if (!end) end = content + strlen(content);
+    } else {
+        // no braces — treat entire content as declarations
+        start = content;
+        end = content + strlen(content);
+    }
+
+    size_t decl_text_len = end - start;
+    char* decl_text = (char*)pool_alloc(pool, decl_text_len + 1);
+    if (!decl_text) return nullptr;
+    memcpy(decl_text, start, decl_text_len);
+    decl_text[decl_text_len] = '\0';
+
+    // tokenize and parse declarations
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(decl_text, decl_text_len, pool, &token_count);
+    if (!tokens || token_count == 0) return nullptr;
+
+    // parse declarations from tokens
+    CssDeclaration* decls[64];
+    size_t decl_count = 0;
+    int pos = 0;
+    while (pos < (int)token_count && decl_count < 64) {
+        // skip whitespace and semicolons
+        while (pos < (int)token_count &&
+               (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
+                tokens[pos].type == CSS_TOKEN_SEMICOLON)) {
+            pos++;
+        }
+        if (pos >= (int)token_count || tokens[pos].type == CSS_TOKEN_EOF) break;
+
+        CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
+        if (decl) {
+            decls[decl_count++] = decl;
+        }
+        // skip semicolons
+        if (pos < (int)token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) pos++;
+    }
+
+    if (decl_count == 0) return nullptr;
+
+    // create a shadow CssRule of type CSS_RULE_STYLE to hold the declarations
+    CssRule* shadow = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+    if (!shadow) return nullptr;
+    shadow->type = CSS_RULE_STYLE;
+    shadow->pool = pool;
+    shadow->data.style_rule.declarations = (CssDeclaration**)pool_calloc(pool, sizeof(CssDeclaration*) * (decl_count + 8));
+    shadow->data.style_rule.declaration_count = decl_count;
+    shadow->data.style_rule.selector = nullptr;
+    shadow->data.style_rule.selector_group = nullptr;
+    for (size_t i = 0; i < decl_count; i++) {
+        shadow->data.style_rule.declarations[i] = decls[i];
+    }
+
+    // cache the shadow rule in the original font-face rule's legacy fields
+    rule->property_count = decl_count;
+    rule->property_values = (CssValue**)shadow;    // repurposed: stores CssRule*
+    rule->property_names = (const char**)shadow;   // sentinel for "parsed"
+
+    log_debug("get_font_face_as_style_rule: parsed %zu declarations from font-face content", decl_count);
+    return shadow;
 }
 
 // =============================================================================
@@ -392,8 +731,17 @@ extern "C" Item js_cssom_rule_get_property(Item rule_item, Item prop_name) {
     }
 
     if (strcmp(prop, "style") == 0) {
-        if (rule->type != CSS_RULE_STYLE) return ItemNull;
-        return wrap_rule_decl(rule, pool);
+        if (rule->type == CSS_RULE_STYLE) {
+            return wrap_rule_decl(rule, pool);
+        }
+        // font-face and page rules also expose .style
+        if (rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_PAGE) {
+            CssRule* shadow = get_font_face_as_style_rule(rule);
+            if (shadow) {
+                return wrap_rule_decl(shadow, pool);
+            }
+        }
+        return ItemNull;
     }
 
     if (strcmp(prop, "cssText") == 0) {
@@ -596,6 +944,49 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
     char css_prop[128];
     cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
 
+    // special handling for unicode-range descriptor (font-face)
+    if (strcmp(css_prop, "unicode-range") == 0) {
+        const char* canonical = css_parse_unicode_range_canonical(val_str, pool);
+        if (!canonical) {
+            // invalid unicode-range — silently ignore (per CSSOM spec)
+            log_debug("js_cssom_rule_decl_set_property: invalid unicode-range '%s'", val_str);
+            return value;
+        }
+
+        // create a declaration with the canonical value
+        CssDeclaration* new_decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
+        if (!new_decl) return value;
+        new_decl->property_name = (char*)pool_alloc(pool, strlen(css_prop) + 1);
+        if (new_decl->property_name) strcpy((char*)new_decl->property_name, css_prop);
+        new_decl->value_text = canonical;
+        new_decl->value_text_len = strlen(canonical);
+        new_decl->valid = true;
+        new_decl->property_id = css_property_id_from_name(css_prop);
+
+        // find and replace or append
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* d = rule->data.style_rule.declarations[i];
+            if (!d) continue;
+            if (d->property_name && strcmp(d->property_name, css_prop) == 0) {
+                rule->data.style_rule.declarations[i] = new_decl;
+                log_debug("js_cssom_rule_decl_set_property: replaced unicode-range = '%s'", canonical);
+                return value;
+            }
+        }
+        // append
+        size_t count = rule->data.style_rule.declaration_count;
+        CssDeclaration** new_decls = (CssDeclaration**)pool_calloc(pool, (count + 1) * sizeof(CssDeclaration*));
+        if (new_decls) {
+            if (rule->data.style_rule.declarations && count > 0)
+                memcpy(new_decls, rule->data.style_rule.declarations, count * sizeof(CssDeclaration*));
+            new_decls[count] = new_decl;
+            rule->data.style_rule.declarations = new_decls;
+            rule->data.style_rule.declaration_count = count + 1;
+        }
+        log_debug("js_cssom_rule_decl_set_property: added unicode-range = '%s'", canonical);
+        return value;
+    }
+
     // parse the value as a CSS declaration: "property: value"
     char decl_text[512];
     snprintf(decl_text, sizeof(decl_text), "%s: %s", css_prop, val_str);
@@ -662,15 +1053,40 @@ extern "C" Item js_cssom_rule_decl_method(Item decl_item, Item method_name, Item
 
     if (strcmp(method, "setProperty") == 0) {
         if (argc < 2) return ItemNull;
-        // TODO: implement setProperty for dynamic rule modification
-        log_debug("js_cssom_rule_decl_method: setProperty not yet implemented");
-        return ItemNull;
+        // delegate to the property setter with the CSS property name
+        return js_cssom_rule_decl_set_property(decl_item, args[0], args[1]);
     }
 
     if (strcmp(method, "removeProperty") == 0) {
         if (argc < 1) return make_string_item("");
-        // TODO: implement removeProperty
-        log_debug("js_cssom_rule_decl_method: removeProperty not yet implemented");
+        const char* prop = fn_to_cstr(args[0]);
+        if (!prop) return make_string_item("");
+
+        CssRule* rm_rule = unwrap_rule_decl(decl_item);
+        if (!rm_rule || rm_rule->type != CSS_RULE_STYLE) return make_string_item("");
+
+        // convert camelCase if needed
+        char css_prop[128];
+        cssom_camel_to_css_prop(prop, css_prop, sizeof(css_prop));
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+
+        // find and remove
+        for (size_t i = 0; i < rm_rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* d = rm_rule->data.style_rule.declarations[i];
+            if (!d) continue;
+            bool match = false;
+            if (prop_id != CSS_PROPERTY_UNKNOWN && d->property_id == prop_id) match = true;
+            else if (d->property_name && strcmp(d->property_name, css_prop) == 0) match = true;
+            if (match) {
+                const char* old_val = serialize_declaration_value(d, unwrap_rule_decl_pool(decl_item));
+                // shift remaining declarations
+                for (size_t j = i; j + 1 < rm_rule->data.style_rule.declaration_count; j++) {
+                    rm_rule->data.style_rule.declarations[j] = rm_rule->data.style_rule.declarations[j + 1];
+                }
+                rm_rule->data.style_rule.declaration_count--;
+                return make_string_item(old_val);
+            }
+        }
         return make_string_item("");
     }
 
