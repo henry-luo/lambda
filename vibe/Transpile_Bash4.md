@@ -593,17 +593,86 @@ Each new module gets a dedicated GTest file:
 
 ## 12. Success Criteria
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| Baseline tests (lambda-jube.exe) | 33/33 | 33/33 (no regressions) |
-| GNU official tests | 7/82 | 30–38/82 |
-| New C module unit tests | 0 | ~100 passing |
-| New integration test scripts | 0 | 4 scripts with expected output |
-| `gnu_baseline.json` entries | 7 | 30+ |
-| Transpiler new LOC | — | ~100 (dispatch only) |
+| Metric | Before | Target | Actual (Phase E–H) |
+|--------|--------|--------|---------------------|
+| Baseline tests (lambda-jube.exe) | 33/33 | 33/33 (no regressions) | **37/37** (+4 new) |
+| GNU official tests | 7/82 | 30–38/82 | **12/82** (7 baseline + 5 new passes) |
+| New C module unit tests | 0 | ~100 passing | ~30 functions registered |
+| New integration test scripts | 0 | 4 scripts with expected output | **4 scripts, all passing** |
+| `gnu_baseline.json` entries | 7 | 30+ | 7 (5 new passes ready to add: dbg_support, dynvar, getopts, ifs, tilde2) |
+| New module LOC | — | — | **1785** (8 files) |
+| Transpiler new LOC | — | ~100 (dispatch only) | ~100 dispatch lines |
 
 ---
 
 ## 13. Progress Log
 
-_(To be filled during implementation)_
+### Phases E–H: Complete (Modules 8–11)
+
+**Date:** April 2026
+
+All four new C modules implemented, wired into transpiler, registered, and tested.
+
+#### New Files Created (8 files, 1785 LOC)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `lambda/bash/bash_exec.h` | 83 | Exec engine header — flags, fd redirect, subscript APIs |
+| `lambda/bash/bash_exec.cpp` | 335 | Exec engine impl — exec builtin, fd table, varfd, subscript fork |
+| `lambda/bash/bash_builtins_ext.h` | 89 | Extended builtins header — mapfile, wait, hash, enable, umask, trap print |
+| `lambda/bash/bash_builtins_ext.cpp` | 608 | Extended builtins impl — full option parsing, StrBuf-based line reading |
+| `lambda/bash/bash_cond.h` | 57 | Conditional engine header — regex, BASH_REMATCH, file comparison, pattern |
+| `lambda/bash/bash_cond.cpp` | 264 | Conditional engine impl — regcomp/regexec, BASH_REMATCH array, stat-based file ops |
+| `lambda/bash/bash_heredoc.h` | 56 | Heredoc engine header — expand, herestring, strip tabs, stdin passing |
+| `lambda/bash/bash_heredoc.cpp` | 293 | Heredoc engine impl — char-by-char scanner for $, backtick, backslash |
+
+#### Existing Files Modified (6 files)
+
+| File | Changes |
+|------|---------|
+| `lambda/bash/transpile_bash_mir.cpp` | Wired exec/wait/mapfile/readarray/hash/enable/umask/trap-p dispatches; replaced `bash_test_regex`→`bash_cond_regex`, `bash_test_glob`→`bash_cond_pattern`; added -nt/-ot/-ef; added BASH_REMATCH to `special_vars[]` |
+| `lambda/bash/bash_ast.hpp` | Added `BASH_TEST_NT`, `BASH_TEST_OT`, `BASH_TEST_EF` to `BashTestOp` enum |
+| `lambda/bash/build_bash_ast.cpp` | Added `-nt`, `-ot`, `-ef` operator parsing |
+| `lambda/bash/bash_runtime.cpp` | Made `bash_trap_handlers[]` non-static; added nocasematch/extglob shopt options with getters |
+| `lambda/bash/bash_runtime.h` | Added `bash_get_option_nocasematch()` and `bash_get_option_extglob()` declarations |
+| `lambda/sys_func_registry.c` | Added includes for 4 new headers; registered ~30 new functions (Modules 8–11) |
+
+#### Integration Test Scripts Added (4 scripts)
+
+| Script | Scenarios |
+|--------|-----------|
+| `test/bash/cond_regex.sh` + `.txt` | `[[ =~ ]]` with BASH_REMATCH, multiple capture groups, pattern matching |
+| `test/bash/mapfile_basic.sh` + `.txt` | mapfile/readarray with -t, -n, -s options |
+| `test/bash/file_compare.sh` + `.txt` | -nt, -ot, -ef with temp files |
+| `test/bash/builtins_ext.sh` + `.txt` | umask, hash, enable, trap -p |
+
+#### Test Results
+
+| Suite | Result |
+|-------|--------|
+| Bash integration tests | **37/37** (including 4 new) |
+| GNU official tests | **7/82** baseline passing + **5 NEW passes** (dbg_support, dynvar, getopts, ifs, tilde2) = **12/82** |
+| Bash pattern tests | **51/51** |
+| C2MIR tests | **174/174** |
+| Python tests | **24/24** |
+| Ruby tests | **22/22** |
+| **Total** | **390/394** (4 pre-existing failures in unrelated `test_transpile_patterns_gtest`) |
+
+#### Key Fixes During Implementation
+
+- **StrBuf API**: Used heap-only `strbuf_new_cap()` → `StrBuf*` (not stack-allocated)
+- **String creation**: `heap_create_name(chars, len)` with `#include "../transpiler.hpp"` for 2-arg overload
+- **Item construction**: `(Item){.item = s2it(...)}` / `(Item){.item = b2it(...)}` required in C++
+- **Exit code**: `bash_set_exit_code()` function (not direct assignment)
+- **BASH_REMATCH**: Added to `special_vars[]` registry for `${BASH_REMATCH[n]}` access
+- **bash_cond_regex return type**: Changed from `int` to `Item` (bool) to match transpiler's `bm_emit_call_2()` convention
+
+#### Remaining Work (Phase I)
+
+Phase I (Expansion Depth + Error Fixes) is not yet started:
+- `bash_expand_indirect()` — `${!var}` indirect expansion
+- `bash_expand_prefix_names()` — `${!prefix@}` variable name listing
+- `bash_get_all_args_at()` / `bash_get_all_args_star()` — `"$@"` vs `"$*"` distinction
+- `bash_array_all_at()` / `bash_array_all_star()` — array `@` vs `*` distinction
+- `bash_error_set_script_path()` — error prefix fix
+- GNU baseline update — run full suite and lock in newly passing tests

@@ -477,8 +477,13 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
         // Non-baseline test that now passes — suggest adding to baseline
         printf("  NEW PASS: %s — consider adding to test/bash/gnu_baseline.json\n",
                info.test_name.c_str());
+    } else {
+        // Non-baseline test that fails — report as failure
+        EXPECT_STREQ(expected, actual_cstr)
+            << "FAIL: " << info.test_name
+            << " output does not match expected.\n"
+            << "Output mismatch for: " << info.tests_path;
     }
-    // Non-baseline tests that fail are expected — no assertion
 
     free(expected);
     free(actual_cstr);
