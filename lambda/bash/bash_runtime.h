@@ -376,6 +376,8 @@ bool bash_get_option_nounset(void);                  // -u: error on undefined v
 bool bash_get_option_xtrace(void);                   // -x: trace commands
 bool bash_get_option_pipefail(void);                 // -o pipefail
 bool bash_get_option_extdebug(void);                 // shopt -s extdebug
+bool bash_get_option_nocasematch(void);              // shopt -s nocasematch
+bool bash_get_option_extglob(void);                  // shopt -s extglob
 
 // errexit suppression
 void bash_errexit_push(void);                        // enter errexit-suppressed context

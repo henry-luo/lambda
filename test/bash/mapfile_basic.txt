@@ -1,0 +1,11 @@
+count: 3
+first: alpha
+second: beta
+third: gamma
+items: 3
+item0: one
+item2: three
+partial count: 2
+partial: a b
+skipped: keep_this
+skipped: and_this

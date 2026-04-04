@@ -134,6 +134,9 @@ BashTestOp bash_test_op_from_string(const char* op_str, size_t len) {
         if (memcmp(op_str, "-ge", 3) == 0) return BASH_TEST_GE;
         if (memcmp(op_str, "-lt", 3) == 0) return BASH_TEST_LT;
         if (memcmp(op_str, "-le", 3) == 0) return BASH_TEST_LE;
+        if (memcmp(op_str, "-nt", 3) == 0) return BASH_TEST_NT;
+        if (memcmp(op_str, "-ot", 3) == 0) return BASH_TEST_OT;
+        if (memcmp(op_str, "-ef", 3) == 0) return BASH_TEST_EF;
     }
     if (len == 2) {
         if (memcmp(op_str, "-z", 2) == 0) return BASH_TEST_Z;
