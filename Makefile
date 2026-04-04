@@ -860,7 +860,7 @@ test-lambda-baseline: build-test
 
 test-bash-baseline: build-jube-test
 	@echo "Running Bash transpiler baseline tests (requires lambda-jube)..."
-	@LAMBDA_EXE=./lambda-jube.exe bash test/test_bash_run.sh
+	@./test/test_bash_run_gtest.exe
 
 test-c2mir: build-test
 	@echo "Clearing HTTP cache for clean test runs..."

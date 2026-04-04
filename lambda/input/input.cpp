@@ -98,8 +98,6 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         break;
     case LMD_TYPE_INT: {
         int64_t int_val = value.get_int56();
-        log_debug("map_put INT: value.item=0x%llx, get_int56()=%lld",
-                  (unsigned long long)value.item, (long long)int_val);
         *(int64_t*)field_ptr = int_val;
         break;
     }

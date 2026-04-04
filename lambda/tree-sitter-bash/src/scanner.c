@@ -865,7 +865,9 @@ extglob_pattern:
 
         if (lexer->lookahead == '?' || lexer->lookahead == '*' || lexer->lookahead == '+' || lexer->lookahead == '@' ||
             lexer->lookahead == '!' || lexer->lookahead == '-' || lexer->lookahead == ')' || lexer->lookahead == '\\' ||
-            lexer->lookahead == '.' || lexer->lookahead == '[' || (iswalpha(lexer->lookahead))) {
+            lexer->lookahead == '.' || lexer->lookahead == '[' || lexer->lookahead == '/' ||
+            lexer->lookahead == '#' || lexer->lookahead == ':' || lexer->lookahead == '~' ||
+            (iswalpha(lexer->lookahead)) || (iswalnum(lexer->lookahead))) {
             if (lexer->lookahead == '\\') {
                 advance(lexer);
                 if ((iswspace(lexer->lookahead) || lexer->lookahead == '"') && lexer->lookahead != '\r' &&
@@ -958,7 +960,9 @@ extglob_pattern:
 
             if (!iswalnum(lexer->lookahead) && lexer->lookahead != '(' && lexer->lookahead != '"' &&
                 lexer->lookahead != '[' && lexer->lookahead != '?' && lexer->lookahead != '/' &&
-                lexer->lookahead != '\\' && lexer->lookahead != '_' && lexer->lookahead != '*') {
+                lexer->lookahead != '\\' && lexer->lookahead != '_' && lexer->lookahead != '*' &&
+                lexer->lookahead != '@' && lexer->lookahead != '+' && lexer->lookahead != '!' &&
+                lexer->lookahead != '-' && lexer->lookahead != '.' && lexer->lookahead != ')') {
                 return false;
             }
 

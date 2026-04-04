@@ -235,8 +235,8 @@ static int pmatch(const char* str, int si, const char* pat, int pi, int flags, i
 
         switch (pat[pi]) {
         case '*': {
-            // skip consecutive *
-            while (pat[pi] == '*') pi++;
+            // skip consecutive * but stop if next * is an extglob prefix like *(
+            while (pat[pi] == '*' && !is_extglob_prefix(pat, pi, flags)) pi++;
 
             // trailing * matches everything remaining
             if (!pat[pi]) {

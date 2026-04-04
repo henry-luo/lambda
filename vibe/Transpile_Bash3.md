@@ -741,6 +741,47 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 
 ---
 
+### 2025-04-04: Phase D Complete — Transpiler Simplification
+
+**Baseline:** 33/34 passing. 0 regressions.
+
+**Phase D status:** ✅ Transpiler refactored to delegate to C modules.
+
+**Metrics:** memcmp calls reduced 66 → 43 (−35%). Repetitive special-variable chains (35+ checks) replaced by data-driven registry. IFS skip list (15 memcmp checks) replaced by table lookup.
+
+#### Pattern Matching → `bash_pattern_match()` — ✅ Complete
+
+**Problem:** Case statement patterns and `[[ == ]]` glob tests used `fnmatch()`, lacking extglob support.
+
+**Changes:**
+- `bash_runtime.cpp` — `bash_test_glob()`, `bash_test_str_eq()`, `bash_test_str_eq_noescape()` now call `bash_pattern_match()` (from `bash_pattern.h`) with `BASH_PAT_EXTGLOB` flag, replacing raw `fnmatch()`. Added `#include "bash_pattern.h"`.
+- `transpile_bash_mir.cpp` — Case pattern matching simplified: unquoted patterns now use `bash_test_glob` (unified glob match via `bash_pattern_match`), quoted patterns remain `bash_str_eq` (literal). Removed 3‑way dispatch (`bash_str_eq` / `bash_test_str_eq_noescape` / `bash_test_str_eq`).
+
+#### Special Variable Registry — ✅ Complete
+
+**Problem:** 35+ hardcoded `memcmp()` chains for FUNCNAME, BASH_SOURCE, BASH_LINENO, BASH_ARGV, BASH_ARGC across ARRAY_ACCESS, ARRAY_ALL, ARRAY_LENGTH, VARREF handlers.
+
+**Changes:**
+- `transpile_bash_mir.cpp` — Added `SpecialVarEntry` table + `bm_find_special_var()` lookup. Each entry maps a variable name to its `access_fn`, `all_fn`, `count_fn`, and `scalar_fn`. Replaced memcmp chains in:
+  - `BASH_AST_NODE_ARRAY_ACCESS` — 5 checks → 1 registry lookup
+  - `BASH_AST_NODE_ARRAY_ALL` — 2 checks → 1 registry lookup
+  - `BASH_AST_NODE_ARRAY_LENGTH` — 5 checks → 1 registry lookup
+  - `bm_transpile_varref()` — 2 checks → 1 registry lookup
+  - `bm_transpile_for()` — 2 checks → 1 registry lookup
+
+#### IFS Skip List → Table Lookup — ✅ Complete
+
+**Problem:** 15 inline `memcmp()` checks in the IFS dispatch gating logic.
+
+**Changes:**
+- `transpile_bash_mir.cpp` — Added `bm_cmd_skips_ifs_dispatch()` with static table of 15 command names. Replaced 15-line `if/else if` chain with single function call.
+
+#### Attribute-Aware Assignment — Already Implemented
+
+`bash_set_var()` already calls `bash_apply_attrs()` internally, enforcing integer coercion, case conversion, and readonly checks. No additional `bash_attr_assign()` wrapper needed.
+
+---
+
 ### 2025-04-04: Phase C Complete — Arithmetic Evaluator + Redirection Engine
 
 **Baseline:** 33/34 passing. 0 regressions.

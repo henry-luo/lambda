@@ -1808,6 +1808,16 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, mt->type_list_reg));
             return pat_reg;  // TypePattern* used as Item by fn_is etc.
         }
+        // Check if this is a local object type reference (e.g., `Point` in `p is Point`)
+        else if (entry_node->node_type == AST_NODE_OBJECT_TYPE) {
+            AstObjectTypeNode* obj_node = (AstObjectTypeNode*)entry_node;
+            if (obj_node->type && obj_node->type->type_id == LMD_TYPE_TYPE) {
+                TypeObject* ot = (TypeObject*)((TypeType*)obj_node->type)->type;
+                log_debug("mir: resolving local object type '%s' via const_type(%d)",
+                    name_buf, ot->type_index);
+                return transpile_const_type(mt, ot->type_index);
+            }
+        }
     }
 
     log_error("mir: undefined variable '%s'", name_buf);
@@ -2550,7 +2560,14 @@ static MIR_reg_t transpile_binary(MirTranspiler* mt, AstBinaryNode* bi) {
     case OPERATOR_GE: fn_name = "fn_ge"; break;
     default:
         log_error("mir: unhandled binary op %d", bi->op);
-        return boxl;
+        {
+            // Return ItemNull for unimplemented operators (e.g. set intersection/exclusion)
+            MIR_reg_t null_r = new_reg(mt, "uop", MIR_T_I64);
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, null_r),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            return null_r;
+        }
     }
 
     MIR_reg_t result = emit_call_2(mt, fn_name, MIR_T_I64,
@@ -3081,6 +3098,67 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         set_var(mt, idx_name, key_item, MIR_T_I64, LMD_TYPE_ANY);
     }
 
+    // Handle nested loops (multi-variable for: for (a in X, b in Y, ...))
+    // Each additional loop variable creates a nested inner loop (cross product)
+    struct NestedLoopInfo { MIR_reg_t nidx; MIR_reg_t nlen; MIR_label_t nloop; MIR_label_t ncont; MIR_label_t nend; };
+    NestedLoopInfo nested_loops[8];
+    int nested_count = 0;
+
+    AstNode* next_loop = loop->next;
+    while (next_loop && nested_count < 8) {
+        AstLoopNode* nl = (AstLoopNode*)next_loop;
+
+        // Evaluate and box the nested collection
+        MIR_reg_t nl_src = transpile_expr(mt, nl->as);
+        TypeId nl_tid = get_effective_type(mt, nl->as);
+        MIR_reg_t nl_boxed = emit_box(mt, nl_src, nl_tid);
+
+        // Get length
+        MIR_reg_t nl_len = emit_call_1(mt, "fn_len", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, nl_boxed));
+
+        // Inner index counter
+        MIR_reg_t nidx = new_reg(mt, "nidx", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, nidx),
+            MIR_new_int_op(mt->ctx, 0)));
+
+        MIR_label_t nl_loop = new_label(mt);
+        MIR_label_t nl_cont = new_label(mt);
+        MIR_label_t nl_end = new_label(mt);
+
+        emit_label(mt, nl_loop);
+        // Exit when nidx >= nl_len
+        MIR_reg_t nl_cmp = new_reg(mt, "nlcmp", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, nl_cmp),
+            MIR_new_reg_op(mt->ctx, nidx), MIR_new_reg_op(mt->ctx, nl_len)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, nl_end),
+            MIR_new_reg_op(mt->ctx, nl_cmp)));
+
+        // Get current item: item_at(nl_src, nidx)
+        MIR_reg_t nl_item = emit_call_2(mt, "item_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, nl_boxed),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, nidx));
+
+        // Bind nested loop variable
+        char nl_name[128];
+        snprintf(nl_name, sizeof(nl_name), "%.*s", (int)nl->name->len, nl->name->chars);
+        set_var(mt, nl_name, nl_item, MIR_T_I64, LMD_TYPE_ANY);
+
+        // Bind index variable if present
+        if (nl->index_name) {
+            char nl_idx_name[128];
+            snprintf(nl_idx_name, sizeof(nl_idx_name), "%.*s", (int)nl->index_name->len, nl->index_name->chars);
+            set_var(mt, nl_idx_name, nidx, MIR_T_I64, LMD_TYPE_INT);
+        }
+
+        nested_loops[nested_count++] = {nidx, nl_len, nl_loop, nl_cont, nl_end};
+        next_loop = next_loop->next;
+    }
+
+    // Determine the innermost continue label for where clause
+    MIR_label_t innermost_continue = (nested_count > 0)
+        ? nested_loops[nested_count - 1].ncont : l_continue;
+
     // Process let clauses (additional variable bindings)
     if (for_node->let_clause) {
         AstNode* lc = for_node->let_clause;
@@ -3098,7 +3176,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
         }
     }
 
-    // Where clause
+    // Where clause — skip to innermost continue on failure
     if (for_node->where) {
         MIR_reg_t where_val = transpile_expr(mt, for_node->where);
         TypeId where_tid = get_effective_type(mt, for_node->where);
@@ -3107,7 +3185,7 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             MIR_reg_t boxw = emit_box(mt, where_val, where_tid);
             where_test = emit_uext8(mt, emit_call_1(mt, "is_truthy", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, boxw)));
         }
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_continue),
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, innermost_continue),
             MIR_new_reg_op(mt->ctx, where_test)));
     }
 
@@ -3130,7 +3208,16 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_key));
     }
 
-    // Continue: increment index
+    // Close nested loops (in reverse order, innermost first)
+    for (int ni = nested_count - 1; ni >= 0; ni--) {
+        emit_label(mt, nested_loops[ni].ncont);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, nested_loops[ni].nidx),
+            MIR_new_reg_op(mt->ctx, nested_loops[ni].nidx), MIR_new_int_op(mt->ctx, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, nested_loops[ni].nloop)));
+        emit_label(mt, nested_loops[ni].nend);
+    }
+
+    // Continue: increment outer index
     emit_label(mt, l_continue);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
         MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
@@ -4874,10 +4961,13 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
-        // OOB: return 0 (safe default for int arrays)
+        // OOB: return ItemNull (suppressed in output)
         emit_label(mt, l_oob);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, 0)));
+        {
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
         // In bounds: load items[idx]
@@ -5094,12 +5184,11 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-            // OOB
+            // OOB: always return ItemNull (suppressed in output).
+            // Even for safe_native_int, the transpile_box_item null check
+            // will detect ITEM_NULL and preserve it instead of re-boxing as INT 0.
             emit_label(mt, l_oob);
-            if (safe_native_int) {
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, 0)));
-            } else {
+            {
                 uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                     MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
@@ -5203,10 +5292,13 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-            // OOB → false
+            // OOB: return ItemNull (suppressed in output)
             emit_label(mt, l_oob);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, 0)));
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
             // Slow path: item_at → unbox bool
@@ -5268,9 +5360,13 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
+        // OOB: return ItemNull (suppressed in output)
         emit_label(mt, l_oob);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-            MIR_new_int_op(mt->ctx, 0)));
+        {
+            uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        }
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
         emit_label(mt, l_ok);
@@ -5417,12 +5513,9 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-            // OOB
+            // OOB: always return ItemNull (suppressed in output)
             emit_label(mt, l_oob);
-            if (safe_native_int) {
-                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                    MIR_new_int_op(mt->ctx, 0)));
-            } else {
+            {
                 uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
                     MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
@@ -5517,10 +5610,13 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
-            // OOB → false
+            // OOB: return ItemNull (suppressed in output)
             emit_label(mt, l_oob);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
-                MIR_new_int_op(mt->ctx, 0)));
+            {
+                uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+            }
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
 
             // Slow path: item_at → unbox bool
@@ -6838,6 +6934,57 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
         MIR_new_reg_op(mt->ctx, arr_len)));
 
+    // Scalar pipe handling: if fn_len returns 0 and left is not a collection type,
+    // treat as single-element iteration (e.g., 42 | ~ * 2 => [84])
+    MIR_reg_t is_scalar = new_reg(mt, "is_scalar", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, is_scalar),
+        MIR_new_int_op(mt->ctx, 0)));
+    {
+        MIR_label_t l_not_scalar = new_label(mt);
+        // Only check for scalar if len == 0
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_not_scalar),
+            MIR_new_reg_op(mt->ctx, arr_len)));
+        // Check if type_id is a collection type — if so, it's truly empty (not scalar)
+        MIR_reg_t is_arr = new_reg(mt, "is_arr", MIR_T_I64);
+        MIR_reg_t is_aint = new_reg(mt, "is_aint", MIR_T_I64);
+        MIR_reg_t is_range = new_reg(mt, "is_range", MIR_T_I64);
+        MIR_reg_t is_elmt = new_reg(mt, "is_elmt", MIR_T_I64);
+        MIR_reg_t is_str = new_reg(mt, "is_str", MIR_T_I64);
+        MIR_reg_t is_null = new_reg(mt, "is_null", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_arr),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_range),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_RANGE)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_elmt),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ELEMENT)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_str),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_STRING)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_null),
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_NULL)));
+        MIR_reg_t is_coll = new_reg(mt, "is_coll", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_coll),
+            MIR_new_reg_op(mt->ctx, is_arr), MIR_new_reg_op(mt->ctx, is_aint)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_coll),
+            MIR_new_reg_op(mt->ctx, is_coll), MIR_new_reg_op(mt->ctx, is_range)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_coll),
+            MIR_new_reg_op(mt->ctx, is_coll), MIR_new_reg_op(mt->ctx, is_elmt)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_coll),
+            MIR_new_reg_op(mt->ctx, is_coll), MIR_new_reg_op(mt->ctx, is_str)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, is_coll),
+            MIR_new_reg_op(mt->ctx, is_coll), MIR_new_reg_op(mt->ctx, is_null)));
+        // If it IS a collection type, skip (it's truly empty)
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_not_scalar),
+            MIR_new_reg_op(mt->ctx, is_coll)));
+        // It's a scalar: set len=1, is_scalar=1
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+            MIR_new_int_op(mt->ctx, 1)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, is_scalar),
+            MIR_new_int_op(mt->ctx, 1)));
+        emit_label(mt, l_not_scalar);
+    }
+
     emit_label(mt, l_start_loop);
 
     // Index counter
@@ -6882,16 +7029,36 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
         MIR_new_reg_op(mt->ctx, map_key)));
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_got_item)));
 
-    // ARRAY/LIST/RANGE path: use item_at
+    // ARRAY/LIST/RANGE path: use item_at (or scalar directly)
     emit_label(mt, l_arr_item);
-    MIR_reg_t arr_item = emit_call_2(mt, "item_at", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+    MIR_label_t l_scalar_item = new_label(mt);
+    MIR_label_t l_arr_done = new_label(mt);
+    // If is_scalar, use boxed_left directly as pipe_item
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_scalar_item),
+        MIR_new_reg_op(mt->ctx, is_scalar)));
+    {
+        MIR_reg_t arr_item = emit_call_2(mt, "item_at", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_item),
+            MIR_new_reg_op(mt->ctx, arr_item)));
+    }
+    {
+        MIR_reg_t arr_idx = emit_box_int(mt, idx);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_index),
+            MIR_new_reg_op(mt->ctx, arr_idx)));
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_arr_done)));
+    // Scalar path: use boxed_left directly as the item
+    emit_label(mt, l_scalar_item);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_item),
-        MIR_new_reg_op(mt->ctx, arr_item)));
-    MIR_reg_t arr_idx = emit_box_int(mt, idx);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_index),
-        MIR_new_reg_op(mt->ctx, arr_idx)));
+        MIR_new_reg_op(mt->ctx, boxed_left)));
+    {
+        MIR_reg_t scalar_idx = emit_box_int(mt, idx);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, pipe_index),
+            MIR_new_reg_op(mt->ctx, scalar_idx)));
+    }
+    emit_label(mt, l_arr_done);
 
     emit_label(mt, l_got_item);
 
@@ -7457,6 +7624,41 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // For LIST type, list_end already returns Item - return as-is
     if (tid == LMD_TYPE_ARRAY && node->node_type == AST_NODE_CONTENT) {
         return val;
+    }
+
+    // INDEX_EXPR fast paths may return ITEM_NULL for out-of-bounds access.
+    // Check at runtime to preserve NULL (suppressed in output) instead of
+    // re-boxing it as a native 0 value (e.g. emit_box_int(ITEM_NULL) → boxed INT 0).
+    // Only for integer-typed results — float fast paths return 0.0 in a double register
+    // which can't be compared with MIR_BNE against an int operand.
+    if (node->node_type == AST_NODE_INDEX_EXPR &&
+        tid != LMD_TYPE_FLOAT && tid != LMD_TYPE_ARRAY_FLOAT) {
+        MIR_label_t l_not_null = MIR_new_label(mt->ctx);
+        MIR_label_t l_done = MIR_new_label(mt->ctx);
+        uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
+        MIR_reg_t boxed = new_reg(mt, "idx_box", MIR_T_I64);
+
+        // if val != ITEM_NULL → goto normal boxing
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+            MIR_new_label_op(mt->ctx, l_not_null),
+            MIR_new_reg_op(mt->ctx, val),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        // OOB null: preserve as-is
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, boxed),
+            MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+            MIR_new_label_op(mt->ctx, l_done)));
+        // Normal: box the value
+        emit_label(mt, l_not_null);
+        {
+            MIR_reg_t box_result = emit_box(mt, val, tid);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, boxed),
+                MIR_new_reg_op(mt->ctx, box_result)));
+        }
+        emit_label(mt, l_done);
+        return boxed;
     }
 
     return emit_box(mt, val, tid);
@@ -8141,8 +8343,29 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_member(mt, (AstFieldNode*)node);
     case AST_NODE_INDEX_EXPR:
         return transpile_index(mt, (AstFieldNode*)node);
-    case AST_NODE_CALL_EXPR:
-        return transpile_call(mt, (AstCallNode*)node);
+    case AST_NODE_CALL_EXPR: {
+        AstCallNode* cn = (AstCallNode*)node;
+        MIR_reg_t call_result = transpile_call(mt, cn);
+        if (cn->propagate) {
+            // '^' error propagation: check if result is error, early-return if so.
+            // can_raise calls return boxed Item (LMD_TYPE_ANY), so result is raw i64.
+            // extract type tag from high byte: result >> 56
+            MIR_reg_t type_tag = new_reg(mt, "ptag", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH, MIR_new_reg_op(mt->ctx, type_tag),
+                MIR_new_reg_op(mt->ctx, call_result), MIR_new_int_op(mt->ctx, 56)));
+            MIR_reg_t is_err = new_reg(mt, "perr", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_err),
+                MIR_new_reg_op(mt->ctx, type_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
+            MIR_label_t l_ok = new_label(mt);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
+                MIR_new_reg_op(mt->ctx, is_err)));
+            // error path: return error from enclosing function
+            emit_insn(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, call_result)));
+            // non-error path: continue with result
+            emit_label(mt, l_ok);
+        }
+        return call_result;
+    }
     case AST_NODE_QUERY_EXPR: {
         // query expression: expr?T or expr.?T → fn_query(data, type_val, direct)
         AstQueryNode* query = (AstQueryNode*)node;

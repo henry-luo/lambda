@@ -12,6 +12,7 @@
  */
 #include "bash_runtime.h"
 #include "bash_redir.h"
+#include "bash_pattern.h"
 #include "bash_ast.hpp"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
@@ -635,19 +636,22 @@ extern "C" Item bash_test_str_eq(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    // use fnmatch: handles glob patterns (*, ?, [) and backslash escapes in pattern
-    bool result = (fnmatch(r, l, 0) == 0);
+    // use bash_pattern_match: handles glob patterns (*, ?, [) and extglob
+    int flags = BASH_PAT_EXTGLOB;
+    bool result = (bash_pattern_match(l, r, flags) == 1);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
 
-// pattern match with FNM_NOESCAPE: for word-literal patterns where backslash
-// escapes have already been processed at the quote-removal stage
+// pattern match without backslash escaping: for word-literal patterns where
+// backslash escapes have already been processed at the quote-removal stage
 extern "C" Item bash_test_str_eq_noescape(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (fnmatch(r, l, FNM_NOESCAPE) == 0);
+    // use bash_pattern_match with extglob — backslashes already stripped by transpiler
+    int flags = BASH_PAT_EXTGLOB;
+    bool result = (bash_pattern_match(l, r, flags) == 1);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
@@ -698,7 +702,8 @@ extern "C" Item bash_test_glob(Item left, Item right) {
     char buf_l[256], buf_r[256];
     const char* text = bash_item_cstr(left, buf_l, sizeof(buf_l));
     const char* pattern = bash_item_cstr(right, buf_r, sizeof(buf_r));
-    bool result = (fnmatch(pattern, text, 0) == 0);
+    int flags = BASH_PAT_EXTGLOB;
+    bool result = (bash_pattern_match(text, pattern, flags) == 1);
     bash_last_exit_code = result ? 0 : 1;
     return (Item){.item = b2it(result)};
 }
