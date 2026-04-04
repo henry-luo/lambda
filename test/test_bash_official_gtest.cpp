@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <set>
 #include <algorithm>
 
 #ifdef _WIN32
@@ -73,11 +74,7 @@ static bool file_exists(const std::string& path) {
 static bool ensure_test_shell_wrapper(const std::string& tests_dir, const std::string& abs_lambda, std::string* wrapper_path) {
     *wrapper_path = tests_dir + "/lambda-test-shell";
 
-    struct stat st;
-    if (stat(wrapper_path->c_str(), &st) == 0) {
-        return true;
-    }
-
+    // Always recreate to ensure correct lambda path (avoids stale wrappers)
     FILE* f = fopen(wrapper_path->c_str(), "w");
     if (!f) return false;
     fprintf(f, "#!/bin/sh\nexec \"%s\" bash \"$@\"\n", abs_lambda.c_str());
@@ -148,6 +145,55 @@ static std::string filter_lambda_noise(const std::string& output) {
     }
 
     return result;
+}
+
+//==============================================================================
+// Baseline: tests expected to pass (loaded from test/bash/gnu_baseline.json)
+//==============================================================================
+
+static std::set<std::string> g_baseline_pass;
+
+static void load_gnu_baseline(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) {
+        // Try alternative relative path
+        f = fopen("test/bash/gnu_baseline.json", "r");
+    }
+    if (!f) {
+        printf("WARNING: Could not load gnu_baseline.json — no regression checking\n");
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* buf = (char*)malloc(sz + 1);
+    if (!buf) { fclose(f); return; }
+    size_t n = fread(buf, 1, sz, f);
+    buf[n] = '\0';
+    fclose(f);
+
+    // Minimal JSON array parser — extract quoted strings from the "pass" array
+    const char* p = strstr(buf, "\"pass\"");
+    if (!p) { free(buf); return; }
+    p = strchr(p, '[');
+    if (!p) { free(buf); return; }
+    p++; // skip '['
+
+    while (*p && *p != ']') {
+        if (*p == '"') {
+            p++;
+            const char* start = p;
+            while (*p && *p != '"') p++;
+            if (*p == '"') {
+                g_baseline_pass.insert(std::string(start, p - start));
+                p++;
+            }
+        } else {
+            p++;
+        }
+    }
+    free(buf);
 }
 
 // Build test name from .tests filename: "arith.tests" -> "arith"
@@ -396,6 +442,7 @@ class BashOfficialTest : public ::testing::TestWithParam<BashOfficialTestInfo> {
 
 TEST_P(BashOfficialTest, ExecuteAndCompare) {
     const BashOfficialTestInfo& info = GetParam();
+    bool is_baseline = g_baseline_pass.count(info.test_name) > 0;
 
     // Check that ref/bash/tests exists
     ASSERT_TRUE(file_exists(info.tests_path))
@@ -418,8 +465,25 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
     trim_trailing_whitespace(actual_cstr);
     trim_trailing_whitespace(expected);
 
-    EXPECT_STREQ(expected, actual_cstr)
-        << "Output mismatch for: " << info.tests_path;
+    bool match = (strcmp(expected, actual_cstr) == 0);
+
+    if (is_baseline) {
+        // Baseline test: MUST pass — failure is a regression
+        EXPECT_STREQ(expected, actual_cstr)
+            << "REGRESSION: " << info.test_name
+            << " is in gnu_baseline.json but now fails!\n"
+            << "Output mismatch for: " << info.tests_path;
+    } else if (match) {
+        // Non-baseline test that now passes — suggest adding to baseline
+        printf("  NEW PASS: %s — consider adding to test/bash/gnu_baseline.json\n",
+               info.test_name.c_str());
+    } else {
+        // Non-baseline test that fails — report as failure
+        EXPECT_STREQ(expected, actual_cstr)
+            << "FAIL: " << info.test_name
+            << " output does not match expected.\n"
+            << "Output mismatch for: " << info.tests_path;
+    }
 
     free(expected);
     free(actual_cstr);
@@ -444,15 +508,16 @@ INSTANTIATE_TEST_SUITE_P(
 int main(int argc, char** argv) {
     g_bash_tests = discover_bash_tests();
 
+    // Load baseline from test/bash/gnu_baseline.json
+    load_gnu_baseline("test/bash/gnu_baseline.json");
+
     if (g_bash_tests.empty()) {
         printf("WARNING: No bash official tests found in %s\n", BASH_TESTS_DIR);
         printf("Run 'bash setup-mac-deps.sh' or 'bash setup-linux-deps.sh' to clone bash.git\n\n");
     } else {
-        printf("Discovered %zu official Bash tests (ref/bash/tests/):\n", g_bash_tests.size());
-        for (const auto& t : g_bash_tests) {
-            printf("  - %s\n", t.test_name.c_str());
-        }
-        printf("\n");
+        printf("Discovered %zu official Bash tests (ref/bash/tests/)\n", g_bash_tests.size());
+        printf("Baseline: %zu tests must pass (from test/bash/gnu_baseline.json)\n\n",
+               g_baseline_pass.size());
     }
 
     ::testing::InitGoogleTest(&argc, argv);

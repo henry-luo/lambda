@@ -2776,7 +2776,13 @@ static void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         JsFunctionNode* fn = (JsFunctionNode*)node;
         // Record how many functions exist before recursion — those are NOT our children
         int children_start = mt->func_count;
-        // recurse into body first (post-order)
+        // recurse into parameters first — default values may contain class/function expressions
+        // e.g. ([cls = class {}]) => {} or function f(x = function(){}) {}
+        {
+            JsAstNode* param = fn->params;
+            while (param) { jm_collect_functions(mt, param); param = param->next; }
+        }
+        // recurse into body (post-order)
         if (fn->body) jm_collect_functions(mt, fn->body);
         int children_end = mt->func_count;
         // add this function
@@ -10838,7 +10844,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // v18g: Set class .length property (constructor parameter count)
             {
                 int ctor_len = 0;
-                if (ce->constructor && ce->constructor->fc)
+                if (ce && ce->constructor && ce->constructor->fc)
                     ctor_len = ce->constructor->param_count;
                 MIR_reg_t len_key = jm_box_string_literal(mt, "length", 6);
                 MIR_reg_t len_val = jm_new_reg(mt, "cls_len", MIR_T_I64);
@@ -10871,7 +10877,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             }
 
             // Emit static field initializers for class expressions
-            for (int fi = 0; fi < ce->static_field_count; fi++) {
+            for (int fi = 0; ce && fi < ce->static_field_count; fi++) {
                 JsStaticFieldEntry* sf = &ce->static_fields[fi];
                 if (sf->computed && sf->key_expr) {
                     MIR_reg_t key = jm_transpile_box_item(mt, sf->key_expr);
@@ -10896,7 +10902,7 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
             // Emit static blocks for class expressions
-            for (int si = 0; si < ce->static_block_count; si++) {
+            for (int si = 0; ce && si < ce->static_block_count; si++) {
                 if (ce->static_blocks[si]) {
                     jm_transpile_statement(mt, ce->static_blocks[si]);
                 }
@@ -12224,8 +12230,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_reg_t key;
                     if (inf->computed && inf->key_expr) {
                         key = jm_transpile_box_item(mt, inf->key_expr);
-                    } else {
+                    } else if (inf->name) {
                         key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                    } else if (inf->key_expr) {
+                        key = jm_transpile_box_item(mt, inf->key_expr);
+                    } else {
+                        continue;
                     }
                     MIR_reg_t val;
                     if (inf->initializer) {
@@ -12248,8 +12258,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t key;
                 if (inf->computed && inf->key_expr) {
                     key = jm_transpile_box_item(mt, inf->key_expr);
-                } else {
+                } else if (inf->name) {
                     key = jm_box_string_literal(mt, inf->name->chars, (int)inf->name->len);
+                } else if (inf->key_expr) {
+                    key = jm_transpile_box_item(mt, inf->key_expr);
+                } else {
+                    continue;
                 }
                 MIR_reg_t val;
                 if (inf->initializer) {

@@ -60,6 +60,8 @@ static bool bash_opt_xtrace = false;    // -x
 static bool bash_opt_pipefail = false;  // pipefail
 static bool bash_opt_extdebug = false;  // shopt -s extdebug
 static bool bash_opt_functrace = false; // -T / set -o functrace
+static bool bash_opt_nocasematch = false; // shopt -s nocasematch
+static bool bash_opt_extglob = true;     // shopt -s extglob (on by default in bash 4+)
 
 // errexit suppression depth: >0 means we're inside a context where set -e is suppressed
 // (if/while/until condition, && / || chain, ! negation)
@@ -120,7 +122,7 @@ static int bash_trap_nesting_depth = 0;   // >0 means we are inside any trap han
 #define BASH_TRAP_IDX_RETURN 7
 #define BASH_TRAP_NUM        8
 
-static char* bash_trap_handlers[BASH_TRAP_NUM];           // NULL=default, ""=ignore, else=code
+char* bash_trap_handlers[BASH_TRAP_NUM];                  // NULL=default, ""=ignore, else=code (non-static for trap -p access)
 static volatile sig_atomic_t bash_trap_fired[BASH_TRAP_NUM]; // set by OS signal handler
 
 static void bash_os_signal_handler(int signum) {
@@ -4113,6 +4115,12 @@ extern "C" void bash_set_option(Item option, bool enable) {
     } else if (s->len == 5 && memcmp(s->chars, "posix", 5) == 0) {
         bash_posix_mode = enable;
         log_debug("bash: set posix=%s", enable ? "on" : "off");
+    } else if (s->len == 11 && memcmp(s->chars, "nocasematch", 11) == 0) {
+        bash_opt_nocasematch = enable;
+        log_debug("bash: set nocasematch=%s", enable ? "on" : "off");
+    } else if (s->len == 7 && memcmp(s->chars, "extglob", 7) == 0) {
+        bash_opt_extglob = enable;
+        log_debug("bash: set extglob=%s", enable ? "on" : "off");
     } else {
         log_debug("bash: set: unknown option '%.*s'", s->len, s->chars);
     }
@@ -4136,6 +4144,14 @@ extern "C" bool bash_get_option_pipefail(void) {
 
 extern "C" bool bash_get_option_extdebug(void) {
     return bash_opt_extdebug;
+}
+
+extern "C" bool bash_get_option_nocasematch(void) {
+    return bash_opt_nocasematch;
+}
+
+extern "C" bool bash_get_option_extglob(void) {
+    return bash_opt_extglob;
 }
 
 // errexit suppression: push/pop depth counter for contexts where set -e is suppressed
