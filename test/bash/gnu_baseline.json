@@ -1,0 +1,12 @@
+{
+  "_comment": "GNU Bash official tests that currently pass. Used by test_bash_official_gtest to detect regressions.",
+  "pass": [
+    "dbg_support2",
+    "dstack2",
+    "extglob3",
+    "invert",
+    "nquote4",
+    "strip",
+    "tilde"
+  ]
+}

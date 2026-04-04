@@ -1,0 +1,12 @@
+match: 123
+group1: 123
+year: 2024
+month: 01
+day: 15
+name: Jane Doe
+not digits
+parts: 3
+user: user
+domain: example.com
+is txt file
+not pdf file

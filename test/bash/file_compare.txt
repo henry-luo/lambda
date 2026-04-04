@@ -1,0 +1,5 @@
+new_file is newer
+old_file is older
+same file
+different files
+nonexistent not newer

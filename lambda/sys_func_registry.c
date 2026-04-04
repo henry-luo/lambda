@@ -107,6 +107,10 @@ extern bool target_equal(Target* a, Target* b);
 #include "bash/bash_errors.h"
 #include "bash/bash_arith.h"
 #include "bash/bash_redir.h"
+#include "bash/bash_exec.h"
+#include "bash/bash_builtins_ext.h"
+#include "bash/bash_cond.h"
+#include "bash/bash_heredoc.h"
 #endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
@@ -1884,6 +1888,43 @@ JitImport jit_runtime_imports[] = {
     {"bash_run_debug_trap", FPTR(bash_run_debug_trap)},
     {"bash_run_return_trap", FPTR(bash_run_return_trap)},
     {"bash_eval_string", FPTR(bash_eval_string)},
+    // exec engine (Module 8)
+    {"bash_exec_builtin", FPTR(bash_exec_builtin)},
+    {"bash_exec_redir_open", FPTR(bash_exec_redir_open)},
+    {"bash_exec_redir_dup", FPTR(bash_exec_redir_dup)},
+    {"bash_exec_redir_close", FPTR(bash_exec_redir_close)},
+    {"bash_exec_redir_varfd", FPTR(bash_exec_redir_varfd)},
+    {"bash_exec_subscript", FPTR(bash_exec_subscript)},
+    {"bash_exec_init", FPTR(bash_exec_init)},
+    {"bash_exec_cleanup", FPTR(bash_exec_cleanup)},
+    // extended builtins (Module 9)
+    {"bash_builtin_mapfile", FPTR(bash_builtin_mapfile)},
+    {"bash_builtin_wait", FPTR(bash_builtin_wait)},
+    {"bash_builtin_hash", FPTR(bash_builtin_hash)},
+    {"bash_builtin_enable", FPTR(bash_builtin_enable)},
+    {"bash_builtin_builtin", FPTR(bash_builtin_builtin)},
+    {"bash_builtin_umask", FPTR(bash_builtin_umask)},
+    {"bash_trap_print_all", FPTR(bash_trap_print_all)},
+    {"bash_trap_print_one", FPTR(bash_trap_print_one)},
+    // conditional engine (Module 10)
+    {"bash_cond_regex", FPTR(bash_cond_regex)},
+    {"bash_get_rematch", FPTR(bash_get_rematch)},
+    {"bash_get_rematch_count", FPTR(bash_get_rematch_count)},
+    {"bash_get_rematch_all", FPTR(bash_get_rematch_all)},
+    {"bash_clear_rematch", FPTR(bash_clear_rematch)},
+    {"bash_cond_pattern", FPTR(bash_cond_pattern)},
+    {"bash_test_nt", FPTR(bash_test_nt)},
+    {"bash_test_ot", FPTR(bash_test_ot)},
+    {"bash_test_ef", FPTR(bash_test_ef)},
+    {"bash_get_option_nocasematch", FPTR(bash_get_option_nocasematch)},
+    {"bash_get_option_extglob", FPTR(bash_get_option_extglob)},
+    // heredoc engine (Module 11)
+    {"bash_heredoc_expand", FPTR(bash_heredoc_expand)},
+    {"bash_herestring_expand", FPTR(bash_herestring_expand)},
+    {"bash_heredoc_strip_tabs", FPTR(bash_heredoc_strip_tabs)},
+    {"bash_set_heredoc_stdin", FPTR(bash_set_heredoc_stdin)},
+    {"bash_get_heredoc_stdin", FPTR(bash_get_heredoc_stdin)},
+    {"bash_clear_heredoc_stdin", FPTR(bash_clear_heredoc_stdin)},
 #endif // LAMBDA_BASH
 
     // ========================================================================

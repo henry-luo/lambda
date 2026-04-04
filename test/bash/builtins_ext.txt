@@ -1,0 +1,9 @@
+has mask: yes
+mask set: ok
+u=rwx,g=rx,o=rx
+symbolic: ok
+hash: ok
+builtins listed: yes
+trap -- 'echo bye' EXIT
+trap printed: ok
+bye
