@@ -2946,6 +2946,20 @@
                         "icon": "💎"
                     },
                     {
+                        "source": "test/test_bash_pattern_gtest.cpp",
+                        "name": "Bash Pattern Matching Tests",
+                        "additional_sources": [
+                            "lambda/bash/bash_pattern.cpp"
+                        ],
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_bash_pattern_gtest.exe",
+                        "icon": "🔍"
+                    },
+                    {
                         "source": "test/test_bash_official_gtest.cpp",
                         "name": "Bash Official Test Suite",
                         "dependencies": [],

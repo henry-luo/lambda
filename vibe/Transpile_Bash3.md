@@ -6,7 +6,7 @@ Lambda's bash transpiler currently passes **10 of 82** GNU official tests (dbg-s
 
 This proposal takes a **bottom-up approach**: survey what the GNU tests demand, design robust C modules to handle each feature area, unit-test those modules for correctness, then wire the transpiler to call them. Instead of chasing tests one at a time, we build solid foundations that make many tests pass simultaneously.
 
-**Baseline status:** 31/31 passing (32 total, 1 skipped).
+**Baseline status:** 33/34 passing (34 total, 1 skipped). Phase A complete.
 
 ---
 
@@ -626,7 +626,205 @@ If all seven modules are implemented and integrated:
 
 ## 8. Progress Log
 
-### 2025-04-02: Preprocessor `$$` Fix + AST Argument Merge + IFS Flip
+### 2025-04-04: Phase A Complete — All Three Foundation Modules Implemented
+
+**Baseline:** 33/34 passing (was 31/32). Two new integration tests added, 0 regressions.
+
+**Phase A status:** ✅ All three foundation modules implemented, tested, and registered.
+
+#### Module 2: Pattern Matching Engine (`bash_pattern.h` / `bash_pattern.cpp`) — ✅ Complete
+
+**Files created:**
+- `lambda/bash/bash_pattern.h` (37 lines) — Public API
+- `lambda/bash/bash_pattern.cpp` (~400 lines) — Full implementation
+- `test/test_bash_pattern_gtest.cpp` — 51 GTest unit tests (all passing)
+
+**Implementation:**
+- `bash_pattern_match(string, pattern, flags)` — unified entry point returning 1/0/-1
+- `bash_bracket_match(c, bracket_expr, flags)` — POSIX character class support
+- Recursive `pmatch()` core with depth limit (MAX_DEPTH=64)
+- Extended globs: `?(pat)`, `*(pat)`, `+(pat)`, `@(pat)`, `!(pat)` via `extglob_dispatch()` → dedicated handlers
+- Flags: `BASH_PAT_EXTGLOB`, `BASH_PAT_NOCASE`, `BASH_PAT_DOTGLOB`, `BASH_PAT_GLOBSTAR`, `BASH_PAT_PERIOD`, `BASH_PAT_PATHNAME`
+- POSIX bracket expressions: `[:alpha:]`, `[:digit:]`, `[:space:]`, etc.
+- Backslash quoting, literal matching, `*` / `?` wildcards
+
+**Test coverage:** 51 tests covering literal matching, `*`/`?` wildcards, bracket expressions with POSIX classes and ranges, negated brackets, extglob patterns (all 5 operators), nested extglobs, case-insensitive mode, pathname mode, dotglob, empty patterns, and edge cases.
+
+**Build config:** Added `test_bash_pattern_gtest` entry to `build_lambda_config.json` with `additional_sources: ["lambda/bash/bash_pattern.cpp"]`.
+
+#### Module 3: Variable Attribute Engine — ✅ Complete (integrated into `bash_runtime`)
+
+Rather than a separate file, attribute operations were added directly to `bash_runtime.h`/`.cpp` where the variable storage infrastructure lives.
+
+**Functions added to `bash_runtime.h` / `bash_runtime.cpp`:**
+- `bash_apply_attrs(value, attrs)` — Enforces `-i` (arithmetic eval), `-l` (lowercase), `-u` (uppercase) on every assignment
+- `bash_resolve_nameref(var_name)` — Follows `-n` reference chains with 10-level limit and cycle detection
+- `bash_check_readonly(var_name)` — Returns false and logs error if variable is readonly
+- `bash_add_attrs(var_name, flags)` / `bash_remove_attrs(var_name, flags)` — Modify attribute flags
+- `bash_declare_nameref(name, value)` / `bash_declare_local_nameref(name, value)` — Create nameref variables (bypasses resolution to store the reference name itself)
+- `bash_lookup_var_entry(name)` — Static helper to find `BashRtVar` across scope frames
+
+**Functions refactored:**
+- `bash_set_var` — Now resolves namerefs and applies attributes before storing
+- `bash_set_local_var` — Same nameref resolution + attribute enforcement
+- `bash_unset_var` — Resolves namerefs before unsetting
+- `bash_get_var_attrs` — Now searches scope frames (was only checking global table)
+
+**Transpiler changes (`transpile_bash_mir.cpp`):**
+- Removed `declare -n` early-return skip
+- Added `BASH_ATTR_NAMEREF` handling: emits `bash_declare_local_nameref` / `bash_declare_nameref` calls with value
+
+**Registered in `sys_func_registry.c`:** `bash_declare_nameref`, `bash_declare_local_nameref`
+
+**Integration test:** `test/bash/nameref.sh` + `nameref.txt` — 8 scenarios covering basic nameref, function-scoped nameref, nameref to array, reassigning through nameref, changing the reference target, readonly through nameref, unsetting nameref, and nested namerefs.
+
+#### Module 1: Word Expansion Engine (`bash_expand.h` / `bash_expand.cpp`) — ✅ Complete
+
+**Files created:**
+- `lambda/bash/bash_expand.h` (82 lines) — Public API with expansion flags
+- `lambda/bash/bash_expand.cpp` (410 lines) — Full implementation
+
+**Implementation:**
+- `bash_word_split(str, ifs)` — Creates new array, delegates to `bash_word_split_into`
+- `bash_word_split_into(arr, str, ifs)` — Full POSIX IFS splitting algorithm with explicit IFS parameter:
+  - IFS whitespace chars (space/tab/newline) act as collapsible separators
+  - IFS non-whitespace chars are strict delimiters preserving empty fields
+  - Leading/trailing IFS whitespace trimmed
+  - Mixed whitespace/non-whitespace IFS handled correctly
+  - Empty IFS means no splitting; NULL IFS uses default (space/tab/newline)
+- `bash_quote_remove(word)` — Runtime quote stripping:
+  - Single quotes: `'text'` → `text` (no interpretation inside)
+  - Double quotes: `"text"` → `text` (handles `\$`, `\``, `\\`, `\"`, `\newline`)
+  - Backslash escaping: `\c` → `c`
+- `bash_process_ansi_escapes(str)` — `$'...'` escape processing:
+  - Basic: `\a \b \e \E \f \n \r \t \v \\ \' \" \?`
+  - Octal: `\0NNN` (3 digits after 0) and `\NNN` (direct octal 1-7 start)
+  - Hex: `\xHH` (1-2 hex digits)
+  - Unicode: `\uHHHH` (4 hex digits) and `\UHHHHHHHH` (8 hex digits) with UTF-8 encoding
+  - Control: `\cX` (X & 0x1F)
+- `bash_expand_word(word, flags)` — Unified pipeline entry point for dynamic contexts (eval, indirect expansion). Applies IFS splitting based on current `$IFS` and unwraps single-element results.
+- Expansion flags: `BASH_EXPAND_FULL`, `BASH_EXPAND_NO_SPLIT`, `BASH_EXPAND_NO_GLOB`, `BASH_EXPAND_ASSIGNMENT`, `BASH_EXPAND_PATTERN`
+
+**Registered in `sys_func_registry.c`:** `bash_word_split`, `bash_word_split_into`, `bash_quote_remove`, `bash_process_ansi_escapes`, `bash_expand_word`
+
+**Integration test:** `test/bash/word_expand.sh` + `word_expand.txt` — 13 scenarios covering:
+- Default IFS splitting (space/tab/newline)
+- Custom IFS (colon delimiter)
+- Empty field preservation with non-whitespace IFS delimiter
+- Leading/trailing whitespace trimming
+- Empty IFS (no splitting)
+- Mixed whitespace + non-whitespace IFS
+- Single/double quote removal, backslash escapes
+- ANSI-C escapes: `\t`, `\n`, `\xHH`, `\NNN`, `\uHHHH`, `\\`, `\'`
+
+#### Summary of changes
+
+| File | Action | Description |
+|------|--------|-------------|
+| `lambda/bash/bash_pattern.h` | Created | Pattern matching API (37 lines) |
+| `lambda/bash/bash_pattern.cpp` | Created | Glob + extglob engine (~400 lines) |
+| `lambda/bash/bash_expand.h` | Created | Word expansion API (82 lines) |
+| `lambda/bash/bash_expand.cpp` | Created | IFS split, quote removal, ANSI-C escapes, pipeline (410 lines) |
+| `lambda/bash/bash_runtime.h` | Modified | +8 function declarations for attribute operations |
+| `lambda/bash/bash_runtime.cpp` | Modified | +~150 lines new functions, 4 functions refactored |
+| `lambda/bash/transpile_bash_mir.cpp` | Modified | Nameref handling in `declare -n` |
+| `lambda/sys_func_registry.c` | Modified | +7 new function registrations, +1 include |
+| `build_lambda_config.json` | Modified | +1 test entry (bash_pattern_gtest) |
+| `test/test_bash_pattern_gtest.cpp` | Created | 51 GTest unit tests |
+| `test/bash/nameref.sh` + `.txt` | Created | 8 nameref integration tests |
+| `test/bash/word_expand.sh` + `.txt` | Created | 13 word expansion integration tests |
+
+#### Next steps
+
+- **Transpiler wiring:** Update `transpile_bash_mir.cpp` to call `bash_pattern_match()` instead of `fnmatch()` for case statements and `[[ == ]]` conditionals
+- **Phase C:** Arithmetic Engine + Redirection Engine
+
+---
+
+### 2025-04-04: Phase B Complete — Error Formatting Engine + Printf Engine
+
+**Baseline:** 33/34 passing. 0 regressions. 51 pattern GTests still passing.
+
+**Phase B status:** ✅ Both modules implemented, tested, and registered.
+
+#### Module 4: Error Formatting Engine (`bash_errors.h` / `bash_errors.cpp`) — ✅ Complete
+
+**Files created:**
+- `lambda/bash/bash_errors.h` (92 lines) — Error formatting API
+- `lambda/bash/bash_errors.cpp` (~210 lines) — Full implementation
+
+**Implementation:**
+- `bash_errmsg(fmt, ...)` — Generic error: `"shell: message\n"` → stderr
+- `bash_errmsg_at(fmt, ...)` — Error with line number: `"shell: line N: message\n"` → stderr
+- `bash_error_set_shell_name(name)` / `bash_error_get_shell_name()` — Shell identity for error prefix
+- `bash_error_set_lineno(line)` / `bash_error_get_lineno()` — Line number for error context
+- 15 specific error producers with exact GNU Bash format:
+  - `bash_err_readonly(var)` — `"shell: line N: var: readonly variable"`
+  - `bash_err_bad_substitution(expr)` — `"shell: expr: bad substitution"`
+  - `bash_err_unbound_variable(var)` — `"shell: line N: var: unbound variable"`
+  - `bash_err_not_found(cmd)` — `"shell: line N: cmd: command not found"`
+  - `bash_err_syntax(token)` — `"shell: line N: syntax error near unexpected token 'token'"`
+  - `bash_err_numeric_arg(func, arg)` — `"shell: func: arg: numeric argument required"`
+  - `bash_err_invalid_option(cmd, opt)` — `"shell: line N: cmd: opt: invalid option"`
+  - `bash_err_too_many_args(cmd)` — `"shell: cmd: too many arguments"`
+  - `bash_err_not_valid_identifier(cmd, name)` — `"shell: line N: cmd: 'name': not a valid identifier"`
+  - `bash_err_ambiguous_redirect(target)` — `"shell: target: ambiguous redirect"`
+  - `bash_err_division_by_zero(expr, val)` — `"shell: line N: ((: expr : division by 0 (error token is \"val \")"`
+  - `bash_err_unset_readonly(builtin, var)` — `"shell: line N: builtin: var: cannot unset: readonly variable"`
+  - `bash_err_circular_nameref(var)` — `"shell: warning: var: circular name reference"`
+  - `bash_err_declare_not_found(var)` — `"shell: declare: var: not found"`
+  - `bash_err_no_such_file(cmd, path)` — `"shell: [cmd: ]path: No such file or directory"`
+  - `bash_err_param_not_set(var, msg)` — `"shell: var: msg"` or `"shell: var: parameter null or not set"`
+
+**Refactored callsites:**
+- `bash_runtime.cpp`: All 10+ `fprintf(stderr, ...)` error calls replaced with centralized functions
+  - Division by zero (2 sites), readonly variable (4 sites), command not found, no such file, unset readonly (2 sites), declare not found, circular nameref, declare readonly (2 sites)
+- `bash_expand_error()` and `bash_expand_error_nocolon()` fixed: changed from `log_error()` to `bash_errmsg()` + `bash_set_exit_code(1)` — bug fix vs real bash behavior
+- Made `bash_error_script_name[4096]` and `bash_current_lineno` non-static for cross-file access
+
+**Registered in `sys_func_registry.c`:** 17 error functions + `bash_write_stderr`
+
+#### Module 5: Printf Engine Enhancements — ✅ Complete
+
+**Files modified:**
+- `lambda/bash/bash_builtins.cpp` — Enhanced printf + shared escape processor
+
+**New features added to printf:**
+- **`%(fmt)T`** — strftime-based date/time formatting. Supports arbitrary strftime format strings (e.g., `%(Y-%m-%d)T`). Arguments: -1 or -2 = current time, positive integer = epoch seconds, no argument = current time.
+- **`\xHH`** — Hex escape sequences in format strings (1-2 hex digits)
+- **`\uHHHH`** — Unicode escape sequences in format strings (up to 4 hex digits, UTF-8 encoded)
+- **`\UHHHHHHHH`** — Unicode escape sequences in format strings (up to 8 hex digits, UTF-8 encoded)
+- **`\e` / `\E`** — ESC character (0x1B) escape in format strings
+- **`\c`** — Stop processing escape in both format strings and `%b` specifier
+
+**Shared escape processor (`bash_process_escapes`):**
+- `process_escape_sequences(src, len, out)` — Internal function handling all escapes: `\a \b \e \E \f \n \r \t \v \\ \' \" \c \0NNN \xHH \uHHHH \UHHHHHHHH`
+- `bash_process_escapes(input)` — Public API returning new Lambda string with escapes resolved
+- `utf8_encode(codepoint, buf)` — UTF-8 encoding helper for Unicode escapes
+- Used by: echo -e, printf %b, printf format string escapes, and available for `$'...'` processing
+
+**Echo -e improvements:**
+- Replaced inline escape handler with shared `process_escape_sequences()` call
+- Now supports all escape types: `\xHH`, `\uHHHH`, `\UHHHHHHHH`, `\e`, `\0NNN`, `\c` (stop output)
+- `\c` correctly suppresses trailing newline and all subsequent output
+
+**Printf %b improvements:**
+- Replaced inline escape handler with shared `process_escape_sequences()` call
+- `\c` in `%b` argument stops all printf output (returns immediately)
+
+**Registered in `sys_func_registry.c`:** `bash_process_escapes`
+
+#### Summary of changes (Phase B)
+
+| File | Action | Description |
+|------|--------|-------------|
+| `lambda/bash/bash_errors.h` | Created | Error formatting API (92 lines) |
+| `lambda/bash/bash_errors.cpp` | Created | 15 error producers + 2 generic formatters (~210 lines) |
+| `lambda/bash/bash_builtins.cpp` | Modified | +shared escape processor, +%(fmt)T, +\xHH/\uHHHH/\UHHHHHHHH, +\e, +\c, echo -e upgraded |
+| `lambda/bash/bash_runtime.h` | Modified | +1 declaration (bash_process_escapes) |
+| `lambda/bash/bash_runtime.cpp` | Modified | +include bash_errors.h, 10+ error sites refactored, expand_error bug fixed, script_name/lineno non-static |
+| `lambda/sys_func_registry.c` | Modified | +18 new function registrations (17 error + 1 escape processor) |
+- **GNU test re-evaluation:** Re-run the 82-test suite to measure how many tests flip with the new modules
 
 **Baseline:** 31/31 passing
 

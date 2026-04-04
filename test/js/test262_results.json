@@ -1,26 +1,26 @@
 {
   "description": "Test262 compliance results for Lambda JS engine",
-  "source_xml": "temp/test262_v18_computed.xml",
-  "date": "2026-04-03",
-  "version": "v18 (computed fields + static blocks)",
+  "source_xml": "temp/test262_v20_computed.xml",
+  "date": "2026-06-01",
+  "version": "v20 (builtin descriptors + Date + JSON + encodeURI + enum order + constructor)",
   "summary": {
     "total": 38649,
-    "passed": 10982,
-    "failed": 16048,
-    "skipped": 11619,
-    "pass_rate": 40.63
+    "passed": 11231,
+    "failed": 15780,
+    "skipped": 11638,
+    "pass_rate": 41.58
   },
   "categories": {
     "built-ins": {
       "total": 16020,
-      "passed": 4161,
-      "failed": 7860,
-      "skipped": 3999,
+      "passed": 4323,
+      "failed": 7679,
+      "skipped": 4018,
       "subcategories": {
         "Array": {
           "total": 3081,
-          "passed": 1260,
-          "failed": 1346,
+          "passed": 1269,
+          "failed": 1337,
           "skipped": 475
         },
         "ArrayBuffer": {
@@ -37,8 +37,8 @@
         },
         "Date": {
           "total": 594,
-          "passed": 49,
-          "failed": 427,
+          "passed": 82,
+          "failed": 394,
           "skipped": 118
         },
         "Error": {
@@ -49,8 +49,8 @@
         },
         "Function": {
           "total": 509,
-          "passed": 139,
-          "failed": 293,
+          "passed": 140,
+          "failed": 292,
           "skipped": 77
         },
         "GeneratorFunction": {
@@ -73,14 +73,14 @@
         },
         "JSON": {
           "total": 165,
-          "passed": 27,
-          "failed": 106,
-          "skipped": 32
+          "passed": 30,
+          "failed": 84,
+          "skipped": 51
         },
         "Map": {
           "total": 204,
-          "passed": 43,
-          "failed": 98,
+          "passed": 44,
+          "failed": 97,
           "skipped": 63
         },
         "Math": {
@@ -97,26 +97,26 @@
         },
         "NativeErrors": {
           "total": 94,
-          "passed": 18,
-          "failed": 62,
+          "passed": 23,
+          "failed": 57,
           "skipped": 14
         },
         "Number": {
           "total": 338,
-          "passed": 129,
-          "failed": 184,
+          "passed": 131,
+          "failed": 182,
           "skipped": 25
         },
         "Object": {
           "total": 3411,
-          "passed": 1359,
-          "failed": 1863,
+          "passed": 1434,
+          "failed": 1788,
           "skipped": 189
         },
         "Promise": {
           "total": 652,
-          "passed": 29,
-          "failed": 207,
+          "passed": 30,
+          "failed": 206,
           "skipped": 416
         },
         "RegExp": {
@@ -127,14 +127,14 @@
         },
         "Set": {
           "total": 383,
-          "passed": 123,
-          "failed": 220,
+          "passed": 125,
+          "failed": 218,
           "skipped": 40
         },
         "String": {
           "total": 1223,
-          "passed": 435,
-          "failed": 595,
+          "passed": 446,
+          "failed": 584,
           "skipped": 193
         },
         "TypedArray": {
@@ -157,14 +157,14 @@
         },
         "WeakSet": {
           "total": 85,
-          "passed": 40,
-          "failed": 23,
+          "passed": 42,
+          "failed": 21,
           "skipped": 22
         },
         "decodeURI": {
           "total": 55,
-          "passed": 0,
-          "failed": 54,
+          "passed": 8,
+          "failed": 46,
           "skipped": 1
         },
         "decodeURIComponent": {
@@ -175,8 +175,8 @@
         },
         "encodeURI": {
           "total": 31,
-          "passed": 0,
-          "failed": 30,
+          "passed": 9,
+          "failed": 21,
           "skipped": 1
         },
         "encodeURIComponent": {
@@ -231,767 +231,149 @@
     },
     "language": {
       "total": 22629,
-      "passed": 6821,
-      "failed": 8188,
+      "passed": 6908,
+      "failed": 8101,
       "skipped": 7620,
       "subcategories": {
-        "arguments/object": {
+        "arguments": {
           "total": 263,
           "passed": 15,
           "failed": 184,
           "skipped": 64
         },
-        "asi/S7": {
-          "total": 101,
-          "passed": 99,
+        "asi": {
+          "total": 102,
+          "passed": 100,
           "failed": 2,
           "skipped": 0
         },
-        "asi/do": {
-          "total": 1,
-          "passed": 1,
-          "failed": 0,
-          "skipped": 0
-        },
-        "block/scope": {
+        "block": {
           "total": 145,
           "passed": 115,
           "failed": 11,
           "skipped": 19
         },
-        "comments/S7": {
-          "total": 14,
-          "passed": 10,
-          "failed": 4,
-          "skipped": 0
-        },
-        "comments/hashbang": {
-          "total": 29,
-          "passed": 0,
-          "failed": 0,
+        "comments": {
+          "total": 52,
+          "passed": 14,
+          "failed": 9,
           "skipped": 29
         },
-        "comments/mongolian": {
-          "total": 3,
-          "passed": 2,
-          "failed": 1,
-          "skipped": 0
-        },
-        "comments/multi": {
-          "total": 5,
-          "passed": 1,
-          "failed": 4,
-          "skipped": 0
-        },
-        "comments/single": {
-          "total": 1,
-          "passed": 1,
-          "failed": 0,
-          "skipped": 0
-        },
-        "computed/property": {
+        "computed": {
           "total": 48,
           "passed": 18,
           "failed": 25,
           "skipped": 5
         },
-        "destructuring/binding": {
+        "destructuring": {
           "total": 19,
           "passed": 15,
           "failed": 2,
           "skipped": 2
         },
-        "directive/prologue": {
+        "directive": {
           "total": 62,
           "passed": 29,
           "failed": 28,
           "skipped": 5
         },
-        "expressions/addition": {
-          "total": 48,
-          "passed": 25,
-          "failed": 13,
-          "skipped": 10
+        "expressions": {
+          "total": 11095,
+          "passed": 3243,
+          "failed": 4000,
+          "skipped": 3852
         },
-        "expressions/array": {
-          "total": 52,
-          "passed": 11,
-          "failed": 26,
-          "skipped": 15
-        },
-        "expressions/arrow": {
-          "total": 343,
-          "passed": 155,
-          "failed": 168,
-          "skipped": 20
-        },
-        "expressions/assignment": {
-          "total": 485,
-          "passed": 147,
-          "failed": 274,
-          "skipped": 64
-        },
-        "expressions/assignmenttargettype": {
-          "total": 324,
-          "passed": 316,
-          "failed": 2,
-          "skipped": 6
-        },
-        "expressions/async": {
-          "total": 776,
-          "passed": 65,
-          "failed": 7,
-          "skipped": 704
-        },
-        "expressions/await": {
-          "total": 22,
-          "passed": 3,
-          "failed": 6,
-          "skipped": 13
-        },
-        "expressions/bitwise": {
-          "total": 106,
-          "passed": 58,
-          "failed": 35,
-          "skipped": 13
-        },
-        "expressions/call": {
-          "total": 92,
-          "passed": 26,
-          "failed": 40,
-          "skipped": 26
-        },
-        "expressions/class": {
-          "total": 4059,
-          "passed": 875,
-          "failed": 1741,
-          "skipped": 1443
-        },
-        "expressions/coalesce": {
-          "total": 24,
-          "passed": 21,
-          "failed": 1,
-          "skipped": 2
-        },
-        "expressions/comma": {
-          "total": 6,
-          "passed": 2,
-          "failed": 3,
-          "skipped": 1
-        },
-        "expressions/compound": {
-          "total": 454,
-          "passed": 267,
-          "failed": 187,
-          "skipped": 0
-        },
-        "expressions/concatenation": {
-          "total": 5,
-          "passed": 3,
-          "failed": 2,
-          "skipped": 0
-        },
-        "expressions/conditional": {
-          "total": 22,
-          "passed": 15,
-          "failed": 4,
-          "skipped": 3
-        },
-        "expressions/delete": {
-          "total": 69,
-          "passed": 20,
-          "failed": 49,
-          "skipped": 0
-        },
-        "expressions/division": {
-          "total": 45,
-          "passed": 30,
-          "failed": 11,
-          "skipped": 4
-        },
-        "expressions/does": {
-          "total": 38,
-          "passed": 25,
-          "failed": 12,
-          "skipped": 1
-        },
-        "expressions/dynamic": {
-          "total": 997,
-          "passed": 39,
-          "failed": 17,
-          "skipped": 941
-        },
-        "expressions/equals": {
-          "total": 47,
-          "passed": 25,
-          "failed": 13,
-          "skipped": 9
-        },
-        "expressions/exponentiation": {
-          "total": 44,
-          "passed": 36,
-          "failed": 4,
-          "skipped": 4
-        },
-        "expressions/function": {
-          "total": 264,
-          "passed": 77,
-          "failed": 167,
-          "skipped": 20
-        },
-        "expressions/generators": {
-          "total": 290,
-          "passed": 72,
-          "failed": 195,
-          "skipped": 23
-        },
-        "expressions/greater": {
-          "total": 92,
-          "passed": 57,
-          "failed": 34,
-          "skipped": 1
-        },
-        "expressions/grouping": {
-          "total": 9,
-          "passed": 6,
-          "failed": 3,
-          "skipped": 0
-        },
-        "expressions/import": {
-          "total": 23,
-          "passed": 1,
-          "failed": 0,
-          "skipped": 22
-        },
-        "expressions/in": {
-          "total": 36,
-          "passed": 14,
-          "failed": 21,
-          "skipped": 1
-        },
-        "expressions/instanceof": {
-          "total": 43,
-          "passed": 13,
-          "failed": 26,
-          "skipped": 4
-        },
-        "expressions/left": {
-          "total": 45,
-          "passed": 30,
-          "failed": 10,
-          "skipped": 5
-        },
-        "expressions/less": {
-          "total": 92,
-          "passed": 56,
-          "failed": 35,
-          "skipped": 1
-        },
-        "expressions/logical": {
-          "total": 133,
-          "passed": 75,
-          "failed": 53,
-          "skipped": 5
-        },
-        "expressions/member": {
-          "total": 1,
-          "passed": 1,
-          "failed": 0,
-          "skipped": 0
-        },
-        "expressions/modulus": {
-          "total": 40,
-          "passed": 24,
-          "failed": 12,
-          "skipped": 4
-        },
-        "expressions/multiplication": {
-          "total": 40,
-          "passed": 27,
-          "failed": 9,
-          "skipped": 4
-        },
-        "expressions/new": {
-          "total": 73,
-          "passed": 9,
-          "failed": 45,
-          "skipped": 19
-        },
-        "expressions/object": {
-          "total": 1170,
-          "passed": 242,
-          "failed": 548,
-          "skipped": 380
-        },
-        "expressions/optional": {
-          "total": 38,
-          "passed": 24,
-          "failed": 8,
-          "skipped": 6
-        },
-        "expressions/postfix": {
-          "total": 75,
-          "passed": 44,
-          "failed": 31,
-          "skipped": 0
-        },
-        "expressions/prefix": {
-          "total": 67,
-          "passed": 43,
-          "failed": 24,
-          "skipped": 0
-        },
-        "expressions/property": {
-          "total": 21,
-          "passed": 7,
-          "failed": 14,
-          "skipped": 0
-        },
-        "expressions/relational": {
-          "total": 1,
-          "passed": 0,
-          "failed": 1,
-          "skipped": 0
-        },
-        "expressions/right": {
-          "total": 37,
-          "passed": 22,
-          "failed": 10,
-          "skipped": 5
-        },
-        "expressions/strict": {
-          "total": 60,
-          "passed": 40,
-          "failed": 18,
-          "skipped": 2
-        },
-        "expressions/subtraction": {
-          "total": 38,
-          "passed": 25,
-          "failed": 9,
-          "skipped": 4
-        },
-        "expressions/super": {
-          "total": 94,
-          "passed": 21,
-          "failed": 56,
-          "skipped": 17
-        },
-        "expressions/tagged": {
-          "total": 27,
-          "passed": 5,
-          "failed": 19,
-          "skipped": 3
-        },
-        "expressions/tco": {
-          "total": 1,
-          "passed": 0,
-          "failed": 0,
-          "skipped": 1
-        },
-        "expressions/template": {
-          "total": 57,
-          "passed": 36,
-          "failed": 21,
-          "skipped": 0
-        },
-        "expressions/this": {
-          "total": 6,
-          "passed": 2,
-          "failed": 4,
-          "skipped": 0
-        },
-        "expressions/typeof": {
-          "total": 16,
-          "passed": 5,
-          "failed": 9,
-          "skipped": 2
-        },
-        "expressions/unary": {
-          "total": 31,
-          "passed": 13,
-          "failed": 17,
-          "skipped": 1
-        },
-        "expressions/unsigned": {
-          "total": 45,
-          "passed": 29,
-          "failed": 11,
-          "skipped": 5
-        },
-        "expressions/void": {
-          "total": 9,
-          "passed": 7,
-          "failed": 2,
-          "skipped": 0
-        },
-        "expressions/yield": {
-          "total": 63,
-          "passed": 4,
-          "failed": 21,
-          "skipped": 38
-        },
-        "function/code": {
+        "function": {
           "total": 217,
           "passed": 127,
           "failed": 90,
           "skipped": 0
         },
-        "future/reserved": {
+        "future": {
           "total": 55,
           "passed": 55,
           "failed": 0,
           "skipped": 0
         },
-        "global/code": {
+        "global": {
           "total": 42,
           "passed": 15,
           "failed": 26,
           "skipped": 1
         },
-        "identifier/resolution": {
+        "identifier": {
           "total": 14,
           "passed": 2,
           "failed": 11,
           "skipped": 1
         },
-        "identifiers/other": {
-          "total": 4,
-          "passed": 4,
-          "failed": 0,
+        "identifiers": {
+          "total": 268,
+          "passed": 250,
+          "failed": 18,
           "skipped": 0
         },
-        "identifiers/part": {
-          "total": 64,
-          "passed": 60,
-          "failed": 4,
-          "skipped": 0
-        },
-        "identifiers/start": {
-          "total": 66,
-          "passed": 65,
-          "failed": 1,
-          "skipped": 0
-        },
-        "identifiers/unicode": {
-          "total": 1,
-          "passed": 1,
-          "failed": 0,
-          "skipped": 0
-        },
-        "identifiers/val": {
-          "total": 115,
-          "passed": 111,
-          "failed": 4,
-          "skipped": 0
-        },
-        "identifiers/vals": {
-          "total": 14,
-          "passed": 5,
-          "failed": 9,
-          "skipped": 0
-        },
-        "identifiers/vertical": {
-          "total": 4,
-          "passed": 4,
-          "failed": 0,
-          "skipped": 0
-        },
-        "keywords/ident": {
+        "keywords": {
           "total": 25,
           "passed": 25,
           "failed": 0,
           "skipped": 0
         },
-        "line/terminators": {
+        "line": {
           "total": 41,
           "passed": 32,
           "failed": 9,
           "skipped": 0
         },
-        "literals/bigint": {
-          "total": 59,
-          "passed": 59,
-          "failed": 0,
-          "skipped": 0
-        },
-        "literals/boolean": {
-          "total": 4,
-          "passed": 4,
-          "failed": 0,
-          "skipped": 0
-        },
-        "literals/null": {
-          "total": 3,
-          "passed": 2,
-          "failed": 1,
-          "skipped": 0
-        },
-        "literals/numeric": {
-          "total": 157,
-          "passed": 147,
-          "failed": 10,
-          "skipped": 0
-        },
-        "literals/regexp": {
-          "total": 238,
-          "passed": 66,
-          "failed": 33,
+        "literals": {
+          "total": 534,
+          "passed": 341,
+          "failed": 54,
           "skipped": 139
         },
-        "literals/string": {
-          "total": 73,
-          "passed": 63,
-          "failed": 10,
-          "skipped": 0
-        },
-        "punctuators/S7": {
+        "punctuators": {
           "total": 11,
           "passed": 10,
           "failed": 1,
           "skipped": 0
         },
-        "reserved/words": {
+        "reserved": {
           "total": 27,
           "passed": 23,
           "failed": 3,
           "skipped": 1
         },
-        "rest/parameters": {
+        "rest": {
           "total": 11,
-          "passed": 9,
-          "failed": 2,
+          "passed": 3,
+          "failed": 8,
           "skipped": 0
         },
-        "source/text": {
+        "source": {
           "total": 1,
           "passed": 1,
           "failed": 0,
           "skipped": 0
         },
-        "statementList/block": {
-          "total": 20,
-          "passed": 20,
-          "failed": 0,
-          "skipped": 0
-        },
-        "statementList/class": {
-          "total": 10,
-          "passed": 10,
-          "failed": 0,
-          "skipped": 0
-        },
-        "statementList/eval": {
-          "total": 40,
-          "passed": 0,
+        "statementList": {
+          "total": 80,
+          "passed": 40,
           "failed": 40,
           "skipped": 0
         },
-        "statementList/fn": {
-          "total": 10,
-          "passed": 10,
-          "failed": 0,
-          "skipped": 0
+        "statements": {
+          "total": 9337,
+          "passed": 2307,
+          "failed": 3532,
+          "skipped": 3498
         },
-        "statements/async": {
-          "total": 375,
-          "passed": 28,
-          "failed": 4,
-          "skipped": 343
-        },
-        "statements/await": {
-          "total": 94,
-          "passed": 0,
-          "failed": 0,
-          "skipped": 94
-        },
-        "statements/block": {
-          "total": 21,
-          "passed": 17,
-          "failed": 2,
-          "skipped": 2
-        },
-        "statements/break": {
-          "total": 20,
-          "passed": 18,
-          "failed": 2,
-          "skipped": 0
-        },
-        "statements/class": {
-          "total": 4367,
-          "passed": 976,
-          "failed": 1936,
-          "skipped": 1455
-        },
-        "statements/const": {
-          "total": 136,
-          "passed": 55,
-          "failed": 72,
-          "skipped": 9
-        },
-        "statements/continue": {
-          "total": 24,
-          "passed": 21,
-          "failed": 3,
-          "skipped": 0
-        },
-        "statements/debugger": {
-          "total": 2,
-          "passed": 2,
-          "failed": 0,
-          "skipped": 0
-        },
-        "statements/do": {
-          "total": 36,
-          "passed": 28,
-          "failed": 6,
-          "skipped": 2
-        },
-        "statements/empty": {
-          "total": 2,
-          "passed": 1,
-          "failed": 1,
-          "skipped": 0
-        },
-        "statements/expression": {
-          "total": 3,
-          "passed": 1,
-          "failed": 2,
-          "skipped": 0
-        },
-        "statements/for": {
-          "total": 2485,
-          "passed": 479,
-          "failed": 612,
-          "skipped": 1394
-        },
-        "statements/function": {
-          "total": 451,
-          "passed": 173,
-          "failed": 258,
-          "skipped": 20
-        },
-        "statements/generators": {
-          "total": 266,
-          "passed": 60,
-          "failed": 185,
-          "skipped": 21
-        },
-        "statements/if": {
-          "total": 69,
-          "passed": 54,
-          "failed": 9,
-          "skipped": 6
-        },
-        "statements/labeled": {
-          "total": 24,
-          "passed": 16,
-          "failed": 4,
+        "types": {
+          "total": 113,
+          "passed": 77,
+          "failed": 32,
           "skipped": 4
         },
-        "statements/let": {
-          "total": 145,
-          "passed": 57,
-          "failed": 79,
-          "skipped": 9
-        },
-        "statements/return": {
-          "total": 16,
-          "passed": 12,
-          "failed": 3,
-          "skipped": 1
-        },
-        "statements/switch": {
-          "total": 111,
-          "passed": 59,
-          "failed": 34,
-          "skipped": 18
-        },
-        "statements/throw": {
-          "total": 14,
-          "passed": 14,
-          "failed": 0,
-          "skipped": 0
-        },
-        "statements/try": {
-          "total": 201,
-          "passed": 61,
-          "failed": 128,
-          "skipped": 12
-        },
-        "statements/using": {
-          "total": 78,
-          "passed": 0,
-          "failed": 0,
-          "skipped": 78
-        },
-        "statements/variable": {
-          "total": 178,
-          "passed": 84,
-          "failed": 85,
-          "skipped": 9
-        },
-        "statements/while": {
-          "total": 38,
-          "passed": 28,
-          "failed": 8,
-          "skipped": 2
-        },
-        "statements/with": {
-          "total": 181,
-          "passed": 19,
-          "failed": 143,
-          "skipped": 19
-        },
-        "types/boolean": {
-          "total": 5,
-          "passed": 4,
-          "failed": 1,
-          "skipped": 0
-        },
-        "types/list": {
-          "total": 3,
-          "passed": 0,
-          "failed": 3,
-          "skipped": 0
-        },
-        "types/null": {
-          "total": 4,
-          "passed": 4,
-          "failed": 0,
-          "skipped": 0
-        },
-        "types/number": {
-          "total": 21,
-          "passed": 20,
-          "failed": 1,
-          "skipped": 0
-        },
-        "types/object": {
-          "total": 19,
-          "passed": 9,
-          "failed": 10,
-          "skipped": 0
-        },
-        "types/reference": {
-          "total": 29,
-          "passed": 15,
-          "failed": 10,
-          "skipped": 4
-        },
-        "types/string": {
-          "total": 24,
-          "passed": 16,
-          "failed": 8,
-          "skipped": 0
-        },
-        "types/undefined": {
-          "total": 8,
-          "passed": 8,
-          "failed": 0,
-          "skipped": 0
-        },
-        "white/space": {
+        "white": {
           "total": 67,
           "passed": 51,
           "failed": 16,

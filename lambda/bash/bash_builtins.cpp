@@ -9,6 +9,7 @@
  * - non-zero (failure) = falsy in Bash
  */
 #include "bash_runtime.h"
+#include "bash_errors.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <ctime>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <regex.h>
@@ -47,6 +49,149 @@ extern "C" void bash_getopts_pop_state(void) {
         getopts_charind = getopts_charind_stack[getopts_state_depth];
         getopts_last_optind = getopts_optind_stack[getopts_state_depth];
     }
+}
+
+// ============================================================================
+// Shared escape sequence processor (used by echo -e, printf %b, $'...')
+// ============================================================================
+
+// encode a Unicode codepoint as UTF-8 into buf, return number of bytes written
+static int utf8_encode(uint32_t cp, char* buf) {
+    if (cp < 0x80) {
+        buf[0] = (char)cp;
+        return 1;
+    } else if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp < 0x10000) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    } else if (cp < 0x110000) {
+        buf[0] = (char)(0xF0 | (cp >> 18));
+        buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = (char)(0x80 | (cp & 0x3F));
+        return 4;
+    }
+    return 0;
+}
+
+// process escape sequences in a string, appending to out
+// supports: \a \b \e \f \n \r \t \v \\ \' \" \0NNN \xHH \uHHHH \UHHHHHHHH \c (stop)
+// returns false if \c was encountered (stop processing)
+static bool process_escape_sequences(const char* src, int len, StrBuf* out) {
+    for (int i = 0; i < len; i++) {
+        if (src[i] != '\\' || i + 1 >= len) {
+            strbuf_append_char(out, src[i]);
+            continue;
+        }
+        i++;
+        switch (src[i]) {
+        case 'a': strbuf_append_char(out, '\a'); break;
+        case 'b': strbuf_append_char(out, '\b'); break;
+        case 'e': case 'E': strbuf_append_char(out, '\x1B'); break;
+        case 'f': strbuf_append_char(out, '\f'); break;
+        case 'n': strbuf_append_char(out, '\n'); break;
+        case 'r': strbuf_append_char(out, '\r'); break;
+        case 't': strbuf_append_char(out, '\t'); break;
+        case 'v': strbuf_append_char(out, '\v'); break;
+        case '\\': strbuf_append_char(out, '\\'); break;
+        case '\'': strbuf_append_char(out, '\''); break;
+        case '"': strbuf_append_char(out, '"'); break;
+        case 'c': return false; // stop processing
+        case '0': {
+            // octal: \0NNN (up to 3 octal digits after the 0)
+            int val = 0;
+            for (int j = 0; j < 3 && i + 1 < len && src[i + 1] >= '0' && src[i + 1] <= '7'; j++) {
+                i++;
+                val = val * 8 + (src[i] - '0');
+            }
+            strbuf_append_char(out, (char)(val & 0xFF));
+            break;
+        }
+        case 'x': {
+            // hex: \xHH (1-2 hex digits)
+            int val = 0;
+            int count = 0;
+            while (count < 2 && i + 1 < len && isxdigit((unsigned char)src[i + 1])) {
+                i++;
+                int d = src[i];
+                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                count++;
+            }
+            if (count > 0) {
+                strbuf_append_char(out, (char)(val & 0xFF));
+            } else {
+                strbuf_append_str(out, "\\x");
+            }
+            break;
+        }
+        case 'u': {
+            // unicode: \uHHHH (exactly 4 hex digits)
+            uint32_t val = 0;
+            int count = 0;
+            while (count < 4 && i + 1 < len && isxdigit((unsigned char)src[i + 1])) {
+                i++;
+                int d = src[i];
+                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                count++;
+            }
+            if (count > 0) {
+                char utf8[4];
+                int n = utf8_encode(val, utf8);
+                strbuf_append_str_n(out, utf8, n);
+            } else {
+                strbuf_append_str(out, "\\u");
+            }
+            break;
+        }
+        case 'U': {
+            // unicode: \UHHHHHHHH (up to 8 hex digits)
+            uint32_t val = 0;
+            int count = 0;
+            while (count < 8 && i + 1 < len && isxdigit((unsigned char)src[i + 1])) {
+                i++;
+                int d = src[i];
+                if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                count++;
+            }
+            if (count > 0) {
+                char utf8[4];
+                int n = utf8_encode(val, utf8);
+                strbuf_append_str_n(out, utf8, n);
+            } else {
+                strbuf_append_str(out, "\\U");
+            }
+            break;
+        }
+        default:
+            // unknown escape: output backslash + char literally
+            strbuf_append_char(out, '\\');
+            strbuf_append_char(out, src[i]);
+            break;
+        }
+    }
+    return true;
+}
+
+// public API: process escape sequences in a Lambda string, return new string
+extern "C" Item bash_process_escapes(Item input) {
+    String* s = it2s(bash_to_string(input));
+    if (!s || s->len == 0) return input;
+    StrBuf* out = strbuf_new();
+    process_escape_sequences(s->chars, s->len, out);
+    Item result = (Item){.item = s2it(heap_create_name(out->str, (int)out->length))};
+    strbuf_free(out);
+    return result;
 }
 
 // ============================================================================
@@ -98,21 +243,16 @@ extern "C" Item bash_builtin_echo(Item* args, int argc) {
         if (!s) continue;
 
         if (enable_escapes) {
-            // process escape sequences
-            for (int j = 0; j < (int)s->len; j++) {
-                if (s->chars[j] == '\\' && j + 1 < (int)s->len) {
-                    switch (s->chars[j + 1]) {
-                    case 'n': bash_raw_putc('\n'); j++; break;
-                    case 't': bash_raw_putc('\t'); j++; break;
-                    case '\\': bash_raw_putc('\\'); j++; break;
-                    case 'a': bash_raw_putc('\a'); j++; break;
-                    case 'b': bash_raw_putc('\b'); j++; break;
-                    case 'r': bash_raw_putc('\r'); j++; break;
-                    default: bash_raw_putc(s->chars[j]); break;
-                    }
-                } else {
-                    bash_raw_putc(s->chars[j]);
-                }
+            // process escape sequences using shared processor
+            StrBuf* esc_buf = strbuf_new();
+            bool cont = process_escape_sequences(s->chars, s->len, esc_buf);
+            bash_raw_write(esc_buf->str, (int)esc_buf->length);
+            strbuf_free(esc_buf);
+            if (!cont) {
+                // \c encountered — stop all output (no trailing newline either)
+                fflush(stdout);
+                bash_set_exit_code(0);
+                return (Item){.item = i2it(0)};
             }
         } else {
             bash_raw_write(s->chars, s->len);
@@ -213,6 +353,45 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
             }
             // conversion character
             if (i >= (int)fmt->len) break;
+
+            // check for %(fmt)T — strftime date/time format
+            if (fmt->chars[i] == '(') {
+                i++;
+                // collect strftime format until )T
+                char timefmt[256];
+                int tfi = 0;
+                while (i < (int)fmt->len && tfi < (int)sizeof(timefmt) - 1) {
+                    if (fmt->chars[i] == ')' && i + 1 < (int)fmt->len && fmt->chars[i + 1] == 'T') {
+                        break;
+                    }
+                    timefmt[tfi++] = fmt->chars[i++];
+                }
+                timefmt[tfi] = '\0';
+                if (i < (int)fmt->len && fmt->chars[i] == ')') i++; // skip ')'
+                if (i < (int)fmt->len && fmt->chars[i] == 'T') ; // will be skipped by 'i' at end of loop
+                else i--; // malformed: backtrack
+
+                // get time argument: -1 = current time, -2 = shell start time (treat as current)
+                time_t t;
+                if (arg_idx < argc) {
+                    int64_t val = printf_get_int(args[arg_idx++]);
+                    if (val == -1 || val == -2) {
+                        t = time(NULL);
+                    } else {
+                        t = (time_t)val;
+                    }
+                } else {
+                    t = time(NULL); // no arg = current time (bash default for %(fmt)T)
+                }
+                struct tm* tm = localtime(&t);
+                char timebuf[512];
+                if (tm) {
+                    size_t n = strftime(timebuf, sizeof(timebuf), timefmt, tm);
+                    strbuf_append_str_n(out, timebuf, (int)n);
+                }
+                continue; // %(fmt)T handled, skip the switch below
+            }
+
             char conv = fmt->chars[i];
             switch (conv) {
             case 'd': case 'i': {
@@ -294,40 +473,21 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
                 break;
             }
             case 'b': {
-                // %b: like %s but interpret backslash escapes
+                // %b: like %s but interpret backslash escapes (using shared processor)
                 const char* str = "";
+                int str_len = 0;
                 if (arg_idx < argc) {
                     Item s = bash_to_string(args[arg_idx++]);
                     String* ss = it2s(s);
-                    if (ss) str = ss->chars;
+                    if (ss) { str = ss->chars; str_len = ss->len; }
                 }
-                for (const char* p = str; *p; p++) {
-                    if (*p == '\\' && *(p + 1)) {
-                        p++;
-                        switch (*p) {
-                        case 'n': strbuf_append_char(out, '\n'); break;
-                        case 't': strbuf_append_char(out, '\t'); break;
-                        case 'r': strbuf_append_char(out, '\r'); break;
-                        case 'a': strbuf_append_char(out, '\a'); break;
-                        case 'b': strbuf_append_char(out, '\b'); break;
-                        case 'f': strbuf_append_char(out, '\f'); break;
-                        case 'v': strbuf_append_char(out, '\v'); break;
-                        case '\\': strbuf_append_char(out, '\\'); break;
-                        case '0': {
-                            // octal
-                            int val = 0;
-                            for (int j = 0; j < 3 && p[1] >= '0' && p[1] <= '7'; j++) {
-                                p++;
-                                val = val * 8 + (*p - '0');
-                            }
-                            strbuf_append_char(out, (char)val);
-                            break;
-                        }
-                        default: strbuf_append_char(out, '\\'); strbuf_append_char(out, *p); break;
-                        }
-                    } else {
-                        strbuf_append_char(out, *p);
-                    }
+                StrBuf* esc_buf = strbuf_new();
+                bool cont = process_escape_sequences(str, str_len, esc_buf);
+                strbuf_append_str_n(out, esc_buf->str, (int)esc_buf->length);
+                strbuf_free(esc_buf);
+                if (!cont) {
+                    // \c in %b stops all output
+                    return arg_idx;
                 }
                 break;
             }
@@ -395,9 +555,11 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
             case 'r': strbuf_append_char(out, '\r'); i++; break;
             case 'a': strbuf_append_char(out, '\a'); i++; break;
             case 'b': strbuf_append_char(out, '\b'); i++; break;
+            case 'e': case 'E': strbuf_append_char(out, '\x1B'); i++; break;
             case 'f': strbuf_append_char(out, '\f'); i++; break;
             case 'v': strbuf_append_char(out, '\v'); i++; break;
             case '\\': strbuf_append_char(out, '\\'); i++; break;
+            case 'c': return arg_idx; // \c in format string: stop all output
             case '0': {
                 // octal escape \0NNN
                 int val = 0;
@@ -406,7 +568,64 @@ static int printf_format_pass(String* fmt, Item* args, int argc, int arg_idx, St
                     i++;
                     val = val * 8 + (fmt->chars[i] - '0');
                 }
-                strbuf_append_char(out, (char)val);
+                strbuf_append_char(out, (char)(val & 0xFF));
+                break;
+            }
+            case 'x': {
+                // hex escape \xHH
+                i++; // skip 'x'
+                int val = 0;
+                int count = 0;
+                while (count < 2 && i + 1 < (int)fmt->len && isxdigit((unsigned char)fmt->chars[i + 1])) {
+                    i++;
+                    int d = fmt->chars[i];
+                    if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                    else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                    else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                    count++;
+                }
+                if (count > 0) strbuf_append_char(out, (char)(val & 0xFF));
+                else { strbuf_append_str(out, "\\x"); }
+                break;
+            }
+            case 'u': {
+                // unicode escape \uHHHH
+                i++; // skip 'u'
+                uint32_t val = 0;
+                int count = 0;
+                while (count < 4 && i + 1 < (int)fmt->len && isxdigit((unsigned char)fmt->chars[i + 1])) {
+                    i++;
+                    int d = fmt->chars[i];
+                    if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                    else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                    else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                    count++;
+                }
+                if (count > 0) {
+                    char utf8[4];
+                    int n = utf8_encode(val, utf8);
+                    strbuf_append_str_n(out, utf8, n);
+                } else { strbuf_append_str(out, "\\u"); }
+                break;
+            }
+            case 'U': {
+                // unicode escape \UHHHHHHHH
+                i++; // skip 'U'
+                uint32_t val = 0;
+                int count = 0;
+                while (count < 8 && i + 1 < (int)fmt->len && isxdigit((unsigned char)fmt->chars[i + 1])) {
+                    i++;
+                    int d = fmt->chars[i];
+                    if (d >= '0' && d <= '9') val = val * 16 + (d - '0');
+                    else if (d >= 'a' && d <= 'f') val = val * 16 + (d - 'a' + 10);
+                    else if (d >= 'A' && d <= 'F') val = val * 16 + (d - 'A' + 10);
+                    count++;
+                }
+                if (count > 0) {
+                    char utf8[4];
+                    int n = utf8_encode(val, utf8);
+                    strbuf_append_str_n(out, utf8, n);
+                } else { strbuf_append_str(out, "\\U"); }
                 break;
             }
             default: strbuf_append_char(out, fmt->chars[i]); break;

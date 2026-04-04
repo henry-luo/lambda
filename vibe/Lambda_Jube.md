@@ -11,9 +11,10 @@ Split the current monolithic `build_lambda_config.json` into two distinct build 
 
 **Why "Jube"?**
 
-1. **Joy & jubilee** — programming should be joyful; vibe coding in a polyglot runtime.
-2. **Candy/gummy of language runtimes** — a jube is a small, self-contained sweet. Each language runtime is a sandboxed "jube" bundled into one binary. In the same spirit as Java Bean, Ruby Gem, and Docker Pod.
-3. **Backronym** — **J**avaScript, r**U**by, **B**ash, Typ**E**script. The four extra language runtimes beyond core Lambda. (suggested by Opus)
+1. **Joy & jubilee** — programming should be joyful.
+2. **Vibe** - vibe coding in a polyglot runtime;
+3. **Candy/gummy of language runtimes** — a jube is a small, self-contained sweet. Each language runtime is a sandboxed "jube" bundled into one binary. In the same spirit as Java Bean, Ruby Gem, and Docker Pod.
+4. **Backronym** — **J**avaScript, r**U**by, **B**ash, Typ**E**script. The four extra language runtimes beyond core Lambda. (suggested by Opus)
 
 ---
 

@@ -176,6 +176,15 @@ int  bash_get_var_attrs(Item name);                 // get variable attribute fl
 bool bash_is_assoc(Item name);                      // check if variable is assoc array
 void bash_declare_print_var(Item name);              // declare -p: print var with attrs
 
+// Variable attribute operations (Phase A — Module 3)
+Item bash_apply_attrs(Item value, int attrs);        // apply INTEGER/LOWERCASE/UPPERCASE transforms
+Item bash_resolve_nameref(Item var_name);            // follow -n nameref chain to target name
+int  bash_check_readonly(Item var_name);             // check readonly; returns 1 + prints error if so
+void bash_add_attrs(Item var_name, int add_flags);   // add attribute flags to a variable
+void bash_remove_attrs(Item var_name, int rm_flags); // remove attribute flags (declare +x)
+void bash_declare_nameref(Item name, Item target);        // declare -n name=target
+void bash_declare_local_nameref(Item name, Item target);  // local -n name=target
+
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
 void bash_set_pending_args(const char** argv, int argc, bool skip_arg0);  // store raw argv for deferred init
@@ -248,6 +257,7 @@ void bash_getopts_pop_state(void);                  // restore getopts charind s
 // ========================================================================
 Item bash_builtin_echo(Item* args, int argc);
 Item bash_builtin_printf(Item* all_args, int total_argc);
+Item bash_process_escapes(Item input);
 Item bash_builtin_let(Item* args, int argc);
 Item bash_builtin_type(Item* args, int argc);
 Item bash_builtin_command(Item* args, int argc);
