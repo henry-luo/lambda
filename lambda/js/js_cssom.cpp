@@ -355,7 +355,7 @@ static CssStylesheet* unwrap_stylesheet(Item item) {
 // for font-face rules. property_count stores declaration count, property_names
 // is repurposed to store CssDeclaration** (cast).
 static CssRule* get_font_face_as_style_rule(CssRule* rule) {
-    if (!rule || rule->type != CSS_RULE_FONT_FACE) return nullptr;
+    if (!rule || (rule->type != CSS_RULE_FONT_FACE && rule->type != CSS_RULE_PAGE)) return nullptr;
 
     Pool* pool = rule->pool ? rule->pool : get_document_pool();
     if (!pool) return nullptr;
@@ -408,6 +408,34 @@ static CssRule* get_font_face_as_style_rule(CssRule* rule) {
             pos++;
         }
         if (pos >= (int)token_count || tokens[pos].type == CSS_TOKEN_EOF) break;
+
+        // skip @-rules inside declaration blocks (e.g., @at {} or @at;)
+        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
+            pos++;
+            int bd = 0;
+            while (pos < (int)token_count && tokens[pos].type != CSS_TOKEN_EOF) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                    bd = 1; pos++;
+                    while (pos < (int)token_count && bd > 0) {
+                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) bd++;
+                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) bd--;
+                        pos++;
+                    }
+                    break;
+                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                    pos++; break;
+                }
+                pos++;
+            }
+            continue;
+        }
+
+        // skip stray RIGHT_BRACE tokens (from @-rule block parsing)
+        if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE ||
+            tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+            pos++;
+            continue;
+        }
 
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
         if (decl) {
@@ -542,7 +570,19 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
 static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool) {
     if (!decl || !pool) return "";
 
-    // prefer parsed value (escapes resolved) over raw source text
+    // for custom properties (--foo) or pending-substitution values (containing
+    // var()), prefer raw source text (preserves comments, blocks faithfully)
+    // unless it contains a backslash (needs escape resolution via parsed value)
+    bool is_custom = decl->property_id == CSS_PROPERTY_CUSTOM
+        || (decl->property_name && decl->property_name[0] == '-' && decl->property_name[1] == '-');
+    bool has_var = decl->value_text && strstr(decl->value_text, "var(");
+
+    if ((is_custom || has_var) && decl->value_text && decl->value_text_len > 0
+        && !memchr(decl->value_text, '\\', decl->value_text_len)) {
+        return decl->value_text;
+    }
+
+    // use parsed value (normalizes standard properties, resolves escapes)
     if (decl->value) {
         CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
         if (fmt) {
@@ -554,7 +594,7 @@ static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool)
         }
     }
 
-    // fall back to raw source text
+    // last resort: raw source text (even with backslash, better than empty)
     if (decl->value_text && decl->value_text_len > 0) {
         return decl->value_text;
     }
@@ -578,20 +618,27 @@ extern "C" Item js_cssom_stylesheet_get_property(Item sheet_item, Item prop_name
     Pool* pool = get_document_pool();
 
     if (strcmp(prop, "cssRules") == 0 || strcmp(prop, "rules") == 0) {
-        // return an array of wrapped CSSRule objects
+        // return an array of wrapped CSSRule objects (excluding @charset per CSSOM spec)
         Array* arr = (Array*)heap_calloc(sizeof(Array), LMD_TYPE_ARRAY);
         arr->type_id = LMD_TYPE_ARRAY;
         arr->items = nullptr;
         arr->length = 0;
         arr->capacity = 0;
         for (size_t i = 0; i < sheet->rule_count; i++) {
+            if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
             array_push(arr, js_cssom_wrap_rule(sheet->rules[i], pool));
         }
         return (Item){.array = arr};
     }
 
     if (strcmp(prop, "length") == 0) {
-        return (Item){.item = i2it((int64_t)sheet->rule_count)};
+        // exclude @charset rules from length count
+        size_t count = 0;
+        for (size_t i = 0; i < sheet->rule_count; i++) {
+            if (sheet->rules[i] && sheet->rules[i]->type == CSS_RULE_CHARSET) continue;
+            count++;
+        }
+        return (Item){.item = i2it((int64_t)count)};
     }
 
     if (strcmp(prop, "disabled") == 0) {
@@ -1151,8 +1198,26 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     }
 
     DomDocument* doc = elem->doc;
-    if (!doc || !doc->stylesheets || doc->stylesheet_count <= 0) {
-        return ItemNull;
+    if (!doc) return ItemNull;
+
+    // if no stylesheets array exists yet, create one for the empty <style> element
+    if (!doc->stylesheets || doc->stylesheet_count <= 0) {
+        Pool* pool = doc->pool;
+        if (!pool) return ItemNull;
+
+        CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));
+        if (!sheet) return ItemNull;
+        sheet->pool = pool;
+        sheet->rule_capacity = 16;
+        sheet->rules = (CssRule**)pool_calloc(pool, sheet->rule_capacity * sizeof(CssRule*));
+        sheet->rule_count = 0;
+
+        if (!doc->stylesheets) {
+            doc->stylesheet_capacity = 4;
+            doc->stylesheets = (CssStylesheet**)pool_calloc(pool, doc->stylesheet_capacity * sizeof(CssStylesheet*));
+        }
+        doc->stylesheets[doc->stylesheet_count++] = sheet;
+        return js_cssom_wrap_stylesheet(sheet);
     }
 
     // We need to find the stylesheet associated with this <style> element.
@@ -1213,8 +1278,31 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     // Map style_index to the actual array index.
     int sheet_idx = linked_count + style_index;
     if (sheet_idx >= doc->stylesheet_count) {
-        log_debug("js_cssom_get_style_element_sheet: sheet_idx %d >= count %d", sheet_idx, doc->stylesheet_count);
-        return ItemNull;
+        // empty <style> element — create an empty stylesheet and add it to the document
+        log_debug("js_cssom_get_style_element_sheet: creating empty sheet for <style> index %d", style_index);
+        Pool* pool = doc->pool;
+        if (!pool) return ItemNull;
+
+        CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));
+        if (!sheet) return ItemNull;
+        sheet->pool = pool;
+        sheet->rule_capacity = 16;
+        sheet->rules = (CssRule**)pool_calloc(pool, sheet->rule_capacity * sizeof(CssRule*));
+        sheet->rule_count = 0;
+
+        // expand document stylesheet array if needed
+        if (doc->stylesheet_count >= doc->stylesheet_capacity) {
+            int new_cap = doc->stylesheet_capacity > 0 ? doc->stylesheet_capacity * 2 : 8;
+            CssStylesheet** new_arr = (CssStylesheet**)pool_calloc(pool, new_cap * sizeof(CssStylesheet*));
+            if (!new_arr) return ItemNull;
+            if (doc->stylesheets && doc->stylesheet_count > 0) {
+                memcpy(new_arr, doc->stylesheets, doc->stylesheet_count * sizeof(CssStylesheet*));
+            }
+            doc->stylesheets = new_arr;
+            doc->stylesheet_capacity = new_cap;
+        }
+        doc->stylesheets[doc->stylesheet_count++] = sheet;
+        return js_cssom_wrap_stylesheet(sheet);
     }
 
     return js_cssom_wrap_stylesheet(doc->stylesheets[sheet_idx]);

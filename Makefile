@@ -1014,7 +1014,7 @@ test-reactive-ui: build
 	@echo "Running Reactive UI test suite..."
 	@echo "=============================================================="
 	@PASS=0; FAIL=0; TOTAL=0; \
-	for json in test/ui/todo_toggle.json test/ui/todo_delete.json; do \
+	for json in test/ui/todo_toggle.json test/ui/todo_delete.json test/ui/todo_add_item.json test/ui/todo_text_input.json; do \
 		name=$$(basename $$json .json); \
 		TOTAL=$$((TOTAL + 1)); \
 		echo "--- $$name ---"; \

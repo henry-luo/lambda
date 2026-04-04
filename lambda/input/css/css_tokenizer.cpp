@@ -29,8 +29,8 @@ static void tokenize_number(const char* input, size_t length, size_t start,
         pos++;
     }
 
-    // parse decimal part
-    if (pos < length && input[pos] == '.') {
+    // parse decimal part (only if '.' is followed by a digit per CSS spec)
+    if (pos < length && input[pos] == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
         pos++;
         while (pos < length && isdigit(input[pos])) {
             pos++;

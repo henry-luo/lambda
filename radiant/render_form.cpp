@@ -173,43 +173,92 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
         is_placeholder = true;
     }
 
+    // Compute text area position (shared by text rendering and caret)
+    float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H) * s;
+    float border_w = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
+    float text_x = x + border_w + padding;
+    float font_size_scaled = block->font ? block->font->font_size * s : 16.0f * s;
+    float text_y = y + border_w + (h - 2*border_w - font_size_scaled) / 2;
+
+    float text_end_x = text_x;  // tracks x position after rendering text
+
     if (text && *text && block->font) {
-        // Scale padding/border from CSS pixels
-        float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXT_PADDING_H) * s;
-        float border = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
-
-        float text_x = x + border + padding;
-        // font_size and ascender are in CSS pixels, need scaling for physical coordinates
-        float font_size_scaled = block->font->font_size * s;
-        float ascender_scaled = block->font->ascender * s;
-        float text_y = y + border + (h - 2*border - font_size_scaled) / 2 + ascender_scaled;
-
         // Set text color
+        Color text_color;
         if (is_placeholder) {
-            rdcon->color.r = 117; rdcon->color.g = 117; rdcon->color.b = 117; rdcon->color.a = 255;
+            text_color = make_color(117, 117, 117);
         } else if (block->in_line) {
-            rdcon->color = block->in_line->color;
+            text_color.r = block->in_line->color.r;
+            text_color.g = block->in_line->color.g;
+            text_color.b = block->in_line->color.b;
+            text_color.a = block->in_line->color.a;
         } else {
-            rdcon->color.r = 0; rdcon->color.g = 0; rdcon->color.b = 0; rdcon->color.a = 255;
+            text_color = make_color(0, 0, 0);
         }
 
         // Render text (using existing text rendering)
         // For password fields, show dots instead
         if (form->input_type && strcmp(form->input_type, "password") == 0) {
-            // Draw dots for each character
+            rdcon->color = text_color;
             size_t len = strlen(text);
             float dot_spacing = font_size_scaled * 0.6f;
             for (size_t i = 0; i < len; i++) {
                 float cx = text_x + i * dot_spacing + dot_spacing / 2;
                 float cy = y + h / 2;
                 float radius = 3 * s;
-                // Simple filled circle approximation
                 fill_rect(rdcon, cx - radius, cy - radius, radius * 2, radius * 2, rdcon->color);
             }
+            text_end_x = text_x + (float)len * dot_spacing;
         } else {
-            // TODO: render actual text using font system
-            // For now we rely on render.cpp text rendering if there's text content
-            log_debug("[FORM] text input value: %s", text);
+            render_simple_string(rdcon, text, text_x, text_y,
+                                 block->font, text_color);
+
+            // Measure rendered text width for caret positioning
+            FontBox fbox = {0};
+            setup_font(rdcon->ui_context, &fbox, block->font);
+            if (fbox.font_handle) {
+                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                    ? rdcon->ui_context->pixel_ratio : 1.0f;
+                const unsigned char* p = (const unsigned char*)text;
+                const unsigned char* p_end = p + strlen(text);
+                float tw = 0;
+                while (p < p_end) {
+                    uint32_t codepoint;
+                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                    if (bytes <= 0) { p++; continue; }
+                    p += bytes;
+                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                    if (glyph) {
+                        tw += glyph->advance_x / pixel_ratio;
+                    }
+                }
+                text_end_x = text_x + tw * s;
+            }
+        }
+    }
+
+    // Draw caret if this input has focus
+    RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
+    if (state) {
+        View* focused = focus_get(state);
+        if (focused == (View*)block) {
+            float caret_x = is_placeholder ? text_x : text_end_x;
+            float caret_y_pos = text_y;
+            float caret_h = font_size_scaled;
+            float caret_w = 2.0f * s;
+
+            // Draw caret via ThorVG
+            Tvg_Paint shape = tvg_shape_new();
+            if (shape) {
+                tvg_shape_append_rect(shape, caret_x, caret_y_pos, caret_w, caret_h, 0, 0, true);
+                tvg_shape_set_fill_color(shape, 0x33, 0x33, 0x33, 0xCC);
+                tvg_canvas_push(rdcon->canvas, shape);
+                tvg_canvas_reset_and_draw(rdcon, false);
+                tvg_canvas_remove(rdcon->canvas, NULL);
+            }
+
+            log_debug("[FORM] drew caret at (%.1f, %.1f) height=%.1f", caret_x, caret_y_pos, caret_h);
         }
     }
 

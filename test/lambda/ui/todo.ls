@@ -27,8 +27,8 @@ on click(evt) {
   }
 }
 
-// Todo list section: edit template for model mutation (delete, clear completed)
-edit <todo_list> {
+// Todo list section: edit template for model mutation (delete, clear completed, add)
+edit <todo_list> state new_text: "" {
   let items = it.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
@@ -42,6 +42,10 @@ edit <todo_list> {
       for (item in items)
         apply(<todo_item text:item.text, done:item.done, id:item.id>)
     >
+    <div class:"add-row"
+      <input type:"text", class:"new-item-input", placeholder:"Add a task...", value:new_text>
+      <button class:"add-btn"; "Add">
+    >
     if (done_count > 0) {
       <div class:"list-actions"
         <button class:"clear-done-btn"; "Clear completed">
@@ -50,8 +54,34 @@ edit <todo_list> {
   >
 }
 on click(evt) {
+  if (evt.target_class == "add-btn") {
+    if (new_text != "") {
+      let next_id = len(it.items) + 1
+      let new_item = {id: next_id, text: new_text, done: false}
+      it.items = it.items ++ [new_item]
+      new_text = ""
+    }
+  }
   if (evt.target_class == "clear-done-btn") {
     it.items = for (item in it.items where not item.done) item
+  }
+}
+on input(evt) {
+  new_text = new_text ++ evt.char
+}
+on keydown(evt) {
+  if (evt.key == "Backspace") {
+    if (len(new_text) > 0) {
+      new_text = slice(new_text, 0, len(new_text) - 1)
+    }
+  }
+  if (evt.key == "Enter") {
+    if (new_text != "") {
+      let next_id = len(it.items) + 1
+      let new_item = {id: next_id, text: new_text, done: false}
+      it.items = it.items ++ [new_item]
+      new_text = ""
+    }
   }
 }
 on delete_item(evt) {
@@ -184,6 +214,33 @@ on delete_item(evt) {
     .clear-done-btn:hover {
       background: #e9ecef;
       color: #555;
+    }
+    .add-row {
+      display: flex;
+      gap: 8px;
+      padding: 10px 15px;
+      align-items: center;
+    }
+    .new-item-input {
+      flex: 1;
+      font-size: 0.9em;
+      padding: 6px 10px;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      color: #333;
+    }
+    .add-btn {
+      font-size: 0.85em;
+      color: white;
+      background: #5c6bc0;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .add-btn:hover {
+      background: #7e57c2;
     }
     .footer {
       text-align: center;

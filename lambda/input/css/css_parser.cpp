@@ -1289,10 +1289,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         (*pos)++; // skip FUNCTION token
 
-        // Collect tokens until matching ')'
+        // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
         int arg_start = *pos;
         int paren_depth = 1; // Already inside the function
         while (*pos < token_count && paren_depth > 0) {
+            if (tokens[*pos].type == CSS_TOKEN_EOF) break;
             if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                 paren_depth++;
             } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -1587,10 +1588,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++; // skip FUNCTION token
 
-                // Collect tokens until matching ')'
+                // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
                 int arg_start = *pos;
                 int paren_depth = 1; // Already inside the function
                 while (*pos < token_count && paren_depth > 0) {
+                    if (tokens[*pos].type == CSS_TOKEN_EOF) break;
                     if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                         paren_depth++;
                     } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -2397,6 +2399,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 rule->type = CSS_RULE_FONT_FACE;
             } else if (keyword_name && strcmp(keyword_name, "keyframes") == 0) {
                 rule->type = CSS_RULE_KEYFRAMES;
+            } else if (keyword_name && strcmp(keyword_name, "page") == 0) {
+                rule->type = CSS_RULE_PAGE;
             } else {
                 // Unknown at-rule (e.g., @page, @layer, @property) - skip it
                 // Per CSS spec, skip the at-rule's block or up to semicolon
@@ -2572,6 +2576,30 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         // Skip whitespace
         pos = css_skip_whitespace_tokens(tokens, pos, token_count);
         if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
+
+        // Skip @-rules inside declaration blocks (e.g., @at {} or @at;)
+        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
+            pos++; // skip @keyword
+            // skip until block or semicolon
+            int brace_depth = 0;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                    brace_depth = 1;
+                    pos++;
+                    while (pos < token_count && brace_depth > 0) {
+                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                        pos++;
+                    }
+                    break;
+                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                    pos++;
+                    break;
+                }
+                pos++;
+            }
+            continue;
+        }
 
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);

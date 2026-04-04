@@ -707,7 +707,12 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
         } else {
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
-                // item is ITEM_NULL, nothing to store
+                // For dynamically-typed fields (e.g. state-bound element attributes),
+                // store non-null values as raw tagged Items. The compiler sets shape type
+                // to LMD_TYPE_NULL when it can't resolve the type at compile time.
+                if (item.item != ITEM_NULL && get_type_id(item) != LMD_TYPE_NULL) {
+                    *(Item*)field_ptr = item;
+                }
                 break;
             }
             case LMD_TYPE_BOOL: {
@@ -911,8 +916,13 @@ Item typeditem_to_item(TypedItem *titem) {
 Item _map_field_to_item(void* field_ptr, TypeId type_id) {
     Item result = (Item){._type_id = type_id};
     switch (type_id) {
-    case LMD_TYPE_NULL:
-        return ItemNull;
+    case LMD_TYPE_NULL: {
+        // For dynamically-typed fields, a non-null value may have been stored as a raw
+        // tagged Item by set_fields(). Read it back; return ItemNull if field is empty.
+        uint64_t raw = *(uint64_t*)field_ptr;
+        if (raw == 0) return ItemNull;
+        return *(Item*)field_ptr;
+    }
     case LMD_TYPE_BOOL:
         result.bool_val = *(bool*)field_ptr;
         break;
