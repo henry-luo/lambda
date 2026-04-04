@@ -11,6 +11,7 @@
  * - Unset variables expand to empty string
  */
 #include "bash_runtime.h"
+#include "bash_redir.h"
 #include "bash_ast.hpp"
 #include "bash_errors.h"
 #include "../lambda-data.hpp"
@@ -551,6 +552,12 @@ extern "C" Item bash_arith_gt(Item left, Item right) {
 
 extern "C" Item bash_arith_ge(Item left, Item right) {
     return (Item){.item = i2it(bash_coerce_int(left) >= bash_coerce_int(right) ? 1 : 0)};
+}
+
+// Logical NOT: !a → 1 if a==0, else 0
+extern "C" Item bash_logical_not(Item operand) {
+    int64_t a = bash_coerce_int(operand);
+    return (Item){.item = i2it(a == 0 ? 1 : 0)};
 }
 
 // ============================================================================
@@ -2779,7 +2786,7 @@ extern "C" void bash_write_stderr(Item value) {
     Item str = bash_to_string(value);
     String* s = it2s(str);
     if (s && s->len > 0) {
-        fwrite(s->chars, 1, s->len, stderr);
+        bash_stderr_route_write(s->chars, s->len);
     }
 }
 
