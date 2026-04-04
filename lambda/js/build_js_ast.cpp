@@ -446,8 +446,6 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
 
 // Build JavaScript call expression node
 JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
-    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
-
     // Get callee (function being called) - use field name instead of ID
     TSNode callee_node = ts_node_child_by_field_name(call_node, "function", strlen("function"));
     if (ts_node_is_null(callee_node)) {
@@ -459,14 +457,29 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
         }
     }
 
+    // Detect tagged template literals: tag`...`
+    // In tree-sitter, these are call_expression where "arguments" is a template_string
+    TSNode args_node = ts_node_child_by_field_name(call_node, "arguments", strlen("arguments"));
+    if (!ts_node_is_null(args_node)) {
+        const char* args_type = ts_node_type(args_node);
+        if (strcmp(args_type, "template_string") == 0) {
+            JsTaggedTemplateNode* tagged = (JsTaggedTemplateNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_TAGGED_TEMPLATE, call_node, sizeof(JsTaggedTemplateNode));
+            tagged->tag = build_js_expression(tp, callee_node);
+            tagged->quasi = (JsTemplateLiteralNode*)build_js_template_literal(tp, args_node);
+            tagged->base.type = &TYPE_ANY;
+            return (JsAstNode*)tagged;
+        }
+    }
+
+    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
+
     call->callee = build_js_expression(tp, callee_node);
     if (!call->callee) {
         log_error("Failed to build callee expression");
         return NULL;
     }
 
-    // Get arguments
-    TSNode args_node = ts_node_child_by_field_name(call_node, "arguments", strlen("arguments"));
     if (ts_node_is_null(args_node)) {
         // Fallback: look for arguments node by type
         uint32_t child_count = ts_node_child_count(call_node);
