@@ -176,6 +176,17 @@ char* url_encode_component(const char* str, size_t len);
 // If out_len is non-NULL, stores the decoded length.
 char* url_decode_component(const char* str, size_t len, size_t* out_len);
 
+// Percent-encode a string per ECMAScript encodeURI rules.
+// Preserves URI-structural chars: ; , / ? : @ & = + $ # and unreserved chars.
+// Returns a newly allocated string. Caller must free.
+char* url_encode_uri(const char* str, size_t len);
+
+// Percent-decode a string per ECMAScript decodeURI rules.
+// Does NOT decode escape sequences for reserved URI chars.
+// Returns a newly allocated string. Caller must free.
+// If out_len is non-NULL, stores the decoded length.
+char* url_decode_uri(const char* str, size_t len, size_t* out_len);
+
 // Convert a hex character (0-9, A-F, a-f) to its integer value (0-15).
 // Returns -1 for invalid characters.
 int url_hex_to_int(char c);

@@ -12,6 +12,10 @@ static CssUnit parse_css_unit(const char* unit_str, size_t length) {
     return css_unit_from_string(unit_str, length);
 }
 
+// Forward declarations for functions used by tokenize_number
+static inline bool css_starts_escape(const char* input, size_t length, size_t pos);
+static inline void css_consume_name(const char* input, size_t length, size_t* pos);
+
 // Helper: tokenize a CSS numeric value (number, percentage, or dimension).
 // `start` is the beginning of the token (may include a sign or leading dot).
 // `pos` on entry points past any sign/dot prefix to the first digit position.
@@ -25,8 +29,8 @@ static void tokenize_number(const char* input, size_t length, size_t start,
         pos++;
     }
 
-    // parse decimal part
-    if (pos < length && input[pos] == '.') {
+    // parse decimal part (only if '.' is followed by a digit per CSS spec)
+    if (pos < length && input[pos] == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
         pos++;
         while (pos < length && isdigit(input[pos])) {
             pos++;
@@ -50,11 +54,12 @@ static void tokenize_number(const char* input, size_t length, size_t start,
     if (pos < length && input[pos] == '%') {
         pos++;
         token->type = CSS_TOKEN_PERCENTAGE;
-    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_'
+               || (unsigned char)input[pos] >= 0x80
+               || css_starts_escape(input, length, pos))) {
         size_t unit_start = pos;
-        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
-            pos++;
-        }
+        // CSS spec: unit is a CSS name (handles escapes and non-ASCII)
+        css_consume_name(input, length, &pos);
         token->type = CSS_TOKEN_DIMENSION;
         CssUnit parsed_unit = parse_css_unit(&input[unit_start], pos - unit_start);
         token->data.dimension.unit = parsed_unit;
@@ -81,11 +86,24 @@ static void tokenize_number(const char* input, size_t length, size_t start,
 
 // Enhanced Unicode character classification
 bool css_is_name_start_char_unicode(uint32_t codepoint) {
-    // CSS3 name-start character definition
+    // CSS3 name-start character definition (ASCII)
     if (codepoint >= 'a' && codepoint <= 'z') return true;
     if (codepoint >= 'A' && codepoint <= 'Z') return true;
     if (codepoint == '_') return true;
-    if (codepoint >= 0x80) return true; // Non-ASCII
+    // Non-ASCII ident code point (CSS Syntax Level 3 §4.2)
+    if (codepoint == 0xB7) return true;
+    if (codepoint >= 0xC0 && codepoint <= 0xD6) return true;
+    if (codepoint >= 0xD8 && codepoint <= 0xF6) return true;
+    if (codepoint >= 0xF8 && codepoint <= 0x37D) return true;
+    if (codepoint >= 0x37F && codepoint <= 0x1FFF) return true;
+    if (codepoint >= 0x200C && codepoint <= 0x200D) return true;
+    if (codepoint >= 0x203F && codepoint <= 0x2040) return true;
+    if (codepoint >= 0x2070 && codepoint <= 0x218F) return true;
+    if (codepoint >= 0x2C00 && codepoint <= 0x2FEF) return true;
+    if (codepoint >= 0x3001 && codepoint <= 0xD7FF) return true;
+    if (codepoint >= 0xF900 && codepoint <= 0xFDCF) return true;
+    if (codepoint >= 0xFDF0 && codepoint <= 0xFFFD) return true;
+    if (codepoint >= 0x10000) return true; // supplementary planes
     return false;
 }
 
@@ -200,10 +218,12 @@ char* css_decode_unicode_escapes(const char* input, Pool* pool) {
 }
 
 // check if input[pos] starts a valid CSS escape sequence
-// a valid escape is \ followed by any char that is NOT a newline
+// a valid escape is \ followed by any char that is NOT a newline, or \ at EOF
 static inline bool css_starts_escape(const char* input, size_t length, size_t pos) {
-    return pos + 1 < length && input[pos] == '\\' &&
-           input[pos + 1] != '\n' && input[pos + 1] != '\r' && input[pos + 1] != '\f';
+    if (input[pos] != '\\') return false;
+    // backslash at EOF: per CSS spec §4.3.7, escaped EOF → U+FFFD (parse error)
+    if (pos + 1 >= length) return true;
+    return input[pos + 1] != '\n' && input[pos + 1] != '\r' && input[pos + 1] != '\f';
 }
 
 // consume a CSS escape sequence starting at input[*pos], advancing *pos
@@ -226,14 +246,23 @@ static inline void css_consume_escape_seq(const char* input, size_t length, size
     }
 }
 
-// consume CSS name characters (letters, digits, -, _, escapes)
+// consume CSS name characters (letters, digits, -, _, escapes, valid non-ASCII)
 // advances *pos through contiguous name code points
 static inline void css_consume_name(const char* input, size_t length, size_t* pos) {
     while (*pos < length) {
-        if (isalnum(input[*pos]) || input[*pos] == '-' || input[*pos] == '_') {
+        unsigned char b = (unsigned char)input[*pos];
+        if (isalnum(b) || b == '-' || b == '_') {
             (*pos)++;
         } else if (css_starts_escape(input, length, *pos)) {
             css_consume_escape_seq(input, length, pos);
+        } else if (b >= 0x80) {
+            // multi-byte UTF-8: decode and check if valid name char
+            UnicodeChar uc = css_parse_unicode_char(input + *pos, length - *pos);
+            if (uc.byte_length > 0 && css_is_name_char_unicode(uc.codepoint)) {
+                *pos += uc.byte_length;
+            } else {
+                break;
+            }
         } else {
             break;
         }
@@ -646,56 +675,64 @@ static char* css_unescape_string(const char* str, size_t len, Pool* pool) {
         return empty;
     }
 
-    // allocate buffer (unescaped string will be <= original length)
-    char* result = (char*)pool_alloc(pool, len + 1);
+    // allocate buffer (escaped EOF can expand \<EOF> to 3-byte U+FFFD, so allow extra)
+    char* result = (char*)pool_alloc(pool, len * 3 + 1);
     if (!result) return NULL;
 
     size_t out_pos = 0;
     size_t i = 0;
 
     while (i < len) {
-        if (str[i] == '\\' && i + 1 < len) {
-            i++; // skip backslash
-
-            // check if next char is hex digit
-            if ((str[i] >= '0' && str[i] <= '9') ||
-                (str[i] >= 'a' && str[i] <= 'f') ||
-                (str[i] >= 'A' && str[i] <= 'F')) {
-
-                // parse hex escape: \XXXXXX (1-6 hex digits)
-                unsigned int codepoint = 0;
-                int hex_count = 0;
-                while (hex_count < 6 && i < len) {
-                    char c = str[i];
-                    if (c >= '0' && c <= '9') {
-                        codepoint = (codepoint << 4) | (c - '0');
-                    } else if (c >= 'a' && c <= 'f') {
-                        codepoint = (codepoint << 4) | (c - 'a' + 10);
-                    } else if (c >= 'A' && c <= 'F') {
-                        codepoint = (codepoint << 4) | (c - 'A' + 10);
-                    } else {
-                        break; // not a hex digit
-                    }
-                    i++;
-                    hex_count++;
-                }
-
-                // skip optional whitespace after hex escape
-                if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r')) {
-                    i++;
-                }
-
-                // convert codepoint to UTF-8
-                char utf8_buf[5];
-                int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
-                for (int j = 0; j < utf8_len; j++) {
-                    result[out_pos++] = utf8_buf[j];
-                }
-            } else {
-                // single character escape (e.g., \", \\, \n)
-                // for CSS, backslash followed by non-hex char is just that char
-                result[out_pos++] = str[i];
+        if (str[i] == '\\') {
+            if (i + 1 >= len) {
+                // backslash at end of string (escaped EOF) → U+FFFD
+                result[out_pos++] = (char)0xEF;
+                result[out_pos++] = (char)0xBF;
+                result[out_pos++] = (char)0xBD;
                 i++;
+            } else {
+                i++; // skip backslash
+
+                // check if next char is hex digit
+                if ((str[i] >= '0' && str[i] <= '9') ||
+                    (str[i] >= 'a' && str[i] <= 'f') ||
+                    (str[i] >= 'A' && str[i] <= 'F')) {
+
+                    // parse hex escape: \XXXXXX (1-6 hex digits)
+                    unsigned int codepoint = 0;
+                    int hex_count = 0;
+                    while (hex_count < 6 && i < len) {
+                        char c = str[i];
+                        if (c >= '0' && c <= '9') {
+                            codepoint = (codepoint << 4) | (c - '0');
+                        } else if (c >= 'a' && c <= 'f') {
+                            codepoint = (codepoint << 4) | (c - 'a' + 10);
+                        } else if (c >= 'A' && c <= 'F') {
+                            codepoint = (codepoint << 4) | (c - 'A' + 10);
+                        } else {
+                            break; // not a hex digit
+                        }
+                        i++;
+                        hex_count++;
+                    }
+
+                    // skip optional whitespace after hex escape
+                    if (i < len && (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r')) {
+                        i++;
+                    }
+
+                    // convert codepoint to UTF-8
+                    char utf8_buf[5];
+                    int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
+                    for (int j = 0; j < utf8_len; j++) {
+                        result[out_pos++] = utf8_buf[j];
+                    }
+                } else {
+                    // single character escape (e.g., \", \\, \n)
+                    // for CSS, backslash followed by non-hex char is just that char
+                    result[out_pos++] = str[i];
+                    i++;
+                }
             }
         } else {
             // regular character
@@ -725,18 +762,66 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
     }
 
     // For STRING tokens, strip quotes and unescape
-    if (token->type == CSS_TOKEN_STRING && token->length >= 2) {
+    if (token->type == CSS_TOKEN_STRING) {
         char quote = token->start[0];
-        if ((quote == '\'' || quote == '"') && token->start[token->length - 1] == quote) {
-            // Strip quotes: start+1, length-2
-            size_t unquoted_len = token->length - 2;
-            if (unquoted_len > 0) {
+        bool has_closing_quote = (token->length >= 2 &&
+            (quote == '\'' || quote == '"') &&
+            token->start[token->length - 1] == quote);
+        bool has_opening_quote = (token->length >= 1 &&
+            (quote == '\'' || quote == '"'));
+
+        if (has_opening_quote) {
+            // Strip opening quote (and closing if present)
+            size_t content_start = 1;
+            size_t content_len = has_closing_quote ? token->length - 2 : token->length - 1;
+
+            if (content_len > 0) {
                 // unescape CSS escape sequences
-                token->value = css_unescape_string(token->start + 1, unquoted_len, pool);
-                log_debug("[CSS UNESCAPE] Input: '%.*s' -> Output: '%s' (len=%zu)",
-                    (int)unquoted_len, token->start + 1,
-                    token->value ? token->value : "(null)",
-                    token->value ? strlen(token->value) : 0);
+                // for strings, \<EOF> means "do nothing" (drop backslash), not U+FFFD
+                const char* content = token->start + content_start;
+                char* result = (char*)pool_alloc(pool, content_len * 3 + 1);
+                if (result) {
+                    size_t out_pos = 0;
+                    size_t ci = 0;
+                    while (ci < content_len) {
+                        if (content[ci] == '\\') {
+                            if (ci + 1 >= content_len) {
+                                // \<EOF> in string: drop the backslash (per CSS spec §4.3.4)
+                                ci++;
+                            } else {
+                                ci++; // skip backslash
+                                if ((content[ci] >= '0' && content[ci] <= '9') ||
+                                    (content[ci] >= 'a' && content[ci] <= 'f') ||
+                                    (content[ci] >= 'A' && content[ci] <= 'F')) {
+                                    unsigned int codepoint = 0;
+                                    int hex_count = 0;
+                                    while (hex_count < 6 && ci < content_len) {
+                                        char c = content[ci];
+                                        if (c >= '0' && c <= '9') codepoint = (codepoint << 4) | (c - '0');
+                                        else if (c >= 'a' && c <= 'f') codepoint = (codepoint << 4) | (c - 'a' + 10);
+                                        else if (c >= 'A' && c <= 'F') codepoint = (codepoint << 4) | (c - 'A' + 10);
+                                        else break;
+                                        ci++;
+                                        hex_count++;
+                                    }
+                                    if (ci < content_len && (content[ci] == ' ' || content[ci] == '\t' ||
+                                        content[ci] == '\n' || content[ci] == '\r')) ci++;
+                                    char utf8_buf[5];
+                                    int utf8_len = codepoint_to_utf8(codepoint, utf8_buf);
+                                    for (int j = 0; j < utf8_len; j++) result[out_pos++] = utf8_buf[j];
+                                } else {
+                                    result[out_pos++] = content[ci];
+                                    ci++;
+                                }
+                            }
+                        } else {
+                            result[out_pos++] = content[ci];
+                            ci++;
+                        }
+                    }
+                    result[out_pos] = '\0';
+                    token->value = result;
+                }
             } else {
                 char* value = (char*)pool_alloc(pool, 1);
                 if (value) value[0] = '\0';
@@ -746,11 +831,11 @@ static void css_token_set_value(CssToken* token, Pool* pool) {
         }
     }
 
-    // For IDENT, HASH, AT_KEYWORD, CUSTOM_PROPERTY, FUNCTION tokens,
+    // For IDENT, HASH, AT_KEYWORD, CUSTOM_PROPERTY, FUNCTION, DIMENSION tokens,
     // unescape CSS escape sequences if the token contains a backslash
     if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_HASH ||
         token->type == CSS_TOKEN_AT_KEYWORD || token->type == CSS_TOKEN_CUSTOM_PROPERTY ||
-        token->type == CSS_TOKEN_FUNCTION) {
+        token->type == CSS_TOKEN_FUNCTION || token->type == CSS_TOKEN_DIMENSION) {
         if (memchr(token->start, '\\', token->length)) {
             token->value = css_unescape_string(token->start, token->length, pool);
             return;
@@ -894,13 +979,20 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 break;
             case '"':
             case '\'': {
-                // Simple string parsing
+                // CSS §4.3.4: Consume a string token
                 char quote = ch;
                 size_t start = pos;
                 pos++; // Skip opening quote
                 while (pos < length && input[pos] != quote) {
-                    if (input[pos] == '\\' && pos + 1 < length) {
-                        pos += 2; // Skip escaped character
+                    if (input[pos] == '\\') {
+                        if (pos + 1 >= length) {
+                            // \<EOF>: per CSS spec, do nothing (consume backslash only)
+                            pos++;
+                        } else if (input[pos + 1] == '\n' || input[pos + 1] == '\r' || input[pos + 1] == '\f') {
+                            pos += 2; // escaped newline
+                        } else {
+                            pos += 2; // escaped character
+                        }
                     } else {
                         pos++;
                     }
@@ -914,10 +1006,28 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 // Hash token
                 size_t start = pos;
                 pos++; // Skip #
+
+                // Determine hash type: "id" only if chars would start an identifier
+                bool is_id_type = false;
+                if (pos < length) {
+                    unsigned char c = (unsigned char)input[pos];
+                    if (isalpha(c) || c == '_' || c >= 0x80) {
+                        is_id_type = true;
+                    } else if (c == '-' && pos + 1 < length) {
+                        unsigned char c2 = (unsigned char)input[pos + 1];
+                        if (isalpha(c2) || c2 == '_' || c2 == '-' || c2 >= 0x80 ||
+                            css_starts_escape(input, length, pos + 1)) {
+                            is_id_type = true;
+                        }
+                    } else if (css_starts_escape(input, length, pos)) {
+                        is_id_type = true;
+                    }
+                }
+
                 css_consume_name(input, length, &pos);
                 token->type = CSS_TOKEN_HASH;
                 token->length = pos - start;
-                token->data.hash_type = CSS_HASH_ID; // Default to ID type
+                token->data.hash_type = is_id_type ? CSS_HASH_ID : CSS_HASH_UNRESTRICTED;
                 break;
             }
             case '@': {

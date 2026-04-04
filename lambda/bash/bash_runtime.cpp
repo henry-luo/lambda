@@ -12,6 +12,7 @@
  */
 #include "bash_runtime.h"
 #include "bash_ast.hpp"
+#include "bash_errors.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
 #include "../../lib/log.h"
@@ -38,7 +39,8 @@ static int bash_last_exit_code = 0;
 static const char* bash_script_name = "";
 
 // original script name for error reporting (not affected by BASH_ARGV0)
-static char bash_error_script_name[4096] = "";
+// non-static: shared with bash_errors.cpp
+char bash_error_script_name[4096] = "";
 
 // SECONDS tracking: start time and user-set offset
 static time_t bash_seconds_start = 0;
@@ -61,7 +63,8 @@ static bool bash_opt_functrace = false; // -T / set -o functrace
 // (if/while/until condition, && / || chain, ! negation)
 static int bash_errexit_depth = 0;
 
-static int bash_current_lineno = 0;
+// non-static: shared with bash_errors.cpp
+int bash_current_lineno = 0;
 static int bash_debug_trap_lineno = 0;
 static int bash_debug_trap_base_depth = 0;
 
@@ -453,10 +456,7 @@ extern "C" Item bash_divide(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        // print error to stderr in bash format
-        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
-            bash_error_script_name, bash_current_lineno,
-            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_err_division_by_zero(bash_arith_expr_text, (long long)b);
         bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
@@ -467,9 +467,7 @@ extern "C" Item bash_modulo(Item left, Item right) {
     int64_t a = bash_coerce_int(left);
     int64_t b = bash_coerce_int(right);
     if (b == 0) {
-        fprintf(stderr, "%s: line %d: ((: %.*s : division by 0 (error token is \"%lld \")\n",
-            bash_error_script_name, bash_current_lineno,
-            bash_arith_expr_len, bash_arith_expr_text, (long long)b);
+        bash_err_division_by_zero(bash_arith_expr_text, (long long)b);
         bash_set_exit_code(1);
         return (Item){.item = i2it(0)};
     }
@@ -842,7 +840,9 @@ extern "C" Item bash_expand_alt(Item val, Item alt) {
 extern "C" Item bash_expand_error(Item val, Item msg) {
     if (bash_item_is_empty(val)) {
         String* m = it2s(bash_to_string(msg));
-        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+        const char* text = (m && m->len > 0) ? m->chars : "parameter null or not set";
+        bash_errmsg("%s", text);
+        bash_set_exit_code(1);
     }
     return val;
 }
@@ -872,7 +872,9 @@ extern "C" Item bash_expand_alt_nocolon(Item val, Item alt) {
 extern "C" Item bash_expand_error_nocolon(Item val, Item msg) {
     if (bash_item_is_unset(val)) {
         String* m = it2s(bash_to_string(msg));
-        log_error("bash: %s", m ? m->chars : "parameter null or not set");
+        const char* text = (m && m->len > 0) ? m->chars : "parameter null or not set";
+        bash_errmsg("%s", text);
+        bash_set_exit_code(1);
     }
     return val;
 }
@@ -2487,8 +2489,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         }
         if (!found) {
             log_debug("bash: %s: command not found", cmd_name);
-            // write error to stderr like real bash
-            fprintf(stderr, "%s: command not found\n", cmd_name);
+            bash_err_not_found(cmd_name);
             free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
@@ -2497,7 +2498,7 @@ extern "C" Item bash_exec_external(Item* argv, int argc) {
         // absolute or relative path — check it exists
         if (access(cmd_name, X_OK) != 0) {
             log_debug("bash: %s: No such file or directory", cmd_name);
-            fprintf(stderr, "%s: No such file or directory\n", cmd_name);
+            bash_err_no_such_file("", cmd_name);
             free(c_argv);
             bash_last_exit_code = 127;
             return (Item){.item = i2it(127)};
@@ -2916,7 +2917,10 @@ static void bash_ensure_var_table(void) {
 
 extern "C" void bash_set_var(Item name, Item value) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
 
     // FUNCNAME, GROUPS: noassign — silently ignore
@@ -2949,16 +2953,12 @@ extern "C" void bash_set_var(Item name, Item value) {
         if (found) {
             if (found->attributes & BASH_ATTR_READONLY) {
                 log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-                fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_err_readonly(s->chars);
                 bash_last_exit_code = 1;
                 return;
             }
             int attrs = found->attributes;
-            Item final_value = value;
-            if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-            if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-            if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+            Item final_value = bash_apply_attrs(value, attrs);
             BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                                .value = final_value, .is_export = found->is_export,
                                .attributes = attrs};
@@ -2973,8 +2973,7 @@ extern "C" void bash_set_var(Item name, Item value) {
     // check readonly
     if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
         log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-        fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_err_readonly(s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -2983,10 +2982,7 @@ extern "C" void bash_set_var(Item name, Item value) {
     bool was_export = existing ? existing->is_export : false;
 
     // apply attribute transformations
-    Item final_value = value;
-    if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-    if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-    if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+    Item final_value = bash_apply_attrs(value, attrs);
 
     BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                        .value = final_value, .is_export = was_export,
@@ -2996,7 +2992,10 @@ extern "C" void bash_set_var(Item name, Item value) {
 
 extern "C" Item bash_get_var(Item name) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return (Item){.item = s2it(heap_create_name("", 0))};
 
     // dynamic variables: computed on the fly
@@ -3095,7 +3094,10 @@ extern "C" Item bash_get_var(Item name) {
 
 extern "C" void bash_set_local_var(Item name, Item value) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
 
     if (bash_func_scope_depth > 0) {
@@ -3107,15 +3109,11 @@ extern "C" void bash_set_local_var(Item name, Item value) {
         // check readonly
         if (existing && (attrs & BASH_ATTR_READONLY)) {
             log_debug("bash: %.*s: readonly variable", s->len, s->chars);
-            fprintf(stderr, "%s: line %d: %.*s: readonly variable\n",
-                    bash_error_script_name, bash_current_lineno, s->len, s->chars);
+            bash_err_readonly(s->chars);
             bash_last_exit_code = 1;
             return;
         }
-        Item final_value = value;
-        if (attrs & BASH_ATTR_INTEGER)   final_value = bash_arith_eval_value(value);
-        if (attrs & BASH_ATTR_LOWERCASE) final_value = bash_string_lower(bash_to_string(final_value), true);
-        if (attrs & BASH_ATTR_UPPERCASE) final_value = bash_string_upper(bash_to_string(final_value), true);
+        Item final_value = bash_apply_attrs(value, attrs);
         BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
                            .value = final_value, .is_export = false,
                            .attributes = attrs};
@@ -3160,7 +3158,10 @@ extern "C" void bash_export_var(Item name) {
 
 extern "C" void bash_unset_var(Item name) {
     bash_ensure_var_table();
-    String* s = it2s(name);
+
+    // resolve nameref chain
+    Item resolved = bash_resolve_nameref(name);
+    String* s = it2s(resolved);
     if (!s) return;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
     // check readonly in scope frames
@@ -3168,8 +3169,7 @@ extern "C" void bash_unset_var(Item name) {
         const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
         if (found) {
             if (found->attributes & BASH_ATTR_READONLY) {
-                fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
-                        bash_error_script_name, bash_current_lineno, s->len, s->chars);
+                bash_err_unset_readonly("unset", s->chars);
                 bash_last_exit_code = 1;
                 return;
             }
@@ -3180,8 +3180,7 @@ extern "C" void bash_unset_var(Item name) {
     // check readonly in global
     const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (existing && (existing->attributes & BASH_ATTR_READONLY)) {
-        fprintf(stderr, "%s: line %d: unset: %.*s: cannot unset: readonly variable\n",
-                bash_error_script_name, bash_current_lineno, s->len, s->chars);
+        bash_err_unset_readonly("unset", s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -3241,9 +3240,41 @@ extern "C" int bash_get_var_attrs(Item name) {
     String* s = it2s(name);
     if (!s) return BASH_ATTR_NONE;
     BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+    // search scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found->attributes;
+    }
     const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_var_table, &key);
     if (found) return found->attributes;
     return BASH_ATTR_NONE;
+}
+
+// declare -n name=target: set nameref attribute and store target name without resolving
+extern "C" void bash_declare_nameref(Item name, Item target) {
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = target, .is_export = false,
+                       .attributes = BASH_ATTR_NAMEREF};
+    hashmap_set(bash_var_table, &entry);
+}
+
+// local -n name=target: set nameref attribute in the current function scope
+extern "C" void bash_declare_local_nameref(Item name, Item target) {
+    if (bash_func_scope_depth <= 0) {
+        bash_declare_nameref(name, target);
+        return;
+    }
+    bash_ensure_var_table();
+    String* s = it2s(name);
+    if (!s) return;
+    struct hashmap* frame = bash_func_scope_stack[bash_func_scope_depth - 1];
+    BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                       .value = target, .is_export = false,
+                       .attributes = BASH_ATTR_NAMEREF};
+    hashmap_set(frame, &entry);
 }
 
 extern "C" bool bash_is_assoc(Item name) {
@@ -3273,8 +3304,7 @@ extern "C" void bash_declare_print_var(Item name) {
 
     if (!var_set) {
         // variable not set — bash prints error for declare -p nonexistent
-        fprintf(stderr, "%s: declare: %.*s: not found\n",
-                bash_error_script_name, s->len, s->chars);
+        bash_err_declare_not_found(s->chars);
         bash_last_exit_code = 1;
         return;
     }
@@ -3326,6 +3356,157 @@ extern "C" void bash_declare_print_var(Item name) {
                      val_str ? val_str->len : 0, val_str ? val_str->chars : "");
     }
     bash_raw_write(buf, n);
+}
+
+// ============================================================================
+// Variable attribute operations (Phase A — Module 3)
+// ============================================================================
+
+// helper: look up a BashRtVar by name across scope stack + global table
+// does NOT resolve namerefs
+static const BashRtVar* bash_lookup_var_entry(const char* name, int name_len) {
+    BashRtVar key = {.name = name, .name_len = (size_t)name_len};
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) return found;
+    }
+    return (const BashRtVar*)hashmap_get(bash_var_table, &key);
+}
+
+// apply attribute transformations to a value: INTEGER → arith eval, LOWERCASE, UPPERCASE
+extern "C" Item bash_apply_attrs(Item value, int attrs) {
+    Item result = value;
+    if (attrs & BASH_ATTR_INTEGER)   result = bash_arith_eval_value(result);
+    if (attrs & BASH_ATTR_LOWERCASE) result = bash_string_lower(bash_to_string(result), true);
+    if (attrs & BASH_ATTR_UPPERCASE) result = bash_string_upper(bash_to_string(result), true);
+    return result;
+}
+
+// follow -n nameref chain to target variable name
+// returns the final resolved variable name (the name, not its value)
+// if not a nameref, returns the original name unchanged
+extern "C" Item bash_resolve_nameref(Item var_name) {
+    bash_ensure_var_table();
+    String* s = it2s(var_name);
+    if (!s) return var_name;
+
+    for (int depth = 0; depth < 10; depth++) {
+        const BashRtVar* found = bash_lookup_var_entry(s->chars, s->len);
+        if (!found || !(found->attributes & BASH_ATTR_NAMEREF))
+            return (Item){.item = s2it(s)};
+
+        // value of a nameref variable is the target variable name
+        Item target = found->value;
+        String* target_s = it2s(target);
+        if (!target_s || target_s->len == 0)
+            return var_name;  // empty nameref — return original
+
+        // check for self-reference
+        if (target_s->len == s->len && memcmp(target_s->chars, s->chars, s->len) == 0)
+            break;  // circular: a -> a
+
+        s = target_s;
+    }
+
+    // circular nameref chain detected
+    String* orig = it2s(var_name);
+    bash_err_circular_nameref(orig ? orig->chars : "");
+    return var_name;
+}
+
+// check if a variable is readonly; returns 1 and prints an error if so
+extern "C" int bash_check_readonly(Item var_name) {
+    bash_ensure_var_table();
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return 0;
+
+    const BashRtVar* found = bash_lookup_var_entry(s->chars, s->len);
+    if (found && (found->attributes & BASH_ATTR_READONLY)) {
+        bash_err_readonly(s->chars);
+        bash_last_exit_code = 1;
+        return 1;
+    }
+    return 0;
+}
+
+// add attribute flags to an existing variable
+extern "C" void bash_add_attrs(Item var_name, int add_flags) {
+    bash_ensure_var_table();
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return;
+
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // check scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            BashRtVar updated = *found;
+            updated.attributes |= add_flags;
+            if (add_flags & BASH_ATTR_EXPORT) updated.is_export = true;
+            hashmap_set(bash_func_scope_stack[i], &updated);
+            return;
+        }
+    }
+
+    // global table
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (existing) {
+        BashRtVar updated = *existing;
+        updated.attributes |= add_flags;
+        if (add_flags & BASH_ATTR_EXPORT) updated.is_export = true;
+        hashmap_set(bash_var_table, &updated);
+    } else {
+        BashRtVar entry = {.name = s->chars, .name_len = (size_t)s->len,
+                           .value = (Item){.item = s2it(NULL)},
+                           .is_export = (add_flags & BASH_ATTR_EXPORT) != 0,
+                           .attributes = add_flags};
+        hashmap_set(bash_var_table, &entry);
+    }
+}
+
+// remove attribute flags from a variable (declare +i, declare +r, etc.)
+extern "C" void bash_remove_attrs(Item var_name, int rm_flags) {
+    bash_ensure_var_table();
+    // note: cannot remove readonly from a readonly variable in bash
+    Item resolved = bash_resolve_nameref(var_name);
+    String* s = it2s(resolved);
+    if (!s) return;
+
+    BashRtVar key = {.name = s->chars, .name_len = (size_t)s->len};
+
+    // check scope frames first
+    for (int i = bash_func_scope_depth - 1; i >= 0; i--) {
+        const BashRtVar* found = (const BashRtVar*)hashmap_get(bash_func_scope_stack[i], &key);
+        if (found) {
+            if ((found->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
+                bash_errmsg_at("declare: %s: readonly variable", s->chars);
+                bash_last_exit_code = 1;
+                return;
+            }
+            BashRtVar updated = *found;
+            updated.attributes &= ~rm_flags;
+            if (rm_flags & BASH_ATTR_EXPORT) updated.is_export = false;
+            hashmap_set(bash_func_scope_stack[i], &updated);
+            return;
+        }
+    }
+
+    // global table
+    const BashRtVar* existing = (const BashRtVar*)hashmap_get(bash_var_table, &key);
+    if (existing) {
+        if ((existing->attributes & BASH_ATTR_READONLY) && (rm_flags & BASH_ATTR_READONLY)) {
+            bash_errmsg_at("declare: %s: readonly variable", s->chars);
+            bash_last_exit_code = 1;
+            return;
+        }
+        BashRtVar updated = *existing;
+        updated.attributes &= ~rm_flags;
+        if (rm_flags & BASH_ATTR_EXPORT) updated.is_export = false;
+        hashmap_set(bash_var_table, &updated);
+    }
 }
 
 // ============================================================================

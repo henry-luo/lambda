@@ -602,6 +602,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
     while (temp_pos < token_count && paren_depth > 0) {
         CssTokenType t = tokens[temp_pos].type;
+        if (t == CSS_TOKEN_EOF) break;
         if (t == CSS_TOKEN_LEFT_PAREN || t == CSS_TOKEN_FUNCTION) {
             paren_depth++;
             has_content = true;
@@ -666,6 +667,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         while (*pos < token_count) {
             CssTokenType ct = tokens[*pos].type;
 
+            if (ct == CSS_TOKEN_EOF) break;
             if (ct == CSS_TOKEN_LEFT_PAREN || ct == CSS_TOKEN_FUNCTION) {
                 inner_paren++;
                 arg_token_count++;
@@ -826,9 +828,21 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
             break;
 
         case CSS_TOKEN_DIMENSION:
-            // reject dimension tokens with unknown/invalid units (e.g. "300x")
             if (token->data.dimension.unit == CSS_UNIT_NONE) {
-                return NULL;
+                // Unknown unit — preserve as CUSTOM text (used for custom properties like --foo: 1foo)
+                const char* tok_val = token->value;
+                if (!tok_val && token->start && token->length > 0) {
+                    char* buf = (char*)pool_calloc(pool, token->length + 1);
+                    if (buf) { memcpy(buf, token->start, token->length); buf[token->length] = '\0'; tok_val = buf; }
+                }
+                if (tok_val) {
+                    value->type = CSS_VALUE_TYPE_CUSTOM;
+                    value->data.custom_property.name = pool_strdup(pool, tok_val);
+                    value->data.custom_property.fallback = NULL;
+                } else {
+                    return NULL;
+                }
+                break;
             }
             value->type = CSS_VALUE_TYPE_LENGTH;
             value->data.length.value = token->data.dimension.value;
@@ -1218,8 +1232,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             log_debug("[CSS Parser] ERROR: Expected identifier after '.'");
             (*pos)--;  // Back up to the '.' token
         }
-    } else if (token->type == CSS_TOKEN_HASH) {
-        // ID selector: #identifier
+    } else if (token->type == CSS_TOKEN_HASH && token->data.hash_type == CSS_HASH_ID) {
+        // ID selector: #identifier (only for id-type hashes, not unrestricted like #1)
         selector->type = CSS_SELECTOR_TYPE_ID;
         // Extract ID value from token (skip the # character)
         if (token->value && token->value[0] == '#') {
@@ -1275,10 +1289,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         (*pos)++; // skip FUNCTION token
 
-        // Collect tokens until matching ')'
+        // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
         int arg_start = *pos;
         int paren_depth = 1; // Already inside the function
         while (*pos < token_count && paren_depth > 0) {
+            if (tokens[*pos].type == CSS_TOKEN_EOF) break;
             if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                 paren_depth++;
             } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -1573,10 +1588,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++; // skip FUNCTION token
 
-                // Collect tokens until matching ')'
+                // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
                 int arg_start = *pos;
                 int paren_depth = 1; // Already inside the function
                 while (*pos < token_count && paren_depth > 0) {
+                    if (tokens[*pos].type == CSS_TOKEN_EOF) break;
                     if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                         paren_depth++;
                     } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -2383,6 +2399,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 rule->type = CSS_RULE_FONT_FACE;
             } else if (keyword_name && strcmp(keyword_name, "keyframes") == 0) {
                 rule->type = CSS_RULE_KEYFRAMES;
+            } else if (keyword_name && strcmp(keyword_name, "page") == 0) {
+                rule->type = CSS_RULE_PAGE;
             } else {
                 // Unknown at-rule (e.g., @page, @layer, @property) - skip it
                 // Per CSS spec, skip the at-rule's block or up to semicolon
@@ -2559,6 +2577,30 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         pos = css_skip_whitespace_tokens(tokens, pos, token_count);
         if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
 
+        // Skip @-rules inside declaration blocks (e.g., @at {} or @at;)
+        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
+            pos++; // skip @keyword
+            // skip until block or semicolon
+            int brace_depth = 0;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                    brace_depth = 1;
+                    pos++;
+                    while (pos < token_count && brace_depth > 0) {
+                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                        pos++;
+                    }
+                    break;
+                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                    pos++;
+                    break;
+                }
+                pos++;
+            }
+            continue;
+        }
+
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
         log_debug(" After parsing: decl=%p", (void*)decl);
@@ -2584,11 +2626,16 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         }
     }
 
-    // Expect closing brace
-    if (pos >= token_count || tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
-        return 0; // Missing closing brace
+    // Expect closing brace (EOF implicitly closes the rule per CSS spec)
+    if (pos < token_count && tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) {
+        pos++; // consume the closing brace
+    } else if (pos < token_count && tokens[pos].type == CSS_TOKEN_EOF) {
+        // EOF implicitly closes the block
+    } else if (pos >= token_count) {
+        // ran out of tokens — implicitly closed
+    } else {
+        return 0; // unexpected token
     }
-    pos++; // consume the closing brace
 
     // Create the CSS rule
     CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));

@@ -1622,6 +1622,22 @@ static MIR_reg_t jm_call_5(JsMirTranspiler* mt, const char* fn_name,
     return res;
 }
 
+// v20: 6-argument call helper (used for Date setter dispatch with up to 4 args + obj + method_id)
+static MIR_reg_t jm_call_6(JsMirTranspiler* mt, const char* fn_name,
+    MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1,
+    MIR_type_t a2t, MIR_op_t a2, MIR_type_t a3t, MIR_op_t a3,
+    MIR_type_t a4t, MIR_op_t a4, MIR_type_t a5t, MIR_op_t a5,
+    MIR_type_t a6t, MIR_op_t a6) {
+    MIR_var_t args[6] = {{a1t, "a", 0}, {a2t, "b", 0}, {a3t, "c", 0}, {a4t, "d", 0}, {a5t, "e", 0}, {a6t, "f", 0}};
+    JsMirImportEntry* ie = jm_ensure_import(mt, fn_name, ret_type, 6, args, 1);
+    MIR_reg_t res = jm_new_reg(mt, fn_name, ret_type);
+    jm_emit(mt, MIR_new_call_insn(mt->ctx, 9,
+        MIR_new_ref_op(mt->ctx, ie->proto),
+        MIR_new_ref_op(mt->ctx, ie->import),
+        MIR_new_reg_op(mt->ctx, res), a1, a2, a3, a4, a5, a6));
+    return res;
+}
+
 static void jm_call_void_1(JsMirTranspiler* mt, const char* fn_name,
     MIR_type_t a1t, MIR_op_t a1) {
     MIR_var_t args[1] = {{a1t, "a", 0}};
@@ -7137,6 +7153,13 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_date_utc", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
             }
+            // v20: Date.parse(string)
+            if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "Date", 4) == 0 &&
+                prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "parse", 5) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_date_parse", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
             // Array.isArray(x)
             if (obj->name && obj->name->len == 5 && strncmp(obj->name->chars, "Array", 5) == 0 &&
                 prop->name && prop->name->len == 7 && strncmp(prop->name->chars, "isArray", 7) == 0) {
@@ -7254,17 +7277,36 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, proto_arg));
                 return obj_arg;
             }
-            // JSON.parse(str)
+            // JSON.parse(str, reviver?)
             if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
                 prop->name && prop->name->len == 5 && strncmp(prop->name->chars, "parse", 5) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                // v20: check for reviver (2nd arg)
+                JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
+                if (second_arg) {
+                    MIR_reg_t reviver = jm_transpile_box_item(mt, second_arg);
+                    return jm_call_2(mt, "js_json_parse_full", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, reviver));
+                }
                 return jm_call_1(mt, "js_json_parse", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
-            // JSON.stringify(value)
+            // JSON.stringify(value, replacer?, space?)
             if (obj->name && obj->name->len == 4 && strncmp(obj->name->chars, "JSON", 4) == 0 &&
                 prop->name && prop->name->len == 9 && strncmp(prop->name->chars, "stringify", 9) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                // v20: check for replacer (2nd arg) and space (3rd arg)
+                JsAstNode* second_arg = call->arguments ? call->arguments->next : NULL;
+                if (second_arg) {
+                    MIR_reg_t replacer = jm_transpile_box_item(mt, second_arg);
+                    JsAstNode* third_arg = second_arg->next;
+                    MIR_reg_t space = third_arg ? jm_transpile_box_item(mt, third_arg) : jm_emit_null(mt);
+                    return jm_call_3(mt, "js_json_stringify_full", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, replacer),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, space));
+                }
                 return jm_call_1(mt, "js_json_stringify", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
@@ -7660,6 +7702,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             // v11: Date instance methods → js_date_method(obj, method_id)
             {
                 int date_method_id = -1;
+                int date_setter_id = -1; // v20: setter methods
                 int plen = prop->name->len;
                 const char* pname = prop->name->chars;
                 if (plen == 7 && strncmp(pname, "getTime", 7) == 0) date_method_id = 0;
@@ -7671,7 +7714,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 else if (plen == 10 && strncmp(pname, "getSeconds", 10) == 0) date_method_id = 6;
                 else if (plen == 15 && strncmp(pname, "getMilliseconds", 15) == 0) date_method_id = 7;
                 else if (plen == 11 && strncmp(pname, "toISOString", 11) == 0) date_method_id = 8;
-                else if (plen == 17 && strncmp(pname, "toLocaleDateString", 17) == 0) date_method_id = 9;
+                else if (plen == 18 && strncmp(pname, "toLocaleDateString", 18) == 0) date_method_id = 9;
                 // UTC variants (10-16)
                 else if (plen == 14 && strncmp(pname, "getUTCFullYear", 14) == 0) date_method_id = 10;
                 else if (plen == 11 && strncmp(pname, "getUTCMonth", 11) == 0) date_method_id = 11;
@@ -7680,11 +7723,56 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 else if (plen == 13 && strncmp(pname, "getUTCMinutes", 13) == 0) date_method_id = 14;
                 else if (plen == 13 && strncmp(pname, "getUTCSeconds", 13) == 0) date_method_id = 15;
                 else if (plen == 18 && strncmp(pname, "getUTCMilliseconds", 18) == 0) date_method_id = 16;
+                // v20: additional getters via setter dispatch (method_id >= 40)
+                else if (plen == 6 && strncmp(pname, "getDay", 6) == 0) date_setter_id = 40;
+                else if (plen == 9 && strncmp(pname, "getUTCDay", 9) == 0) date_setter_id = 41;
+                else if (plen == 17 && strncmp(pname, "getTimezoneOffset", 17) == 0) date_setter_id = 42;
+                else if (plen == 7 && strncmp(pname, "valueOf", 7) == 0) date_setter_id = 43;
+                else if (plen == 6 && strncmp(pname, "toJSON", 6) == 0) date_setter_id = 44;
+                else if (plen == 11 && strncmp(pname, "toUTCString", 11) == 0) date_setter_id = 45;
+                else if (plen == 12 && strncmp(pname, "toDateString", 12) == 0) date_setter_id = 46;
+                else if (plen == 12 && strncmp(pname, "toTimeString", 12) == 0) date_setter_id = 47;
+                // v20: local setters (21-27)
+                else if (plen == 7 && strncmp(pname, "setTime", 7) == 0) date_setter_id = 20;
+                else if (plen == 11 && strncmp(pname, "setFullYear", 11) == 0) date_setter_id = 21;
+                else if (plen == 8 && strncmp(pname, "setMonth", 8) == 0) date_setter_id = 22;
+                else if (plen == 7 && strncmp(pname, "setDate", 7) == 0) date_setter_id = 23;
+                else if (plen == 8 && strncmp(pname, "setHours", 8) == 0) date_setter_id = 24;
+                else if (plen == 10 && strncmp(pname, "setMinutes", 10) == 0) date_setter_id = 25;
+                else if (plen == 10 && strncmp(pname, "setSeconds", 10) == 0) date_setter_id = 26;
+                else if (plen == 15 && strncmp(pname, "setMilliseconds", 15) == 0) date_setter_id = 27;
+                // v20: UTC setters (30-36)
+                else if (plen == 14 && strncmp(pname, "setUTCFullYear", 14) == 0) date_setter_id = 30;
+                else if (plen == 11 && strncmp(pname, "setUTCMonth", 11) == 0) date_setter_id = 31;
+                else if (plen == 10 && strncmp(pname, "setUTCDate", 10) == 0) date_setter_id = 32;
+                else if (plen == 11 && strncmp(pname, "setUTCHours", 11) == 0) date_setter_id = 33;
+                else if (plen == 13 && strncmp(pname, "setUTCMinutes", 13) == 0) date_setter_id = 34;
+                else if (plen == 13 && strncmp(pname, "setUTCSeconds", 13) == 0) date_setter_id = 35;
+                else if (plen == 18 && strncmp(pname, "setUTCMilliseconds", 18) == 0) date_setter_id = 36;
                 if (date_method_id >= 0) {
                     MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
                     return jm_call_2(mt, "js_date_method", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, date_method_id));
+                }
+                // v20: setter/extra getter dispatch with up to 4 args
+                if (date_setter_id >= 0) {
+                    MIR_reg_t obj_reg = jm_transpile_box_item(mt, m->object);
+                    JsAstNode* a0 = call->arguments;
+                    JsAstNode* a1 = a0 ? a0->next : NULL;
+                    JsAstNode* a2 = a1 ? a1->next : NULL;
+                    JsAstNode* a3 = a2 ? a2->next : NULL;
+                    MIR_reg_t r0 = a0 ? jm_transpile_box_item(mt, a0) : jm_emit_null(mt);
+                    MIR_reg_t r1 = a1 ? jm_transpile_box_item(mt, a1) : jm_emit_null(mt);
+                    MIR_reg_t r2 = a2 ? jm_transpile_box_item(mt, a2) : jm_emit_null(mt);
+                    MIR_reg_t r3 = a3 ? jm_transpile_box_item(mt, a3) : jm_emit_null(mt);
+                    return jm_call_6(mt, "js_date_setter", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, obj_reg),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, date_setter_id),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r1),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r2),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, r3));
                 }
             }
 
@@ -8056,6 +8144,18 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             if (nl == 18 && strncmp(n, "decodeURIComponent", 18) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 return jm_call_1(mt, "js_decodeURIComponent", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+            // v20: encodeURI(str)
+            if (nl == 9 && strncmp(n, "encodeURI", 9) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_encodeURI", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
+            // v20: decodeURI(str)
+            if (nl == 9 && strncmp(n, "decodeURI", 9) == 0) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_decodeURI", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
             // unescape(str) — legacy percent-decoding
@@ -9657,6 +9757,11 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
     // Set function name from the AST node (original JS name, not MIR-mangled)
     const char* js_name = (fc->node && fc->node->name) ? fc->node->name->chars : NULL;
     jm_emit_set_function_name(mt, fn_reg, js_name);
+    // v20: Mark generator functions so their prototype has no constructor
+    if (fc->node && fc->node->is_generator) {
+        jm_call_void_1(mt, "js_mark_generator_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
     return fn_reg;
 }
 
@@ -9820,6 +9925,11 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     // Set function name from the AST node (original JS name, not MIR-mangled)
     const char* js_name = fn->name ? fn->name->chars : NULL;
     jm_emit_set_function_name(mt, fn_reg, js_name);
+    // v20: Mark generator functions so their prototype has no constructor
+    if (fn->is_generator) {
+        jm_call_void_1(mt, "js_mark_generator_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
     return fn_reg;
 }
 
@@ -12105,6 +12215,12 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     // new Date() — returns a Date object with getTime() method
     // Used by raytrace3d: var startDate = new Date().getTime();
     if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) {
+        if (arg_count >= 2) {
+            // v20: new Date(year, month, day, hours, min, sec, ms) - multi-arg
+            MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
+            return jm_call_1(mt, "js_date_new_multi", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, args_arr));
+        }
         if (first_arg) {
             return jm_call_1(mt, "js_date_new_from", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, first_arg));
@@ -17162,6 +17278,11 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
                         MIR_T_I64, MIR_new_int_op(mt->ctx, pc));
                     jm_emit_set_function_name(mt, fn_item, fn->name->chars);
+                    // v20: Mark generator functions
+                    if (fn->is_generator) {
+                        jm_call_void_1(mt, "js_mark_generator_func",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                    }
                     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));

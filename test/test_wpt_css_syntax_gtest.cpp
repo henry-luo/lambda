@@ -233,7 +233,9 @@ TEST_P(WptCssSyntaxTest, Run) {
 
     // Extract inline scripts
     std::string scripts = extract_inline_scripts(html);
-    ASSERT_FALSE(scripts.empty()) << "No inline scripts found in: " << p.html_path;
+    if (scripts.empty()) {
+        GTEST_SKIP() << "No inline scripts (reftest): " << p.html_path;
+    }
 
     // Read the testharness shim
     std::string shim = read_file_contents(SHIM_PATH);

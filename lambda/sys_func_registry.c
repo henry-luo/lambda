@@ -103,6 +103,8 @@ extern bool target_equal(Target* a, Target* b);
 #endif
 #ifdef LAMBDA_BASH
 #include "bash/bash_runtime.h"
+#include "bash/bash_expand.h"
+#include "bash/bash_errors.h"
 #endif
 #ifdef LAMBDA_RUBY
 #include "rb/rb_runtime.h"
@@ -1219,6 +1221,7 @@ JitImport jit_runtime_imports[] = {
     {"js_object_get_own_property_descriptor", FPTR(js_object_get_own_property_descriptor)},
     {"js_object_get_own_property_descriptors", FPTR(js_object_get_own_property_descriptors)},
     {"js_set_function_name", FPTR(js_set_function_name)},
+    {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
@@ -1250,7 +1253,9 @@ JitImport jit_runtime_imports[] = {
     {"js_array_from", FPTR(js_array_from)},
     {"js_array_from_with_mapper", FPTR(js_array_from_with_mapper)},
     {"js_json_parse", FPTR(js_json_parse)},
+    {"js_json_parse_full", FPTR(js_json_parse_full)},
     {"js_json_stringify", FPTR(js_json_stringify)},
+    {"js_json_stringify_full", FPTR(js_json_stringify_full)},
     {"js_delete_property", FPTR(js_delete_property)},
     // timing
     {"js_performance_now", FPTR(js_performance_now)},
@@ -1259,6 +1264,9 @@ JitImport jit_runtime_imports[] = {
     {"js_date_new_from", FPTR(js_date_new_from)},
     {"js_date_utc", FPTR(js_date_utc)},
     {"js_date_method", FPTR(js_date_method)},
+    {"js_date_setter", FPTR(js_date_setter)},
+    {"js_date_new_multi", FPTR(js_date_new_multi)},
+    {"js_date_parse", FPTR(js_date_parse)},
     {"js_map_collection_new", FPTR(js_map_collection_new)},
     {"js_map_collection_new_from", FPTR(js_map_collection_new_from)},
     {"js_set_collection_new", FPTR(js_set_collection_new)},
@@ -1298,6 +1306,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_rest", FPTR(js_object_rest)},
     {"js_encodeURIComponent", FPTR(js_encodeURIComponent)},
     {"js_decodeURIComponent", FPTR(js_decodeURIComponent)},
+    {"js_encodeURI", FPTR(js_encodeURI)},
+    {"js_decodeURI", FPTR(js_decodeURI)},
     {"js_unescape", FPTR(js_unescape)},
     {"js_escape", FPTR(js_escape)},
     {"js_atob", FPTR(js_atob)},
@@ -1679,6 +1689,8 @@ JitImport jit_runtime_imports[] = {
     // variable attributes
     {"bash_declare_var", FPTR(bash_declare_var)},
     {"bash_declare_local_var", FPTR(bash_declare_local_var)},
+    {"bash_declare_nameref", FPTR(bash_declare_nameref)},
+    {"bash_declare_local_nameref", FPTR(bash_declare_local_nameref)},
     {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
     {"bash_is_assoc", FPTR(bash_is_assoc)},
     {"bash_declare_print_var", FPTR(bash_declare_print_var)},
@@ -1745,7 +1757,27 @@ JitImport jit_runtime_imports[] = {
     {"bash_cmd_sub_exit", FPTR(bash_cmd_sub_exit)},
     {"bash_raw_write", FPTR(bash_raw_write)},
     {"bash_write_heredoc", FPTR(bash_write_heredoc)},
+    {"bash_write_stderr", FPTR(bash_write_stderr)},
     {"bash_raw_putc", FPTR(bash_raw_putc)},
+    // error formatting (Module 4)
+    {"bash_errmsg", FPTR(bash_errmsg)},
+    {"bash_errmsg_at", FPTR(bash_errmsg_at)},
+    {"bash_err_readonly", FPTR(bash_err_readonly)},
+    {"bash_err_bad_substitution", FPTR(bash_err_bad_substitution)},
+    {"bash_err_unbound_variable", FPTR(bash_err_unbound_variable)},
+    {"bash_err_not_found", FPTR(bash_err_not_found)},
+    {"bash_err_syntax", FPTR(bash_err_syntax)},
+    {"bash_err_numeric_arg", FPTR(bash_err_numeric_arg)},
+    {"bash_err_invalid_option", FPTR(bash_err_invalid_option)},
+    {"bash_err_too_many_args", FPTR(bash_err_too_many_args)},
+    {"bash_err_not_valid_identifier", FPTR(bash_err_not_valid_identifier)},
+    {"bash_err_ambiguous_redirect", FPTR(bash_err_ambiguous_redirect)},
+    {"bash_err_division_by_zero", FPTR(bash_err_division_by_zero)},
+    {"bash_err_unset_readonly", FPTR(bash_err_unset_readonly)},
+    {"bash_err_circular_nameref", FPTR(bash_err_circular_nameref)},
+    {"bash_err_declare_not_found", FPTR(bash_err_declare_not_found)},
+    {"bash_err_no_such_file", FPTR(bash_err_no_such_file)},
+    {"bash_err_param_not_set", FPTR(bash_err_param_not_set)},
     // pipeline stdin item passing
     {"bash_set_stdin_item", FPTR(bash_set_stdin_item)},
     {"bash_get_stdin_item", FPTR(bash_get_stdin_item)},
@@ -1765,6 +1797,12 @@ JitImport jit_runtime_imports[] = {
     {"bash_expand_brace", FPTR(bash_expand_brace)},
     {"bash_words_split_into", FPTR(bash_words_split_into)},
     {"bash_ifs_split_into", FPTR(bash_ifs_split_into)},
+    // word expansion (Module 1)
+    {"bash_word_split", FPTR(bash_word_split)},
+    {"bash_word_split_into", FPTR(bash_word_split_into)},
+    {"bash_quote_remove", FPTR(bash_quote_remove)},
+    {"bash_process_ansi_escapes", FPTR(bash_process_ansi_escapes)},
+    {"bash_expand_word", FPTR(bash_expand_word)},
     {"bash_set_positional_from_array", FPTR(bash_set_positional_from_array)},
     // scope lifecycle
     {"bash_scope_push", FPTR(bash_scope_push)},
@@ -1774,6 +1812,7 @@ JitImport jit_runtime_imports[] = {
     // built-in commands
     {"bash_builtin_echo", FPTR(bash_builtin_echo)},
     {"bash_builtin_printf", FPTR(bash_builtin_printf)},
+    {"bash_process_escapes", FPTR(bash_process_escapes)},
     {"bash_builtin_let", FPTR(bash_builtin_let)},
     {"bash_builtin_type", FPTR(bash_builtin_type)},
     {"bash_builtin_command", FPTR(bash_builtin_command)},
