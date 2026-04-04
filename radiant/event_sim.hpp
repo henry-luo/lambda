@@ -103,6 +103,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
+    SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     // Navigation
     SIM_EVENT_NAVIGATE,        // load a new HTML document
     SIM_EVENT_NAVIGATE_BACK,   // go back to previous document
@@ -176,6 +177,10 @@ struct SimEvent {
     // drag_and_drop / assert_attribute fields
     char* attribute_name;        // HTML attribute name (for assert_attribute)
     int drag_steps;              // number of intermediate mouse_move steps (default 5)
+    // assert_count fields
+    int assert_count_expected;   // exact expected count (-1 = not set)
+    int assert_count_min;        // minimum expected count (-1 = not set)
+    int assert_count_max;        // maximum expected count (-1 = not set)
 };
 
 // Event simulation context

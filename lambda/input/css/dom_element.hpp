@@ -95,6 +95,11 @@ struct DomDocument {
     // Reactive UI: retained Lambda runtime for event handler execution
     Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
 
+    // Reactive UI: cached CSS for rebuild_lambda_doc optimization
+    struct CssStylesheet** cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
+    int cached_inline_sheet_count;                // Number of cached inline stylesheets
+    void* cached_css_engine;                      // CssEngine* (void* to avoid header dep)
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -105,7 +110,9 @@ struct DomDocument {
                     viewport_width(0), viewport_height(0),
                     body_transform_scale(1.0f),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
-                    lambda_runtime(nullptr) {}
+                    lambda_runtime(nullptr),
+                    cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
+                    cached_css_engine(nullptr) {}
 };
 
 typedef struct {

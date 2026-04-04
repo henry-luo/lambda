@@ -400,7 +400,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAV
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
-	    test-ui-automation
+	    test-ui-automation test-reactive-ui
 
 # Help target - shows available commands
 help:
@@ -448,6 +448,7 @@ help:
 	@echo "  test-bash-baseline - Run Bash transpiler baseline test suite"
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
+	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -1004,6 +1005,25 @@ test-ui-automation: build-test
 		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
+
+test-reactive-ui: build
+	@echo "Running Reactive UI test suite..."
+	@echo "=============================================================="
+	@PASS=0; FAIL=0; TOTAL=0; \
+	for json in test/ui/todo_toggle.json test/ui/todo_delete.json; do \
+		name=$$(basename $$json .json); \
+		TOTAL=$$((TOTAL + 1)); \
+		echo "--- $$name ---"; \
+		if ./lambda.exe view test/lambda/ui/todo.ls --event-file $$json --headless; then \
+			PASS=$$((PASS + 1)); \
+		else \
+			FAIL=$$((FAIL + 1)); \
+			echo "FAIL: $$name"; \
+		fi; \
+	done; \
+	echo "=============================================================="; \
+	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
+	if [ $$FAIL -gt 0 ]; then exit 1; fi
 
 # Save/check/diff layout suite snapshots for regression detection outside baseline
 layout-snapshot:
