@@ -1139,6 +1139,7 @@ static SimEvent* parse_sim_event(MapReader& reader) {
         ev->assert_count_min = -1;
         ev->assert_count_max = -1;
         if (reader.has("count")) ev->assert_count_expected = reader.get("count").asInt32();
+        if (reader.has("equals")) ev->assert_count_expected = reader.get("equals").asInt32();
         if (reader.has("min")) ev->assert_count_min = reader.get("min").asInt32();
         if (reader.has("max")) ev->assert_count_max = reader.get("max").asInt32();
         if (!ev->target_selector) {

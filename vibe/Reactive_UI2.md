@@ -670,7 +670,7 @@ The existing assertion types are sufficient for most reactive testing:
 | Field | Type | Description |
 |-------|------|-------------|
 | `target` | object | CSS selector to match |
-| `equals` | int | Exact expected count |
+| `count` or `equals` | int | Exact expected count (both field names accepted) |
 | `min` | int | Minimum expected count (inclusive) |
 | `max` | int | Maximum expected count (inclusive) |
 
@@ -961,13 +961,13 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 | 4 | Fix any issues found in steps 1–3 | 6,7 | 3 | M | ✅ Done — 5 bugs fixed (see §3.1) |
 | 5 | Cache CSS stylesheet in rebuild_lambda_doc | 7 | — | S | ✅ Done — DomDocument caches `CssStylesheet**` + `CssEngine*`, skip re-parse on subsequent rebuilds |
 | 6 | Implement `assert_count` in event_sim | 9 | — | S | ✅ Done — `SIM_EVENT_ASSERT_COUNT`, counting visitor, supports exact/min/max |
-| 7 | Write todo_toggle.json test, run headless | 9 | 3,6 | M | ✅ Done — 6/6 assertions pass (added assert_count) |
+| 7 | Write todo_toggle.json test, run headless | 9 | 3,6 | M | ✅ Done — 8/8 assertions pass (assert_text + assert_count + footer) |
 | 8 | Implement `emit()` system function for cross-template events | 8 | 4 | M | ✅ Done — `pn_emit()` → `dispatch_emit()`, thread-local `EmitHandlerContext`, DOM ancestry walk |
 | 9 | Build event object for `on click(evt)` handlers | 6 | 4 | M | ✅ Done — 2-param handler signature, `build_lambda_event_map()` with {type, target_class, target_tag, x, y} |
 | 10 | Wire `on input(evt)` to Radiant text input events | 8 | 9 | M | ✅ Done — `dispatch_lambda_handler` wired in `RDT_EVENT_TEXT_INPUT` case (full text editing still TODO) |
 | 11 | Enhance todo.ls with delete/clear completed | 8 | 8,9 | M | ✅ Done — `edit <todo_list>` template, delete via emit, clear completed button |
 | 11b | Wire edit template mutations to reactivity | 8 | 11 | M | ✅ Done — inline mode, runtime type dispatch, dirty marking for edit handlers |
-| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | ✅ Done — todo_delete.json (8/8 with assert_count), todo_toggle.json (6/6 with assert_count). text_input test deferred. |
+| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | ✅ Done — todo_delete.json (8/8 with assert_count), todo_toggle.json (8/8 with assert_count + footer). text_input test deferred. |
 | 13 | Add `test-reactive-ui` make target | 9 | 12 | S | ✅ Done — `make test-reactive-ui` runs todo_toggle + todo_delete via headless lambda.exe |
 
 **Effort:** S = small (< half day), M = medium (1–2 days)
@@ -1053,17 +1053,20 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 | `radiant/event_sim.cpp` | Added `assert_count` JSON parsing block. Added `sim_count_visitor` + `count_elements_by_selector()` (traverses all matches, unlike `find_element_by_selector` which stops on first). Added execution case for `SIM_EVENT_ASSERT_COUNT`. Updated both assertion range checks (`SIM_EVENT_ASSERT_ATTRIBUTE` → `SIM_EVENT_ASSERT_COUNT`) |
 | `radiant/event.cpp` | Wired `dispatch_lambda_handler(&evcon, focused, "input")` in `RDT_EVENT_TEXT_INPUT` case for `on input(evt)` Lambda handler dispatch |
 | `Makefile` | Added `test-reactive-ui` phony target: runs `todo_toggle.json` + `todo_delete.json` via headless `lambda.exe view`. Added help text |
-| `test/ui/todo_toggle.json` | Added 2 `assert_count` assertions (initial count=4, count unchanged after toggle). Now 6 total assertions |
-| `test/ui/todo_delete.json` | Added 3 `assert_count` assertions (initial=4, after delete=3, after clear completed=2). Now 8 total assertions |
+| `test/ui/todo_toggle.json` | 8 assertions: header text, initial count=8, first item text, checkbox ○, toggled ✓, untoggled ○, count unchanged, footer text. Added `"html"` field for GTest auto-discovery |
+| `test/ui/todo_delete.json` | 8 assertions: initial count=8, first item text, delete button, after delete count=7, new first item, clear button, after clear count=6, remaining item. Added `"html"` field for GTest auto-discovery |
 
 ### Test Results
 
 ```
 $ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_toggle.json --headless
-Assertions: 6 passed, 0 failed — PASS
+Assertions: 8 passed, 0 failed — PASS
 
 $ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_delete.json --headless
 Assertions: 8 passed, 0 failed — PASS
+
+$ make test-reactive-ui
+Reactive UI: 2/2 passed
 
 $ make test-lambda-baseline
 540/560 passed (20 pre-existing failures unrelated to these changes)

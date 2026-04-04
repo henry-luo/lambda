@@ -1,12 +1,13 @@
 {
   "name": "Todo delete and clear completed",
+  "html": "test/lambda/ui/todo.ls",
   "viewport": {"width": 600, "height": 800},
   "events": [
     {"type": "log", "message": "=== Todo Delete & Clear Test ==="},
     {"type": "wait", "ms": 200},
 
-    {"type": "log", "message": "Step 1: Verify initial item count"},
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 4},
+    {"type": "log", "message": "Step 1: Verify initial item count (3+3+2=8)"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
 
     {"type": "log", "message": "Step 2: Verify initial render - first item exists"},
     {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Review pull requests"},
@@ -18,8 +19,8 @@
     {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
     {"type": "wait", "ms": 200},
 
-    {"type": "log", "message": "Step 5: Verify item count decreased"},
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 3},
+    {"type": "log", "message": "Step 5: Verify item count decreased (8-1=7)"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
 
     {"type": "log", "message": "Step 6: Verify first item was deleted - new first item is different"},
     {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Update documentation"},
@@ -27,14 +28,14 @@
     {"type": "log", "message": "Step 7: Verify clear completed button is visible"},
     {"type": "assert_text", "target": {"selector": ".clear-done-btn"}, "contains": "Clear completed"},
 
-    {"type": "log", "message": "Step 8: Click clear completed button"},
+    {"type": "log", "message": "Step 8: Click clear completed button on Work list"},
     {"type": "click", "target": {"selector": ".clear-done-btn"}},
     {"type": "wait", "ms": 200},
 
-    {"type": "log", "message": "Step 9: Verify completed items were cleared"},
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 2},
+    {"type": "log", "message": "Step 9: Verify completed items were cleared (7-1=6)"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 6},
 
-    {"type": "log", "message": "Step 10: Verify first remaining item is undone"},
+    {"type": "log", "message": "Step 10: Verify first remaining item in Work list is undone"},
     {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Fix CI pipeline"},
 
     {"type": "log", "message": "=== Todo Delete & Clear Test Complete ==="}

@@ -1,5 +1,6 @@
 {
   "name": "Todo item toggle",
+  "html": "test/lambda/ui/todo.ls",
   "viewport": {"width": 600, "height": 800},
   "events": [
     {"type": "log", "message": "=== Todo Toggle Test ==="},
@@ -8,28 +9,34 @@
     {"type": "log", "message": "Step 1: Verify initial render - header text"},
     {"type": "assert_text", "target": {"selector": ".header h1"}, "contains": "My Todo List"},
 
-    {"type": "log", "message": "Step 2: Verify initial todo item count"},
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 4},
+    {"type": "log", "message": "Step 2: Verify initial todo item count (3 lists: 3+3+2=8)"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
 
-    {"type": "log", "message": "Step 3: Verify initial todo items exist"},
+    {"type": "log", "message": "Step 3: Verify first item text"},
     {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Review pull requests"},
 
-    {"type": "log", "message": "Step 4: Click first todo item to toggle it"},
+    {"type": "log", "message": "Step 4: Verify first item checkbox is unchecked"},
+    {"type": "assert_text", "target": {"selector": ".todo-item .checkbox"}, "equals": "○"},
+
+    {"type": "log", "message": "Step 5: Click first todo item to toggle it"},
     {"type": "click", "target": {"selector": ".todo-item"}},
     {"type": "wait", "ms": 200},
 
-    {"type": "log", "message": "Step 5: Verify toggled state - checkbox should show checkmark"},
+    {"type": "log", "message": "Step 6: Verify toggled state - checkbox should show checkmark"},
     {"type": "assert_text", "target": {"selector": ".todo-item .checkbox"}, "contains": "✓"},
 
-    {"type": "log", "message": "Step 6: Item count unchanged after toggle"},
-    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 4},
+    {"type": "log", "message": "Step 7: Item count unchanged after toggle"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
 
-    {"type": "log", "message": "Step 7: Click again to untoggle"},
+    {"type": "log", "message": "Step 8: Click again to untoggle"},
     {"type": "click", "target": {"selector": ".todo-item"}},
     {"type": "wait", "ms": 200},
 
-    {"type": "log", "message": "Step 8: Verify untoggled state - checkbox should be empty"},
+    {"type": "log", "message": "Step 9: Verify untoggled state - checkbox should be empty"},
     {"type": "assert_text", "target": {"selector": ".todo-item .checkbox"}, "equals": "○"},
+
+    {"type": "log", "message": "Step 10: Verify footer count"},
+    {"type": "assert_text", "target": {"selector": ".footer"}, "contains": "of 8 tasks completed"},
 
     {"type": "log", "message": "=== Todo Toggle Test Complete ==="}
   ]
