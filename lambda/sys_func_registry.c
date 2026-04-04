@@ -1679,6 +1679,8 @@ JitImport jit_runtime_imports[] = {
     // variable attributes
     {"bash_declare_var", FPTR(bash_declare_var)},
     {"bash_declare_local_var", FPTR(bash_declare_local_var)},
+    {"bash_declare_nameref", FPTR(bash_declare_nameref)},
+    {"bash_declare_local_nameref", FPTR(bash_declare_local_nameref)},
     {"bash_get_var_attrs", FPTR(bash_get_var_attrs)},
     {"bash_is_assoc", FPTR(bash_is_assoc)},
     {"bash_declare_print_var", FPTR(bash_declare_print_var)},
