@@ -499,6 +499,14 @@ typedef struct BashArithAssignNode {
     BashAstNode* value;             // right-hand side (NULL for ++/--)
 } BashArithAssignNode;
 
+// Arithmetic ternary: cond ? then_expr : else_expr
+typedef struct BashArithTernaryNode {
+    BashAstNode base;
+    BashAstNode* condition;
+    BashAstNode* then_expr;
+    BashAstNode* else_expr;
+} BashArithTernaryNode;
+
 // Test command: [ expr ] or test expr
 typedef struct BashTestCommandNode {
     BashAstNode base;

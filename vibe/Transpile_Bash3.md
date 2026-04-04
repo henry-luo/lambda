@@ -741,6 +741,50 @@ Rather than a separate file, attribute operations were added directly to `bash_r
 
 ---
 
+### 2025-04-04: Phase C Complete — Arithmetic Evaluator + Redirection Engine
+
+**Baseline:** 33/34 passing. 0 regressions.
+
+**Phase C status:** ✅ Both modules implemented, tested, and registered.
+
+#### Module 6: Arithmetic Evaluator — ✅ Complete
+
+**New files:**
+- `bash_arith.h` / `bash_arith.cpp` — Runtime string-based arithmetic evaluator (recursive descent parser)
+  - Full operator precedence: comma, assignment (=, +=, -=, *=, /=, %=, <<=, >>=, &=, ^=, |=), ternary (?:), logical (&&, ||), bitwise (&, |, ^, ~), comparison (==, !=, <, <=, >, >=), shift (<<, >>), arithmetic (+, -, *, /, %, **), unary (-, +, ~, !), prefix/postfix (++, --)
+  - Variable references ($var and var), base conversion (N#val, 0x hex, 0 octal)
+  - Functions: `bash_arith_eval_string(Item)`, `bash_arith_eval_to_int(const char*)`
+
+**Enhanced files:**
+- `bash_ast.hpp` — Added `BashArithTernaryNode` struct (condition, then_expr, else_expr)
+- `build_bash_ast.cpp` — Added `ternary_expression` handler; fixed hex literal parsing (base 0 for strtoll)
+- `transpile_bash_mir.cpp` — Added `ARITH_TERNARY` case (branch-based codegen); expanded `ARITH_UNARY` handler for logical NOT (!), bitwise NOT (~), prefix ++/--
+- `bash_runtime.cpp` / `bash_runtime.h` — Added `bash_logical_not()` function
+- `sys_func_registry.c` — Registered `bash_logical_not`, `bash_arith_eval_string`
+
+**Tests:**
+- `test/bash/arithmetic.sh` / `.txt` — Extended with bitwise ops, comparisons, logical ops, ternary, postfix/prefix ++/--
+
+#### Module 7: Redirection & I/O Engine — ✅ Complete
+
+**New files:**
+- `bash_redir.h` / `bash_redir.cpp` — Stderr routing and I/O state management
+  - Stderr routing modes: NORMAL, TO_NULL, TO_STDOUT, TO_FILE
+  - I/O state save/restore stack (32 depth) via `bash_io_push()`/`bash_io_pop()`
+  - Stderr capture buffer for file redirects with auto-flush on scope exit
+  - Functions: `bash_redir_stderr_to_stdout()`, `bash_redir_stderr_to_null()`, `bash_redir_stderr_to_file()`
+
+**Enhanced files:**
+- `bash_runtime.cpp` — `bash_write_stderr()` now routes through `bash_stderr_route_write()`
+- `transpile_bash_mir.cpp` — COMMAND and REDIRECTED handlers now emit stderr routing calls:
+  - `2>/dev/null` → `bash_redir_stderr_to_null()` (was no-op)
+  - `2>file` / `2>>file` → `bash_redir_stderr_to_file()` with capture (was no-op)
+  - `2>&1` → `bash_redir_stderr_to_stdout()` (was no-op)
+  - I/O state push/pop wraps scoped redirections
+- `sys_func_registry.c` — Registered all 6 redir functions
+
+---
+
 ### 2025-04-04: Phase B Complete — Error Formatting Engine + Printf Engine
 
 **Baseline:** 33/34 passing. 0 regressions. 51 pattern GTests still passing.

@@ -2233,7 +2233,7 @@ static BashAstNode* build_arith_expression(BashTranspiler* tp, TSNode node) {
         BashArithNumberNode* num = (BashArithNumberNode*)alloc_bash_ast_node(
             tp, BASH_AST_NODE_ARITH_NUMBER, node, sizeof(BashArithNumberNode));
         StrView src = bash_node_source(tp, node);
-        num->value = strtoll(src.str, NULL, 10);
+        num->value = strtoll(src.str, NULL, 0); // base 0: auto-detect hex (0x), octal (0), decimal
         return (BashAstNode*)num;
     }
     if (strcmp(node_type, "variable_name") == 0 || strcmp(node_type, "word") == 0) {
@@ -2353,6 +2353,25 @@ static BashAstNode* build_arith_expression(BashTranspiler* tp, TSNode node) {
             return build_arith_expression(tp, ts_node_named_child(node, 0));
         }
         return NULL;
+    }
+    if (strcmp(node_type, "ternary_expression") == 0) {
+        // condition ? then_expr : else_expr
+        BashArithTernaryNode* ternary = (BashArithTernaryNode*)alloc_bash_ast_node(
+            tp, BASH_AST_NODE_ARITH_TERNARY, node, sizeof(BashArithTernaryNode));
+        uint32_t operand_idx = 0;
+        uint32_t ch_count = ts_node_named_child_count(node);
+        for (uint32_t j = 0; j < ch_count; j++) {
+            TSNode c = ts_node_named_child(node, j);
+            if (operand_idx == 0) {
+                ternary->condition = build_arith_expression(tp, c);
+            } else if (operand_idx == 1) {
+                ternary->then_expr = build_arith_expression(tp, c);
+            } else {
+                ternary->else_expr = build_arith_expression(tp, c);
+            }
+            operand_idx++;
+        }
+        return (BashAstNode*)ternary;
     }
     if (strcmp(node_type, "postfix_expression") == 0) {
         // i++ or i-- (tree-sitter c_postfix_expression aliased)
