@@ -10,7 +10,6 @@
 #include <cstdlib>
 
 // TypeScript parser (unified: handles both JS and TS)
-// NOTE: tree_sitter_typescript is currently a stub; use JavaScript parser for now
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
     const TSLanguage* tree_sitter_javascript(void);

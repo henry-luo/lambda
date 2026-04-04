@@ -137,6 +137,8 @@ namespace radiant { struct LayoutCache; }
 struct CssCustomProp {
     const char* name;       // Variable name (e.g., "--primary-color")
     const CssValue* value;  // Variable value
+    const char* value_text; // Raw value text for faithful CSSOM serialization
+    size_t value_text_len;  // Length of value_text
     CssCustomProp* next;    // Linked list for simple storage
 };
 
