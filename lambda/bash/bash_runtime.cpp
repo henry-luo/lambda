@@ -1080,6 +1080,118 @@ extern "C" Item bash_expand_lower_all(Item val) {
     return result;
 }
 
+// ${var~} — toggle case of first character
+extern "C" Item bash_expand_toggle_first(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    if (slen == 0) return val;
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    unsigned char c = (unsigned char)str[0];
+    if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
+    else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
+    else strbuf_append_char(sb, (char)c);
+    if (slen > 1) strbuf_append_str_n(sb, str + 1, slen - 1);
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${var~~} — toggle case of all characters
+extern "C" Item bash_expand_toggle_all(Item val) {
+    char buf[512];
+    const char* str = bash_item_cstr(val, buf, sizeof(buf));
+    size_t slen = strlen(str);
+    StrBuf* sb = strbuf_new_cap(slen + 1);
+    for (size_t i = 0; i < slen; i++) {
+        unsigned char c = (unsigned char)str[i];
+        if (isupper(c)) strbuf_append_char(sb, (char)tolower(c));
+        else if (islower(c)) strbuf_append_char(sb, (char)toupper(c));
+        else strbuf_append_char(sb, (char)c);
+    }
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// ${!var} — indirect expansion: get value of variable whose name is in var
+extern "C" Item bash_expand_indirect(Item var_name) {
+    // step 1: get the name stored in var_name
+    char buf[512];
+    const char* name = bash_item_cstr(var_name, buf, sizeof(buf));
+    if (!name || !name[0]) return bash_make_string("", 0);
+
+    // step 2: look up that name as a variable
+    Item name_item = bash_make_string(name, strlen(name));
+    Item result = bash_get_var(name_item);
+    return result;
+}
+
+// ${!prefix@} / ${!prefix*} — list variable names matching prefix
+extern "C" Item bash_expand_prefix_names(Item prefix) {
+    // iterate all variables in scope and return names matching prefix
+    char buf[512];
+    const char* pfx = bash_item_cstr(prefix, buf, sizeof(buf));
+    size_t pfx_len = strlen(pfx);
+
+    // get all variable names from scope
+    StrBuf* sb = strbuf_new_cap(256);
+    bool first = true;
+
+    // use bash_get_all_var_names() if available, otherwise return empty
+    // for now, return empty — this is a stub that can be enhanced later
+    (void)pfx_len;
+    (void)first;
+
+    Item result = bash_make_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+// process substitution — <(cmd) / >(cmd)
+
+static pid_t procsub_pids[64];
+static int procsub_count = 0;
+
+extern "C" Item bash_procsub_in(Item cmd_str) {
+    // <(cmd): the captured output is provided as cmd_str
+    // write it to a pipe and return /dev/fd/N for reading
+    char buf[8192];
+    const char* data = bash_item_cstr(cmd_str, buf, sizeof(buf));
+    size_t data_len = strlen(data);
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        log_error("bash_procsub_in: pipe() failed");
+        return bash_make_string("/dev/null", 9);
+    }
+
+    // write data to pipe write end
+    if (data_len > 0) {
+        write(pipefd[1], data, data_len);
+    }
+    close(pipefd[1]); // close write end so reader sees EOF
+
+    char path[64];
+    snprintf(path, sizeof(path), "/dev/fd/%d", pipefd[0]);
+    return bash_make_string(path, strlen(path));
+}
+
+extern "C" Item bash_procsub_out(Item cmd_str) {
+    // >(cmd): create a pipe the parent can write to
+    // for now, just return /dev/null as placeholder
+    (void)cmd_str;
+    return bash_make_string("/dev/null", 9);
+}
+
+extern "C" void bash_procsub_wait_all(void) {
+    for (int i = 0; i < procsub_count; i++) {
+        int status;
+        waitpid(procsub_pids[i], &status, 0);
+    }
+    procsub_count = 0;
+}
+
 // ============================================================================
 // String operations
 // ============================================================================
@@ -3295,6 +3407,38 @@ extern "C" bool bash_is_assoc(Item name) {
     return (bash_get_var_attrs(name) & BASH_ATTR_ASSOC_ARRAY) != 0;
 }
 
+// associative array types — defined here (before declare -p) and used later
+typedef struct BashAssocEntry {
+    const char* key;
+    size_t key_len;
+    Item value;
+} BashAssocEntry;
+
+typedef struct BashAssocArray {
+    TypeId type_id;     // LMD_TYPE_MAP to distinguish from List (LMD_TYPE_ARRAY)
+    uint8_t flags;
+    struct hashmap* map;
+} BashAssocArray;
+
+static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const BashAssocEntry* e = (const BashAssocEntry*)item;
+    return hashmap_sip(e->key, e->key_len, seed0, seed1);
+}
+
+static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
+    const BashAssocEntry* ea = (const BashAssocEntry*)a;
+    const BashAssocEntry* eb = (const BashAssocEntry*)b;
+    (void)udata;
+    if (ea->key_len != eb->key_len) return 1;
+    return memcmp(ea->key, eb->key, ea->key_len);
+}
+
+static BashAssocArray* bash_item_to_assoc(Item map) {
+    BashAssocArray* aa = (BashAssocArray*)(uintptr_t)map.item;
+    if (!aa || aa->type_id != LMD_TYPE_MAP) return NULL;
+    return aa;
+}
+
 // declare -p: print variable with attributes
 extern "C" void bash_declare_print_var(Item name) {
     bash_ensure_var_table();
@@ -3342,22 +3486,36 @@ extern "C" void bash_declare_print_var(Item name) {
     char buf[8192];
     int n = 0;
     if (attrs & BASH_ATTR_ASSOC_ARRAY) {
-        // associative array: declare -A name=([key1]="val1" ...)
-        // TODO: iterate assoc entries
-        String* val_str = it2s(bash_to_string(value));
-        n = snprintf(buf, sizeof(buf), "declare %s %.*s=%.*s\n",
-                     flags, s->len, s->chars,
-                     val_str ? val_str->len : 0, val_str ? val_str->chars : "");
+        // associative array: declare -A name=([key1]="val1" [key2]="val2" )
+        BashAssocArray* aa = bash_item_to_assoc(value);
+        int pos = snprintf(buf, sizeof(buf), "declare %s %.*s", flags, s->len, s->chars);
+        if (aa && hashmap_count(aa->map) > 0) {
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "=(");
+            size_t iter = 0;
+            void* item;
+            while (hashmap_iter(aa->map, &iter, &item)) {
+                const BashAssocEntry* e = (const BashAssocEntry*)item;
+                String* vs = it2s(bash_to_string(e->value));
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%.*s]=\"%.*s\" ",
+                               (int)e->key_len, e->key,
+                               vs ? vs->len : 0, vs ? vs->chars : "");
+            }
+            pos += snprintf(buf + pos, sizeof(buf) - pos, ")");
+        } else if (aa) {
+            // empty assoc: declare -A name=()
+            pos += snprintf(buf + pos, sizeof(buf) - pos, "=()");
+        }
+        buf[pos++] = '\n';
+        n = pos;
     } else if ((attrs & BASH_ATTR_INDEXED_ARRAY) || bash_item_is_array(value)) {
-        // indexed array: declare -a name=([0]="val0" [1]="val1" ...)
+        // indexed array: declare -a name=([0]="val0" [1]="val1" )
         int pos = snprintf(buf, sizeof(buf), "declare %s %.*s=(", flags, s->len, s->chars);
         if (bash_item_is_array(value)) {
             List* list = (List*)(uintptr_t)value.item;
             for (int j = 0; j < list->length && pos < (int)sizeof(buf) - 64; j++) {
                 Item elem = list->items[j];
                 String* es = it2s(bash_to_string(elem));
-                if (j > 0) buf[pos++] = ' ';
-                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=\"%.*s\"",
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "[%d]=\"%.*s\" ",
                                j, es ? es->len : 0, es ? es->chars : "");
             }
         }
@@ -3527,37 +3685,7 @@ extern "C" void bash_remove_attrs(Item var_name, int rm_flags) {
 // Associative arrays (string-keyed hashmaps)
 // ============================================================================
 
-typedef struct BashAssocEntry {
-    const char* key;
-    size_t key_len;
-    Item value;
-} BashAssocEntry;
-
-// wrapper struct stored as an Item (pointer)
-typedef struct BashAssocArray {
-    TypeId type_id;     // LMD_TYPE_MAP to distinguish from List (LMD_TYPE_ARRAY)
-    uint8_t flags;
-    struct hashmap* map;
-} BashAssocArray;
-
-static uint64_t bash_assoc_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const BashAssocEntry* e = (const BashAssocEntry*)item;
-    return hashmap_sip(e->key, e->key_len, seed0, seed1);
-}
-
-static int bash_assoc_entry_cmp(const void *a, const void *b, void *udata) {
-    const BashAssocEntry* ea = (const BashAssocEntry*)a;
-    const BashAssocEntry* eb = (const BashAssocEntry*)b;
-    (void)udata;
-    if (ea->key_len != eb->key_len) return 1;
-    return memcmp(ea->key, eb->key, ea->key_len);
-}
-
-static BashAssocArray* bash_item_to_assoc(Item map) {
-    BashAssocArray* aa = (BashAssocArray*)(uintptr_t)map.item;
-    if (!aa || aa->type_id != LMD_TYPE_MAP) return NULL;
-    return aa;
-}
+// BashAssocEntry, BashAssocArray, hash/cmp/to_assoc moved above bash_declare_print_var
 
 extern "C" Item bash_assoc_new(void) {
     BashAssocArray* aa = (BashAssocArray*)heap_calloc(sizeof(BashAssocArray), LMD_TYPE_RAW_POINTER);

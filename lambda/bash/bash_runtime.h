@@ -127,6 +127,15 @@ Item bash_expand_upper_first(Item val);                     // ${var^}
 Item bash_expand_upper_all(Item val);                       // ${var^^}
 Item bash_expand_lower_first(Item val);                     // ${var,}
 Item bash_expand_lower_all(Item val);                       // ${var,,}
+Item bash_expand_toggle_first(Item val);                    // ${var~}
+Item bash_expand_toggle_all(Item val);                      // ${var~~}
+Item bash_expand_indirect(Item var_name);                   // ${!var}
+Item bash_expand_prefix_names(Item prefix);                 // ${!prefix@}
+
+// process substitution
+Item bash_procsub_in(Item cmd_str);                         // <(command)
+Item bash_procsub_out(Item cmd_str);                        // >(command)
+void bash_procsub_wait_all(void);
 
 // ========================================================================
 // Array operations

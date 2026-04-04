@@ -1258,6 +1258,23 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         bm_emit_call_void_0(mt, "bash_cmd_sub_exit");
         return MIR_new_reg_op(mt->ctx, result);
     }
+    case BASH_AST_NODE_PROCESS_SUB: {
+        BashProcessSubNode* ps = (BashProcessSubNode*)node;
+        // process substitution: execute body with capture, write to temp pipe
+        // for <(cmd): execute, capture output, return /dev/fd path for reading
+        bm_emit_call_void_0(mt, "bash_cmd_sub_enter");
+        bm_emit_call_void_0(mt, "bash_begin_capture");
+        BashAstNode* stmt = ps->body;
+        while (stmt) {
+            bm_transpile_statement(mt, stmt);
+            stmt = stmt->next;
+        }
+        MIR_reg_t captured = bm_emit_call_0(mt, "bash_end_capture_raw");
+        bm_emit_call_void_0(mt, "bash_cmd_sub_exit");
+        const char* func = ps->is_output ? "bash_procsub_out" : "bash_procsub_in";
+        MIR_reg_t result = bm_emit_call_1(mt, func, MIR_new_reg_op(mt->ctx, captured));
+        return MIR_new_reg_op(mt->ctx, result);
+    }
     case BASH_AST_NODE_COMMAND: {
         MIR_op_t result = bm_transpile_command(mt, (BashCommandNode*)node);
         return result;
@@ -1596,6 +1613,10 @@ static MIR_op_t bm_transpile_cmd_arg(BashMirTranspiler* mt, BashAstNode* node) {
         MIR_reg_t split = bm_emit_call_1(mt, "bash_cmd_sub_word_split", raw);
         return MIR_new_reg_op(mt->ctx, split);
     }
+    // process substitution: transpile to get /dev/fd path
+    if (node->node_type == BASH_AST_NODE_PROCESS_SUB) {
+        return bm_transpile_node(mt, node);
+    }
     return bm_transpile_node(mt, node);
 }
 
@@ -1788,16 +1809,30 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
     case BASH_EXPAND_UPPER_FIRST:
     case BASH_EXPAND_UPPER_ALL:
     case BASH_EXPAND_LOWER_FIRST:
-    case BASH_EXPAND_LOWER_ALL: {
+    case BASH_EXPAND_LOWER_ALL:
+    case BASH_EXPAND_TOGGLE_FIRST:
+    case BASH_EXPAND_TOGGLE_ALL: {
         const char* func = NULL;
         switch (exp->expand_type) {
         case BASH_EXPAND_UPPER_FIRST: func = "bash_expand_upper_first"; break;
         case BASH_EXPAND_UPPER_ALL:   func = "bash_expand_upper_all"; break;
         case BASH_EXPAND_LOWER_FIRST: func = "bash_expand_lower_first"; break;
         case BASH_EXPAND_LOWER_ALL:   func = "bash_expand_lower_all"; break;
+        case BASH_EXPAND_TOGGLE_FIRST: func = "bash_expand_toggle_first"; break;
+        case BASH_EXPAND_TOGGLE_ALL:   func = "bash_expand_toggle_all"; break;
         default: break;
         }
         MIR_reg_t result = bm_emit_call_1(mt, func, var_val);
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+    case BASH_EXPAND_INDIRECT: {
+        // ${!var} — indirect expansion: look up value of var, then use that as var name
+        MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_indirect", var_val);
+        return MIR_new_reg_op(mt->ctx, result);
+    }
+    case BASH_EXPAND_PREFIX_NAMES: {
+        // ${!prefix@} / ${!prefix*} — list variable names matching prefix
+        MIR_reg_t result = bm_emit_call_1(mt, "bash_expand_prefix_names", var_val);
         return MIR_new_reg_op(mt->ctx, result);
     }
     default:
