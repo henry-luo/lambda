@@ -2,11 +2,11 @@
 
 ## 1. Executive Summary
 
-LambdaJS currently passes **10,982 of 27,030 executed tests** (40.6%) in the test262 suite (38,649 total, 11,619 skipped due to unsupported features). This proposal identifies the **root causes** of the 16,048 failures, groups them into prioritized phases, and estimates the recovery potential for each.
+LambdaJS currently passes **12,036 of 27,030 executed tests** (44.5%) in the test262 suite (38,649 total, 11,619 skipped due to unsupported features). This proposal identifies the **root causes** of the remaining failures, groups them into prioritized phases, and estimates the recovery potential for each.
 
-The key finding is that a small number of systemic issues cascade across thousands of tests. Fixing **5 root causes** could recover an estimated **~5,500 tests**, raising the pass rate from 40.6% to ~61%.
+The key finding is that a small number of systemic issues cascade across thousands of tests. Fixing **5 root causes** could recover an estimated **~5,500 tests**, raising the pass rate to ~61%.
 
-### Current Baseline (v18)
+### Original Baseline (v18)
 
 | Metric | Value |
 |--------|-------|
@@ -16,13 +16,77 @@ The key finding is that a small number of systemic issues cascade across thousan
 | Passed | 10,982 (40.6%) |
 | Failed | 16,048 |
 
+### Current Progress (v20 in-progress)
+
+| Metric | Value |
+|--------|-------|
+| Executed | 27,030 |
+| Passed | **12,036 (44.5%)** |
+| Failed | 14,994 |
+| Net gain from v18 | **+1,054 tests** |
+
 ### Target (v20)
 
 | Metric | Value |
 |--------|-------|
 | Executed | 27,030 |
 | Passed (projected) | ~16,500 (61%) |
-| Net gain | ~5,500 tests |
+| Net gain from v18 | ~5,500 tests |
+
+## 1.1 Implementation Progress
+
+### Milestone Progression
+
+| Milestone | Passing | Pass Rate | Net Gain | Phases Completed |
+|-----------|--------:|----------:|---------:|------------------|
+| v18 baseline | 10,982 | 40.6% | — | — |
+| After Phase 1a, 1d, 2, 4, 5, 7d | 11,231 | 41.6% | +249 | 1a, 1d, 2, 4, 5, 7d |
+| After Phase 1b, 7c | 11,439 | 42.3% | +457 | +1b, 7c |
+| After Phase 3 (destructuring) | 11,969 | 44.3% | +987 | +3 |
+| After callback validation fix | **12,036** | **44.5%** | **+1,054** | +callback validation |
+
+### Phase Completion Status
+
+| Phase | Description | Status | Tests Recovered |
+|:-----:|-------------|:------:|:---------------:|
+| 1a | Built-in method descriptors (non-enumerable markers) | ✅ Done | ~100 |
+| 1b | Class prototype chain (methods on prototype, not instance) | ✅ Done | ~80 |
+| 1c | getOwnPropertyDescriptor accuracy | ⬜ Not started | — |
+| 1d | Property enumeration order (integer indices first) | ✅ Done | ~60 |
+| 1e | for-in enumerable flag enforcement | ⬜ Not started | — |
+| 2 | Date object completion (setters, statics, utilities) | ✅ Done | ~250 |
+| 3 | Destructuring completion (recursive helpers, nested, computed, for-of, rest) | ✅ Done | ~530 |
+| 4 | JSON full parameters (replacer, space, reviver) | ✅ Done | ~80 |
+| 5 | encodeURI / decodeURI | ✅ Done | ~60 |
+| 6 | Generator/iterator protocol | ⬜ Not started | — |
+| 7a | arguments aliasing | ⬜ Not started | — |
+| 7b | TDZ enforcement for let/const | ⬜ Not started | — |
+| 7c | Error object properties (toString, message defaults) | ✅ Done | ~40 |
+| 7d | Number/Math gaps (static properties, missing functions) | ✅ Done | ~60 |
+| 7e | try/catch improvements | ⬜ Not started | — |
+| 7f | Tagged template literals | ⬜ Not started | — |
+| 7g | new expression semantics | ⬜ Not started | — |
+| — | Array callback validation (TypeError for non-callable) | ✅ Done | ~69 |
+
+### Key Implementation Details
+
+**Phase 3 — Destructuring Refactoring**: Created unified recursive destructuring helpers (`jm_emit_array_destructure`, `jm_emit_object_destructure`, `jm_emit_destructure_target`, `jm_emit_destructure_default`, `jm_bind_destructure_var`) that handle all destructuring contexts: variable declarations, assignments, function parameters, and for-of bindings. Fixed computed property key support in `build_js_ast.cpp` (`pair_pattern` handler).
+
+**Phase 1b — Class Prototype Chain**: Fixed `jm_transpile_new_expr()` to assign methods to the prototype instead of copying them to each instance. Instances now properly inherit from the prototype chain.
+
+**Callback Validation**: Added `js_throw_not_callable()` helper. Updated all array higher-order methods (`filter`, `reduce`, `forEach`, `find`, `findIndex`, `some`, `every`, `map`, `reduceRight`, `sort`) to throw `TypeError` for non-callable callbacks. Also fixed `reduce`/`reduceRight` to throw `TypeError` on empty array with no initial value.
+
+### Remaining High-Failure Categories (Non-Class, Non-Temporal)
+
+| Category | Failed Tests | Notes |
+|----------|:-----------:|-------|
+| RegExp property-escapes | ~350 | Unicode property escape support needed |
+| dynamic-import syntax | ~503 | `import()` expression not supported |
+| Array named properties | ~500+ | `LMD_TYPE_ARRAY` lacks named property storage |
+| Object.prototype methods | ~69 | Various missing/incorrect behaviors |
+| Function.prototype.call | ~44 | Edge cases in call/apply |
+| Array.prototype.splice | ~46 | Edge case handling |
+| Number.prototype.toString | ~46 | Radix conversion issues |
 
 ## 2. Failure Analysis
 
@@ -560,16 +624,17 @@ The tag function receives a frozen template array with a `.raw` property. Curren
 
 ## 4. Implementation Plan
 
-| Phase | Description | Est. Tests Recovered | Priority | Effort |
-|:-----:|-------------|:--------------------:|:--------:|:------:|
-| 1 | Property descriptor correctness | ~3,200 | 🔴 Critical | Medium-High |
-| 2 | Date object completion | ~400 | 🔴 Critical | Medium |
-| 3 | Destructuring completion | ~700 | 🔴 Critical | Medium |
-| 4 | JSON full parameters | ~100 | 🟡 High | Low |
-| 5 | URI function completion | ~84 | 🟡 High | Low |
-| 6 | Generator/iterator protocol | ~300 | 🟡 High | High |
-| 7 | Secondary improvements | ~700 | 🟠 Medium | Medium |
-| **Total** | | **~5,484** | | |
+| Phase | Description | Est. Tests Recovered | Priority | Effort | Status |
+|:-----:|-------------|:--------------------:|:--------:|:------:|:------:|
+| 1 | Property descriptor correctness | ~3,200 | 🔴 Critical | Medium-High | Partial (1a, 1b, 1d ✅) |
+| 2 | Date object completion | ~400 | 🔴 Critical | Medium | ✅ Done |
+| 3 | Destructuring completion | ~700 | 🔴 Critical | Medium | ✅ Done |
+| 4 | JSON full parameters | ~100 | 🟡 High | Low | ✅ Done |
+| 5 | URI function completion | ~84 | 🟡 High | Low | ✅ Done |
+| 6 | Generator/iterator protocol | ~300 | 🟡 High | High | ⬜ Not started |
+| 7 | Secondary improvements | ~700 | 🟠 Medium | Medium | Partial (7c, 7d ✅) |
+| — | Array callback validation | ~69 | 🟡 High | Low | ✅ Done |
+| **Total** | | **~5,553** | | | |
 
 ### Suggested Implementation Order
 
@@ -615,15 +680,17 @@ Each phase should include unit tests in `test/js/` that verify the newly impleme
 
 ### Acceptance Criteria
 
-| Phase | Target Pass Rate (Executed) | Absolute Passes |
-|:-----:|:---------------------------:|:---------------:|
-| After Phase 1 | ~52% | ~14,100 |
-| After Phase 2 | ~54% | ~14,500 |
-| After Phase 3 | ~56% | ~15,200 |
-| After Phase 4 | ~57% | ~15,300 |
-| After Phase 5 | ~57% | ~15,400 |
-| After Phase 6 | ~58% | ~15,700 |
-| After Phase 7 | ~61% | ~16,500 |
+| Phase | Target Pass Rate (Executed) | Absolute Passes | Actual |
+|:-----:|:---------------------------:|:---------------:|:------:|
+| v18 baseline | 40.6% | 10,982 | 10,982 ✅ |
+| After Phase 1 (partial) | ~52% | ~14,100 | 11,439 (1a, 1b, 1d done) |
+| After Phase 2 | ~54% | ~14,500 | — (included in cumulative) |
+| After Phase 3 | ~56% | ~15,200 | — (included in cumulative) |
+| After Phase 4 | ~57% | ~15,300 | — (included in cumulative) |
+| After Phase 5 | ~57% | ~15,400 | — (included in cumulative) |
+| **Current (cumulative)** | — | — | **12,036 (44.5%)** |
+| After Phase 6 | ~58% | ~15,700 | ⬜ |
+| After Phase 7 | ~61% | ~16,500 | ⬜ |
 
 ## 6. Out of Scope (Not Proposed)
 

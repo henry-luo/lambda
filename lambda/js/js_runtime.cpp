@@ -202,8 +202,16 @@ extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
     js_property_set(obj, name_key, name_val);
+    // v20: default message to "" when undefined/null (ES spec)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    js_property_set(obj, msg_key, message);
+    if (message.item == ItemNull.item || message.item == ITEM_JS_UNDEFINED) {
+        js_property_set(obj, msg_key, (Item){.item = s2it(heap_create_name("", 0))});
+    } else if (get_type_id(message) != LMD_TYPE_STRING) {
+        Item str_msg = js_to_string(message);
+        js_property_set(obj, msg_key, str_msg);
+    } else {
+        js_property_set(obj, msg_key, message);
+    }
     // Set stack property from compile-time stack trace
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
     if (stack_str.item != ITEM_JS_UNDEFINED) {
@@ -242,8 +250,16 @@ extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item
     Item obj = js_new_object();
     Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     js_property_set(obj, name_key, error_name);
+    // v20: default message to "" when undefined/null (ES spec)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    js_property_set(obj, msg_key, message);
+    if (message.item == ItemNull.item || message.item == ITEM_JS_UNDEFINED) {
+        js_property_set(obj, msg_key, (Item){.item = s2it(heap_create_name("", 0))});
+    } else if (get_type_id(message) != LMD_TYPE_STRING) {
+        Item str_msg = js_to_string(message);
+        js_property_set(obj, msg_key, str_msg);
+    } else {
+        js_property_set(obj, msg_key, message);
+    }
     // Set stack property
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
     if (stack_str.item != ITEM_JS_UNDEFINED) {
@@ -4792,10 +4808,33 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
         String* method = it2s(method_name);
         if (method) {
             if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
-                // Try property access first (user-defined toString)
-                Item fn = js_property_access(obj, method_name);
-                if (get_type_id(fn) == LMD_TYPE_FUNC) {
-                    return js_call_function(fn, obj, args, argc);
+                // v20: Check user-defined toString (own + prototype) BEFORE builtins
+                // This prevents Object.prototype.toString from intercepting Error objects
+                {
+                    bool own_ts = false;
+                    Item ts_fn = js_map_get_fast(obj.map, "toString", 8, &own_ts);
+                    if (own_ts && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                        return js_call_function(ts_fn, obj, args, argc);
+                    }
+                }
+                {
+                    Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+                    Item ts_fn = js_prototype_lookup(obj, ts_key);
+                    if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                        return js_call_function(ts_fn, obj, args, argc);
+                    }
+                }
+                // v20: Error.prototype.toString — "name: message" format
+                {
+                    bool cn_own = false;
+                    Item cn = js_map_get_fast(obj.map, "__class_name__", 14, &cn_own);
+                    if (cn_own && get_type_id(cn) == LMD_TYPE_STRING) {
+                        String* cn_str = it2s(cn);
+                        if (cn_str && cn_str->len >= 5 &&
+                            strncmp(cn_str->chars + cn_str->len - 5, "Error", 5) == 0) {
+                            return js_to_string(obj);
+                        }
+                    }
                 }
                 // v18l: Wrapper objects (Number, String, Boolean) — delegate to primitive methods
                 bool own_cn = false;
@@ -4816,7 +4855,7 @@ extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) 
                         }
                     }
                 }
-                // Built-in fallback: use js_to_string (handles Error, plain objects)
+                // Built-in fallback: use js_to_string (handles plain objects)
                 return js_to_string(obj);
             }
             if (method->len == 14 && strncmp(method->chars, "hasOwnProperty", 14) == 0) {
@@ -5512,6 +5551,17 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
 // Array Method Dispatcher
 // =============================================================================
 
+// Helper: throw TypeError for non-callable callback in array methods
+static Item js_throw_not_callable(const char* method_name) {
+    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+    char msg[128];
+    snprintf(msg, sizeof(msg), "%s is not a function", method_name ? method_name : "callback");
+    Item msg_item = (Item){.item = s2it(heap_create_name(msg, strlen(msg)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    js_throw_value(error);
+    return ItemNull;
+}
+
 extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
@@ -5655,9 +5705,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // map - uses callback as first arg (must be a JsFunction)
     if (method->len == 3 && strncmp(method->chars, "map", 3) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return arr;
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
         Array* src = arr.array;
         Item result = js_array_new(src->length);
         Array* dst = result.array;
@@ -5672,9 +5722,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // filter
     if (method->len == 6 && strncmp(method->chars, "filter", 6) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return arr;
+        if (arr_type != LMD_TYPE_ARRAY) return arr;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return arr;
         Array* src = arr.array;
         Item result = js_array_new(0);
         Array* dst = result.array;
@@ -5690,9 +5740,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // reduce
     if (method->len == 6 && strncmp(method->chars, "reduce", 6) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         Item accumulator;
@@ -5701,7 +5751,13 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             accumulator = args[1];
             start_idx = 0;
         } else {
-            if (src->length == 0) return ItemNull;
+            if (src->length == 0) {
+                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
+                Item error = js_new_error_with_name(type_name, msg_item);
+                js_throw_value(error);
+                return ItemNull;
+            }
             accumulator = src->items[0];
             start_idx = 1;
         }
@@ -5713,9 +5769,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // forEach
     if (method->len == 7 && strncmp(method->chars, "forEach", 7) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
@@ -5726,9 +5782,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // find
     if (method->len == 4 && strncmp(method->chars, "find", 4) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
@@ -5740,9 +5796,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // findIndex
     if (method->len == 9 && strncmp(method->chars, "findIndex", 9) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = i2it(-1)};
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = i2it(-1)};
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
@@ -5754,9 +5810,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // some
     if (method->len == 4 && strncmp(method->chars, "some", 4) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(false)};
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = b2it(false)};
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
@@ -5768,9 +5824,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // every
     if (method->len == 5 && strncmp(method->chars, "every", 5) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(true)};
+        if (arr_type != LMD_TYPE_ARRAY) return (Item){.item = b2it(true)};
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return (Item){.item = b2it(true)};
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
@@ -5784,6 +5840,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     if (method->len == 4 && strncmp(method->chars, "sort", 4) == 0) {
         if (arr_type != LMD_TYPE_ARRAY) return arr;
         Array* src = arr.array;
+        // Per spec: if comparefn is defined and not undefined, it must be callable
+        if (argc >= 1 && args[0].item != ITEM_JS_UNDEFINED && get_type_id(args[0]) != LMD_TYPE_FUNC) {
+            return js_throw_not_callable("comparefn");
+        }
         if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_FUNC) {
             // sort with comparator callback
             JsFunction* cmp_fn = (JsFunction*)args[0].function;
@@ -5998,9 +6058,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // reduceRight
     if (method->len == 11 && strncmp(method->chars, "reduceRight", 11) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (arr_type != LMD_TYPE_ARRAY) return ItemNull;
+        if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
-        if (get_type_id(callback) != LMD_TYPE_FUNC) return ItemNull;
         Array* src = arr.array;
         JsFunction* fn = (JsFunction*)callback.function;
         Item accumulator;
@@ -6009,7 +6069,13 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             accumulator = args[1];
             start_idx = src->length - 1;
         } else {
-            if (src->length == 0) return ItemNull;
+            if (src->length == 0) {
+                Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+                Item msg_item = (Item){.item = s2it(heap_create_name("Reduce of empty array with no initial value"))};
+                Item error = js_new_error_with_name(type_name, msg_item);
+                js_throw_value(error);
+                return ItemNull;
+            }
             accumulator = src->items[src->length - 1];
             start_idx = src->length - 2;
         }
