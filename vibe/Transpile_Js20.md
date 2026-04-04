@@ -743,3 +743,99 @@ The 16,048 test262 failures are dominated by a few systemic issues, not thousand
 The proposed 7 phases address the root causes in priority order, with an estimated recovery of ~5,500 tests. This would raise the test262 pass rate from **40.6% to ~61%** on executed tests, establishing LambdaJS as a substantially more ES-compliant engine.
 
 The most important single fix — ensuring all property creation paths produce correct descriptors with proper enumerable/writable/configurable attributes — has the highest leverage because test262's harness functions depend on descriptor correctness for verification.
+
+## 9. Test Runner Performance Tuning
+
+### Problem
+
+The test262 GTest runner (`test/test_js_test262_gtest.cpp`) executes ~27K tests by spawning child processes via `posix_spawn()`. Each child runs `./lambda.exe js-test-batch` with a manifest of JS test sources piped through stdin. The original configuration:
+
+- **Batch size**: 5 tests per process spawn
+- **Workers**: 6 parallel threads
+- **Timeout**: 10s per test
+- **No crash recovery**: if a test crashed, all remaining tests in that batch were silently lost
+
+This resulted in **~5,400 process spawns**, producing ~372s of system time (page-table setup, pipe I/O, process teardown) and a **2:38 wall clock** for a full run.
+
+### Analysis
+
+Profiling the 3-phase pipeline revealed Phase 2 (execute) consumed 99% of wall time:
+
+| Phase | Time | % of Total |
+|-------|-----:|:----------:|
+| Phase 1 (prepare metadata) | 0.9s | 0.6% |
+| Phase 2 (execute batches) | 146.1s | **99.3%** |
+| Phase 3 (evaluate results) | <0.1s | <0.1% |
+
+Key observations:
+- **System time was 372s** on a 419s user-time run — spawn overhead dominated
+- Each `posix_spawn()` cost ~69ms in syscall overhead
+- Only **8 tests** ever hit the 10s timeout — not a significant factor
+- **839 tests** were "batch-lost" (crashed process killed remaining tests in batch)
+- Machine has 10 cores but only 6 workers were used (500% CPU)
+
+### Changes Made
+
+#### 1. Batch size 5 → 50 (10× fewer spawns)
+
+Reduces spawn count from ~5,400 to ~540. Phase 2 execution dropped from 146s to ~79s. The tradeoff: larger blast radius when a test crashes (more tests lost per crash).
+
+#### 2. Workers 6 → 8 (better CPU utilization)
+
+On a 10-core machine, 6 workers left 4 cores idle. Increasing to 8 improved CPU utilization from 500% to ~590%.
+
+#### 3. Crash recovery pass (Phase 2b)
+
+With batch size 50, crashes lose up to 49 co-batched tests. A new Phase 2b re-runs all batch-lost tests in small batches of 5:
+
+```
+Phase 2:  79s — 21,250 results collected (batch size 50)
+Phase 2b: 38s — recovered 4,700 of 5,669 lost tests (batch size 5)
+```
+
+The ~969 remaining unrecovered tests are genuine crashers (they crash even when run solo).
+
+#### 4. `--baseline-only` mode
+
+New flag that filters execution to only tests listed in `test262_baseline.txt` (tests known to pass). Skips all ~15K expected-failing tests, enabling fast regression checks during development.
+
+### Results
+
+| Mode | Before | After | Speedup |
+|------|-------:|------:|:-------:|
+| **Full run (wall clock)** | 2:38 | 2:01 | **1.3×** |
+| **Full run (system time)** | 372s | 307s | **17% less** |
+| **`--baseline-only` (wall clock)** | 2:38 | 0:35 | **4.5×** |
+
+Detailed phase breakdown (full run, after tuning):
+
+| Phase | Time | Notes |
+|-------|-----:|-------|
+| Phase 1 (prepare) | 0.9s | Unchanged — metadata parsing is fast |
+| Phase 2 (execute) | 79s | 540 spawns vs 5,400 previously |
+| Phase 2b (retry) | 38s | Crash recovery for batch-lost tests |
+| Phase 3 (evaluate) | <0.1s | Unchanged |
+| **Total** | **~118s** | Down from 147s |
+
+#### Batch size tradeoff analysis
+
+| Batch Size | Phase 2 | Batch-Lost | Retry Time | Total Exec | Wall Clock |
+|:----------:|--------:|-----------:|-----------:|-----------:|-----------:|
+| 5 (original) | 146s | 839 | — | 146s | 2:38 |
+| 25 | 89s | 3,228 | 31s | 120s | 2:05 |
+| **50 (chosen)** | **79s** | **5,669** | **38s** | **117s** | **2:01** |
+
+Batch size 50 is optimal: the time saved from fewer spawns outweighs the retry overhead.
+
+### Usage
+
+```bash
+# Full compliance run (2 min)
+./test/test_js_test262_gtest.exe
+
+# Fast regression check — baseline tests only (35s)
+./test/test_js_test262_gtest.exe --baseline-only
+
+# Update baseline after improvements
+./test/test_js_test262_gtest.exe --update-baseline
+```

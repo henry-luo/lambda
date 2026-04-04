@@ -2972,6 +2972,18 @@
                         "icon": "🐚"
                     },
                     {
+                        "source": "test/test_bash_run_gtest.cpp",
+                        "name": "Bash Integration Tests",
+                        "dependencies": [],
+                        "binary": "test_bash_run_gtest.exe",
+                        "libraries": [
+                            "gtest"
+                        ],
+                        "requires_lambda_exe": true,
+                        "requires_jube_exe": true,
+                        "icon": "🐚"
+                    },
+                    {
                         "source": "test/test_c2mir_gtest.cpp",
                         "name": "C2MIR JIT Execution Tests",
                         "dependencies": [],
