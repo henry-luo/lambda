@@ -13,6 +13,7 @@
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
+#include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
 
 // thread-local eval context used by heap allocation functions
 extern __thread EvalContext* context;
@@ -312,6 +313,181 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
 // ============================================================================
 
 /**
+ * Build a Lambda map Item representing an event object.
+ * Contains: {type, target_class, target_tag, x, y}
+ * Uses doc->input (created during load_lambda_script_doc) for allocation.
+ */
+static Item build_lambda_event_map(DomDocument* doc, View* target,
+                                   const char* event_name, EventContext* evcon) {
+    if (!doc || !doc->input) return ItemNull;
+
+    MarkBuilder builder(doc->input);
+    MapBuilder mb = builder.map();
+    mb.put("type", event_name);
+
+    // extract target element's class and tag from the innermost DomElement target
+    DomNode* tgt_node = (DomNode*)target;
+    if (tgt_node) {
+        // walk up to find the nearest DomElement (target might be a text node)
+        while (tgt_node && tgt_node->node_type != DOM_NODE_ELEMENT) {
+            tgt_node = tgt_node->parent;
+        }
+        if (tgt_node && tgt_node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* tgt_elem = (DomElement*)tgt_node;
+            if (tgt_elem->tag_name) {
+                mb.put("target_tag", tgt_elem->tag_name);
+            }
+            // build space-separated class string from class_names array
+            if (tgt_elem->class_count > 0 && tgt_elem->class_names) {
+                if (tgt_elem->class_count == 1) {
+                    mb.put("target_class", tgt_elem->class_names[0]);
+                } else {
+                    StrBuf* sb = strbuf_new_cap(64);
+                    for (int i = 0; i < tgt_elem->class_count; i++) {
+                        if (i > 0) strbuf_append_char(sb, ' ');
+                        strbuf_append_str(sb, tgt_elem->class_names[i]);
+                    }
+                    mb.put("target_class", sb->str);
+                    strbuf_free(sb);
+                }
+            } else {
+                mb.put("target_class", "");
+            }
+        }
+    }
+
+    // mouse coordinates (from event context)
+    if (evcon) {
+        mb.put("x", (int64_t)evcon->event.mouse_button.x);
+        mb.put("y", (int64_t)evcon->event.mouse_button.y);
+    }
+
+    return mb.final();
+}
+
+// ============================================================================
+// Handler context for emit() support
+// ============================================================================
+
+/**
+ * Thread-local context tracking the currently executing handler.
+ * Used by pn_emit() → dispatch_emit() to walk the DOM ancestry
+ * from the current handler's template result upward to find a parent
+ * template handler matching the emitted event name.
+ */
+typedef struct EmitHandlerContext {
+    DomDocument* doc;           // current document
+    View* target;               // original click target (innermost View)
+    Item model_item;            // current handler's model item
+    const char* template_ref;   // current handler's template reference
+    EventContext* evcon;        // event context for passing to nested handlers
+} EmitHandlerContext;
+
+static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
+
+/**
+ * dispatch_emit — called from pn_emit() (lambda-proc.cpp).
+ * Walks the DOM ancestry from the current handler's result element upward,
+ * looking for a parent template with a handler matching the emitted event name.
+ * If found, invokes the parent handler with (parent_source_item, event_data).
+ */
+extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
+    if (!g_emit_handler_ctx || !g_emit_handler_ctx->doc) {
+        log_error("dispatch_emit: no handler context — emit() called outside handler");
+        return ItemNull;
+    }
+
+    const char* event_name = nullptr;
+    TypeId name_tid = get_type_id(event_name_item);
+    if (name_tid == LMD_TYPE_STRING || name_tid == LMD_TYPE_SYMBOL) {
+        event_name = event_name_item.get_chars();
+    }
+    if (!event_name) {
+        log_error("dispatch_emit: event_name must be a string or symbol");
+        return ItemNull;
+    }
+
+    log_debug("dispatch_emit: emitting '%s' from tmpl=%s", event_name,
+             g_emit_handler_ctx->template_ref ? g_emit_handler_ctx->template_ref : "(null)");
+
+    // get the current handler's result node from render map
+    Item result_node = render_map_get_result(
+        g_emit_handler_ctx->model_item,
+        g_emit_handler_ctx->template_ref);
+    if (result_node.item == 0 || result_node.item == ITEM_NULL) {
+        log_debug("dispatch_emit: no result_node for current handler");
+        return ItemNull;
+    }
+
+    // find the DomElement for the current result_node, then walk up its parent chain
+    // to find a parent template that handles this event
+    DomDocument* doc = g_emit_handler_ctx->doc;
+    if (!doc->root) return ItemNull;
+
+    // find the DomElement whose native_element matches result_node.element
+    // by walking from the original click target upward
+    DomNode* node = (DomNode*)g_emit_handler_ctx->target;
+    bool found_self = false;
+
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* dom_elem = (DomElement*)node;
+            if (dom_elem->native_element) {
+                Item item;
+                item.element = dom_elem->native_element;
+
+                // skip the current handler's template (we want PARENT)
+                RenderMapLookup lookup;
+                if (render_map_reverse_lookup(item, &lookup)) {
+                    if (lookup.template_ref == g_emit_handler_ctx->template_ref &&
+                        lookup.source_item.item == g_emit_handler_ctx->model_item.item) {
+                        found_self = true;
+                        node = node->parent;
+                        continue;
+                    }
+
+                    // found a different template — check for matching handler
+                    if (found_self) {
+                        TemplateEntry* tmpl = NULL;
+                        for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
+                            if (e->template_ref == lookup.template_ref) {
+                                tmpl = e;
+                                break;
+                            }
+                        }
+
+                        if (tmpl && tmpl->handlers) {
+                            for (TemplateHandlerEntry* h = tmpl->handlers; h; h = h->next) {
+                                if (strcmp(h->event_name, event_name) == 0) {
+                                    log_info("dispatch_emit: found '%s' handler on parent tmpl=%s",
+                                             event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
+
+                                    // invoke parent handler with (parent_source_item, event_data)
+                                    typedef Item (*handler_fn)(Item, Item);
+                                    handler_fn fn = (handler_fn)h->handler_func;
+                                    fn(lookup.source_item, event_data);
+
+                                    // For edit handlers, mark dirty after in-place mutation
+                                    if (tmpl->is_edit) {
+                                        render_map_mark_dirty(lookup.source_item, lookup.template_ref);
+                                    }
+
+                                    return ItemNull;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        node = node->parent;
+    }
+
+    log_debug("dispatch_emit: no parent handler found for '%s'", event_name);
+    return ItemNull;
+}
+
+/**
  * Dispatch a Lambda template event handler for a clicked element.
  * Walks up the DOM ancestry from `target` to find a DomElement whose
  * native_element was produced by a template with a matching handler.
@@ -381,10 +557,33 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 // during list expansion in retransformed body functions.
                                 input_context = nullptr;
 
-                                // invoke handler: Item handler(Item model)
-                                typedef Item (*handler_fn)(Item);
+                                // build event object map: {type, target_class, target_tag, x, y}
+                                Item event_item = build_lambda_event_map(doc, target, event_name, evcon);
+
+                                // set up emit context so handlers can call emit()
+                                EmitHandlerContext emit_ctx;
+                                emit_ctx.doc = doc;
+                                emit_ctx.target = target;
+                                emit_ctx.model_item = lookup.source_item;
+                                emit_ctx.template_ref = lookup.template_ref;
+                                emit_ctx.evcon = evcon;
+                                EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
+                                g_emit_handler_ctx = &emit_ctx;
+
+                                // invoke handler: Item handler(Item model, Item event)
+                                typedef Item (*handler_fn)(Item, Item);
                                 handler_fn fn = (handler_fn)h->handler_func;
-                                fn(lookup.source_item);
+                                fn(lookup.source_item, event_item);
+
+                                // restore emit context
+                                g_emit_handler_ctx = saved_emit_ctx;
+
+                                // For edit handlers, the model was mutated in-place
+                                // via edit_map_update (inline mode). Mark the entry
+                                // dirty so retransform re-renders with updated data.
+                                if (tmpl->is_edit) {
+                                    render_map_mark_dirty(lookup.source_item, lookup.template_ref);
+                                }
 
                                 // after handler, check for dirty entries and retransform
                                 if (render_map_has_dirty()) {

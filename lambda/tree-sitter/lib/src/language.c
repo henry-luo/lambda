@@ -25,7 +25,7 @@ uint32_t ts_language_state_count(const TSLanguage *self) {
 }
 
 const TSSymbol *ts_language_supertypes(const TSLanguage *self, uint32_t *length) {
-  if (self->version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS) {
+  if (self->abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS) {
     *length = self->supertype_count;
     return self->supertype_symbols;
   } else {
@@ -39,7 +39,7 @@ const TSSymbol *ts_language_subtypes(
   TSSymbol supertype,
   uint32_t *length
 ) {
-  if (self->version < LANGUAGE_VERSION_WITH_RESERVED_WORDS || !ts_language_symbol_metadata(self, supertype).supertype) {
+  if (self->abi_version < LANGUAGE_VERSION_WITH_RESERVED_WORDS || !ts_language_symbol_metadata(self, supertype).supertype) {
     *length = 0;
     return NULL;
   }
@@ -50,11 +50,11 @@ const TSSymbol *ts_language_subtypes(
 }
 
 uint32_t ts_language_version(const TSLanguage *self) {
-  return self->version;
+  return self->abi_version;
 }
 
 const char *ts_language_name(const TSLanguage *self) {
-  return self->version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS ? self->name : NULL;
+  return self->abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS ? self->name : NULL;
 }
 
 uint32_t ts_language_field_count(const TSLanguage *self) {
@@ -85,7 +85,7 @@ TSLexerMode ts_language_lex_mode_for_state(
    const TSLanguage *self,
    TSStateId state
 ) {
-  if (self->version < 15) {
+  if (self->abi_version < 15) {
     TSLexMode mode = ((const TSLexMode *)self->lex_modes)[state];
     return (TSLexerMode) {
       .lex_state = mode.lex_state,

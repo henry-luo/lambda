@@ -686,6 +686,10 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_EDIT_COMMIT1, "commit", 1, &TYPE_INT, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_commit1", FPTR(fn_commit1), NULL, NULL, false, 0},
+
+    // reactive UI: emit event to parent template handler
+    {SYSPROC_EMIT, "emit", 2, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_emit", FPTR(pn_emit), NULL, NULL, false, 0},
 };
 
 // note: sizeof(sys_func_defs) may fail with incomplete type because the header

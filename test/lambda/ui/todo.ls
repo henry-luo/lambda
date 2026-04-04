@@ -1,5 +1,5 @@
-// Reactive Todo App — Lambda Script with view templates
-// Demonstrates Phase 5: event dispatch from Radiant to Lambda template handlers
+// Reactive Todo App — Lambda Script with view and edit templates
+// Demonstrates Phase 8: extended interactions (delete, clear completed)
 // Run: ./lambda.exe view test/lambda/ui/todo.ls
 
 let data^err = input('./test/lambda/ui/todos.json', 'json')
@@ -8,7 +8,7 @@ let data^err = input('./test/lambda/ui/todos.json', 'json')
 // Templates — reactive components with state and event handlers
 // ============================================================================
 
-// Todo item component: clicking toggles done/not-done
+// Todo item component: clicking toggles done/not-done, delete emits to parent
 view <todo_item> state toggled: false {
   let done = if (toggled) (!it.done) else it.done
   let check_mark = if (done) "✓" else "○"
@@ -16,27 +16,46 @@ view <todo_item> state toggled: false {
   <li class:done_class
     <span class:"checkbox"; check_mark>
     <span class:"todo-text"; it.text>
+    <span class:"delete-btn"; "×">
   >
 }
-on click() {
-  toggled = not toggled
+on click(evt) {
+  if (evt.target_class == "delete-btn") {
+    emit("delete_item", it)
+  } else {
+    toggled = not toggled
+  }
 }
 
-// Helper: render a list section with its items
-fn render_list(lst) {
-  let item_count = len(lst.items)
-  let done_count = len(for (i in lst.items where i.done) i)
+// Todo list section: edit template for model mutation (delete, clear completed)
+edit <todo_list> {
+  let items = it.items
+  let item_count = len(items)
+  let done_count = len(for (i in items where i.done) i)
   let count_text = string(done_count) ++ "/" ++ string(item_count)
   <div class:"todo-list"
     <div class:"list-header"
-      <span class:"list-name"; lst.name>
+      <span class:"list-name"; it.name>
       <span class:"list-count"; count_text>
     >
     <ul class:"items"
-      for (item in lst.items)
-        apply(<todo_item text:item.text, done:item.done>)
+      for (item in items)
+        apply(<todo_item text:item.text, done:item.done, id:item.id>)
     >
+    if (done_count > 0) {
+      <div class:"list-actions"
+        <button class:"clear-done-btn"; "Clear completed">
+      >
+    }
   >
+}
+on click(evt) {
+  if (evt.target_class == "clear-done-btn") {
+    it.items = for (item in it.items where not item.done) item
+  }
+}
+on delete_item(evt) {
+  it.items = for (item in it.items where item.id != evt.id) item
 }
 
 // ============================================================================
@@ -133,6 +152,39 @@ fn render_list(lst) {
       text-decoration: line-through;
       color: #aaa;
     }
+    .delete-btn {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1em;
+      color: #ccc;
+      cursor: pointer;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .delete-btn:hover {
+      color: #e53935;
+      background: #ffebee;
+    }
+    .list-actions {
+      padding: 8px 15px;
+      text-align: right;
+    }
+    .clear-done-btn {
+      font-size: 0.85em;
+      color: #888;
+      background: #f1f3f5;
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 4px 12px;
+      cursor: pointer;
+    }
+    .clear-done-btn:hover {
+      background: #e9ecef;
+      color: #555;
+    }
     .footer {
       text-align: center;
       padding: 15px;
@@ -146,10 +198,11 @@ fn render_list(lst) {
   <div class:"container"
     <div class:"header"
       <h1 data.title>
-      <p "Reactive UI — click items to toggle">
+      <p "Reactive UI — click to toggle, × to delete">
     >
     <div class:"content"
-      for (lst in data.lists) render_list(lst)
+      for (lst in data.lists)
+        apply(<todo_list name:lst.name, items:lst.items>, {mode: "edit"})
     >
     <div class:"footer"
       let all_items = [for (lst in data.lists) for (item in lst.items) item]
