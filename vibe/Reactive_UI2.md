@@ -1,7 +1,7 @@
 # Reactive UI Phase 2 — End-to-End Interactive Todo App
 
-**Date:** 2026-04-02
-**Status:** Phase 6 & 7 complete, Phase 9 partial (toggle test passing)
+**Date:** 2026-04-02 (updated 2026-04-04)
+**Status:** Phase 6–8 complete (toggle, delete, clear completed working). Phase 9 partial (toggle + delete tests passing)
 **Prerequisite:** Phases 1–4 complete (Reactive_UI.md), Phase 5 event dispatch bridge complete
 **Commit:** `a624cf18` — "reactive ui automated test"
 
@@ -124,16 +124,16 @@ Despite all components being individually implemented, the end-to-end reactive l
 
 **Resolution:** `render_map_retransform()` already updates the reverse map: removes the old result_node entry and inserts the new one. Verified working across multiple toggle cycles.
 
-### Gap 4: Event Object Not Passed to Handler — Deferred to Phase 8
+### Gap 4: Event Object Not Passed to Handler — ✅ RESOLVED
 
 **Problem:** Many handlers declare an event parameter: `on click(evt) { ... }`. However, `dispatch_lambda_handler` calls `handler_fn(source_item)` — no event object is passed. Handlers that inspect `evt.target`, `evt.x`, `evt.y`, etc. will receive incorrect data.
 
-**Required:** Either:
-- (A) Change handler signature to `Item handler(Item model, Item event)` and construct an event map
-- (B) Set the event object in a thread-local/global before handler invocation
-- (C) For Phase 6, accept that simple handlers like `on click() { toggled = !toggled }` don't use evt, and defer event object support
+**Resolution:** Implemented Option A. Handler signature changed to `Item handler(Item _model, Item _event)` with 2 MIR parameters. `build_lambda_event_map()` constructs a map with `{type, target_class, target_tag, x, y}` using `MarkBuilder`. The event parameter is bound to the handler's declared parameter name (e.g., `evt`) via MIR register. Handlers that don't declare an event parameter simply ignore the second argument.
 
-**Recommendation:** Option (C) for Phase 6. The todo toggle handler doesn't reference `evt`. Construct a proper event object in a later phase.
+**Key implementation details:**
+- `transpile-mir.cpp`: Handler function now has 2 `MIR_var_t` params (`_model`, `_event`). If `handler->param` exists, the `_event` register is bound to the param name.
+- `event.cpp`: `build_lambda_event_map(doc, target, event_name, evcon)` walks DomNode ancestry to find nearest DomElement for class/tag extraction.
+- `cmd_layout.cpp`: `dom_doc->input = Input::create(pool, script_url)` added to provide arena allocation for event map construction.
 
 ### Gap 5: Template Body Re-Execution State Binding — ✅ RESOLVED
 
@@ -280,7 +280,7 @@ For handlers that **do** declare an event parameter (`on click(evt)`), the MIR c
 
 - **Option B:** Always pass `ItemNull` for the event parameter. Handlers that don't reference `evt` are unaffected; those that do will get null.
 
-**Decision:** Use Option B for Phase 6 (no handler in todo.ls uses `evt`). Implement Option A in Phase 8 when text input handlers need event data.
+**Decision:** Option A implemented for Phase 8. All handlers now receive a proper event map.
 
 ### 6.3 State Read/Write in Handlers
 
@@ -323,7 +323,7 @@ edit_map_update(model, "done", new_done);  // via MarkEditor, creates new versio
 edit_commit("toggle todo done");
 ```
 
-**Phase 6 scope:** The todo.ls example uses `view` (state-only toggle via `toggled` flag). `edit` template model mutation is already implemented but will be exercised in Phase 8 (add/delete items).
+**Phase 6 scope:** The todo.ls example originally used `view` only (state-only toggle via `toggled` flag). Phase 8 added an `edit <todo_list>` template exercising model mutation through `edit_map_update` (inline mode) for delete and clear-completed operations.
 
 ---
 
@@ -962,18 +962,19 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 | 5 | Cache CSS stylesheet in rebuild_lambda_doc | 7 | — | S | Not started |
 | 6 | Implement `assert_count` in event_sim | 9 | — | S | Not started |
 | 7 | Write todo_toggle.json test, run headless | 9 | 3,6 | M | ✅ Done — 4/4 assertions pass |
-| 8 | Implement `emit()` system function for cross-template events | 8 | 4 | M | Not started |
-| 9 | Build event object for `on click(evt)` handlers | 6 | 4 | M | Not started |
-| 10 | Wire `on input(evt)` to Radiant text input events | 8 | 9 | M | Not started |
-| 11 | Enhance todo.ls with add/delete/input | 8 | 8,10 | M | Not started |
-| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | Not started |
+| 8 | Implement `emit()` system function for cross-template events | 8 | 4 | M | ✅ Done — `pn_emit()` → `dispatch_emit()`, thread-local `EmitHandlerContext`, DOM ancestry walk |
+| 9 | Build event object for `on click(evt)` handlers | 6 | 4 | M | ✅ Done — 2-param handler signature, `build_lambda_event_map()` with {type, target_class, target_tag, x, y} |
+| 10 | Wire `on input(evt)` to Radiant text input events | 8 | 9 | M | ⏸️ Deferred — Radiant text input has TODOs for character insertion into form controls |
+| 11 | Enhance todo.ls with delete/clear completed | 8 | 8,9 | M | ✅ Done — `edit <todo_list>` template, delete via emit, clear completed button |
+| 11b | Wire edit template mutations to reactivity | 8 | 11 | M | ✅ Done — inline mode, runtime type dispatch, dirty marking for edit handlers |
+| 12 | Write todo_add_delete.json + todo_text_input.json tests | 9 | 6,11 | M | 🔄 Partial — todo_delete.json written (5/5 pass). text_input deferred (requires task 10) |
 | 13 | Add `test-reactive-ui` make target | 9 | 12 | S | Not started |
 
 **Effort:** S = small (< half day), M = medium (1–2 days)
 
-**Critical path:** Tasks 1 → 2 → 3 → 4 → 7 ✅ (toggle working + tested)
+**Critical path:** Tasks 1–4 → 7 → 9 → 8 → 11 → 11b → 12 ✅ (toggle + delete + clear working + tested)
 
-**Next priority:** Task 5 (CSS cache), Task 6 (assert_count), then Phase 8 tasks.
+**Next priority:** Task 5 (CSS cache), Task 6 (assert_count), Task 10 (text input wiring), Task 13 (make target).
 
 ---
 
@@ -988,13 +989,14 @@ test/ui/todo_text_input.json   → "html": "test/lambda/ui/todo.ls"
 | Stale thread-local contexts after initial script execution | High | ✅ Mitigated — Bugs #2, #3 fixed (EvalContext + input_context) |
 | fn_not return type mismatch (Bool→i64 upper bits garbage) | High | ✅ Mitigated — Bug #4 fixed (emit_box_bool) |
 | Input element value sync between Radiant state store and Lambda template state | Medium | Phase 8 task 10; may need bidirectional sync mechanism |
-| `emit()` cross-template dispatch requires template instance hierarchy | Medium | Use DOM ancestry (already walked in dispatch_lambda_handler) |
+| `emit()` cross-template dispatch requires template instance hierarchy | Medium | ✅ Resolved — `dispatch_emit()` walks DOM ancestry, skips self template, finds parent handler |
+| Edit template mutations not connected to retransform pipeline | High | ✅ Resolved — switched to inline mode, added runtime type dispatch, dirty marking after edit handlers |
 
 ---
 
 ## 11. Files Modified
 
-All changes committed in `a624cf18`:
+### Commit `a624cf18` — Phase 6/7/9 (toggle)
 
 | File | Changes |
 |------|---------|
@@ -1008,12 +1010,48 @@ All changes committed in `a624cf18`:
 | `test/lambda/ui/todo.ls` | `not toggled` (was `!toggled`), `"○"` (was `" "`) |
 | `test/ui/todo_toggle.json` | New: headless toggle test, 4 assertions |
 
+### Phase 8 Changes (2026-04-04) — Event Object, Emit, Delete/Clear
+
+| File | Changes |
+|------|--------|
+| `lambda/transpile-mir.cpp` | Handler signature changed to 2-param `(Item _model, Item _event)`. Event parameter binding via `handler->param->name` → `_event` register |
+| `radiant/event.cpp` | Added `build_lambda_event_map()` (constructs {type, target_class, target_tag, x, y} via MarkBuilder). Added `EmitHandlerContext` thread-local + `dispatch_emit()` for cross-template event dispatch. Handler invocation now 2-arg `fn(source_item, event_item)`. Added dirty marking for edit handlers (`tmpl->is_edit → render_map_mark_dirty`) in both `dispatch_lambda_handler` and `dispatch_emit` |
+| `radiant/cmd_layout.cpp` | `dom_doc->input = Input::create(pool, script_url)` for event map arena allocation |
+| `lambda/lambda.h` | Added `SYSPROC_EMIT` enum, declared `pn_emit()` and `dispatch_emit()` |
+| `lambda/sys_func_registry.c` | Registered `emit` as `{SYSPROC_EMIT, "emit", 2, ...}` |
+| `lambda/lambda-proc.cpp` | Added `pn_emit()` thin wrapper calling `dispatch_emit()` |
+| `lambda/edit_bridge.cpp` | Switched from `EDIT_MODE_IMMUTABLE` to `EDIT_MODE_INLINE` for in-place model mutation. Added runtime type dispatch: `edit_map_update()` now handles elements (type=19) by routing to `elmt_update_attr()` |
+| `lambda/mark_editor.cpp` | `commit()` returns 0 (silent no-op) in inline mode instead of logging a warning |
+| `test/lambda/ui/todo.ls` | Full rewrite: added `<span class:"delete-btn">` to todo_item, `on click(evt)` with target_class dispatch, `emit("delete_item", it)`. New `edit <todo_list>` template with clear-completed button, `on delete_item(evt)` handler. CSS for delete button and clear button. Page shell uses `apply(<todo_list ...>, {mode: "edit"})` |
+| `test/ui/todo_delete.json` | New: delete + clear completed test, 5 assertions |
+
+### Bugs Found and Fixed During Phase 8
+
+#### Bug #6 — Edit Bridge Immutable Mode Incompatible with Render Map Reactivity
+
+**Symptom:** `edit_map_update()` returned a new `Map*` (immutable copy-on-write), but the render map's `source_item` still pointed to the old map, so retransform re-rendered stale data.
+
+**Root cause:** `EDIT_MODE_IMMUTABLE` creates new map copies on every mutation. The render map keys by `source_item` pointer identity. The new map copy has a different pointer, so `render_map_mark_dirty()` can't find the entry, and even if it could, `retransform()` would re-invoke the body with the old `source_item`.
+
+**Fix:** Switched edit bridge to `EDIT_MODE_INLINE`. In-place mutation preserves the same `Map*`/`Element*` pointer, keeping render map entries valid. Added `render_map_mark_dirty()` call after edit handler invocation in `dispatch_lambda_handler` (for direct edit handler clicks) and `dispatch_emit` (for emit-triggered parent edit handlers).
+
+#### Bug #7 — Runtime Type Mismatch in edit_map_update
+
+**Symptom:** `map_update: not a map (type=19)` — the model was an `Element` (type 19), but the transpiler emitted `edit_map_update` because the compile-time type was `ANY`.
+
+**Root cause:** In `transpile-mir.cpp`, the `AST_NODE_MEMBER_ASSIGN_STAM` edit path checks `get_effective_type(mt, ca->object)` to decide between `edit_map_update` and `edit_elmt_update_attr`. When the model type is `LMD_TYPE_ANY` (common for template parameters), `edit_map_update` is always selected.
+
+**Fix:** Added runtime type dispatch in `edit_map_update()`: if `get_type_id(map) == LMD_TYPE_ELEMENT`, routes to `elmt_update_attr()` instead.
+
 ### Test Results
 
 ```
 $ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_toggle.json --headless
 Assertions: 4 passed, 0 failed — PASS
 
+$ ./lambda.exe view test/lambda/ui/todo.ls --event-file test/ui/todo_delete.json --headless
+Assertions: 5 passed, 0 failed — PASS
+
 $ make test-lambda-baseline
-504/507 passed (3 pre-existing failures unrelated to these changes)
+759/761 passed (2 pre-existing failures unrelated to these changes)
 ```
