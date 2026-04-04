@@ -6,10 +6,12 @@
  */
 #include "js_runtime.h"
 #include "js_dom.h"
+#include "js_cssom.h"
 #include "js_typed_array.h"
 #include "js_event_loop.h"
 #include "../lambda-data.hpp"
 #include "../transpiler.hpp"
+#include "../module_registry.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/str.h"
@@ -167,6 +169,27 @@ extern "C" Item js_clear_exception(void) {
     Item val = js_exception_value;
     js_exception_value = ItemNull;
     return val;
+}
+
+// forward declaration for js_batch_reset (defined near js_module_count_v14)
+static void js_module_cache_reset();
+
+extern "C" void js_batch_reset() {
+    // reset module variable table
+    js_reset_module_vars();
+    // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
+    module_registry_cleanup();
+    // clear JS module cache (specifier String* pointers become dangling after heap reset)
+    js_module_cache_reset();
+    // clear any pending exception from previous script
+    js_exception_pending = false;
+    js_exception_value = (Item){0};
+    // clear current this binding
+    js_current_this = (Item){0};
+    // clear array method real this
+    js_array_method_real_this = (Item){0};
+    // clear Input context
+    js_input = NULL;
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -1600,6 +1623,16 @@ extern "C" Item js_property_get(Item object, Item key) {
         if (js_is_computed_style_item(object)) {
             return js_computed_style_get_property(object, key);
         }
+        // Check if this is a CSSOM wrapper (stylesheet, rule, declaration)
+        if (js_is_stylesheet(object)) {
+            return js_cssom_stylesheet_get_property(object, key);
+        }
+        if (js_is_css_rule(object)) {
+            return js_cssom_rule_get_property(object, key);
+        }
+        if (js_is_rule_style_decl(object)) {
+            return js_cssom_rule_decl_get_property(object, key);
+        }
         // Regular Lambda map (including JS objects)
         // P10f: Use fast lookup with pre-computed key length (memcmp instead of strncmp+strlen)
         // JS semantics: numeric keys are coerced to strings (obj[17] === obj["17"])
@@ -1941,6 +1974,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         // Check if this is a DOM node wrapper (indicated by js_dom_type_marker)
         if (js_is_dom_node(object)) {
             return js_dom_set_property(object, key, value);
+        }
+        // Check if this is a CSSOM rule wrapper (e.g., rule.selectorText = "...")
+        if (js_is_css_rule(object)) {
+            return js_cssom_rule_set_property(object, key, value);
+        }
+        // Check if this is a CSSOM rule declaration wrapper (e.g., rule.style.zIndex = "12345")
+        if (js_is_rule_style_decl(object)) {
+            return js_cssom_rule_decl_set_property(object, key, value);
         }
         // Setter property dispatch: check for __set_<propName> on object or prototype
         // Skip setter check only for __get_/__set_ keys (to prevent infinite recursion)
@@ -4277,6 +4318,21 @@ extern "C" Item js_generator_throw(Item generator, Item error);
 
 // Map method dispatcher: handles collection methods, falls back to property access
 extern "C" Item js_map_method(Item obj, Item method_name, Item* args, int argc) {
+    // CSSOM wrapper methods
+    if (js_is_stylesheet(obj)) {
+        return js_cssom_stylesheet_method(obj, method_name, args, argc);
+    }
+    if (js_is_rule_style_decl(obj)) {
+        return js_cssom_rule_decl_method(obj, method_name, args, argc);
+    }
+    // Computed style getPropertyValue
+    if (js_is_computed_style_item(obj)) {
+        String* method = it2s(method_name);
+        if (method && method->len == 16 && strncmp(method->chars, "getPropertyValue", 16) == 0) {
+            if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+            return js_computed_style_get_property(obj, args[0]);
+        }
+    }
     // DataView methods
     if (js_is_dataview(obj)) {
         return js_dataview_method(obj, method_name, args, argc);
@@ -7657,6 +7713,11 @@ struct JsModule {
 
 static JsModule js_modules[JS_MAX_MODULES];
 static int js_module_count_v14 = 0;
+
+// called by js_batch_reset() to clear module cache between batch scripts
+static void js_module_cache_reset() {
+    js_module_count_v14 = 0;
+}
 
 extern "C" void js_module_register(Item specifier, Item namespace_obj) {
     if (js_module_count_v14 >= JS_MAX_MODULES) {

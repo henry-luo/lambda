@@ -1,0 +1,37 @@
+HELLO
+hello
+Hello world
+hello
+7
+7
+fedcba
+true
+false
+true
+true
+3
+a
+c
+3
+world
+hell0 w0rld
+hi hello
+5
+2
+3
+b
+true
+false
+hello
+  hi  
+hi----
+....hi
+hELLO wORLD
+hippo
+42
+3.14
+hello world
+abc
+he wrd
+e
+ell

@@ -10,6 +10,7 @@
  */
 
 #include "js_dom.h"
+#include "js_cssom.h"
 #include "js_runtime.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -23,6 +24,7 @@
 #include "../input/css/dom_node.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style_node.hpp"
+#include "../input/css/css_formatter.hpp"
 #include "../input/css/selector_matcher.hpp"
 #include "../input/html5/html5_parser.h"
 
@@ -32,6 +34,7 @@
 // Forward declarations
 static void js_camel_to_css_prop(const char* js_prop, char* css_buf, size_t buf_size);
 static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId prop_id, int pseudo_type);
+static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
 // ============================================================================
@@ -53,6 +56,36 @@ static TypeMap js_computed_style_marker = {};
 static __thread DomDocument* _js_current_document = nullptr;
 
 // ============================================================================
+// Named element access on Window (HTML spec: named access on Window object)
+// Walks DOM tree, registers elements with id as global properties
+// ============================================================================
+
+static void register_named_elements_recursive(DomElement* elem, Item global) {
+    if (!elem) return;
+
+    if (elem->id && elem->id[0] != '\0') {
+        Item key = (Item){.item = s2it(heap_create_name(elem->id))};
+        Item wrapped = js_dom_wrap_element(elem);
+        js_property_set(global, key, wrapped);
+        log_debug("js_dom: registered element id='%s' on global object", elem->id);
+    }
+
+    DomNode* child = elem->first_child;
+    while (child) {
+        if (child->is_element()) {
+            register_named_elements_recursive(child->as_element(), global);
+        }
+        child = child->next_sibling;
+    }
+}
+
+void js_dom_register_named_elements(DomElement* root) {
+    if (!root) return;
+    Item global = js_get_global_this();
+    register_named_elements_recursive(root, global);
+}
+
+// ============================================================================
 // DOM Context Management
 // ============================================================================
 
@@ -62,6 +95,10 @@ extern "C" void js_dom_set_document(void* dom_doc) {
         DomDocument* doc = (DomDocument*)dom_doc;
         if (doc->pool) {
             css_property_system_init(doc->pool);
+        }
+        // populate global object with element IDs (browser-like named access on Window)
+        if (doc->root) {
+            js_dom_register_named_elements(doc->root);
         }
     }
     log_debug("js_dom_set_document: set document=%p", dom_doc);
@@ -238,6 +275,450 @@ extern "C" Item js_get_computed_style(Item elem_item, Item pseudo_item) {
     return (Item){.map = wrapper};
 }
 
+// ============================================================================
+// CSS var() Resolution for Custom Properties
+// ============================================================================
+
+// classify a CSS token for the consecutive-token ambiguity table
+enum CssTokenClass {
+    TC_IDENT,       // ident, function, url
+    TC_AT_KEYWORD,  // at-keyword
+    TC_HASH,        // hash
+    TC_DIMENSION,   // dimension
+    TC_NUMBER,      // number
+    TC_PERCENTAGE,  // percentage
+    TC_CDC,         // -->
+    TC_LPAREN,      // (
+    TC_DELIM_HASH,  // # (delimiter)
+    TC_DELIM_MINUS, // - (delimiter)
+    TC_DELIM_AT,    // @ (delimiter)
+    TC_DELIM_DOT,   // . (delimiter)
+    TC_DELIM_PLUS,  // + (delimiter)
+    TC_DELIM_SLASH, // / (delimiter)
+    TC_DELIM_STAR,  // * (delimiter)
+    TC_OTHER
+};
+
+static CssTokenClass classify_token(const CssToken* tok) {
+    switch (tok->type) {
+        case CSS_TOKEN_IDENT:
+        case CSS_TOKEN_IDENTIFIER:
+        case CSS_TOKEN_CUSTOM_PROPERTY:
+            return TC_IDENT;
+        case CSS_TOKEN_FUNCTION:
+        case CSS_TOKEN_VAR_FUNCTION:
+        case CSS_TOKEN_CALC_FUNCTION:
+        case CSS_TOKEN_COLOR_FUNCTION:
+            return TC_IDENT;  // function tokens start with ident
+        case CSS_TOKEN_URL:
+            return TC_IDENT;  // url() starts like an ident
+        case CSS_TOKEN_AT_KEYWORD:
+            return TC_AT_KEYWORD;
+        case CSS_TOKEN_HASH:
+            return TC_HASH;
+        case CSS_TOKEN_DIMENSION:
+            return TC_DIMENSION;
+        case CSS_TOKEN_NUMBER:
+            return TC_NUMBER;
+        case CSS_TOKEN_PERCENTAGE:
+            return TC_PERCENTAGE;
+        case CSS_TOKEN_CDC:
+            return TC_CDC;
+        case CSS_TOKEN_LEFT_PAREN:
+            return TC_LPAREN;
+        case CSS_TOKEN_DELIM:
+            if (tok->data.delimiter == '#') return TC_DELIM_HASH;
+            if (tok->data.delimiter == '-') return TC_DELIM_MINUS;
+            if (tok->data.delimiter == '@') return TC_DELIM_AT;
+            if (tok->data.delimiter == '.') return TC_DELIM_DOT;
+            if (tok->data.delimiter == '+') return TC_DELIM_PLUS;
+            if (tok->data.delimiter == '/') return TC_DELIM_SLASH;
+            if (tok->data.delimiter == '*') return TC_DELIM_STAR;
+            if (tok->data.delimiter == '%') return TC_PERCENTAGE; // bare % is percentage-like
+            return TC_OTHER;
+        default:
+            return TC_OTHER;
+    }
+}
+
+// check if two adjacent tokens need a comment inserted between them
+// per CSS Syntax spec §9.2 "would-be ambiguous token pairs"
+static bool tokens_need_comment(CssTokenClass left, CssTokenClass right) {
+    // ident/function/url + ident/function/url/-/number/%/dim/CDC/()
+    if (left == TC_IDENT) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION || right == TC_CDC ||
+               right == TC_LPAREN;
+    }
+    // at-keyword + ident/function/url/-/number/%/dim/CDC
+    if (left == TC_AT_KEYWORD) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION || right == TC_CDC;
+    }
+    // hash + ident/function/url/-/number/%/dim/CDC
+    if (left == TC_HASH) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION || right == TC_CDC;
+    }
+    // dimension + ident/function/url/-/number/%/dim/CDC
+    if (left == TC_DIMENSION) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION || right == TC_CDC;
+    }
+    // # (delimiter) + ident/function/url/-/number/%/dim
+    if (left == TC_DELIM_HASH) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION;
+    }
+    // - (delimiter) + ident/function/url/-/number/%/dim
+    if (left == TC_DELIM_MINUS) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS || right == TC_NUMBER ||
+               right == TC_PERCENTAGE || right == TC_DIMENSION;
+    }
+    // number + ident/function/url/number/%/dim/%
+    if (left == TC_NUMBER) {
+        return right == TC_IDENT || right == TC_NUMBER || right == TC_PERCENTAGE ||
+               right == TC_DIMENSION;
+    }
+    // @ (delimiter) + ident/function/url/-
+    if (left == TC_DELIM_AT) {
+        return right == TC_IDENT || right == TC_DELIM_MINUS;
+    }
+    // . (delimiter) + number/%/dim
+    if (left == TC_DELIM_DOT) {
+        return right == TC_NUMBER || right == TC_PERCENTAGE || right == TC_DIMENSION;
+    }
+    // + (delimiter) + number/%/dim
+    if (left == TC_DELIM_PLUS) {
+        return right == TC_NUMBER || right == TC_PERCENTAGE || right == TC_DIMENSION;
+    }
+    // / + *
+    if (left == TC_DELIM_SLASH) {
+        return right == TC_DELIM_STAR;
+    }
+    return false;
+}
+
+// strip exterior comments from a var()-substituted value
+// interior comments (within original token text) are preserved,
+// but comments at the boundary of a substituted var() are replaced with /**/
+static const char* strip_exterior_comments(const char* text, size_t len, Pool* pool) {
+    // find and remove /* ... */ comments at boundaries
+    // for now, if the text has comments, we check if they're at the very
+    // start or end (from var() boundary) and collapse them to /**/
+    // Interior comments are preserved as-is
+    return text;  // simplification: handled during var() substitution
+}
+
+/**
+ * Resolve a custom property value, substituting var() references.
+ * Returns a pool-allocated string with all var() references resolved.
+ * Inserts /**​/ comments between ambiguous consecutive tokens per CSS spec §9.2.
+ *
+ * @param elem     The element context for variable lookup
+ * @param val_text The raw value text to resolve
+ * @param pool     Memory pool for allocations
+ * @param depth    Recursion depth to prevent infinite loops
+ * @return Resolved string, or NULL on failure
+ */
+static const char* js_resolve_custom_property_value(DomElement* elem, const char* val_text, Pool* pool, int depth) {
+    if (!val_text || !pool || depth > 10) return val_text;  // max recursion depth
+
+    // quick check: does this value contain var(?
+    if (!strstr(val_text, "var(")) return val_text;
+
+    size_t len = strlen(val_text);
+    StringBuf* result = stringbuf_new(pool);
+    if (!result) return val_text;
+
+    // we'll collect resolved segments, then do token-pair analysis
+    // first pass: find and resolve all var() references
+    size_t i = 0;
+
+    // we need to collect the resolved text segments for token-pair analysis
+    // strategy: build result by scanning for var(--xxx) patterns
+    //   - text before var() is literal
+    //   - var(--xxx) is replaced with the resolved value of --xxx
+    //   - var(--xxx, fallback) uses fallback if --xxx is not defined
+
+    // Track segments for comment insertion between var() boundaries
+    struct Segment {
+        const char* text;
+        size_t len;
+        bool from_var;  // true if this segment came from var() substitution
+    };
+    Segment segments[64];
+    int seg_count = 0;
+
+    while (i < len && seg_count < 63) {
+        // look for var(
+        const char* var_start = strstr(val_text + i, "var(");
+        if (!var_start) {
+            // no more var() — rest is literal
+            if (i < len) {
+                segments[seg_count].text = val_text + i;
+                segments[seg_count].len = len - i;
+                segments[seg_count].from_var = false;
+                seg_count++;
+            }
+            break;
+        }
+
+        // literal text before var(
+        size_t literal_len = var_start - (val_text + i);
+        if (literal_len > 0) {
+            // strip trailing exterior comments at the var() boundary per CSS spec
+            const char* lit_start = val_text + i;
+            size_t adj_len = literal_len;
+            while (adj_len >= 4) {
+                // find last */ in the segment
+                size_t end_pos = adj_len;
+                // check if segment ends with */  (possibly followed by whitespace)
+                size_t check = adj_len;
+                while (check > 0 && (lit_start[check-1] == ' ' || lit_start[check-1] == '\t'))
+                    check--;
+                if (check >= 2 && lit_start[check-2] == '*' && lit_start[check-1] == '/') {
+                    // find matching /* backwards — but must NOT be inside a string
+                    size_t search = check - 2;
+                    bool found = false;
+                    while (search > 0) {
+                        search--;
+                        if (lit_start[search] == '/' && search + 1 < check - 2 && lit_start[search + 1] == '*') {
+                            adj_len = search;
+                            // trim trailing whitespace after removing comment
+                            while (adj_len > 0 && (lit_start[adj_len-1] == ' ' || lit_start[adj_len-1] == '\t'))
+                                adj_len--;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) break;
+                } else {
+                    break;
+                }
+            }
+            segments[seg_count].text = lit_start;
+            segments[seg_count].len = adj_len;
+            segments[seg_count].from_var = false;
+            seg_count++;
+        }
+
+        // parse var(--name) or var(--name, fallback)
+        const char* p = var_start + 4;  // skip "var("
+
+        // skip whitespace
+        while (*p == ' ' || *p == '\t') p++;
+
+        // extract variable name (must start with --)
+        if (p[0] != '-' || p[1] != '-') {
+            // not a valid var() — treat as literal
+            segments[seg_count].text = var_start;
+            segments[seg_count].len = 4;  // "var("
+            segments[seg_count].from_var = false;
+            seg_count++;
+            i = (var_start - val_text) + 4;
+            continue;
+        }
+
+        const char* name_start = p;
+        while (*p && *p != ')' && *p != ',') p++;
+
+        size_t name_len = p - name_start;
+        // trim trailing whitespace from name
+        while (name_len > 0 && (name_start[name_len-1] == ' ' || name_start[name_len-1] == '\t'))
+            name_len--;
+
+        char var_name[128];
+        if (name_len >= sizeof(var_name)) name_len = sizeof(var_name) - 1;
+        memcpy(var_name, name_start, name_len);
+        var_name[name_len] = '\0';
+
+        // check for fallback
+        const char* fallback = nullptr;
+        size_t fallback_len = 0;
+        if (*p == ',') {
+            p++; // skip comma
+            // skip whitespace
+            while (*p == ' ' || *p == '\t') p++;
+            fallback = p;
+            // find matching closing paren, accounting for nested parens
+            int paren_depth = 1;
+            while (*p && paren_depth > 0) {
+                if (*p == '(') paren_depth++;
+                else if (*p == ')') { paren_depth--; if (paren_depth == 0) break; }
+                p++;
+            }
+            fallback_len = p - fallback;
+            // trim trailing whitespace from fallback
+            while (fallback_len > 0 && (fallback[fallback_len-1] == ' ' || fallback[fallback_len-1] == '\t'))
+                fallback_len--;
+        } else {
+            // skip to closing paren
+            int paren_depth = 1;
+            while (*p && paren_depth > 0) {
+                if (*p == '(') paren_depth++;
+                else if (*p == ')') { paren_depth--; if (paren_depth == 0) break; }
+                p++;
+            }
+        }
+
+        if (*p == ')') p++; // skip closing paren
+
+        // resolve the variable
+        CssDeclaration* var_decl = js_match_custom_property(elem, var_name);
+        const char* resolved = nullptr;
+        size_t resolved_len = 0;
+
+        if (var_decl) {
+            if (var_decl->value_text && var_decl->value_text_len > 0) {
+                resolved = var_decl->value_text;
+                resolved_len = var_decl->value_text_len;
+            } else if (var_decl->value) {
+                CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+                if (fmt) {
+                    css_format_value(fmt, var_decl->value);
+                    String* s = stringbuf_to_string(fmt->output);
+                    if (s && s->chars) {
+                        resolved = s->chars;
+                        resolved_len = s->len;
+                    }
+                }
+            }
+        }
+
+        // trim whitespace from resolved value
+        if (resolved) {
+            while (resolved_len > 0 && (*resolved == ' ' || *resolved == '\t')) {
+                resolved++;
+                resolved_len--;
+            }
+            while (resolved_len > 0 && (resolved[resolved_len-1] == ' ' || resolved[resolved_len-1] == '\t'))
+                resolved_len--;
+        }
+
+        if (resolved && resolved_len > 0) {
+            // recursively resolve nested var() in the resolved value
+            char* resolved_copy = (char*)pool_alloc(pool, resolved_len + 1);
+            if (resolved_copy) {
+                memcpy(resolved_copy, resolved, resolved_len);
+                resolved_copy[resolved_len] = '\0';
+                const char* nested = js_resolve_custom_property_value(elem, resolved_copy, pool, depth + 1);
+                if (nested) {
+                    // strip exterior comments from var() result
+                    // per spec, comments at boundaries of var() substitution are removed
+                    const char* clean = nested;
+                    size_t clean_len = strlen(clean);
+                    // strip leading comment
+                    while (clean_len >= 4 && clean[0] == '/' && clean[1] == '*') {
+                        const char* end_comment = strstr(clean + 2, "*/");
+                        if (end_comment) {
+                            clean = end_comment + 2;
+                            clean_len = strlen(clean);
+                        } else break;
+                    }
+                    // strip trailing comment
+                    while (clean_len >= 4 && clean[clean_len-1] == '/' && clean[clean_len-2] == '*') {
+                        // find the start of this comment by searching backwards for /*
+                        size_t j = clean_len - 2;
+                        while (j > 0 && !(clean[j] == '/' && clean[j+1] == '*')) j--;
+                        if (clean[j] == '/' && clean[j+1] == '*') {
+                            clean_len = j;
+                        } else break;
+                    }
+                    segments[seg_count].text = clean;
+                    segments[seg_count].len = clean_len;
+                    segments[seg_count].from_var = true;
+                    seg_count++;
+                }
+            }
+        } else if (fallback && fallback_len > 0) {
+            // use fallback value
+            char* fb_copy = (char*)pool_alloc(pool, fallback_len + 1);
+            if (fb_copy) {
+                memcpy(fb_copy, fallback, fallback_len);
+                fb_copy[fallback_len] = '\0';
+                const char* resolved_fb = js_resolve_custom_property_value(elem, fb_copy, pool, depth + 1);
+                segments[seg_count].text = resolved_fb ? resolved_fb : fb_copy;
+                segments[seg_count].len = strlen(segments[seg_count].text);
+                segments[seg_count].from_var = true;
+                seg_count++;
+            }
+        }
+        // else: var() with no value and no fallback — produces nothing (empty)
+
+        i = p - val_text;
+    }
+
+    if (seg_count == 0) return "";
+
+    // now concatenate segments with comment insertion between ambiguous token boundaries
+    // for segments that come from var() substitution, we need to check the last token
+    // of the previous segment against the first token of the next segment
+    for (int s = 0; s < seg_count; s++) {
+        if (s > 0) {
+            // check if we need a comment between previous segment and this one
+            // only needed when at least one segment is from var() substitution
+            if (segments[s].from_var || segments[s-1].from_var) {
+                // get last token of previous segment
+                const char* prev_text = segments[s-1].text;
+                size_t prev_len = segments[s-1].len;
+                const char* cur_text = segments[s].text;
+                size_t cur_len = segments[s].len;
+
+                if (prev_len > 0 && cur_len > 0) {
+                    // tokenize the last few chars of prev and first few chars of cur
+                    // to determine if they'd be ambiguous
+                    char* prev_copy = (char*)pool_alloc(pool, prev_len + 1);
+                    char* cur_copy = (char*)pool_alloc(pool, cur_len + 1);
+                    if (prev_copy && cur_copy) {
+                        memcpy(prev_copy, prev_text, prev_len);
+                        prev_copy[prev_len] = '\0';
+                        memcpy(cur_copy, cur_text, cur_len);
+                        cur_copy[cur_len] = '\0';
+
+                        size_t prev_tok_count = 0, cur_tok_count = 0;
+                        CssToken* prev_tokens = css_tokenize(prev_copy, prev_len, pool, &prev_tok_count);
+                        CssToken* cur_tokens = css_tokenize(cur_copy, cur_len, pool, &cur_tok_count);
+
+                        if (prev_tokens && cur_tokens && prev_tok_count > 0 && cur_tok_count > 0) {
+                            // find last non-whitespace token of prev
+                            int last_idx = (int)prev_tok_count - 1;
+                            while (last_idx >= 0 && prev_tokens[last_idx].type == CSS_TOKEN_WHITESPACE) last_idx--;
+                            // skip EOF token
+                            while (last_idx >= 0 && prev_tokens[last_idx].type == CSS_TOKEN_EOF) last_idx--;
+
+                            // find first non-whitespace token of cur
+                            size_t first_idx = 0;
+                            while (first_idx < cur_tok_count && cur_tokens[first_idx].type == CSS_TOKEN_WHITESPACE) first_idx++;
+
+                            if (last_idx >= 0 && first_idx < cur_tok_count &&
+                                cur_tokens[first_idx].type != CSS_TOKEN_EOF) {
+                                CssTokenClass left_class = classify_token(&prev_tokens[last_idx]);
+                                CssTokenClass right_class = classify_token(&cur_tokens[first_idx]);
+
+                                if (tokens_need_comment(left_class, right_class)) {
+                                    stringbuf_append_str(result, "/**/");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // append segment text
+        char* seg_copy = (char*)pool_alloc(pool, segments[s].len + 1);
+        if (seg_copy) {
+            memcpy(seg_copy, segments[s].text, segments[s].len);
+            seg_copy[segments[s].len] = '\0';
+            stringbuf_append_str(result, seg_copy);
+        }
+    }
+
+    String* final_str = stringbuf_to_string(result);
+    return (final_str && final_str->chars) ? final_str->chars : "";
+}
+
 extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) {
     if (!js_is_computed_style(style_item)) {
         log_debug("js_computed_style_get_property: not a computed style object");
@@ -265,7 +746,48 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
 
     // look up the CSS property ID
     CssPropertyId prop_id = css_property_id_from_name(css_prop);
-    if (prop_id == CSS_PROPERTY_UNKNOWN) {
+    if (prop_id == CSS_PROPERTY_UNKNOWN || prop_id == 0) {
+        // check for CSS custom properties (--foo)
+        // note: css_property_get_id_by_name returns 0 for not-found, CSS_PROPERTY_UNKNOWN is -1
+        if (css_prop[0] == '-' && css_prop[1] == '-') {
+            // on-demand matching for custom property
+            CssDeclaration* decl = js_match_custom_property(elem, css_prop);
+            if (decl && (decl->value || decl->value_text)) {
+                const char* val = nullptr;
+
+                // prefer raw value text for faithful serialization
+                if (decl->value_text && decl->value_text_len > 0) {
+                    val = decl->value_text;
+                } else if (decl->value) {
+                    Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                    if (!pool) return (Item){.item = s2it(heap_create_name(""))};
+                    CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+                    if (!fmt) return (Item){.item = s2it(heap_create_name(""))};
+                    css_format_value(fmt, decl->value);
+                    String* result = stringbuf_to_string(fmt->output);
+                    val = (result && result->chars) ? result->chars : "";
+                }
+                if (!val) val = "";
+                // trim leading/trailing whitespace per CSS spec
+                while (*val == ' ' || *val == '\t' || *val == '\n' || *val == '\r') val++;
+                size_t vlen = strlen(val);
+                while (vlen > 0 && (val[vlen-1] == ' ' || val[vlen-1] == '\t' || val[vlen-1] == '\n' || val[vlen-1] == '\r')) vlen--;
+                Pool* pool = elem->doc ? elem->doc->pool : nullptr;
+                if (pool) {
+                    char* trimmed = (char*)pool_alloc(pool, vlen + 1);
+                    if (trimmed) { memcpy(trimmed, val, vlen); trimmed[vlen] = '\0'; val = trimmed; }
+                }
+
+                // resolve var() references in the value
+                if (val && strstr(val, "var(")) {
+                    const char* resolved = js_resolve_custom_property_value(elem, val, pool, 0);
+                    if (resolved) val = resolved;
+                }
+
+                return (Item){.item = s2it(heap_create_name(val))};
+            }
+            return (Item){.item = s2it(heap_create_name(""))};
+        }
         log_debug("js_computed_style_get_property: unknown CSS property '%s' (from JS '%s')",
                   css_prop, js_prop);
         return (Item){.item = s2it(heap_create_name(""))};
@@ -410,6 +932,104 @@ static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId
     if (best_decl) {
         log_debug("js_match_element_property: found property %d for <%s> pseudo=%d via on-demand matching",
                   prop_id, elem->tag_name ? elem->tag_name : "?", pseudo_type);
+    }
+
+    return best_decl;
+}
+
+/**
+ * On-demand matching for CSS custom properties (--variable-name).
+ * Matches element against all stylesheets and returns the best-matching
+ * declaration for the given custom property name.
+ */
+static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name) {
+    if (!elem || !elem->doc || !prop_name) return nullptr;
+
+    DomDocument* doc = elem->doc;
+    Pool* pool = doc->pool;
+
+    CssDeclaration* best_decl = nullptr;
+    CssSpecificity best_spec = {0, 0, 0, 0, false};
+
+    // check inline custom properties first (highest specificity: 1,0,0,0)
+    // inline styles are stored in elem->css_variables as a linked list
+    // created by dom_element_apply_declaration when style.setProperty("--name", value) is called
+    if (elem->css_variables) {
+        CssCustomProp* prop = elem->css_variables;
+        while (prop) {
+            if (prop->name && strcmp(prop->name, prop_name) == 0) {
+                // create a synthetic CssDeclaration for the inline custom property
+                CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
+                if (decl) {
+                    decl->property_name = prop->name;
+                    decl->value = (CssValue*)prop->value;
+                    decl->value_text = prop->value_text;
+                    decl->value_text_len = prop->value_text_len;
+                    decl->specificity = {1, 0, 0, 0, false};  // inline style
+                    decl->valid = true;
+                    best_decl = decl;
+                    best_spec = decl->specificity;
+                }
+                break;  // linked list: first match is the most recent (prepended)
+            }
+            prop = prop->next;
+        }
+    }
+
+    // search stylesheets (lower specificity than inline)
+    if (doc->stylesheets && doc->stylesheet_count > 0) {
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        if (matcher) {
+            for (int s = 0; s < doc->stylesheet_count; s++) {
+                CssStylesheet* sheet = doc->stylesheets[s];
+                if (!sheet) continue;
+
+                for (size_t r = 0; r < sheet->rule_count; r++) {
+                    CssRule* rule = sheet->rules[r];
+                    if (!rule || rule->type != CSS_RULE_STYLE) continue;
+                    if (rule->data.style_rule.declaration_count == 0) continue;
+
+                    bool matched = false;
+                    CssSpecificity match_spec = {0, 0, 0, 0, false};
+
+                    CssSelectorGroup* group = rule->data.style_rule.selector_group;
+                    CssSelector* single_sel = rule->data.style_rule.selector;
+
+                    if (group && group->selector_count > 0) {
+                        for (size_t si = 0; si < group->selector_count; si++) {
+                            CssSelector* sel = group->selectors[si];
+                            if (!sel) continue;
+                            MatchResult result;
+                            if (selector_matcher_matches(matcher, sel, elem, &result)) {
+                                matched = true;
+                                match_spec = result.specificity;
+                                break;
+                            }
+                        }
+                    } else if (single_sel) {
+                        MatchResult result;
+                        if (selector_matcher_matches(matcher, single_sel, elem, &result)) {
+                            matched = true;
+                            match_spec = result.specificity;
+                        }
+                    }
+
+                    if (!matched) continue;
+
+                    // find matching custom property by name
+                    for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
+                        CssDeclaration* decl = rule->data.style_rule.declarations[d];
+                        if (!decl || !decl->property_name) continue;
+                        if (strcmp(decl->property_name, prop_name) != 0) continue;
+
+                        if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
+                            best_decl = decl;
+                            best_spec = match_spec;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     return best_decl;
@@ -936,6 +1556,11 @@ extern "C" Item js_document_get_property(Item prop_name) {
         return (Item){.item = s2it(heap_create_name(""))};
     }
 
+    // styleSheets — collection of parsed CSSStyleSheet objects
+    if (strcmp(prop, "styleSheets") == 0) {
+        return js_cssom_get_document_stylesheets();
+    }
+
     log_debug("js_document_get_property: unknown property '%s'", prop);
     return ItemNull;
 }
@@ -1287,6 +1912,11 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
 
     // fall back to native element attribute access
     if (elem->native_element) {
+        // HTMLStyleElement.sheet — associated CSSStyleSheet
+        if (strcmp(prop, "sheet") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+            return js_cssom_get_style_element_sheet(elem_item);
+        }
+
         const char* attr_val = dom_element_get_attribute(elem, prop);
         if (attr_val) {
             return (Item){.item = s2it(heap_create_name(attr_val))};
@@ -2439,7 +3069,18 @@ extern "C" Item js_dom_contains(Item elem_item, Item other_item) {
 
 extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args, int argc) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
-    if (!elem) return ItemNull;
+    if (!elem) {
+        // check if this is a CSSOM rule — transpiler routes rule.style.setProperty() here too
+        if (js_is_css_rule(elem_item)) {
+            // get the .style wrapper from the rule
+            Item style_prop = (Item){.item = s2it(heap_create_name("style"))};
+            Item style_decl = js_cssom_rule_get_property(elem_item, style_prop);
+            if (js_is_rule_style_decl(style_decl)) {
+                return js_cssom_rule_decl_method(style_decl, method_name, args, argc);
+            }
+        }
+        return ItemNull;
+    }
 
     const char* method = fn_to_cstr(method_name);
     if (!method) return ItemNull;
@@ -2462,7 +3103,7 @@ extern "C" Item js_dom_style_method(Item elem_item, Item method_name, Item* args
         } else {
             snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
         }
-        dom_element_apply_inline_style(elem, style_decl);
+        int applied = dom_element_apply_inline_style(elem, style_decl);
         elem->styles_resolved = false;
         log_debug("js_dom_style_method: setProperty '%s: %s' on <%s>",
                   css_prop, val_str, elem->tag_name ? elem->tag_name : "?");

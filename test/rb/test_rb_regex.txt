@@ -1,0 +1,11 @@
+true
+false
+true
+false
+world
+2
+123
+456
+hell0 w0rld
+abcNUMdefNUM
+hello ruby world

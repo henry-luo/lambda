@@ -362,6 +362,21 @@ static void css_format_value_with_property(CssFormatter* formatter, CssValue* va
             }
             break;
 
+        case CSS_VALUE_TYPE_VAR:
+            // Output var() function reference
+            if (value->data.var_ref) {
+                stringbuf_append_str(formatter->output, "var(--");
+                if (value->data.var_ref->name) {
+                    stringbuf_append_str(formatter->output, value->data.var_ref->name);
+                }
+                if (value->data.var_ref->has_fallback && value->data.var_ref->fallback) {
+                    stringbuf_append_str(formatter->output, ", ");
+                    css_format_value(formatter, value->data.var_ref->fallback);
+                }
+                stringbuf_append_str(formatter->output, ")");
+            }
+            break;
+
         default:
             stringbuf_append_str(formatter->output, "<unknown-value>");
             break;
@@ -434,6 +449,53 @@ const char* css_format_declaration(CssFormatter* formatter, CssPropertyId proper
         stringbuf_append_str(formatter->output, value_str->chars);
     }    String* result = stringbuf_to_string(formatter->output);
     return (result && result->chars) ? result->chars : "";
+}
+
+// ============================================================================
+// An+B Canonical Serialization (CSSOM spec)
+// ============================================================================
+
+// Format An+B formula into canonical form per CSSOM:
+//   odd → 2n+1, even → 2n
+//   a=0: just output b (e.g., 0n+1 → 1)
+//   a=1: "n" (not "1n"), a=-1: "-n" (not "-1n")
+//   b=0: omit (e.g., 2n+0 → 2n)
+//   leading + on a: omit (e.g., +n → n)
+static void css_format_anb_canonical(StringBuf* output, const CssNthFormula* f) {
+    if (f->odd) {
+        stringbuf_append_str(output, "2n+1");
+        return;
+    }
+    if (f->even) {
+        stringbuf_append_str(output, "2n");
+        return;
+    }
+
+    int a = f->a;
+    int b = f->b;
+
+    if (a == 0) {
+        // just output b
+        stringbuf_append_format(output, "%d", b);
+        return;
+    }
+
+    // output the 'a' coefficient + 'n'
+    if (a == 1) {
+        stringbuf_append_str(output, "n");
+    } else if (a == -1) {
+        stringbuf_append_str(output, "-n");
+    } else {
+        stringbuf_append_format(output, "%dn", a);
+    }
+
+    // output the 'b' constant (omit if zero)
+    if (b > 0) {
+        stringbuf_append_format(output, "+%d", b);
+    } else if (b < 0) {
+        stringbuf_append_format(output, "%d", b); // negative sign included
+    }
+    // b == 0: omit
 }
 
 // ============================================================================
@@ -582,12 +644,24 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         stringbuf_append_str(formatter->output, ":last-child");
                         break;
                     case CSS_SELECTOR_PSEUDO_NTH_CHILD:
-                        stringbuf_append_str(formatter->output, ":nth-child");
-                        if (simple->value) {
-                            stringbuf_append_str(formatter->output, "(");
-                            stringbuf_append_str(formatter->output, simple->value);
-                            stringbuf_append_str(formatter->output, ")");
-                        }
+                        stringbuf_append_str(formatter->output, ":nth-child(");
+                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
+                        stringbuf_append_str(formatter->output, ")");
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+                        stringbuf_append_str(formatter->output, ":nth-last-child(");
+                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
+                        stringbuf_append_str(formatter->output, ")");
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+                        stringbuf_append_str(formatter->output, ":nth-of-type(");
+                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
+                        stringbuf_append_str(formatter->output, ")");
+                        break;
+                    case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE:
+                        stringbuf_append_str(formatter->output, ":nth-last-of-type(");
+                        css_format_anb_canonical(formatter->output, &simple->nth_formula);
+                        stringbuf_append_str(formatter->output, ")");
                         break;
                     case CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC:
                         // Generic pseudo-element - use stored name with ::

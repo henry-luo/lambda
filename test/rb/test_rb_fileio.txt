@@ -1,0 +1,4 @@
+hello from ruby
+true
+false
+true

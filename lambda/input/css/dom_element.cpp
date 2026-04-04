@@ -619,29 +619,39 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
         return 0;
     }
 
-    // Strip CSS comments (/* ... */) before splitting by semicolons.
-    // Comments may contain semicolons which would break the strtok split.
+    // Copy text for in-place modification, preserving CSS comments intact.
+    // Comments inside custom property values must be preserved per CSS spec.
+    // We split by semicolons that are NOT inside comments.
+    memcpy(text_copy, style_text, style_len);
+    text_copy[style_len] = '\0';
+
+    // Find semicolons not inside comments and replace them with NUL for splitting
     {
-        size_t j = 0;
-        for (size_t i = 0; i < style_len; ) {
-            if (i + 1 < style_len && style_text[i] == '/' && style_text[i + 1] == '*') {
-                // skip until closing */
+        size_t i = 0;
+        while (i < style_len) {
+            if (i + 1 < style_len && text_copy[i] == '/' && text_copy[i + 1] == '*') {
+                // inside comment — skip until closing */
                 i += 2;
-                while (i + 1 < style_len && !(style_text[i] == '*' && style_text[i + 1] == '/')) {
+                while (i + 1 < style_len && !(text_copy[i] == '*' && text_copy[i + 1] == '/')) {
                     i++;
                 }
                 if (i + 1 < style_len) i += 2; // skip */
+            } else if (text_copy[i] == ';') {
+                text_copy[i] = '\0';  // split point
+                i++;
             } else {
-                text_copy[j++] = style_text[i++];
+                i++;
             }
         }
-        text_copy[j] = '\0';
     }
 
-    char* saveptr = NULL;
-    char* declaration_str = strtok_r(text_copy, ";", &saveptr);
-
-    while (declaration_str) {
+    // Iterate over NUL-separated declarations
+    size_t offset = 0;
+    while (offset < style_len) {
+        char* declaration_str = text_copy + offset;
+        // advance offset past this segment (to next NUL or end)
+        size_t seg_len = strlen(declaration_str);
+        offset += seg_len + 1; // +1 for the NUL separator
         // Trim leading whitespace
         while (*declaration_str == ' ' || *declaration_str == '\t' ||
                *declaration_str == '\n' || *declaration_str == '\r') {
@@ -650,14 +660,12 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
         // Skip empty declarations
         if (*declaration_str == '\0') {
-            declaration_str = strtok_r(NULL, ";", &saveptr);
             continue;
         }
 
         // Find the colon separator
         char* colon = strchr(declaration_str, ':');
         if (!colon) {
-            declaration_str = strtok_r(NULL, ";", &saveptr);
             continue;
         }
 
@@ -718,8 +726,6 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
                 }
             }
         }
-
-        declaration_str = strtok_r(NULL, ";", &saveptr);
     }
 
     return applied_count;
@@ -784,6 +790,8 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
 
         prop->name = declaration->property_name;
         prop->value = declaration->value;
+        prop->value_text = declaration->value_text;
+        prop->value_text_len = declaration->value_text_len;
         prop->next = element->css_variables;
         element->css_variables = prop;
 

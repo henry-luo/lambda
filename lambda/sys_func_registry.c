@@ -1302,6 +1302,9 @@ JitImport jit_runtime_imports[] = {
     {"js_native_sha384", FPTR(js_native_sha384)},
     {"js_native_sha512", FPTR(js_native_sha512)},
     {"js_get_global_this", FPTR(js_get_global_this)},
+    {"js_get_global_object", FPTR(js_get_global_object)},
+    {"js_get_global_property", FPTR(js_get_global_property)},
+
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},
     {"js_symbol_key_for", FPTR(js_symbol_key_for)},
@@ -1979,6 +1982,7 @@ JitImport jit_runtime_imports[] = {
     {"rb_builtin_len", FPTR(rb_builtin_len)},
     {"rb_builtin_type", FPTR(rb_builtin_type)},
     {"rb_builtin_rand", FPTR(rb_builtin_rand)},
+    {"rb_builtin_require_relative", FPTR(rb_builtin_require_relative)},
     // Phase 2: Class system
     {"rb_class_create", FPTR(rb_class_create)},
     {"rb_class_add_method", FPTR(rb_class_add_method)},
@@ -1995,6 +1999,7 @@ JitImport jit_runtime_imports[] = {
     {"rb_attr_accessor", FPTR(rb_attr_accessor)},
     // Phase 2: Block / Proc / Lambda
     {"rb_block_call", FPTR(rb_block_call)},
+    {"rb_block_call_0", FPTR(rb_block_call_0)},
     {"rb_block_call_1", FPTR(rb_block_call_1)},
     {"rb_block_call_2", FPTR(rb_block_call_2)},
     // Phase 2: Iterator methods
@@ -2010,6 +2015,53 @@ JitImport jit_runtime_imports[] = {
     {"rb_int_times", FPTR(rb_int_times)},
     {"rb_int_upto", FPTR(rb_int_upto)},
     {"rb_int_downto", FPTR(rb_int_downto)},
+    {"rb_array_flat_map", FPTR(rb_array_flat_map)},
+    {"rb_array_each_with_object", FPTR(rb_array_each_with_object)},
+    {"rb_array_sort_by", FPTR(rb_array_sort_by)},
+    {"rb_array_min_by", FPTR(rb_array_min_by)},
+    {"rb_array_max_by", FPTR(rb_array_max_by)},
+    {"rb_array_reduce_no_init", FPTR(rb_array_reduce_no_init)},
+    {"rb_hash_each", FPTR(rb_hash_each)},
+    {"rb_hash_map", FPTR(rb_hash_map)},
+    {"rb_hash_select", FPTR(rb_hash_select)},
+    // Phase 3: Built-in method dispatchers
+    {"rb_string_method", FPTR(rb_string_method)},
+    {"rb_array_method", FPTR(rb_array_method)},
+    {"rb_hash_method", FPTR(rb_hash_method)},
+    {"rb_int_method", FPTR(rb_int_method)},
+    {"rb_float_method", FPTR(rb_float_method)},
+    // Phase 4: Exception handling
+    {"rb_raise", FPTR(rb_raise)},
+    {"rb_check_exception", FPTR(rb_check_exception)},
+    {"rb_clear_exception", FPTR(rb_clear_exception)},
+    {"rb_new_exception", FPTR(rb_new_exception)},
+    {"rb_exception_get_type", FPTR(rb_exception_get_type)},
+    {"rb_exception_get_message", FPTR(rb_exception_get_message)},
+    // Phase 4: Dynamic dispatch / introspection
+    {"rb_respond_to", FPTR(rb_respond_to)},
+    {"rb_send", FPTR(rb_send)},
+    // defined? keyword
+    {"rb_defined", FPTR(rb_defined)},
+    // File I/O
+    {"rb_file_read", FPTR(rb_file_read)},
+    {"rb_file_write", FPTR(rb_file_write)},
+    {"rb_file_exist", FPTR(rb_file_exist)},
+    // Regex
+    {"rb_regex_new", FPTR(rb_regex_new)},
+    {"rb_regex_match", FPTR(rb_regex_match)},
+    {"rb_regex_test", FPTR(rb_regex_test)},
+    {"rb_regex_scan", FPTR(rb_regex_scan)},
+    {"rb_regex_gsub", FPTR(rb_regex_gsub)},
+    {"rb_regex_sub", FPTR(rb_regex_sub)},
+    {"rb_is_regex", FPTR(rb_is_regex)},
+    {"rb_module_include", FPTR(rb_module_include)},
+    // method_missing
+    {"rb_call_method_missing", FPTR(rb_call_method_missing)},
+    // Struct
+    {"rb_struct_new", FPTR(rb_struct_new)},
+    {"rb_struct_init", FPTR(rb_struct_init)},
+    {"rb_is_struct", FPTR(rb_is_struct)},
+    {"rb_struct_members", FPTR(rb_struct_members)},
 #endif // LAMBDA_RUBY
 };
 

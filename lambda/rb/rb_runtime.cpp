@@ -8,14 +8,30 @@
 
 #include <cstring>
 #include <cstdio>
+
+// forward declaration from rb_class.cpp
+extern "C" Item rb_call_spaceship(Item left, Item right);
 #include <cstdlib>
 #include <cmath>
+#include <re2/re2.h>
+
+// push_d boxes a double into an Item via GC nursery allocation (C linkage)
+extern "C" Item push_d(double dval);
+
+// forward declarations
+extern String* heap_create_name(const char* str, size_t len);
 
 // global state
 static void* rb_input = NULL;
+static const char* rb_current_file = NULL;  // current executing file path
+static void* rb_runtime_ptr = NULL;  // Runtime pointer for require_relative
 
 #define RB_MODULE_VAR_MAX 1024
 static Item rb_module_vars[RB_MODULE_VAR_MAX];
+
+// exception state — simple flag-based model (same pattern as Python transpiler)
+static bool rb_exception_pending = false;
+static Item rb_exception_value = {0};
 
 // ============================================================================
 // Runtime initialization
@@ -27,8 +43,20 @@ extern "C" void rb_runtime_set_input(void* input_ptr) {
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root_range((uint64_t*)rb_module_vars, RB_MODULE_VAR_MAX);
+        heap_register_gc_root(&rb_exception_value.item);
         statics_rooted = true;
     }
+    // clear exception state on new script execution
+    rb_exception_pending = false;
+    rb_exception_value = (Item){.item = ITEM_NULL};
+}
+
+extern "C" void rb_runtime_set_current_file(const char* path) {
+    rb_current_file = path;
+}
+
+extern "C" void rb_runtime_set_runtime(void* runtime) {
+    rb_runtime_ptr = runtime;
 }
 
 // ============================================================================
@@ -88,21 +116,21 @@ extern "C" Item rb_to_int(Item value) {
 extern "C" Item rb_to_float(Item value) {
     TypeId type = get_type_id(value);
     switch (type) {
-        case LMD_TYPE_NULL: return (Item){.item = d2it(0.0)};
-        case LMD_TYPE_BOOL: return (Item){.item = d2it(it2b(value) ? 1.0 : 0.0)};
-        case LMD_TYPE_INT: return (Item){.item = d2it((double)it2i(value))};
-        case LMD_TYPE_INT64: return (Item){.item = d2it((double)it2i(value))};
+        case LMD_TYPE_NULL: return (Item)push_d(0.0);
+        case LMD_TYPE_BOOL: return (Item)push_d(it2b(value) ? 1.0 : 0.0);
+        case LMD_TYPE_INT: return (Item)push_d((double)it2i(value));
+        case LMD_TYPE_INT64: return (Item)push_d((double)it2i(value));
         case LMD_TYPE_FLOAT: return value;
         case LMD_TYPE_STRING: {
             String* str = it2s(value);
-            if (!str || !str->chars) return (Item){.item = d2it(0.0)};
+            if (!str || !str->chars) return (Item)push_d(0.0);
             char* end;
             double val = strtod(str->chars, &end);
-            if (end == str->chars) return (Item){.item = d2it(0.0)};
-            return (Item){.item = d2it(val)};
+            if (end == str->chars) return (Item)push_d(0.0);
+            return (Item)push_d(val);
         }
         default:
-            return (Item){.item = d2it(0.0)};
+            return (Item)push_d(0.0);
     }
 }
 
@@ -181,7 +209,7 @@ extern "C" Item rb_add(Item left, Item right) {
     // float arithmetic
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) + rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) + rb_get_number(right));
     }
     // string concatenation
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_STRING) {
@@ -216,7 +244,7 @@ extern "C" Item rb_subtract(Item left, Item right) {
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) - rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) - rb_get_number(right));
     }
     log_error("rb: TypeError: no implicit conversion in rb_subtract");
     return (Item){.item = ITEM_NULL};
@@ -230,7 +258,7 @@ extern "C" Item rb_multiply(Item left, Item right) {
     }
     if ((lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT || lt == LMD_TYPE_INT64) &&
         (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT || rt == LMD_TYPE_INT64)) {
-        return (Item){.item = d2it(rb_get_number(left) * rb_get_number(right))};
+        return (Item)push_d(rb_get_number(left) * rb_get_number(right));
     }
     // string * int → repetition
     if (lt == LMD_TYPE_STRING && rt == LMD_TYPE_INT) {
@@ -263,7 +291,7 @@ extern "C" Item rb_divide(Item left, Item right) {
             log_error("rb: ZeroDivisionError: divided by 0");
             return (Item){.item = ITEM_NULL};
         }
-        return (Item){.item = d2it(rb_get_number(left) / d)};
+        return (Item)push_d(rb_get_number(left) / d);
     }
     log_error("rb: TypeError: no implicit conversion in rb_divide");
     return (Item){.item = ITEM_NULL};
@@ -290,7 +318,7 @@ extern "C" Item rb_modulo(Item left, Item right) {
             log_error("rb: ZeroDivisionError: divided by 0");
             return (Item){.item = ITEM_NULL};
         }
-        return (Item){.item = d2it(fmod(rb_get_number(left), b))};
+        return (Item)push_d(fmod(rb_get_number(left), b));
     }
     log_error("rb: TypeError: no implicit conversion in rb_modulo");
     return (Item){.item = ITEM_NULL};
@@ -302,7 +330,7 @@ extern "C" Item rb_power(Item left, Item right) {
     if (lt == LMD_TYPE_INT && rt == LMD_TYPE_INT) {
         int64_t exp = it2i(right);
         if (exp < 0) {
-            return (Item){.item = d2it(pow((double)it2i(left), (double)exp))};
+            return (Item)push_d(pow((double)it2i(left), (double)exp));
         }
         int64_t base = it2i(left);
         int64_t result = 1;
@@ -311,14 +339,14 @@ extern "C" Item rb_power(Item left, Item right) {
         }
         return (Item){.item = i2it(result)};
     }
-    return (Item){.item = d2it(pow(rb_get_number(left), rb_get_number(right)))};
+    return (Item)push_d(pow(rb_get_number(left), rb_get_number(right)));
 }
 
 extern "C" Item rb_negate(Item value) {
     TypeId type = get_type_id(value);
     if (type == LMD_TYPE_INT) return (Item){.item = i2it(-it2i(value))};
     if (type == LMD_TYPE_INT64) return (Item){.item = i2it(-it2i(value))};
-    if (type == LMD_TYPE_FLOAT) return (Item){.item = d2it(-it2d(value))};
+    if (type == LMD_TYPE_FLOAT) return (Item)push_d(-it2d(value));
     return (Item){.item = ITEM_NULL};
 }
 
@@ -401,6 +429,13 @@ extern "C" Item rb_lt(Item left, Item right) {
         if (cmp == 0) return (Item){.item = b2it(a->len < b->len)};
         return (Item){.item = b2it(cmp < 0)};
     }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        Item cmp = rb_call_spaceship(left, right);
+        if (cmp.item != ITEM_NULL && get_type_id(cmp) == LMD_TYPE_INT) {
+            return (Item){.item = b2it(it2i(cmp) < 0)};
+        }
+    }
     return (Item){.item = ITEM_NULL};
 }
 
@@ -417,6 +452,13 @@ extern "C" Item rb_le(Item left, Item right) {
         int cmp = memcmp(a->chars, b->chars, a->len < b->len ? a->len : b->len);
         if (cmp == 0) return (Item){.item = b2it(a->len <= b->len)};
         return (Item){.item = b2it(cmp <= 0)};
+    }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        Item cmp = rb_call_spaceship(left, right);
+        if (cmp.item != ITEM_NULL && get_type_id(cmp) == LMD_TYPE_INT) {
+            return (Item){.item = b2it(it2i(cmp) <= 0)};
+        }
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -450,6 +492,10 @@ extern "C" Item rb_cmp(Item left, Item right) {
             return (Item){.item = i2it(0)};
         }
         return (Item){.item = i2it(cmp < 0 ? -1 : 1)};
+    }
+    // fallback: try custom <=> method on objects
+    if (lt == LMD_TYPE_MAP) {
+        return rb_call_spaceship(left, right);
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -732,11 +778,18 @@ extern "C" Item rb_puts(Item* args, int argc) {
         TypeId type = get_type_id(str);
         if (type == LMD_TYPE_STRING) {
             String* s = it2s(str);
-            if (s && s->chars) {
+            if (s && s->chars && s->len > 0) {
                 printf("%.*s", (int)s->len, s->chars);
+                // Ruby: puts suppresses trailing newline if string already ends with \n
+                if (s->chars[s->len - 1] != '\n') {
+                    printf("\n");
+                }
+            } else {
+                printf("\n");
             }
+        } else {
+            printf("\n");
         }
-        printf("\n");
     }
     return (Item){.item = ITEM_NULL};
 }
@@ -822,7 +875,7 @@ extern "C" Item rb_builtin_type(Item obj) {
 
 extern "C" Item rb_builtin_rand(Item max) {
     if (get_type_id(max) == LMD_TYPE_NULL) {
-        return (Item){.item = d2it((double)rand() / RAND_MAX)};
+        return (Item)push_d((double)rand() / RAND_MAX);
     }
     int64_t n = it2i(max);
     if (n <= 0) return (Item){.item = i2it(0)};
@@ -830,9 +883,89 @@ extern "C" Item rb_builtin_rand(Item max) {
 }
 
 extern "C" Item rb_builtin_require_relative(Item path) {
-    // stub — cross-language import handled at transpile time
-    (void)path;
-    return (Item){.item = ITEM_NULL};
+    String* path_str = it2s(path);
+    if (!path_str || !path_str->chars) {
+        log_error("require_relative: invalid path argument");
+        return (Item){.item = ITEM_NULL};
+    }
+
+    // resolve path relative to current file's directory
+    char resolved[1024];
+    if (rb_current_file) {
+        // get directory of current file
+        char dir[1024];
+        strncpy(dir, rb_current_file, sizeof(dir) - 1);
+        dir[sizeof(dir) - 1] = '\0';
+        char* last_sep = strrchr(dir, '/');
+        if (!last_sep) last_sep = strrchr(dir, '\\');
+        if (last_sep) {
+            *(last_sep + 1) = '\0';
+        } else {
+            dir[0] = '.';
+            dir[1] = '/';
+            dir[2] = '\0';
+        }
+        snprintf(resolved, sizeof(resolved), "%s%.*s", dir,
+            (int)path_str->len, path_str->chars);
+    } else {
+        snprintf(resolved, sizeof(resolved), "%.*s",
+            (int)path_str->len, path_str->chars);
+    }
+
+    // add .rb extension if no extension present
+    const char* ext = strrchr(resolved, '.');
+    if (!ext || (ext < strrchr(resolved, '/'))) {
+        strncat(resolved, ".rb", sizeof(resolved) - strlen(resolved) - 1);
+    }
+
+    // read the file
+    FILE* f = fopen(resolved, "r");
+    if (!f) {
+        log_error("require_relative: cannot open '%s'", resolved);
+        return (Item){.item = ITEM_NULL};
+    }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char* source = (char*)malloc(fsize + 1);
+    if (!source) {
+        fclose(f);
+        log_error("require_relative: out of memory");
+        return (Item){.item = ITEM_NULL};
+    }
+    size_t nread = fread(source, 1, fsize, f);
+    source[nread] = '\0';
+    fclose(f);
+
+    // save and restore current file context
+    const char* prev_file = rb_current_file;
+    rb_current_file = resolved;
+
+    // determine language by extension and compile+execute
+    ext = strrchr(resolved, '.');
+    Item result = (Item){.item = ITEM_NULL};
+
+    if (ext && strcmp(ext, ".rb") == 0) {
+        // Ruby file — use the transpile pipeline
+        if (rb_runtime_ptr) {
+            result = transpile_rb_to_mir((Runtime*)rb_runtime_ptr, source, resolved);
+        } else {
+            log_error("require_relative: no runtime available for .rb import");
+        }
+    } else {
+        log_error("require_relative: unsupported file type '%s'", ext ? ext : "(none)");
+    }
+
+    free(source);
+    rb_current_file = prev_file;
+    return result;
+}
+
+// defined?(var) runtime check — returns "local-variable" if non-nil, else nil
+extern "C" Item rb_defined(Item value) {
+    TypeId tid = get_type_id(value);
+    if (tid == LMD_TYPE_NULL) return (Item){.item = ITEM_NULL};
+    return (Item){.item = s2it(heap_create_name("local-variable", 14))};
 }
 
 // ============================================================================
@@ -864,4 +997,407 @@ extern "C" Item rb_to_i(Item value) {
 // Alias for rb_to_float matching Ruby convention
 extern "C" Item rb_to_f(Item value) {
     return rb_to_float(value);
+}
+
+// ============================================================================
+// Exception handling (Phase 4)
+// ============================================================================
+
+extern "C" void rb_raise(Item exception) {
+    rb_exception_pending = true;
+    rb_exception_value = exception;
+}
+
+extern "C" Item rb_check_exception(void) {
+    return (Item){.item = b2it(rb_exception_pending)};
+}
+
+extern "C" Item rb_clear_exception(void) {
+    rb_exception_pending = false;
+    Item val = rb_exception_value;
+    rb_exception_value = (Item){.item = ITEM_NULL};
+    return val;
+}
+
+extern "C" Item rb_new_exception(Item type_name, Item message) {
+    Item obj = rb_new_object();
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("type", 4))}, type_name);
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("message", 7))}, message);
+    return obj;
+}
+
+extern "C" Item rb_exception_get_type(Item exception) {
+    // if the exception is a plain string, treat it as RuntimeError message
+    TypeId tid = get_type_id(exception);
+    if (tid == LMD_TYPE_STRING) {
+        return (Item){.item = s2it(heap_create_name("RuntimeError", 12))};
+    }
+    // for exception objects created by rb_new_exception, get the "type" attribute
+    Item type_attr = rb_getattr(exception, (Item){.item = s2it(heap_create_name("type", 4))});
+    if (get_type_id(type_attr) != LMD_TYPE_NULL) {
+        return type_attr;
+    }
+    // for class instances (e.g. CustomError.new("msg")), use __rb_class__.__name__
+    Item cls = rb_getattr(exception, (Item){.item = s2it(heap_create_name("__rb_class__", 12))});
+    if (get_type_id(cls) != LMD_TYPE_NULL) {
+        Item name = rb_getattr(cls, (Item){.item = s2it(heap_create_name("__name__", 8))});
+        if (get_type_id(name) != LMD_TYPE_NULL) return name;
+    }
+    return (Item){.item = s2it(heap_create_name("RuntimeError", 12))};
+}
+
+extern "C" Item rb_exception_get_message(Item exception) {
+    TypeId tid = get_type_id(exception);
+    if (tid == LMD_TYPE_STRING) {
+        return exception;
+    }
+    Item msg = rb_getattr(exception, (Item){.item = s2it(heap_create_name("message", 7))});
+    if (get_type_id(msg) != LMD_TYPE_NULL) {
+        return msg;
+    }
+    return (Item){.item = s2it(heap_create_name("", 0))};
+}
+
+extern "C" Item rb_respond_to(Item obj, Item method_name) {
+    TypeId tid = get_type_id(obj);
+    const char* mname = NULL;
+    size_t mlen = 0;
+    TypeId mtid = get_type_id(method_name);
+    if (mtid == LMD_TYPE_STRING) {
+        String* s = it2s(method_name);
+        mname = s->chars;
+        mlen = s->len;
+    } else if (mtid == LMD_TYPE_SYMBOL) {
+        String* s = it2s(method_name);
+        mname = s->chars;
+        mlen = s->len;
+    }
+    if (!mname) return (Item){.item = b2it(false)};
+
+    // check built-in type methods
+    // strings
+    if (tid == LMD_TYPE_STRING) {
+        Item test_args[1] = {method_name};
+        Item result = rb_string_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // arrays
+    if (tid == LMD_TYPE_ARRAY) {
+        Item test_args[1] = {method_name};
+        Item result = rb_array_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // integers
+    if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64) {
+        Item test_args[1] = {method_name};
+        Item result = rb_int_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // floats
+    if (tid == LMD_TYPE_FLOAT) {
+        Item test_args[1] = {method_name};
+        Item result = rb_float_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // hashes
+    if (tid == LMD_TYPE_MAP) {
+        Item test_args[1] = {method_name};
+        Item result = rb_hash_method(obj, method_name, test_args, 0);
+        if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return (Item){.item = b2it(true)};
+    }
+    // check instance/class methods
+    if (tid == LMD_TYPE_MAP) {
+        Item lookup = rb_method_lookup(obj, method_name);
+        if (get_type_id(lookup) != LMD_TYPE_NULL) return (Item){.item = b2it(true)};
+    }
+    // common methods all objects have
+    if ((mlen == 4 && strncmp(mname, "to_s", 4) == 0) ||
+        (mlen == 5 && strncmp(mname, "class", 5) == 0) ||
+        (mlen == 4 && strncmp(mname, "nil?", 4) == 0) ||
+        (mlen == 5 && strncmp(mname, "is_a?", 5) == 0) ||
+        (mlen == 7 && strncmp(mname, "frozen?", 7) == 0)) {
+        return (Item){.item = b2it(true)};
+    }
+    return (Item){.item = b2it(false)};
+}
+
+extern "C" Item rb_send(Item obj, Item method_name, Item* args, int argc) {
+    // dynamic dispatch — try built-in dispatchers then class method lookup
+    Item result;
+    result = rb_string_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_array_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_hash_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_int_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    result = rb_float_method(obj, method_name, args, argc);
+    if (result.item != ((uint64_t)LMD_TYPE_ERROR << 56)) return result;
+    // class instance method lookup
+    Item func = rb_method_lookup(obj, method_name);
+    if (get_type_id(func) == LMD_TYPE_FUNC) {
+        return rb_block_call(func, args, argc);
+    }
+    log_error("rb: NoMethodError: undefined method '%s'",
+        get_type_id(method_name) == LMD_TYPE_STRING ? it2s(method_name)->chars : "?");
+    return (Item){.item = ITEM_NULL};
+}
+
+// ============================================================================
+// File I/O
+// ============================================================================
+extern "C" char* read_text_file(const char* filename);
+extern "C" void write_text_file(const char* filename, const char* content);
+extern "C" bool file_exists(const char* path);
+
+extern "C" Item rb_file_read(Item path) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(path);
+    if (!s || !s->chars) return (Item){.item = ITEM_NULL};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)s->len, s->chars);
+    char* content = read_text_file(filepath);
+    if (!content) return (Item){.item = ITEM_NULL};
+    size_t len = strlen(content);
+    Item result = (Item){.item = s2it(heap_create_name(content, len))};
+    free(content);
+    return result;
+}
+
+extern "C" Item rb_file_write(Item path, Item content) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    if (get_type_id(content) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* p = it2s(path);
+    String* c = it2s(content);
+    if (!p || !c) return (Item){.item = ITEM_NULL};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)p->len, p->chars);
+    char* buf = (char*)malloc(c->len + 1);
+    memcpy(buf, c->chars, c->len);
+    buf[c->len] = '\0';
+    write_text_file(filepath, buf);
+    free(buf);
+    return (Item){.item = i2it(c->len)};
+}
+
+extern "C" Item rb_file_exist(Item path) {
+    if (get_type_id(path) != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
+    String* s = it2s(path);
+    if (!s || !s->chars) return (Item){.item = b2it(BOOL_FALSE)};
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "%.*s", (int)s->len, s->chars);
+    return (Item){.item = b2it(file_exists(filepath) ? BOOL_TRUE : BOOL_FALSE)};
+}
+
+// ============================================================================
+// Regex (via RE2)
+// ============================================================================
+
+// rb_regex_new(pattern_str) — compile a regex pattern, return as Map with __regex__ marker
+extern "C" Item rb_regex_new(Item pattern) {
+    if (get_type_id(pattern) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(pattern);
+    if (!s) return (Item){.item = ITEM_NULL};
+
+    // create RE2 regex
+    std::string pat(s->chars, s->len);
+    re2::RE2::Options opts;
+    opts.set_log_errors(false);
+    re2::RE2* re = new re2::RE2(pat, opts);
+    if (!re->ok()) {
+        log_error("rb: Regexp compile error: %s", re->error().c_str());
+        delete re;
+        return (Item){.item = ITEM_NULL};
+    }
+
+    // store as Map with __regex__ = pointer (as int64), __source__ = pattern string
+    Item obj = rb_new_object();
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__regex__", 9))},
+        (Item){.item = i2it((int64_t)(uintptr_t)re)});
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__source__", 10))}, pattern);
+    rb_setattr(obj, (Item){.item = s2it(heap_create_name("__rb_regex__", 12))},
+        (Item){.item = b2it(BOOL_TRUE)});
+    return obj;
+}
+
+// helper: extract RE2 from regex map
+static re2::RE2* rb_get_re2(Item regex) {
+    Item ptr = rb_getattr(regex, (Item){.item = s2it(heap_create_name("__regex__", 9))});
+    if (get_type_id(ptr) == LMD_TYPE_INT || get_type_id(ptr) == LMD_TYPE_INT64) {
+        return (re2::RE2*)(uintptr_t)it2i(ptr);
+    }
+    return nullptr;
+}
+
+// check if item is a regex
+extern "C" int rb_is_regex(Item item) {
+    if (get_type_id(item) != LMD_TYPE_MAP) return 0;
+    Item marker = rb_getattr(item, (Item){.item = s2it(heap_create_name("__rb_regex__", 12))});
+    return (get_type_id(marker) == LMD_TYPE_BOOL && marker.item == b2it(BOOL_TRUE)) ? 1 : 0;
+}
+
+// rb_regex_match(regex_or_pattern, string) — returns matched string or nil
+extern "C" Item rb_regex_match(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return (Item){.item = ITEM_NULL};
+    String* s = it2s(str);
+    if (!s) return (Item){.item = ITEM_NULL};
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        // string pattern — compile inline
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return (Item){.item = ITEM_NULL}; }
+    } else {
+        return (Item){.item = ITEM_NULL};
+    }
+
+    re2::StringPiece input(s->chars, s->len);
+    re2::StringPiece match;
+    bool found = re->Match(input, 0, s->len, re2::RE2::UNANCHORED, &match, 1);
+    if (owns_re) delete re;
+    if (!found) return (Item){.item = ITEM_NULL};
+
+    return (Item){.item = s2it(heap_create_name(match.data(), match.size()))};
+}
+
+// rb_regex_test(regex_or_pattern, string) — returns true/false
+extern "C" Item rb_regex_test(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return (Item){.item = b2it(BOOL_FALSE)};
+    String* s = it2s(str);
+    if (!s) return (Item){.item = b2it(BOOL_FALSE)};
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return (Item){.item = b2it(BOOL_FALSE)}; }
+    } else {
+        return (Item){.item = b2it(BOOL_FALSE)};
+    }
+
+    bool found = re2::RE2::PartialMatch(re2::StringPiece(s->chars, s->len), *re);
+    if (owns_re) delete re;
+    return (Item){.item = b2it(found ? BOOL_TRUE : BOOL_FALSE)};
+}
+
+// rb_regex_scan(regex_or_pattern, string) — returns array of all matches
+extern "C" Item rb_regex_scan(Item regex, Item str) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return rb_array_new();
+    String* s = it2s(str);
+    if (!s) return rb_array_new();
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return rb_array_new(); }
+    } else {
+        return rb_array_new();
+    }
+
+    Item arr = rb_array_new();
+    re2::StringPiece input(s->chars, s->len);
+    re2::StringPiece match;
+    size_t pos = 0;
+    while (pos <= (size_t)s->len) {
+        bool found = re->Match(input, (int)pos, s->len, re2::RE2::UNANCHORED, &match, 1);
+        if (!found) break;
+        Item m = (Item){.item = s2it(heap_create_name(match.data(), match.size()))};
+        rb_array_push(arr, m);
+        size_t new_pos = (size_t)(match.data() - s->chars) + match.size();
+        if (new_pos == pos) new_pos++; // avoid infinite loop on zero-length match
+        pos = new_pos;
+    }
+    if (owns_re) delete re;
+    return arr;
+}
+
+// rb_regex_gsub(regex_or_pattern, string, replacement) — replace all matches
+extern "C" Item rb_regex_gsub(Item regex, Item str, Item replacement) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return str;
+    if (get_type_id(replacement) != LMD_TYPE_STRING) return str;
+    String* s = it2s(str);
+    String* r = it2s(replacement);
+    if (!s || !r) return str;
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return str; }
+    } else {
+        return str;
+    }
+
+    std::string result(s->chars, s->len);
+    std::string repl(r->chars, r->len);
+    re2::RE2::GlobalReplace(&result, *re, repl);
+    if (owns_re) delete re;
+    return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
+}
+
+// rb_regex_sub(regex_or_pattern, string, replacement) — replace first match
+extern "C" Item rb_regex_sub(Item regex, Item str, Item replacement) {
+    if (get_type_id(str) != LMD_TYPE_STRING) return str;
+    if (get_type_id(replacement) != LMD_TYPE_STRING) return str;
+    String* s = it2s(str);
+    String* r = it2s(replacement);
+    if (!s || !r) return str;
+
+    re2::RE2* re = nullptr;
+    bool owns_re = false;
+
+    if (rb_is_regex(regex)) {
+        re = rb_get_re2(regex);
+    } else if (get_type_id(regex) == LMD_TYPE_STRING) {
+        String* pat = it2s(regex);
+        std::string p(pat->chars, pat->len);
+        re2::RE2::Options opts;
+        opts.set_log_errors(false);
+        re = new re2::RE2(p, opts);
+        owns_re = true;
+        if (!re->ok()) { delete re; return str; }
+    } else {
+        return str;
+    }
+
+    std::string result(s->chars, s->len);
+    std::string repl(r->chars, r->len);
+    re2::RE2::Replace(&result, *re, repl);
+    if (owns_re) delete re;
+    return (Item){.item = s2it(heap_create_name(result.c_str(), result.size()))};
 }

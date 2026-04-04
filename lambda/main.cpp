@@ -37,6 +37,7 @@
 #include "../radiant/graph_theme.hpp"
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
+#include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
 #include "input/input-graph.h"
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // v16: js_check_exception for exit code
@@ -130,6 +131,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script);
 extern Element* get_html_root_element(Input* input);
 extern DomDocument* dom_document_create(Input* input);
 extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
+extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
 
 // External function declarations
 extern "C" {
@@ -1045,6 +1047,19 @@ int main(int argc, char *argv[]) {
                             if (dom_root) {
                                 dom_doc->root = dom_root;
                                 dom_doc->html_root = html_root;
+
+                                // Extract and parse CSS from <style> elements
+                                // so document.styleSheets and <style>.sheet work
+                                CssEngine* css_engine = css_engine_create(dom_doc->pool);
+                                if (css_engine) {
+                                    int sheet_count = 0;
+                                    CssStylesheet** sheets = extract_and_collect_css(
+                                        html_root, css_engine, html_file, dom_doc->pool, &sheet_count);
+                                    dom_doc->stylesheets = sheets;
+                                    dom_doc->stylesheet_count = sheet_count;
+                                    log_debug("JS document: extracted %d stylesheet(s)", sheet_count);
+                                }
+
                                 runtime.dom_doc = (void*)dom_doc;
                                 log_debug("Loaded HTML document: root=<%s>", dom_root->tag_name);
                             }
@@ -2534,6 +2549,133 @@ int main(int argc, char *argv[]) {
 
         runtime_cleanup(&runtime);
         log_finish();
+        return 0;
+    }
+
+    // Handle js-test-batch command: run multiple JS scripts in one process for test performance
+    if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
+        // batch mode always disables logging for maximum throughput
+        log_disable_all();
+
+        int batch_timeout = 10; // default per-script timeout in seconds
+        for (int i = 2; i < argc; i++) {
+            if (strncmp(argv[i], "--timeout=", 10) == 0) {
+                batch_timeout = atoi(argv[i] + 10);
+                if (batch_timeout <= 0) batch_timeout = 10;
+            }
+        }
+
+        Runtime runtime;
+        runtime_init(&runtime);
+        lambda_stack_init();
+
+        char line[4096];
+        while (fgets(line, sizeof(line), stdin)) {
+            // trim trailing whitespace
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
+                line[--len] = '\0';
+            if (len == 0) continue;
+
+            char* script_path = line;
+            if (*script_path == '\0') continue;
+
+            // support inline source protocol: source:<name>:<length>
+            // reads <length> bytes of JS source directly from stdin
+            char* js_source = NULL;
+            bool inline_source = false;
+            if (strncmp(line, "source:", 7) == 0) {
+                // parse source:<name>:<length>
+                char* name_start = line + 7;
+                char* colon = strrchr(name_start, ':');
+                if (!colon) continue;
+                *colon = '\0';
+                script_path = name_start;
+                size_t source_len = (size_t)atol(colon + 1);
+                if (source_len == 0 || source_len > 10 * 1024 * 1024) continue; // sanity check
+                js_source = (char*)malloc(source_len + 1);
+                if (!js_source) continue;
+                size_t total_read = 0;
+                while (total_read < source_len) {
+                    size_t n = fread(js_source + total_read, 1, source_len - total_read, stdin);
+                    if (n == 0) break;
+                    total_read += n;
+                }
+                js_source[total_read] = '\0';
+                // consume trailing newline after source blob
+                int ch = fgetc(stdin);
+                if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
+                inline_source = true;
+            }
+
+            printf("\x01" "BATCH_START %s\n", script_path);
+            fflush(stdout);
+
+            if (!inline_source) {
+                if (!file_exists(script_path)) {
+                    fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
+                    printf("\x01" "BATCH_END 1\n");
+                    fflush(stdout);
+                    continue;
+                }
+
+                js_source = read_text_file(script_path);
+                if (!js_source) {
+                    fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
+                    printf("\x01" "BATCH_END 1\n");
+                    fflush(stdout);
+                    continue;
+                }
+            }
+
+            int result = 0;
+#ifndef _WIN32
+            if (batch_timeout > 0) {
+                struct sigaction sa, old_sa;
+                sa.sa_handler = batch_alarm_handler;
+                sigemptyset(&sa.sa_mask);
+                sa.sa_flags = 0;
+                sigaction(SIGALRM, &sa, &old_sa);
+                batch_timeout_active = 1;
+                if (setjmp(batch_timeout_jmp) == 0) {
+                    alarm(batch_timeout);
+                    Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                    alarm(0);
+                    batch_timeout_active = 0;
+                    if (res.item == ITEM_ERROR || js_check_exception()) {
+                        result = 1;
+                    }
+                } else {
+                    // timed out
+                    fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
+                    result = 124;
+                }
+                sigaction(SIGALRM, &old_sa, NULL);
+            } else {
+                Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                if (res.item == ITEM_ERROR || js_check_exception()) {
+                    result = 1;
+                }
+            }
+#else
+            Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+            if (res.item == ITEM_ERROR || js_check_exception()) {
+                result = 1;
+            }
+#endif
+            free(js_source);
+            fflush(stdout);
+
+            printf("\x01" "BATCH_END %d\n", result);
+            fflush(stdout);
+
+            // reset all JS global state for next script
+            js_batch_reset();
+            // reset GC heap/nursery/name_pool
+            runtime_reset_heap(&runtime);
+        }
+
+        runtime_cleanup(&runtime);
         return 0;
     }
 

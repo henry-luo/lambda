@@ -64,6 +64,8 @@ RbOperator rb_operator_from_string(const char* op_str, size_t len) {
         if (strncmp(op_str, "&&", 2) == 0) return RB_OP_AND;
         if (strncmp(op_str, "||", 2) == 0) return RB_OP_OR;
         if (strncmp(op_str, "or", 2) == 0) return RB_OP_OR;
+        if (strncmp(op_str, "=~", 2) == 0) return RB_OP_MATCH;
+        if (strncmp(op_str, "!~", 2) == 0) return RB_OP_NOT_MATCH;
     } else if (len == 3) {
         if (strncmp(op_str, "<=>", 3) == 0) return RB_OP_CMP;
         if (strncmp(op_str, "===", 3) == 0) return RB_OP_CASE_EQ;
@@ -292,6 +294,148 @@ static int rb_decode_escape(const char* src, size_t src_len, char* out) {
 
 static RbAstNode* build_rb_string(RbTranspiler* tp, TSNode string_node) {
     // tree-sitter-ruby string has children: string_content, escape_sequence, interpolation
+    const char* stype = ts_node_type(string_node);
+
+    // heredoc_body: tree-sitter-ruby gives us heredoc_content / interpolation children
+    if (strcmp(stype, "heredoc_body") == 0) {
+        // first pass: check for interpolation
+        bool hd_has_interp = false;
+        uint32_t cc = ts_node_child_count(string_node);
+        for (uint32_t i = 0; i < cc; i++) {
+            TSNode child = ts_node_child(string_node, i);
+            if (strcmp(ts_node_type(child), "interpolation") == 0) {
+                hd_has_interp = true;
+                break;
+            }
+        }
+
+        if (hd_has_interp) {
+            // build string interpolation node from heredoc parts
+            RbStringInterpNode* interp = (RbStringInterpNode*)alloc_rb_ast_node(
+                tp, RB_AST_NODE_STRING_INTERPOLATION, string_node, sizeof(RbStringInterpNode));
+            interp->part_count = 0;
+            RbAstNode* prev = NULL;
+            bool first_content = true;
+            for (uint32_t i = 0; i < cc; i++) {
+                TSNode child = ts_node_child(string_node, i);
+                const char* ct = ts_node_type(child);
+                RbAstNode* part = NULL;
+                if (strcmp(ct, "heredoc_content") == 0 || strcmp(ct, "string_content") == 0) {
+                    StrView content = rb_node_source(tp, child);
+                    // strip leading newline from first heredoc content
+                    if (first_content && content.length > 0 && content.str[0] == '\n') {
+                        content.str++;
+                        content.length--;
+                    }
+                    first_content = false;
+                    if (content.length > 0) {
+                        RbLiteralNode* lit = (RbLiteralNode*)alloc_rb_ast_node(
+                            tp, RB_AST_NODE_LITERAL, child, sizeof(RbLiteralNode));
+                        lit->literal_type = RB_LITERAL_STRING;
+                        lit->value.string_value = name_pool_create_len(tp->name_pool, content.str, content.length);
+                        lit->base.type = &TYPE_STRING;
+                        part = (RbAstNode*)lit;
+                    }
+                } else if (strcmp(ct, "interpolation") == 0) {
+                    uint32_t ic = ts_node_named_child_count(child);
+                    if (ic > 0) {
+                        part = build_rb_expression(tp, ts_node_named_child(child, 0));
+                    }
+                } else if (strcmp(ct, "escape_sequence") == 0) {
+                    StrView esc_src = rb_node_source(tp, child);
+                    char decoded;
+                    if (rb_decode_escape(esc_src.str, esc_src.length, &decoded) > 0) {
+                        RbLiteralNode* lit = (RbLiteralNode*)alloc_rb_ast_node(
+                            tp, RB_AST_NODE_LITERAL, child, sizeof(RbLiteralNode));
+                        lit->literal_type = RB_LITERAL_STRING;
+                        lit->value.string_value = name_pool_create_len(tp->name_pool, &decoded, 1);
+                        lit->base.type = &TYPE_STRING;
+                        part = (RbAstNode*)lit;
+                    }
+                }
+                if (part) {
+                    interp->part_count++;
+                    if (!prev) { interp->parts = part; } else { prev->next = part; }
+                    prev = part;
+                }
+            }
+            interp->base.type = &TYPE_STRING;
+            return (RbAstNode*)interp;
+        }
+
+        // plain heredoc (no interpolation) — collect content
+        char buf[4096];
+        size_t buf_len = 0;
+        for (uint32_t i = 0; i < cc; i++) {
+            TSNode child = ts_node_child(string_node, i);
+            const char* ct = ts_node_type(child);
+            if (strcmp(ct, "heredoc_content") == 0 || strcmp(ct, "string_content") == 0) {
+                StrView content = rb_node_source(tp, child);
+                size_t copy_len = content.length;
+                if (buf_len + copy_len >= sizeof(buf)) copy_len = sizeof(buf) - buf_len - 1;
+                memcpy(buf + buf_len, content.str, copy_len);
+                buf_len += copy_len;
+            } else if (strcmp(ct, "escape_sequence") == 0) {
+                StrView esc_src = rb_node_source(tp, child);
+                char decoded;
+                if (rb_decode_escape(esc_src.str, esc_src.length, &decoded) > 0) {
+                    if (buf_len < sizeof(buf) - 1) buf[buf_len++] = decoded;
+                }
+            }
+        }
+        // strip leading newline (tree-sitter includes newline after heredoc tag)
+        if (buf_len > 0 && buf[0] == '\n') {
+            memmove(buf, buf + 1, buf_len - 1);
+            buf_len--;
+        }
+        // strip common leading whitespace for <<~ (squiggly heredoc)
+        {
+            int min_indent = 9999;
+            const char* p = buf;
+            const char* end = buf + buf_len;
+            while (p < end) {
+                const char* line_start = p;
+                while (p < end && *p != '\n') p++;
+                int line_len = (int)(p - line_start);
+                if (line_len > 0) {
+                    int indent = 0;
+                    while (indent < line_len && line_start[indent] == ' ') indent++;
+                    if (indent < line_len) {
+                        if (indent < min_indent) min_indent = indent;
+                    }
+                }
+                if (p < end) p++;
+            }
+            if (min_indent > 0 && min_indent < 9999) {
+                char buf2[4096];
+                size_t buf2_len = 0;
+                p = buf;
+                while (p < end) {
+                    const char* line_start = p;
+                    while (p < end && *p != '\n') p++;
+                    int line_len = (int)(p - line_start);
+                    int skip = (line_len > 0 && min_indent <= line_len) ? min_indent : 0;
+                    size_t copy_len = line_len - skip;
+                    if (buf2_len + copy_len + 1 < sizeof(buf2)) {
+                        memcpy(buf2 + buf2_len, line_start + skip, copy_len);
+                        buf2_len += copy_len;
+                        if (p < end) buf2[buf2_len++] = '\n';
+                    }
+                    if (p < end) p++;
+                }
+                memcpy(buf, buf2, buf2_len);
+                buf_len = buf2_len;
+            }
+        }
+        buf[buf_len] = '\0';
+        RbLiteralNode* literal = (RbLiteralNode*)alloc_rb_ast_node(
+            tp, RB_AST_NODE_LITERAL, string_node, sizeof(RbLiteralNode));
+        literal->literal_type = RB_LITERAL_STRING;
+        literal->value.string_value = name_pool_create_len(tp->name_pool, buf, buf_len);
+        literal->base.type = &TYPE_STRING;
+        return (RbAstNode*)literal;
+    }
+
     uint32_t child_count = ts_node_named_child_count(string_node);
 
     // check for interpolations
@@ -476,7 +620,8 @@ static RbAstNode* build_rb_binary_op(RbTranspiler* tp, TSNode binary_node) {
 
         // comparison operators → RbBinaryNode with COMPARISON type
         if ((op_source.length == 2 && (strncmp(op_source.str, "==", 2) == 0 || strncmp(op_source.str, "!=", 2) == 0 ||
-             strncmp(op_source.str, "<=", 2) == 0 || strncmp(op_source.str, ">=", 2) == 0)) ||
+             strncmp(op_source.str, "<=", 2) == 0 || strncmp(op_source.str, ">=", 2) == 0 ||
+             strncmp(op_source.str, "=~", 2) == 0 || strncmp(op_source.str, "!~", 2) == 0)) ||
             (op_source.length == 1 && (op_source.str[0] == '<' || op_source.str[0] == '>')) ||
             (op_source.length == 3 && (strncmp(op_source.str, "<=>", 3) == 0 || strncmp(op_source.str, "===", 3) == 0))) {
             RbBinaryNode* cmp = (RbBinaryNode*)alloc_rb_ast_node(tp, RB_AST_NODE_COMPARISON, binary_node, sizeof(RbBinaryNode));
@@ -509,6 +654,17 @@ static RbAstNode* build_rb_unary_op(RbTranspiler* tp, TSNode unary_node) {
     StrView op_source = {0};
     if (!ts_node_is_null(op_node)) {
         op_source = rb_node_source(tp, op_node);
+    }
+
+    // defined? — returns string describing operand type
+    if (op_source.length >= 7 && memcmp(op_source.str, "defined", 7) == 0) {
+        RbDefinedNode* def = (RbDefinedNode*)alloc_rb_ast_node(
+            tp, RB_AST_NODE_DEFINED, unary_node, sizeof(RbDefinedNode));
+        if (!ts_node_is_null(operand_node)) {
+            def->operand = build_rb_expression(tp, operand_node);
+        }
+        def->base.type = &TYPE_STRING;
+        return (RbAstNode*)def;
     }
 
     // 'not' and '!' — boolean unary
@@ -935,6 +1091,38 @@ RbAstNode* build_rb_expression(RbTranspiler* tp, TSNode expr_node) {
         strcmp(node_type, "chained_string") == 0 || strcmp(node_type, "heredoc_body") == 0) {
         return build_rb_string(tp, expr_node);
     }
+    if (strcmp(node_type, "heredoc_beginning") == 0) {
+        // heredoc_beginning is the RHS of an assignment; the actual content is
+        // in the next heredoc_body sibling of the containing statement.
+        // Walk up to find the parent, then look for the next heredoc_body sibling.
+        TSNode parent = ts_node_parent(expr_node);
+        if (!ts_node_is_null(parent)) {
+            TSNode grandparent = ts_node_parent(parent);
+            if (!ts_node_is_null(grandparent)) {
+                uint32_t gp_count = ts_node_named_child_count(grandparent);
+                bool found_parent = false;
+                for (uint32_t i = 0; i < gp_count; i++) {
+                    TSNode sibling = ts_node_named_child(grandparent, i);
+                    if (found_parent) {
+                        const char* st = ts_node_type(sibling);
+                        if (strcmp(st, "heredoc_body") == 0) {
+                            return build_rb_string(tp, sibling);
+                        }
+                    }
+                    if (ts_node_eq(sibling, parent)) {
+                        found_parent = true;
+                    }
+                }
+            }
+        }
+        // fallback: return empty string
+        RbLiteralNode* lit = (RbLiteralNode*)alloc_rb_ast_node(
+            tp, RB_AST_NODE_LITERAL, expr_node, sizeof(RbLiteralNode));
+        lit->literal_type = RB_LITERAL_STRING;
+        lit->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
+        lit->base.type = &TYPE_STRING;
+        return (RbAstNode*)lit;
+    }
     if (strcmp(node_type, "true") == 0) {
         return build_rb_boolean(tp, expr_node, true);
     }
@@ -949,12 +1137,75 @@ RbAstNode* build_rb_expression(RbTranspiler* tp, TSNode expr_node) {
         return build_rb_symbol(tp, expr_node);
     }
 
+    // regex literal: /pattern/
+    if (strcmp(node_type, "regex") == 0) {
+        // collect the pattern from string_content children inside _literal_contents
+        char pattern_buf[1024];
+        int pattern_len = 0;
+        uint32_t child_count = ts_node_child_count(expr_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(expr_node, i);
+            const char* ct = ts_node_type(child);
+            if (strcmp(ct, "string_content") == 0 || strcmp(ct, "escape_sequence") == 0) {
+                StrView sv = rb_node_source(tp, child);
+                int copy_len = (int)sv.length;
+                if (pattern_len + copy_len < (int)sizeof(pattern_buf)) {
+                    memcpy(pattern_buf + pattern_len, sv.str, copy_len);
+                    pattern_len += copy_len;
+                }
+            }
+        }
+        pattern_buf[pattern_len] = '\0';
+
+        RbLiteralNode* lit = (RbLiteralNode*)alloc_rb_ast_node(
+            tp, RB_AST_NODE_LITERAL, expr_node, sizeof(RbLiteralNode));
+        lit->literal_type = RB_LITERAL_REGEX;
+        lit->value.string_value = name_pool_create_len(tp->name_pool, pattern_buf, pattern_len);
+        lit->base.type = &TYPE_ANY;
+        return (RbAstNode*)lit;
+    }
+
     // operators
     if (strcmp(node_type, "binary") == 0) {
         return build_rb_binary_op(tp, expr_node);
     }
     if (strcmp(node_type, "unary") == 0) {
         return build_rb_unary_op(tp, expr_node);
+    }
+    // defined?(expr) and not(expr) — parenthesized_unary
+    if (strcmp(node_type, "parenthesized_unary") == 0) {
+        TSNode op_node = ts_node_child_by_field_name(expr_node, "operator", 8);
+        TSNode operand_node = ts_node_child_by_field_name(expr_node, "operand", 7);
+        if (!ts_node_is_null(op_node)) {
+            StrView op_src = rb_node_source(tp, op_node);
+            if (op_src.length >= 7 && memcmp(op_src.str, "defined", 7) == 0) {
+                RbDefinedNode* def = (RbDefinedNode*)alloc_rb_ast_node(
+                    tp, RB_AST_NODE_DEFINED, expr_node, sizeof(RbDefinedNode));
+                // operand is parenthesized_statements — extract inner expression
+                if (!ts_node_is_null(operand_node)) {
+                    uint32_t ic = ts_node_named_child_count(operand_node);
+                    if (ic > 0) {
+                        def->operand = build_rb_expression(tp, ts_node_named_child(operand_node, 0));
+                    }
+                }
+                def->base.type = &TYPE_STRING;
+                return (RbAstNode*)def;
+            }
+            // 'not' operator
+            if (op_src.length == 3 && memcmp(op_src.str, "not", 3) == 0) {
+                RbUnaryNode* un = (RbUnaryNode*)alloc_rb_ast_node(
+                    tp, RB_AST_NODE_UNARY_OP, expr_node, sizeof(RbUnaryNode));
+                un->op = RB_OP_NOT;
+                if (!ts_node_is_null(operand_node)) {
+                    uint32_t ic = ts_node_named_child_count(operand_node);
+                    if (ic > 0) {
+                        un->operand = build_rb_expression(tp, ts_node_named_child(operand_node, 0));
+                    }
+                }
+                un->base.type = &TYPE_BOOL;
+                return (RbAstNode*)un;
+            }
+        }
     }
 
     // call, attribute, subscript
@@ -1092,6 +1343,22 @@ RbAstNode* build_rb_expression(RbTranspiler* tp, TSNode expr_node) {
     }
 
     log_debug("rb: unhandled expression type: %s", node_type);
+
+    // control flow keywords that can appear in expression position (e.g., modifier-if)
+    if (strcmp(node_type, "retry") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_RETRY, expr_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "break") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_BREAK, expr_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "next") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_NEXT, expr_node, sizeof(RbAstNode));
+    }
+    // begin/rescue/end as expression (e.g., x = begin...rescue...end)
+    if (strcmp(node_type, "begin") == 0) {
+        return build_rb_begin_rescue(tp, expr_node);
+    }
+
     return NULL;
 }
 
@@ -1657,7 +1924,8 @@ static RbAstNode* build_rb_body_statements(RbTranspiler* tp, TSNode body_node) {
 
         // skip certain structural nodes that appear inside body_statement
         if (strcmp(child_type, "rescue") == 0 || strcmp(child_type, "ensure") == 0 ||
-            strcmp(child_type, "else") == 0 || strcmp(child_type, "empty_statement") == 0) {
+            strcmp(child_type, "else") == 0 || strcmp(child_type, "empty_statement") == 0 ||
+            strcmp(child_type, "heredoc_body") == 0) {
             continue;
         }
 
@@ -1761,6 +2029,9 @@ RbAstNode* build_rb_statement(RbTranspiler* tp, TSNode stmt_node) {
     }
     if (strcmp(node_type, "next") == 0) {
         return alloc_rb_ast_node(tp, RB_AST_NODE_NEXT, stmt_node, sizeof(RbAstNode));
+    }
+    if (strcmp(node_type, "retry") == 0) {
+        return alloc_rb_ast_node(tp, RB_AST_NODE_RETRY, stmt_node, sizeof(RbAstNode));
     }
     if (strcmp(node_type, "yield") == 0) {
         return build_rb_expression(tp, stmt_node);

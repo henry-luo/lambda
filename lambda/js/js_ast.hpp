@@ -104,6 +104,7 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_CLASS_EXPRESSION,
     JS_AST_NODE_METHOD_DEFINITION,
     JS_AST_NODE_FIELD_DEFINITION,
+    JS_AST_NODE_STATIC_BLOCK,
     JS_AST_NODE_TRY_STATEMENT,
     JS_AST_NODE_CATCH_CLAUSE,
     JS_AST_NODE_FINALLY_CLAUSE,
@@ -447,11 +448,18 @@ typedef struct JsMethodDefinitionNode {
 // JavaScript static field definition node (class body field)
 typedef struct JsFieldDefinitionNode {
     JsAstNode base;
-    JsAstNode* key;                 // Field name (identifier)
+    JsAstNode* key;                 // Field name (identifier or computed expression)
     JsAstNode* value;               // Initializer expression (optional)
     bool is_static;                 // Whether it's a static field
     bool is_private;                // Whether it's a private field (#field)
+    bool computed;                  // Whether key is a computed property [expr]
 } JsFieldDefinitionNode;
+
+// JavaScript class static block node: static { ... }
+typedef struct JsStaticBlockNode {
+    JsAstNode base;
+    JsAstNode* body;                // Block statement body
+} JsStaticBlockNode;
 
 // JavaScript try statement node
 typedef struct JsTryNode {
