@@ -542,19 +542,24 @@ static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
 static const char* serialize_declaration_value(CssDeclaration* decl, Pool* pool) {
     if (!decl || !pool) return "";
 
-    // prefer raw source text for faithful serialization (preserves whitespace around {} blocks etc.)
+    // prefer parsed value (escapes resolved) over raw source text
+    if (decl->value) {
+        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (fmt) {
+            css_format_value(fmt, decl->value);
+            String* result = stringbuf_to_string(fmt->output);
+            if (result && result->chars && result->chars[0] != '\0') {
+                return result->chars;
+            }
+        }
+    }
+
+    // fall back to raw source text
     if (decl->value_text && decl->value_text_len > 0) {
         return decl->value_text;
     }
 
-    if (!decl->value) return "";
-
-    CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
-    if (!fmt) return "";
-
-    css_format_value(fmt, decl->value);
-    String* result = stringbuf_to_string(fmt->output);
-    return (result && result->chars) ? result->chars : "";
+    return "";
 }
 
 // =============================================================================
@@ -818,6 +823,16 @@ extern "C" Item js_cssom_rule_set_property(Item rule_item, Item prop_name, Item 
         if (!new_group || new_group->selector_count == 0) {
             log_debug("js_cssom_rule_set_property: failed to parse selectorText '%s'", new_text);
             return value;  // silently ignore
+        }
+
+        // reject if there are unconsumed tokens (e.g. non-printable code points)
+        while (pos < (int)token_count && (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
+               tokens[pos].type == CSS_TOKEN_EOF || tokens[pos].type == CSS_TOKEN_COMMENT)) {
+            pos++;
+        }
+        if (pos < (int)token_count) {
+            log_debug("js_cssom_rule_set_property: leftover tokens in selectorText '%s'", new_text);
+            return value;  // silently ignore - invalid selector
         }
 
         // replace the rule's selectors

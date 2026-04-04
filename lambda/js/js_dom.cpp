@@ -171,6 +171,17 @@ static Item css_value_to_string_item(CssValue* val) {
 
     switch (val->type) {
         case CSS_VALUE_TYPE_KEYWORD: {
+            // resolve named color keywords to rgb() for getComputedStyle
+            uint8_t r, g, b, a;
+            if (css_named_color_to_rgba(val->data.keyword, &r, &g, &b, &a)) {
+                char buf[64];
+                if (a < 255) {
+                    snprintf(buf, sizeof(buf), "rgba(%d, %d, %d, %g)", r, g, b, a / 255.0);
+                } else {
+                    snprintf(buf, sizeof(buf), "rgb(%d, %d, %d)", r, g, b);
+                }
+                return (Item){.item = s2it(heap_create_name(buf))};
+            }
             const CssEnumInfo* info = css_enum_info(val->data.keyword);
             if (info && info->name) {
                 return (Item){.item = s2it(heap_create_name(info->name))};
@@ -755,10 +766,8 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             if (decl && (decl->value || decl->value_text)) {
                 const char* val = nullptr;
 
-                // prefer raw value text for faithful serialization
-                if (decl->value_text && decl->value_text_len > 0) {
-                    val = decl->value_text;
-                } else if (decl->value) {
+                // prefer parsed value (handles escape resolution) over raw source text
+                if (decl->value) {
                     Pool* pool = elem->doc ? elem->doc->pool : nullptr;
                     if (!pool) return (Item){.item = s2it(heap_create_name(""))};
                     CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
@@ -766,6 +775,8 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
                     css_format_value(fmt, decl->value);
                     String* result = stringbuf_to_string(fmt->output);
                     val = (result && result->chars) ? result->chars : "";
+                } else if (decl->value_text && decl->value_text_len > 0) {
+                    val = decl->value_text;
                 }
                 if (!val) val = "";
                 // trim leading/trailing whitespace per CSS spec
@@ -840,6 +851,23 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
 // ============================================================================
 // On-demand CSS selector matching for getComputedStyle
 // ============================================================================
+
+// check if a shorthand property covers the requested longhand
+static bool css_shorthand_covers_longhand(CssPropertyId shorthand_id, CssPropertyId longhand_id) {
+    switch (shorthand_id) {
+        case CSS_PROPERTY_BACKGROUND:
+            return longhand_id == CSS_PROPERTY_BACKGROUND_COLOR ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_IMAGE ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_POSITION ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_SIZE ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_REPEAT ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_ATTACHMENT ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_ORIGIN ||
+                   longhand_id == CSS_PROPERTY_BACKGROUND_CLIP;
+        default:
+            return false;
+    }
+}
 
 /**
  * Match an element against all parsed stylesheets to find a specific property.
@@ -918,7 +946,9 @@ static CssDeclaration* js_match_element_property(DomElement* elem, CssPropertyId
             // find the requested property in this rule's declarations
             for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
                 CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                if (!decl || decl->property_id != prop_id) continue;
+                if (!decl) continue;
+                if (decl->property_id != prop_id &&
+                    !css_shorthand_covers_longhand(decl->property_id, prop_id)) continue;
 
                 // compare specificity — take highest
                 if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
@@ -1277,7 +1307,13 @@ extern "C" Item js_document_method(Item method_name, Item* args, int argc) {
 
         Pool* pool = doc->pool;
         CssSelector* selector = parse_css_selector(sel_text, pool);
-        if (!selector) return ItemNull;
+        if (!selector) {
+            // per DOM spec, throw SyntaxError for invalid selectors
+            Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
+            Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return ItemNull;
+        }
 
         SelectorMatcher* matcher = selector_matcher_create(pool);
         DomElement* found = selector_matcher_find_first(matcher, selector, root);
@@ -2195,6 +2231,21 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
     char style_decl[256];
     snprintf(style_decl, sizeof(style_decl), "%s: %s", css_prop, val_str);
 
+    // validate: reject values with invalid non-ASCII codepoints (CSS Syntax §4.2)
+    for (size_t i = 0; val_str[i]; ) {
+        unsigned char b = (unsigned char)val_str[i];
+        if (b < 0x80) {
+            i++;
+        } else {
+            UnicodeChar uc = css_parse_unicode_char(val_str + i, strlen(val_str + i));
+            if (uc.byte_length == 0 || !css_is_name_char_unicode(uc.codepoint)) {
+                log_debug("js_dom_set_style_property: rejecting value with invalid codepoint U+%04X at byte offset %zu (byte=0x%02X)", uc.codepoint, i, b);
+                return value;  // silently reject per CSSOM spec
+            }
+            i += uc.byte_length;
+        }
+    }
+
     // apply as inline style (highest cascade priority)
     dom_element_apply_inline_style(elem, style_decl);
     elem->styles_resolved = false;  // mark for re-cascading
@@ -2321,6 +2372,11 @@ extern "C" Item js_dom_get_style_property(Item elem_item, Item prop_name) {
         case CSS_VALUE_TYPE_STRING:
             if (val->data.string) {
                 return (Item){.item = s2it(heap_create_name(val->data.string))};
+            }
+            break;
+        case CSS_VALUE_TYPE_CUSTOM:
+            if (val->data.custom_property.name) {
+                return (Item){.item = s2it(heap_create_name(val->data.custom_property.name))};
             }
             break;
         default:
