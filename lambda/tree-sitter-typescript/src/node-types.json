@@ -5673,8 +5673,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "const",
@@ -5758,8 +5757,7 @@
   },
   {
     "type": "html_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "if",
@@ -5827,11 +5825,11 @@
   },
   {
     "type": "number",
-    "named": false
+    "named": true
   },
   {
     "type": "number",
-    "named": true
+    "named": false
   },
   {
     "type": "object",

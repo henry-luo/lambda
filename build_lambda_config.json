@@ -31,6 +31,7 @@
     "source_files": [
         "lib/sqlite3.c"
     ],
+    "sqlite_version": "3.45.3",
     "exclude_source_files": [
         "lambda/schema_builder.cpp",
         "radiant/radiant.cpp",
@@ -68,6 +69,7 @@
     "libraries": [
         {
             "name": "curl",
+            "version": "8.10.1",
             "description": "libcurl HTTP client library (built with mbedTLS)",
             "include": "mac-deps/curl-8.10.1/include",
             "lib": "mac-deps/curl-8.10.1/lib/libcurl.a",
@@ -75,48 +77,56 @@
         },
         {
             "name": "tree-sitter",
+            "version": "0.25.0",
             "include": "lambda/tree-sitter/lib/include",
             "lib": "lambda/tree-sitter/libtree-sitter.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-lambda",
+            "version": "0.1.0",
             "include": "lambda/tree-sitter-lambda/bindings/c",
             "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-typescript",
+            "version": "0.23.2-fork",
             "include": "lambda/tree-sitter-typescript/bindings/c",
             "lib": "lambda/tree-sitter-typescript/libtree-sitter-typescript.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-javascript",
+            "version": "0.23.1",
             "include": "lambda/tree-sitter-javascript/bindings/c",
             "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-python",
+            "version": "0.25.0",
             "include": "lambda/tree-sitter-python/bindings/c",
             "lib": "lambda/tree-sitter-python/libtree-sitter-python.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-ruby",
+            "version": "0.23.1",
             "include": "lambda/tree-sitter-ruby/bindings/c",
             "lib": "lambda/tree-sitter-ruby/libtree-sitter-ruby.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-bash",
+            "version": "0.25.1",
             "include": "lambda/tree-sitter-bash/bindings/c",
             "lib": "lambda/tree-sitter-bash/libtree-sitter-bash.a",
             "link": "static"
         },
         {
             "name": "tree-sitter-latex",
+            "version": "0.6.0",
             "description": "Tree-sitter LaTeX parser library",
             "include": "lambda/tree-sitter-latex/bindings/swift/TreeSitterLatex",
             "lib": "lambda/tree-sitter-latex/libtree-sitter-latex.a",
@@ -124,6 +134,7 @@
         },
         {
             "name": "tree-sitter-latex-math",
+            "version": "0.1.0",
             "description": "Tree-sitter LaTeX math mode parser library",
             "include": "lambda/tree-sitter-latex-math/bindings/c",
             "lib": "lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a",
@@ -131,24 +142,28 @@
         },
         {
             "name": "mir",
+            "version": "1.0.0",
             "include": "mac-deps/mir",
             "lib": "mac-deps/mir/libmir.a",
             "link": "static"
         },
         {
             "name": "mpdec",
+            "version": "4.0.1",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libmpdec.a",
             "link": "static"
         },
         {
             "name": "utf8proc",
+            "version": "2.10.0",
             "include": "build_temp/utf8proc",
             "lib": "build_temp/utf8proc/build/libutf8proc.a",
             "link": "static"
         },
         {
             "name": "mbedtls",
+            "version": "3.6.4",
             "description": "mbedTLS - SSL/TLS library",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libmbedtls.a",
@@ -156,6 +171,7 @@
         },
         {
             "name": "mbedx509",
+            "version": "3.6.4",
             "description": "mbedTLS - X.509 certificate parsing",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libmbedx509.a",
@@ -163,6 +179,7 @@
         },
         {
             "name": "mbedcrypto",
+            "version": "3.6.4",
             "description": "mbedTLS - Cryptographic primitives",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libmbedcrypto.a",
@@ -170,6 +187,7 @@
         },
         {
             "name": "libuv",
+            "version": "1.52.1",
             "description": "Cross-platform async I/O library (replaces libevent)",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libuv.a",
@@ -177,6 +195,7 @@
         },
         {
             "name": "nghttp2",
+            "version": "1.67.0",
             "description": "HTTP/2 library required by curl",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libnghttp2.a",
@@ -184,29 +203,34 @@
         },
         {
             "name": "zlib",
+            "version": "1.3.1",
             "description": "Compression library",
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
         },
         {
             "name": "bzip2",
+            "version": "1.0.8",
             "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
             "link": "static"
         },
         {
             "name": "freetype",
+            "version": "2.14.2",
             "include": "/opt/homebrew/opt/freetype/include/freetype2",
             "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
             "link": "static"
         },
         {
             "name": "brotlidec",
+            "version": "1.2.0",
             "description": "Brotli decompression (WOFF2 dependency, built from source)",
             "lib": "mac-deps/brotli/out/libbrotlidec.a",
             "link": "static"
         },
         {
             "name": "brotlicommon",
+            "version": "1.2.0",
             "description": "Brotli common (WOFF2 dependency, built from source)",
             "lib": "mac-deps/brotli/out/libbrotlicommon.a",
             "link": "static"
@@ -221,27 +245,32 @@
         },
         {
             "name": "glfw",
+            "version": "3.4",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libglfw3.a",
             "link": "static"
         },
         {
             "name": "png",
+            "version": "1.6.55",
             "lib": "/opt/homebrew/lib/libpng.a",
             "link": "static"
         },
         {
             "name": "turbojpeg",
+            "version": "3.1.2",
             "lib": "/opt/homebrew/lib/libturbojpeg.a",
             "link": "static"
         },
         {
             "name": "gif",
+            "version": "5.2.2",
             "lib": "/opt/homebrew/lib/libgif.a",
             "link": "static"
         },
         {
             "name": "re2",
+            "version": "2023-03-01",
             "description": "RE2 regular expression library for string pattern matching",
             "include": "build_temp/re2-noabsl",
             "lib": "build_temp/re2-noabsl/cmake_build/libre2.a",
@@ -251,12 +280,14 @@
     "dev_libraries": [
         {
             "name": "gtest",
+            "version": "1.17.0",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libgtest.a",
             "link": "static"
         },
         {
             "name": "gtest_main",
+            "version": "1.17.0",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libgtest_main.a",
             "link": "static"

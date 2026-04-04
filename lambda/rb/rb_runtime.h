@@ -153,9 +153,32 @@ Item rb_respond_to(Item obj, Item method_name);
 Item rb_send(Item obj, Item method_name, Item* args, int argc);
 
 // ============================================================================
+// File I/O
+// ============================================================================
+Item rb_file_read(Item path);
+Item rb_file_write(Item path, Item content);
+Item rb_file_exist(Item path);
+
+// ============================================================================
+// Regex (via RE2)
+// ============================================================================
+Item rb_regex_new(Item pattern);
+Item rb_regex_match(Item regex, Item str);
+Item rb_regex_test(Item regex, Item str);
+Item rb_regex_scan(Item regex, Item str);
+Item rb_regex_gsub(Item regex, Item str, Item replacement);
+Item rb_regex_sub(Item regex, Item str, Item replacement);
+int rb_is_regex(Item item);
+
+// ============================================================================
 // Runtime initialization
 // ============================================================================
 void rb_runtime_set_input(void* input_ptr);
+
+// ============================================================================
+// defined? keyword
+// ============================================================================
+Item rb_defined(Item value);
 
 // ============================================================================
 // Class system (Phase 2)
@@ -173,11 +196,13 @@ Item rb_super_lookup(Item cls, Item method_name);
 void rb_attr_reader(Item cls, Item attr_name);
 void rb_attr_writer(Item cls, Item attr_name);
 void rb_attr_accessor(Item cls, Item attr_name);
+void rb_module_include(Item cls, Item module);
 
 // ============================================================================
 // Block / Proc / Lambda calling
 // ============================================================================
 Item rb_block_call(Item block, Item* args, int argc);
+Item rb_block_call_0(Item block);
 Item rb_block_call_1(Item block, Item arg);
 Item rb_block_call_2(Item block, Item arg1, Item arg2);
 

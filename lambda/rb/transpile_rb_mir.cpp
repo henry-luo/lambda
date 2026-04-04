@@ -198,6 +198,7 @@ static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt);
 static MIR_reg_t rm_transpile_if_expr(RbMirTranspiler* mt, RbIfNode* ifs);
 static void rm_transpile_multi_assignment(RbMirTranspiler* mt, RbMultiAssignmentNode* ma);
 static void rm_transpile_class_def(RbMirTranspiler* mt, RbClassDefNode* cls);
+static void rm_transpile_module_def(RbMirTranspiler* mt, RbModuleDefNode* mod);
 static void rm_transpile_begin_rescue(RbMirTranspiler* mt, RbBeginRescueNode* br);
 static void rm_emit_exc_check(RbMirTranspiler* mt, MIR_label_t handler_label);
 static MIR_reg_t rm_transpile_block_as_func(RbMirTranspiler* mt, RbBlockNode* block);
@@ -479,6 +480,8 @@ static const char* rm_comparison_func(RbOperator op) {
         case RB_OP_GE:      return "rb_ge";
         case RB_OP_CMP:     return "rb_cmp";
         case RB_OP_CASE_EQ: return "rb_case_eq";
+        case RB_OP_MATCH:   return "rb_regex_test";
+        case RB_OP_NOT_MATCH: return "rb_regex_test";
         default:            return "rb_eq";
     }
 }
@@ -512,6 +515,14 @@ static MIR_reg_t rm_transpile_literal(RbMirTranspiler* mt, RbLiteralNode* lit) {
         case RB_LITERAL_BOOLEAN:
             return rm_emit_bool(mt, lit->value.boolean_value);
         case RB_LITERAL_NIL:
+            return rm_emit_null(mt);
+        case RB_LITERAL_REGEX:
+            if (lit->value.string_value) {
+                MIR_reg_t pat = rm_box_string_literal(mt, lit->value.string_value->chars,
+                    (int)lit->value.string_value->len);
+                return rm_call_1(mt, "rb_regex_new", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, pat));
+            }
             return rm_emit_null(mt);
     }
     return rm_emit_null(mt);
@@ -576,6 +587,36 @@ static MIR_reg_t rm_transpile_binary(RbMirTranspiler* mt, RbBinaryNode* bin) {
 static MIR_reg_t rm_transpile_comparison(RbMirTranspiler* mt, RbBinaryNode* cmp) {
     MIR_reg_t left = rm_transpile_expression(mt, cmp->left);
     MIR_reg_t right = rm_transpile_expression(mt, cmp->right);
+
+    // =~ : call rb_regex_test(right_regex, left_string)
+    if (cmp->op == RB_OP_MATCH) {
+        return rm_call_2(mt, "rb_regex_test", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left));
+    }
+    // !~ : negate rb_regex_test result
+    if (cmp->op == RB_OP_NOT_MATCH) {
+        MIR_reg_t match_result = rm_call_2(mt, "rb_regex_test", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, left));
+        // negate: if truthy → false, else → true
+        MIR_reg_t truthy = rm_call_1(mt, "rb_is_truthy", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, match_result));
+        MIR_reg_t result = rm_new_reg(mt, "nm", MIR_T_I64);
+        MIR_label_t l_false = rm_new_label(mt);
+        MIR_label_t l_end = rm_new_label(mt);
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_false),
+            MIR_new_reg_op(mt->ctx, truthy)));
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_TRUE_VAL)));
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
+        rm_emit_label(mt, l_false);
+        rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_FALSE_VAL)));
+        rm_emit_label(mt, l_end);
+        return result;
+    }
+
     const char* fn = rm_comparison_func(cmp->op);
     return rm_call_2(mt, fn, MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
@@ -836,6 +877,40 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
                 return rm_call_1(mt, "rb_builtin_type", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
             }
+
+            // proc.call(args...) / lambda.call(args...)
+            if (mlen == 4 && strncmp(mname, "call", 4) == 0) {
+                if (call->arg_count == 0) {
+                    return rm_call_1(mt, "rb_block_call_0", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
+                } else if (call->arg_count == 1) {
+                    MIR_reg_t a0 = rm_transpile_expression(mt, call->args);
+                    return rm_call_2(mt, "rb_block_call_1", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a0));
+                } else if (call->arg_count == 2) {
+                    MIR_reg_t a0 = rm_transpile_expression(mt, call->args);
+                    MIR_reg_t a1 = rm_transpile_expression(mt, call->args->next);
+                    return rm_call_3(mt, "rb_block_call_2", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a1));
+                } else if (call->arg_count == 3) {
+                    MIR_reg_t a0 = rm_transpile_expression(mt, call->args);
+                    MIR_reg_t a1 = rm_transpile_expression(mt, call->args->next);
+                    MIR_reg_t a2 = rm_transpile_expression(mt, call->args->next->next);
+                    return rm_call_4(mt, "rb_block_call_3", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a0),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a1),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, a2));
+                }
+                // fallback: call with first arg only
+                MIR_reg_t a0 = rm_transpile_expression(mt, call->args);
+                return rm_call_2(mt, "rb_block_call_1", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, recv),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, a0));
+            }
         }
 
         // Phase 2: iterator methods with blocks
@@ -955,7 +1030,44 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
             const char* mname = call->method_name->chars;
             int mlen = (int)call->method_name->len;
 
+            // File class methods: File.read, File.write, File.exist?
+            if (call->receiver->node_type == RB_AST_NODE_CONST) {
+                RbConstNode* cn = (RbConstNode*)call->receiver;
+                if (cn->name->len == 4 && strncmp(cn->name->chars, "File", 4) == 0) {
+                    if (mlen == 4 && strncmp(mname, "read", 4) == 0 && call->arg_count >= 1) {
+                        MIR_reg_t path_arg = rm_transpile_expression(mt, call->args);
+                        return rm_call_1(mt, "rb_file_read", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg));
+                    }
+                    if (mlen == 5 && strncmp(mname, "write", 5) == 0 && call->arg_count >= 2) {
+                        MIR_reg_t path_arg = rm_transpile_expression(mt, call->args);
+                        MIR_reg_t content_arg = rm_transpile_expression(mt, call->args->next);
+                        return rm_call_2(mt, "rb_file_write", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, content_arg));
+                    }
+                    if (((mlen == 6 && strncmp(mname, "exist?", 6) == 0) ||
+                         (mlen == 7 && strncmp(mname, "exists?", 7) == 0)) && call->arg_count >= 1) {
+                        MIR_reg_t path_arg = rm_transpile_expression(mt, call->args);
+                        return rm_call_1(mt, "rb_file_exist", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, path_arg));
+                    }
+                }
+            }
+
             if (mlen == 3 && strncmp(mname, "new", 3) == 0) {
+                // Proc.new { |x|... } — return block as function value
+                if (call->receiver->node_type == RB_AST_NODE_CONST) {
+                    RbConstNode* cn = (RbConstNode*)call->receiver;
+                    if ((cn->name->len == 4 && strncmp(cn->name->chars, "Proc", 4) == 0) ||
+                        (cn->name->len == 6 && strncmp(cn->name->chars, "Lambda", 6) == 0)) {
+                        if (call->block && call->block->node_type == RB_AST_NODE_BLOCK) {
+                            return rm_transpile_block_as_func(mt, (RbBlockNode*)call->block);
+                        }
+                        return rm_emit_null(mt);
+                    }
+                }
+
                 // recv is the class, create instance + call initialize
                 MIR_reg_t inst = rm_call_1(mt, "rb_class_new_instance", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, recv));
@@ -1288,12 +1400,22 @@ static MIR_reg_t rm_transpile_call(RbMirTranspiler* mt, RbCallNode* call) {
 
         // Phase 4: respond_to?
         if (flen == 11 && strncmp(fname, "respond_to?", 11) == 0 && call->arg_count >= 1) {
+
             MIR_reg_t arg = rm_transpile_expression(mt, call->args);
             // if called without receiver, check self
             MIR_reg_t self_r = mt->in_method ? mt->self_reg : rm_emit_null(mt);
             return rm_call_2(mt, "rb_respond_to", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, self_r),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+        }
+
+        // lambda { |x| ... } or proc { |x| ... } — return block as function value
+        if ((flen == 6 && strncmp(fname, "lambda", 6) == 0) ||
+            (flen == 4 && strncmp(fname, "proc", 4) == 0)) {
+            if (call->block && call->block->node_type == RB_AST_NODE_BLOCK) {
+                return rm_transpile_block_as_func(mt, (RbBlockNode*)call->block);
+            }
+            return rm_emit_null(mt);
         }
 
         // check for user-defined function
@@ -1580,6 +1702,51 @@ static MIR_reg_t rm_transpile_expression(RbMirTranspiler* mt, RbAstNode* expr) {
             return rm_call_2(mt, "rb_instance_getattr", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg));
+        }
+        case RB_AST_NODE_DEFINED: {
+            // defined?(expr) — compile-time analysis of operand type
+            RbDefinedNode* def = (RbDefinedNode*)expr;
+            if (!def->operand) return rm_emit_null(mt);
+            switch (def->operand->node_type) {
+                case RB_AST_NODE_IDENTIFIER: {
+                    // check if variable is defined at compile-time
+                    RbIdentifierNode* id = (RbIdentifierNode*)def->operand;
+                    char vname[128];
+                    snprintf(vname, sizeof(vname), "_rb_%.*s", (int)id->name->len, id->name->chars);
+                    RbMirVarEntry* var = rm_find_var(mt, vname);
+                    if (var) {
+                        // variable exists — but might be nil at runtime, emit runtime check
+                        return rm_call_1(mt, "rb_defined", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, var->reg));
+                    }
+                    return rm_emit_null(mt);
+                }
+                case RB_AST_NODE_IVAR:
+                    return rm_box_string_literal(mt, "instance-variable", 17);
+                case RB_AST_NODE_GVAR:
+                    return rm_box_string_literal(mt, "global-variable", 15);
+                case RB_AST_NODE_CONST:
+                    return rm_box_string_literal(mt, "constant", 8);
+                case RB_AST_NODE_LITERAL: {
+                    RbLiteralNode* lit = (RbLiteralNode*)def->operand;
+                    switch (lit->literal_type) {
+                        case RB_LITERAL_NIL: return rm_box_string_literal(mt, "expression", 10);
+                        case RB_LITERAL_BOOLEAN:
+                            return rm_box_string_literal(mt,
+                                lit->value.boolean_value ? "true" : "false",
+                                lit->value.boolean_value ? 4 : 5);
+                        default: return rm_box_string_literal(mt, "expression", 10);
+                    }
+                }
+                case RB_AST_NODE_CALL:
+                    return rm_box_string_literal(mt, "method", 6);
+                case RB_AST_NODE_SELF:
+                    return rm_box_string_literal(mt, "self", 4);
+                case RB_AST_NODE_YIELD:
+                    return rm_box_string_literal(mt, "yield", 5);
+                default:
+                    return rm_box_string_literal(mt, "expression", 10);
+            }
         }
         default:
             log_debug("rb-mir: unhandled expression type: %d", expr->node_type);
@@ -2238,7 +2405,8 @@ static void rm_transpile_statement(RbMirTranspiler* mt, RbAstNode* stmt) {
             rm_transpile_class_def(mt, (RbClassDefNode*)stmt);
             break;
         case RB_AST_NODE_MODULE_DEF:
-            // module support: treat like class for now
+            // module support: compile as a class to hold methods
+            rm_transpile_module_def(mt, (RbModuleDefNode*)stmt);
             break;
         case RB_AST_NODE_BEGIN_RESCUE:
             rm_transpile_begin_rescue(mt, (RbBeginRescueNode*)stmt);
@@ -2677,6 +2845,21 @@ static void rm_transpile_class_def(RbMirTranspiler* mt, RbClassDefNode* cls_node
             if (call->method_name) {
                 const char* fname = call->method_name->chars;
                 int flen = (int)call->method_name->len;
+
+                // include ModuleName — copy module methods to this class
+                if (!call->receiver && flen == 7 && strncmp(fname, "include", 7) == 0) {
+                    RbAstNode* arg = call->args;
+                    while (arg) {
+                        MIR_reg_t mod_reg = rm_transpile_expression(mt, arg);
+                        rm_call_void_2(mt, "rb_module_include",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_reg),
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, mod_reg));
+                        arg = arg->next;
+                    }
+                    body = body->next;
+                    continue;
+                }
+
                 const char* attr_fn = NULL;
                 if (flen == 11 && strncmp(fname, "attr_reader", 11) == 0) attr_fn = "rb_attr_reader";
                 else if (flen == 11 && strncmp(fname, "attr_writer", 11) == 0) attr_fn = "rb_attr_writer";
@@ -2716,6 +2899,83 @@ static void rm_transpile_class_def(RbMirTranspiler* mt, RbClassDefNode* cls_node
     // restore class context
     mt->in_class = saved_in_class;
     strncpy(mt->current_class, saved_class, sizeof(mt->current_class));
+}
+
+// Compile module definition — like a class, stores methods as a class object
+static void rm_transpile_module_def(RbMirTranspiler* mt, RbModuleDefNode* mod_node) {
+    const char* mname = mod_node->name ? mod_node->name->chars : "AnonModule";
+    int mlen = mod_node->name ? (int)mod_node->name->len : 10;
+
+    log_debug("rb-mir: compiling module '%.*s'", mlen, mname);
+
+    // create module as a class object (so it can hold methods)
+    MIR_reg_t name_reg = rm_box_string_literal(mt, mname, mlen);
+    MIR_reg_t mod_reg = rm_call_2(mt, "rb_class_create", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, name_reg),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)RB_ITEM_NULL_VAL));
+
+    // store module in variable scope
+    char mod_varname[128];
+    snprintf(mod_varname, sizeof(mod_varname), "_rb_%.*s", mlen, mname);
+    rm_set_var(mt, mod_varname, mod_reg);
+
+    if (mt->in_main) {
+        bool found = false;
+        for (int i = 0; i < mt->global_var_count; i++) {
+            if (strcmp(mt->global_var_names[i], mod_varname) == 0) {
+                found = true;
+                rm_call_void_2(mt, "rb_set_module_var",
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, mt->global_var_indices[i]),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, mod_reg));
+                break;
+            }
+        }
+        if (!found && mt->global_var_count < 64) {
+            int idx = mt->module_var_count++;
+            snprintf(mt->global_var_names[mt->global_var_count], sizeof(mt->global_var_names[0]),
+                "%s", mod_varname);
+            mt->global_var_indices[mt->global_var_count] = idx;
+            mt->global_var_count++;
+            rm_call_void_2(mt, "rb_set_module_var",
+                MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, mod_reg));
+        }
+    }
+
+    // register pre-compiled methods on the module
+    RbAstNode* body = mod_node->body;
+    while (body) {
+        if (body->node_type == RB_AST_NODE_METHOD_DEF) {
+            RbMethodDefNode* meth = (RbMethodDefNode*)body;
+            if (meth->name) {
+                RbFuncCollected* fc = NULL;
+                for (int fi = 0; fi < mt->func_count; fi++) {
+                    if (mt->func_entries[fi].is_method &&
+                        mt->func_entries[fi].node == meth) {
+                        fc = &mt->func_entries[fi];
+                        break;
+                    }
+                }
+                if (fc) {
+                    MIR_reg_t method_name_reg = rm_box_string_literal(mt,
+                        meth->name->chars, (int)meth->name->len);
+                    int user_params = fc->param_count - (fc->has_block_param ? 1 : 0);
+                    int mir_param_count = 1 + user_params + (fc->has_block_param ? 1 : 0);
+                    MIR_reg_t fn_ptr = rm_new_reg(mt, "modfptr", MIR_T_I64);
+                    rm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, fn_ptr),
+                        MIR_new_ref_op(mt->ctx, fc->func_item)));
+                    MIR_reg_t fn_item = rm_call_2(mt, "js_new_function", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_ptr),
+                        MIR_T_I64, MIR_new_int_op(mt->ctx, mir_param_count));
+                    rm_call_void_3(mt, "rb_class_add_method",
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, mod_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, method_name_reg),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_item));
+                }
+            }
+        }
+        body = body->next;
+    }
 }
 
 // ============================================================================
@@ -2770,6 +3030,33 @@ static void rm_collect_functions(RbMirTranspiler* mt, RbAstNode* root) {
                     body = body->next;
                 }
             }
+            // collect module methods as func_entries (like class methods)
+            if (s->node_type == RB_AST_NODE_MODULE_DEF) {
+                RbModuleDefNode* mod = (RbModuleDefNode*)s;
+                const char* mname = mod->name ? mod->name->chars : "AnonModule";
+                int mlen = mod->name ? (int)mod->name->len : 10;
+
+                RbAstNode* body = mod->body;
+                while (body) {
+                    if (body->node_type == RB_AST_NODE_METHOD_DEF) {
+                        RbMethodDefNode* meth = (RbMethodDefNode*)body;
+                        if (mt->func_count < 128 && meth->name) {
+                            RbFuncCollected* fc = &mt->func_entries[mt->func_count];
+                            memset(fc, 0, sizeof(RbFuncCollected));
+                            fc->node = meth;
+                            snprintf(fc->name, sizeof(fc->name), "%.*s",
+                                (int)meth->name->len, meth->name->chars);
+                            fc->param_count = meth->param_count;
+                            fc->required_count = meth->required_count;
+                            fc->has_block_param = meth->has_block_param;
+                            fc->is_method = true;
+                            snprintf(fc->class_name, sizeof(fc->class_name), "%.*s", mlen, mname);
+                            mt->func_count++;
+                        }
+                    }
+                    body = body->next;
+                }
+            }
             s = s->next;
         }
     }
@@ -2778,6 +3065,23 @@ static void rm_collect_functions(RbMirTranspiler* mt, RbAstNode* root) {
 // Phase 2: recursively collect all blocks in the AST
 static void rm_collect_blocks_r(RbMirTranspiler* mt, RbAstNode* node) {
     if (!node) return;
+
+    // proc/lambda/block standalone — collect as block for pre-compilation
+    if (node->node_type == RB_AST_NODE_PROC_LAMBDA || node->node_type == RB_AST_NODE_BLOCK) {
+        RbBlockNode* block = (RbBlockNode*)node;
+        if (mt->block_count < 64) {
+            RbBlockCollected* bc = &mt->block_entries[mt->block_count];
+            memset(bc, 0, sizeof(RbBlockCollected));
+            bc->node = block;
+            bc->param_count = block->param_count;
+            bc->id = mt->block_count;
+            mt->block_count++;
+        }
+        // recurse into block body
+        RbAstNode* bs = block->body;
+        while (bs) { rm_collect_blocks_r(mt, bs); bs = bs->next; }
+        return;
+    }
 
     // check if this node is a call with a block
     if (node->node_type == RB_AST_NODE_CALL) {

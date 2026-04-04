@@ -1,0 +1,5 @@
+10
+16
+10
+hello from lambda
+30
