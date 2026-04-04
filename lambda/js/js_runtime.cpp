@@ -176,6 +176,17 @@ extern "C" Item js_clear_exception(void) {
     return val;
 }
 
+// TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone
+extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
+    if (value.item == ITEM_JS_TDZ) {
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
+        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+        Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+    }
+}
+
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
 
@@ -1318,7 +1329,13 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         // Call the constructor (__ctor__ property on the class object)
         Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
-            js_call_function(ctor, obj, args, argc);
+            Item result = js_call_function(ctor, obj, args, argc);
+            // Per ES spec §9.2.2: if constructor returns an Object, use that instead
+            TypeId rt = get_type_id(result);
+            if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+                rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+                return result;
+            }
         }
         return obj;
     }
@@ -2463,6 +2480,42 @@ extern "C" Item js_array_push(Item array, Item value) {
 }
 
 // =============================================================================
+// Tagged Template Literals
+// =============================================================================
+
+extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
+    // build a JS object (map) that acts like an array with .raw property
+    // { "0": cooked[0], "1": cooked[1], ..., length: count, raw: [raw[0], raw[1], ...] }
+    Item obj = js_new_object();
+    char buf[24];
+    for (int i = 0; i < count; i++) {
+        snprintf(buf, sizeof(buf), "%d", i);
+        Item key = (Item){.item = s2it(heap_create_name(buf))};
+        js_property_set(obj, key, cooked[i]);
+    }
+    // set length
+    Item len_key = (Item){.item = s2it(heap_create_name("length"))};
+    js_property_set(obj, len_key, (Item){.item = i2it(count)});
+    // build raw array
+    Item raw_arr = js_new_object();
+    for (int i = 0; i < count; i++) {
+        snprintf(buf, sizeof(buf), "%d", i);
+        Item key = (Item){.item = s2it(heap_create_name(buf))};
+        js_property_set(raw_arr, key, raw[i]);
+    }
+    Item raw_len_key = (Item){.item = s2it(heap_create_name("length"))};
+    js_property_set(raw_arr, raw_len_key, (Item){.item = i2it(count)});
+    // freeze raw
+    js_object_freeze(raw_arr);
+    // set .raw on obj
+    Item raw_key = (Item){.item = s2it(heap_create_name("raw"))};
+    js_property_set(obj, raw_key, raw_arr);
+    // freeze obj
+    js_object_freeze(obj);
+    return obj;
+}
+
+// =============================================================================
 // Console Functions
 // =============================================================================
 
@@ -2472,6 +2525,16 @@ extern "C" void js_console_log(Item value) {
         String* s = it2s(str);
         printf("%.*s\n", (int)s->len, s->chars);
     }
+}
+
+// Per ES spec §9.2.2: if constructor returns an Object, use that instead of `this`
+extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
+    TypeId rt = get_type_id(result);
+    if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+        rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+        return result;
+    }
+    return obj;
 }
 
 // =============================================================================

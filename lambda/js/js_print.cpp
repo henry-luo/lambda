@@ -42,6 +42,7 @@ static const char* js_node_type_name(JsAstNodeType type) {
         case JS_AST_NODE_CONDITIONAL_EXPRESSION: return "conditional_expression";
         case JS_AST_NODE_TEMPLATE_LITERAL: return "template_literal";
         case JS_AST_NODE_TEMPLATE_ELEMENT: return "template_element";
+        case JS_AST_NODE_TAGGED_TEMPLATE: return "tagged_template";
         case JS_AST_NODE_SPREAD_ELEMENT: return "spread_element";
         case JS_AST_NODE_CLASS_DECLARATION: return "class_declaration";
         case JS_AST_NODE_CLASS_EXPRESSION: return "class_expression";

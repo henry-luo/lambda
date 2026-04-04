@@ -1,2 +1,0 @@
-[test262] Prepared 27030 test files (11619 skipped)
-[test262] Phase 1 (prepare): 0.7s — 27030 scripts to batch
