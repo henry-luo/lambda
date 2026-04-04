@@ -2397,12 +2397,29 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
         class_decl->name = name_pool_create_strview(tp->name_pool, name_source);
     }
 
-    // Get superclass (optional) — tree-sitter puts it inside a class_heritage child node
+    // Get superclass (optional) — tree-sitter puts it inside a class_heritage
+    // or extends_clause child node depending on grammar version
     uint32_t child_count_cls = ts_node_named_child_count(class_node);
     for (uint32_t i = 0; i < child_count_cls; i++) {
         TSNode child = ts_node_named_child(class_node, i);
-        if (strcmp(ts_node_type(child), "class_heritage") == 0) {
-            // The heritage node contains the superclass expression as its first named child
+        const char* child_type = ts_node_type(child);
+        if (strcmp(child_type, "class_heritage") == 0) {
+            // class_heritage may contain extends_clause or direct superclass expression
+            TSNode super_node = ts_node_named_child(child, 0);
+            if (!ts_node_is_null(super_node)) {
+                // if the child is extends_clause, get the expression inside it
+                if (strcmp(ts_node_type(super_node), "extends_clause") == 0) {
+                    TSNode expr_node = ts_node_named_child(super_node, 0);
+                    if (!ts_node_is_null(expr_node)) {
+                        class_decl->superclass = build_js_expression(tp, expr_node);
+                    }
+                } else {
+                    class_decl->superclass = build_js_expression(tp, super_node);
+                }
+            }
+            break;
+        } else if (strcmp(child_type, "extends_clause") == 0) {
+            // some grammar versions put extends_clause directly on the class node
             TSNode super_expr = ts_node_named_child(child, 0);
             if (!ts_node_is_null(super_expr)) {
                 class_decl->superclass = build_js_expression(tp, super_expr);
@@ -2448,8 +2465,12 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         }
     }
 
-    // get property name (field name "property")
+    // get property name — tree-sitter uses "property" for field_definition,
+    // "name" for public_field_definition
     TSNode prop_node = ts_node_child_by_field_name(field_node, "property", strlen("property"));
+    if (ts_node_is_null(prop_node)) {
+        prop_node = ts_node_child_by_field_name(field_node, "name", strlen("name"));
+    }
     if (!ts_node_is_null(prop_node)) {
         const char* prop_type = ts_node_type(prop_node);
         if (strcmp(prop_type, "private_property_identifier") == 0) {
@@ -2482,7 +2503,8 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
         const char* child_type = ts_node_type(child_node);
 
         JsAstNode* method = NULL;
-        if (strcmp(child_type, "field_definition") == 0) {
+        if (strcmp(child_type, "field_definition") == 0 ||
+            strcmp(child_type, "public_field_definition") == 0) {
             method = build_js_field_definition(tp, child_node);
         } else if (strcmp(child_type, "class_static_block") == 0) {
             // static { ... } block
@@ -3297,7 +3319,8 @@ static JsAstNode* build_ts_class_body_u(JsTranspiler* tp, TSNode body_node) {
         const char* child_type = ts_node_type(child_node);
 
         JsAstNode* member_node = NULL;
-        if (strcmp(child_type, "field_definition") == 0) {
+        if (strcmp(child_type, "field_definition") == 0 ||
+            strcmp(child_type, "public_field_definition") == 0) {
             member_node = build_js_field_definition(tp, child_node);
         } else if (strcmp(child_type, "method_definition") == 0) {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)alloc_js_ast_node(tp,
