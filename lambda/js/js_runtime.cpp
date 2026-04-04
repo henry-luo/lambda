@@ -870,7 +870,16 @@ extern "C" Item js_strict_equal(Item left, Item right) {
     }
 
     default:
-        // Object identity comparison
+        // Object identity comparison (also handles native wrapper objects:
+        // two wrappers of the same type wrapping the same native pointer are ===)
+        if (left.item != right.item && left_type == LMD_TYPE_MAP) {
+            Map* l_map = left.map;
+            Map* r_map = right.map;
+            if (l_map && r_map && l_map->type && l_map->type == r_map->type
+                && l_map->data && l_map->data == r_map->data) {
+                return (Item){.item = b2it(true)};
+            }
+        }
         return (Item){.item = b2it(left.item == right.item)};
     }
 }

@@ -815,7 +815,8 @@ typedef enum CssRuleType {
     CSS_RULE_LAYER,          // @layer rule
     CSS_RULE_CONTAINER,      // @container rule
     CSS_RULE_SCOPE,          // @scope rule
-    CSS_RULE_NESTING         // Nested rule
+    CSS_RULE_NESTING,        // Nested rule
+    CSS_RULE_NESTED_DECLARATIONS  // CSSNestedDeclarations (declarations after nested rules)
 } CssRuleType;
 
 // CSS Rule structure
@@ -830,6 +831,8 @@ typedef struct CssRule {
             struct CssSelectorGroup* selector_group; // Selector group (comma-separated selectors)
             CssDeclaration** declarations;
             size_t declaration_count;
+            CssRule** nested_rules;
+            size_t nested_rule_count;
         } style_rule;
 
         struct {

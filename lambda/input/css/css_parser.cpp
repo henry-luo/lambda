@@ -1289,10 +1289,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
         (*pos)++; // skip FUNCTION token
 
-        // Collect tokens until matching ')'
+        // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
         int arg_start = *pos;
         int paren_depth = 1; // Already inside the function
         while (*pos < token_count && paren_depth > 0) {
+            if (tokens[*pos].type == CSS_TOKEN_EOF) break;
             if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                 paren_depth++;
             } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -1587,10 +1588,11 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
                 (*pos)++; // skip FUNCTION token
 
-                // Collect tokens until matching ')'
+                // Collect tokens until matching ')' or EOF (unclosed parens implicitly close at EOF)
                 int arg_start = *pos;
                 int paren_depth = 1; // Already inside the function
                 while (*pos < token_count && paren_depth > 0) {
+                    if (tokens[*pos].type == CSS_TOKEN_EOF) break;
                     if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN) {
                         paren_depth++;
                     } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -1872,6 +1874,9 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     int value_count = 0;
     bool is_important = false;
     int brace_depth = 0;  // track {}-blocks inside values
+    int bracket_depth = 0;  // track []-brackets inside values
+    int paren_depth_val = 0;  // track ()-parens inside values
+    bool bracket_mismatch = false;  // unmatched ] or ) detected
     int value_end_before_important = -1;  // track end of value before !important
 
     while (*pos < token_count) {
@@ -1937,6 +1942,18 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             continue;
         }
 
+        // Track bracket and paren matching for custom property validation
+        if (t == CSS_TOKEN_LEFT_BRACKET) bracket_depth++;
+        else if (t == CSS_TOKEN_RIGHT_BRACKET) {
+            bracket_depth--;
+            if (bracket_depth < 0) bracket_mismatch = true;
+        }
+        else if (t == CSS_TOKEN_LEFT_PAREN) paren_depth_val++;
+        else if (t == CSS_TOKEN_RIGHT_PAREN) {
+            paren_depth_val--;
+            if (paren_depth_val < 0) bracket_mismatch = true;
+        }
+
         // Count non-whitespace, non-comma tokens as values
         if (t != CSS_TOKEN_WHITESPACE && t != CSS_TOKEN_COMMA) {
             value_count++;
@@ -1946,6 +1963,14 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     if (value_count == 0) {
         log_debug("[CSS Parser] No value tokens found");
+        return NULL;
+    }
+
+    // For custom properties, validate bracket matching
+    // Per CSS spec, <declaration-value> requires balanced (), [], {} pairs
+    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
+    if (is_custom_prop && bracket_mismatch) {
+        log_debug("[CSS Parser] Custom property '%s' has mismatched brackets — invalid", property_name);
         return NULL;
     }
 
@@ -2397,6 +2422,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 rule->type = CSS_RULE_FONT_FACE;
             } else if (keyword_name && strcmp(keyword_name, "keyframes") == 0) {
                 rule->type = CSS_RULE_KEYFRAMES;
+            } else if (keyword_name && strcmp(keyword_name, "page") == 0) {
+                rule->type = CSS_RULE_PAGE;
             } else {
                 // Unknown at-rule (e.g., @page, @layer, @property) - skip it
                 // Per CSS spec, skip the at-rule's block or up to semicolon
@@ -2562,16 +2589,169 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     log_debug(" Found '{', parsing declarations");
     pos++;
 
-    // Parse declarations
+    // Parse declarations and nested rules (CSS Nesting support)
     CssDeclaration** declarations = NULL;
     int decl_count = 0;
     int decl_capacity = 4;
     declarations = (CssDeclaration**)pool_calloc(pool, decl_capacity * sizeof(CssDeclaration*));
 
+    CssRule** nested_rules = NULL;
+    int nested_rule_count = 0;
+    int nested_rule_capacity = 0;
+    bool seen_nested_rule = false;
+
+    // Post-nested declarations (declarations appearing after a nested rule → CSSNestedDeclarations)
+    CssDeclaration** post_nested_decls = NULL;
+    int post_nested_count = 0;
+    int post_nested_capacity = 0;
+
     while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
         // Skip whitespace
         pos = css_skip_whitespace_tokens(tokens, pos, token_count);
         if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
+
+        // Skip @-rules inside declaration blocks (e.g., @at {} or @at;)
+        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
+            pos++; // skip @keyword
+            // skip until block or semicolon
+            int brace_depth = 0;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                    brace_depth = 1;
+                    pos++;
+                    while (pos < token_count && brace_depth > 0) {
+                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                        pos++;
+                    }
+                    break;
+                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                    pos++;
+                    break;
+                }
+                pos++;
+            }
+            continue;
+        }
+
+        // Check if this looks like a nested qualified rule (CSS Nesting)
+        // A nested rule starts with tokens that can't begin a declaration:
+        //   DELIM (., #, >, ~, +, *, &), HASH, LEFT_BRACKET, COLON
+        // Also: IDENT not followed by COLON (e.g., nested "div { }")
+        bool looks_like_nested_rule = false;
+        CssTokenType cur_type = tokens[pos].type;
+        if (cur_type == CSS_TOKEN_DELIM || cur_type == CSS_TOKEN_HASH ||
+            cur_type == CSS_TOKEN_LEFT_BRACKET || cur_type == CSS_TOKEN_COLON) {
+            looks_like_nested_rule = true;
+        } else if (cur_type == CSS_TOKEN_IDENT) {
+            // IDENT followed by COLON = declaration; otherwise = nested rule
+            int peek = css_skip_whitespace_tokens(tokens, pos + 1, token_count);
+            if (peek >= token_count || tokens[peek].type != CSS_TOKEN_COLON) {
+                looks_like_nested_rule = true;
+            }
+        }
+
+        if (looks_like_nested_rule) {
+            // Parse nested qualified rule: consume prelude until '{', then consume block
+            int prelude_start = pos;
+            bool has_ampersand = false;
+
+            // Check for leading '&' nesting selector
+            if (cur_type == CSS_TOKEN_DELIM && tokens[pos].data.delimiter == '&') {
+                has_ampersand = true;
+            }
+
+            // Skip prelude tokens until '{' (respecting nested brackets)
+            int nest_paren = 0, nest_bracket = 0;
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE && nest_paren == 0 && nest_bracket == 0) break;
+                if (tokens[pos].type == CSS_TOKEN_LEFT_PAREN) nest_paren++;
+                else if (tokens[pos].type == CSS_TOKEN_RIGHT_PAREN && nest_paren > 0) nest_paren--;
+                else if (tokens[pos].type == CSS_TOKEN_LEFT_BRACKET) nest_bracket++;
+                else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACKET && nest_bracket > 0) nest_bracket--;
+                pos++;
+            }
+
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                // Consume the block (match braces)
+                int block_start = pos;
+                pos++; // skip '{'
+                int block_depth = 1;
+                while (pos < token_count && block_depth > 0) {
+                    if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) block_depth++;
+                    else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) block_depth--;
+                    pos++;
+                }
+
+                // Try to parse prelude as a selector group
+                // If prelude starts with '&', skip it for selector parsing
+                int sel_start = prelude_start;
+                if (has_ampersand) {
+                    sel_start++; // skip '&' token
+                    sel_start = css_skip_whitespace_tokens(tokens, sel_start, token_count);
+                }
+
+                int sel_pos = sel_start;
+                CssSelectorGroup* nested_sg = NULL;
+                if (sel_pos < block_start) {
+                    nested_sg = css_parse_selector_group_from_tokens(tokens, &sel_pos, block_start, pool);
+                }
+
+                // Verify entire prelude was consumed (skip trailing whitespace)
+                int after_sel = css_skip_whitespace_tokens(tokens, sel_pos, block_start);
+                if (nested_sg && nested_sg->selector_count > 0 && after_sel >= block_start) {
+                    // Valid nested rule — create it
+                    CssRule* nested = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+                    nested->type = CSS_RULE_STYLE;
+                    nested->pool = pool;
+                    nested->data.style_rule.selector_group = nested_sg;
+                    nested->data.style_rule.selector = nested_sg->selectors[0];
+
+                    // Parse declarations inside the nested block
+                    int inner_pos = block_start + 1; // skip '{'
+                    int inner_end = pos - 1; // before '}'
+                    CssDeclaration** inner_decls = NULL;
+                    int inner_count = 0;
+                    int inner_cap = 4;
+                    inner_decls = (CssDeclaration**)pool_calloc(pool, inner_cap * sizeof(CssDeclaration*));
+                    while (inner_pos < inner_end) {
+                        inner_pos = css_skip_whitespace_tokens(tokens, inner_pos, inner_end);
+                        if (inner_pos >= inner_end) break;
+                        CssDeclaration* idecl = css_parse_declaration_from_tokens(tokens, &inner_pos, inner_end, pool);
+                        if (idecl) {
+                            if (inner_count >= inner_cap) {
+                                inner_cap *= 2;
+                                CssDeclaration** nd = (CssDeclaration**)pool_calloc(pool, inner_cap * sizeof(CssDeclaration*));
+                                memcpy(nd, inner_decls, inner_count * sizeof(CssDeclaration*));
+                                inner_decls = nd;
+                            }
+                            inner_decls[inner_count++] = idecl;
+                        }
+                        if (inner_pos < inner_end && tokens[inner_pos].type == CSS_TOKEN_SEMICOLON) inner_pos++;
+                    }
+                    nested->data.style_rule.declarations = inner_decls;
+                    nested->data.style_rule.declaration_count = inner_count;
+
+                    // Add to nested_rules array
+                    if (nested_rule_count >= nested_rule_capacity) {
+                        nested_rule_capacity = (nested_rule_capacity == 0) ? 4 : nested_rule_capacity * 2;
+                        CssRule** nr = (CssRule**)pool_calloc(pool, nested_rule_capacity * sizeof(CssRule*));
+                        if (nested_rule_count > 0) memcpy(nr, nested_rules, nested_rule_count * sizeof(CssRule*));
+                        nested_rules = nr;
+                    }
+                    nested_rules[nested_rule_count++] = nested;
+                    seen_nested_rule = true;
+                    log_debug(" Parsed nested rule with %d declarations", inner_count);
+                } else {
+                    // Invalid nested rule — discard it (error recovery)
+                    log_debug(" Discarded invalid nested rule (bad selector)");
+                }
+            } else {
+                // No '{' found — skip to end of outer block
+                // (pos is already at '}' or past token_count)
+            }
+            continue;
+        }
 
         // Parse declaration
         CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
@@ -2580,22 +2760,50 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             log_debug(" Parsed declaration: property_id=%d for position %d",
                     decl->property_id, decl_count);
 
-            // Expand array if needed
-            if (decl_count >= decl_capacity) {
-                decl_capacity *= 2;
-                CssDeclaration** new_decls = (CssDeclaration**)pool_calloc(pool, decl_capacity * sizeof(CssDeclaration*));
-                memcpy(new_decls, declarations, decl_count * sizeof(CssDeclaration*));
-                declarations = new_decls;
+            if (seen_nested_rule) {
+                // Declaration after nested rule → collect for CSSNestedDeclarations
+                if (post_nested_count >= post_nested_capacity) {
+                    post_nested_capacity = (post_nested_capacity == 0) ? 4 : post_nested_capacity * 2;
+                    CssDeclaration** nd = (CssDeclaration**)pool_calloc(pool, post_nested_capacity * sizeof(CssDeclaration*));
+                    if (post_nested_count > 0) memcpy(nd, post_nested_decls, post_nested_count * sizeof(CssDeclaration*));
+                    post_nested_decls = nd;
+                }
+                post_nested_decls[post_nested_count++] = decl;
+            } else {
+                // Expand array if needed
+                if (decl_count >= decl_capacity) {
+                    decl_capacity *= 2;
+                    CssDeclaration** new_decls = (CssDeclaration**)pool_calloc(pool, decl_capacity * sizeof(CssDeclaration*));
+                    memcpy(new_decls, declarations, decl_count * sizeof(CssDeclaration*));
+                    declarations = new_decls;
+                }
+                declarations[decl_count++] = decl;
+                log_debug(" Stored declaration at index %d, now have %d declarations",
+                        decl_count - 1, decl_count);
             }
-            declarations[decl_count++] = decl;
-            log_debug(" Stored declaration at index %d, now have %d declarations",
-                    decl_count - 1, decl_count);
         }
 
         // Skip optional semicolon
         if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
             pos++;
         }
+    }
+
+    // If there are post-nested declarations, create a CSSNestedDeclarations rule
+    if (post_nested_count > 0) {
+        CssRule* nd_rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+        nd_rule->type = CSS_RULE_NESTED_DECLARATIONS;
+        nd_rule->pool = pool;
+        nd_rule->data.style_rule.declarations = post_nested_decls;
+        nd_rule->data.style_rule.declaration_count = post_nested_count;
+        // Add to nested_rules
+        if (nested_rule_count >= nested_rule_capacity) {
+            nested_rule_capacity = (nested_rule_capacity == 0) ? 4 : nested_rule_capacity * 2;
+            CssRule** nr = (CssRule**)pool_calloc(pool, nested_rule_capacity * sizeof(CssRule*));
+            if (nested_rule_count > 0) memcpy(nr, nested_rules, nested_rule_count * sizeof(CssRule*));
+            nested_rules = nr;
+        }
+        nested_rules[nested_rule_count++] = nd_rule;
     }
 
     // Expect closing brace (EOF implicitly closes the rule per CSS spec)
@@ -2620,6 +2828,13 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     rule->data.style_rule.selector = (selector_group->selector_count > 0) ? selector_group->selectors[0] : NULL;
     rule->data.style_rule.declarations = declarations;
     rule->data.style_rule.declaration_count = decl_count;
+    rule->data.style_rule.nested_rules = nested_rules;
+    rule->data.style_rule.nested_rule_count = nested_rule_count;
+
+    // Set parent pointer on nested rules
+    for (int i = 0; i < nested_rule_count; i++) {
+        if (nested_rules[i]) nested_rules[i]->parent = rule;
+    }
 
     log_debug(" Created rule with %d declarations:", decl_count);
     for (int i = 0; i < decl_count && i < 5; i++) {

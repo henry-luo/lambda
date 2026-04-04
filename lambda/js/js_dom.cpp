@@ -766,8 +766,13 @@ extern "C" Item js_computed_style_get_property(Item style_item, Item prop_name) 
             if (decl && (decl->value || decl->value_text)) {
                 const char* val = nullptr;
 
-                // prefer parsed value (handles escape resolution) over raw source text
-                if (decl->value) {
+                // prefer raw source text (preserves comments, blocks) unless it
+                // contains a backslash (which needs escape resolution via parsed value)
+                bool use_raw = decl->value_text && decl->value_text_len > 0
+                    && !memchr(decl->value_text, '\\', decl->value_text_len);
+                if (use_raw) {
+                    val = decl->value_text;
+                } else if (decl->value) {
                     Pool* pool = elem->doc ? elem->doc->pool : nullptr;
                     if (!pool) return (Item){.item = s2it(heap_create_name(""))};
                     CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
@@ -1946,13 +1951,13 @@ extern "C" Item js_dom_get_property(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
 
+    // HTMLStyleElement.sheet — associated CSSStyleSheet (doesn't require native_element)
+    if (strcmp(prop, "sheet") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
+        return js_cssom_get_style_element_sheet(elem_item);
+    }
+
     // fall back to native element attribute access
     if (elem->native_element) {
-        // HTMLStyleElement.sheet — associated CSSStyleSheet
-        if (strcmp(prop, "sheet") == 0 && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
-            return js_cssom_get_style_element_sheet(elem_item);
-        }
-
         const char* attr_val = dom_element_get_attribute(elem, prop);
         if (attr_val) {
             return (Item){.item = s2it(heap_create_name(attr_val))};

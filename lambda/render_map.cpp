@@ -236,14 +236,9 @@ int render_map_retransform(void) {
         entry->result_node = new_result;
         entry->dirty = false;
 
-        // update reverse map: remove old result, add new result
+        // update reverse map: keep old result mapping (DOM still references it),
+        // add new result mapping for the updated element tree
         if (s_reverse_map) {
-            if (old_result.item) {
-                ReverseMapEntry rquery;
-                memset(&rquery, 0, sizeof(rquery));
-                rquery.result_item_bits = old_result.item;
-                hashmap_delete(s_reverse_map, &rquery);
-            }
             if (new_result.item) {
                 ReverseMapEntry rentry;
                 memset(&rentry, 0, sizeof(rentry));

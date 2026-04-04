@@ -1,0 +1,81 @@
+{
+  "name": "Todo text input typing and editing",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "=== Todo Text Input Test ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify input field exists and is empty"},
+    {"type": "assert_count", "target": {"selector": ".new-item-input"}, "count": 3},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": ""},
+
+    {"type": "log", "message": "Step 2: Click input to focus"},
+    {"type": "click", "target": {"selector": ".new-item-input"}},
+    {"type": "wait", "ms": 100},
+
+    {"type": "log", "message": "Step 3: Type a single character and verify value"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "H"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "H"},
+
+    {"type": "log", "message": "Step 4: Type more characters"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "ello"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "Hello"},
+
+    {"type": "log", "message": "Step 5: Backspace deletes last char"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "Hell"},
+
+    {"type": "log", "message": "Step 6: Multiple backspaces"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "He"},
+
+    {"type": "log", "message": "Step 7: Delete all chars leaves empty input"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": ""},
+
+    {"type": "log", "message": "Step 8: Backspace on empty input is safe"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": ""},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
+
+    {"type": "log", "message": "Step 9: Type and submit via Add button"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "New task"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "New task"},
+    {"type": "click", "target": {"selector": ".add-btn"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 10: Item added, input cleared"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 9},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": ""},
+
+    {"type": "log", "message": "Step 11: Type, partially delete, retype, then submit"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "Fixme"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "Fixme"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "key_press", "key": "backspace"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "Fix"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": " bugs"},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": "Fix bugs"},
+    {"type": "click", "target": {"selector": ".add-btn"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 12: Second item added, input cleared"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 10},
+    {"type": "assert_value", "target": {"selector": ".new-item-input"}, "equals": ""},
+
+    {"type": "log", "message": "=== Todo Text Input Test Complete ==="}
+  ]
+}
