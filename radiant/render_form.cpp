@@ -243,7 +243,35 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
     if (state) {
         View* focused = focus_get(state);
         if (focused == (View*)block) {
-            float caret_x = is_placeholder ? text_x : text_end_x;
+            // Position caret at char_offset within the value text
+            float caret_x = text_x;  // default: start of text area
+            if (!is_placeholder && text && *text && state->caret && block->font) {
+                int caret_off = state->caret->char_offset;
+                int val_len = (int)strlen(text);
+                if (caret_off > val_len) caret_off = val_len;  // clamp
+                if (caret_off > 0) {
+                    // Measure text width up to caret_off bytes
+                    FontBox fbox = {0};
+                    setup_font(rdcon->ui_context, &fbox, block->font);
+                    if (fbox.font_handle) {
+                        float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                            ? rdcon->ui_context->pixel_ratio : 1.0f;
+                        const unsigned char* p = (const unsigned char*)text;
+                        const unsigned char* p_end = p + caret_off;
+                        float tw = 0;
+                        while (p < p_end) {
+                            uint32_t codepoint;
+                            int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                            if (bytes <= 0) { p++; continue; }
+                            p += bytes;
+                            FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                            LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                            if (glyph) tw += glyph->advance_x / pixel_ratio;
+                        }
+                        caret_x = text_x + tw * s;
+                    }
+                }
+            }
             float caret_y_pos = text_y;
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
@@ -257,8 +285,6 @@ void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* 
                 tvg_canvas_reset_and_draw(rdcon, false);
                 tvg_canvas_remove(rdcon->canvas, NULL);
             }
-
-            log_debug("[FORM] drew caret at (%.1f, %.1f) height=%.1f", caret_x, caret_y_pos, caret_h);
         }
     }
 
