@@ -306,11 +306,11 @@ lambda/serve/wsgi_bridge.py
 
 ## Estimated Size Impact
 
-| Build | Tree-sitter libs | Source files | Est. binary (release) |
-|-------|-----------------|-------------|----------------------|
-| Lambda (current) | 9 | ~350+ | ~8MB |
-| Lambda (focused) | 6 | ~310 | ~6.5MB |
-| Lambda Jube | 9 | ~350+ | ~8MB |
+| Build            | Tree-sitter libs | Source files | Est. binary (release) |
+| ---------------- | ---------------- | ------------ | --------------------- |
+| Lambda (current) | 9                | ~350+        | ~16MB                 |
+| Lambda (focused) | 6                | ~310         | ~11MB                 |
+| Lambda Jube      | 9                | ~350+        | ~16MB                 |
 
 ---
 
