@@ -1,0 +1,25 @@
+version: '3.8'
+
+# Lambda Development Environment - Docker Compose
+# Usage:
+#   cd cicd
+#   docker compose up -d        # Start container
+#   docker compose exec dev bash # Shell into container
+#   docker compose down          # Stop container
+
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: cicd/Dockerfile
+    container_name: lambda-dev
+    hostname: lambda-dev
+    volumes:
+      - ..:/workspace:cached
+    ports:
+      - "2222:22"       # SSH for VS Code Remote SSH
+    stdin_open: true
+    tty: true
+    # Start SSH daemon so VS Code Remote SSH can connect
+    command: sshd
+    restart: unless-stopped
