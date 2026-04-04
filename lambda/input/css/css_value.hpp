@@ -522,3 +522,7 @@ typedef struct CssEnumInfo{
 
 const CssEnumInfo* css_enum_info(CssEnum id);
 CssEnum css_enum_by_name(const char* name);
+
+// Convert a CSS named color keyword to RGBA values.
+// Returns true if the keyword is a recognized color, false otherwise.
+bool css_named_color_to_rgba(CssEnum keyword, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a);
