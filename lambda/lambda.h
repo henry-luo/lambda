@@ -321,6 +321,8 @@ typedef enum SysFunc {
     SYSFUNC_EDIT_REDO,       // redo() - redo last undone commit
     SYSFUNC_EDIT_COMMIT,     // commit() - commit current edits as version
     SYSFUNC_EDIT_COMMIT1,    // commit(description) - commit with description
+    // reactive UI event dispatch
+    SYSPROC_EMIT,            // emit(event_name, data) - dispatch event to parent template handler
 } SysFunc;
 
 typedef struct Type {
@@ -1274,6 +1276,11 @@ extern "C" {
     Item vmap_new();
     Item vmap_from_array(Item array_item);
     void vmap_set(Item vmap_item, Item key, Item value);
+
+    // reactive UI: emit event to parent template handler
+    Item pn_emit(Item event_name, Item event_data);
+    // called from Radiant side — dispatches emitted event up the DOM ancestry
+    Item dispatch_emit(Item event_name, Item event_data);
 
 #ifdef __cplusplus
 } // extern "C"

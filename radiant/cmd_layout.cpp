@@ -4042,6 +4042,9 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // The GC heap, JIT code, and name pool remain live for the session.
     dom_doc->lambda_runtime = runtime;
 
+    // Create Input context for event object construction (used by dispatch_lambda_handler)
+    dom_doc->input = Input::create(pool, script_url);
+
     // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 
     auto total_end = std::chrono::high_resolution_clock::now();

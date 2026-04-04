@@ -1,4 +1,5 @@
 // rb_print.cpp — Ruby AST printer for debugging
+#ifndef NDEBUG
 #include "rb_transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstdio>
@@ -594,3 +595,4 @@ void print_rb_ast_node(RbAstNode* node, int depth) {
             break;
     }
 }
+#endif // NDEBUG

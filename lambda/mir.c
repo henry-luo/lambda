@@ -7,7 +7,9 @@
 #include "../lib/hashmap.h"    // for O(1) import resolution
 #include "mir.h"
 #include "mir-gen.h"
+#ifdef LAMBDA_C2MIR
 #include "c2mir.h"
+#endif
 #include "lambda.h"
 #include "lambda-error.h"
 #include "sys_func_registry.h"
@@ -131,7 +133,9 @@ void *import_resolver(const char *name) {
 MIR_context_t jit_init(unsigned int optimize_level) {
     init_func_map();  // build O(1) import resolution hashmap
     MIR_context_t ctx = MIR_init();
+#ifdef LAMBDA_C2MIR
     c2mir_init(ctx);
+#endif
     MIR_gen_init(ctx); // init the JIT generator
     // Level 0: Only register allocator and machine code generator (no inlining)
     // Level 1: Adds code selection (more compact/faster code)
@@ -143,6 +147,7 @@ MIR_context_t jit_init(unsigned int optimize_level) {
     return ctx;
 }
 
+#ifdef LAMBDA_C2MIR
 // compile C code to MIR
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
@@ -154,7 +159,6 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
     #ifdef ENABLE_C2MIR_DEBUG
         enable_debug = true;  // Force enable if compile-time flag is set
     #endif
-    enable_debug = true;  // hardcode enable for now
 
     if (enable_debug) {
         // Create a temporary file to capture C2MIR messages
@@ -206,6 +210,7 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
         fclose(ops.message_file);
     }
 }
+#endif // LAMBDA_C2MIR
 
 void print_module_item(MIR_item_t mitem) {
     switch (mitem->item_type) {
@@ -326,7 +331,9 @@ void* find_data(MIR_context_t ctx, const char *data_name) {
 void jit_cleanup(MIR_context_t ctx) {
     // Cleanup
     MIR_gen_finish(ctx);
+#ifdef LAMBDA_C2MIR
     c2mir_finish(ctx);
+#endif
     MIR_finish(ctx);
 }
 

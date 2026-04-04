@@ -1,3 +1,4 @@
+#ifndef NDEBUG
 #include "py_transpiler.hpp"
 #include "../../lib/log.h"
 #include <cstdio>
@@ -403,3 +404,4 @@ void print_py_ast_node(PyAstNode* node, int depth) {
             break;
     }
 }
+#endif // NDEBUG

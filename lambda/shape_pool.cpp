@@ -364,19 +364,23 @@ bool shape_pool_shapes_equal(ShapeEntry* shape1, ShapeEntry* shape2) {
 }
 
 void shape_pool_print_stats(ShapePool* pool) {
+#ifndef NDEBUG
     if (!pool) return;
     
     size_t count = hashmap_count(pool->shapes);
-    printf("ShapePool Statistics:\n");
-    printf("  Pool: %p\n", pool);
-    printf("  Unique shapes: %zu\n", count);
-    printf("  Ref count: %u\n", pool->ref_count);
-    printf("  Parent: %p\n", pool->parent);
+    log_debug("ShapePool Statistics:");
+    log_debug("  Pool: %p", pool);
+    log_debug("  Unique shapes: %zu", count);
+    log_debug("  Ref count: %u", pool->ref_count);
+    log_debug("  Parent: %p", pool->parent);
     
     if (pool->parent) {
-        printf("\nParent pool:\n");
+        log_debug("Parent pool:");
         shape_pool_print_stats(pool->parent);
     }
+#else
+    (void)pool;
+#endif
 }
 
 size_t shape_pool_count(ShapePool* pool) {

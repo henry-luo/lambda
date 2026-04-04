@@ -101,12 +101,14 @@ int css_specificity_compare(CssSpecificity a, CssSpecificity b) {
 }
 
 void css_specificity_print(CssSpecificity specificity) {
+#ifndef NDEBUG
     printf("(%d,%d,%d,%d)%s",
            specificity.inline_style,
            specificity.ids,
            specificity.classes,
            specificity.elements,
            specificity.important ? "!" : "");
+#endif
 }
 
 // ============================================================================
@@ -660,6 +662,7 @@ int style_tree_foreach(StyleTree* style_tree, style_tree_callback_t callback, vo
 }
 
 void style_tree_print(StyleTree* style_tree) {
+#ifndef NDEBUG
     if (!style_tree) {
         printf("StyleTree: NULL\n");
         return;
@@ -669,9 +672,11 @@ void style_tree_print(StyleTree* style_tree) {
            style_tree->declaration_count, avl_tree_size(style_tree->tree));
 
     style_tree_foreach(style_tree, print_tree_callback, NULL);
+#endif
 }
 
 void style_node_print_cascade(StyleNode* node) {
+#ifndef NDEBUG
     if (!node) {
         printf("StyleNode: NULL\n");
         return;
@@ -697,6 +702,7 @@ void style_node_print_cascade(StyleNode* node) {
         printf(" (order: %d)\n", weak->declaration->source_order);
         weak = weak->next;
     }
+#endif
 }
 
 void style_tree_get_statistics(StyleTree* style_tree, int* total_nodes,

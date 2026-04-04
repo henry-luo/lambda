@@ -1,0 +1,33 @@
+{
+  "name": "Todo delete and clear completed",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "=== Todo Delete & Clear Test ==="},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 1: Verify initial render - first item exists"},
+    {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Review pull requests"},
+
+    {"type": "log", "message": "Step 2: Verify delete button exists on first item"},
+    {"type": "assert_text", "target": {"selector": ".todo-item .delete-btn"}, "contains": "×"},
+
+    {"type": "log", "message": "Step 3: Click delete button on first item"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 4: Verify first item was deleted - new first item is different"},
+    {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Update documentation"},
+
+    {"type": "log", "message": "Step 5: Verify clear completed button is visible"},
+    {"type": "assert_text", "target": {"selector": ".clear-done-btn"}, "contains": "Clear completed"},
+
+    {"type": "log", "message": "Step 6: Click clear completed button"},
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "Step 7: Verify done item was cleared - first item is now undone"},
+    {"type": "assert_text", "target": {"selector": ".todo-item .todo-text"}, "contains": "Fix CI pipeline"},
+
+    {"type": "log", "message": "=== Todo Delete & Clear Test Complete ==="}
+  ]
+}

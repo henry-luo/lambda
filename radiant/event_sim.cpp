@@ -2510,7 +2510,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             {
                 const char* path = ev->file_path ? ev->file_path : "./view_tree.txt";
                 log_info("event_sim: dump_caret to %s", path);
-                fprintf(stderr, "[EVENT_SIM] Dumping caret state to: %s\n", path);
                 DomDocument* doc = uicon->document;
                 if (doc && doc->state) {
                     extern void print_caret_state(RadiantState* state, const char* output_path);
