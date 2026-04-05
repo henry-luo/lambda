@@ -985,6 +985,9 @@ typedef struct BlockProp {
     float first_line_max_descender;
     float last_line_max_ascender;
     float last_line_max_descender;
+    // Baseline positions (distance from border-box top to baseline).
+    // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
+    float first_line_baseline;  // first line box baseline (for flex baseline)
     CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
 } BlockProp;
 
@@ -996,6 +999,7 @@ typedef struct FontBox {
 
 typedef struct TextRect {
     float x, y, width, height;
+    float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
     TextRect* next;
 } TextRect;

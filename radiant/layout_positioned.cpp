@@ -1273,6 +1273,13 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
     // setup inline context
     setup_inline(lycon, block);
 
+    // CSS 2.1 §10.3.7: Save the pre-layout width (border-box) computed by
+    // calculate_absolute_position via shrink-to-fit. Used below to prevent
+    // the post-layout auto-sizing from shrinking when children with percentage
+    // widths create a circular dependency (percentage resolves against
+    // shrink-to-fit width → child becomes smaller → auto-sizing shrinks container).
+    float pre_layout_width = block->width;
+
     // layout block content, and determine flow width and height
     layout_block_inner_content(lycon, block);
 
@@ -1367,6 +1374,30 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
                 border_box_width = content_width + total_pad_border;
             }
             block->width = border_box_width;
+
+            // CSS 2.1 §10.3.7: When the pre-layout width was computed via shrink-to-fit
+            // and auto-sizing produces a smaller width, check whether any child has a
+            // percentage width. Percentage widths resolve against the container's
+            // shrink-to-fit width, producing smaller child dimensions that make
+            // max_width < shrink-to-fit. The container must not shrink below the
+            // shrink-to-fit width in this case (circular dependency).
+            if (block->width < pre_layout_width) {
+                bool has_child_pct_width = false;
+                for (View* ch = block->first_child; ch; ch = ch->next_sibling) {
+                    if (ch->is_element()) {
+                        ViewBlock* cb = (ViewBlock*)ch;
+                        if (cb->blk && !isnan(cb->blk->given_width_percent)) {
+                            has_child_pct_width = true;
+                            break;
+                        }
+                    }
+                }
+                if (has_child_pct_width) {
+                    log_debug("[ABS POS] Flooring auto-sized width %.1f to shrink-to-fit width %.1f (child has %%width)",
+                              block->width, pre_layout_width);
+                    block->width = pre_layout_width;
+                }
+            }
 
             // CRITICAL FIX: Re-align text after shrink-to-fit width calculation
             // Text alignment during layout used the large initial width, so rect->x may have
