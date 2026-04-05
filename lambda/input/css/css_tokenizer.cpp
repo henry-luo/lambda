@@ -979,9 +979,10 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                 break;
             case '"':
             case '\'': {
-                // CSS §4.3.4: Consume a string token
+                // CSS §4.3.5: Consume a string token
                 char quote = ch;
                 size_t start = pos;
+                bool bad_string = false;
                 pos++; // Skip opening quote
                 while (pos < length && input[pos] != quote) {
                     if (input[pos] == '\\') {
@@ -993,12 +994,17 @@ int css_tokenizer_tokenize(CSSTokenizer* tokenizer,
                         } else {
                             pos += 2; // escaped character
                         }
+                    } else if (input[pos] == '\n' || input[pos] == '\r' || input[pos] == '\f') {
+                        // CSS §4.3.5: unescaped newline in string is a parse error
+                        // Do not consume the newline; produce a bad-string token
+                        bad_string = true;
+                        break;
                     } else {
                         pos++;
                     }
                 }
-                if (pos < length) pos++; // Skip closing quote
-                token->type = CSS_TOKEN_STRING;
+                if (!bad_string && pos < length) pos++; // Skip closing quote
+                token->type = bad_string ? CSS_TOKEN_BAD_STRING : CSS_TOKEN_STRING;
                 token->length = pos - start;
                 break;
             }

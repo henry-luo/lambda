@@ -350,6 +350,19 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
 }
 
 /**
+ * CSS Text 3 §4.1.1: Check if a codepoint is a Unicode space separator
+ * (general category Zs) other than U+0020 SPACE and U+00A0 NO-BREAK SPACE.
+ * These are rendered as zero-width when white-space is collapsible.
+ */
+static inline bool is_other_space_separator(uint32_t cp) {
+    return cp == 0x1680 ||                      // OGHAM SPACE MARK
+           (cp >= 0x2000 && cp <= 0x200A) ||    // EN QUAD through HAIR SPACE
+           cp == 0x202F ||                      // NARROW NO-BREAK SPACE
+           cp == 0x205F ||                      // MEDIUM MATHEMATICAL SPACE
+           cp == 0x3000;                        // IDEOGRAPHIC SPACE
+}
+
+/**
  * Check if whitespace should be collapsed according to white-space property.
  * Returns true for: normal, nowrap, pre-line
  * Returns false for: pre, pre-wrap, break-spaces
@@ -644,6 +657,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_replaced_content = false;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
+    lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
     // These are the correct "parent" for top-level inline content.
@@ -659,7 +673,9 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.committed_trailing_view = NULL;
     lycon->line.committed_trailing_space = 0;
     lycon->line.hanging_space_width = 0;
+    lycon->line.hanging_space_text_trim = 0;
     lycon->line.last_space_hanging_width = 0;
+    lycon->line.last_space_hanging_text_trim = 0;
     lycon->line.wrap_opportunity_before_nowrap = false;
     lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
@@ -715,6 +731,31 @@ void line_init(LayoutContext* lycon, float left, float right) {
     lycon->line.vertical_align_offset = 0;
 }
 
+/**
+ * Recursively fix height of collapsed inline spans on a line with visible content.
+ * CSS 2.1 §10.8.1: Empty inline elements should report height = line-height
+ * when on a line that has visible content (the "strut" concept).
+ * compute_span_bounding_box sets 0×0 for truly empty spans; this restores
+ * their height from the pre-stored content_height (= block's line-height).
+ */
+static void fixup_collapsed_inline_spans(ViewSpan* span) {
+    // recurse into children first (depth-first)
+    View* child = span->first_child;
+    while (child) {
+        if (child->view_type == RDT_VIEW_INLINE) {
+            fixup_collapsed_inline_spans((ViewSpan*)child);
+        }
+        child = child->next();
+    }
+    // fix this span if collapsed
+    if (span->height == 0) {
+        DomElement* elem = static_cast<DomElement*>((DomNode*)span);
+        if (elem->content_height > 0) {
+            span->height = (int)elem->content_height;
+        }
+    }
+}
+
 void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
@@ -750,10 +791,26 @@ void line_break(LayoutContext* lycon) {
     }
     // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
     // don't contribute to the line box width for min/max-width calculations.
-    // Only adjust advance_x (line box width), NOT the text rect width (visual rendering).
+    // Store how much of the trailing space should be subtracted from text node
+    // JSON output. Browsers exclude hanging ASCII spaces from text node
+    // getBoundingClientRect(), but INCLUDE them in parent span bounds. U+3000
+    // ideographic space has a visible glyph and is NOT trimmed.
+    // NOTE: Only trim when the text rect has non-whitespace content remaining
+    // after the trim. When the entire text rect is hanging whitespace (e.g. " "),
+    // browsers include it in the text node bounds.
     if (lycon->line.hanging_space_width > 0) {
+        float hang_trim = lycon->line.hanging_space_text_trim;
+        if (hang_trim > 0 && lycon->line.last_text_rect) {
+            float remaining = lycon->line.last_text_rect->width - hang_trim;
+            if (remaining > 0.01f) {
+                // Store trim on rect for JSON output; keep rect->width untrimmed
+                // so ViewText bounds (used by span bounding box) stay full-width.
+                lycon->line.last_text_rect->hanging_trim = hang_trim;
+            }
+        }
         lycon->line.advance_x -= lycon->line.hanging_space_width;
         lycon->line.hanging_space_width = 0;
+        lycon->line.hanging_space_text_trim = 0;
     }
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
 
@@ -770,8 +827,17 @@ void line_break(LayoutContext* lycon) {
             lycon->line.max_descender, lycon->line.max_desc_before_last_text);
         lycon->line.max_descender = lycon->line.max_desc_before_last_text;
     }
+    // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font
+    // and line-height. Run vertical alignment when:
+    // 1) inline content exceeds the strut (original condition), OR
+    // 2) a different inline font needs baseline alignment with the strut
+    //    (e.g., 32px caption text inside 128px Ahem div).
+    // Case 2 is guarded by has_different_inline_font to avoid triggering for
+    // same-font tight line-height (line-height < font-height) where max_ascender
+    // is reduced by negative half-leading, not by a different font.
     if (lycon->line.max_ascender > lycon->block.init_ascender ||
-        lycon->line.max_descender > lycon->block.init_descender) {
+        lycon->line.max_descender > lycon->block.init_descender ||
+        lycon->line.has_different_inline_font) {
         // apply vertical alignment
         log_debug("apply vertical adjustment for the line");
         View* view = lycon->line.start_view;
@@ -891,7 +957,7 @@ void line_break(LayoutContext* lycon) {
     // compute_span_bounding_box. However, when the line has visible content, the
     // inline box should still show height = its line-height (the "strut" concept).
     // Walk the view tree from start_view and fix any marked collapsed inline spans,
-    // including nested children of inline spans.
+    // recursing into arbitrarily nested inline children.
     // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
     // only fix when used_line_height > 0 (line has actual visible content).
     if (used_line_height > 0 && lycon->line.start_view) {
@@ -899,28 +965,7 @@ void line_break(LayoutContext* lycon) {
         DomNode* line_parent = ((DomNode*)v)->parent;
         while (v) {
             if (v->view_type == RDT_VIEW_INLINE) {
-                // Recurse into children of inline spans to fix nested empty spans
-                View* child = ((ViewSpan*)v)->first_child;
-                while (child) {
-                    if (child->view_type == RDT_VIEW_INLINE && child->height == 0) {
-                        DomElement* celem = static_cast<DomElement*>((DomNode*)child);
-                        if (celem->content_height > 0) {
-                            child->height = (int)celem->content_height;
-                            log_debug("fixup nested collapsed inline span %s height=%d",
-                                     celem->node_name(), child->height);
-                        }
-                    }
-                    child = child->next();
-                }
-                // Also fix the span itself if collapsed
-                if (v->height == 0) {
-                    DomElement* elem = static_cast<DomElement*>((DomNode*)v);
-                    if (elem->content_height > 0) {
-                        v->height = (int)elem->content_height;
-                        log_debug("fixup collapsed inline span %s height=%d",
-                                 elem->node_name(), v->height);
-                    }
-                }
+                fixup_collapsed_inline_spans((ViewSpan*)v);
             }
             DomNode* next = ((DomNode*)v)->next_sibling;
             if (!next || ((DomNode*)v)->parent != line_parent) break;
@@ -937,6 +982,13 @@ void line_break(LayoutContext* lycon) {
     //   - used_line_height (back to this line's top)
     //   + max_ascender (from line top to baseline)
     lycon->block.last_line_ascender = lycon->block.advance_y - used_line_height + lycon->line.max_ascender;
+
+    // CSS Flexbox §9.4: Track first line's baseline offset for flex baseline alignment.
+    // For block containers with in-flow line boxes, the first baseline is the
+    // baseline of the first line box. Store distance from border-box top.
+    if (lycon->block.first_line_ascender == 0) {
+        lycon->block.first_line_ascender = lycon->block.last_line_ascender;
+    }
 
     // CSS Inline 3 §5: Track first/last line box metrics for text-box-trim.
     // max_ascender/max_descender capture the full line box extent including
@@ -1156,6 +1208,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
         // Save max_descender before this text's contribution, for trailing whitespace rollback
         lycon->line.max_desc_before_last_text = lycon->line.max_descender;
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
+        // CSS 2.1 §10.8.1: Track if any inline text uses a different font from the
+        // block's strut. When the strut font differs, the vertical alignment pass must
+        // run to position content relative to the strut's baseline.
+        if (!lycon->line.has_different_inline_font &&
+            lycon->font.font_handle != lycon->line.line_start_font.font_handle) {
+            lycon->line.has_different_inline_font = true;
+        }
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
         log_debug("output_text: asc=%.1f desc=%.1f -> max_asc=%.1f max_desc=%.1f",
             ascender, descender, lycon->line.max_ascender, lycon->line.max_descender);
@@ -1589,8 +1648,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                            lycon->line.effective_right : lycon->line.right;
         if (wrap_lines && rect->x + rect->width > line_right) { // line filled up and wrapping enabled
             log_debug("line filled up");
-            if (codepoint == 0x3000) {
+            if (codepoint == 0x3000 && white_space != CSS_VALUE_BREAK_SPACES) {
                 // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE hangs at end of line.
+                // In break-spaces mode, spaces don't hang (§3), so skip this.
                 // Don't break here — fall through to break tracking below.
             }
             else if (is_space(*str) && !collapse_spaces && white_space != CSS_VALUE_BREAK_SPACES) {
@@ -1602,15 +1662,45 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Space within a hanging sequence (after U+3000): don't break.
                 // The space is between hangable characters and should hang with them.
             }
+            // CSS Text 3 §3 + §5.2: For break-spaces with break_all/line-break:anywhere,
+            // when a space (or U+3000) overflows, prefer the earlier break_all opportunity
+            // before the space. This avoids overflow by placing the space on the next line,
+            // where it takes up its full width as break-spaces requires.
+            else if ((is_space(*str) || codepoint == 0x3000) && white_space == CSS_VALUE_BREAK_SPACES
+                     && break_all && lycon->line.last_space
+                     && text_start <= lycon->line.last_space && lycon->line.last_space < str) {
+                log_debug("break-spaces with break_all: break before overflowing space");
+                rect->width -= wd;  // undo the space width
+                str = lycon->line.last_space + 1;
+                float output_width = lycon->line.last_space_pos;
+                output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                line_break(lycon);  goto LAYOUT_TEXT;
+            }
             else if (is_space(*str)) { // break at the current space (collapsible or break-spaces)
                 log_debug("break on space");
+                // CSS Text 3 §3: For break-spaces, "a soft wrap opportunity exists
+                // before and after every preserved white space character." When the
+                // space overflows and there's content before it, break BEFORE the
+                // space so it starts the next line with its full width preserved.
+                if (white_space == CSS_VALUE_BREAK_SPACES && rect->width - wd > 0.01f) {
+                    rect->width -= wd;  // remove the space from current line
+                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                    line_break(lycon);
+                    log_debug("break-spaces: break before space");
+                    goto LAYOUT_TEXT;  // space will be first char on new line
+                }
                 // skip spaces according to white-space mode
                 if (collapse_spaces) {
                     do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
                 } else {
                     str++;  // only skip the current space in break-spaces mode
                 }
-                rect->width -= wd;  // minus away space width at line break
+                // CSS Text 3 §4.1.3: For break-spaces, preserved spaces take up space
+                // and do not hang at end of line. Keep the space width in the text rect.
+                // For other modes, remove the trailing space from the rect.
+                if (white_space != CSS_VALUE_BREAK_SPACES) {
+                    rect->width -= wd;  // minus away space width at line break
+                }
                 lycon->line.trailing_space_width = 0;  // already trimmed, don't double-subtract
                 // Note: hanging_space_width (from U+3000) is handled by line_break().
                 output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
@@ -1623,20 +1713,25 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // and are not counted for overflow/wrapping purposes. If the non-hanging
             // content (text minus accumulated trailing spaces) fits within the line,
             // don't wrap — let the spaces hang past the margin.
-            else if (lycon->line.last_space_hanging_width > 0
-                     && rect->x + rect->width - lycon->line.last_space_hanging_width <= line_right) {
+            // Use live hanging_space_width (not saved last_space_hanging_width) because
+            // once non-space content follows the spaces, they are no longer trailing
+            // and normal wrap rules apply (the live value resets after non-space chars).
+            else if (lycon->line.hanging_space_width > 0
+                     && rect->x + rect->width - lycon->line.hanging_space_width <= line_right) {
                 log_debug("pre-wrap hanging: content fits without %dpx hanging spaces",
-                    (int)lycon->line.last_space_hanging_width);
-                // Restore hanging_space_width so line_break() can subtract it from
-                // the line box width. It was reset when non-space content appeared,
-                // but the spaces still hang per CSS Text 3 §4.1.3.
-                lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
+                    (int)lycon->line.hanging_space_width);
                 // Don't wrap. The spaces hang past the margin. Fall through to continue.
             }
             else if (lycon->line.last_space) { // break at the last space
                 log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                     str = lycon->line.last_space + 1;
+                    // Restore hanging_space_width from saved values so line_break()
+                    // can subtract it from the line box width.
+                    if (lycon->line.last_space_hanging_width > 0) {
+                        lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
+                        lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
+                    }
                     // Output full width including hanging spaces — visual rect preserves
                     // hanging width. line_break() adjusts advance_x to exclude it.
                     float output_width = lycon->line.last_space_pos;
@@ -1756,14 +1851,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             // CSS Text 3 §4.1.3: For pre-wrap, track accumulated trailing space
             // width separately. Used at wrap points to compute hanging space.
-            if (!collapse_spaces && wrap_lines) {
+            // For break-spaces, spaces do NOT hang — they take up space at end
+            // of line (CSS Text 3 §3: "preserved white space takes up space and
+            // does not hang at the end of a line").
+            if (!collapse_spaces && wrap_lines && white_space != CSS_VALUE_BREAK_SPACES) {
                 lycon->line.hanging_space_width += wd;
+                lycon->line.hanging_space_text_trim += wd;  // regular ASCII spaces get trimmed from text rects
             }
             // Save hanging_space_width at the time last_space is recorded,
             // AFTER accumulating the current space. This is used at
             // break-at-last-space wrap points where non-space chars may have
             // reset the live hanging_space_width since the last space.
             lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
+            lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
         }
         else if (codepoint == 0x3000) {
             // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is a hangable break opportunity.
@@ -1774,9 +1874,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_is_hyphen = false;
             lycon->line.has_space = true;
             lycon->line.is_line_start = false;
-            // Track as hanging space — its width doesn't count for line box width
-            lycon->line.hanging_space_width += wd;
+            // Track as hanging space — its width doesn't count for line box width.
+            // For break-spaces, spaces don't hang (CSS Text 3 §3), so skip accumulation.
+            if (white_space != CSS_VALUE_BREAK_SPACES) {
+                lycon->line.hanging_space_width += wd;
+            }
             lycon->line.last_space_hanging_width = lycon->line.hanging_space_width;
+            lycon->line.last_space_hanging_text_trim = lycon->line.hanging_space_text_trim;
         }
         else if (*str == '-') {
             // Hyphens are break opportunities (CSS allows breaking after hyphens)
@@ -1789,6 +1893,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
         }
         else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character.
@@ -1801,6 +1906,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
 
             // Record break opportunity after this character, unless forbidden by line-break rules
             bool allow_break = true;
@@ -1823,6 +1929,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
             // UAX #14 / CSS Text 3 §5.2: CL/NS characters adjacent to CJK text
             // participate in CJK-style break tracking. After CL/NS, a break is
             // allowed (they stay with preceding content, break after is fine).
@@ -1846,6 +1953,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str = lycon->line.last_space + 1;
                 // Restore advance_x before output_text (it will add the correct width)
                 lycon->line.advance_x = saved_advance_x;
+                // Restore hanging_space_width from saved values so line_break()
+                // can subtract it from the line box width.
+                if (lycon->line.last_space_hanging_width > 0) {
+                    lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
+                    lycon->line.hanging_space_text_trim = lycon->line.last_space_hanging_text_trim;
+                }
                 // Output with full width including hanging spaces — the visual rect
                 // preserves hanging space width. line_break() adjusts advance_x
                 // to exclude hanging width from line box calculations.

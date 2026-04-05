@@ -3304,7 +3304,12 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 // Named font sizes: small, medium, large, etc.
                 CssEnum kw = value->data.keyword;
-                if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
+                if (kw == CSS_VALUE_INHERIT) {
+                    // CSS 2.1 §6.2.1: inherit from parent's computed font-size
+                    font_size = parent_font_size;
+                    log_debug("[CSS] Font size inherit from parent: %.2f px", font_size);
+                    valid = true;
+                } else if (kw == CSS_VALUE_LARGER || kw == CSS_VALUE_SMALLER) {
                     // CSS 2.1 §15.7: relative to parent font size
                     float scale = (kw == CSS_VALUE_LARGER) ? 1.2f : (1.0f / 1.2f);
                     font_size = parent_font_size * scale;
@@ -3681,6 +3686,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // CSS 2.1: text-indent applies to the first line of a block container
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 float indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, value);
+                // Clamp to browser-compatible range to prevent integer overflow
+                // in layout (browsers typically clamp at ±33554432 = 2^25)
+                if (indent > 33554432.0f) indent = 33554432.0f;
+                else if (indent < -33554432.0f) indent = -33554432.0f;
                 block->blk->text_indent = indent;
                 block->blk->text_indent_percent = NAN;  // not percentage
                 log_debug("[CSS] Text-indent: %.1fpx", indent);

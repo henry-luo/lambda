@@ -146,10 +146,44 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         return c->x + c->width;
     };
 
+    // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding
+    // extend from the font CONTENT AREA, not from child borders. Track two extents:
+    // 1. visual_min/max_y: union of ALL children's boxes (including child inline
+    //    span borders) — the full visual extent of children.
+    // 2. content_min/max_y: union of NON-inline-span children (text, inline-block)
+    //    — the font content area position, used for placing THIS span's border.
+    // The final bbox = union of visual extent and parent's own border extent.
+    auto get_child_content_y = [](View* c) -> int {
+        if (c->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* cs = (ViewSpan*)c;
+            float bt = 0, pt = 0;
+            if (cs->bound) {
+                if (cs->bound->border) bt = cs->bound->border->width.top;
+                pt = cs->bound->padding.top > 0 ? cs->bound->padding.top : 0;
+            }
+            return (int)(c->y + bt + pt);
+        }
+        return c->y;
+    };
+    auto get_child_content_bottom = [](View* c) -> int {
+        if (c->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* cs = (ViewSpan*)c;
+            float bb = 0, pb = 0;
+            if (cs->bound) {
+                if (cs->bound->border) bb = cs->bound->border->width.bottom;
+                pb = cs->bound->padding.bottom > 0 ? cs->bound->padding.bottom : 0;
+            }
+            return (int)(c->y + c->height - bb - pb);
+        }
+        return c->y + c->height;
+    };
+
     int min_x = get_child_outer_left(child);
-    int min_y = child->y;
+    int visual_min_y = child->y;
     int max_x = get_child_outer_right(child);
-    int max_y = child->y + child->height;
+    int visual_max_y = child->y + child->height;
+    int content_min_y = get_child_content_y(child);
+    int content_max_y = get_child_content_bottom(child);
 
     // Iterate through remaining children to find union
     child = child->next();
@@ -160,15 +194,21 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
             continue;
         }
         int child_min_x = get_child_outer_left(child);
-        int child_min_y = child->y;
         int child_max_x = get_child_outer_right(child);
-        int child_max_y = child->y + child->height;
 
         // Expand bounding box to include this child
         if (child_min_x < min_x) min_x = child_min_x;
-        if (child_min_y < min_y) min_y = child_min_y;
         if (child_max_x > max_x) max_x = child_max_x;
-        if (child_max_y > max_y) max_y = child_max_y;
+
+        // Visual extent (including child inline span borders)
+        if (child->y < visual_min_y) visual_min_y = child->y;
+        if (child->y + child->height > visual_max_y) visual_max_y = child->y + child->height;
+
+        // Content extent (stripped of child inline span borders)
+        int cy = get_child_content_y(child);
+        int cb = get_child_content_bottom(child);
+        if (cy < content_min_y) content_min_y = cy;
+        if (cb > content_max_y) content_max_y = cb;
 
         child = child->next();
     }
@@ -196,12 +236,23 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     float right_edge = border_right + pad_right;
     float inline_sum = left_edge + right_edge;
     int content_width = max_x - min_x;
-    int content_height = max_y - min_y;
-    if (content_width == 0 && content_height == 0 && inline_sum == 0) {
+    int visual_height = visual_max_y - visual_min_y;
+    if (content_width == 0 && visual_height == 0 && inline_sum == 0) {
         span->width = 0;
         span->height = 0;
         return;
     }
+
+    // CSS 2.1 §10.6.1: For inline non-replaced elements, vertical borders/padding
+    // extend from the font CONTENT AREA, not from child border boxes. This means
+    // nested inline spans with borders don't stack — both extend from the same
+    // content area. Compute the parent's border extent from content_min/max_y
+    // (the text/inline-block positions), then take the union with the visual extent
+    // (which includes child inline span borders that may extend further).
+    int parent_border_top_y = content_min_y - (int)border_top - (int)pad_top;
+    int parent_border_bottom_y = content_max_y + (int)border_bottom + (int)pad_bottom;
+    int final_min_y = min(visual_min_y, parent_border_top_y);
+    int final_max_y = max(visual_max_y, parent_border_bottom_y);
 
     // CSS 2.1 §8.5.1: Inline elements' border/padding appear at the start and end
     // of the inline box. For single-line spans, border+padding expand the bounding box
@@ -211,15 +262,15 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     if (is_multi_line) {
         // Multi-line: don't add horizontal border+padding to union bounding box
         span->x = min_x;
-        span->y = min_y - (int)border_top - (int)pad_top;
+        span->y = final_min_y;
         span->width = content_width;
-        span->height = content_height + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
+        span->height = final_max_y - final_min_y;
     } else {
         // Single-line: include horizontal border+padding in bounding box
         span->x = min_x - (int)left_edge;
-        span->y = min_y - (int)border_top - (int)pad_top;
+        span->y = final_min_y;
         span->width = content_width + (int)left_edge + (int)right_edge;
-        span->height = content_height + (int)border_top + (int)pad_top + (int)pad_bottom + (int)border_bottom;
+        span->height = final_max_y - final_min_y;
     }
 }
 
@@ -805,10 +856,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
 
         // CSS 2.1 §9.2.1.1: Extend span bounding box to cover the trailing anonymous
-        // block's strut. Only do this when the span has inline-end decorations that
-        // caused a trailing strut to be generated. Without inline-end decorations,
-        // advance_y may include the block child's margins which should NOT be part
-        // of the span's bounding box (margins are outside the border box).
+        // block's strut. When the span has inline-end decoration (border/padding),
+        // the trailing anonymous block contains the span's inline-end edge, which
+        // generates a strut of at least one line-height even with no visible content.
+        // Compute the trailing extent directly from the last block child's bottom
+        // position, avoiding reliance on advance_y which may or may not include
+        // the trailing strut advance (depending on nesting context).
         {
             bool has_inline_end = false;
             if (span->bound) {
@@ -823,9 +876,23 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 has_inline_end = (end_border > 0 || end_padding > 0);
             }
             if (has_inline_end) {
-                float span_bottom = span->y + span->height;
-                float flow_bottom = lycon->block.advance_y;
-                if (flow_bottom > span_bottom) {
+                // Find the bottom of the last block child within this span.
+                // The trailing anonymous block starts at that position.
+                float last_block_bottom = -1;
+                View* scan_child = span->first_child;
+                while (scan_child) {
+                    if (scan_child->view_type == RDT_VIEW_BLOCK) {
+                        float child_bottom = scan_child->y + scan_child->height;
+                        if (child_bottom > last_block_bottom)
+                            last_block_bottom = child_bottom;
+                    }
+                    scan_child = scan_child->next();
+                }
+
+                if (last_block_bottom >= 0) {
+                    // The trailing strut line extends from last_block_bottom by
+                    // one line-height, then border-bottom and padding-bottom
+                    float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
                     float border_bottom = 0, pad_bottom = 0;
                     if (span->bound) {
                         if (span->bound->border)
@@ -833,9 +900,13 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (span->bound->padding.bottom > 0)
                             pad_bottom = span->bound->padding.bottom;
                     }
-                    span->height = (int)(flow_bottom - span->y + border_bottom + pad_bottom);
-                    log_debug("%s block-in-inline: extended span height to %d (flow_bottom=%.1f, span_y=%d)", elmt->source_loc(),
-                              span->height, flow_bottom, span->y);
+                    float trailing_extent = last_block_bottom + line_height + border_bottom + pad_bottom;
+                    float span_bottom = span->y + span->height;
+                    if (trailing_extent > span_bottom) {
+                        span->height = (int)(trailing_extent - span->y);
+                        log_debug("%s block-in-inline: extended span height to %d (last_block_bottom=%.1f, line_height=%.1f, border_bottom=%.1f)",
+                                  elmt->source_loc(), span->height, last_block_bottom, line_height, border_bottom);
+                    }
                 }
             }
         }

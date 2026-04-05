@@ -1877,10 +1877,16 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     int bracket_depth = 0;  // track []-brackets inside values
     int paren_depth_val = 0;  // track ()-parens inside values
     bool bracket_mismatch = false;  // unmatched ] or ) detected
+    bool has_bad_token = false;  // CSS §5.4.5: bad-string/bad-url in value → drop declaration
     int value_end_before_important = -1;  // track end of value before !important
 
     while (*pos < token_count) {
         CssTokenType t = tokens[*pos].type;
+
+        // CSS §5.4.5: bad-string or bad-url tokens make the declaration invalid
+        if (t == CSS_TOKEN_BAD_STRING || t == CSS_TOKEN_BAD_URL) {
+            has_bad_token = true;
+        }
 
         // Check for !important (whitespace allowed between ! and important per CSS spec)
         if (brace_depth == 0 && t == CSS_TOKEN_DELIM && tokens[*pos].data.delimiter == '!') {
@@ -1963,6 +1969,12 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     if (value_count == 0) {
         log_debug("[CSS Parser] No value tokens found");
+        return NULL;
+    }
+
+    // CSS §5.4.5: declarations containing bad-string or bad-url tokens must be dropped
+    if (has_bad_token) {
+        log_debug("[CSS Parser] Dropping declaration '%s': contains bad-string or bad-url token", property_name);
         return NULL;
     }
 
