@@ -505,6 +505,10 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
         case CSS_PROPERTY_MAX_WIDTH:
         case CSS_PROPERTY_MAX_HEIGHT: {
             // Width and height must be non-negative (per CSS spec)
+            // Reject CUSTOM values (e.g., dimension with unknown unit like "300x")
+            if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+                return false;
+            }
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
                 if (value->data.length.value < 0) {
                     return false;
@@ -540,6 +544,17 @@ bool css_property_validate_value(CssPropertyId id, CssValue* value) {
                 if (value->data.number.value < 0) {
                     return false;
                 }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_INDENT: {
+            // CSS Text 3 §8.1: text-indent: <length-percentage> && hanging? && each-line?
+            // 'hanging' and 'each-line' keywords are not yet supported, so reject LIST
+            // values (e.g., "4ch hanging") to let the cascade fall back to the
+            // next matching declaration — matching Chrome's behavior.
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                return false;
             }
             break;
         }

@@ -62,6 +62,11 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
+
+// JS runtime batch reset functions (from lambda/js/)
+extern "C" void js_batch_reset(void);
+extern "C" void js_dom_batch_reset(void);
+extern "C" void js_globals_batch_reset(void);
 // print_view_tree is declared in layout.hpp
 // print_item is declared in lambda/ast.hpp
 
@@ -4651,6 +4656,13 @@ static bool layout_single_file(
     // Cleanup document and pool for this file
     // Note: free_document is handled by pool_destroy since doc is allocated from pool
     pool_destroy(pool);
+
+    // Reset JS runtime state to avoid cross-document leakage in batch mode.
+    // JS singletons (globalThis, document proxy) and module state persist across files
+    // unless explicitly reset, causing tests with <script> tags to fail in batch.
+    js_batch_reset();
+    js_dom_batch_reset();
+    js_globals_batch_reset();
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     // Clears @font-face descriptors, face cache, and codepoint fallback cache.
