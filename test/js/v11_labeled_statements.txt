@@ -2,7 +2,4 @@
 3
 4
 inside
-[
-  0,
-  "break-outer"
-]
+[0,"break-outer"]
