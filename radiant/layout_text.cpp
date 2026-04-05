@@ -570,6 +570,62 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
     return RDT_NOT_SURE;
 }
 
+// Forward declaration (defined below output_text)
+void adjust_text_bounds(ViewText* text);
+
+// Forward declaration from layout_inline.cpp
+extern void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh);
+
+/**
+ * After trimming a text rect's trailing space, update the parent ViewText bounds
+ * and shrink ancestor ViewSpan widths by the same amount.  This is safe to call
+ * mid-layout because it only subtracts the known trim amount — it does NOT call
+ * compute_span_bounding_box which can produce wrong results when some children
+ * haven't been positioned yet (e.g., block-in-inline cases).
+ */
+static void propagate_text_trim(ViewText* text_view, float trim_amount) {
+    // After trimming a trailing-space text rect in line_break(), recompute
+    // the ViewText bounding box from its (now-trimmed) TextRects.
+    adjust_text_bounds(text_view);
+
+    // Walk up parent ViewSpan chain and shrink widths when the trimmed text
+    // was the rightmost content in the span. If other content (e.g. inline-table)
+    // extends beyond the text, the span's bounding box is determined by that
+    // content and should not change.
+    ViewElement* parent = text_view->parent_view();
+    while (parent && parent->view_type == RDT_VIEW_INLINE) {
+        float span_right = parent->x + parent->width;
+        // Compute the span's content-area right edge (inside border+padding).
+        // exit_inline_box's compute_span_bounding_box already accounts for
+        // border+padding, so the content ends before those decorations.
+        float content_right = span_right;
+        if (parent->bound) {
+            if (parent->bound->border)
+                content_right -= parent->bound->border->width.right;
+            if (parent->bound->padding.right > 0)
+                content_right -= parent->bound->padding.right;
+        }
+        float old_text_right = text_view->x + text_view->width + trim_amount;
+        // The text was at the right edge of the span before trimming — the span
+        // needs to shrink by the same amount. If the text's original right edge
+        // was well inside the span content area, other content determines the
+        // span width.
+        if ((int)old_text_right < (int)content_right) {
+            break;  // text was not at the right edge; span width unaffected
+        }
+        // If span was already trimmed by exit_inline_box (content right <=
+        // post-trim text right), no further adjustment needed.
+        float text_right = text_view->x + text_view->width;
+        if ((int)text_right >= (int)content_right) {
+            break;
+        }
+        int new_width = parent->width - (int)trim_amount;
+        if (new_width < 0) new_width = 0;
+        parent->width = new_width;
+        parent = parent->parent_view();
+    }
+}
+
 void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
@@ -597,11 +653,14 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size : (lycon->block.init_ascender + lycon->block.init_descender);
     lycon->line.parent_font_handle = lycon->font.font_handle;
     lycon->line.last_text_rect = NULL;
+    lycon->line.last_text_view = NULL;
     lycon->line.trailing_space_width = 0;
     lycon->line.committed_trailing_rect = NULL;
+    lycon->line.committed_trailing_view = NULL;
     lycon->line.committed_trailing_space = 0;
     lycon->line.hanging_space_width = 0;
     lycon->line.last_space_hanging_width = 0;
+    lycon->line.wrap_opportunity_before_nowrap = false;
     lycon->line.is_last_line = false;
     lycon->line.advance_x = lycon->line.left;  // Start at container left
 
@@ -660,10 +719,16 @@ void line_break(LayoutContext* lycon) {
     // CSS 2.1 §16.6.1: For normal/nowrap/pre-line white-space, trailing spaces
     // at the end of a line are removed. Trim the last text rect's width.
     if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
-        lycon->line.last_text_rect->width -= lycon->line.trailing_space_width;
-        lycon->line.advance_x -= lycon->line.trailing_space_width;
+        float trim_amount = lycon->line.trailing_space_width;
+        lycon->line.last_text_rect->width -= trim_amount;
+        lycon->line.advance_x -= trim_amount;
         lycon->line.trailing_space_width = 0;
+        // Update the ViewText bounds and parent ViewSpan bounding boxes
+        if (lycon->line.last_text_view) {
+            propagate_text_trim(lycon->line.last_text_view, trim_amount);
+        }
         lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_view = NULL;
         lycon->line.committed_trailing_space = 0;
     }
     // CSS 2.1 §16.6.1: Cross-node trailing space trimming. When a text rect
@@ -672,9 +737,15 @@ void line_break(LayoutContext* lycon) {
     // with the trailing-space rect still being the last text on the line,
     // trim it using the committed trailing space info.
     else if (lycon->line.committed_trailing_space > 0 && lycon->line.committed_trailing_rect) {
-        lycon->line.committed_trailing_rect->width -= lycon->line.committed_trailing_space;
-        lycon->line.advance_x -= lycon->line.committed_trailing_space;
+        float trim_amount = lycon->line.committed_trailing_space;
+        lycon->line.committed_trailing_rect->width -= trim_amount;
+        lycon->line.advance_x -= trim_amount;
+        // Update the ViewText bounds and parent ViewSpan bounding boxes
+        if (lycon->line.committed_trailing_view) {
+            propagate_text_trim(lycon->line.committed_trailing_view, trim_amount);
+        }
         lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_view = NULL;
         lycon->line.committed_trailing_space = 0;
     }
     // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
@@ -859,9 +930,13 @@ void line_break(LayoutContext* lycon) {
 
     lycon->block.advance_y += used_line_height;
 
-    // CSS 2.1 10.8.1: Track last line's ascender for inline-block baseline alignment
-    // The baseline of an inline-block with in-flow content is the baseline of its last line box
-    lycon->block.last_line_ascender = lycon->line.max_ascender;
+    // CSS 2.1 10.8.1: Track last line's baseline offset for inline-block baseline alignment.
+    // The baseline of an inline-block is the baseline of its last line box.
+    // Store the distance from the block's border-box top to the baseline:
+    //   advance_y (which includes border_top + pad_top + all preceding line heights)
+    //   - used_line_height (back to this line's top)
+    //   + max_ascender (from line top to baseline)
+    lycon->block.last_line_ascender = lycon->block.advance_y - used_line_height + lycon->line.max_ascender;
 
     // CSS Inline 3 §5: Track first/last line box metrics for text-box-trim.
     // max_ascender/max_descender capture the full line box extent including
@@ -1027,13 +1102,16 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     // the end of the line — clear it. Then save any trailing space from this rect.
     if (lycon->line.trailing_space_width > 0) {
         lycon->line.committed_trailing_rect = rect;
+        lycon->line.committed_trailing_view = text;
         lycon->line.committed_trailing_space = lycon->line.trailing_space_width;
     } else if (lycon->line.committed_trailing_rect != rect) {
         // New text content with no trailing space clears the committed info
         lycon->line.committed_trailing_rect = NULL;
+        lycon->line.committed_trailing_view = NULL;
         lycon->line.committed_trailing_space = 0;
     }
     lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
+    lycon->line.last_text_view = text;  // ViewText owner for bounds update after trimming
     // CSS 2.1 §8.3: Inline content has been placed on this line, so any pending
     // inline left edges (margin+border+padding) have been consumed.
     lycon->line.inline_start_edge_pending = 0;
@@ -1195,6 +1273,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // todo: probably should still set it bounds
             text_node->view_type = RDT_VIEW_NONE;
             log_debug("skipping whitespace text node");
+            // CSS Text 3 §5: Even though this whitespace was fully collapsed, it
+            // represents a line break opportunity when the text's white-space allows
+            // wrapping.  Record this so that subsequent nowrap content can use it as
+            // a wrap point at the inter-element boundary.
+            // Only set when not at line start — whitespace at line start has no
+            // preceding content to break away from.
+            if (wrap_lines && !lycon->line.is_line_start) {
+                lycon->line.wrap_opportunity_before_nowrap = true;
+            }
             return;
         }
     }
@@ -1532,6 +1619,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (*str) { goto LAYOUT_TEXT; }
                 else return;
             }
+            // CSS Text 3 §4.1.3: For pre-wrap, preserved spaces at end of line "hang"
+            // and are not counted for overflow/wrapping purposes. If the non-hanging
+            // content (text minus accumulated trailing spaces) fits within the line,
+            // don't wrap — let the spaces hang past the margin.
+            else if (lycon->line.last_space_hanging_width > 0
+                     && rect->x + rect->width - lycon->line.last_space_hanging_width <= line_right) {
+                log_debug("pre-wrap hanging: content fits without %dpx hanging spaces",
+                    (int)lycon->line.last_space_hanging_width);
+                // Restore hanging_space_width so line_break() can subtract it from
+                // the line box width. It was reset when non-space content appeared,
+                // but the spaces still hang per CSS Text 3 §4.1.3.
+                lycon->line.hanging_space_width = lycon->line.last_space_hanging_width;
+                // Don't wrap. The spaces hang past the margin. Fall through to continue.
+            }
             else if (lycon->line.last_space) { // break at the last space
                 log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
@@ -1607,6 +1708,29 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 goto LAYOUT_TEXT;
             }
             // else cannot break and no float intrusion, continue the flow in current line
+        }
+        // CSS Text 3 §3/§5: white-space: nowrap prevents ALL line breaks within this
+        // text, but break opportunities from a wrappable parent context still apply.
+        // When nowrap content causes overflow and a wrappable break opportunity exists
+        // at the inter-element boundary (e.g., collapsed whitespace between nowrap spans
+        // in a normal-wrapping parent), break the line and re-layout this entire nowrap
+        // text segment on the new line.
+        else if (!wrap_lines && rect->x + rect->width > line_right
+                 && lycon->line.wrap_opportunity_before_nowrap
+                 && !lycon->line.is_line_start) {
+            log_debug("nowrap overflow with wrappable break opportunity, breaking line");
+            // Reset to start of current text segment
+            str = text_start + rect->start_index;
+            // Unlink the current (incomplete) rect — LAYOUT_TEXT will create a new one
+            if (text_view->rect == rect) {
+                text_view->rect = nullptr;
+            } else {
+                TextRect* prev = text_view->rect;
+                while (prev && prev->next != rect) prev = prev->next;
+                if (prev) prev->next = nullptr;
+            }
+            line_break(lycon);
+            goto LAYOUT_TEXT;
         }
         if (is_space(*str)) {
             if (collapse_spaces) {

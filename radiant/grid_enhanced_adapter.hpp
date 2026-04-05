@@ -320,8 +320,8 @@ inline int resolve_negative_line(int negative_line, int total_track_count) {
     // -2 = total_track_count (second to last)
     // Formula: resolved = total_track_count + 2 + negative_line
     int resolved = total_track_count + 2 + negative_line;
-    // Ensure we don't go below line 1
-    if (resolved < 1) resolved = 1;
+    // CSS Grid spec: values <= 0 represent positions before the explicit grid start,
+    // creating negative implicit tracks. Do NOT clamp to 1.
     return resolved;
 }
 
@@ -477,6 +477,12 @@ inline void resolve_negative_lines_in_items(
             // Both start and end are negative: "-N / -M"
             int resolved_start = resolve_negative_line(item.column.start, total_col_count);
             int resolved_end = resolve_negative_line(item.column.end, total_col_count);
+            // CSS Grid spec §8.3: if start > end, swap the two lines
+            if (resolved_start > resolved_end) {
+                int temp = resolved_start;
+                resolved_start = resolved_end;
+                resolved_end = temp;
+            }
             int span = resolved_end - resolved_start;
             if (span < 1) span = 1;
             item.column.start = static_cast<int16_t>(resolved_start);
@@ -488,10 +494,20 @@ inline void resolve_negative_lines_in_items(
         } else if (item.column.has_negative_end && item.column.start > 0) {
             // Only end is negative: "N / -M"
             int resolved_end = resolve_negative_line(item.column.end, total_col_count);
-            int span = resolved_end - item.column.start;
-            if (span < 1) span = 1;
-            item.column.span = static_cast<uint16_t>(span);
-            item.column.end = static_cast<int16_t>(resolved_end);
+            // CSS Grid spec §8.3: if start > end, swap the two lines
+            if (item.column.start > resolved_end) {
+                int original_start = item.column.start;
+                item.column.start = static_cast<int16_t>(resolved_end);
+                item.column.end = static_cast<int16_t>(original_start);
+                int span = original_start - resolved_end;
+                if (span < 1) span = 1;
+                item.column.span = static_cast<uint16_t>(span);
+            } else {
+                int span = resolved_end - item.column.start;
+                if (span < 1) span = 1;
+                item.column.span = static_cast<uint16_t>(span);
+                item.column.end = static_cast<int16_t>(resolved_end);
+            }
             item.column.has_negative_end = false;
         }
 
@@ -500,6 +516,12 @@ inline void resolve_negative_lines_in_items(
             // Both start and end are negative: "-N / -M"
             int resolved_start = resolve_negative_line(item.row.start, total_row_count);
             int resolved_end = resolve_negative_line(item.row.end, total_row_count);
+            // CSS Grid spec §8.3: if start > end, swap the two lines
+            if (resolved_start > resolved_end) {
+                int temp = resolved_start;
+                resolved_start = resolved_end;
+                resolved_end = temp;
+            }
             int span = resolved_end - resolved_start;
             if (span < 1) span = 1;
             item.row.start = static_cast<int16_t>(resolved_start);
@@ -511,10 +533,20 @@ inline void resolve_negative_lines_in_items(
         } else if (item.row.has_negative_end && item.row.start > 0) {
             // Only end is negative: "N / -M"
             int resolved_end = resolve_negative_line(item.row.end, total_row_count);
-            int span = resolved_end - item.row.start;
-            if (span < 1) span = 1;
-            item.row.span = static_cast<uint16_t>(span);
-            item.row.end = static_cast<int16_t>(resolved_end);
+            // CSS Grid spec §8.3: if start > end, swap the two lines
+            if (item.row.start > resolved_end) {
+                int original_start = item.row.start;
+                item.row.start = static_cast<int16_t>(resolved_end);
+                item.row.end = static_cast<int16_t>(original_start);
+                int span = original_start - resolved_end;
+                if (span < 1) span = 1;
+                item.row.span = static_cast<uint16_t>(span);
+            } else {
+                int span = resolved_end - item.row.start;
+                if (span < 1) span = 1;
+                item.row.span = static_cast<uint16_t>(span);
+                item.row.end = static_cast<int16_t>(resolved_end);
+            }
             item.row.has_negative_end = false;
         }
     }

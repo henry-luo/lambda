@@ -975,7 +975,19 @@ inline void resolve_intrinsic_track_sizes(
 
     // After growth_limit distribution: ensure growth_limit >= base_size
     for (auto& track : tracks) {
-        if (!isinf(track.growth_limit) && track.growth_limit < track.base_size) {
+        if (isinf(track.growth_limit)) {
+            // CSS Grid §11.5: Intrinsic max tracks that still have infinite growth_limit
+            // after contributions should transition to finite. This handles the case where
+            // an item's max-content equals its base_size (extra=0, distribute_to_gl skipped).
+            auto mt = track.max_track_sizing_function.type;
+            if (mt == SizingFunctionType::Auto ||
+                mt == SizingFunctionType::MinContent ||
+                mt == SizingFunctionType::MaxContent ||
+                mt == SizingFunctionType::FitContentPx ||
+                mt == SizingFunctionType::FitContentPercent) {
+                track.growth_limit = track.base_size;
+            }
+        } else if (track.growth_limit < track.base_size) {
             track.growth_limit = track.base_size;
         }
     }

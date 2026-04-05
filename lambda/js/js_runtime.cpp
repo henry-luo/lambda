@@ -43,6 +43,13 @@ static Item js_map_get_fast(Map* m, const char* key_str, int key_len, bool* out_
 // Global 'this' binding for the current method call
 static Item js_current_this = {0};
 
+// new.target: set to the constructor function when called via 'new', undefined otherwise.
+// Uses a pending pattern: js_set_new_target sets a pending value that js_call_function
+// picks up on entry. Regular calls see new.target as undefined ({0}).
+static Item js_new_target = {0};
+static Item js_pending_new_target = {0};
+static bool js_has_pending_new_target = false;
+
 // Pending arguments for building 'arguments' object inside JIT-compiled functions.
 // Set by js_invoke_fn before each call, read by js_build_arguments_object().
 static Item* js_pending_call_args = NULL;
@@ -176,6 +183,17 @@ extern "C" Item js_clear_exception(void) {
     return val;
 }
 
+// TDZ check: throw ReferenceError if variable is still in Temporal Dead Zone
+extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
+    if (value.item == ITEM_JS_TDZ) {
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
+        Item tn = (Item){.item = s2it(heap_create_name("ReferenceError", 14))};
+        Item msg = (Item){.item = s2it(heap_create_name(buf, len))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+    }
+}
+
 // forward declaration for js_batch_reset (defined near js_module_count_v14)
 static void js_module_cache_reset();
 
@@ -191,6 +209,10 @@ extern "C" void js_batch_reset() {
     js_exception_value = (Item){0};
     // clear current this binding
     js_current_this = (Item){0};
+    // clear new.target
+    js_new_target = (Item){0};
+    js_pending_new_target = (Item){0};
+    js_has_pending_new_target = false;
     // clear array method real this
     js_array_method_real_this = (Item){0};
     // clear Input context
@@ -318,6 +340,8 @@ extern "C" void js_runtime_set_input(void* input) {
     static bool statics_rooted = false;
     if (!statics_rooted) {
         heap_register_gc_root(&js_current_this.item);
+        heap_register_gc_root(&js_new_target.item);
+        heap_register_gc_root(&js_pending_new_target.item);
         heap_register_gc_root(&js_exception_value.item);
         statics_rooted = true;
     }
@@ -329,6 +353,21 @@ extern "C" Item js_get_this() {
 
 extern "C" void js_set_this(Item this_val) {
     js_current_this = this_val;
+}
+
+extern "C" Item js_get_new_target() {
+    return js_new_target;
+}
+
+extern "C" void js_set_new_target(Item target) {
+    // Set as pending — will be picked up by js_call_function on entry
+    js_pending_new_target = target;
+    js_has_pending_new_target = true;
+}
+
+extern "C" void js_set_direct_new_target(Item target) {
+    // Directly set new.target (for direct calls that bypass js_call_function)
+    js_new_target = target;
 }
 
 // Build the 'arguments' array-like object from the pending call args.
@@ -1282,6 +1321,10 @@ extern "C" Item js_constructor_create_object(Item callee) {
 // Dynamic class instantiation: new Type() where Type is a runtime variable.
 // Handles both function constructors and class objects (MAPs with __ctor__).
 extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
+    // Set pending new.target (will be picked up by js_call_function)
+    js_pending_new_target = callee;
+    js_has_pending_new_target = true;
+
     // Case 1: callee is a function — standard constructor call
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         Item obj = js_constructor_create_object(callee);
@@ -1318,7 +1361,16 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         // Call the constructor (__ctor__ property on the class object)
         Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
-            js_call_function(ctor, obj, args, argc);
+            // Set pending new.target for the constructor call
+            js_pending_new_target = callee;
+            js_has_pending_new_target = true;
+            Item result = js_call_function(ctor, obj, args, argc);
+            // Per ES spec §9.2.2: if constructor returns an Object, use that instead
+            TypeId rt = get_type_id(result);
+            if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+                rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+                return result;
+            }
         }
         return obj;
     }
@@ -2463,6 +2515,42 @@ extern "C" Item js_array_push(Item array, Item value) {
 }
 
 // =============================================================================
+// Tagged Template Literals
+// =============================================================================
+
+extern "C" Item js_build_template_object(Item* cooked, Item* raw, int count) {
+    // build a JS object (map) that acts like an array with .raw property
+    // { "0": cooked[0], "1": cooked[1], ..., length: count, raw: [raw[0], raw[1], ...] }
+    Item obj = js_new_object();
+    char buf[24];
+    for (int i = 0; i < count; i++) {
+        snprintf(buf, sizeof(buf), "%d", i);
+        Item key = (Item){.item = s2it(heap_create_name(buf))};
+        js_property_set(obj, key, cooked[i]);
+    }
+    // set length
+    Item len_key = (Item){.item = s2it(heap_create_name("length"))};
+    js_property_set(obj, len_key, (Item){.item = i2it(count)});
+    // build raw array
+    Item raw_arr = js_new_object();
+    for (int i = 0; i < count; i++) {
+        snprintf(buf, sizeof(buf), "%d", i);
+        Item key = (Item){.item = s2it(heap_create_name(buf))};
+        js_property_set(raw_arr, key, raw[i]);
+    }
+    Item raw_len_key = (Item){.item = s2it(heap_create_name("length"))};
+    js_property_set(raw_arr, raw_len_key, (Item){.item = i2it(count)});
+    // freeze raw
+    js_object_freeze(raw_arr);
+    // set .raw on obj
+    Item raw_key = (Item){.item = s2it(heap_create_name("raw"))};
+    js_property_set(obj, raw_key, raw_arr);
+    // freeze obj
+    js_object_freeze(obj);
+    return obj;
+}
+
+// =============================================================================
 // Console Functions
 // =============================================================================
 
@@ -2472,6 +2560,16 @@ extern "C" void js_console_log(Item value) {
         String* s = it2s(str);
         printf("%.*s\n", (int)s->len, s->chars);
     }
+}
+
+// Per ES spec §9.2.2: if constructor returns an Object, use that instead of `this`
+extern "C" Item js_new_check_constructor_return(Item obj, Item result) {
+    TypeId rt = get_type_id(result);
+    if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_ARRAY || rt == LMD_TYPE_ELEMENT ||
+        rt == LMD_TYPE_FUNC || rt == LMD_TYPE_OBJECT || rt == LMD_TYPE_VMAP) {
+        return result;
+    }
+    return obj;
 }
 
 // =============================================================================
@@ -3535,17 +3633,35 @@ extern "C" Item js_call_function(Item func_item, Item this_val, Item* args, int 
             merged_args[fn->bound_argc + i] = args ? args[i] : ItemNull;
         }
         Item prev_this = js_current_this;
+        Item prev_nt = js_new_target;
         js_current_this = effective_this;
+        // Check for pending new.target (set by 'new' expression before this call)
+        if (js_has_pending_new_target) {
+            js_new_target = js_pending_new_target;
+            js_has_pending_new_target = false;
+        } else {
+            js_new_target = make_js_undefined(); // regular call: new.target is undefined
+        }
         Item result = js_invoke_fn(fn, merged_args, total_argc);
         js_current_this = prev_this;
+        js_new_target = prev_nt;
         return result;
     }
 
     // Bind 'this' for the duration of this call
     Item prev_this = js_current_this;
+    Item prev_nt = js_new_target;
     js_current_this = this_val;
+    // Check for pending new.target (set by 'new' expression before this call)
+    if (js_has_pending_new_target) {
+        js_new_target = js_pending_new_target;
+        js_has_pending_new_target = false;
+    } else {
+        js_new_target = make_js_undefined(); // regular call: new.target is undefined
+    }
     Item result = js_invoke_fn(fn, args, arg_count);
     js_current_this = prev_this;
+    js_new_target = prev_nt;
     return result;
 }
 

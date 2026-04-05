@@ -168,13 +168,18 @@ typedef struct Linebox {
     float parent_font_size;         // parent element's font size (pixels)
     struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
+    struct ViewText* last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
     TextRect* committed_trailing_rect;  // text rect that had trailing space when output_text was called
+    struct ViewText* committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
                                         // cross-node char processing so line_break can trim correctly
     float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
                                     // for pre-wrap mode; used to compute hanging space at wrap points
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
+    bool wrap_opportunity_before_nowrap;  // CSS Text 3 §5: a wrappable break opportunity exists at the current
+                                         // position (from collapsed inter-element whitespace in a wrappable
+                                         // parent); allows nowrap content to break at this boundary
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied

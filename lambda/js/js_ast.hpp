@@ -146,6 +146,9 @@ typedef enum JsAstNodeType {
 
     // v17: with statement (for strict mode rejection)
     JS_AST_NODE_WITH_STATEMENT,
+
+    // v20: Tagged template literals
+    JS_AST_NODE_TAGGED_TEMPLATE,
 } JsAstNodeType;
 
 // JavaScript operators
@@ -415,6 +418,13 @@ typedef struct JsTemplateElementNode {
     String* cooked;                 // Processed string value
     bool tail;                      // Is this the last element
 } JsTemplateElementNode;
+
+// JavaScript tagged template expression node: tag`...`
+typedef struct JsTaggedTemplateNode {
+    JsAstNode base;
+    JsAstNode* tag;                 // Tag function expression
+    JsTemplateLiteralNode* quasi;   // Template literal
+} JsTaggedTemplateNode;
 
 // JavaScript spread element node
 typedef struct JsSpreadElementNode {
