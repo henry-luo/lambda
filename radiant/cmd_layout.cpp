@@ -89,6 +89,12 @@ void parse_pdf(Input* input, const char* pdf_data, size_t pdf_length);  // From 
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 
+// Element-to-DOM map functions (from dom_element.cpp, Phase 12)
+HashMap* element_dom_map_create(void);
+void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
+DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
+bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
+
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
 // before it gets filtered out during DomElement tree construction
@@ -4138,6 +4144,13 @@ void rebuild_lambda_doc(UiContext* uicon) {
     // ensure CSS property system is initialized
     css_property_system_init(doc->pool);
 
+    // create/reset element-to-DOM map (enables incremental rebuild next time)
+    if (!doc->element_dom_map) {
+        doc->element_dom_map = element_dom_map_create();
+    } else {
+        hashmap_clear(doc->element_dom_map, false);
+    }
+
     // rebuild DOM tree from Lambda elements
     DomElement* new_root = build_dom_tree_from_element(html_elem, doc, nullptr);
     if (!new_root) {
@@ -4210,6 +4223,153 @@ void rebuild_lambda_doc(UiContext* uicon) {
         duration<double, std::milli>(t_layout - t_css).count(),
         duration<double, std::milli>(t_render - t_layout).count(),
         duration<double, std::milli>(t_render - t_start).count());
+}
+
+// ============================================================================
+// Reactive UI: incremental DOM rebuild (Phase 12)
+// Only rebuilds changed DOM subtrees instead of the entire tree.
+// Falls back to full rebuild when incremental update is not possible.
+// ============================================================================
+
+void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count) {
+    if (!uicon || !uicon->document) {
+        log_error("rebuild_lambda_doc_incremental: no document");
+        return;
+    }
+
+    DomDocument* doc = uicon->document;
+    Element* html_elem = doc->html_root;
+    if (!html_elem) {
+        log_error("rebuild_lambda_doc_incremental: no html_root in document");
+        return;
+    }
+
+    // Determine if incremental update is feasible
+    bool can_incremental = (doc->element_dom_map != nullptr) &&
+                           (doc->root != nullptr) &&
+                           (result_count > 0);
+
+    // Verify all results have Element-typed old_result that exists in the map
+    if (can_incremental) {
+        for (int i = 0; i < result_count; i++) {
+            if (get_type_id(results[i].old_result) != LMD_TYPE_ELEMENT) {
+                can_incremental = false;
+                break;
+            }
+            Element* old_elem = results[i].old_result.element;
+            if (!old_elem || !element_dom_map_lookup(doc->element_dom_map, old_elem)) {
+                can_incremental = false;
+                break;
+            }
+            if (get_type_id(results[i].new_result) != LMD_TYPE_ELEMENT) {
+                can_incremental = false;
+                break;
+            }
+        }
+    }
+
+    if (!can_incremental) {
+        // Fallback: full rebuild (rebuild_lambda_doc creates element_dom_map for next time)
+        log_debug("rebuild_lambda_doc_incremental: falling back to full rebuild");
+        rebuild_lambda_doc(uicon);
+        return;
+    }
+
+    // --- Incremental path ---
+    log_debug("rebuild_lambda_doc_incremental: patching %d subtree(s)", result_count);
+
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    // Save focus info
+    RadiantState* state = (RadiantState*)doc->state;
+    const char* focus_tag = nullptr;
+    const char* focus_class = nullptr;
+    bool had_focus = false;
+    if (state && state->focus && state->focus->current) {
+        View* focused = state->focus->current;
+        if (focused->is_element()) {
+            DomElement* felem = (DomElement*)focused;
+            focus_tag = felem->tag_name;
+            if (felem->class_count > 0 && felem->class_names)
+                focus_class = felem->class_names[0];
+            had_focus = true;
+        }
+    }
+
+    // ensure CSS property system is initialized
+    css_property_system_init(doc->pool);
+
+    // Get cached CSS (must already exist from prior full rebuild)
+    CssStylesheet** inline_sheets = doc->cached_inline_sheets;
+    int inline_count = doc->cached_inline_sheet_count;
+    CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
+
+    // Phase 12.1: Replace changed DOM subtrees
+    for (int i = 0; i < result_count; i++) {
+        Element* old_elem = results[i].old_result.element;
+        Element* new_elem = results[i].new_result.element;
+
+        DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
+        if (!old_dom || !old_dom->parent) {
+            log_debug("rebuild_lambda_doc_incremental: entry %d has no DOM parent, skipping", i);
+            continue;
+        }
+        DomElement* parent_dom = (DomElement*)old_dom->parent;
+
+        // Build new DOM subtree from the new Lambda element (not linked to parent yet)
+        DomElement* new_dom = build_dom_tree_from_element(new_elem, doc, nullptr);
+        if (!new_dom) {
+            log_debug("rebuild_lambda_doc_incremental: failed to build subtree for entry %d", i);
+            continue;
+        }
+
+        // Replace old DOM child with new subtree in parent's linked list
+        dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
+
+        // Phase 12.2: Apply CSS cascade to new subtree only
+        if (css_engine && inline_sheets && inline_count > 0) {
+            SelectorMatcher* matcher = selector_matcher_create(doc->pool);
+            for (int s = 0; s < inline_count; s++) {
+                if (inline_sheets[s] && inline_sheets[s]->rule_count > 0) {
+                    apply_stylesheet_to_dom_tree_fast(new_dom, inline_sheets[s],
+                                                      matcher, doc->pool, css_engine);
+                }
+            }
+        }
+
+        // Apply inline styles to new subtree only
+        apply_inline_styles_to_tree(new_dom, new_elem, doc->pool);
+    }
+    auto t_dom_css = high_resolution_clock::now();
+
+    // Full layout (Phase 12.3 will optimize this later)
+    doc->view_tree = nullptr;
+    layout_html_doc(uicon, doc, false);
+    auto t_layout = high_resolution_clock::now();
+
+    // Restore focus
+    if (had_focus && state && doc->view_tree && doc->view_tree->root) {
+        View* new_focused = find_matching_input(
+            (View*)doc->view_tree->root, focus_tag, focus_class);
+        if (new_focused) {
+            state->focus->current = new_focused;
+            log_debug("rebuild_lambda_doc_incremental: restored focus");
+        }
+    }
+
+    // Full render (Phase 12.4 will optimize this later)
+    if (doc->view_tree) {
+        render_html_doc(uicon, doc->view_tree, NULL);
+    }
+    auto t_render = high_resolution_clock::now();
+
+    log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d)",
+        duration<double, std::milli>(t_dom_css - t_start).count(),
+        duration<double, std::milli>(t_layout - t_dom_css).count(),
+        duration<double, std::milli>(t_render - t_layout).count(),
+        duration<double, std::milli>(t_render - t_start).count(),
+        result_count);
 }
 
 /**

@@ -24,6 +24,7 @@ View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
 void rebuild_lambda_doc(UiContext* uicon);
+void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -686,11 +687,13 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 
                                 // after handler, check for dirty entries and retransform
                                 if (render_map_has_dirty()) {
-                                    int count = render_map_retransform();
+                                    RetransformResult results[16];
+                                    int count = render_map_retransform_with_results(results, 16);
                                     auto t_retransform = high_resolution_clock::now();
 
-                                    // rebuild DOM from updated Lambda element tree
-                                    rebuild_lambda_doc(evcon->ui_context);
+                                    // incremental DOM rebuild (falls back to full if map not ready)
+                                    int reported = count <= 16 ? count : 16;
+                                    rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
                                     auto t_rebuild = high_resolution_clock::now();
 
                                     using std::chrono::duration;

@@ -51,6 +51,20 @@ Item render_map_get_result(Item source_item, const char* template_ref);
 // Returns the number of entries re-transformed.
 int render_map_retransform(void);
 
+// Result of a single retransformation (for incremental DOM rebuild)
+typedef struct RetransformResult {
+    Item parent_result;     // Lambda parent element containing the changed child
+    Item new_result;        // new Lambda result element (after re-execution)
+    Item old_result;        // old Lambda result element (before re-execution)
+    int child_index;        // position within parent's children
+    const char* template_ref;
+} RetransformResult;
+
+// Re-transform dirty entries and return details of what changed.
+// Fills out_results (up to max_results), returns actual count.
+// If more dirty entries than max_results, excess is still retransformed but not reported.
+int render_map_retransform_with_results(RetransformResult* out_results, int max_results);
+
 // Clear all entries
 void render_map_reset(void);
 

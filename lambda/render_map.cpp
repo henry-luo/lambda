@@ -281,6 +281,97 @@ int render_map_retransform(void) {
     return count;
 }
 
+int render_map_retransform_with_results(RetransformResult* out_results, int max_results) {
+    HashMap* map = ensure_map();
+    if (!g_template_registry) {
+        log_error("render_map_retransform_with_results: no template registry");
+        return 0;
+    }
+
+    int count = 0;
+    size_t iter = 0;
+    void* item;
+    while (hashmap_iter(map, &iter, &item)) {
+        RenderMapEntry* entry = (RenderMapEntry*)item;
+        if (!entry->dirty) continue;
+
+        // find the template by template_ref
+        TemplateEntry* tmpl = NULL;
+        for (TemplateEntry* e = g_template_registry->first; e; e = e->next) {
+            if (e->template_ref == entry->key.template_ref) {
+                tmpl = e;
+                break;
+            }
+        }
+
+        if (!tmpl || !tmpl->body_func) {
+            log_error("render_map_retransform_with_results: no template found for ref=%s",
+                      entry->key.template_ref ? entry->key.template_ref : "(null)");
+            entry->dirty = false;
+            continue;
+        }
+
+        // re-execute template body with the source item
+        typedef Item (*template_body_fn)(Item);
+        template_body_fn fn = (template_body_fn)tmpl->body_func;
+        Item new_result = fn(entry->key.source_item);
+
+        Item old_result = entry->result_node;
+
+        // record result before updating entry
+        if (out_results && count < max_results) {
+            out_results[count].parent_result = entry->parent_result;
+            out_results[count].new_result = new_result;
+            out_results[count].old_result = old_result;
+            out_results[count].child_index = entry->child_index;
+            out_results[count].template_ref = entry->key.template_ref;
+        }
+
+        // update the entry
+        entry->result_node = new_result;
+        entry->dirty = false;
+
+        // update reverse map
+        if (s_reverse_map && new_result.item) {
+            ReverseMapEntry rentry;
+            memset(&rentry, 0, sizeof(rentry));
+            rentry.result_item_bits = new_result.item;
+            rentry.key = entry->key;
+            hashmap_set(s_reverse_map, &rentry);
+        }
+
+        // replace child in parent's Lambda element tree
+        if (get_type_id(entry->parent_result) != LMD_TYPE_NULL && entry->child_index >= 0) {
+            TypeId parent_type = get_type_id(entry->parent_result);
+            if (parent_type == LMD_TYPE_ELEMENT) {
+                Element* parent_elmt = it2elmt(entry->parent_result);
+                if (parent_elmt && entry->child_index < (int)parent_elmt->length) {
+                    parent_elmt->items[entry->child_index] = new_result;
+                }
+            } else if (parent_type == LMD_TYPE_ARRAY) {
+                Array* parent_arr = it2arr(entry->parent_result);
+                if (parent_arr && entry->child_index < (int)parent_arr->length) {
+                    parent_arr->items[entry->child_index] = new_result;
+                }
+            }
+        } else if (s_doc_root.item && old_result.item != new_result.item) {
+            replace_in_element_tree(s_doc_root, old_result, new_result);
+        }
+
+        hashmap_set(map, entry);
+
+        count++;
+        log_debug("render_map_retransform_with_results: re-transformed tmpl=%s (entry %d)",
+                  entry->key.template_ref ? entry->key.template_ref : "(anon)", count);
+    }
+
+    if (count > 0) {
+        log_debug("render_map_retransform_with_results: re-transformed %d entries (%d reported)",
+                  count, count < max_results ? count : max_results);
+    }
+    return count;
+}
+
 void render_map_reset(void) {
     if (s_render_map) {
         hashmap_clear(s_render_map, false);

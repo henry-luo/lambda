@@ -1,7 +1,7 @@
 # Reactive UI Phase 3 — Performance & Language Cleanup
 
 **Date:** 2026-04-05
-**Status:** Phases 10, 11, 13 implemented · Phase 12 deferred pending timing data
+**Status:** Phases 10, 11, 12.1, 12.2, 13 implemented · Phase 12.3, 12.4 deferred pending timing data
 **Prerequisite:** Phases 6–9 complete (Reactive_UI2.md)
 
 ---
@@ -12,7 +12,7 @@
 2. [Current Performance Baseline](#2-current-performance-baseline)
 3. [Phase 10: Remove `it` Keyword — Use `~` Only](#3-phase-10-remove-it-keyword--use--only) ✅
 4. [Phase 11: Event Handling Timing Instrumentation](#4-phase-11-event-handling-timing-instrumentation) ✅
-5. [Phase 12: Incremental DOM Patching](#5-phase-12-incremental-dom-patching) — deferred
+5. [Phase 12: Incremental DOM Patching](#5-phase-12-incremental-dom-patching) — 12.1+12.2 ✅, 12.3+12.4 deferred
    - [12.1 Subtree-Only DOM Rebuild](#121-subtree-only-dom-rebuild)
    - [12.2 CSS Cascade Reuse for Unchanged Subtrees](#122-css-cascade-reuse-for-unchanged-subtrees)
    - [12.3 Partial Relayout via DirtyTracker](#123-partial-relayout-via-dirtytracker)
@@ -512,10 +512,10 @@ Use `log_info` for the detailed per-step breakdown (debug-only).
 | 6 | Run timing, analyze bottleneck distribution | 11 | 4,5 | S | — | Next step |
 | 7 | Downgrade noisy `log_info` → `log_debug` | 13 | — | S | Low | ✅ Done |
 | 8 | Gate verbose hit-test logging | 13 | — | S | Low | ✅ Done |
-| 9 | Element-to-DOM hashmap | 12.1 | — | M | Low | — |
-| 10 | `render_map_retransform_with_results` | 12.1 | — | M | Medium — API change | — |
-| 11 | `rebuild_dom_subtree` | 12.1 | 9,10 | M | Medium | — |
-| 12 | Scope CSS cascade to subtree | 12.2 | 11 | S | Low — already works by passing subtree root | — |
+| 9 | Element-to-DOM hashmap | 12.1 | — | M | Low | ✅ Done |
+| 10 | `render_map_retransform_with_results` | 12.1 | — | M | Medium — API change | ✅ Done |
+| 11 | `rebuild_dom_subtree` | 12.1 | 9,10 | M | Medium | ✅ Done |
+| 12 | Scope CSS cascade to subtree | 12.2 | 11 | S | Low — already works by passing subtree root | ✅ Done |
 | 13 | Preserve view tree, wire `ReflowScheduler` | 12.3 | 11 | L | High — view tree reuse requires stable node identity | — |
 | 14 | Implement `layout_subtree` | 12.3 | 13 | L | High — must handle size escalation | — |
 | 15 | Damage-region repaint with ThorVG clipping | 12.4 | 14 | M | Medium — ThorVG clip API | — |
@@ -551,16 +551,21 @@ Use `log_info` for the detailed per-step breakdown (debug-only).
 | `radiant/event.cpp` | Add `std::chrono` timing around handler, retransform, rebuild in `dispatch_lambda_handler` |
 | `radiant/cmd_layout.cpp` | Add timing around each step in `rebuild_lambda_doc` |
 
-### Phase 12 — Incremental DOM
+### Phase 12 — Incremental DOM (12.1 + 12.2 implemented)
 
 | File | Change |
 |------|--------|
 | `lambda/render_map.h` | Add `RetransformResult` struct, `render_map_retransform_with_results()` |
-| `lambda/render_map.cpp` | Implement `retransform_with_results`, element-to-DOM map |
-| `lambda/input/css/dom_element.hpp` | Add element-to-DOM hashmap to `DomDocument` |
-| `lambda/input/css/dom_element.cpp` | Populate hashmap in `build_dom_tree_from_element`, add `rebuild_dom_subtree` |
-| `radiant/cmd_layout.cpp` | New `rebuild_lambda_doc_incremental`, replace full rebuild when possible |
-| `radiant/event.cpp` | Call incremental path instead of `rebuild_lambda_doc` |
+| `lambda/render_map.cpp` | Implement `retransform_with_results` (captures old/new result + parent info) |
+| `lambda/input/css/dom_element.hpp` | Add `element_dom_map` field to `DomDocument` |
+| `lambda/input/css/dom_element.cpp` | `ElementDomMapEntry` hashmap helpers, populate during `build_dom_tree_from_element`, `dom_node_replace_in_parent` |
+| `radiant/cmd_layout.cpp` | `rebuild_lambda_doc_incremental` — subtree DOM patch + scoped CSS cascade + full layout/render with fallback |
+| `radiant/event.cpp` | Use `retransform_with_results` + `rebuild_lambda_doc_incremental` |
+
+**Not yet implemented (12.3 + 12.4):**
+
+| File | Change |
+|------|--------|
 | `radiant/layout.cpp` | Add `layout_subtree()` using `REFLOW_SUBTREE` |
 | `radiant/render.cpp` | Add `render_block_view_clipped()` with damage rect |
 | `radiant/state_store.cpp` | Wire `DirtyTracker` into reactive rebuild path |
@@ -625,3 +630,49 @@ Downgraded 25+ `log_info` → `log_debug` across hot event/render paths. Only `[
 - **Build:** 0 errors, 1518 warnings (debug build)
 - **Tests:** 558/559 passed (254 Lambda Runtime, 106 Lambda Structured, 61 Lambda Errors, 6 Lambda Proc, 38 Lambda REPL, 19 TypeScript, 74/75 JS)
 - **1 failure:** `test/js/v11_labeled_statements.js` — pre-existing array formatting difference, unrelated to these changes
+
+### Phase 12.1 + 12.2 — Completed 2026-04-05
+
+Implemented incremental DOM patching: only changed subtrees are rebuilt and re-cascaded. Falls back to full rebuild on first event (to populate the element-to-DOM map) and when incremental conditions aren't met.
+
+**Architecture:**
+
+```
+Event → handler → retransform_with_results()
+                        ↓
+              [RetransformResult: old_result, new_result, parent_result, child_index]
+                        ↓
+           rebuild_lambda_doc_incremental()
+                        ↓
+              ┌─ Can incremental? ──→ NO → full rebuild (populates element_dom_map)
+              └─ YES:
+                  for each result:
+                    1. element_dom_map_lookup(old_result.element) → old_dom
+                    2. build_dom_tree_from_element(new_result.element) → new_dom  [subtree only]
+                    3. dom_node_replace_in_parent(parent_dom, old_dom, new_dom)
+                    4. apply_stylesheet_to_dom_tree_fast(new_dom, ...)            [subtree only]
+                    5. apply_inline_styles_to_tree(new_dom, new_elem, ...)        [subtree only]
+                  full layout + full render  [12.3/12.4 will optimize these]
+```
+
+**Key components:**
+
+1. **Element-to-DOM hashmap** (`dom_element.cpp`): `ElementDomMapEntry` maps `Element*` → `DomElement*`. Created via `element_dom_map_create()`, populated automatically during `build_dom_tree_from_element` when `doc->element_dom_map` is non-null. O(1) lookup.
+
+2. **`render_map_retransform_with_results`** (`render_map.cpp`): Clone of `render_map_retransform` that fills a `RetransformResult[]` array with old/new result Items, parent, and child_index. Enables the caller to know exactly what changed.
+
+3. **`dom_node_replace_in_parent`** (`dom_element.cpp`): Splices a new DomNode into an old DomNode's position in the parent's linked-list child chain. O(1) pointer surgery.
+
+4. **`rebuild_lambda_doc_incremental`** (`cmd_layout.cpp`): Main integration function. Checks feasibility (map exists, all results are Elements with valid map entries), then either patches subtrees or falls back to full `rebuild_lambda_doc`.
+
+5. **Scoped CSS cascade**: Passes the new subtree root to `apply_stylesheet_to_dom_tree_fast` instead of document root. The existing function naturally limits scope by walking from its root argument.
+
+**Event lifecycle:**
+- 1st event: `retransform_with_results` → `rebuild_lambda_doc_incremental` → no map yet → fallback to `rebuild_lambda_doc` (creates map) → full rebuild
+- 2nd+ events: `retransform_with_results` → `rebuild_lambda_doc_incremental` → map exists → incremental: patch subtree, scoped CSS, full layout/render
+
+**Timing output:** `[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d)`
+
+**Build:** 0 errors. **Tests:** 560/562 passed (2 pre-existing JS failures: `fs_basic.js` env-dependent, `v11_labeled_statements.js` formatting).
+
+**Next steps:** Run interactive timing (`./lambda.exe view test/lambda/ui/todo.ls`) to compare `[TIMING] rebuild:` (full) vs `[TIMING] rebuild_incr:` (incremental). Phase 12.3 (partial relayout) and 12.4 (damage-region repaint) remain deferred — they require view tree stability work.
