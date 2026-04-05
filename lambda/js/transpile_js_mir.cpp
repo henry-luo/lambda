@@ -5062,17 +5062,8 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
         if (rid->name) {
             const char* rname = rid->name->chars;
             int rlen = (int)rid->name->len;
-            // Check if right side resolves to a known class (including aliases)
-            JsClassEntry* rce = jm_find_class(mt, rname, rlen);
-            if (rce) {
-                // Use the actual class name (not the alias) for the check
-                MIR_reg_t classname = jm_box_string_literal(mt, rce->name->chars,
-                    (int)rce->name->len);
-                return jm_call_2(mt, "js_instanceof_classname", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, left),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, classname));
-            }
-            // Check for builtin class names
+            // Check for builtin class names — these are safe for name-based check
+            // (they never have custom Symbol.hasInstance)
             bool is_builtin_class =
                 (rlen == 5 && strncmp(rname, "Error", 5) == 0) ||
                 (rlen == 9 && strncmp(rname, "TypeError", 9) == 0) ||
@@ -6447,28 +6438,28 @@ static MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, S
             return jm_call_1(mt, "fn_abs", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
-        // Math.floor(x) → fn_floor(js_to_number(x))
+        // Math.floor(x) → js_math_floor(js_to_number(x))
         if (MATH_MATCH("floor", 5)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
-            return jm_call_1(mt, "fn_floor", MIR_T_I64,
+            return jm_call_1(mt, "js_math_floor", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
-        // Math.ceil(x) → fn_ceil(js_to_number(x))
+        // Math.ceil(x) → js_math_ceil(js_to_number(x))
         if (MATH_MATCH("ceil", 4)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
-            return jm_call_1(mt, "fn_ceil", MIR_T_I64,
+            return jm_call_1(mt, "js_math_ceil", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
-        // Math.round(x) → fn_round(js_to_number(x))
+        // Math.round(x) → js_math_round_item(js_to_number(x)) with JS semantics
         if (MATH_MATCH("round", 5)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
-            return jm_call_1(mt, "fn_round", MIR_T_I64,
+            return jm_call_1(mt, "js_math_round_item", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
         // Math.sqrt(x) → fn_math_sqrt(js_to_number(x))
@@ -6527,20 +6518,20 @@ static MIR_reg_t jm_transpile_math_call(JsMirTranspiler* mt, JsCallNode* call, S
             return jm_call_1(mt, "fn_math_tan", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
-        // Math.sign(x) → fn_sign(js_to_number(x))
+        // Math.sign(x) → js_math_sign(js_to_number(x))
         if (MATH_MATCH("sign", 4)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
-            return jm_call_1(mt, "fn_sign", MIR_T_I64,
+            return jm_call_1(mt, "js_math_sign", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
-        // Math.trunc(x) → fn_int(js_to_number(x))
+        // Math.trunc(x) → js_math_trunc(js_to_number(x))
         if (MATH_MATCH("trunc", 5)) {
             MIR_reg_t a = jm_transpile_box_item(mt, arg0);
             MIR_reg_t num = jm_call_1(mt, "js_to_number", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, a));
-            return jm_call_1(mt, "fn_int", MIR_T_I64,
+            return jm_call_1(mt, "js_math_trunc", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, num));
         }
     }
@@ -6797,7 +6788,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return jm_emit_double_to_int(mt, cd);
             }
         }
-        // Math.round: int→int (identity), float→int via C round()
+        // Math.round: int→int (identity), float→int via js_math_round (JS semantics)
         if (MATH_MATCH("round", 5)) {
             if (arg_type == LMD_TYPE_INT) {
                 MIR_reg_t i = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_INT);
@@ -6805,7 +6796,7 @@ static MIR_reg_t jm_transpile_math_native(JsMirTranspiler* mt, JsCallNode* call,
                 return i;
             } else {
                 MIR_reg_t d = jm_transpile_as_native(mt, arg0, arg_type, LMD_TYPE_FLOAT);
-                MIR_reg_t rd = jm_call_1(mt, "round", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+                MIR_reg_t rd = jm_call_1(mt, "js_math_round", MIR_T_D, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
                 if (target_type == LMD_TYPE_FLOAT) return rd;
                 return jm_emit_double_to_int(mt, rd);
             }
@@ -8478,7 +8469,7 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 MIR_reg_t str = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
                 MIR_reg_t radix = (call->arguments && call->arguments->next)
                     ? jm_transpile_box_item(mt, call->arguments->next)
-                    : jm_box_int_const(mt, 10);
+                    : jm_box_int_const(mt, 0);
                 return jm_call_2(mt, "js_parseInt", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, str),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, radix));
@@ -9515,6 +9506,15 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
         }
 
+        // String.raw → constructor static method lookup
+        if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "String", 6) == 0) {
+            MIR_reg_t ctor_key = jm_box_string_literal(mt, "String", 6);
+            MIR_reg_t prop_key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
+            return jm_call_2(mt, "js_constructor_static_property", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, ctor_key),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, prop_key));
+        }
+
         // v12: Symbol.iterator, Symbol.toPrimitive, etc. → js_symbol_well_known(name)
         // These are well-known symbols — always return the same pre-defined symbol item.
         // Unlike js_symbol_create(), this DOES NOT create a new unique symbol each time.
@@ -10273,6 +10273,11 @@ static MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected*
         jm_call_void_1(mt, "js_mark_generator_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
+    // Mark arrow functions as non-constructable
+    if (fc->node && fc->node->is_arrow) {
+        jm_call_void_1(mt, "js_mark_arrow_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
     return fn_reg;
 }
 
@@ -10439,6 +10444,11 @@ static MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn)
     // v20: Mark generator functions so their prototype has no constructor
     if (fn->is_generator) {
         jm_call_void_1(mt, "js_mark_generator_func",
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+    }
+    // Mark arrow functions as non-constructable
+    if (fn->is_arrow) {
+        jm_call_void_1(mt, "js_mark_arrow_func",
             MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
     }
     return fn_reg;
@@ -12443,16 +12453,24 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
             MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
-    // new Error(message) — built-in Error constructor with compile-time stack trace
+    // new Error(message, options) — built-in Error constructor with compile-time stack trace
     if (ctor_len == 5 && strncmp(ctor_name, "Error", 5) == 0) {
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
         MIR_reg_t stack_arg = jm_build_error_stack_string(mt, "Error");
-        return jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
+        MIR_reg_t err = jm_call_2(mt, "js_new_error_with_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
+        // ES2022: Error.cause from options object
+        if (arg_count >= 2 && call->arguments && call->arguments->next) {
+            MIR_reg_t opts = jm_transpile_box_item(mt, call->arguments->next);
+            err = jm_call_2(mt, "js_error_set_cause", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, err),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, opts));
+        }
+        return err;
     }
 
-    // v11: new TypeError/RangeError/SyntaxError/ReferenceError(message)
+    // v11: new TypeError/RangeError/SyntaxError/ReferenceError(message, options)
     if ((ctor_len == 9 && strncmp(ctor_name, "TypeError", 9) == 0) ||
         (ctor_len == 10 && strncmp(ctor_name, "RangeError", 10) == 0) ||
         (ctor_len == 11 && strncmp(ctor_name, "SyntaxError", 11) == 0) ||
@@ -12460,10 +12478,18 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
         MIR_reg_t name_arg = jm_box_string_literal(mt, ctor_name, ctor_len);
         MIR_reg_t msg_arg = first_arg ? first_arg : jm_emit_null(mt);
         MIR_reg_t stack_arg = jm_build_error_stack_string(mt, ctor_name);
-        return jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
+        MIR_reg_t err = jm_call_3(mt, "js_new_error_with_name_stack", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, name_arg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_arg),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, stack_arg));
+        // ES2022: Error.cause from options object
+        if (arg_count >= 2 && call->arguments && call->arguments->next) {
+            MIR_reg_t opts = jm_transpile_box_item(mt, call->arguments->next);
+            err = jm_call_2(mt, "js_error_set_cause", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, err),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, opts));
+        }
+        return err;
     }
 
     // new Date() — returns a Date object with getTime() method

@@ -1,0 +1,19 @@
+{
+  "name": "Clear completed after add",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "--- ADD ITEM: focus input, type, press Enter ---"},
+    {"type": "click", "target": {"selector": ".new-item-input"}},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "New task"},
+    {"type": "wait", "ms": 200},
+    {"type": "key_press", "key": "Return"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Click clear completed ---"},
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "log", "message": "--- Done ---"}
+  ]
+}

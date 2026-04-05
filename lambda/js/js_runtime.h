@@ -344,6 +344,9 @@ void js_fetch_reset(void);
  */
 void js_throw_value(Item value);
 
+/** v20: Throw a RangeError with the given message. */
+Item js_throw_range_error(const char* message);
+
 /**
  * Check if an exception is currently pending.
  * Returns 1 if pending, 0 otherwise.
@@ -369,6 +372,11 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  */
 Item js_new_error_with_name(Item error_name, Item message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
+
+/**
+ * ES2022: Extract cause from options object and set on error.
+ */
+Item js_error_set_cause(Item error, Item options);
 
 // TDZ (Temporal Dead Zone) check for let/const
 void js_check_tdz(Item value, const char* name, int name_len);
@@ -396,6 +404,8 @@ void js_reset_module_vars(void);
  * Clears module vars, exception state, event loop, DOM context, and Input context.
  */
 void js_batch_reset(void);
+int js_get_module_var_count(void);
+void js_batch_reset_to(int checkpoint_var_count);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
 Item js_constructor_create_object(Item callee);
@@ -455,6 +465,7 @@ Item js_symbol_create(Item description);
 Item js_symbol_for(Item key);
 Item js_symbol_key_for(Item sym);
 Item js_symbol_to_string(Item sym);
+Item js_symbol_get_description(Item sym);
 Item js_symbol_well_known(Item name);
 
 // =============================================================================

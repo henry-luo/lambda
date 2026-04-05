@@ -1,0 +1,13 @@
+{
+  "name": "One delete then clear",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "log", "message": "--- Done ---"}
+  ]
+}

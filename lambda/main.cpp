@@ -2590,6 +2590,20 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
         lambda_stack_init();
 
+        // Set up a persistent EvalContext with pre-initialized heap.
+        // This fixes a per-test heap leak (each transpile_js_to_mir created a
+        // heap on a stack-local EvalContext that was lost on return) and enables
+        // the reusing_context fast-path, avoiding heap/nursery/name_pool
+        // teardown+recreation between tests.
+        EvalContext batch_context;
+        memset(&batch_context, 0, sizeof(EvalContext));
+        context = &batch_context;
+        batch_context.nursery = gc_nursery_create(0);
+        heap_init();  // sets context->heap via the global context pointer
+        batch_context.pool = batch_context.heap->pool;
+        batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+        batch_context.type_list = arraylist_new(64);
+
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
             // trim trailing whitespace
@@ -2690,11 +2704,33 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_END %d\n", result);
             fflush(stdout);
 
-            // reset all JS global state for next script
-            js_batch_reset();
-            // reset GC heap/nursery/name_pool
-            runtime_reset_heap(&runtime);
+            // Restore context FIRST (longjmp on timeout may leave it dangling)
+            context = &batch_context;
+
+            if (result == 124) {
+                // Timeout — longjmp may have left heap in inconsistent state.
+                // Reinitialize the persistent context from scratch.
+                js_batch_reset();
+                heap_destroy();
+                if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+                memset(&batch_context, 0, sizeof(EvalContext));
+                context = &batch_context;
+                batch_context.nursery = gc_nursery_create(0);
+                heap_init();
+                batch_context.pool = batch_context.heap->pool;
+                batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+                batch_context.type_list = arraylist_new(64);
+            } else {
+                // Normal path: reset JS state, keep heap alive for reusing_context.
+                js_batch_reset();
+            }
         }
+
+        // tear down persistent heap
+        context = &batch_context;
+        heap_destroy();
+        if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+        context = NULL;
 
         runtime_cleanup(&runtime);
         return 0;

@@ -758,3 +758,60 @@ Event → handler → retransform_with_results()
 **Build:** 0 errors. **Tests:** 561/562 passed (1 pre-existing JS failure).
 
 **Timing output:** `[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d, selective=yes/no)`
+
+---
+
+## Appendix A: UI Automation Timing Results
+
+**Test:** `test/ui/todo_perf_timing.json` — 42 events on `todo.ls` (3 lists, ~8 items).
+**Build:** Debug. **Platform:** macOS, Apple Silicon.
+
+### Summary
+
+| Metric | Average | Min | Max |
+|--------|---------|-----|-----|
+| Handler | 0.03ms | 0.01ms | 0.08ms |
+| Retransform | 0.07ms | 0.02ms | 0.12ms |
+| Rebuild (DOM+CSS+Layout+Render) | 85.4ms | 79.3ms | 104.2ms |
+| **Total** | **85.5ms** | **79.4ms** | **104.4ms** |
+
+### Key Findings
+
+- **Handler execution** is negligible (<0.1ms), confirming JIT-compiled handlers are fast.
+- **Retransform** (re-executing template body) is also negligible (<0.15ms).
+- **Rebuild dominates** at ~99.9% of total time. Within rebuild, layout (~47%) and render (~50%) are the main costs; DOM patching is <0.5%.
+- First 4 events (toggles on initial render) are slightly slower (~91–96ms) due to full rebuild fallback. Subsequent events use incremental path (~80–85ms).
+- Events that change element count (delete, add) cause size-changed → full repaint. Toggle/focus events use selective repaint.
+
+### Bottleneck Distribution
+
+```
+Handler:      ████  <0.1%
+Retransform:  ████  <0.1%
+DOM patch:    ████  <0.5%
+Layout:       ████████████████████████  ~47%
+Render:       █████████████████████████ ~50%
+```
+
+**Conclusion:** Future optimization should target layout and render. The incremental DOM patching (Phase 12.1) successfully eliminated DOM rebuilds as a bottleneck (~0.3ms for subtree replacement vs ~40ms for full tree).
+
+---
+
+## Appendix B: Shared TypeElmt Mutation Bug (SIGSEGV Fix)
+
+**Date:** 2026-04-12
+**Symptom:** SIGSEGV in `item_keys()` → `get_type_id()` when clicking "clear completed" after 2+ delete operations on a multi-list todo app.
+
+### Root Cause
+
+`elmt_rebuild_with_new_shape()` in `mark_editor.cpp` mutated the `TypeElmt` **in-place** when an `edit` handler changed a field's type (e.g., `items` from `LMD_TYPE_ANY` → `LMD_TYPE_ARRAY`). The `TypeElmt` is shared across all Elements created from the same template (e.g., all 3 todo_list instances). Mutating the shared TypeElmt changed the field's byte size from 9 (TypedItem) to 8 (typed pointer) for ALL lists, but only the modified list's data buffer was rebuilt to match the new layout. Other lists' data buffers still used the original 9-byte TypedItem format, causing field reads to include the TypeId byte in the pointer value → invalid address → SIGSEGV.
+
+### Fix
+
+Always create a new `TypeElmt` when the shape changes, even in inline mode. This ensures the modified Element gets its own type descriptor while other Elements sharing the original type remain unaffected.
+
+**File:** `lambda/mark_editor.cpp` — `elmt_rebuild_with_new_shape()`
+
+### Minimal Reproduction
+
+`test/ui/todo_two_delete_clear.json` — 2 deletes from one list + click clear-completed on another list.
