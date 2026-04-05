@@ -517,11 +517,14 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // monospace font family
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->family = (char*)"monospace";
-        // Browser quirk: when font-family transitions to monospace and no explicit
-        // font-size on this element, scale inherited size by 13/16.
+        // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
+        // transitions to monospace and no explicit font-size on this element,
+        // scale inherited size by 13/16. Only applies when the inherited font-size
+        // originates from the CSS 'medium' keyword (initial value), not from an
+        // explicit font-size declaration like '12px'.
         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
             str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-        if (!parent_is_mono && span->font->font_size > 0) {
+        if (!parent_is_mono && span->font->font_size > 0 && span->font->font_size_from_medium) {
             span->font->font_size = span->font->font_size * 13.0f / 16.0f;
         }
         break;
@@ -584,21 +587,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         // preformatted: monospace, preserve whitespace, margin 1em 0
         if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->family = (char*)"monospace";
-        // Browser quirk: when font-family transitions to monospace and no explicit
-        // font-size on this element, scale inherited size by 13/16.
-        // Compute the element's estimated font-size for margin resolution (1em).
+        // Browser quirk (Chromium CheckForGenericFamilyChange): when font-family
+        // transitions to monospace and no explicit font-size on this element,
+        // scale inherited size by 13/16. Only applies when the inherited font-size
+        // originates from the CSS 'medium' keyword (initial value).
         float pre_font_size = lycon->font.style->font_size;
         {
             bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
                 str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-            if (!parent_is_mono && block->font->font_size > 0) {
+            if (!parent_is_mono && block->font->font_size > 0 && block->font->font_size_from_medium) {
                 block->font->font_size = block->font->font_size * 13.0f / 16.0f;
             }
-            // CSS 2.1 §15.3: When transitioning to monospace, the inherited
-            // font-size is scaled by 13/16. Use this scaled size for the
-            // margin: 1em resolution, since 1em refers to the element's own
-            // computed font-size, not the parent's.
-            if (!parent_is_mono && pre_font_size > 0) {
+            if (!parent_is_mono && pre_font_size > 0 && block->font->font_size_from_medium) {
                 pre_font_size = pre_font_size * 13.0f / 16.0f;
             }
         }

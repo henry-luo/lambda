@@ -478,6 +478,12 @@ struct GridItemProp {
 typedef struct {
     float min_content;  // Minimum content width (longest word/element)
     float max_content;  // Maximum content width (no wrapping)
+    // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
+    // the content spans multiple lines. These fields allow the parent's inline run
+    // accumulation to split at forced break points rather than summing all lines.
+    float first_line_max = -1;  // width before first forced break (-1 = no forced break)
+    float last_line_max = -1;   // width after last forced break (-1 = no forced break)
+    bool has_forced_break = false;
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)
