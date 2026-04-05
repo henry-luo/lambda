@@ -305,6 +305,36 @@ static inline bool is_line_break_ns(uint32_t cp) {
 }
 
 /**
+ * UAX #14 LB13: No break before EX, IS, or SY characters.
+ * EX = Exclamation/Interrogation (!, ?, etc.)
+ * IS = Infix Numeric Separator (., ,, :, etc.)
+ * SY = Break Symbols (/)
+ * These classes are not covered by is_line_break_cl (CL/CP) or is_line_break_ns (NS).
+ */
+static inline bool is_line_break_ex_is_sy(uint32_t cp) {
+    // EX class: exclamation/interrogation
+    if (cp == 0x0021 || cp == 0x003F) return true;   // ! ?
+    if (cp == 0x05C6) return true;                    // HEBREW PUNCTUATION NUN HAFUKHA
+    if (cp == 0x061B || cp == 0x061E || cp == 0x061F) return true;  // Arabic semicolon/punct/question
+    if (cp == 0x06D4) return true;                    // ARABIC FULL STOP
+    if (cp == 0xFE15 || cp == 0xFE16) return true;   // Presentation forms for ! ?
+    if (cp == 0xFE56 || cp == 0xFE57) return true;   // Small ! ?
+    if (cp == 0xFF01 || cp == 0xFF1F) return true;   // Fullwidth ! ?
+    // IS class: infix numeric separator
+    if (cp == 0x002C || cp == 0x002E) return true;    // , .
+    if (cp == 0x003A || cp == 0x003B) return true;    // : ;
+    if (cp == 0x037E) return true;                    // GREEK QUESTION MARK
+    if (cp == 0x0589) return true;                    // ARMENIAN FULL STOP
+    if (cp == 0x060C || cp == 0x060D) return true;    // ARABIC COMMA/DATE SEPARATOR
+    if (cp == 0x07F8) return true;                    // NKO COMMA
+    if (cp == 0xFE10 || cp == 0xFE13 || cp == 0xFE14) return true;  // Vertical comma/colon/semicolon
+    // SY class: break symbols
+    if (cp == 0x002F) return true;                    // /
+    return false;
+}
+
+
+/**
  * Peek at the next Unicode codepoint without advancing the string pointer.
  * Returns 0 if at end of string.
  */
@@ -314,6 +344,60 @@ static inline uint32_t peek_codepoint(const unsigned char* str) {
     uint32_t cp = 0;
     str_utf8_decode((const char*)str, 4, &cp);
     return cp ? cp : *str;
+}
+
+/**
+ * Peek at the first codepoint of the next inline content following a given DOM node.
+ * Traverses siblings and walks up through inline parents to find the next
+ * text character. Used for UAX #14 LB13 cross-span lookahead (no break before IS/SY/EX).
+ * Returns 0 if no next inline text is found.
+ */
+static uint32_t peek_next_inline_codepoint(DomNode* node);
+
+/**
+ * Find first text codepoint within a DOM subtree (depth-first).
+ * Returns 0 if no text found.
+ */
+static uint32_t first_text_codepoint_in_subtree(DomNode* node) {
+    while (node) {
+        if (node->is_text()) {
+            const unsigned char* text = node->text_data();
+            if (text && *text) {
+                while (*text && is_space(*text)) text++;
+                if (*text) return peek_codepoint(text);
+            }
+        } else if (node->is_element()) {
+            CssEnum outer_display = resolve_display_value(node).outer;
+            if (outer_display == CSS_VALUE_INLINE) {
+                DomElement* elmt = (DomElement*)node;
+                if (elmt->first_child) {
+                    uint32_t cp = first_text_codepoint_in_subtree(elmt->first_child);
+                    if (cp) return cp;
+                }
+            } else {
+                return 0;  // non-inline element stops search
+            }
+        }
+        node = node->next_sibling;
+    }
+    return 0;
+}
+
+static uint32_t peek_next_inline_codepoint(DomNode* node) {
+    while (node) {
+        // check next siblings of this node
+        if (node->next_sibling) {
+            uint32_t cp = first_text_codepoint_in_subtree(node->next_sibling);
+            if (cp) return cp;
+        }
+        // walk up to parent (only through inline elements)
+        DomNode* parent = node->parent;
+        if (!parent || !parent->is_element()) break;
+        CssEnum parent_display = resolve_display_value(parent).outer;
+        if (parent_display != CSS_VALUE_INLINE) break;
+        node = parent;
+    }
+    return 0;
 }
 
 /**
@@ -360,6 +444,19 @@ static inline bool is_other_space_separator(uint32_t cp) {
            cp == 0x202F ||                      // NARROW NO-BREAK SPACE
            cp == 0x205F ||                      // MEDIUM MATHEMATICAL SPACE
            cp == 0x3000;                        // IDEOGRAPHIC SPACE
+}
+
+/**
+ * CSS Text 3 §5.2: Check if a character is a "typographic letter unit" for
+ * word-break: break-all. break-all only converts letters and numbers to ID
+ * class for line-breaking purposes; punctuation and other characters keep
+ * their original line-break behavior.
+ * Typographic letter units = Unicode General Category L* (letters) and N* (numbers).
+ */
+static inline bool is_typographic_letter_unit(uint32_t cp) {
+    utf8proc_category_t cat = utf8proc_category(cp);
+    return (cat >= UTF8PROC_CATEGORY_LU && cat <= UTF8PROC_CATEGORY_LO) ||  // L*: letters
+           (cat >= UTF8PROC_CATEGORY_ND && cat <= UTF8PROC_CATEGORY_NO);    // N*: numbers
 }
 
 /**
@@ -1440,6 +1537,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         str, rect->start_index, rect->x, rect->y, lycon->block.advance_y, lycon->block.lead_y, lycon->font.style->family, lycon->font.style->font_size);
 
     // layout the text glyphs
+    bool zwj_preceded = false;  // UAX #14: ZWJ suppresses break between adjacent characters
     do {
         float wd;
         uint32_t codepoint = *str;
@@ -1569,6 +1667,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str = next_ch;
                 lycon->line.is_line_start = false;
                 lycon->line.has_space = false;
+                if (codepoint == 0x200D) zwj_preceded = true;  // ZWJ suppresses next break
                 continue;  // Skip to next character without adding width
             } else if (unicode_space_em > 0.0f) {
                 // Use Unicode-specified width (fraction of em)
@@ -1895,7 +1994,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.hanging_space_width = 0;
             lycon->line.hanging_space_text_trim = 0;
         }
-        else if ((break_all || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+        else if (((break_all && is_typographic_letter_unit(codepoint)) || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character.
             // Track as last_space so overflow handling can break at this position.
             // UAX #14 / CSS Text 3 §5.2: Apply OP/CL/NS rules:
@@ -1910,15 +2009,24 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             // Record break opportunity after this character, unless forbidden by line-break rules
             bool allow_break = true;
+            // UAX #14 §9.2: ZWJ (U+200D) suppresses break between adjacent characters
+            if (zwj_preceded) allow_break = false;
             // CSS Text 3 §5.2: No break after OP characters (OP stays with following content)
-            if (is_line_break_op(codepoint)) allow_break = false;
+            if (allow_break && is_line_break_op(codepoint)) allow_break = false;
             if (allow_break) {
-                // Peek at next character: no break before CL or NS (they stay with preceding)
+                // Peek at next character: no break before CL, NS, EX, IS, or SY (UAX #14 LB13)
+                // Also no break before ZWJ (it joins with the preceding character)
                 uint32_t next_cp = peek_codepoint(str);
-                if (next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp))) {
+                // If at end of text node, look across span boundaries for LB13
+                if (next_cp == 0) next_cp = peek_next_inline_codepoint(text_node);
+                if (next_cp == 0x200D) {
+                    allow_break = false;  // ZWJ follows: suppress break
+                } else if (next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp) ||
+                                    is_line_break_ex_is_sy(next_cp))) {
                     allow_break = false;
                 }
             }
+            zwj_preceded = false;  // consumed
             if (allow_break) {
                 lycon->line.last_space = str - 1;  // last byte of current char
                 lycon->line.last_space_pos = rect->width;  // width including this char
@@ -1930,6 +2038,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.trailing_space_width = 0;
             lycon->line.hanging_space_width = 0;
             lycon->line.hanging_space_text_trim = 0;
+            zwj_preceded = false;
             // UAX #14 / CSS Text 3 §5.2: CL/NS characters adjacent to CJK text
             // participate in CJK-style break tracking. After CL/NS, a break is
             // allowed (they stay with preceding content, break after is fine).
