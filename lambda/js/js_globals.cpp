@@ -624,15 +624,18 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
         return (Item){.item = d2it(fp)};
     }
 
-    // Get radix (default 10)
+    // Get radix (default 10, auto-detect 16 for 0x prefix)
     int radix = 10;
+    bool radix_explicit = false;
     TypeId rtype = get_type_id(radix_item);
     if (rtype == LMD_TYPE_INT) {
         radix = (int)it2i(radix_item);
+        radix_explicit = true;
     } else if (rtype == LMD_TYPE_FLOAT) {
         radix = (int)it2d(radix_item);
+        radix_explicit = true;
     }
-    if (radix == 0) radix = 10;
+    if (radix == 0) { radix = 10; radix_explicit = false; }
 
     // Null-terminate
     char buf[256];
@@ -643,6 +646,14 @@ extern "C" Item js_parseInt(Item str_item, Item radix_item) {
     // Skip whitespace
     char* start = buf;
     while (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r') start++;
+
+    // Auto-detect hex prefix (0x/0X) when no explicit radix
+    if (!radix_explicit && start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
+        radix = 16;
+        start += 2;
+    } else if (radix == 16 && start[0] == '0' && (start[1] == 'x' || start[1] == 'X')) {
+        start += 2; // skip 0x prefix even with explicit radix 16
+    }
 
     char* endptr;
     long long val = strtoll(start, &endptr, radix);
@@ -758,28 +769,57 @@ extern "C" Item js_number_method(Item num, Item method_name, Item* args, int arg
             TypeId rt = get_type_id(radix_item);
             if (rt == LMD_TYPE_INT) radix = (int)it2i(radix_item);
             else if (rt == LMD_TYPE_FLOAT) radix = (int)it2d(radix_item);
-            if (radix >= 2 && radix <= 36 && radix != 10) {
-                // convert number to string with given radix
-                int64_t n = 0;
+            // v20: RangeError for invalid radix
+            if (radix < 2 || radix > 36) {
+                return js_throw_range_error("toString() radix must be between 2 and 36");
+            }
+            if (radix != 10) {
+                // v20: Handle float-to-radix conversion (integer + fractional parts)
                 TypeId nt = get_type_id(num);
-                if (nt == LMD_TYPE_INT) n = it2i(num);
-                else if (nt == LMD_TYPE_FLOAT) n = (int64_t)it2d(num);
-                bool negative = n < 0;
-                uint64_t val = negative ? (uint64_t)(-(int64_t)n) : (uint64_t)n;
-                char buf[68]; // max 64 binary digits + sign + null
-                int pos = 66;
-                buf[66] = '\0';
-                if (val == 0) {
+                double dval = 0;
+                if (nt == LMD_TYPE_INT) dval = (double)it2i(num);
+                else if (nt == LMD_TYPE_FLOAT) dval = it2d(num);
+                bool negative = dval < 0;
+                if (negative) dval = -dval;
+
+                // Integer part
+                uint64_t int_part = (uint64_t)dval;
+                double frac_part = dval - (double)int_part;
+
+                const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+                char buf[256];
+                int pos = 128;
+                buf[pos] = '\0';
+
+                // Convert integer part
+                if (int_part == 0) {
                     buf[--pos] = '0';
                 } else {
-                    const char digits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-                    while (val > 0) {
-                        buf[--pos] = digits[val % radix];
-                        val /= radix;
+                    while (int_part > 0) {
+                        buf[--pos] = digits[int_part % radix];
+                        int_part /= radix;
                     }
                 }
                 if (negative) buf[--pos] = '-';
-                return (Item){.item = s2it(heap_create_name(&buf[pos], 66 - pos))};
+
+                // Convert fractional part
+                if (frac_part > 0) {
+                    int frac_pos = 128;
+                    buf[frac_pos++] = '.';
+                    // Emit up to 20 fractional digits (sufficient precision)
+                    int max_frac = 20;
+                    for (int i = 0; i < max_frac && frac_part > 0; i++) {
+                        frac_part *= radix;
+                        int digit = (int)frac_part;
+                        buf[frac_pos++] = digits[digit];
+                        frac_part -= digit;
+                        // Stop if remaining fraction is negligible
+                        if (frac_part < 1e-15) break;
+                    }
+                    buf[frac_pos] = '\0';
+                    return (Item){.item = s2it(heap_create_name(&buf[pos], frac_pos - pos))};
+                }
+                return (Item){.item = s2it(heap_create_name(&buf[pos], 128 - pos))};
             }
         }
         return js_to_string(num);
@@ -1049,6 +1089,51 @@ extern "C" Item js_string_fromCodePoint_array(Item arr_item) {
     return result;
 }
 
+// String.raw(template, ...substitutions) — tagged template literal
+// Called with args[0]=template_object (has .raw property), args[1..]=substitutions
+extern "C" Item js_string_raw(Item* args, int argc) {
+    if (argc < 1) return (Item){.item = s2it(heap_strcpy("", 0))};
+
+    Item template_obj = args[0];
+    // Get template.raw
+    Item raw_key = (Item){.item = s2it(heap_create_name("raw", 3))};
+    Item raw = js_property_access(template_obj, raw_key);
+    if (raw.item == ITEM_NULL || raw.item == ITEM_JS_UNDEFINED) {
+        return (Item){.item = s2it(heap_strcpy("", 0))};
+    }
+
+    // Get raw.length (may be a MAP with numeric keys + length property)
+    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+    Item len_item = js_property_access(raw, len_key);
+    int raw_len = 0;
+    TypeId len_type = get_type_id(len_item);
+    if (len_type == LMD_TYPE_INT) raw_len = (int)it2i(len_item);
+    else if (len_type == LMD_TYPE_FLOAT) raw_len = (int)it2d(len_item);
+    if (raw_len <= 0) return (Item){.item = s2it(heap_strcpy("", 0))};
+
+    StrBuf* buf = strbuf_new();
+    for (int i = 0; i < raw_len; i++) {
+        // Get raw[i] — use string key for MAP compatibility
+        char idx_buf[16];
+        int idx_len = snprintf(idx_buf, sizeof(idx_buf), "%d", i);
+        Item idx = (Item){.item = s2it(heap_create_name(idx_buf, idx_len))};
+        Item part = js_property_access(raw, idx);
+        Item part_str = js_to_string(part);
+        String* s = it2s(part_str);
+        if (s && s->len > 0) strbuf_append_str_n(buf, s->chars, s->len);
+
+        // Interleave substitution if present (i+1 in args because args[0] is template)
+        if (i < argc - 1) {
+            Item sub_str = js_to_string(args[i + 1]);
+            String* sub_s = it2s(sub_str);
+            if (sub_s && sub_s->len > 0) strbuf_append_str_n(buf, sub_s->chars, sub_s->len);
+        }
+    }
+    String* result = heap_strcpy(buf->str, buf->length);
+    strbuf_free(buf);
+    return (Item){.item = s2it(result)};
+}
+
 // =============================================================================
 // Console multi-argument log
 // =============================================================================
@@ -1109,19 +1194,15 @@ extern "C" Item js_instanceof(Item left, Item right) {
     // right should be a constructor (a class). We check if left's prototype chain
     // contains right's prototype. For our implementation, we check if right has
     // a __class_name__ marker that matches any __class_name__ in left's proto chain.
-    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
 
-    // v16: Check for Symbol.hasInstance on the right-hand constructor
+    // v16: Check for Symbol.hasInstance on the right-hand constructor FIRST (before type check)
     // Per ES spec §7.3.21: if right[@@hasInstance] exists, call it
     {
         TypeId rt = get_type_id(right);
         if (rt == LMD_TYPE_MAP || rt == LMD_TYPE_FUNC) {
-            // look for __sym_3 (Symbol.hasInstance = ID 3)
-            Item has_instance_fn = ItemNull;
-            if (rt == LMD_TYPE_MAP) {
-                bool found = false;
-                has_instance_fn = js_map_get_fast_ext(right.map, "__sym_3", 7, &found);
-            }
+            // look for __sym_3 (Symbol.hasInstance = ID 3) via property_get (handles both MAP and FUNC)
+            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_3", 7))};
+            Item has_instance_fn = js_property_get(right, sym_key);
             if (has_instance_fn.item != ItemNull.item && get_type_id(has_instance_fn) == LMD_TYPE_FUNC) {
                 Item args[1] = { left };
                 Item result = js_call_function(has_instance_fn, right, args, 1);
@@ -1130,25 +1211,47 @@ extern "C" Item js_instanceof(Item left, Item right) {
         }
     }
 
-    // If right is a function (IIFE-returned constructor), walk the __proto__ chain
-    // and check for __ctor__ (function identity) match, stored at object creation time.
+    if (get_type_id(left) != LMD_TYPE_MAP) return (Item){.item = b2it(false)};
+
+    // If right is a function, use ES spec OrdinaryHasInstance:
+    // Walk left's __proto__ chain comparing against right.prototype
     TypeId right_type = get_type_id(right);
     if (right_type == LMD_TYPE_FUNC) {
-        Item obj = left;
-        int depth = 0;
-        Item ctor_key = (Item){.item = s2it(heap_create_name("__ctor__", 8))};
-        Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-        while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
-            Item ctor_val = map_get(obj.map, ctor_key);
-            if (ctor_val.item != 0 && get_type_id(ctor_val) == LMD_TYPE_FUNC) {
-                if (ctor_val.item == right.item) return (Item){.item = b2it(true)};
+        // v20: Get Func.prototype via property access (handles both Function and JsFunction)
+        Item proto_key = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item func_proto = js_property_get(right, proto_key);
+        if (func_proto.item != ItemNull.item && get_type_id(func_proto) == LMD_TYPE_MAP) {
+            // Walk left's __proto__ chain looking for func_proto (identity check)
+            Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+            Item obj = left;
+            int depth = 0;
+            while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
+                Item obj_proto = map_get(obj.map, proto_key_item);
+                if (obj_proto.item != 0 && get_type_id(obj_proto) == LMD_TYPE_MAP) {
+                    if (obj_proto.map == func_proto.map) {
+                        return (Item){.item = b2it(true)};
+                    }
+                }
+                obj = obj_proto;
+                depth++;
             }
-            obj = map_get(obj.map, proto_key_item);
-            depth++;
         }
-        // v18c: __ctor__ walk failed — fall through to name-based check using
-        // the function's name (handles built-in constructors like TypeError
-        // passed as variable arguments, e.g. assert.throws(TypeError, fn))
+        // Fallback: also check __ctor__ walk for class-based objects
+        {
+            Item obj = left;
+            int depth = 0;
+            Item ctor_key = (Item){.item = s2it(heap_create_name("__ctor__", 8))};
+            Item proto_key_item = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+            while (obj.item != 0 && get_type_id(obj) == LMD_TYPE_MAP && depth < 32) {
+                Item ctor_val = map_get(obj.map, ctor_key);
+                if (ctor_val.item != 0 && get_type_id(ctor_val) == LMD_TYPE_FUNC) {
+                    if (ctor_val.item == right.item) return (Item){.item = b2it(true)};
+                }
+                obj = map_get(obj.map, proto_key_item);
+                depth++;
+            }
+        }
+        // v18c: name-based fallback for built-in constructors
         JsFuncName* fp = (JsFuncName*)right.function;
         if (fp->name && fp->name->len > 0) {
             Item name_item = (Item){.item = s2it(fp->name)};
@@ -1182,6 +1285,14 @@ extern "C" Item js_instanceof_classname(Item left, Item classname) {
     // Array check
     if (rn->len == 5 && strncmp(rn->chars, "Array", 5) == 0) {
         return (Item){.item = b2it(lt == LMD_TYPE_ARRAY)};
+    }
+    // v20: Object check — any object (MAP) is instanceof Object (includes user-defined instances)
+    if (rn->len == 6 && strncmp(rn->chars, "Object", 6) == 0) {
+        return (Item){.item = b2it(lt == LMD_TYPE_MAP)};
+    }
+    // v20: Function check — any function is instanceof Function
+    if (rn->len == 8 && strncmp(rn->chars, "Function", 8) == 0) {
+        return (Item){.item = b2it(lt == LMD_TYPE_FUNC)};
     }
     // RegExp check
     if (rn->len == 6 && strncmp(rn->chars, "RegExp", 6) == 0) {
@@ -1391,6 +1502,11 @@ extern "C" Item js_object_create(Item proto) {
     Item obj = js_new_object();
     if (proto.item != 0 && get_type_id(proto) == LMD_TYPE_MAP) {
         js_set_prototype(obj, proto);
+    } else if (proto.item == ITEM_NULL || proto.item == 0) {
+        // Object.create(null): mark explicitly as no prototype
+        // Use JS undefined as sentinel — distinguished from "no __proto__ key"
+        Item key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
+        js_property_set(obj, key, make_js_undefined());
     }
     return obj;
 }
@@ -1447,6 +1563,8 @@ extern "C" Item js_get_prototype_of(Item object) {
     // v18l: Check __proto__ first — Object.create sets this explicitly
     {
         Item raw_proto = js_get_prototype(object);
+        // Object.create(null) stores undefined as sentinel for null prototype
+        if (raw_proto.item == ITEM_JS_UNDEFINED) return ItemNull;
         if (raw_proto.item != ItemNull.item) return raw_proto;
     }
 
@@ -2941,22 +3059,14 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
     if (!ks) return (Item){.item = b2it(false)};
     Map* m = obj.map;
     if (!m || !m->type) return (Item){.item = b2it(false)};
-    TypeMap* tm = (TypeMap*)m->type;
-    // Check shape for key existence — unlike map_get which returns ItemNull for both
-    // "not found" and "found with null value", causing hasOwnProperty to incorrectly
-    // return false for properties set to null.
-    ShapeEntry* e = tm->shape;
-    while (e) {
-        if (e->name && e->name->length == (size_t)ks->len &&
-            strncmp(e->name->str, ks->chars, ks->len) == 0) {
-            // Check for deleted sentinel — deleted properties are not "own"
-            Item val = _map_read_field(e, m->data);
-            if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
-            return (Item){.item = b2it(true)};
-        }
-        e = e->next;
-    }
-    return (Item){.item = b2it(false)};
+    // Use js_map_get_fast_ext which uses the hash table (last-writer-wins)
+    // to always find the latest value for a key. The old linear shape walk
+    // could find stale entries when a property was updated (e.g. deleted).
+    bool found = false;
+    Item val = js_map_get_fast_ext(m, ks->chars, (int)ks->len, &found);
+    if (!found) return (Item){.item = b2it(false)};
+    if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
+    return (Item){.item = b2it(true)};
 }
 
 // =============================================================================
@@ -3144,6 +3254,26 @@ extern "C" Item js_array_from(Item iterable) {
             js_array_push(result, (Item){.item = s2it(ch)});
         }
         return result;
+    }
+    // v20: Array-like objects with .length property (e.g. {0: 'a', 1: 'b', length: 2})
+    if (tid == LMD_TYPE_MAP) {
+        Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+        Item len_val = js_property_get(iterable, len_key);
+        TypeId lt = get_type_id(len_val);
+        if (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) {
+            int len = (lt == LMD_TYPE_INT) ? (int)it2i(len_val) : (int)it2d(len_val);
+            if (len >= 0) {
+                Item result = js_array_new(0);
+                for (int i = 0; i < len; i++) {
+                    char idx_buf[16];
+                    snprintf(idx_buf, sizeof(idx_buf), "%d", i);
+                    Item idx_key = (Item){.item = s2it(heap_create_name(idx_buf, strlen(idx_buf)))};
+                    Item val = js_property_get(iterable, idx_key);
+                    js_array_push(result, val);
+                }
+                return result;
+            }
+        }
     }
     // Use js_iterable_to_array for Map, Set, generators, and other iterables
     Item converted = js_iterable_to_array(iterable);
@@ -4073,6 +4203,32 @@ struct JsSymbolEntry {
 static uint64_t js_symbol_next_id = 100;  // IDs 1-99 reserved for well-known symbols
 static HashMap* js_symbol_registry = nullptr;  // string key -> JsSymbolEntry
 
+// symbol description registry: maps symbol_id -> description string
+struct JsSymbolDesc {
+    uint64_t symbol_id;
+    char desc[128];
+    int desc_len;    // -1 means no description (Symbol() with no arg)
+};
+
+static HashMap* js_symbol_desc_registry = nullptr;
+
+static int js_symbol_desc_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    return ((const JsSymbolDesc*)a)->symbol_id != ((const JsSymbolDesc*)b)->symbol_id;
+}
+
+static uint64_t js_symbol_desc_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const JsSymbolDesc* e = (const JsSymbolDesc*)item;
+    return hashmap_sip(&e->symbol_id, sizeof(uint64_t), seed0, seed1);
+}
+
+static void js_symbol_desc_init() {
+    if (!js_symbol_desc_registry) {
+        js_symbol_desc_registry = hashmap_new(sizeof(JsSymbolDesc), 16, 0, 0,
+            js_symbol_desc_hash, js_symbol_desc_compare, NULL, NULL);
+    }
+}
+
 // well-known symbol IDs (pre-allocated)
 #define JS_SYMBOL_ID_ITERATOR       1
 #define JS_SYMBOL_ID_TO_PRIMITIVE   2
@@ -4122,9 +4278,29 @@ static uint64_t js_symbol_item_id(Item item) {
 
 extern "C" Item js_symbol_create(Item description) {
     uint64_t id = js_symbol_next_id++;
-    // store description on a map wrapper so toString can access it
     Item sym = js_make_symbol_item(id);
-    (void)description;  // description is only for debugging
+
+    // store description for Symbol.prototype.description
+    js_symbol_desc_init();
+    JsSymbolDesc entry;
+    entry.symbol_id = id;
+    if (description.item == ITEM_NULL || description.item == ITEM_JS_UNDEFINED) {
+        entry.desc[0] = '\0';
+        entry.desc_len = -1;  // no description
+    } else {
+        String* s = it2s(js_to_string(description));
+        if (s) {
+            int len = s->len < 127 ? (int)s->len : 127;
+            memcpy(entry.desc, s->chars, len);
+            entry.desc[len] = '\0';
+            entry.desc_len = len;
+        } else {
+            entry.desc[0] = '\0';
+            entry.desc_len = -1;
+        }
+    }
+    hashmap_set(js_symbol_desc_registry, &entry);
+
     return sym;
 }
 
@@ -4198,7 +4374,63 @@ extern "C" Item js_symbol_to_string(Item sym) {
         }
     }
 
+    // check description registry
+    if (js_symbol_desc_registry) {
+        JsSymbolDesc lookup;
+        lookup.symbol_id = id;
+        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        if (found && found->desc_len >= 0) {
+            char buf[160];
+            snprintf(buf, sizeof(buf), "Symbol(%s)", found->desc);
+            return (Item){.item = s2it(heap_create_name(buf, strlen(buf)))};
+        }
+    }
+
     return (Item){.item = s2it(heap_create_name("Symbol()", 8))};
+}
+
+// Return the description of a symbol, or undefined if none
+extern "C" Item js_symbol_get_description(Item sym) {
+    if (!js_is_symbol_item(sym)) return make_js_undefined();
+    uint64_t id = js_symbol_item_id(sym);
+
+    // well-known symbols have fixed descriptions
+    if (id == JS_SYMBOL_ID_ITERATOR)       return (Item){.item = s2it(heap_create_name("Symbol.iterator", 15))};
+    if (id == JS_SYMBOL_ID_TO_PRIMITIVE)   return (Item){.item = s2it(heap_create_name("Symbol.toPrimitive", 18))};
+    if (id == JS_SYMBOL_ID_HAS_INSTANCE)   return (Item){.item = s2it(heap_create_name("Symbol.hasInstance", 18))};
+    if (id == JS_SYMBOL_ID_TO_STRING_TAG)  return (Item){.item = s2it(heap_create_name("Symbol.toStringTag", 18))};
+    if (id == JS_SYMBOL_ID_ASYNC_ITERATOR) return (Item){.item = s2it(heap_create_name("Symbol.asyncIterator", 20))};
+    if (id == JS_SYMBOL_ID_SPECIES)        return (Item){.item = s2it(heap_create_name("Symbol.species", 14))};
+    if (id == JS_SYMBOL_ID_MATCH)          return (Item){.item = s2it(heap_create_name("Symbol.match", 12))};
+    if (id == JS_SYMBOL_ID_REPLACE)        return (Item){.item = s2it(heap_create_name("Symbol.replace", 14))};
+    if (id == JS_SYMBOL_ID_SEARCH)         return (Item){.item = s2it(heap_create_name("Symbol.search", 13))};
+    if (id == JS_SYMBOL_ID_SPLIT)          return (Item){.item = s2it(heap_create_name("Symbol.split", 12))};
+    if (id == JS_SYMBOL_ID_UNSCOPABLES)    return (Item){.item = s2it(heap_create_name("Symbol.unscopables", 18))};
+
+    // check Symbol.for() registry
+    if (js_symbol_registry) {
+        size_t iter = 0;
+        void* entry;
+        while (hashmap_iter(js_symbol_registry, &iter, &entry)) {
+            JsSymbolEntry* e = (JsSymbolEntry*)entry;
+            if (e->symbol_id == id) {
+                return (Item){.item = s2it(heap_create_name(e->key, strlen(e->key)))};
+            }
+        }
+    }
+
+    // check description registry
+    if (js_symbol_desc_registry) {
+        JsSymbolDesc lookup;
+        lookup.symbol_id = id;
+        JsSymbolDesc* found = (JsSymbolDesc*)hashmap_get(js_symbol_desc_registry, &lookup);
+        if (found) {
+            if (found->desc_len < 0) return make_js_undefined();  // Symbol() with no arg
+            return (Item){.item = s2it(heap_create_name(found->desc, found->desc_len))};
+        }
+    }
+
+    return make_js_undefined();
 }
 
 // Return a well-known symbol by its property name on the Symbol constructor.

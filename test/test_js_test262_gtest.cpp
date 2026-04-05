@@ -127,7 +127,6 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "arbitrary-module-namespace-names",
     "json-modules", "source-phase-imports",
     "AggregateError",
-    "error-cause",
     "symbols-as-weakmap-keys",
     "Set.prototype.intersection",
     "Set.prototype.union",

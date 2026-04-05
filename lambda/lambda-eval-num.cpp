@@ -2195,16 +2195,101 @@ extern "C" Bool fn_not_u(Bool x) {
 // when both operands have known types, so no wrappers needed.
 
 // --- Sign function ---
-extern "C" int32_t fn_sign_i(int64_t x) {
+extern "C" int64_t fn_sign_i(int64_t x) {
     if (x > 0) return 1;
     if (x < 0) return -1;
     return 0;
 }
 
-extern "C" int32_t fn_sign_f(double x) {
+extern "C" int64_t fn_sign_f(double x) {
     if (x > 0.0) return 1;
     if (x < 0.0) return -1;
     return 0;
+}
+
+// JS Math.round: rounds to +Infinity for ties (unlike C round which rounds away from zero)
+// Math.round(-0.5) -> 0, Math.round(0.5) -> 1
+extern "C" double js_math_round(double x) {
+    return floor(x + 0.5);
+}
+
+// JS-semantic Math functions that handle NaN, Infinity, -0 correctly.
+// These operate on boxed Items and return boxed Items.
+extern "C" Item js_math_trunc(Item x) {
+    TypeId t = get_type_id(x);
+    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (t == LMD_TYPE_FLOAT) {
+        double d = it2d(x);
+        if (d != d) return push_d(NAN);              // NaN
+        if (d == 0.0 || !isfinite(d)) return push_d(d); // -0, +0, +-Inf
+        double r = trunc(d);
+        if (r >= -9007199254740991.0 && r <= 9007199254740991.0) {
+            return (Item){.item = i2it((int64_t)r)};
+        }
+        return push_d(r);
+    }
+    return push_d(NAN);
+}
+
+extern "C" Item js_math_sign(Item x) {
+    TypeId t = get_type_id(x);
+    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) {
+        int64_t v = it2i(x);
+        if (v > 0) return (Item){.item = i2it(1)};
+        if (v < 0) return (Item){.item = i2it(-1)};
+        return (Item){.item = i2it(0)};
+    }
+    if (t == LMD_TYPE_FLOAT) {
+        double d = it2d(x);
+        if (d != d) return push_d(NAN);
+        if (d == 0.0) return push_d(d); // preserves -0
+        return (Item){.item = i2it(d > 0 ? 1 : -1)};
+    }
+    return push_d(NAN);
+}
+
+extern "C" Item js_math_floor(Item x) {
+    TypeId t = get_type_id(x);
+    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (t == LMD_TYPE_FLOAT) {
+        double d = it2d(x);
+        if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
+        double r = floor(d);
+        if (r >= -9007199254740991.0 && r <= 9007199254740991.0) {
+            return (Item){.item = i2it((int64_t)r)};
+        }
+        return push_d(r);
+    }
+    return push_d(NAN);
+}
+
+extern "C" Item js_math_ceil(Item x) {
+    TypeId t = get_type_id(x);
+    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (t == LMD_TYPE_FLOAT) {
+        double d = it2d(x);
+        if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
+        double r = ceil(d);
+        if (r == 0.0 && d < 0.0) return push_d(-0.0); // ceil(-0.5) → -0
+        if (r >= -9007199254740991.0 && r <= 9007199254740991.0) {
+            return (Item){.item = i2it((int64_t)r)};
+        }
+        return push_d(r);
+    }
+    return push_d(NAN);
+}
+
+extern "C" Item js_math_round_item(Item x) {
+    TypeId t = get_type_id(x);
+    if (t == LMD_TYPE_INT || t == LMD_TYPE_INT64) return x;
+    if (t == LMD_TYPE_FLOAT) {
+        double d = it2d(x);
+        if (d != d || !isfinite(d) || d == 0.0) return push_d(d);
+        double r = floor(d + 0.5);
+        if (r == 0.0 && d < 0.0) return push_d(-0.0);
+        return push_d(r);
+    }
+    return push_d(NAN);
 }
 
 // --- Rounding functions (int version returns identity) ---
