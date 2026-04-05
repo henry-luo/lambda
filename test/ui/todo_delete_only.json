@@ -1,0 +1,11 @@
+{
+  "name": "Just delete items",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "--- DELETE: click delete button ---"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "log", "message": "--- Done ---"}
+  ]
+}
