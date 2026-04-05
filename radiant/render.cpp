@@ -2466,7 +2466,25 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Get canvas background color (may be propagated from body per CSS spec)
     uint32_t canvas_bg = get_canvas_background(view_tree->root);
-    fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
+
+    // Phase 12.4: selective clear — only clear dirty regions when available
+    bool selective = false;
+    RadiantState* state = uicon->document ? (RadiantState*)uicon->document->state : nullptr;
+    if (state && !state->dirty_tracker.full_repaint && dirty_has_regions(&state->dirty_tracker)) {
+        // Clear only dirty regions to background color
+        DirtyRect* dr = state->dirty_tracker.dirty_list;
+        float scale = rdcon.scale;
+        while (dr) {
+            Rect dirty_rect = {dr->x * scale, dr->y * scale, dr->width * scale, dr->height * scale};
+            fill_surface_rect(rdcon.ui_context->surface, &dirty_rect, canvas_bg, &rdcon.block.clip);
+            dr = dr->next;
+        }
+        selective = true;
+        log_debug("render_html_doc: selective clear (dirty regions present)");
+    } else {
+        // Full clear
+        fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
+    }
 
     auto t_init = high_resolution_clock::now();
 
@@ -2534,5 +2552,6 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     }
 
     auto t_end = high_resolution_clock::now();
-    log_info("[TIMING] render_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    log_info("[TIMING] render_html_doc total: %.1fms%s", duration<double, std::milli>(t_end - t_start).count(),
+        selective ? " (selective)" : "");
 }

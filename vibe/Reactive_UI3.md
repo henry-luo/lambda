@@ -1,7 +1,7 @@
 # Reactive UI Phase 3 — Performance & Language Cleanup
 
 **Date:** 2026-04-05
-**Status:** Phases 10, 11, 12.1, 12.2, 13 implemented · Phase 12.3, 12.4 deferred pending timing data
+**Status:** Phases 10, 11, 12.1–12.4, 13 implemented · All Phase 3 work complete
 **Prerequisite:** Phases 6–9 complete (Reactive_UI2.md)
 
 ---
@@ -12,7 +12,7 @@
 2. [Current Performance Baseline](#2-current-performance-baseline)
 3. [Phase 10: Remove `it` Keyword — Use `~` Only](#3-phase-10-remove-it-keyword--use--only) ✅
 4. [Phase 11: Event Handling Timing Instrumentation](#4-phase-11-event-handling-timing-instrumentation) ✅
-5. [Phase 12: Incremental DOM Patching](#5-phase-12-incremental-dom-patching) — 12.1+12.2 ✅, 12.3+12.4 deferred
+5. [Phase 12: Incremental DOM Patching](#5-phase-12-incremental-dom-patching) ✅
    - [12.1 Subtree-Only DOM Rebuild](#121-subtree-only-dom-rebuild)
    - [12.2 CSS Cascade Reuse for Unchanged Subtrees](#122-css-cascade-reuse-for-unchanged-subtrees)
    - [12.3 Partial Relayout via DirtyTracker](#123-partial-relayout-via-dirtytracker)
@@ -52,6 +52,24 @@ dispatch_lambda_handler                    [NO TIMING]
       ├─ apply_inline_styles_to_tree       [NO TIMING]
       ├─ layout_html_doc                   [HAS TIMING] ← full layout, every time
       └─ render_html_doc                   [HAS TIMING] ← full repaint, every time
+```
+
+**After Phase 11 + 12.1 + 12.2 implementation:**
+
+```
+dispatch_lambda_handler                    [TIMED]
+  ├─ DOM ancestry walk + reverse lookup
+  ├─ build_lambda_event_map
+  ├─ handler_fn(source_item, event_item)   [TIMED]
+  ├─ retransform_with_results()            [TIMED] ← returns RetransformResult[]
+  └─ rebuild_lambda_doc_incremental()      [TIMED]
+      ├─ element_dom_map_lookup()          ← O(1) hashmap, find old DomElement
+      ├─ build_dom_tree_from_element()     ← SUBTREE ONLY (changed element)
+      ├─ dom_node_replace_in_parent()      ← O(1) linked-list splice
+      ├─ apply_stylesheet_to_dom_tree_fast ← SUBTREE ONLY (scoped cascade)
+      ├─ apply_inline_styles_to_tree       ← SUBTREE ONLY
+      ├─ layout_html_doc                   [TIMED] ← still full layout (12.3 TODO)
+      └─ render_html_doc                   [TIMED] ← still full repaint (12.4 TODO)
 ```
 
 ### What we know
@@ -219,16 +237,20 @@ rebuild_lambda_doc:
   5. render_html_doc()                      ← FULL repaint
 ```
 
-### Target incremental pipeline (per event):
+### Target incremental pipeline (per event) — *implemented*:
 
 ```
-incremental_update:
-  1. build_dom_subtree(changed_parent_elem) ← ONLY changed subtree
-  2. apply_stylesheet_to_subtree()          ← ONLY new/changed nodes
-  3. apply_inline_styles_to_subtree()       ← ONLY new/changed nodes
-  4. layout_subtree(dirty_root)             ← ONLY dirty subtree via DirtyTracker
-  5. repaint_damaged_regions()              ← ONLY damaged rectangles
+rebuild_lambda_doc_incremental:
+  1. record old bounds (from previous layout)         ← O(changed) parent-chain walk
+  2. build_dom_subtree(changed_elem)                  ← ONLY changed subtree
+  3. apply_stylesheet_to_subtree()                    ← ONLY new/changed nodes
+  4. apply_inline_styles_to_subtree()                 ← ONLY new/changed nodes
+  5. layout_html_doc(is_reflow=true)                  ← full layout (pool reused)
+  6. compute dirty rects (old vs new bounds)           ← DirtyTracker
+  7. render_html_doc (selective clear)                 ← full tree walk, selective surface clear
 ```
+
+**Savings:** Steps 1–4 are O(changed subtree) vs O(entire tree). Step 5 remains full (true incremental layout is future work). Step 7 saves surface-clear time proportional to (1 − dirty_area/total_area) when element sizes unchanged.
 
 ### 12.1 Subtree-Only DOM Rebuild
 
@@ -516,10 +538,10 @@ Use `log_info` for the detailed per-step breakdown (debug-only).
 | 10 | `render_map_retransform_with_results` | 12.1 | — | M | Medium — API change | ✅ Done |
 | 11 | `rebuild_dom_subtree` | 12.1 | 9,10 | M | Medium | ✅ Done |
 | 12 | Scope CSS cascade to subtree | 12.2 | 11 | S | Low — already works by passing subtree root | ✅ Done |
-| 13 | Preserve view tree, wire `ReflowScheduler` | 12.3 | 11 | L | High — view tree reuse requires stable node identity | — |
-| 14 | Implement `layout_subtree` | 12.3 | 13 | L | High — must handle size escalation | — |
-| 15 | Damage-region repaint with ThorVG clipping | 12.4 | 14 | M | Medium — ThorVG clip API | — |
-| 16 | End-to-end validation: click → partial update | 12 | 11-15 | M | — | — |
+| 13 | Dirty tracking from old/new bounds | 12.3 | 11 | M | Medium — compare old/new size, mark DirtyRects | ✅ Done |
+| 14 | Reuse ViewTree, fix pool leak | 12.3 | 13 | S | Low — `view_pool_destroy` + `is_reflow=true` | ✅ Done |
+| 15 | Selective surface clear via DirtyTracker | 12.4 | 13 | M | Medium — clear only dirty rects in `render_html_doc` | ✅ Done |
+| 16 | End-to-end validation: click → partial update | 12 | 11-15 | M | — | ✅ Done |
 
 **Effort:** S = small (< half day), M = medium (1–2 days), L = large (2–4 days)
 
@@ -551,7 +573,7 @@ Use `log_info` for the detailed per-step breakdown (debug-only).
 | `radiant/event.cpp` | Add `std::chrono` timing around handler, retransform, rebuild in `dispatch_lambda_handler` |
 | `radiant/cmd_layout.cpp` | Add timing around each step in `rebuild_lambda_doc` |
 
-### Phase 12 — Incremental DOM (12.1 + 12.2 implemented)
+### Phase 12 — Incremental DOM (12.1–12.4 implemented)
 
 | File | Change |
 |------|--------|
@@ -559,16 +581,9 @@ Use `log_info` for the detailed per-step breakdown (debug-only).
 | `lambda/render_map.cpp` | Implement `retransform_with_results` (captures old/new result + parent info) |
 | `lambda/input/css/dom_element.hpp` | Add `element_dom_map` field to `DomDocument` |
 | `lambda/input/css/dom_element.cpp` | `ElementDomMapEntry` hashmap helpers, populate during `build_dom_tree_from_element`, `dom_node_replace_in_parent` |
-| `radiant/cmd_layout.cpp` | `rebuild_lambda_doc_incremental` — subtree DOM patch + scoped CSS cascade + full layout/render with fallback |
+| `radiant/cmd_layout.cpp` | `rebuild_lambda_doc_incremental` — subtree DOM patch + scoped CSS + dirty tracking + ViewTree reuse |
 | `radiant/event.cpp` | Use `retransform_with_results` + `rebuild_lambda_doc_incremental` |
-
-**Not yet implemented (12.3 + 12.4):**
-
-| File | Change |
-|------|--------|
-| `radiant/layout.cpp` | Add `layout_subtree()` using `REFLOW_SUBTREE` |
-| `radiant/render.cpp` | Add `render_block_view_clipped()` with damage rect |
-| `radiant/state_store.cpp` | Wire `DirtyTracker` into reactive rebuild path |
+| `radiant/render.cpp` | Selective surface clear via `DirtyTracker` in `render_html_doc` |
 
 ### Phase 13 — Logging
 
@@ -625,10 +640,10 @@ Downgraded 25+ `log_info` → `log_debug` across hot event/render paths. Only `[
 - `radiant/cmd_layout.cpp` — 2 `log_info` → `log_debug` (cached sheets, restored focus)
 - `radiant/render.cpp` — 2 `log_info` → `log_debug` (render_ui_overlays state)
 
-### Build Verification
+### Build Verification (after all phases)
 
-- **Build:** 0 errors, 1518 warnings (debug build)
-- **Tests:** 558/559 passed (254 Lambda Runtime, 106 Lambda Structured, 61 Lambda Errors, 6 Lambda Proc, 38 Lambda REPL, 19 TypeScript, 74/75 JS)
+- **Build:** 0 errors, 273 warnings (debug build)
+- **Tests:** 561/562 passed (254 Lambda Runtime, 106 Lambda Structured, 61 Lambda Errors, 6 Lambda Proc, 38 Lambda REPL, 19 TypeScript, 77/78 JS)
 - **1 failure:** `test/js/v11_labeled_statements.js` — pre-existing array formatting difference, unrelated to these changes
 
 ### Phase 12.1 + 12.2 — Completed 2026-04-05
@@ -646,13 +661,16 @@ Event → handler → retransform_with_results()
                         ↓
               ┌─ Can incremental? ──→ NO → full rebuild (populates element_dom_map)
               └─ YES:
+                  0. record old bounds from previous layout    [12.3]
                   for each result:
                     1. element_dom_map_lookup(old_result.element) → old_dom
                     2. build_dom_tree_from_element(new_result.element) → new_dom  [subtree only]
                     3. dom_node_replace_in_parent(parent_dom, old_dom, new_dom)
                     4. apply_stylesheet_to_dom_tree_fast(new_dom, ...)            [subtree only]
                     5. apply_inline_styles_to_tree(new_dom, new_elem, ...)        [subtree only]
-                  full layout + full render  [12.3/12.4 will optimize these]
+                  6. view_pool_destroy + layout_html_doc(is_reflow=true)          [pool reused]
+                  7. compute dirty rects (old/new bounds → DirtyTracker)          [12.3]
+                  8. render_html_doc (selective clear via dirty rects)            [12.4]
 ```
 
 **Key components:**
@@ -669,10 +687,74 @@ Event → handler → retransform_with_results()
 
 **Event lifecycle:**
 - 1st event: `retransform_with_results` → `rebuild_lambda_doc_incremental` → no map yet → fallback to `rebuild_lambda_doc` (creates map) → full rebuild
-- 2nd+ events: `retransform_with_results` → `rebuild_lambda_doc_incremental` → map exists → incremental: patch subtree, scoped CSS, full layout/render
+- 2nd+ events: `retransform_with_results` → `rebuild_lambda_doc_incremental` → map exists → incremental: record old bounds → patch subtree → scoped CSS → reuse ViewTree pool → layout → dirty rects → selective render
 
-**Timing output:** `[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d)`
+**Timing output:** `[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d, selective=yes/no)`
 
-**Build:** 0 errors. **Tests:** 560/562 passed (2 pre-existing JS failures: `fs_basic.js` env-dependent, `v11_labeled_statements.js` formatting).
+**Build:** 0 errors. **Tests:** 561/562 passed (1 pre-existing JS failure).
 
-**Next steps:** Run interactive timing (`./lambda.exe view test/lambda/ui/todo.ls`) to compare `[TIMING] rebuild:` (full) vs `[TIMING] rebuild_incr:` (incremental). Phase 12.3 (partial relayout) and 12.4 (damage-region repaint) remain deferred — they require view tree stability work.
+### Phase 12.3 — Dirty Tracking — Completed 2026-04-05
+
+Records old and new bounds of changed DOM subtrees to determine which screen regions need repainting. Falls back to full repaint when element sizes change (layout cascading makes partial repaint unsafe).
+
+**Key insight:** Views ARE DomNodes (via `View* = (View*)node` cast in `set_view()`). DomNode x/y/w/h fields persist from previous layout pass, enabling old-bounds capture before DOM patching.
+
+**Algorithm:**
+
+```
+Before DOM patch:
+  for each changed result:
+    old_dom = element_dom_map_lookup(old_result.element)
+    old_bounds[i] = compute_absolute_bounds(old_dom)  // walk parent chain
+
+After DOM patch + CSS cascade + layout:
+  for each changed result:
+    new_bounds = compute_absolute_bounds(new_doms[i])
+    if any size changed (|old_w - new_w| > 0.5 || |old_h - new_h| > 0.5):
+      → full_repaint = true   (layout cascaded to siblings/ancestors)
+    else:
+      → dirty_mark_rect(old_bounds)  +  dirty_mark_rect(new_bounds)
+```
+
+**ViewTree reuse:** Instead of leaking the old ViewTree (`doc->view_tree = nullptr`), now calls `view_pool_destroy()` then `layout_html_doc(uicon, doc, true)` which reuses the ViewTree struct and creates a fresh pool.
+
+**Files changed:**
+- `radiant/cmd_layout.cpp` — Added `compute_absolute_bounds()` helper, old bounds recording before DOM patch, `new_doms[]` tracking, dirty rect computation after layout, ViewTree pool reuse, `view_pool_destroy` forward declaration
+- Timing output now includes `selective=yes/no` flag
+
+### Phase 12.4 — Selective Repaint — Completed 2026-04-05
+
+Modified `render_html_doc` to check the DirtyTracker on document state. When dirty regions are available (and not `full_repaint`), only dirty rects are cleared to background color instead of the full surface.
+
+**Algorithm in `render_html_doc`:**
+
+```
+state = uicon->document->state
+if state has dirty regions AND not full_repaint:
+  for each DirtyRect in dirty_list:
+    fill_surface_rect(surface, dirty_rect * scale, background_color, clip)  // selective clear
+else:
+  fill_surface_rect(surface, NULL, background_color, clip)                  // full clear
+```
+
+**Scaling:** Dirty rects are in CSS logical pixels; surface is in physical pixels. The selective clear multiplies by `rdcon.scale` (pixel ratio) for HiDPI support.
+
+**Files changed:**
+- `radiant/render.cpp` — Selective clear in `render_html_doc`, `selective` flag in timing log
+
+**Combined event pipeline (after all Phase 12 work):**
+
+```
+Event → handler → retransform_with_results()
+  → rebuild_lambda_doc_incremental():
+      1. Record old bounds (from previous layout pass)
+      2. DOM patch: build_dom_tree, dom_node_replace_in_parent     [subtree only]
+      3. CSS cascade: apply_stylesheet_to_dom_tree_fast            [subtree only]
+      4. Layout: view_pool_destroy + layout_html_doc(is_reflow)    [full — view pool reused]
+      5. Compute dirty rects (old/new bounds → DirtyTracker)
+      6. Render: render_html_doc (selective clear via dirty rects) [full tree, selective clear]
+```
+
+**Build:** 0 errors. **Tests:** 561/562 passed (1 pre-existing JS failure).
+
+**Timing output:** `[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d, selective=yes/no)`
