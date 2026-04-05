@@ -51,21 +51,21 @@ The key finding is that a small number of systemic issues cascade across thousan
 |:-----:|-------------|:------:|:---------------:|
 | 1a | Built-in method descriptors (non-enumerable markers) | ✅ Done | ~100 |
 | 1b | Class prototype chain (methods on prototype, not instance) | ✅ Done | ~80 |
-| 1c | getOwnPropertyDescriptor accuracy | ⬜ Not started | — |
+| 1c | getOwnPropertyDescriptor accuracy | ✅ Done | ~31 |
 | 1d | Property enumeration order (integer indices first) | ✅ Done | ~60 |
-| 1e | for-in enumerable flag enforcement | ⬜ Not started | — |
+| 1e | for-in enumerable flag enforcement | ✅ Done | ~13 |
 | 2 | Date object completion (setters, statics, utilities) | ✅ Done | ~250 |
 | 3 | Destructuring completion (recursive helpers, nested, computed, for-of, rest) | ✅ Done | ~530 |
 | 4 | JSON full parameters (replacer, space, reviver) | ✅ Done | ~80 |
 | 5 | encodeURI / decodeURI | ✅ Done | ~60 |
 | 6 | Generator/iterator protocol | ⬜ Not started | — |
-| 7a | arguments aliasing | ⬜ Not started | — |
-| 7b | TDZ enforcement for let/const | ⬜ Not started | — |
+| 7a | arguments aliasing | ✅ Done | ~72 |
+| 7b | TDZ enforcement for let/const | ✅ Done | ~100 |
 | 7c | Error object properties (toString, message defaults) | ✅ Done | ~40 |
 | 7d | Number/Math gaps (static properties, missing functions) | ✅ Done | ~60 |
-| 7e | try/catch improvements | ⬜ Not started | — |
-| 7f | Tagged template literals | ⬜ Not started | — |
-| 7g | new expression semantics | ⬜ Not started | — |
+| 7e | try/catch improvements (catch destructuring) | ✅ Done | ~50 |
+| 7f | Tagged template literals | ✅ Done | ~19 |
+| 7g | new expression semantics (new.target) | ✅ Done | ~30 |
 | — | Array callback validation (TypeError for non-callable) | ✅ Done | ~69 |
 
 ### Key Implementation Details
