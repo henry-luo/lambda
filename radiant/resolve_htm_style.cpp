@@ -586,17 +586,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->font->family = (char*)"monospace";
         // Browser quirk: when font-family transitions to monospace and no explicit
         // font-size on this element, scale inherited size by 13/16.
+        // Compute the element's estimated font-size for margin resolution (1em).
+        float pre_font_size = lycon->font.style->font_size;
         {
             bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
                 str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
             if (!parent_is_mono && block->font->font_size > 0) {
                 block->font->font_size = block->font->font_size * 13.0f / 16.0f;
             }
+            // CSS 2.1 §15.3: When transitioning to monospace, the inherited
+            // font-size is scaled by 13/16. Use this scaled size for the
+            // margin: 1em resolution, since 1em refers to the element's own
+            // computed font-size, not the parent's.
+            if (!parent_is_mono && pre_font_size > 0) {
+                pre_font_size = pre_font_size * 13.0f / 16.0f;
+            }
         }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->white_space = CSS_VALUE_PRE;
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
+        block->bound->margin.top = block->bound->margin.bottom = pre_font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     }
@@ -818,6 +827,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->in_line->vertical_align = CSS_VALUE_BOTTOM;
             }
         }
+        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
+        if (elmt->get_attribute("nowrap")) {
+            block->blk->white_space = CSS_VALUE_NOWRAP;
+            log_debug("[HTML] TH nowrap attribute -> white-space: nowrap");
+        }
         // Handle HTML bgcolor attribute for TH
         const char* bgcolor_attr = elmt->get_attribute("bgcolor");
         if (bgcolor_attr) {
@@ -915,6 +929,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             if (!block->bound->background) { block->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)); }
             block->bound->background->color = bg_color;
             log_debug("[HTML] TD bgcolor attribute: #%02x%02x%02x", bg_color.r, bg_color.g, bg_color.b);
+        }
+        // WHATWG 15.3.7: td[nowrap], th[nowrap] → white-space: nowrap
+        if (elmt->get_attribute("nowrap")) {
+            block->blk->white_space = CSS_VALUE_NOWRAP;
+            log_debug("[HTML] TD nowrap attribute -> white-space: nowrap");
         }
         // Per WHATWG 15.3.10: table[border] td, table[border] th { border: 1px inset grey; }
         {

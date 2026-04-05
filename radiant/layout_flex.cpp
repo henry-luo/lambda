@@ -3561,6 +3561,43 @@ float calculate_item_baseline(ViewElement* item) {
         child_view = (View*)child_view->next_sibling;
     }
 
+    // CSS Flexbox §9.4 / CSS 2.1 §10.8.1: For block containers with in-flow
+    // line boxes (text content), the baseline is the first line box's baseline.
+    // Check stored first_line_baseline (set during content layout via finalize_block_flow).
+    if (item_block->blk && item_block->blk->first_line_baseline > 0) {
+        return margin_top + item_block->blk->first_line_baseline;
+    }
+
+    // If no stored baseline but item has font metrics and text children, synthesize
+    // from font ascender. This handles items with text-only children whose content
+    // hasn't been laid out yet (e.g., during flex Phase 5 before layout_flex_item_content).
+    // Only apply when the item actually has non-whitespace text children.
+    if (item->font && item->font->ascender > 0) {
+        bool has_text_child = false;
+        DomNode* dn = item->first_child;
+        while (dn) {
+            if (dn->is_text()) {
+                const char* text = (const char*)dn->text_data();
+                if (text) {
+                    // check for non-whitespace content
+                    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+                    if (*text) { has_text_child = true; break; }
+                }
+            }
+            dn = dn->next_sibling;
+        }
+        if (has_text_child) {
+            float border_top = 0, padding_top = 0;
+            if (item->bound) {
+                padding_top = item->bound->padding.top;
+                if (item->bound->border) {
+                    border_top = item->bound->border->width.top;
+                }
+            }
+            return margin_top + border_top + padding_top + item->font->ascender;
+        }
+    }
+
     // Synthesize baseline from outer margin edge (bottom of margin box)
     // This is the CSS spec fallback for elements without text or participating children
     return margin_top + item->height;

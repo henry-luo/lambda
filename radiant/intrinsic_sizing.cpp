@@ -1569,58 +1569,70 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             const char* text = (const char*)child->text_data();
             if (text) {
                 size_t text_len = strlen(text);
-                // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
-                // This matches CSS white-space: normal behavior
+                // CSS 2.1 §16.6: white-space determines whether to collapse or preserve spaces
+                CssEnum ws = get_white_space_value(child);
+                bool preserve_spaces = (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+                                        ws == CSS_VALUE_BREAK_SPACES);
+
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
-                // Only trim leading whitespace if this is the first child or preceded only by whitespace.
-                // If there's inline content before this text node, leading whitespace should
-                // collapse to a single space (which contributes to intrinsic width).
-                bool has_inline_before = (child->prev_sibling != nullptr &&
-                                          has_inline_content &&
-                                          inline_max_sum > 0);
-                bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
-                for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
-                    unsigned char ch = (unsigned char)text[i];
-                    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
-                        if (!in_whitespace) {
-                            normalized_buffer[out_pos++] = ' ';  // Collapse to single space
-                            in_whitespace = true;
-                        }
-                    } else {
-                        normalized_buffer[out_pos++] = (char)ch;
-                        in_whitespace = false;
+
+                if (preserve_spaces) {
+                    // white-space: pre/pre-wrap/break-spaces — preserve all whitespace as-is
+                    for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                        normalized_buffer[out_pos++] = text[i];
                     }
-                }
-                // Only trim trailing whitespace if there's no inline content after this text node.
-                // Trailing whitespace before an inline sibling (like <a>) should be preserved
-                // as it contributes to the inter-word spacing.
-                bool has_inline_after = false;
-                if (child->next_sibling) {
-                    DomNode* next = child->next_sibling;
-                    // Skip whitespace-only text nodes
-                    while (next && next->is_text()) {
-                        const char* next_text = (const char*)next->text_data();
-                        bool all_ws = true;
-                        if (next_text) {
-                            for (const char* p = next_text; *p && all_ws; p++) {
-                                unsigned char c = (unsigned char)*p;
-                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                    all_ws = false;
+                } else {
+                    // white-space: normal/nowrap/pre-line — collapse consecutive spaces
+                    // Only trim leading whitespace if this is the first child or preceded only by whitespace.
+                    // If there's inline content before this text node, leading whitespace should
+                    // collapse to a single space (which contributes to intrinsic width).
+                    bool has_inline_before = (child->prev_sibling != nullptr &&
+                                              has_inline_content &&
+                                              inline_max_sum > 0);
+                    bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
+                    for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                        unsigned char ch = (unsigned char)text[i];
+                        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                            if (!in_whitespace) {
+                                normalized_buffer[out_pos++] = ' ';  // Collapse to single space
+                                in_whitespace = true;
+                            }
+                        } else {
+                            normalized_buffer[out_pos++] = (char)ch;
+                            in_whitespace = false;
+                        }
+                    }
+                    // Only trim trailing whitespace if there's no inline content after this text node.
+                    // Trailing whitespace before an inline sibling (like <a>) should be preserved
+                    // as it contributes to the inter-word spacing.
+                    bool has_inline_after = false;
+                    if (child->next_sibling) {
+                        DomNode* next = child->next_sibling;
+                        // Skip whitespace-only text nodes
+                        while (next && next->is_text()) {
+                            const char* next_text = (const char*)next->text_data();
+                            bool all_ws = true;
+                            if (next_text) {
+                                for (const char* p = next_text; *p && all_ws; p++) {
+                                    unsigned char c = (unsigned char)*p;
+                                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+                                        all_ws = false;
+                                    }
                                 }
                             }
+                            if (!all_ws) break;
+                            next = next->next_sibling;
                         }
-                        if (!all_ws) break;
-                        next = next->next_sibling;
+                        if (next && next->is_element()) {
+                            has_inline_after = is_inline_level_element(next->as_element());
+                        }
                     }
-                    if (next && next->is_element()) {
-                        has_inline_after = is_inline_level_element(next->as_element());
-                    }
-                }
-                if (!has_inline_after) {
-                    // Trim trailing whitespace
-                    while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
-                        out_pos--;
+                    if (!has_inline_after) {
+                        // Trim trailing whitespace
+                        while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
+                            out_pos--;
+                        }
                     }
                 }
                 normalized_buffer[out_pos] = '\0';
@@ -1634,17 +1646,37 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum text_transform = get_element_text_transform(element);
                 CssEnum font_variant = get_element_font_variant(element);
 
-                TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                    lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                TextIntrinsicWidths text_widths;
+                if (preserve_spaces) {
+                    // For pre/pre-wrap/break-spaces: newlines create forced line breaks.
+                    // Measure each line separately; max-content = widest line.
+                    text_widths = {0, 0};
+                    const char* line_start = normalized_buffer;
+                    const char* buf_end = normalized_buffer + out_pos;
+                    while (line_start <= buf_end) {
+                        const char* nl = (const char*)memchr(line_start, '\n', buf_end - line_start);
+                        size_t line_len = nl ? (size_t)(nl - line_start) : (size_t)(buf_end - line_start);
+                        if (line_len > 0) {
+                            TextIntrinsicWidths lw = measure_text_intrinsic_widths(
+                                lycon, line_start, line_len, text_transform, font_variant);
+                            if (lw.max_content > text_widths.max_content)
+                                text_widths.max_content = lw.max_content;
+                            if (lw.min_content > text_widths.min_content)
+                                text_widths.min_content = lw.min_content;
+                        }
+                        if (!nl) break;
+                        line_start = nl + 1;
+                    }
+                } else {
+                    text_widths = measure_text_intrinsic_widths(
+                        lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
-                {
-                    CssEnum ws = get_white_space_value(child);
-                    if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
-                        child_sizes.min_content = child_sizes.max_content;
-                    }
+                if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
+                    child_sizes.min_content = child_sizes.max_content;
                 }
 
                 // In vertical writing mode, text flows top-to-bottom.
@@ -2627,7 +2659,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         if (lycon->font.style && lycon->font.style->font_size > 0) {
             font_size = lycon->font.style->font_size;
         }
-        float line_height = font_size * 1.2f;  // default for line-height: normal
+        // Use actual font metrics for line-height:normal when available
+        float line_height = font_size * 1.2f;  // fallback if no font loaded
+        if (lycon->font.font_handle) {
+            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+            if (normal_lh > 0) line_height = normal_lh;
+        }
 
         // Check ancestor elements for resolved CSS line-height
         // Walk up the DOM tree since intermediate parents may not have blk resolved yet

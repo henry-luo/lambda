@@ -1,0 +1,19 @@
+{
+  "name": "Two deletes then clear",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "--- DELETE 1 (triggers full rebuild) ---"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- DELETE 2 (triggers incremental) ---"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- CLEAR COMPLETED ---"},
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 500},
+    {"type": "log", "message": "--- Done ---"}
+  ]
+}

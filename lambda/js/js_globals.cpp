@@ -4034,6 +4034,14 @@ extern "C" Item js_escape(Item str_item) {
 
 static Item js_global_this_obj = {0};
 
+/**
+ * Reset globalThis for batch mode. Forces re-creation on next access
+ * so element IDs and variables from previous files don't leak.
+ */
+extern "C" void js_globals_batch_reset() {
+    js_global_this_obj = (Item){0};
+}
+
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         js_global_this_obj = js_new_object();

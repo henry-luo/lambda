@@ -1027,37 +1027,27 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
     }
 
     // Create or update TypeElmt
+    // Always create a new TypeElmt when shape changes, even in inline mode.
+    // The old TypeElmt may be shared by other Elements with the same original shape.
+    // Mutating it in-place would corrupt those other Elements whose data buffers
+    // still use the old layout (e.g., TypedItem 9-byte fields vs typed 8-byte fields).
     TypeElmt* new_type;
-    if (old_type->type_index == -1 || old_type == &EmptyElmt || !is_inline) {
-        // Create new TypeElmt
-        new_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        new_type->name = old_type->name;  // Keep same element name
-        new_type->shape = new_shape;
-        new_type->length = builder->field_count;
-        new_type->byte_size = new_byte_size;
-        new_type->content_length = old_type->content_length;
-        new_type->type_index = type_list_->length;
+    new_type = (TypeElmt*)alloc_type(pool_, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    new_type->name = old_type->name;  // Keep same element name
+    new_type->shape = new_shape;
+    new_type->length = builder->field_count;
+    new_type->byte_size = new_byte_size;
+    new_type->content_length = old_type->content_length;
+    new_type->type_index = type_list_->length;
 
-        // Find last entry
-        new_type->last = new_shape;
-        while (new_type->last && new_type->last->next) {
-            new_type->last = new_type->last->next;
-        }
-
-        arraylist_append(type_list_, new_type);
-        result_elmt->type = new_type;
-    } else {
-        // Inline mode - mutate existing TypeElmt
-        old_type->shape = new_shape;
-        old_type->length = builder->field_count;
-        old_type->byte_size = new_byte_size;
-
-        // Find last entry
-        old_type->last = new_shape;
-        while (old_type->last && old_type->last->next) {
-            old_type->last = old_type->last->next;
-        }
+    // Find last entry
+    new_type->last = new_shape;
+    while (new_type->last && new_type->last->next) {
+        new_type->last = new_type->last->next;
     }
+
+    arraylist_append(type_list_, new_type);
+    result_elmt->type = new_type;
 
     // Free old data (inline mode only), replace with new
     if (is_inline && old_elmt->data) {

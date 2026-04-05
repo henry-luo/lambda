@@ -1385,6 +1385,12 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         flex_item->content_height = lycon->block.advance_y - content_y_offset;
     }
 
+    // CSS Flexbox §9.4: Persist first line baseline for flex baseline alignment.
+    // finalize_block_flow is not called for flex items, so copy here.
+    if (flex_item->blk && lycon->block.first_line_ascender > 0) {
+        flex_item->blk->first_line_baseline = lycon->block.first_line_ascender;
+    }
+
     // CRITICAL FIX: For column flex items without explicit height,
     // update item height based on actual content height.
     // This fixes the issue where intrinsic height was calculated incorrectly

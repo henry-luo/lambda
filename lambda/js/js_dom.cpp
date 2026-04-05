@@ -63,6 +63,15 @@ static Item js_document_proxy_item = {.item = ITEM_NULL};
 
 static __thread DomDocument* _js_current_document = nullptr;
 
+/**
+ * Reset JS DOM state for batch mode. Clears cached document proxy and
+ * document pointer so next file starts fresh.
+ */
+extern "C" void js_dom_batch_reset() {
+    js_document_proxy_item = (Item){.item = ITEM_NULL};
+    _js_current_document = nullptr;
+}
+
 // ============================================================================
 // Named element access on Window (HTML spec: named access on Window object)
 // Walks DOM tree, registers elements with id as global properties
@@ -2335,6 +2344,18 @@ extern "C" Item js_dom_set_style_property(Item elem_item, Item prop_name, Item v
         }
         log_debug("js_dom_set_style_property: set cssText='%.50s' on <%s>",
                   val_str, elem->tag_name ? elem->tag_name : "?");
+        return value;
+    }
+
+    // CSSOM §6.7.3: setting a property to empty string removes it
+    if (!val_str[0]) {
+        CssPropertyId prop_id = css_property_id_from_name(css_prop);
+        if (prop_id != CSS_PROPERTY_UNKNOWN && elem->specified_style) {
+            style_tree_remove_property(elem->specified_style, prop_id);
+            elem->styles_resolved = false;
+        }
+        log_debug("js_dom_set_style_property: removed %s (CSS: %s) on <%s>",
+                  js_prop, css_prop, elem->tag_name ? elem->tag_name : "?");
         return value;
     }
 

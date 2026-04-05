@@ -1719,6 +1719,33 @@ bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomEle
     return true;
 }
 
+bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child) {
+    if (!parent || !old_child || !new_child) return false;
+    if (old_child->parent != parent) return false;
+
+    // splice new_child into old_child's position in the linked list
+    new_child->parent = parent;
+    new_child->prev_sibling = old_child->prev_sibling;
+    new_child->next_sibling = old_child->next_sibling;
+
+    if (old_child->prev_sibling) {
+        old_child->prev_sibling->next_sibling = new_child;
+    } else {
+        parent->first_child = new_child;
+    }
+
+    if (old_child->next_sibling) {
+        old_child->next_sibling->prev_sibling = new_child;
+    } else {
+        parent->last_child = new_child;
+    }
+
+    old_child->parent = nullptr;
+    old_child->prev_sibling = nullptr;
+    old_child->next_sibling = nullptr;
+    return true;
+}
+
 // ============================================================================
 // Structural Queries
 // ============================================================================
@@ -2609,6 +2636,50 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Aren
     return string_value ? string_value->chars : nullptr;
 }
 
+// ============================================================================
+// Element-to-DOM map: Lambda Element* → DomElement*
+// Used for incremental DOM rebuild (Phase 12)
+// ============================================================================
+
+typedef struct ElementDomMapEntry {
+    Element* element;       // key: Lambda Element pointer
+    DomElement* dom_elem;   // value: corresponding DomElement
+} ElementDomMapEntry;
+
+static uint64_t element_dom_map_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ElementDomMapEntry* entry = (const ElementDomMapEntry*)item;
+    return hashmap_sip(&entry->element, sizeof(Element*), seed0, seed1);
+}
+
+static int element_dom_map_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const ElementDomMapEntry* ea = (const ElementDomMapEntry*)a;
+    const ElementDomMapEntry* eb = (const ElementDomMapEntry*)b;
+    return ea->element == eb->element ? 0 : (ea->element < eb->element ? -1 : 1);
+}
+
+HashMap* element_dom_map_create(void) {
+    return hashmap_new(sizeof(ElementDomMapEntry), 64, 0, 0,
+                       element_dom_map_hash, element_dom_map_compare, NULL, NULL);
+}
+
+void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem) {
+    if (!map || !elem || !dom_elem) return;
+    ElementDomMapEntry entry;
+    entry.element = elem;
+    entry.dom_elem = dom_elem;
+    hashmap_set(map, &entry);
+}
+
+DomElement* element_dom_map_lookup(HashMap* map, Element* elem) {
+    if (!map || !elem) return nullptr;
+    ElementDomMapEntry key;
+    key.element = elem;
+    key.dom_elem = nullptr;
+    const ElementDomMapEntry* found = (const ElementDomMapEntry*)hashmap_get(map, &key);
+    return found ? found->dom_elem : nullptr;
+}
+
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent) {
     if (!elem || !doc) {
         log_debug("build_dom_tree_from_element: Invalid arguments\n");
@@ -2643,6 +2714,11 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     // create DomElement
     DomElement* dom_elem = dom_element_create(doc, tag_name, elem);
     if (!dom_elem) return nullptr;
+
+    // populate element-to-DOM map if available (for incremental rebuild)
+    if (doc->element_dom_map) {
+        element_dom_map_insert(doc->element_dom_map, elem, dom_elem);
+    }
 
     // Extract source line number if tracked during HTML5 parsing
     ConstItem sl_attr = elem->get_attr("__source_line");
