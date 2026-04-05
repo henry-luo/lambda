@@ -5101,6 +5101,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->content_width = max(new_content_width, 0.0f);
             lycon->block.content_width = block->content_width;
 
+            // Update BFC float edges to match new content width after shrink-to-fit.
+            // The BFC edges were set earlier (line ~4608) with the initial content_width
+            // before shrink-to-fit. If not updated, inline-block children will see
+            // stale float boundaries and be mispositioned.
+            if (lycon->block.is_bfc_root && lycon->block.establishing_element == block) {
+                lycon->block.float_left_edge = 0;
+                lycon->block.float_right_edge = block->content_width;
+                log_debug("%s [BFC] Updated float edges after shrink-to-fit: right=%.1f",
+                          block->source_loc(), block->content_width);
+            }
+
             // CSS 2.1 §16.1: Reset is_first_line BEFORE line_init so that
             // line_reset() (called inside line_init) applies text-indent on the
             // actual first content line. The initial setup_inline → line_reset

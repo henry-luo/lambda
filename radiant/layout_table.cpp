@@ -4459,6 +4459,24 @@ static bool should_collapse_whitespace(ViewTableCell* cell) {
     return true; // Default: collapse whitespace (normal, nowrap)
 }
 
+// Helper: Check if wrapping is suppressed for this cell
+// CSS white-space: nowrap, pre -> no line break opportunities (min-content = max-content)
+// CSS white-space: normal, pre-wrap, pre-line, break-spaces -> wrapping allowed
+static bool should_prevent_wrapping(ViewTableCell* cell) {
+    if (!cell) return false;
+
+    // Check the cell's own resolved white-space property
+    DomElement* elem = cell->as_element();
+    if (elem && elem->blk && elem->blk->white_space != 0) {
+        CssEnum ws = elem->blk->white_space;
+        return (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE);
+    }
+
+    // Fall back to inherited value
+    CssEnum ws_value = get_white_space_value((DomNode*)cell);
+    return (ws_value == CSS_VALUE_NOWRAP || ws_value == CSS_VALUE_PRE);
+}
+
 // Helper: Check if text is all whitespace
 static bool is_all_whitespace(const char* text, size_t length) {
     for (size_t i = 0; i < length; i++) {
@@ -4926,6 +4944,13 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
     // Finalize any remaining inline run
     if (inline_run_max > max_width) max_width = inline_run_max;
+
+    // CSS Text 3 §5.2: white-space: nowrap/pre prevents soft wrap opportunities,
+    // so min-content width equals max-content width (content cannot break into lines)
+    if (should_prevent_wrapping(cell) && max_width > min_width) {
+        log_debug("%s Cell widths: nowrap/pre forces min=max (%.2f -> %.2f)", cell->source_loc(), min_width, max_width);
+        min_width = max_width;
+    }
 
     log_debug("%s Cell widths: inline_run_max=%.2f, final max_width=%.2f", cell->source_loc(), inline_run_max, max_width);
 
@@ -5560,6 +5585,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 // so the table never shrinks below its content's minimum size.
                 CellWidths widths = measure_cell_widths(lycon, tcell, table->tb->border_collapse);
                 min_width = widths.min_width > cell_width ? widths.min_width : cell_width;
+            }
+
+            // CSS 2.1 §17.5.2.2: When white-space: nowrap/pre prevents soft wrap
+            // opportunities, the cell's min-content equals max-content. The preferred
+            // width must expand beyond any CSS width to accommodate content that cannot
+            // break. Only applies when wrapping is actually suppressed.
+            if (should_prevent_wrapping(tcell) && pref_width < min_width) {
+                pref_width = min_width;
+                cell_width = min_width;
             }
 
             // Store intrinsic width for post-border-resolution adjustment
