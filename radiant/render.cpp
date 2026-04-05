@@ -2499,10 +2499,10 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Render UI overlays (focus outline, caret, selection) on top of content
     if (uicon->document && uicon->document->state) {
-        log_info("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
+        log_debug("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
-        log_info("[RENDER] no state for overlays: doc=%p, state=%p",
+        log_debug("[RENDER] no state for overlays: doc=%p, state=%p",
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 

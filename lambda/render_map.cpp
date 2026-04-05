@@ -144,7 +144,7 @@ void render_map_record(Item source_item, const char* template_ref,
         hashmap_set(rmap, &rentry);
     }
 
-    log_info("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
+    log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
               template_ref ? template_ref : "(anon)",
               (unsigned long long)result_node.item,
               s_reverse_map ? hashmap_count(s_reverse_map) : 0);
@@ -276,7 +276,7 @@ int render_map_retransform(void) {
     }
 
     if (count > 0) {
-        log_info("render_map_retransform: re-transformed %d dirty entries", count);
+        log_debug("render_map_retransform: re-transformed %d dirty entries", count);
     }
     return count;
 }

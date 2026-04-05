@@ -4114,7 +4114,10 @@ void rebuild_lambda_doc(UiContext* uicon) {
         return;
     }
 
-    log_info("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
+    log_debug("rebuild_lambda_doc: rebuilding DOM from updated Lambda elements");
+
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
 
     // Save focus info before rebuild so we can restore it on the new tree
     RadiantState* state = (RadiantState*)doc->state;
@@ -4141,6 +4144,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         log_error("rebuild_lambda_doc: failed to rebuild DOM tree");
         return;
     }
+    auto t_dom = high_resolution_clock::now();
 
     // replace old DOM root
     doc->root = new_root;
@@ -4159,7 +4163,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             doc->cached_inline_sheets = inline_sheets;
             doc->cached_inline_sheet_count = inline_count;
             doc->cached_css_engine = css_engine;
-            log_info("rebuild_lambda_doc: cached %d inline stylesheet(s)", inline_count);
+            log_debug("rebuild_lambda_doc: cached %d inline stylesheet(s)", inline_count);
         }
     }
 
@@ -4175,12 +4179,14 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     // apply inline style attributes
     apply_inline_styles_to_tree(new_root, html_elem, doc->pool);
+    auto t_css = high_resolution_clock::now();
 
     // mark view tree dirty for full relayout
     doc->view_tree = nullptr;  // force full layout rebuild
 
     // trigger relayout + repaint
     layout_html_doc(uicon, doc, false);
+    auto t_layout = high_resolution_clock::now();
 
     // Restore focus to matching element in new view tree
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
@@ -4188,7 +4194,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
             (View*)doc->view_tree->root, focus_tag, focus_class);
         if (new_focused) {
             state->focus->current = new_focused;
-            log_info("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
+            log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
                      new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
         }
     }
@@ -4196,8 +4202,14 @@ void rebuild_lambda_doc(UiContext* uicon) {
     if (doc->view_tree) {
         render_html_doc(uicon, doc->view_tree, NULL);
     }
+    auto t_render = high_resolution_clock::now();
 
-    log_info("rebuild_lambda_doc: DOM rebuild and relayout complete");
+    log_info("[TIMING] rebuild: dom_build=%.2fms css_cascade=%.2fms layout=%.2fms render=%.2fms total=%.2fms",
+        duration<double, std::milli>(t_dom - t_start).count(),
+        duration<double, std::milli>(t_css - t_dom).count(),
+        duration<double, std::milli>(t_layout - t_css).count(),
+        duration<double, std::milli>(t_render - t_layout).count(),
+        duration<double, std::milli>(t_render - t_start).count());
 }
 
 /**
