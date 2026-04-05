@@ -404,6 +404,8 @@ void js_reset_module_vars(void);
  * Clears module vars, exception state, event loop, DOM context, and Input context.
  */
 void js_batch_reset(void);
+int js_get_module_var_count(void);
+void js_batch_reset_to(int checkpoint_var_count);
 void js_dom_batch_reset(void);
 void js_globals_batch_reset(void);
 Item js_constructor_create_object(Item callee);
