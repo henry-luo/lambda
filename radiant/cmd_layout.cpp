@@ -100,6 +100,9 @@ void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
 
+// View pool management (from view_pool.cpp)
+void view_pool_destroy(ViewTree* tree);
+
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
 // before it gets filtered out during DomElement tree construction
@@ -4236,6 +4239,20 @@ void rebuild_lambda_doc(UiContext* uicon) {
 // Falls back to full rebuild when incremental update is not possible.
 // ============================================================================
 
+// Helper: compute absolute bounds of a DOM node by walking parent chain
+static void compute_absolute_bounds(DomNode* node, float* abs_x, float* abs_y, float* w, float* h) {
+    *abs_x = node->x;
+    *abs_y = node->y;
+    *w = node->width;
+    *h = node->height;
+    DomNode* p = node->parent;
+    while (p) {
+        *abs_x += p->x;
+        *abs_y += p->y;
+        p = p->parent;
+    }
+}
+
 void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count) {
     if (!uicon || !uicon->document) {
         log_error("rebuild_lambda_doc_incremental: no document");
@@ -4310,6 +4327,19 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     int inline_count = doc->cached_inline_sheet_count;
     CssEngine* css_engine = (CssEngine*)doc->cached_css_engine;
 
+    // Phase 12.3: Record old bounds of changed subtrees for dirty tracking
+    // (Views ARE DomNodes — x/y/w/h from previous layout pass)
+    struct { float x, y, w, h; } old_bounds[16] = {};
+    DomElement* new_doms[16] = {};
+    for (int i = 0; i < result_count && i < 16; i++) {
+        Element* old_elem = results[i].old_result.element;
+        DomElement* old_dom = element_dom_map_lookup(doc->element_dom_map, old_elem);
+        if (old_dom) {
+            compute_absolute_bounds((DomNode*)old_dom,
+                &old_bounds[i].x, &old_bounds[i].y, &old_bounds[i].w, &old_bounds[i].h);
+        }
+    }
+
     // Phase 12.1: Replace changed DOM subtrees
     for (int i = 0; i < result_count; i++) {
         Element* old_elem = results[i].old_result.element;
@@ -4331,6 +4361,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
         // Replace old DOM child with new subtree in parent's linked list
         dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
+        if (i < 16) new_doms[i] = new_dom;
 
         // Phase 12.2: Apply CSS cascade to new subtree only
         if (css_engine && inline_sheets && inline_count > 0) {
@@ -4348,10 +4379,56 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
     auto t_dom_css = high_resolution_clock::now();
 
-    // Full layout (Phase 12.3 will optimize this later)
-    doc->view_tree = nullptr;
-    layout_html_doc(uicon, doc, false);
+    // Reuse ViewTree instead of leaking it (destroy pool, keep struct)
+    if (doc->view_tree) {
+        view_pool_destroy(doc->view_tree);
+        layout_html_doc(uicon, doc, true);
+    } else {
+        layout_html_doc(uicon, doc, false);
+    }
     auto t_layout = high_resolution_clock::now();
+
+    // Phase 12.3: Compute dirty rects from old/new bounds
+    if (state) {
+        dirty_clear(&state->dirty_tracker);
+
+        bool size_changed = false;
+        int bounded = (result_count < 16) ? result_count : 16;
+        for (int i = 0; i < bounded; i++) {
+            if (!new_doms[i]) continue;
+            // Compare old/new sizes — if size changed, layout cascades to siblings/ancestors
+            float nw = new_doms[i]->width;
+            float nh = new_doms[i]->height;
+            if (fabsf(old_bounds[i].w - nw) > 0.5f || fabsf(old_bounds[i].h - nh) > 0.5f) {
+                size_changed = true;
+                break;
+            }
+        }
+
+        if (size_changed) {
+            // Size changed → layout cascaded, must repaint everything
+            state->dirty_tracker.full_repaint = true;
+            log_debug("rebuild_incr dirty: size changed, full repaint");
+        } else {
+            // Same size → only repaint changed regions
+            for (int i = 0; i < bounded; i++) {
+                if (!new_doms[i]) continue;
+                // Mark old bounds dirty
+                if (old_bounds[i].w > 0 && old_bounds[i].h > 0) {
+                    dirty_mark_rect(&state->dirty_tracker,
+                        old_bounds[i].x, old_bounds[i].y, old_bounds[i].w, old_bounds[i].h);
+                }
+                // Mark new bounds dirty (after layout, new_dom now has updated x/y/w/h)
+                float nx, ny, nw, nh;
+                compute_absolute_bounds((DomNode*)new_doms[i], &nx, &ny, &nw, &nh);
+                if (nw > 0 && nh > 0) {
+                    dirty_mark_rect(&state->dirty_tracker, nx, ny, nw, nh);
+                }
+            }
+            log_debug("rebuild_incr dirty: selective repaint, %s",
+                dirty_has_regions(&state->dirty_tracker) ? "has regions" : "no regions");
+        }
+    }
 
     // Restore focus
     if (had_focus && state && doc->view_tree && doc->view_tree->root) {
@@ -4363,18 +4440,25 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
-    // Full render (Phase 12.4 will optimize this later)
+    // Render (Phase 12.4: render_html_doc checks dirty tracker for selective repaint)
+    bool used_selective = state && !state->dirty_tracker.full_repaint
+                          && dirty_has_regions(&state->dirty_tracker);
     if (doc->view_tree) {
         render_html_doc(uicon, doc->view_tree, NULL);
     }
+    // Clear dirty tracker after render
+    if (state) {
+        dirty_clear(&state->dirty_tracker);
+    }
     auto t_render = high_resolution_clock::now();
 
-    log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d)",
+    log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d, selective=%s)",
         duration<double, std::milli>(t_dom_css - t_start).count(),
         duration<double, std::milli>(t_layout - t_dom_css).count(),
         duration<double, std::milli>(t_render - t_layout).count(),
         duration<double, std::milli>(t_render - t_start).count(),
-        result_count);
+        result_count,
+        used_selective ? "yes" : "no");
 }
 
 /**
