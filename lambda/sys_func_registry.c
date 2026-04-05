@@ -1163,6 +1163,9 @@ JitImport jit_runtime_imports[] = {
     {"js_debug_check_callee", FPTR(js_debug_check_callee)},
     {"js_get_this", FPTR(js_get_this)},
     {"js_set_this", FPTR(js_set_this)},
+    {"js_get_new_target", FPTR(js_get_new_target)},
+    {"js_set_new_target", FPTR(js_set_new_target)},
+    {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value)},

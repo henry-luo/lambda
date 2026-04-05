@@ -1196,6 +1196,22 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         super_node->name = name_pool_create_len(tp->name_pool, "super", 5);
         super_node->base.type = &TYPE_ANY;
         return (JsAstNode*)super_node;
+    } else if (strcmp(node_type, "meta_property") == 0) {
+        // Handle new.target and import.meta
+        // Tree-sitter produces: meta_property -> "new" "." "target" or "import" "." "meta"
+        uint32_t text_len = ts_node_end_byte(expr_node) - ts_node_start_byte(expr_node);
+        const char* text = tp->source + ts_node_start_byte(expr_node);
+        if (text_len >= 10 && strncmp(text, "new.target", 10) == 0) {
+            JsIdentifierNode* nt_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+            nt_node->name = name_pool_create_len(tp->name_pool, "new.target", 10);
+            nt_node->base.type = &TYPE_ANY;
+            return (JsAstNode*)nt_node;
+        }
+        // import.meta — return undefined for now
+        JsIdentifierNode* meta_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        meta_node->name = name_pool_create_len(tp->name_pool, "undefined", 9);
+        meta_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)meta_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
                strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
@@ -2354,9 +2370,15 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
         JsCatchNode* catch_clause = (JsCatchNode*)alloc_js_ast_node(tp, JS_AST_NODE_CATCH_CLAUSE, handler_node, sizeof(JsCatchNode));
 
         // Get catch parameter (optional in modern JS)
+        // Can be a simple identifier or a destructuring pattern ({msg} or [a, b])
         TSNode param_node = ts_node_child_by_field_name(handler_node, "parameter", 9);
         if (!ts_node_is_null(param_node)) {
-            catch_clause->param = build_js_identifier(tp, param_node);
+            const char* param_type = ts_node_type(param_node);
+            if (strcmp(param_type, "object_pattern") == 0 || strcmp(param_type, "array_pattern") == 0) {
+                catch_clause->param = build_js_expression(tp, param_node);
+            } else {
+                catch_clause->param = build_js_identifier(tp, param_node);
+            }
         }
 
         // Get catch body

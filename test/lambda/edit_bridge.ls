@@ -2,7 +2,7 @@
 
 // Test 1: edit template compiles and can be applied
 edit int {
-  string(it)
+  string(~)
 }
 let r1 = apply(42, {mode: "edit"})
 r1
@@ -10,7 +10,7 @@ r1
 
 // Test 2: edit template with state compiles
 edit string state count: 0 {
-  it ++ ":" ++ string(count)
+  ~ ++ ":" ++ string(count)
 }
 let r2 = apply("hello", {mode: "edit"})
 r2

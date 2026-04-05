@@ -100,6 +100,9 @@ struct DomDocument {
     int cached_inline_sheet_count;                // Number of cached inline stylesheets
     void* cached_css_engine;                      // CssEngine* (void* to avoid header dep)
 
+    // Reactive UI: Element* → DomElement* map for incremental DOM rebuild
+    struct hashmap* element_dom_map;              // maps Lambda Element* to its DomElement wrapper
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -112,7 +115,8 @@ struct DomDocument {
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
-                    cached_css_engine(nullptr) {}
+                    cached_css_engine(nullptr),
+                    element_dom_map(nullptr) {}
 };
 
 typedef struct {

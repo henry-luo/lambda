@@ -10,18 +10,18 @@ let data^err = input('./test/lambda/ui/todos.json', 'json')
 
 // Todo item component: clicking toggles done/not-done, delete emits to parent
 view <todo_item> state toggled: false {
-  let done = if (toggled) (!it.done) else it.done
+  let done = if (toggled) (!~.done) else ~.done
   let check_mark = if (done) "✓" else "○"
   let done_class = if (done) "todo-item done" else "todo-item"
   <li class:done_class
     <span class:"checkbox"; check_mark>
-    <span class:"todo-text"; it.text>
+    <span class:"todo-text"; ~.text>
     <span class:"delete-btn"; "×">
   >
 }
 on click(evt) {
   if (evt.target_class == "delete-btn") {
-    emit("delete_item", it)
+    emit("delete_item", ~)
   } else {
     toggled = not toggled
   }
@@ -29,13 +29,13 @@ on click(evt) {
 
 // Todo list section: edit template for model mutation (delete, clear completed, add)
 edit <todo_list> state new_text: "" {
-  let items = it.items
+  let items = ~.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
   let count_text = string(done_count) ++ "/" ++ string(item_count)
   <div class:"todo-list"
     <div class:"list-header"
-      <span class:"list-name"; it.name>
+      <span class:"list-name"; ~.name>
       <span class:"list-count"; count_text>
     >
     <ul class:"items"
@@ -56,14 +56,14 @@ edit <todo_list> state new_text: "" {
 on click(evt) {
   if (evt.target_class == "add-btn") {
     if (new_text != "") {
-      let next_id = len(it.items) + 1
+      let next_id = len(~.items) + 1
       let new_item = {id: next_id, text: new_text, done: false}
-      it.items = it.items ++ [new_item]
+      ~.items = ~.items ++ [new_item]
       new_text = ""
     }
   }
   if (evt.target_class == "clear-done-btn") {
-    it.items = for (item in it.items where not item.done) item
+    ~.items = for (item in ~.items where not item.done) item
   }
 }
 on input(evt) {
@@ -79,15 +79,15 @@ on keydown(evt) {
   }
   if (evt.key == "Enter") {
     if (new_text != "") {
-      let next_id = len(it.items) + 1
+      let next_id = len(~.items) + 1
       let new_item = {id: next_id, text: new_text, done: false}
-      it.items = it.items ++ [new_item]
+      ~.items = ~.items ++ [new_item]
       new_text = ""
     }
   }
 }
 on delete_item(evt) {
-  it.items = for (item in it.items where item.id != evt.id) item
+  ~.items = for (item in ~.items where item.id != evt.id) item
 }
 
 // ============================================================================

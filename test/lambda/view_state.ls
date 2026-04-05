@@ -9,7 +9,7 @@ apply(42)
 
 // Test 2: State initialized to non-zero default
 view string state label: "default" {
-  it ++ ":" ++ label
+  ~ ++ ":" ++ label
 }
 apply("hello")
 0

@@ -2,26 +2,26 @@
 
 // Test 1: Basic view with int pattern
 view int {
-  it * 2
+  ~ * 2
 }
 apply(42)
 
 // Test 2: Float view
 view float {
-  it + 0.5
+  ~ + 0.5
 }
 apply(3.14)
 
 // Test 3: String view
 view string {
-  "hi:" ++ it
+  "hi:" ++ ~
 }
 apply("world")
 0  // separator
 
 // Test 4: Bool view
 view bool {
-  string(it) ++ "!"
+  string(~) ++ "!"
 }
 apply(true)
 0  // separator
