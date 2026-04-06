@@ -839,20 +839,49 @@ NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lam
 
 **Test results: 565/565 baseline tests passing.**
 
-### Phase 2: Literal Parsing & Type Annotations (partially complete)
+### Phase 2: Literal Parsing & Type Annotations ✅ COMPLETED
 - ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (via `array_int_new` shim)
 - ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (via `array_float_new` shim)
-- Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)`
-- Extend `ensure_typed_array()` for `ARRAY_NUM` coercion
-- Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
-- Extend `build_base_type()` to recognize all numeric array types
+- ✅ Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)` for i8/u8/i16/u16/i32/u32/f16/f32
+- ✅ Extend `ensure_sized_array()` for `ARRAY_NUM` coercion from generic arrays
+- ✅ Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
+- ✅ Extend `build_base_type()` to recognize all numeric array types
+- ✅ `EnumArrayNumElemType` expanded to 14 values with compact storage (1/2/4 bytes per element)
+- ✅ `ELEM_TYPE_SIZE[16]` lookup table for byte widths
+- ✅ `array_num_get()` handles all 14 elem_types including compact types
+- ✅ `array_num_set_item()` generic setter with dispatch on elem_type
+- ✅ `item_to_int_value()` / `item_to_float_value()` helpers for NUM_SIZED extraction
+- ✅ `fn_join` (concat) updated to use `ELEM_TYPE_SIZE` and `data` pointer for compact arrays
+- ✅ `print.cpp` updated with `read_compact_elem()` helper for compact type printing
 
-### Phase 3: Vectorized Arithmetic
-- Extend `is_scalar_numeric()` and `is_vector_type()` for `NUM_SIZED`, `UINT64`, `ARRAY_NUM`
-- Extend `item_to_double()` and `vector_get()` for `ARRAY_NUM`
-- Refactor `vec_scalar_op` / `vec_vec_op` to dispatch on `elem_type` instead of `type_id`
-- Native-width loops for same-type operations (no double conversion)
-- Arithmetic promotion table implementation
+**Files modified:** lambda.h, lambda.hpp, lambda-data-runtime.cpp, lambda-eval.cpp, print.cpp, transpile.cpp, transpile-mir.cpp, build_ast.cpp
+
+**Test results: 566/566 baseline tests passing** (565 original + 1 new `compact_typed_arrays`).
+
+### Phase 3: Vectorized Arithmetic ✅ COMPLETED
+- ✅ Extend `is_scalar_numeric()` for `NUM_SIZED`, `UINT64` — sized scalars now route to vector ops
+- ✅ Extend `item_to_double()` for `NUM_SIZED` (via `get_num_sized_as_double()`), `UINT64`, `DECIMAL`
+- ✅ Extend `vector_get()` from 3 elem_type branches to 13, covering all compact types
+- ✅ Extend `needs_float_result()` for `NUM_SIZED` float scalars and compact float elem types (f16/f32/f64)
+- ✅ Add `compact_elem_to_double()` helper — reads compact array elements as double without boxing to Item
+- ✅ Add `is_float_elem_type()` helper — identifies float-variant elem types
+- ✅ Add `ELEM_INT` fast path in `vec_scalar_op` (packed int56 arrays)
+- ✅ Add `ELEM_FLOAT32` native-width fast path in `vec_scalar_op` (native `float` arithmetic, no double conversion)
+- ✅ Add `ELEM_INT` × `ELEM_INT` fast path in `vec_vec_op`
+- ✅ Add `ELEM_FLOAT32` × `ELEM_FLOAT32` native-width fast path in `vec_vec_op`
+- ✅ Add `ARRAY_NUM` + non-`ARRAY_NUM` integer fast path in `vec_vec_op` (uses `compact_elem_to_double`)
+- ✅ Update float paths in `vec_scalar_op` / `vec_vec_op` to use `compact_elem_to_double` instead of `vector_get` + `item_to_double`
+- ✅ Fix `fn_math_prod`, `fn_math_cumsum`, `fn_math_cumprod` for compact typed arrays
+- Arithmetic promotion table (Section 10 widening rules) — deferred to future work
+
+**Files modified:** lambda-vector.cpp
+
+**Key design decisions during implementation:**
+- Integer modulo-by-zero now consistently returns 0 across all array types (previously returned NAN when going through float fallback path for generic lists).
+- `ELEM_FLOAT32` fast paths operate directly on `float*` buffers with `fmodf`/`powf` — compiler can auto-vectorize these loops.
+- Mixed-type compact array arithmetic (e.g., `i8[] + i16[]`) falls through to the generic float path via `compact_elem_to_double`, producing `float[]` result. Same-type fast paths avoid double conversion entirely.
+
+**Test results: 567/567 baseline tests passing** (566 + 1 new `typed_array_vector_ops`).
 
 ### Phase 4: Construction APIs
 - `zeros(count, type)`, `ones(count, type)` — new system functions
