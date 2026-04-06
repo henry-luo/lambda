@@ -1894,6 +1894,36 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     finalize_block_flow(lycon, html, CSS_VALUE_BLOCK);
 
+    // Quirks mode behavior: html/body stretch to at least viewport height.
+    // Chrome's getBoundingClientRect reports html height = max(content, viewport) in quirks mode
+    // (missing DOCTYPE or legacy DTD), but html height = content height in standards mode.
+    bool is_quirks = is_quirks_mode(lycon->doc->view_tree->html_version);
+    if (is_quirks && !root_has_explicit_height && html->height < physical_height) {
+        float old_html_height = html->height;
+        html->height = physical_height;
+        log_debug("%s quirks viewport stretch: html height %.1f -> %.1f", elmt->source_loc(),
+            old_html_height, physical_height);
+
+        // Stretch body to fill html content area (quirks mode behavior)
+        View* vc = html->first_placed_child();
+        while (vc) {
+            if (vc->is_block()) {
+                ViewBlock* vb = (ViewBlock*)vc;
+                if (vb->tag() == HTM_TAG_BODY) {
+                    float body_margin_bottom = (vb->bound && vb->bound->margin.bottom > 0)
+                        ? vb->bound->margin.bottom : 0;
+                    float body_available = physical_height - vb->y - body_margin_bottom;
+                    if (vb->height < body_available) {
+                        log_debug("  quirks viewport stretch: body height %.1f -> %.1f", vb->height, body_available);
+                        vb->height = body_available;
+                    }
+                    break;
+                }
+            }
+            vc = vc->next();
+        }
+    }
+
     // CSS 2.1 §9.4.3: Apply position:relative offsets to root element after layout
     if (root_is_relative && html->position) {
         if (html->position->position == CSS_VALUE_RELATIVE) {
@@ -1993,9 +2023,12 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     clear_measurement_cache();
     advance_measurement_cache_generation();
 
-    // Reset styles_resolved flags for all elements before layout
-    // This ensures CSS style resolution happens exactly once per element per layout pass
-    reset_styles_resolved(doc);
+    // Reset styles_resolved flags before layout
+    // Phase 15: Skip blanket reset during incremental rebuilds — new DOM nodes
+    // already have styles_resolved=false, and ancestors are cleared explicitly
+    if (!doc->skip_style_reset) {
+        reset_styles_resolved(doc);
+    }
 
     // Initialize text flow logging
     init_text_flow_logging();

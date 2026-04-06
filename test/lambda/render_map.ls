@@ -15,7 +15,7 @@ r1 == r2
 
 // Test 3: Different source item gets separate mapping
 view string state label: "x" {
-  it ++ ":" ++ label
+  ~ ++ ":" ++ label
 }
 apply("a")
 0

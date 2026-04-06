@@ -83,6 +83,7 @@ typedef struct BlockContext {
     CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
+    float first_line_ascender;  // Baseline of first line (distance from border-box top, for flex baseline)
     float last_line_ascender;   // Baseline of last line (for inline-block baseline alignment)
 
     // CSS Inline 3 §5: line box metrics for text-box-trim calculation.
@@ -160,6 +161,7 @@ typedef struct Linebox {
     float max_desc_before_last_text; // max_descender value before last output_text (for trailing space rollback)
     bool has_expanded_inline_lh;    // true if an inline element's own line-height exceeds the parent block's
     bool has_inline_spans;          // true if line contains inline span elements (for bbox correction)
+    bool has_different_inline_font; // true if any inline text uses a different font from the block's strut
     float max_normal_line_height;   // max normal line-height across all inline boxes on this line
     // CSS 2.1 §10.8.1: parent font metrics for vertical-align keywords (text-top, text-bottom, etc.)
     // Set by span_vertical_align before recursing into children; defaults to block init values.
@@ -168,13 +170,21 @@ typedef struct Linebox {
     float parent_font_size;         // parent element's font size (pixels)
     struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
+    struct ViewText* last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
     TextRect* committed_trailing_rect;  // text rect that had trailing space when output_text was called
+    struct ViewText* committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
                                         // cross-node char processing so line_break can trim correctly
     float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
                                     // for pre-wrap mode; used to compute hanging space at wrap points
+    float hanging_space_text_trim;  // portion of hanging_space_width from regular ASCII spaces only;
+                                    // used to trim text rects (U+3000 has visible glyph, not trimmed)
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
+    float last_space_hanging_text_trim; // hanging_space_text_trim saved at the time last_space was recorded
+    bool wrap_opportunity_before_nowrap;  // CSS Text 3 §5: a wrappable break opportunity exists at the current
+                                         // position (from collapsed inter-element whitespace in a wrappable
+                                         // parent); allows nowrap content to break at this boundary
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied

@@ -975,7 +975,19 @@ inline void resolve_intrinsic_track_sizes(
 
     // After growth_limit distribution: ensure growth_limit >= base_size
     for (auto& track : tracks) {
-        if (!isinf(track.growth_limit) && track.growth_limit < track.base_size) {
+        if (isinf(track.growth_limit)) {
+            // CSS Grid §11.5: Intrinsic max tracks that still have infinite growth_limit
+            // after contributions should transition to finite. This handles the case where
+            // an item's max-content equals its base_size (extra=0, distribute_to_gl skipped).
+            auto mt = track.max_track_sizing_function.type;
+            if (mt == SizingFunctionType::Auto ||
+                mt == SizingFunctionType::MinContent ||
+                mt == SizingFunctionType::MaxContent ||
+                mt == SizingFunctionType::FitContentPx ||
+                mt == SizingFunctionType::FitContentPercent) {
+                track.growth_limit = track.base_size;
+            }
+        } else if (track.growth_limit < track.base_size) {
             track.growth_limit = track.base_size;
         }
     }
@@ -1153,31 +1165,10 @@ inline void maximize_tracks(
     // to that limit — this is how the grid contributes its max-content to its container.
     // (Flex tracks are sized in §11.7; their growth_limit is infinity here.)
     if (axis_inner_size < 0 && axis_available_space < 0) {
-        // Check if any non-fit-content track has a finite growth_limit
-        // (set by step 2.5 growth_limit distribution). If so, fit-content tracks with
-        // base=0 should NOT grow — their space was already accounted for in step 2.5.
-        bool has_non_fc_finite_gl = false;
-        for (const auto& track : tracks) {
-            if (track.is_flexible() || isinf(track.growth_limit)) continue;
-            auto mt = track.max_track_sizing_function.type;
-            if (mt != SizingFunctionType::FitContentPx &&
-                mt != SizingFunctionType::FitContentPercent &&
-                mt != SizingFunctionType::Length &&
-                mt != SizingFunctionType::Percent) {
-                has_non_fc_finite_gl = true;
-                break;
-            }
-        }
+        // Indefinite container: computing max-content grid size.
+        // CSS Grid §11.6: every non-flex track with finite growth_limit is grown to it.
         for (auto& track : tracks) {
             if (track.is_flexible() || isinf(track.growth_limit)) continue;
-            // Skip fit-content tracks with no contributions if other tracks claimed
-            // growth via step 2.5 — their gl space was not counted in step 2.5.
-            auto mt = track.max_track_sizing_function.type;
-            if (has_non_fc_finite_gl && track.base_size == 0 &&
-                (mt == SizingFunctionType::FitContentPx ||
-                 mt == SizingFunctionType::FitContentPercent)) {
-                continue;
-            }
             track.base_size = track.growth_limit;
         }
         return;

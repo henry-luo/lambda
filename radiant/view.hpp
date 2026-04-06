@@ -398,6 +398,10 @@ struct FontProp {
     bool has_kerning;  // whether the font has kerning
     struct FontHandle* font_handle; // unified font handle (populated by setup_font)
     TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
+    CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
+    Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
+    float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
+    float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
 };
 
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
@@ -474,6 +478,12 @@ struct GridItemProp {
 typedef struct {
     float min_content;  // Minimum content width (longest word/element)
     float max_content;  // Maximum content width (no wrapping)
+    // CSS Text 3 §5.2: For inline content with forced line breaks (pre/pre-wrap newlines),
+    // the content spans multiple lines. These fields allow the parent's inline run
+    // accumulation to split at forced break points rather than summing all lines.
+    float first_line_max = -1;  // width before first forced break (-1 = no forced break)
+    float last_line_max = -1;   // width after last forced break (-1 = no forced break)
+    bool has_forced_break = false;
 } IntrinsicSizes;
 
 // FlexItemProp definition (needed by flex.hpp)
@@ -522,6 +532,7 @@ struct InlineProp {
     float vertical_align_offset;  // length/percentage vertical-align offset (px), positive = raise
     float opacity;  // CSS opacity value (0.0 to 1.0)
     int visibility;  // Visibility
+    CssEnum mix_blend_mode;  // CSS mix-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 };
 
 typedef struct Spacing {
@@ -635,6 +646,7 @@ typedef struct {
     // Multiple gradient layers (for stacked gradients)
     RadialGradient** radial_layers;  // array of additional radial gradients
     int radial_layer_count;
+    CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
 
 /**
@@ -979,6 +991,10 @@ typedef struct BlockProp {
     float first_line_max_descender;
     float last_line_max_ascender;
     float last_line_max_descender;
+    // Baseline positions (distance from border-box top to baseline).
+    // Used for flex/inline-block baseline alignment (CSS 2.1 §10.8.1).
+    float first_line_baseline;  // first line box baseline (for flex baseline)
+    CssEnum text_overflow;  // CSS_VALUE_CLIP (default 0) | CSS_VALUE_ELLIPSIS
 } BlockProp;
 
 typedef struct FontBox {
@@ -989,6 +1005,7 @@ typedef struct FontBox {
 
 typedef struct TextRect {
     float x, y, width, height;
+    float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
     TextRect* next;
 } TextRect;

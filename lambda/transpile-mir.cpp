@@ -8384,6 +8384,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_pipe(mt, (AstPipeNode*)node);
     case AST_NODE_CURRENT_ITEM: {
         if (mt->in_pipe) return mt->pipe_item_reg;
+        // in view/edit template context, ~ resolves to the model parameter
+        if (mt->in_view_context) return mt->view_model_reg;
         MIR_reg_t r = new_reg(mt, "pipe_item", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, 0)));
@@ -10821,10 +10823,9 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
     mt->view_is_edit = view->is_edit;
     mt->view_template_ref = tmpl_ref;
 
-    // set up parameter scope: bind the model parameter as 'it'
+    // set up parameter scope: ~ resolves to the model parameter
     push_scope(mt);
     MIR_reg_t model_reg = MIR_reg(mt->ctx, "_model", func);
-    set_var(mt, "it", model_reg, MIR_T_I64, LMD_TYPE_ANY);
     mt->view_model_reg = model_reg;
 
     // initialize state variables from the central state store
@@ -10984,10 +10985,9 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
     mt->view_is_edit = view->is_edit;
     mt->view_template_ref = tmpl_ref;
 
-    // set up handler scope: bind model parameter
+    // set up handler scope: ~ resolves to the model parameter
     push_scope(mt);
     MIR_reg_t model_reg = MIR_reg(mt->ctx, "_model", func);
-    set_var(mt, "it", model_reg, MIR_T_I64, LMD_TYPE_ANY);
     mt->view_model_reg = model_reg;
 
     // bind event parameter if declared: on click(evt) { evt.target_class ... }

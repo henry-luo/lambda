@@ -2,6 +2,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "grid_enhanced_adapter.hpp"  // Enhanced grid integration
+#include "intrinsic_sizing.hpp"       // measure_text_intrinsic_widths
 
 extern "C" {
 #include <stdlib.h>
@@ -404,6 +405,156 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Phase 5.5: Auto-fit empty track collapsing is deferred until proper gutter
     // collapsing is implemented (CSS Grid §7.2.3.2 requires collapsed gutters too).
+
+    // Phase 5.6: CSS Grid §11.7.1 — Adjust orthogonal flow items' width contributions.
+    // For grid items with a vertical writing mode, the physical min-content width
+    // (block size) depends on the available inline size (physical height from row tracks).
+    // If the spanned row tracks have definite sizes, re-measure the item at that height.
+    {
+        int neg_row_offset = grid_layout->negative_implicit_row_count;
+        int explicit_row_start = neg_row_offset;
+        int explicit_row_end = neg_row_offset + grid_layout->explicit_row_count;
+
+        for (int idx = 0; idx < item_count; idx++) {
+            ViewBlock* item = items[idx];
+            if (!item || !item->gi || !item->gi->has_measured_size) continue;
+
+            // Check if item has orthogonal writing mode
+            bool is_orthogonal = false;
+            if (item->embed && item->embed->flex) {
+                WritingMode wm = item->embed->flex->writing_mode;
+                is_orthogonal = (wm == WM_VERTICAL_LR || wm == WM_VERTICAL_RL);
+            }
+            if (!is_orthogonal) continue;
+
+            // Get definite row height from template definitions.
+            // Note: computed_rows are not yet allocated at this stage;
+            // use grid_template_rows for explicit tracks directly.
+            int rs = item->gi->computed_grid_row_start - 1;  // 0-based track index
+            int re = item->gi->computed_grid_row_end - 1;
+            if (rs < 0 || re <= rs || re > grid_layout->computed_row_count) continue;
+
+            float definite_row_height = 0.0f;
+            bool all_definite = true;
+            for (int r = rs; r < re; r++) {
+                // Map track index to template definition
+                int tmpl_idx = r - explicit_row_start;  // index within explicit grid
+                if (tmpl_idx >= 0 && tmpl_idx < grid_layout->explicit_row_count &&
+                    grid_layout->grid_template_rows &&
+                    tmpl_idx < grid_layout->grid_template_rows->track_count) {
+                    // Explicit track — check template size
+                    GridTrackSize* ts = grid_layout->grid_template_rows->tracks[tmpl_idx];
+                    if (!ts) { all_definite = false; break; }
+                    if (ts->type == GRID_TRACK_SIZE_LENGTH) {
+                        definite_row_height += ts->value;
+                    } else if (ts->type == GRID_TRACK_SIZE_PERCENTAGE &&
+                               grid_layout->content_height > 0) {
+                        definite_row_height += grid_layout->content_height *
+                                               ts->value / 100.0f;
+                    } else {
+                        all_definite = false;
+                        break;
+                    }
+                } else {
+                    // Implicit track — not definite
+                    all_definite = false;
+                    break;
+                }
+            }
+            // Add row gaps between spanned tracks
+            int span = re - rs;
+            if (span > 1 && grid_layout->row_gap > 0) {
+                definite_row_height += (span - 1) * grid_layout->row_gap;
+            }
+
+            if (!all_definite || definite_row_height <= 0) continue;
+
+            // Re-measure: compute block size (physical width) at the given inline size
+            // (physical height) by walking the item's text children.
+            float font_size = 16.0f;
+            if (item->font) {
+                font_size = item->font->font_size;
+            } else if (lycon->font.style) {
+                font_size = lycon->font.style->font_size;
+            }
+
+            // Set up font context for text measurement
+            FontBox saved_font = lycon->font;
+            bool font_changed = false;
+            if (item->font && lycon->ui_context) {
+                setup_font(lycon->ui_context, &lycon->font, item->font);
+                font_changed = true;
+            }
+
+            float max_block_size = 0.0f;
+            DomNode* child = item->first_child;
+            while (child) {
+                if (child->is_text()) {
+                    const char* text = (const char*)child->text_data();
+                    size_t text_len = text ? strlen(text) : 0;
+                    if (text_len > 0) {
+                        CssEnum text_transform = CSS_VALUE_NONE;
+                        CssEnum font_variant = CSS_VALUE_NONE;
+                        if (child->parent && child->parent->is_element()) {
+                            text_transform = get_element_text_transform(
+                                child->parent->as_element());
+                            font_variant = get_element_font_variant(
+                                child->parent->as_element());
+                        }
+                        TextIntrinsicWidths tw = measure_text_intrinsic_widths(
+                            lycon, text, text_len, text_transform, font_variant);
+
+                        // For vertical writing mode, horizontal text measurements
+                        // approximate the inline-direction measurements (exact for
+                        // monospaced/square fonts like Ahem).
+                        // Compute number of vertical text "lines" at the available
+                        // inline size (= definite row height).
+                        float text_max_inline = tw.max_content;
+                        float text_min_unit = tw.min_content;
+                        float line_advance = font_size;
+
+                        if (text_max_inline > definite_row_height && text_min_unit > 0) {
+                            float eff = definite_row_height;
+                            if (text_min_unit <= definite_row_height) {
+                                int units = (int)(definite_row_height / text_min_unit);
+                                if (units > 0) eff = units * text_min_unit;
+                            } else {
+                                eff = text_min_unit;
+                            }
+                            int num_lines = (int)ceilf(text_max_inline / eff);
+                            float w = num_lines * line_advance;
+                            if (w > max_block_size) max_block_size = w;
+                        } else {
+                            // All text fits in one vertical line
+                            if (line_advance > max_block_size)
+                                max_block_size = line_advance;
+                        }
+                    }
+                }
+                child = child->next_sibling;
+            }
+
+            if (font_changed) lycon->font = saved_font;
+
+            // Add padding and border in the block direction (horizontal)
+            if (item->bound) {
+                max_block_size += item->bound->padding.left + item->bound->padding.right;
+                if (item->bound->border) {
+                    max_block_size += item->bound->border->width.left +
+                                     item->bound->border->width.right;
+                }
+            }
+
+            if (max_block_size > 0) {
+                log_debug("%s orthogonal item %s: row_height=%.1f -> width=%.1f (was min=%.1f max=%.1f)",
+                          container->source_loc(), item->node_name(),
+                          definite_row_height, max_block_size,
+                          item->gi->measured_min_width, item->gi->measured_max_width);
+                item->gi->measured_min_width = max_block_size;
+                item->gi->measured_max_width = max_block_size;
+            }
+        }
+    }
 
     // Phase 6: Resolve track sizes (using enhanced algorithm with intrinsic sizing)
     log_debug("%s DEBUG: Phase 6 - Resolving track sizes", container->source_loc());

@@ -815,14 +815,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // skip _UNDEF (0) which means no decoration was explicitly set
         if (rdcon->font.style->text_deco != CSS_VALUE_NONE && rdcon->font.style->text_deco != CSS_VALUE__UNDEF) {
             const FontMetrics* _deco_m = font_get_metrics(rdcon->font.font_handle);
-            float thinkness = max(_deco_m ? _deco_m->underline_thickness : 1.0, 1.0);
+            // Use text-decoration-thickness if explicitly set, otherwise font metric or 1px
+            float thickness = rdcon->font.style->text_deco_thickness > 0
+                ? rdcon->font.style->text_deco_thickness
+                : fmaxf(_deco_m ? _deco_m->underline_thickness : 1.0f, 1.0f);
+            // Use text-decoration-color if set, otherwise currentColor
+            Color deco_color = rdcon->font.style->text_deco_color.a > 0
+                ? rdcon->font.style->text_deco_color
+                : rdcon->color;
+            CssEnum deco_style = rdcon->font.style->text_deco_style;
+            // Default to solid if not explicitly set
+            if (deco_style == CSS_VALUE__UNDEF || deco_style == 0) deco_style = CSS_VALUE_SOLID;
+
             Rect rect = {0, 0, 0, 0};
             bool draw_deco = true;
-            // todo: underline probably should draw below/before the text, and leaves a gap where text has descender
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
-                // underline drawn at baseline, with a gap of thickness
-                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s +
-                    (_deco_m ? (_deco_m->hhea_ascender * s) : 12.0) + thinkness;
+                // Use font underline_position metric for correct placement below baseline
+                float underline_pos = _deco_m ? _deco_m->underline_position : 0;
+                float ascend = _deco_m ? (_deco_m->hhea_ascender * s) : 12.0f;
+                // Apply text-underline-offset if set
+                float offset = rdcon->font.style->text_underline_offset;
+                rect.x = rdcon->block.x + text_rect->x * s;
+                rect.y = rdcon->block.y + text_rect->y * s + ascend - underline_pos * s + offset;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
                 rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
@@ -834,10 +848,67 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 draw_deco = false;  // unknown decoration type, skip rendering
             }
             if (draw_deco) {
-                rect.width = text_rect->width * s;  rect.height = thinkness;
-                log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
-                    rect.x, rect.y, rect.width, rect.height);
-                fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
+                rect.width = text_rect->width * s;  rect.height = thickness;
+                log_debug("text deco: %d style=%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f",
+                    rdcon->font.style->text_deco, deco_style, rect.x, rect.y, rect.width, rect.height);
+
+                if (deco_style == CSS_VALUE_DASHED) {
+                    // Dashed line: dash=3*thickness, gap=3*thickness
+                    float dash_len = thickness * 3.0f;
+                    float gap_len = thickness * 3.0f;
+                    float dx = rect.x;
+                    while (dx < rect.x + rect.width) {
+                        float seg_w = fminf(dash_len, rect.x + rect.width - dx);
+                        Rect seg = {dx, rect.y, seg_w, thickness};
+                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip);
+                        dx += dash_len + gap_len;
+                    }
+                } else if (deco_style == CSS_VALUE_DOTTED) {
+                    // Dotted line: dot=thickness, gap=thickness
+                    float dx = rect.x;
+                    while (dx < rect.x + rect.width) {
+                        float seg_w = fminf(thickness, rect.x + rect.width - dx);
+                        Rect seg = {dx, rect.y, seg_w, thickness};
+                        fill_surface_rect(rdcon->ui_context->surface, &seg, deco_color.c, &rdcon->block.clip);
+                        dx += thickness * 2.0f;
+                    }
+                } else if (deco_style == CSS_VALUE_DOUBLE) {
+                    // Double line: two lines at 1/3 thickness with 1/3 gap
+                    float line_t = fmaxf(1.0f, thickness / 3.0f);
+                    Rect top_line = {rect.x, rect.y, rect.width, line_t};
+                    fill_surface_rect(rdcon->ui_context->surface, &top_line, deco_color.c, &rdcon->block.clip);
+                    Rect bot_line = {rect.x, rect.y + thickness - line_t, rect.width, line_t};
+                    fill_surface_rect(rdcon->ui_context->surface, &bot_line, deco_color.c, &rdcon->block.clip);
+                } else if (deco_style == CSS_VALUE_WAVY) {
+                    // Wavy line using ThorVG shape
+                    float wave_amp = thickness * 1.5f;
+                    float wave_len = thickness * 4.0f;
+                    Tvg_Canvas canvas = rdcon->canvas;
+                    Tvg_Paint shape = tvg_shape_new();
+                    float wx = rect.x;
+                    tvg_shape_move_to(shape, wx, rect.y);
+                    while (wx < rect.x + rect.width) {
+                        float half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
+                        tvg_shape_cubic_to(shape, wx + half * 0.33f, rect.y - wave_amp,
+                                           wx + half * 0.67f, rect.y - wave_amp,
+                                           wx + half, rect.y);
+                        wx += half;
+                        if (wx >= rect.x + rect.width) break;
+                        half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
+                        tvg_shape_cubic_to(shape, wx + half * 0.33f, rect.y + wave_amp,
+                                           wx + half * 0.67f, rect.y + wave_amp,
+                                           wx + half, rect.y);
+                        wx += half;
+                    }
+                    tvg_shape_set_stroke_color(shape, deco_color.r, deco_color.g, deco_color.b, deco_color.a);
+                    tvg_shape_set_stroke_width(shape, fmaxf(1.0f, thickness * 0.5f));
+                    tvg_canvas_push(canvas, shape);
+                    tvg_canvas_reset_and_draw(rdcon, false);
+                    tvg_canvas_remove(canvas, NULL);
+                } else {
+                    // Solid (default)
+                    fill_surface_rect(rdcon->ui_context->surface, &rect, deco_color.c, &rdcon->block.clip);
+                }
             }
         }
         text_rect = text_rect->next;
@@ -1473,6 +1544,29 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
+    // Phase 18: Early exit if block is entirely outside all dirty regions
+    if (rdcon->dirty_tracker && !rdcon->dirty_tracker->full_repaint && rdcon->dirty_tracker->dirty_list) {
+        float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+        float abs_x = rdcon->block.x / s + block->x;
+        float abs_y = rdcon->block.y / s + block->y;
+        float bw = block->width;
+        float bh = block->height;
+        // add margin to avoid clipping positioned descendants that overflow
+        float margin = 50.0f;
+        abs_x -= margin; abs_y -= margin; bw += margin * 2; bh += margin * 2;
+        bool intersects = false;
+        DirtyRect* dr = rdcon->dirty_tracker->dirty_list;
+        while (dr) {
+            if (abs_x < dr->x + dr->width && abs_x + bw > dr->x &&
+                abs_y < dr->y + dr->height && abs_y + bh > dr->y) {
+                intersects = true;
+                break;
+            }
+            dr = dr->next;
+        }
+        if (!intersects) return;
+    }
+
     log_debug("render block view:%s, clip:[%.0f,%.0f,%.0f,%.0f]", block->node_name(),
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
     log_enter();
@@ -2395,7 +2489,27 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Get canvas background color (may be propagated from body per CSS spec)
     uint32_t canvas_bg = get_canvas_background(view_tree->root);
-    fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
+
+    // Phase 12.4: selective clear — only clear dirty regions when available
+    bool selective = false;
+    RadiantState* state = uicon->document ? (RadiantState*)uicon->document->state : nullptr;
+    if (state && !state->dirty_tracker.full_repaint && dirty_has_regions(&state->dirty_tracker)) {
+        // Clear only dirty regions to background color
+        DirtyRect* dr = state->dirty_tracker.dirty_list;
+        float scale = rdcon.scale;
+        while (dr) {
+            Rect dirty_rect = {dr->x * scale, dr->y * scale, dr->width * scale, dr->height * scale};
+            fill_surface_rect(rdcon.ui_context->surface, &dirty_rect, canvas_bg, &rdcon.block.clip);
+            dr = dr->next;
+        }
+        selective = true;
+        // Phase 18: Pass dirty tracker to render context for subtree clipping
+        rdcon.dirty_tracker = &state->dirty_tracker;
+        log_debug("render_html_doc: selective clear (dirty regions present)");
+    } else {
+        // Full clear
+        fill_surface_rect(rdcon.ui_context->surface, NULL, canvas_bg, &rdcon.block.clip);
+    }
 
     auto t_init = high_resolution_clock::now();
 
@@ -2428,10 +2542,10 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     // Render UI overlays (focus outline, caret, selection) on top of content
     if (uicon->document && uicon->document->state) {
-        log_info("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
+        log_debug("[RENDER] calling render_ui_overlays, state=%p", (void*)uicon->document->state);
         render_ui_overlays(&rdcon, uicon->document->state);
     } else {
-        log_info("[RENDER] no state for overlays: doc=%p, state=%p",
+        log_debug("[RENDER] no state for overlays: doc=%p, state=%p",
             (void*)uicon->document, uicon->document ? (void*)uicon->document->state : nullptr);
     }
 
@@ -2463,5 +2577,6 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
     }
 
     auto t_end = high_resolution_clock::now();
-    log_info("[TIMING] render_html_doc total: %.1fms", duration<double, std::milli>(t_end - t_start).count());
+    log_info("[TIMING] render_html_doc total: %.1fms%s", duration<double, std::milli>(t_end - t_start).count(),
+        selective ? " (selective)" : "");
 }

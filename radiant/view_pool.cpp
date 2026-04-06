@@ -1010,7 +1010,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // Output dimensions directly (already in CSS logical pixels)
     float css_x = abs_x;
     float css_y = abs_y;
-    float css_width = rect ? rect->width : view->width;
+    float css_width = rect ? rect->width - rect->hanging_trim : view->width;
     float css_height = rect ? rect->height : view->height;
 
     // For the root <html> element with auto height, viewport clamping sets height

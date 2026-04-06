@@ -1892,6 +1892,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         block->blk->first_line_max_descender = lycon->block.first_line_max_descender;
         block->blk->last_line_max_ascender = lycon->block.last_line_max_ascender;
         block->blk->last_line_max_descender = lycon->block.last_line_max_descender;
+        // Persist first line baseline for flex baseline alignment (CSS Flexbox §9.4)
+        block->blk->first_line_baseline = lycon->block.first_line_ascender;
     }
     float text_box_trim_amount = apply_text_box_trim(block);
     if (text_box_trim_amount > 0) {
@@ -1908,6 +1910,13 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
 
     log_debug("%s finalizing block, display=%d, given wd:%f", block->source_loc(), display, lycon->block.given_width);
     if (display == CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
+        // CSS 2.1 §10.3.9: Save the pre-layout fit-content width (border-box).
+        // When max-content > available, the fit-content equals available width,
+        // and text wraps within it. After layout, flow_width (widest wrapped line)
+        // can be less than available. Floor at pre-layout width to prevent
+        // incorrect shrinking below the shrink-to-fit width.
+        float pre_layout_fit_width = block->width;
+
         // CSS 2.1 §10.3.9: shrink-to-fit width cannot be less than border+padding
         float min_bp_width = 0;
         if (block->bound) {
@@ -1916,10 +1925,27 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 min_bp_width += block->bound->border->width.left + block->bound->border->width.right;
             }
         }
-        block->width = min(max(flow_width, min_bp_width), block->width);
+        // CSS 2.1 §10.3.9: Shrink-to-fit width = min(max(preferred_minimum_width,
+        // available_width), preferred_width). After layout, flow_width captures the
+        // actual content extent — if content has explicit wider widths, flow_width
+        // exceeds available width, and the inline-block MUST expand to accommodate it
+        // (the preferred width is at least flow_width). Do NOT cap at available width.
+        block->width = max(flow_width, min_bp_width);
         // CSS 2.1 §10.3.9 + §10.4: Apply min-width/max-width constraints
         // to inline-block shrink-to-fit width, same as other auto-width paths
         block->width = adjust_min_max_width(block, block->width);
+
+        // CSS 2.1 §10.3.9: Floor at the pre-layout fit-content width.
+        // The fit-content formula min(max-content, max(min-content, available))
+        // is the correct shrink-to-fit width. Post-layout flow_width can be less
+        // (text wrapped within the available width). Allow expansion (overflow)
+        // but not spurious shrinking.
+        if (block->width < pre_layout_fit_width) {
+            log_debug("%s inline-block floor: flow_width=%.1f -> fit_width=%.1f",
+                      block->source_loc(), block->width, pre_layout_fit_width);
+            block->width = pre_layout_fit_width;
+        }
+
         log_debug("%s inline-block final width set to: %f, text_align=%d", block->source_loc(), block->width, lycon->block.text_align);
 
         // For inline-block with auto width and text-align:center/right,
@@ -2202,11 +2228,18 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                 max_float_bottom = fb->margin_box_bottom;
             }
         }
-        log_debug("%s finalize BFC %s: max_float_bottom=%.1f, block->height=%.1f", block->source_loc(),
-            block->node_name(), max_float_bottom, block->height);
-        if (max_float_bottom > block->height) {
+        // max_float_bottom is relative to the BFC root's border-box top
+        // (because origin_y for child BFCs is inherited from parent, and float
+        // positions include padding-top). To get the full border-box height,
+        // we must add padding-bottom and border-bottom.
+        float padding_bottom = block->bound ? block->bound->padding.bottom : 0;
+        float border_bottom = block->bound && block->bound->border ? block->bound->border->width.bottom : 0;
+        float float_border_box_height = max_float_bottom + padding_bottom + border_bottom;
+        log_debug("%s finalize BFC %s: max_float_bottom=%.1f, float_bbox_hg=%.1f, block->height=%.1f",
+                  block->source_loc(), block->node_name(), max_float_bottom, float_border_box_height, block->height);
+        if (float_border_box_height > block->height) {
             float old_height = block->height;
-            block->height = max_float_bottom;
+            block->height = float_border_box_height;
             log_debug("%s finalize BFC height expansion: old=%.1f, new=%.1f", block->source_loc(),
                       old_height, block->height);
         }
@@ -3624,6 +3657,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
+    // CSS 2.1 §10.8.1: Update line_start_font to the block's own font, since
+    // line_reset() was called before setup_font() and captured the parent's font.
+    // The strut baseline detection needs the block's font, not the parent's.
+    lycon->line.line_start_font = lycon->font;
     // setup line height
     setup_line_height(lycon, block);
 
@@ -4244,6 +4281,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 block->blk->given_height = lycon->block.given_height;
                 log_debug("%s [IFRAME] re-resolved height: %.0f%% of %.1f = %.1f", block->source_loc(),
                     block->blk->given_height_percent, container_height, lycon->block.given_height);
+            } else {
+                // CSS 2.1 §10.5: percentage height can't resolve (containing block height
+                // depends on content) — treat as 'auto', use intrinsic height (150px)
+                lycon->block.given_height = 150;
+                if (block->blk) block->blk->given_height = 150;
+                log_debug("%s [IFRAME] percentage height unresolvable, fallback to intrinsic 150px", block->source_loc());
             }
         }
     }
@@ -4386,6 +4429,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                          block->blk->given_width_type == CSS_VALUE_AUTO ||
                          block->blk->given_width_type == CSS_VALUE__UNDEF;
     bool is_float_auto_width = element_has_float(block) && lycon->block.given_width < 0 && width_is_auto;
+    // CSS 2.1 §10.3.9: Inline-blocks with auto width use shrink-to-fit.
+    // Check given_width < 0 to exclude percentage widths (resolved to px during
+    // CSS resolution, so given_width >= 0 even though given_width_type = _UNDEF).
+    bool is_inline_block_auto_width = (block->view_type == RDT_VIEW_INLINE_BLOCK) &&
+        lycon->block.given_width < 0 && width_is_auto && !is_float_auto_width;
 
     // Check for width: max-content or min-content (intrinsic sizing keywords)
     // Either from CSS property OR propagated from parent's intrinsic sizing mode
@@ -5008,7 +5056,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     // This ensures children are laid out with the correct shrink-to-fit width
     // CSS 2.1 §10.3.5 (floats) and §10.3.9 (inline-blocks): shrink-to-fit width =
     //   min(max-content, max(min-content, available))
-    if ((is_float_auto_width || is_max_content_width || is_min_content_width) && block->is_element()) {
+    if ((is_float_auto_width || is_inline_block_auto_width || is_max_content_width || is_min_content_width) && block->is_element()) {
         // Font is loaded after setup_inline, so now we can calculate intrinsic width
         DomElement* dom_element = (DomElement*)block;
         float available = pa_block->content_width;
@@ -5032,7 +5080,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // always correct, whether it expands (narrow container) or shrinks (wide container).
         if (fit_content >= 0 && fabsf(fit_content - block->width) > 0.01f) {
             log_debug("%s Shrink-to-fit (%s): fit_content=%.1f, old_width=%.1f, available=%.1f", block->source_loc(),
-                is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" : "float"),
+                is_max_content_width ? "max-content" : (is_min_content_width ? "min-content" :
+                (is_inline_block_auto_width ? "inline-block" : "float")),
                 fit_content, block->width, available);
 
             // Update block width to shrink-to-fit size
@@ -5051,6 +5100,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
             block->content_width = max(new_content_width, 0.0f);
             lycon->block.content_width = block->content_width;
+
+            // Update BFC float edges to match new content width after shrink-to-fit.
+            // The BFC edges were set earlier (line ~4608) with the initial content_width
+            // before shrink-to-fit. If not updated, inline-block children will see
+            // stale float boundaries and be mispositioned.
+            if (lycon->block.is_bfc_root && lycon->block.establishing_element == block) {
+                lycon->block.float_left_edge = 0;
+                lycon->block.float_right_edge = block->content_width;
+                log_debug("%s [BFC] Updated float edges after shrink-to-fit: right=%.1f",
+                          block->source_loc(), block->content_width);
+            }
 
             // CSS 2.1 §16.1: Reset is_first_line BEFORE line_init so that
             // line_reset() (called inside line_init) applies text-indent on the
@@ -5638,6 +5698,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
     // reset line ascender/descender state so stale values from the parent context
     // do not contaminate this child block's baseline computation
+    lycon->block.first_line_ascender = 0;
     lycon->block.last_line_ascender = 0;
     lycon->block.last_line_max_ascender = 0;
     lycon->block.last_line_max_descender = 0;
@@ -5786,30 +5847,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         // CSS 2.1 Section 10.8.1: For non-replaced inline-blocks with in-flow line boxes
         // and overflow:visible, the baseline is the baseline of the last line box.
-        // The last line's ascender was saved to lycon->block.last_line_ascender in line_break().
-        // If there was no line break (single line), use lycon->line.max_ascender.
-        float content_last_line_ascender = lycon->block.last_line_ascender;
-        if (content_last_line_ascender == 0 && lycon->line.max_ascender > 0) {
-            // No line break occurred - use current line's ascender
-            content_last_line_ascender = lycon->line.max_ascender;
+        // last_line_ascender stores the distance from the border-box top to the baseline
+        // (set in line_break() as advance_y - used_line_height + max_ascender).
+        // The current (unbroken) line is always the true last line: if it has content,
+        // use its baseline (advance_y + max_ascender) regardless of what line_break()
+        // saved for prior lines. Only fall back to the line_break() value when the
+        // current line is empty (e.g., trailing whitespace was collapsed).
+        float content_last_line_ascender;
+        if (lycon->line.max_ascender > 0) {
+            // Current line has content — it IS the last line
+            content_last_line_ascender = lycon->block.advance_y + lycon->line.max_ascender;
+        } else {
+            // Current line is empty — use the last broken line's baseline
+            content_last_line_ascender = lycon->block.last_line_ascender;
         }
 
         // <button> elements go through normal child layout (not layout_form_control),
-        // so line_break() inside the button overwrites last_line_ascender with the
-        // raw text ascender, discarding border/padding.  Override with the proper
-        // form-control baseline: border-top + padding-top + font-ascender, matching
-        // the formula used in layout_form_control for other form controls.
-        // Only apply when the button actually has in-flow content (last_line_ascender > 0),
-        // so empty buttons still use the replaced-element (bottom-margin-edge) baseline path.
-        if (content_last_line_ascender > 0 &&
-            block->tag() == HTM_TAG_BUTTON && block->form &&
-            block->form->control_type == FORM_CONTROL_BUTTON) {
-            FontProp* bfont = block->font ? block->font : lycon->font.style;
-            float border_top = (block->bound && block->bound->border) ? block->bound->border->width.top : 0;
-            float pad_top = block->bound ? block->bound->padding.top : 0;
-            float font_asc = (bfont && bfont->ascender > 0) ? bfont->ascender : (bfont ? bfont->font_size * 0.8f : 13.0f);
-            content_last_line_ascender = border_top + pad_top + font_asc;
-        }
+        // so line_break() previously overwrote last_line_ascender with just the raw
+        // text ascender. Now that line_break() stores the full baseline offset
+        // (advance_y - used_line_height + max_ascender, which includes border_top
+        // and pad_top), and the single-line fallback also includes advance_y, the
+        // override is no longer needed. Buttons correctly get their baseline from
+        // the last line box position, matching other inline-blocks.
 
         bool content_has_line_boxes = content_last_line_ascender > 0;
 
@@ -6383,37 +6442,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     block->bound->margin.bottom, margin_top, chain_pos, chain_neg);
                             }
 
-                            // CSS 8.3.1: When parent has no border/padding, child margin collapses through parent
-                            // If parent had no margin (parent_margin_top == 0) AND parent has no bound,
-                            // we need to retroactively collapse with parent's previous sibling.
-                            // Only do this for no-bound parents — bound parents will get normal sibling
-                            // collapse later in step 7, so doing it here too would double-count.
-                            float sibling_collapse = 0;
-                            if (parent_margin_top == 0 && !parent->bound) {
-                                // Find parent's previous in-flow sibling for retroactive sibling collapsing
-                                View* prev_view = parent->prev_placed_view();
-                                while (prev_view && prev_view->is_block()) {
-                                    ViewBlock* vb = (ViewBlock*)prev_view;
-                                    if (vb->position && element_has_float(vb)) {
-                                        prev_view = prev_view->prev_placed_view();
-                                        continue;
-                                    }
-                                    break;
-                                }
-                                if (prev_view && prev_view->is_block() && ((ViewBlock*)prev_view)->bound) {
-                                    ViewBlock* prev_block = (ViewBlock*)prev_view;
-                                    float prev_mb = prev_block->bound->margin.bottom;
-                                    if (prev_mb != 0 && margin_top != 0) {
-                                        // CSS 2.1 §8.3.1: collapse sibling margins
-                                        float collapsed = collapse_margins(prev_mb, margin_top);
-                                        sibling_collapse = prev_mb + margin_top - collapsed;
-                                        log_debug("%s retroactive sibling collapse for parent-child: sibling_collapse=%f", elmt->source_loc(), sibling_collapse);
-                                    }
-                                }
-                            }
+                            // CSS 2.1 §8.3.1: Parent-child collapse propagates the child's
+                            // margin to the parent. The parent's sibling collapse (step 7)
+                            // will handle collapsing with the parent's previous sibling.
+                            // Do NOT do retroactive sibling collapse here — the bound
+                            // allocated below makes the parent visible to step 7, which
+                            // would double-count the sibling margin deduction.
 
                             if (!parent_has_clearance) {
-                                parent->y += margin_top - parent_margin_top - sibling_collapse;
+                                parent->y += margin_top - parent_margin_top;
                                 // CSS 2.1 §8.3.1: Ensure parent->bound exists so margin.top
                                 // can be stored. Without this, the "unified margin chain"
                                 // code in finalize sees margin.top=0 and double-adjusts y.
@@ -6421,7 +6458,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     parent->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
                                     memset(parent->bound, 0, sizeof(BoundaryProp));
                                 }
-                                parent->bound->margin.top = margin_top - sibling_collapse;
+                                parent->bound->margin.top = margin_top;
                             } else {
                                 log_debug("%s [CLEARANCE] Parent has clearance — skipping y adjustment (margin would be %f)", elmt->source_loc(), margin_top);
                             }
@@ -6456,8 +6493,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                                     chain_pos, chain_neg, block->bound->margin.bottom);
                             }
 
-                            log_debug("%s collapsed margin between block and first child: %f, parent y: %f, block y: %f, sibling_collapse: %f", elmt->source_loc(),
-                                margin_top, parent->y, block->y, sibling_collapse);
+                            log_debug("%s collapsed margin between block and first child: %f, parent y: %f, block y: %f", elmt->source_loc(),
+                                margin_top, parent->y, block->y);
                         }
                         else {
                             log_debug("%s no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f, parent_creates_bfc=%d", elmt->source_loc(),

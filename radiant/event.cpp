@@ -14,6 +14,7 @@
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/transpiler.hpp"   // Runtime (heap, nursery, name_pool)
 #include "../lambda/mark_builder.hpp" // MarkBuilder for event object construction
+#include <chrono>       // timing for reactive event dispatch
 
 // thread-local eval context used by heap allocation functions
 extern __thread EvalContext* context;
@@ -23,6 +24,7 @@ View* layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void process_document_font_faces(UiContext* uicon, DomDocument* doc);
 void to_repaint();
 void rebuild_lambda_doc(UiContext* uicon);
+void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results, int result_count);
 
 // Forward declarations for event targeting
 void target_html_doc(EventContext* evcon, ViewTree* view_tree);
@@ -552,7 +554,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
                         if (tmpl && tmpl->handlers) {
                             for (TemplateHandlerEntry* h = tmpl->handlers; h; h = h->next) {
                                 if (strcmp(h->event_name, event_name) == 0) {
-                                    log_info("dispatch_emit: found '%s' handler on parent tmpl=%s",
+                                    log_debug("dispatch_emit: found '%s' handler on parent tmpl=%s",
                                              event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
 
                                     // invoke parent handler with (parent_source_item, event_data)
@@ -627,8 +629,11 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                         // find handler for this event name
                         for (TemplateHandlerEntry* h = tmpl->handlers; h; h = h->next) {
                             if (strcmp(h->event_name, event_name) == 0) {
-                                log_info("dispatch_lambda_handler: invoking '%s' handler on tmpl=%s",
+                                log_debug("dispatch_lambda_handler: invoking '%s' handler on tmpl=%s",
                                          event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
+
+                                using namespace std::chrono;
+                                auto t_start = high_resolution_clock::now();
 
                                 // Set up eval context for heap allocation during handler/retransform.
                                 // After run_script_mir returns, the thread-local context is stale
@@ -668,6 +673,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                 handler_fn fn = (handler_fn)h->handler_func;
                                 fn(lookup.source_item, event_item);
 
+                                auto t_handler = high_resolution_clock::now();
+
                                 // restore emit context
                                 g_emit_handler_ctx = saved_emit_ctx;
 
@@ -680,11 +687,37 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 
                                 // after handler, check for dirty entries and retransform
                                 if (render_map_has_dirty()) {
-                                    int count = render_map_retransform();
-                                    log_info("dispatch_lambda_handler: retransformed %d entries", count);
+                                    RetransformResult results[16];
+                                    int count = render_map_retransform_with_results(results, 16);
+                                    auto t_retransform = high_resolution_clock::now();
 
-                                    // rebuild DOM from updated Lambda element tree
-                                    rebuild_lambda_doc(evcon->ui_context);
+                                    // Phase 14: No-op elision — skip rebuild if output unchanged
+                                    bool any_changed = false;
+                                    int reported = count <= 16 ? count : 16;
+                                    for (int i = 0; i < reported; i++) {
+                                        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+                                            any_changed = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (any_changed) {
+                                        // incremental DOM rebuild (falls back to full if map not ready)
+                                        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+                                    }
+                                    auto t_rebuild = high_resolution_clock::now();
+
+                                    using std::chrono::duration;
+                                    using std::chrono::duration_cast;
+                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
+                                        duration<double, std::milli>(t_handler - t_start).count(),
+                                        duration<double, std::milli>(t_retransform - t_handler).count(),
+                                        duration<double, std::milli>(t_rebuild - t_retransform).count(),
+                                        duration<double, std::milli>(t_rebuild - t_start).count(),
+                                        any_changed ? "" : " (no-op elided)");
+                                } else {
+                                    log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
+                                        duration<double, std::milli>(t_handler - t_start).count());
                                 }
 
                                 // restore previous context
@@ -935,11 +968,11 @@ static void uncheck_radio_group(View* root, const char* name, View* exclude, Rad
 static View* find_checkbox_radio_input(View* target) {
     if (!target) return nullptr;
 
-    log_info("find_checkbox_radio_input: starting search from target=%p", target);
+    log_debug("find_checkbox_radio_input: starting search from target=%p", target);
 
     // Check if target itself is a checkbox/radio
     if (is_checkbox(target) || is_radio(target)) {
-        log_info("find_checkbox_radio_input: target is checkbox/radio");
+        log_debug("find_checkbox_radio_input: target is checkbox/radio");
         return target;
     }
 
@@ -949,15 +982,15 @@ static View* find_checkbox_radio_input(View* target) {
     while (current) {
         if (current->is_element()) {
             ViewElement* elem = (ViewElement*)current;
-            log_info("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
+            log_debug("find_checkbox_radio_input: checking element tag=%d (%s)", elem->tag(), elem->node_name());
             if (elem->tag() == HTM_TAG_LABEL) {
                 label_element = current;
-                log_info("find_checkbox_radio_input: found label element");
+                log_debug("find_checkbox_radio_input: found label element");
                 break;
             }
             // If we hit a checkbox/radio directly, use it
             if (is_checkbox(current) || is_radio(current)) {
-                log_info("find_checkbox_radio_input: found checkbox/radio in ancestor chain");
+                log_debug("find_checkbox_radio_input: found checkbox/radio in ancestor chain");
                 return current;
             }
         }
@@ -965,7 +998,7 @@ static View* find_checkbox_radio_input(View* target) {
     }
 
     if (!label_element) {
-        log_info("find_checkbox_radio_input: no label found in ancestor chain");
+        log_debug("find_checkbox_radio_input: no label found in ancestor chain");
         return nullptr;
     }
 
@@ -974,7 +1007,7 @@ static View* find_checkbox_radio_input(View* target) {
     // Check for "for" attribute pointing to an input id
     const char* for_attr = label->get_attribute("for");
     if (for_attr && for_attr[0]) {
-        log_info("find_checkbox_radio_input: label has for='%s'", for_attr);
+        log_debug("find_checkbox_radio_input: label has for='%s'", for_attr);
         // Need to find input with matching id in the document
         // Walk from document root to find matching id
         View* root = label_element;
@@ -1074,7 +1107,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
             }
         }
 
-        log_info("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
+        log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
         state->needs_repaint = true;
         return true;
     }
@@ -1108,7 +1141,7 @@ static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
                 }
             }
 
-            log_info("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
+            log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
             state->needs_repaint = true;
         }
         return true;
@@ -1255,7 +1288,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
 
     if (state->open_dropdown == select_view) {
         // Close the dropdown
-        log_info("handle_select_click: closing dropdown");
+        log_debug("handle_select_click: closing dropdown");
         state->open_dropdown = nullptr;
         select->form->dropdown_open = 0;
         select->form->hover_index = -1;
@@ -1273,7 +1306,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     }
 
     // Open this dropdown
-    log_info("handle_select_click: opening dropdown with %d options", select->form->option_count);
+    log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
     state->open_dropdown = select_view;
     select->form->dropdown_open = 1;
     select->form->hover_index = select->form->selected_index;
@@ -1314,17 +1347,17 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
 
     float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
 
-    log_info("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
+    log_debug("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
              mouse_x, mouse_y, state->dropdown_x, state->dropdown_y,
              state->dropdown_width, state->dropdown_height);
 
     // Check if click is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width) {
-        log_info("handle_dropdown_option_click: click outside X bounds");
+        log_debug("handle_dropdown_option_click: click outside X bounds");
         return false;
     }
     if (mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
-        log_info("handle_dropdown_option_click: click outside Y bounds");
+        log_debug("handle_dropdown_option_click: click outside Y bounds");
         return false;
     }
 
@@ -1332,11 +1365,11 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     float option_height = select->height * scale;
     int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
 
-    log_info("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
+    log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
              option_height, clicked_index, select->form->option_count);
 
     if (clicked_index >= 0 && clicked_index < select->form->option_count) {
-        log_info("handle_dropdown_option_click: selecting option %d", clicked_index);
+        log_debug("handle_dropdown_option_click: selecting option %d", clicked_index);
         select->form->selected_index = clicked_index;
 
         // Close dropdown
@@ -1347,7 +1380,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
         return true;
     }
 
-    log_info("handle_dropdown_option_click: clicked_index out of range");
+    log_debug("handle_dropdown_option_click: clicked_index out of range");
     return false;
 }
 
@@ -1476,7 +1509,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     }
 
     // Click outside - close dropdown
-    log_info("close_dropdown_if_outside: closing dropdown");
+    log_debug("close_dropdown_if_outside: closing dropdown");
     state->open_dropdown = nullptr;
     select->form->dropdown_open = 0;
     select->form->hover_index = -1;
@@ -2012,7 +2045,7 @@ void update_caret_visual_position(UiContext* uicon, RadiantState* state) {
 
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     EventContext evcon;
-    log_info("HANDLE_EVENT: type=%d", event->type);
+    log_debug("HANDLE_EVENT: type=%d", event->type);
     log_debug("Handling event %d", event->type);
     // PDF documents don't have html_root - they only have view_tree
     // For PDFs, we can still handle basic events using the view_tree
@@ -2206,9 +2239,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Update active and focus states
         if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target) {
-            log_info("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
+            log_debug("MOUSE_DOWN: target=%p view_type=%d", evcon.target, evcon.target->view_type);
             if (evcon.target->view_type == RDT_VIEW_TEXT) {
-                log_info("Target is ViewText, target_text_rect=%p", evcon.target_text_rect);
+                log_debug("Target is ViewText, target_text_rect=%p", evcon.target_text_rect);
             }
 
             // Set :active state
@@ -2233,7 +2266,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 int char_offset = calculate_char_offset_from_position(
                     &evcon, text, rect, btn_event->x, btn_event->y);
 
-                log_info("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
+                log_debug("CLICK IN TEXT at offset %d (target=%p)", char_offset, evcon.target);
 
                 // Set caret at clicked position
                 caret_set(state, evcon.target, char_offset);
@@ -2268,7 +2301,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->caret->iframe_offset_x = evcon.block.x - chain_x;
                     state->caret->iframe_offset_y = evcon.block.y - chain_y;
 
-                    log_info("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
+                    log_debug("CARET VISUAL: x=%.1f y=%.1f height=%.1f iframe_offset=(%.1f,%.1f)",
                         caret_x, caret_y, caret_height,
                         state->caret->iframe_offset_x, state->caret->iframe_offset_y);
                 }
@@ -2406,7 +2439,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         state->caret->iframe_offset_y = evcon.block.y - chain_y;
                     }
 
-                    log_info("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
+                    log_debug("INPUT CARET: offset=%d x=%.1f y=%.1f height=%.1f",
                         char_offset, caret_x, caret_y, caret_height);
                     evcon.need_repaint = true;
 
@@ -2447,7 +2480,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Only process other click handlers if dropdown wasn't involved
             if (!dropdown_handled) {
                 // Handle checkbox/radio click toggle
-                log_info("MOUSE_UP: evcon.target=%p", evcon.target);
+                log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
                 if (evcon.target) {
                     handle_checkbox_radio_click(&evcon, evcon.target);
                 }
@@ -2493,7 +2526,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (evcon.new_url) {
-            log_info("opening_url:%s", evcon.new_url);
+            log_debug("opening_url:%s", evcon.new_url);
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name

@@ -517,6 +517,7 @@ static bool is_inline_level_element(DomElement* element) {
             strcmp(tag, "acronym") == 0 ||
             strcmp(tag, "dfn") == 0 ||
             strcmp(tag, "q") == 0 ||
+            strcmp(tag, "br") == 0 ||
             strcmp(tag, "time") == 0 ||
             strcmp(tag, "mark") == 0 ||
             strcmp(tag, "label") == 0 ||
@@ -611,57 +612,179 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         setup_font(lycon->ui_context, &lycon->font, view_block_font->font);
         font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
-        // Element has CSS styles but font not yet resolved - check font-family and font-size
-        // independently. Either property alone should trigger font setup.
+        // Element has CSS styles but font not yet resolved - check font shorthand
+        // and individual font properties. Either alone should trigger font setup.
         FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
         bool need_font_setup = false;
         const char* css_family = NULL;
 
-        // Check for font-family change
+        // Check for font shorthand (CSS_PROPERTY_FONT) first.
+        // CSS 2.1 §15.8: The font shorthand sets all font sub-properties.
+        // Individual longhands with higher source_order may override below.
+        CssDeclaration* font_shorthand_decl = style_tree_get_declaration(
+            element->specified_style, CSS_PROPERTY_FONT);
+        if (font_shorthand_decl && font_shorthand_decl->value) {
+            const CssValue* fv = font_shorthand_decl->value;
+            if (fv->type == CSS_VALUE_TYPE_KEYWORD) {
+                // System font keyword (caption, icon, menu, message-box, small-caption, status-bar)
+                const CssEnumInfo* info = css_enum_info(fv->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_SYSTEM_FONT) {
+                    css_family = "Arial";
+                    temp_font_prop->font_size = 13.333f;
+                    temp_font_prop->font_weight = CSS_VALUE_NORMAL;
+                    temp_font_prop->font_weight_numeric = 400;
+                    temp_font_prop->font_style = CSS_VALUE_NORMAL;
+                    need_font_setup = true;
+                    log_debug("intrinsic font shorthand: system font '%s' -> Arial", info->name);
+                }
+            } else if (fv->type == CSS_VALUE_TYPE_LIST && fv->data.list.count >= 2) {
+                // Full shorthand: [style] [variant] [weight] size[/line-height] family
+                size_t count = fv->data.list.count;
+                for (size_t fi = 0; fi < count; fi++) {
+                    const CssValue* v = fv->data.list.values[fi];
+                    if (!v) continue;
+                    if (v->type == CSS_VALUE_TYPE_LENGTH || v->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                        // font-size found
+                        if (v->type == CSS_VALUE_TYPE_LENGTH) {
+                            float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
+                            if (sz > 0) temp_font_prop->font_size = sz;
+                        } else {
+                            float parent_sz = lycon->font.style ? lycon->font.style->font_size : 16.0f;
+                            temp_font_prop->font_size = (float)(v->data.percentage.value / 100.0 * parent_sz);
+                        }
+                        // skip /line-height, then extract font-family
+                        size_t fam_idx = fi + 1;
+                        if (fam_idx < count) {
+                            const CssValue* next = fv->data.list.values[fam_idx];
+                            if (next && next->type == CSS_VALUE_TYPE_CUSTOM &&
+                                next->data.custom_property.name &&
+                                strcmp(next->data.custom_property.name, "/") == 0) {
+                                fam_idx += 2;
+                            }
+                        }
+                        if (fam_idx < count) {
+                            const CssValue* fam = fv->data.list.values[fam_idx];
+                            if (fam) {
+                                if (fam->type == CSS_VALUE_TYPE_STRING) css_family = fam->data.string;
+                                else if (fam->type == CSS_VALUE_TYPE_KEYWORD) {
+                                    CssEnum kw = fam->data.keyword;
+                                    if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
+                                    else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
+                                    else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
+                                    else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
+                                    else { const CssEnumInfo* ki = css_enum_info(kw); if (ki) css_family = ki->name; }
+                                } else if (fam->type == CSS_VALUE_TYPE_CUSTOM && fam->data.custom_property.name) {
+                                    css_family = fam->data.custom_property.name;
+                                }
+                            }
+                        }
+                        need_font_setup = true;
+                        break;
+                    } else if (v->type == CSS_VALUE_TYPE_KEYWORD) {
+                        const CssEnumInfo* info = css_enum_info(v->data.keyword);
+                        if (info) {
+                            if (info->group == CSS_VALUE_GROUP_FONT_WEIGHT) {
+                                CssEnum kw = v->data.keyword;
+                                temp_font_prop->font_weight = (kw == CSS_VALUE_BOLD) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+                                temp_font_prop->font_weight_numeric = (kw == CSS_VALUE_BOLD) ? (int16_t)700 : (int16_t)400;
+                            } else if (info->group == CSS_VALUE_GROUP_FONT_STYLE) {
+                                temp_font_prop->font_style = v->data.keyword;
+                            } else if (info->group == CSS_VALUE_GROUP_FONT_SIZE) {
+                                float sz = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, v);
+                                if (sz > 0) temp_font_prop->font_size = sz;
+                                // everything after is font-family
+                                size_t fam_idx = fi + 1;
+                                if (fam_idx < count) {
+                                    const CssValue* fam = fv->data.list.values[fam_idx];
+                                    if (fam) {
+                                        if (fam->type == CSS_VALUE_TYPE_STRING) css_family = fam->data.string;
+                                        else if (fam->type == CSS_VALUE_TYPE_KEYWORD) {
+                                            CssEnum kw = fam->data.keyword;
+                                            if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
+                                            else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
+                                            else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
+                                            else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
+                                            else { const CssEnumInfo* ki = css_enum_info(kw); if (ki) css_family = ki->name; }
+                                        } else if (fam->type == CSS_VALUE_TYPE_CUSTOM && fam->data.custom_property.name) {
+                                            css_family = fam->data.custom_property.name;
+                                        }
+                                    }
+                                }
+                                need_font_setup = true;
+                                break;
+                            }
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                        int w = (int)v->data.number.value;
+                        if (w >= 1 && w <= 1000) {
+                            temp_font_prop->font_weight = (w > 500) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+                            temp_font_prop->font_weight_numeric = (int16_t)w;
+                        }
+                    } else if (v->type == CSS_VALUE_TYPE_STRING) {
+                        css_family = v->data.string;
+                        need_font_setup = true;
+                    } else if (v->type == CSS_VALUE_TYPE_CUSTOM && v->data.custom_property.name &&
+                               strcmp(v->data.custom_property.name, "/") != 0) {
+                        css_family = v->data.custom_property.name;
+                        need_font_setup = true;
+                    }
+                }
+                if (css_family) need_font_setup = true;
+            }
+            if (css_family) {
+                temp_font_prop->family = (char*)css_family;
+            }
+        }
+
+        // Check for font-family longhand (overrides shorthand if higher source_order)
         CssDeclaration* font_family_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_FAMILY);
 
-        if (font_family_decl && font_family_decl->value) {
+        if (font_family_decl && font_family_decl->value &&
+            (!font_shorthand_decl || font_family_decl->source_order > font_shorthand_decl->source_order)) {
             // Extract font-family from CSS value
+            const char* longhand_family = NULL;
             if (font_family_decl->value->type == CSS_VALUE_TYPE_STRING) {
-                css_family = font_family_decl->value->data.string;
+                longhand_family = font_family_decl->value->data.string;
             } else if (font_family_decl->value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-font stack - use first font
                 int list_count = font_family_decl->value->data.list.count;
                 CssValue** list_values = font_family_decl->value->data.list.values;
                 if (list_count > 0 && list_values[0]) {
                     if (list_values[0]->type == CSS_VALUE_TYPE_STRING) {
-                        css_family = list_values[0]->data.string;
+                        longhand_family = list_values[0]->data.string;
                     } else if (list_values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
                         // Generic font family keyword
                         CssEnum kw = list_values[0]->data.keyword;
-                        if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) css_family = "monospace";
-                        else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) css_family = "sans-serif";
-                        else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) css_family = "serif";
-                        else if (kw == CSS_VALUE_SYSTEM_UI) css_family = "system-ui";
+                        if (kw == CSS_VALUE_MONOSPACE || kw == CSS_VALUE_UI_MONOSPACE) longhand_family = "monospace";
+                        else if (kw == CSS_VALUE_SANS_SERIF || kw == CSS_VALUE_UI_SANS_SERIF) longhand_family = "sans-serif";
+                        else if (kw == CSS_VALUE_SERIF || kw == CSS_VALUE_UI_SERIF) longhand_family = "serif";
+                        else if (kw == CSS_VALUE_SYSTEM_UI) longhand_family = "system-ui";
                     } else if (list_values[0]->type == CSS_VALUE_TYPE_CUSTOM) {
                         // Custom identifier (e.g., "Menlo" as unquoted font name)
-                        css_family = list_values[0]->data.custom_property.name;
+                        longhand_family = list_values[0]->data.custom_property.name;
                     }
                 }
             } else if (font_family_decl->value->type == CSS_VALUE_TYPE_CUSTOM) {
                 // Single unquoted font name
-                css_family = font_family_decl->value->data.custom_property.name;
+                longhand_family = font_family_decl->value->data.custom_property.name;
             }
 
-            if (css_family && css_family != lycon->font.style->family) {
-                temp_font_prop->family = (char*)css_family;
-                need_font_setup = true;
+            if (longhand_family) {
+                css_family = longhand_family;
+                if (css_family != lycon->font.style->family) {
+                    temp_font_prop->family = (char*)css_family;
+                    need_font_setup = true;
+                }
             }
         }
 
-        // Check for font-size change independently of font-family.
-        // CSS 2.1 §10.2: font-size can be set on any element and affects text
-        // measurement. During intrinsic sizing, we must use the element's own
-        // font-size even when font-family is inherited unchanged.
+        // Check for font-size longhand (overrides shorthand if higher source_order).
+        // CSS 2.1 §10.2: font-size affects text measurement during intrinsic sizing.
         CssDeclaration* font_size_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_SIZE);
-        if (font_size_decl && font_size_decl->value) {
+        if (font_size_decl && font_size_decl->value &&
+            (!font_shorthand_decl || font_size_decl->source_order > font_shorthand_decl->source_order)) {
             float resolved_size = 0;
             if (font_size_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
                 resolved_size = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE,
@@ -671,16 +794,21 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 float parent_size = lycon->font.style ? lycon->font.style->font_size : 16.0f;
                 resolved_size = (float)(font_size_decl->value->data.percentage.value / 100.0 * parent_size);
             }
-            if (resolved_size > 0 && fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
-                temp_font_prop->font_size = resolved_size;
-                need_font_setup = true;
+            if (resolved_size > 0) {
+                // When shorthand already triggered setup, apply size unconditionally
+                // (even if it matches parent) to override shorthand's default size
+                if (need_font_setup || fabs(resolved_size - lycon->font.style->font_size) > 0.1f) {
+                    temp_font_prop->font_size = resolved_size;
+                    need_font_setup = true;
+                }
             }
         }
 
-        // Check for font-weight change (bold text is wider than regular)
+        // Check for font-weight longhand (overrides shorthand if higher source_order)
         CssDeclaration* font_weight_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_WEIGHT);
-        if (font_weight_decl && font_weight_decl->value) {
+        if (font_weight_decl && font_weight_decl->value &&
+            (!font_shorthand_decl || font_weight_decl->source_order > font_shorthand_decl->source_order)) {
             CssEnum mapped_weight = CSS_VALUE_NORMAL;
             int16_t numeric_weight = 0;
             const CssValue* fw_val = font_weight_decl->value;
@@ -696,21 +824,22 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 mapped_weight = (w > 500) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
             }
             CssEnum parent_weight = lycon->font.style ? lycon->font.style->font_weight : CSS_VALUE_NORMAL;
-            if (mapped_weight != parent_weight) {
+            if (need_font_setup || mapped_weight != parent_weight) {
                 temp_font_prop->font_weight = mapped_weight;
                 temp_font_prop->font_weight_numeric = numeric_weight;
                 need_font_setup = true;
             }
         }
 
-        // Check for font-style change (italic text has different metrics)
+        // Check for font-style longhand (overrides shorthand if higher source_order)
         CssDeclaration* font_style_decl = style_tree_get_declaration(
             element->specified_style, CSS_PROPERTY_FONT_STYLE);
         if (font_style_decl && font_style_decl->value &&
-            font_style_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+            font_style_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            (!font_shorthand_decl || font_style_decl->source_order > font_shorthand_decl->source_order)) {
             CssEnum css_font_style = font_style_decl->value->data.keyword;
             CssEnum parent_style = lycon->font.style ? lycon->font.style->font_style : CSS_VALUE_NORMAL;
-            if (css_font_style != parent_style) {
+            if (need_font_setup || css_font_style != parent_style) {
                 temp_font_prop->font_style = css_font_style;
                 need_font_setup = true;
             }
@@ -1261,9 +1390,32 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     }
 
     // Track inline-level content separately
-    float inline_min_sum = 0.0f;  // Sum of min-content widths for inline children
+    float inline_min_sum = 0.0f;  // Max of min-content widths for inline children
     float inline_max_sum = 0.0f;  // Sum of max-content widths for inline children
     bool has_inline_content = false;
+    float first_inline_child_min = -1.0f;  // First inline child's min-content (for text-indent)
+    float nonfirst_inline_min_max = 0.0f;  // Max min-content of non-first inline children (for neg text-indent)
+    // CSS Text 3 §5.2: Track forced line breaks in inline content for propagation
+    // to parent's inline run accumulation. first_inline_break_sum captures the
+    // inline_max_sum at the point of the first forced break.
+    bool inline_has_forced_break = false;
+    float first_inline_break_sum = 0.0f;  // inline_max_sum before first forced break
+
+    // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block container.
+    // Pre-compute text-indent so it's available for <br> forced break handling.
+    float text_indent = 0.0f;
+    {
+        ViewBlock* vb = (ViewBlock*)element;
+        if (vb->blk && vb->blk->text_indent != 0.0f) {
+            text_indent = vb->blk->text_indent;
+        } else if (element->specified_style) {
+            CssDeclaration* ti_decl = style_tree_get_declaration(
+                element->specified_style, CSS_PROPERTY_TEXT_INDENT);
+            if (ti_decl && ti_decl->value && ti_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
+                text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, ti_decl->value);
+            }
+        }
+    }
 
     // Track floated block-level children for intrinsic sizing
     // CSS Sizing 3 §5: At max-content, floats arrange side-by-side (infinite width),
@@ -1569,58 +1721,70 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             const char* text = (const char*)child->text_data();
             if (text) {
                 size_t text_len = strlen(text);
-                // Normalize whitespace: collapse consecutive spaces, trim leading/trailing
-                // This matches CSS white-space: normal behavior
+                // CSS 2.1 §16.6: white-space determines whether to collapse or preserve spaces
+                CssEnum ws = get_white_space_value(child);
+                bool preserve_spaces = (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
+                                        ws == CSS_VALUE_BREAK_SPACES);
+
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
-                // Only trim leading whitespace if this is the first child or preceded only by whitespace.
-                // If there's inline content before this text node, leading whitespace should
-                // collapse to a single space (which contributes to intrinsic width).
-                bool has_inline_before = (child->prev_sibling != nullptr &&
-                                          has_inline_content &&
-                                          inline_max_sum > 0);
-                bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
-                for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
-                    unsigned char ch = (unsigned char)text[i];
-                    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
-                        if (!in_whitespace) {
-                            normalized_buffer[out_pos++] = ' ';  // Collapse to single space
-                            in_whitespace = true;
-                        }
-                    } else {
-                        normalized_buffer[out_pos++] = (char)ch;
-                        in_whitespace = false;
+
+                if (preserve_spaces) {
+                    // white-space: pre/pre-wrap/break-spaces — preserve all whitespace as-is
+                    for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                        normalized_buffer[out_pos++] = text[i];
                     }
-                }
-                // Only trim trailing whitespace if there's no inline content after this text node.
-                // Trailing whitespace before an inline sibling (like <a>) should be preserved
-                // as it contributes to the inter-word spacing.
-                bool has_inline_after = false;
-                if (child->next_sibling) {
-                    DomNode* next = child->next_sibling;
-                    // Skip whitespace-only text nodes
-                    while (next && next->is_text()) {
-                        const char* next_text = (const char*)next->text_data();
-                        bool all_ws = true;
-                        if (next_text) {
-                            for (const char* p = next_text; *p && all_ws; p++) {
-                                unsigned char c = (unsigned char)*p;
-                                if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                    all_ws = false;
+                } else {
+                    // white-space: normal/nowrap/pre-line — collapse consecutive spaces
+                    // Only trim leading whitespace if this is the first child or preceded only by whitespace.
+                    // If there's inline content before this text node, leading whitespace should
+                    // collapse to a single space (which contributes to intrinsic width).
+                    bool has_inline_before = (child->prev_sibling != nullptr &&
+                                              has_inline_content &&
+                                              inline_max_sum > 0);
+                    bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
+                    for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
+                        unsigned char ch = (unsigned char)text[i];
+                        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                            if (!in_whitespace) {
+                                normalized_buffer[out_pos++] = ' ';  // Collapse to single space
+                                in_whitespace = true;
+                            }
+                        } else {
+                            normalized_buffer[out_pos++] = (char)ch;
+                            in_whitespace = false;
+                        }
+                    }
+                    // Only trim trailing whitespace if there's no inline content after this text node.
+                    // Trailing whitespace before an inline sibling (like <a>) should be preserved
+                    // as it contributes to the inter-word spacing.
+                    bool has_inline_after = false;
+                    if (child->next_sibling) {
+                        DomNode* next = child->next_sibling;
+                        // Skip whitespace-only text nodes
+                        while (next && next->is_text()) {
+                            const char* next_text = (const char*)next->text_data();
+                            bool all_ws = true;
+                            if (next_text) {
+                                for (const char* p = next_text; *p && all_ws; p++) {
+                                    unsigned char c = (unsigned char)*p;
+                                    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
+                                        all_ws = false;
+                                    }
                                 }
                             }
+                            if (!all_ws) break;
+                            next = next->next_sibling;
                         }
-                        if (!all_ws) break;
-                        next = next->next_sibling;
+                        if (next && next->is_element()) {
+                            has_inline_after = is_inline_level_element(next->as_element());
+                        }
                     }
-                    if (next && next->is_element()) {
-                        has_inline_after = is_inline_level_element(next->as_element());
-                    }
-                }
-                if (!has_inline_after) {
-                    // Trim trailing whitespace
-                    while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
-                        out_pos--;
+                    if (!has_inline_after) {
+                        // Trim trailing whitespace
+                        while (out_pos > 0 && normalized_buffer[out_pos - 1] == ' ') {
+                            out_pos--;
+                        }
                     }
                 }
                 normalized_buffer[out_pos] = '\0';
@@ -1634,17 +1798,53 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum text_transform = get_element_text_transform(element);
                 CssEnum font_variant = get_element_font_variant(element);
 
-                TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
-                    lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                TextIntrinsicWidths text_widths;
+                if (preserve_spaces) {
+                    // For pre/pre-wrap/break-spaces: newlines create forced line breaks.
+                    // Measure each line separately; max-content = widest line.
+                    text_widths = {0, 0};
+                    const char* line_start = normalized_buffer;
+                    const char* buf_end = normalized_buffer + out_pos;
+                    int line_count = 0;
+                    float first_line_width = 0;
+                    float last_line_width = 0;
+                    while (line_start <= buf_end) {
+                        const char* nl = (const char*)memchr(line_start, '\n', buf_end - line_start);
+                        size_t line_len = nl ? (size_t)(nl - line_start) : (size_t)(buf_end - line_start);
+                        float line_width = 0;
+                        if (line_len > 0) {
+                            TextIntrinsicWidths lw = measure_text_intrinsic_widths(
+                                lycon, line_start, line_len, text_transform, font_variant);
+                            if (lw.max_content > text_widths.max_content)
+                                text_widths.max_content = lw.max_content;
+                            if (lw.min_content > text_widths.min_content)
+                                text_widths.min_content = lw.min_content;
+                            line_width = lw.max_content;
+                        }
+                        if (line_count == 0) first_line_width = line_width;
+                        last_line_width = line_width;
+                        line_count++;
+                        if (!nl) break;
+                        line_start = nl + 1;
+                    }
+                    // CSS Text 3 §5.2: Track forced breaks for inline run accumulation.
+                    // When a preserved newline creates a forced break, the inline run
+                    // at the parent level must be split at that point.
+                    if (line_count > 1) {
+                        child_sizes.has_forced_break = true;
+                        child_sizes.first_line_max = first_line_width;
+                        child_sizes.last_line_max = last_line_width;
+                    }
+                } else {
+                    text_widths = measure_text_intrinsic_widths(
+                        lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
 
                 // white-space: nowrap/pre prevents line breaks, so min-content = max-content
-                {
-                    CssEnum ws = get_white_space_value(child);
-                    if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
-                        child_sizes.min_content = child_sizes.max_content;
-                    }
+                if (ws == CSS_VALUE_NOWRAP || ws == CSS_VALUE_PRE) {
+                    child_sizes.min_content = child_sizes.max_content;
                 }
 
                 // In vertical writing mode, text flows top-to-bottom.
@@ -1849,8 +2049,71 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // For inline content, sum widths for max-content (no wrapping)
             // and take max of min-content (can wrap between items)
             has_inline_content = true;
-            inline_max_sum += child_sizes.max_content;
+
+            // Detect <br> elements as forced line breaks. Unlike text nodes with
+            // preserved newlines, <br> is an element that doesn't set has_forced_break
+            // on its own IntrinsicSizes. Handle it directly as a forced break point.
+            bool is_br_element = child->is_element() &&
+                child->as_element()->node_name() &&
+                strcmp(child->as_element()->node_name(), "br") == 0;
+            if (is_br_element) {
+                // Apply text-indent to the first line before flushing.
+                // Text-indent only affects the first formatted line.
+                if (!inline_has_forced_break && text_indent != 0) {
+                    inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
+                    // For min-content: apply indent to first segment
+                    float first_seg = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
+                    if (text_indent > 0) {
+                        float first_line_min = first_seg + text_indent;
+                        inline_min_sum = fmaxf(first_line_min, inline_min_sum);
+                    } else {
+                        float first_line_min = fmaxf(first_seg + text_indent, 0.0f);
+                        inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
+                    }
+                }
+                // Record inline_max_sum at the first forced break for parent propagation
+                if (!inline_has_forced_break) {
+                    first_inline_break_sum = inline_max_sum;
+                    inline_has_forced_break = true;
+                }
+                // Flush the current inline run
+                sizes.max_content = max(sizes.max_content, inline_max_sum);
+                sizes.min_content = max(sizes.min_content, inline_min_sum);
+                // Start new inline run after the break
+                inline_max_sum = 0;
+                inline_min_sum = 0;
+                // Don't reset first_inline_child_min — text-indent only applies to first line
+                continue;
+            }
+
+            // CSS Text 3 §5.2: If this inline child has forced line breaks (preserved
+            // newlines in pre/pre-wrap), split the inline run at the break point.
+            // The first line of the child adds to the current inline run; the forced
+            // break flushes the run; the last line starts a new run.
+            if (child_sizes.has_forced_break) {
+                // Add first line to current inline run
+                inline_max_sum += child_sizes.first_line_max;
+                // Record inline_max_sum at the first forced break for parent propagation
+                if (!inline_has_forced_break) {
+                    first_inline_break_sum = inline_max_sum;
+                    inline_has_forced_break = true;
+                }
+                // Flush the current inline run (this is a forced line break)
+                sizes.max_content = max(sizes.max_content, inline_max_sum);
+                // The internal max-content covers the widest internal line
+                sizes.max_content = max(sizes.max_content, child_sizes.max_content);
+                // Start new inline run with the last line width
+                inline_max_sum = child_sizes.last_line_max;
+            } else {
+                inline_max_sum += child_sizes.max_content;
+            }
             inline_min_sum = max(inline_min_sum, child_sizes.min_content);
+            // Track first inline child's min-content for text-indent calculation
+            if (first_inline_child_min < 0) {
+                first_inline_child_min = child_sizes.min_content;
+            } else {
+                nonfirst_inline_min_max = max(nonfirst_inline_min_max, child_sizes.min_content);
+            }
         } else {
             // Block-level child encountered
             // CSS 2.1: Block children break inline flow (block-in-inline)
@@ -2266,41 +2529,43 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
-    // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block container.
-    // Add text-indent to inline max-content width (it contributes to preferred width).
-    float text_indent = 0.0f;
-    if (has_inline_content && view_block->blk && view_block->blk->text_indent != 0.0f) {
-        text_indent = view_block->blk->text_indent;
-    } else if (has_inline_content && element->specified_style) {
-        CssDeclaration* ti_decl = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_TEXT_INDENT);
-        if (ti_decl && ti_decl->value && ti_decl->value->type == CSS_VALUE_TYPE_LENGTH) {
-            text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, ti_decl->value);
-        }
-    }
-
     // Merge inline content measurements
     if (has_inline_content) {
         // CSS 2.1 §16.1: text-indent applies to the first formatted line.
-        // Positive: increases both min-content and max-content first-line width.
-        // Negative: reduces first-line width but cannot make it negative;
-        //           subsequent lines are unaffected, so min-content uses max of
-        //           (first-line-with-indent, widest-subsequent-line).
-        if (text_indent > 0) {
-            inline_max_sum += text_indent;
-            inline_min_sum += text_indent;
-        } else if (text_indent < 0) {
-            // Negative text-indent: first line is narrower, but min/max content
-            // cannot go below zero from the indent alone.
-            inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
-            // For min-content with negative indent: the first word + indent might
-            // still be wider than subsequent words, or it might not.
-            // Use max of (first-line contribution, existing min without indent).
-            float first_line_min = fmaxf(inline_min_sum + text_indent, 0.0f);
-            inline_min_sum = fmaxf(first_line_min, sizes.min_content);
+        // If a forced break (<br>) already flushed the first line with text-indent
+        // applied, skip indent here — it only applies to the first line.
+        if (!inline_has_forced_break) {
+            // For max-content: single unwrapped line, text-indent adds to total.
+            // For min-content: text-indent only applies to the first breakable segment.
+            //   min_content = max(first_segment + text_indent, widest_other_segment)
+            //   NOT max(widest_segment) + text_indent (which overcounts).
+            if (text_indent > 0) {
+                inline_max_sum += text_indent;
+                float first_seg_min = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
+                float first_line_min = first_seg_min + text_indent;
+                inline_min_sum = fmaxf(first_line_min, inline_min_sum);
+            } else if (text_indent < 0) {
+                // Negative text-indent: first line is narrower, but min/max content
+                // cannot go below zero from the indent alone.
+                inline_max_sum = fmaxf(inline_max_sum + text_indent, 0.0f);
+                // For min-content with negative indent: the first segment + indent
+                // may be narrower. Use max(first_seg + indent, max_of_nonfirst_segs).
+                float first_seg_min = (first_inline_child_min >= 0) ? first_inline_child_min : inline_min_sum;
+                float first_line_min = fmaxf(first_seg_min + text_indent, 0.0f);
+                inline_min_sum = fmaxf(first_line_min, nonfirst_inline_min_max);
+            }
         }
         sizes.min_content = max(sizes.min_content, inline_min_sum);
         sizes.max_content = max(sizes.max_content, inline_max_sum);
+
+        // CSS Text 3 §5.2: Propagate forced break info for inline spans.
+        // This allows the parent to split its inline run when this element
+        // contains preserved newlines that create forced line breaks.
+        if (inline_has_forced_break) {
+            sizes.has_forced_break = true;
+            sizes.first_line_max = first_inline_break_sum;
+            sizes.last_line_max = inline_max_sum;
+        }
         log_debug("  inline_max_sum=%.1f, inline_min_sum=%.1f, text_indent=%.1f",
                   inline_max_sum, inline_min_sum, text_indent);
     }
@@ -2450,6 +2715,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     int horiz_border = (int)(border_left + border_right);
     sizes.min_content += horiz_padding + horiz_border;
     sizes.max_content += horiz_padding + horiz_border;
+
+    // CSS 2.1 §8.3: For inline elements with forced breaks, the left padding/border
+    // applies to the first line and the right padding/border to the last line.
+    if (sizes.has_forced_break) {
+        sizes.first_line_max += (int)(pad_left + border_left);
+        sizes.last_line_max += (int)(pad_right + border_right);
+    }
 
     // CSS 2.1 §10.4: Apply min-width and max-width constraints to intrinsic sizes.
     // min-width sets a floor: an element can never be narrower than its min-width,
@@ -2627,7 +2899,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         if (lycon->font.style && lycon->font.style->font_size > 0) {
             font_size = lycon->font.style->font_size;
         }
-        float line_height = font_size * 1.2f;  // default for line-height: normal
+        // Use actual font metrics for line-height:normal when available
+        float line_height = font_size * 1.2f;  // fallback if no font loaded
+        if (lycon->font.font_handle) {
+            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+            if (normal_lh > 0) line_height = normal_lh;
+        }
 
         // Check ancestor elements for resolved CSS line-height
         // Walk up the DOM tree since intermediate parents may not have blk resolved yet
@@ -3490,9 +3767,10 @@ float calculate_fit_content_width(LayoutContext* lycon, DomNode* node, float ava
         max_content = calculate_max_content_width(lycon, node);
     }
 
-    // fit-content = clamp(min-content, available, max-content)
-    // = min(max-content, max(min-content, available))
-    return fminf(max_content, fmaxf(min_content, available_width));
+    // CSS Sizing 3 §4.1: fit-content = max(min-content, min(max-content, available))
+    // This ensures min-content is always respected as a floor, even when max-content
+    // is smaller than min-content (e.g., negative text-indent).
+    return fmaxf(min_content, fminf(max_content, available_width));
 }
 
 // ============================================================================

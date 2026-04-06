@@ -446,8 +446,6 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
 
 // Build JavaScript call expression node
 JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
-    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
-
     // Get callee (function being called) - use field name instead of ID
     TSNode callee_node = ts_node_child_by_field_name(call_node, "function", strlen("function"));
     if (ts_node_is_null(callee_node)) {
@@ -459,14 +457,29 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
         }
     }
 
+    // Detect tagged template literals: tag`...`
+    // In tree-sitter, these are call_expression where "arguments" is a template_string
+    TSNode args_node = ts_node_child_by_field_name(call_node, "arguments", strlen("arguments"));
+    if (!ts_node_is_null(args_node)) {
+        const char* args_type = ts_node_type(args_node);
+        if (strcmp(args_type, "template_string") == 0) {
+            JsTaggedTemplateNode* tagged = (JsTaggedTemplateNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_TAGGED_TEMPLATE, call_node, sizeof(JsTaggedTemplateNode));
+            tagged->tag = build_js_expression(tp, callee_node);
+            tagged->quasi = (JsTemplateLiteralNode*)build_js_template_literal(tp, args_node);
+            tagged->base.type = &TYPE_ANY;
+            return (JsAstNode*)tagged;
+        }
+    }
+
+    JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
+
     call->callee = build_js_expression(tp, callee_node);
     if (!call->callee) {
         log_error("Failed to build callee expression");
         return NULL;
     }
 
-    // Get arguments
-    TSNode args_node = ts_node_child_by_field_name(call_node, "arguments", strlen("arguments"));
     if (ts_node_is_null(args_node)) {
         // Fallback: look for arguments node by type
         uint32_t child_count = ts_node_child_count(call_node);
@@ -666,41 +679,32 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
 
         // Handle method_definition nodes (methods, getters, setters in object literals)
         if (strcmp(child_type, "method_definition") == 0) {
-            // Check if this is a getter: first child is "get" keyword
+            // Check if this is a getter or setter: look for "get"/"set" keyword child
             bool is_getter = false;
+            bool is_setter = false;
             uint32_t mchild_count = ts_node_child_count(property_node);
             for (uint32_t mi = 0; mi < mchild_count; mi++) {
                 TSNode mc = ts_node_child(property_node, mi);
                 const char* mc_type = ts_node_type(mc);
                 if (strcmp(mc_type, "get") == 0) { is_getter = true; break; }
+                if (strcmp(mc_type, "set") == 0) { is_setter = true; break; }
             }
 
             TSNode name_node = ts_node_child_by_field_name(property_node, "name", strlen("name"));
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
-            if (is_getter && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
-                // Getter: store as __get_<name> key with a function expression value
-                StrView getter_name = js_node_source(tp, name_node);
-                char get_key[256];
-                snprintf(get_key, sizeof(get_key), "__get_%.*s", (int)getter_name.length, getter_name.str);
+            if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
+                // Getter/Setter: store as __get_<name> or __set_<name> key with a function expression value
+                StrView accessor_name = js_node_source(tp, name_node);
+                char acc_key[256];
+                snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
+                         (int)accessor_name.length, accessor_name.str);
                 JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                key_id->name = name_pool_create_len(tp->name_pool, get_key, strlen(get_key));
+                key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
                 property->key = (JsAstNode*)key_id;
 
-                // Build as function expression (no params, body from getter body)
-                JsFunctionNode* func = (JsFunctionNode*)alloc_js_ast_node(tp, JS_AST_NODE_FUNCTION_EXPRESSION, property_node, sizeof(JsFunctionNode));
-                func->name = NULL;
-                func->params = NULL;
-                func->is_arrow = false;
-                func->is_async = false;
-                func->is_generator = false;
-                const char* body_type = ts_node_type(body_node);
-                if (strcmp(body_type, "statement_block") == 0) {
-                    func->body = build_js_block_statement(tp, body_node);
-                } else {
-                    func->body = build_js_expression(tp, body_node);
-                }
-                property->value = (JsAstNode*)func;
+                // Build as function expression using build_js_function (handles params for setters)
+                property->value = build_js_function(tp, property_node);
             } else if (!ts_node_is_null(name_node)) {
                 const char* name_type = ts_node_type(name_node);
                 if (strcmp(name_type, "computed_property_name") == 0) {
@@ -733,6 +737,9 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         TSNode value_node = ts_node_child_by_field_name(property_node, "value", strlen("value"));
 
         if (!ts_node_is_null(key_node)) {
+            if (strcmp(ts_node_type(key_node), "computed_property_name") == 0) {
+                property->computed = true;
+            }
             property->key = build_js_expression(tp, key_node);
         }
         if (!ts_node_is_null(value_node)) {
@@ -831,6 +838,21 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
                 if (ts_node_is_null(pat_node)) {
                     pat_node = ts_node_child_by_field_name(param_node, "name", 4);
                 }
+                // v20: check if inner pattern is rest_pattern (TS wraps ...args as required_parameter)
+                if (!ts_node_is_null(pat_node)) {
+                    const char* inner_type = ts_node_type(pat_node);
+                    if (strcmp(inner_type, "rest_pattern") == 0) {
+                        JsSpreadElementNode* rest = (JsSpreadElementNode*)alloc_js_ast_node(
+                            tp, JS_AST_NODE_REST_ELEMENT, pat_node, sizeof(JsSpreadElementNode));
+                        if (ts_node_named_child_count(pat_node) > 0) {
+                            TSNode inner = ts_node_named_child(pat_node, 0);
+                            rest->argument = build_js_expression(tp, inner);
+                        }
+                        rest->base.type = &TYPE_ARRAY;
+                        param = (JsAstNode*)rest;
+                        goto param_done;
+                    }
+                }
                 TSNode default_node = ts_node_child_by_field_name(param_node, "value", 5);
                 if (!ts_node_is_null(default_node) && !ts_node_is_null(pat_node)) {
                     // param with default: build as assignment_pattern
@@ -857,6 +879,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
                 param = build_js_expression(tp, param_node);
             }
 
+            param_done:
             if (param) {
                 if (!prev_param) {
                     func->params = param;
@@ -1183,6 +1206,22 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         super_node->name = name_pool_create_len(tp->name_pool, "super", 5);
         super_node->base.type = &TYPE_ANY;
         return (JsAstNode*)super_node;
+    } else if (strcmp(node_type, "meta_property") == 0) {
+        // Handle new.target and import.meta
+        // Tree-sitter produces: meta_property -> "new" "." "target" or "import" "." "meta"
+        uint32_t text_len = ts_node_end_byte(expr_node) - ts_node_start_byte(expr_node);
+        const char* text = tp->source + ts_node_start_byte(expr_node);
+        if (text_len >= 10 && strncmp(text, "new.target", 10) == 0) {
+            JsIdentifierNode* nt_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+            nt_node->name = name_pool_create_len(tp->name_pool, "new.target", 10);
+            nt_node->base.type = &TYPE_ANY;
+            return (JsAstNode*)nt_node;
+        }
+        // import.meta — return undefined for now
+        JsIdentifierNode* meta_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        meta_node->name = name_pool_create_len(tp->name_pool, "undefined", 9);
+        meta_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)meta_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 ||
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
                strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
@@ -1998,19 +2037,22 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
     // two template_substitution nodes; they must be merged into one quasi.
     char quasi_buf[4096];
     int quasi_len = 0;
+    char raw_buf[4096];  // raw text (escape sequences unprocessed)
+    int raw_len = 0;
 
     // Helper: flush accumulated quasi text into a quasi node
     #define FLUSH_QUASI() do { \
         JsTemplateElementNode* element = (JsTemplateElementNode*)alloc_js_ast_node( \
             tp, JS_AST_NODE_TEMPLATE_ELEMENT, template_node, sizeof(JsTemplateElementNode)); \
         element->cooked = name_pool_create_len(tp->name_pool, quasi_buf, quasi_len); \
-        element->raw = element->cooked; \
+        element->raw = name_pool_create_len(tp->name_pool, raw_buf, raw_len); \
         element->tail = false; \
         element->base.type = &TYPE_STRING; \
         if (!prev_quasi) { template_lit->quasis = (JsAstNode*)element; } \
         else { prev_quasi->next = (JsAstNode*)element; } \
         prev_quasi = (JsAstNode*)element; \
         quasi_len = 0; \
+        raw_len = 0; \
     } while(0)
 
     for (uint32_t i = 0; i < child_count; i++) {
@@ -2019,7 +2061,7 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
         TSSymbol symbol = ts_node_symbol(child);
 
         if (strcmp(child_type, "string_fragment") == 0 || symbol == sym_template_chars) {
-            // Append text to current quasi buffer
+            // Append text to current quasi buffer (cooked and raw are the same for plain text)
             StrView source = js_node_source(tp, child);
             int copy_len = (int)source.length;
             if (quasi_len + copy_len > (int)sizeof(quasi_buf) - 1)
@@ -2028,9 +2070,27 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                 memcpy(quasi_buf + quasi_len, source.str, copy_len);
                 quasi_len += copy_len;
             }
+            // Also append to raw buffer (same content for plain text)
+            int raw_copy = (int)source.length;
+            if (raw_len + raw_copy > (int)sizeof(raw_buf) - 1)
+                raw_copy = (int)sizeof(raw_buf) - 1 - raw_len;
+            if (raw_copy > 0) {
+                memcpy(raw_buf + raw_len, source.str, raw_copy);
+                raw_len += raw_copy;
+            }
         } else if (strcmp(child_type, "escape_sequence") == 0) {
-            // Decode escape sequence and append to current quasi buffer
+            // Decode escape sequence and append to current quasi buffer (cooked)
+            // Append raw source text to raw buffer (unprocessed)
             StrView source = js_node_source(tp, child);
+            // raw: append literal source
+            int raw_copy = (int)source.length;
+            if (raw_len + raw_copy > (int)sizeof(raw_buf) - 1)
+                raw_copy = (int)sizeof(raw_buf) - 1 - raw_len;
+            if (raw_copy > 0) {
+                memcpy(raw_buf + raw_len, source.str, raw_copy);
+                raw_len += raw_copy;
+            }
+            // cooked: decode escape sequence
             if (source.length >= 2 && source.str[0] == '\\') {
                 char esc = source.str[1];
                 if (esc == 'u' && source.length >= 6 && source.str[2] != '{') {
@@ -2341,9 +2401,15 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
         JsCatchNode* catch_clause = (JsCatchNode*)alloc_js_ast_node(tp, JS_AST_NODE_CATCH_CLAUSE, handler_node, sizeof(JsCatchNode));
 
         // Get catch parameter (optional in modern JS)
+        // Can be a simple identifier or a destructuring pattern ({msg} or [a, b])
         TSNode param_node = ts_node_child_by_field_name(handler_node, "parameter", 9);
         if (!ts_node_is_null(param_node)) {
-            catch_clause->param = build_js_identifier(tp, param_node);
+            const char* param_type = ts_node_type(param_node);
+            if (strcmp(param_type, "object_pattern") == 0 || strcmp(param_type, "array_pattern") == 0) {
+                catch_clause->param = build_js_expression(tp, param_node);
+            } else {
+                catch_clause->param = build_js_identifier(tp, param_node);
+            }
         }
 
         // Get catch body

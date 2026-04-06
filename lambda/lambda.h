@@ -618,6 +618,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
+#define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 #define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
@@ -1125,8 +1126,27 @@ extern "C" {
     Bool fn_not_u(Bool x);
 
     // Sign function
-    int32_t fn_sign_i(int64_t x);
-    int32_t fn_sign_f(double x);
+    int64_t fn_sign_i(int64_t x);
+    int64_t fn_sign_f(double x);
+
+    // JS Math.round (rounds to +Infinity for ties)
+    double js_math_round(double x);
+
+    // JS-semantic Math functions (boxed Item → boxed Item, handle NaN/-0/Infinity)
+    Item js_math_trunc(Item x);
+    Item js_math_sign(Item x);
+    Item js_math_floor(Item x);
+    Item js_math_ceil(Item x);
+    Item js_math_round_item(Item x);
+
+    // String.raw tagged template literal
+    Item js_string_raw(Item* args, int argc);
+
+    // Constructor static property lookup (String.raw, etc.)
+    Item js_constructor_static_property(Item ctor_name, Item prop_name);
+
+    // Mark arrow functions as non-constructable
+    void js_mark_arrow_func(Item fn_item);
 
     // Rounding functions (int versions return identity)
     int64_t fn_floor_i(int64_t x);

@@ -1,0 +1,78 @@
+{
+  "name": "Todo performance timing - all event types",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "=== Todo Performance Timing Test ==="},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Initial state ---"},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
+
+    {"type": "log", "message": "--- TOGGLE TEST: click first item (toggle on) ---"},
+    {"type": "click", "target": {"selector": ".todo-item"}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": ".todo-item .checkbox"}, "contains": "✓"},
+
+    {"type": "log", "message": "--- TOGGLE TEST: click first item again (toggle off) ---"},
+    {"type": "click", "target": {"selector": ".todo-item"}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_text", "target": {"selector": ".todo-item .checkbox"}, "equals": "○"},
+
+    {"type": "log", "message": "--- TOGGLE TEST: click 2nd item ---"},
+    {"type": "click", "target": {"selector": ".todo-item:nth-child(2)"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- TOGGLE TEST: click 3rd item ---"},
+    {"type": "click", "target": {"selector": ".todo-item:nth-child(3)"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- DELETE TEST: click delete button on first item ---"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
+
+    {"type": "log", "message": "--- DELETE TEST: click delete button again ---"},
+    {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 6},
+
+    {"type": "log", "message": "--- TEXT INPUT TEST: click input field to focus ---"},
+    {"type": "click", "target": {"selector": ".new-item-input"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "--- TEXT INPUT TEST: type 'Hello World' ---"},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "Hello World"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- ADD ITEM TEST: click Add button ---"},
+    {"type": "click", "target": {"selector": ".add-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
+
+    {"type": "log", "message": "--- ADD VIA ENTER TEST: focus input, type, press Enter ---"},
+    {"type": "click", "target": {"selector": ".new-item-input"}},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "Second task"},
+    {"type": "wait", "ms": 200},
+    {"type": "key_press", "key": "Return"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
+
+    {"type": "log", "message": "--- CLEAR COMPLETED TEST: click clear completed ---"},
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- BACKSPACE TEST: focus input, type, backspace ---"},
+    {"type": "click", "target": {"selector": ".new-item-input"}},
+    {"type": "wait", "ms": 100},
+    {"type": "type", "target": {"selector": ".new-item-input"}, "text": "abc"},
+    {"type": "wait", "ms": 200},
+    {"type": "key_press", "key": "BackSpace"},
+    {"type": "wait", "ms": 200},
+    {"type": "key_press", "key": "BackSpace"},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "=== Todo Performance Timing Test Complete ==="}
+  ]
+}

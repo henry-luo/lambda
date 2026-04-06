@@ -1,0 +1,12 @@
+{
+  "name": "Minimal clear completed test",
+  "html": "test/lambda/ui/todo.ls",
+  "viewport": {"width": 600, "height": 800},
+  "events": [
+    {"type": "log", "message": "--- Click clear completed directly ---"},
+    {"type": "wait", "ms": 300},
+    {"type": "click", "target": {"selector": ".clear-done-btn"}},
+    {"type": "wait", "ms": 300},
+    {"type": "log", "message": "--- Done ---"}
+  ]
+}

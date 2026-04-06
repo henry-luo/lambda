@@ -291,6 +291,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
 | [Radiant Layout Design](doc/dev/Radiant_Layout_Design.md) | HTML/CSS layout engine internals                                                       |
+| [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | Polyglot runtime build — Python, Bash, Ruby, and legacy C2MIR transpiler               |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 
 ## Platform Support
