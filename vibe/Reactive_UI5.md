@@ -701,6 +701,24 @@ void render_textarea_selection(RenderContext* rdcon, ViewBlock* block,
 
 **Medium risk.** The selection model is conceptually straightforward (two offsets into a string), but visual rendering of multi-line selection rectangles requires correct char→pixel mapping on each visual line. Reuses existing `SelectionState` patterns.
 
+### 8.7 Implementation Results ✅
+
+**Implemented** — All selection features for textarea are working.
+
+**Approach**: Reused existing `SelectionState` infrastructure (anchor/focus offsets, `selection_start`/`selection_extend`/`selection_clear` API) rather than creating a separate `TextareaSelectionState`. The textarea is treated as a single-view selection where both `anchor_view` and `focus_view` point to the textarea's `ViewBlock`.
+
+**Changes**:
+1. **Click-to-position caret** (`event.cpp` MOUSE_DOWN): Calculates click line from `rel_y / line_height`, finds line start offset, measures glyph widths to determine character position. Supports Shift+Click to extend selection.
+2. **Keyboard selection** (`event.cpp` KEY_DOWN): Shift+Arrow/Home/End extends selection. Unmodified arrows collapse selection to appropriate edge. Cmd+A selects all textarea text. Cmd+Home/End moves to document start/end.
+3. **Selection highlight rendering** (`render_form.cpp`): Iterates logical lines in selection range, computes highlight rectangles using `measure_text_width()`, draws semi-transparent blue ThorVG shapes (color `#3399FF`, alpha `0x60`). Render order: selection highlight → text → caret.
+4. **Click+drag selection** (`event.cpp` MOUSE_MOVE): Detects when anchor_view is a textarea form control, computes absolute textarea position by walking parent chain, calculates character offset from mouse position, extends selection via `selection_extend()`.
+
+**Test results**:
+- `todo2_selection`: 2/2 assertions pass (Cmd+A, escape)
+- All 3 existing todo2 tests pass (basic, file_switch, textarea)
+- Lambda baseline: 564/565 (same pre-existing failure)
+- Radiant baseline: 40/46 (same 6 pre-existing todo v1 failures)
+
 ---
 
 ## 9. Phase 25: Copy / Cut / Paste / Delete with Selection
@@ -817,6 +835,34 @@ on keydown(evt) {
 ### 9.7 Risk Assessment
 
 **Medium risk.** Paste requires `glfwGetClipboardString()` which returns the system clipboard — well-supported API. The main complexity is coordinating selection deletion + string splicing + caret repositioning between the engine (which manages caret/selection state) and Lambda handlers (which manage the actual text string). A clean event contract is critical.
+
+### 9.8 Implementation Results ✅
+
+**Implemented** — Full clipboard and selection-delete support for textarea.
+
+**Event contract**: Added `selection_start` and `selection_end` (character indices) to keydown/input/paste/cut event maps when a selection is active. Lambda handlers check `evt.selection_start != null` to branch between selection-replace and single-char operations.
+
+**Engine changes** (`radiant/event.cpp`, `radiant/handler.hpp`, `radiant/state_store.cpp/.hpp`):
+1. **`clipboard_get_text()`**: New function wrapping `glfwGetClipboardString()`.
+2. **`paste_text` field on EventContext**: Carries clipboard text to `build_lambda_event_map` for "paste" events.
+3. **Selection info in event map**: `build_lambda_event_map` adds `selection_start`/`selection_end` (char indices) for keydown/input/paste/cut events when selection is active.
+4. **Cmd+C**: Extracts selected substring from `form->value` via byte offsets, copies to clipboard.
+5. **Cmd+X**: Copies to clipboard, dispatches "cut" event to Lambda, sets caret to selection start, clears selection.
+6. **Cmd+V**: Reads clipboard via `clipboard_get_text()`, sets `evcon.paste_text`, dispatches "paste" event to Lambda, advances caret by paste byte length, clears selection.
+7. **Selection-aware Backspace**: If selection was active before keydown dispatch, caret moves to `sel_start` (not back 1 char). Lambda handler deletes range instead of single char.
+8. **Selection-aware Enter**: If selection was active, caret moves to `sel_start + 1`. Lambda handler replaces range with newline.
+9. **Selection-aware text input**: Captured selection state before "input" dispatch. Caret goes to `sel_start + char_bytes`. Lambda handler replaces range with typed char.
+
+**Lambda changes** (`test/lambda/ui/todo2.ls`):
+- `on input`: Selection-aware — if `evt.selection_start` present, replaces range with typed char.
+- `on keydown`: Selection-aware — Backspace/Enter check for selection and delete range accordingly.
+- `on paste`: New handler — inserts `evt.text` at caret, with selection-replace support.
+- `on cut`: New handler — deletes selected range from text string.
+
+**Test results**:
+- All 4 todo2 tests pass (basic, file_switch, selection, textarea)
+- Lambda baseline: 564/565 (same pre-existing failure)
+- Radiant baseline: 41/47 (same 6 pre-existing todo v1 failures)
 
 ---
 

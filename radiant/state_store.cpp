@@ -2389,6 +2389,15 @@ void clipboard_copy_text(const char* text) {
     }
 }
 
+const char* clipboard_get_text() {
+    extern UiContext ui_context;
+    if (ui_context.window) {
+        return glfwGetClipboardString(ui_context.window);
+    }
+    log_error("clipboard_get_text: no active window");
+    return nullptr;
+}
+
 void clipboard_copy_html(const char* html) {
     if (!html) return;
 

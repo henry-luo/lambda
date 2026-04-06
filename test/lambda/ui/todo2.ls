@@ -43,10 +43,17 @@ on click(evt) {
 }
 on input(evt) {
   if (editing) {
-    let pos = evt.caret_pos
     if (evt.target_class == "notes-edit") {
-      edit_notes = slice(edit_notes, 0, pos) ++ evt.char ++ slice(edit_notes, pos, len(edit_notes))
+      if (evt.selection_start != null) {
+        let s = evt.selection_start
+        let e = evt.selection_end
+        edit_notes = slice(edit_notes, 0, s) ++ evt.char ++ slice(edit_notes, e, len(edit_notes))
+      } else {
+        let pos = evt.caret_pos
+        edit_notes = slice(edit_notes, 0, pos) ++ evt.char ++ slice(edit_notes, pos, len(edit_notes))
+      }
     } else {
+      let pos = evt.caret_pos
       edit_text = slice(edit_text, 0, pos) ++ evt.char ++ slice(edit_text, pos, len(edit_text))
     }
   }
@@ -55,14 +62,26 @@ on keydown(evt) {
   if (editing) {
     if (evt.target_class == "notes-edit") {
       if (evt.key == "Backspace") {
-        let pos = evt.caret_pos
-        if (pos > 0) {
-          edit_notes = slice(edit_notes, 0, pos - 1) ++ slice(edit_notes, pos, len(edit_notes))
+        if (evt.selection_start != null) {
+          let s = evt.selection_start
+          let e = evt.selection_end
+          edit_notes = slice(edit_notes, 0, s) ++ slice(edit_notes, e, len(edit_notes))
+        } else {
+          let pos = evt.caret_pos
+          if (pos > 0) {
+            edit_notes = slice(edit_notes, 0, pos - 1) ++ slice(edit_notes, pos, len(edit_notes))
+          }
         }
       }
       if (evt.key == "Enter") {
-        let pos = evt.caret_pos
-        edit_notes = slice(edit_notes, 0, pos) ++ "\n" ++ slice(edit_notes, pos, len(edit_notes))
+        if (evt.selection_start != null) {
+          let s = evt.selection_start
+          let e = evt.selection_end
+          edit_notes = slice(edit_notes, 0, s) ++ "\n" ++ slice(edit_notes, e, len(edit_notes))
+        } else {
+          let pos = evt.caret_pos
+          edit_notes = slice(edit_notes, 0, pos) ++ "\n" ++ slice(edit_notes, pos, len(edit_notes))
+        }
       }
       if (evt.key == "Escape") {
         emit("update_item", {id: ~.id, text: edit_text, notes: edit_notes})
@@ -81,6 +100,36 @@ on keydown(evt) {
       }
       if (evt.key == "Escape") {
         editing = false
+      }
+    }
+  }
+}
+on paste(evt) {
+  if (editing) {
+    if (evt.target_class == "notes-edit") {
+      if (evt.selection_start != null) {
+        let s = evt.selection_start
+        let e = evt.selection_end
+        edit_notes = slice(edit_notes, 0, s) ++ evt.text ++ slice(edit_notes, e, len(edit_notes))
+      } else {
+        let pos = evt.caret_pos
+        edit_notes = slice(edit_notes, 0, pos) ++ evt.text ++ slice(edit_notes, pos, len(edit_notes))
+      }
+    } else {
+      let pos = evt.caret_pos
+      edit_text = slice(edit_text, 0, pos) ++ evt.text ++ slice(edit_text, pos, len(edit_text))
+    }
+  }
+}
+on cut(evt) {
+  if (editing) {
+    if (evt.selection_start != null) {
+      let s = evt.selection_start
+      let e = evt.selection_end
+      if (evt.target_class == "notes-edit") {
+        edit_notes = slice(edit_notes, 0, s) ++ slice(edit_notes, e, len(edit_notes))
+      } else {
+        edit_text = slice(edit_text, 0, s) ++ slice(edit_text, e, len(edit_text))
       }
     }
   }

@@ -832,8 +832,76 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
         }
     }
 
-    // Draw caret if this textarea has focus
+    // Draw selection highlight if textarea has an active selection
     RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
+    if (state && state->selection && !state->selection->is_collapsed && !is_placeholder) {
+        View* focused = focus_get(state);
+        if (focused == (View*)block && state->selection->anchor_view == focused) {
+            const char* value = form->value;
+            int val_len = value ? (int)strlen(value) : 0;
+            int sel_start = state->selection->anchor_offset;
+            int sel_end = state->selection->focus_offset;
+            if (sel_start > sel_end) { int tmp = sel_start; sel_start = sel_end; sel_end = tmp; }
+            if (sel_start < 0) sel_start = 0;
+            if (sel_end > val_len) sel_end = val_len;
+
+            if (sel_start < sel_end && value && block->font) {
+                FontBox fbox = {0};
+                setup_font(rdcon->ui_context, &fbox, block->font);
+                if (fbox.font_handle) {
+                    float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                        ? rdcon->ui_context->pixel_ratio : 1.0f;
+
+                    // iterate over each logical line and draw highlight rectangles
+                    int line_off = 0;
+                    int line_num = 0;
+                    while (line_off <= val_len) {
+                        // find end of this line
+                        int line_end_off = line_off;
+                        while (line_end_off < val_len && value[line_end_off] != '\n')
+                            line_end_off++;
+
+                        // check if this line overlaps with selection
+                        // selection range [sel_start, sel_end) may span the \n at line_end_off
+                        int line_range_end = (line_end_off < val_len) ? line_end_off + 1 : line_end_off;
+                        if (sel_start < line_range_end && sel_end > line_off) {
+                            // compute highlight x-range on this line
+                            int hl_start = sel_start > line_off ? sel_start - line_off : 0;
+                            int hl_end = sel_end < line_end_off ? sel_end - line_off : line_end_off - line_off;
+
+                            float x0 = content_x + measure_text_width(fbox.font_handle, block->font,
+                                                                       pixel_ratio, value + line_off, hl_start) * s;
+                            float x1 = content_x + measure_text_width(fbox.font_handle, block->font,
+                                                                       pixel_ratio, value + line_off, hl_end) * s;
+
+                            // if selection includes the newline, extend highlight to content edge
+                            if (sel_end > line_end_off && line_end_off < val_len)
+                                x1 = content_x + content_w;
+
+                            float hl_y = content_y + line_num * line_height;
+                            if (x1 > x0 && hl_y + line_height > y && hl_y < y + h) {
+                                // draw selection rectangle (semi-transparent blue)
+                                Tvg_Paint shape = tvg_shape_new();
+                                if (shape) {
+                                    tvg_shape_append_rect(shape, x0, hl_y, x1 - x0, line_height, 0, 0, true);
+                                    tvg_shape_set_fill_color(shape, 0x33, 0x99, 0xFF, 0x60);
+                                    tvg_canvas_push(rdcon->canvas, shape);
+                                    tvg_canvas_reset_and_draw(rdcon, false);
+                                    tvg_canvas_remove(rdcon->canvas, NULL);
+                                }
+                            }
+                        }
+
+                        if (line_end_off >= val_len) break;
+                        line_off = line_end_off + 1;
+                        line_num++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw caret if this textarea has focus
     if (state) {
         View* focused = focus_get(state);
         if (focused == (View*)block && state->caret && !is_placeholder) {
