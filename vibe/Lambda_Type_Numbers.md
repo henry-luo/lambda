@@ -397,6 +397,54 @@ This implies `f16` arithmetic is slower than `f32`. For compute-heavy code, user
 
 **Suggestion:** Use the standard software conversion routines (bit manipulation, ~10 instructions each way). `f16` is primarily a storage/interchange format, not a compute format. Arithmetic on `f16` operands should auto-promote to at least `f32`, then truncate back to `f16` only on assignment.
 
+## Prior Art
+
+Lambda's sized numeric literal syntax is directly modeled on **Rust**, which is the closest match. Other languages offer varying degrees of numeric suffix support.
+
+| Language | Syntax Style | Integer Suffixes | Float Suffixes | Case |
+|----------|-------------|-----------------|----------------|------|
+| **Rust** | `{value}{type}` | `42i8`, `255u8`, `1000i16`, `100u64` | `3.14f32`, `2.7f64` | Lowercase only (`42I8` is invalid) |
+| **F#** | Single-letter | `42y` (i8), `42uy` (u8), `42s` (i16), `42us` (u16), `42l` (i32), `42L` (i64) | `3.14f` (f32) | Mixed (`L` for int64) |
+| **Nim** | Apostrophe sep. | `42'i8`, `255'u8`, `1000'i16` | `3.14'f32` | Lowercase only |
+| **Crystal** | Underscore sep. | `42_i8`, `255_u8`, `1000_i16` | `3.14_f32` | Lowercase only |
+| **OCaml** | Letter suffixes | `42l` (i32), `42L` (i64), `42n` (nativeint) | — | Mixed |
+| **C/C++** | Class suffixes | `42U`, `42L`, `42UL`, `42LL`, `42ULL` | `3.14f`, `3.14L` | Case-insensitive |
+| **C#** | Class suffixes | `42L`, `42UL` | `3.14f`, `3.14d`, `3.14m` (decimal) | Case-insensitive |
+| **Java/Kotlin** | Limited | `42L` (long) | `3.14f`, `3.14d` | Case-insensitive |
+| **Zig** | Coercion-based | No literal suffixes — types inferred from context or explicit `@as(u8, 42)` | Same | N/A |
+| **Swift** | No suffixes | No literal suffixes — types inferred from annotation: `let x: UInt8 = 42` | Same | N/A |
+
+### Key Differences
+
+**Rust** (closest to Lambda):
+- Identical `{value}{type}` postfix syntax: `42i8`, `255u8`, `3.14f32`
+- Strictly lowercase — `42I8` is a compile error
+- Additional types not in Lambda: `i128`, `u128`, `isize`, `usize`
+- Sized arithmetic **panics on overflow** in debug builds, **wraps** in release builds. Lambda always wraps.
+
+**C-family** (C, C++, C#, Java):
+- Only distinguish broad categories (`L` for long, `U` for unsigned, `f` for float) — no per-width suffixes like `i8` or `u16`
+- Case-insensitive: `42L` and `42l` are equivalent
+- Cannot express specific bit widths in literals; must use casts: `(int8_t)42`
+
+**Nim and Crystal**:
+- Use a separator character (`'` or `_`) between value and suffix, making the suffix visually distinct
+- Otherwise semantically identical to Rust/Lambda
+
+**Zig and Swift**:
+- No numeric suffixes at all — rely on type inference and explicit type annotations
+- More verbose but avoids suffix proliferation
+
+### Design Rationale
+
+Lambda follows Rust's convention because:
+1. **Readable** — `42i8` clearly states both value and type in a single token
+2. **Unambiguous** — no separator needed; the letter after digits starts the suffix
+3. **Compact** — shorter than cast syntax (`i8(42)`) or annotation-only (`let x: i8 = 42`)
+4. **Familiar** — Rust has popularized this syntax in the systems programming community
+
+Lambda keeps suffixes **lowercase only** (matching Rust, Nim, Crystal) to avoid ambiguity with identifiers and maintain visual consistency.
+
 ## Implementation Phases
 
 ### Phase 1: Core Infrastructure
