@@ -225,6 +225,8 @@ typedef struct {
     CssSelector* selector;
     SelectorMatcher* matcher;
     View* result;
+    int target_index;   // which match to return (0-based)
+    int current_match;  // counter of matches found so far
 } SimSelectorCtx;
 
 static bool sim_selector_visitor(View* view, void* udata) {
@@ -232,14 +234,17 @@ static bool sim_selector_visitor(View* view, void* udata) {
     if (!view->is_element()) return true;
     DomElement* dom_elem = (DomElement*)view;
     if (selector_matcher_matches(ctx->matcher, ctx->selector, dom_elem, NULL)) {
-        ctx->result = view;
-        return false;  // stop on first match
+        if (ctx->current_match == ctx->target_index) {
+            ctx->result = view;
+            return false;  // stop on target match
+        }
+        ctx->current_match++;
     }
     return true;
 }
 
-// Find first element matching a CSS selector in the document
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text) {
+// Find nth element matching a CSS selector in the document (0-based index)
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index = 0) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
 
     Pool* pool = doc->pool;
@@ -266,6 +271,8 @@ static View* find_element_by_selector(DomDocument* doc, const char* selector_tex
     ctx.selector = selector;
     ctx.matcher = matcher;
     ctx.result = NULL;
+    ctx.target_index = index;
+    ctx.current_match = 0;
 
     sim_traverse_views((View*)doc->view_tree->root, sim_selector_visitor, &ctx);
     return ctx.result;
@@ -756,16 +763,16 @@ static void sim_extract_text(View* view, StrBuf* buf) {
 static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_y) {
     // Priority: selector > text > raw coordinates
     if (ev->target_selector && doc) {
-        View* elem = find_element_by_selector(doc, ev->target_selector);
+        View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
             float fx, fy;
             get_element_center_abs(elem, &fx, &fy);
             *out_x = (int)fx;
             *out_y = (int)fy;
-            log_info("event_sim: resolved selector '%s' to (%d, %d)", ev->target_selector, *out_x, *out_y);
+            log_info("event_sim: resolved selector '%s'[%d] to (%d, %d)", ev->target_selector, ev->target_index, *out_x, *out_y);
             return true;
         }
-        log_error("event_sim: selector '%s' not found", ev->target_selector);
+        log_error("event_sim: selector '%s'[%d] not found", ev->target_selector, ev->target_index);
         return false;
     }
     if (ev->target_text && doc) {
@@ -787,7 +794,7 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
 // Resolve a target to a View* element (for assertions and actions that need the element)
 static View* resolve_target_element(SimEvent* ev, DomDocument* doc) {
     if (ev->target_selector && doc) {
-        return find_element_by_selector(doc, ev->target_selector);
+        return find_element_by_selector(doc, ev->target_selector, ev->target_index);
     }
     return NULL;
 }
@@ -803,6 +810,8 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
         if (sel) ev->target_selector = mem_strdup(sel, MEM_CAT_LAYOUT);
         const char* txt = target_map.get("text").cstring();
         if (txt) ev->target_text = mem_strdup(txt, MEM_CAT_LAYOUT);
+        // target index: which nth matching element (0-based)
+        if (target_map.has("index")) ev->target_index = target_map.get("index").asInt32();
         // target can also carry x,y
         if (target_map.has("x")) ev->x = target_map.get("x").asInt32();
         if (target_map.has("y")) ev->y = target_map.get("y").asInt32();
@@ -1679,7 +1688,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             bool was_checked = false;
             if (ev->target_selector) {
                 DomDocument* doc = uicon->document;
-                form_elem = find_element_by_selector(doc, ev->target_selector);
+                form_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
                 if (form_elem && sim_is_checkbox_or_radio(form_elem)) {
                     was_checked = dom_element_has_pseudo_state((DomElement*)form_elem, PSEUDO_STATE_CHECKED);
                 } else {

@@ -22,6 +22,9 @@ typedef struct EventContext {
     char* new_target;
     bool need_repaint;
 
+    // paste text (set before dispatching "paste" event)
+    const char* paste_text;
+
     // iframe bridging: when target is inside an iframe, this points to the
     // iframe block in the parent document so events can propagate across
     // the iframe boundary

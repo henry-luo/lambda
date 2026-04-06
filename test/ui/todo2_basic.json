@@ -1,0 +1,54 @@
+{
+  "name": "Todo2 basic interactions",
+  "html": "test/lambda/ui/todo2.ls",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "log", "message": "=== Todo2 Basic Test ==="},
+    {"type": "wait", "ms": 500},
+
+    {"type": "log", "message": "--- Verify two-column layout rendered ---"},
+    {"type": "assert_count", "target": {"selector": ".file-panel"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".todo-panel"}, "count": 1},
+
+    {"type": "log", "message": "--- Verify file list has entries ---"},
+    {"type": "assert_count", "target": {"selector": ".file-entry"}, "min_count": 1},
+
+    {"type": "log", "message": "--- Click first file entry ---"},
+    {"type": "click", "target": {"selector": ".file-name"}},
+    {"type": "wait", "ms": 400},
+
+    {"type": "log", "message": "--- Verify todo lists loaded ---"},
+    {"type": "assert_count", "target": {"selector": ".todo-list"}, "min_count": 1},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "min_count": 1},
+
+    {"type": "log", "message": "--- Toggle first todo item ---"},
+    {"type": "click", "target": {"selector": ".checkbox"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Click + to add item ---"},
+    {"type": "click", "target": {"selector": ".add-icon"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Type new item text ---"},
+    {"type": "type", "target": {"selector": ".inline-add-input"}, "text": "New task"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Press Enter to add ---"},
+    {"type": "key_press", "key": "Return"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Click todo text to edit inline ---"},
+    {"type": "click", "target": {"selector": ".todo-text"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Press Escape to cancel edit ---"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "--- Delete a todo item ---"},
+    {"type": "click", "target": {"selector": ".delete-btn"}},
+    {"type": "wait", "ms": 300},
+
+    {"type": "log", "message": "=== Todo2 Basic Test Complete ==="}
+  ]
+}

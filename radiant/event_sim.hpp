@@ -133,6 +133,7 @@ struct SimEvent {
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
+    int target_index;            // 0-based index: which matching element (default 0 = first)
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
     char* input_text;            // for type action: text to type
