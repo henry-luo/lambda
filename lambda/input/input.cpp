@@ -116,7 +116,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = value.get_string();
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
     case LMD_TYPE_FUNC:
         *(Map**)field_ptr = value.map;
@@ -151,7 +151,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
             titem.string = str;
             break;
         }
-        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
         case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
             Container *container = item.container;
             titem.container = container;
@@ -236,7 +236,7 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = value.get_string();
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         Container *container = value.container;
         *(void**)field_ptr = container;

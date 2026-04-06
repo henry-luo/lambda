@@ -1792,8 +1792,8 @@ extern "C" void js_set_shaped_slot(Item object, int64_t slot, Item value) {
         *(double*)field_ptr = value.get_double();
         break;
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
         *(Container**)field_ptr = value.container;
         break;
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
