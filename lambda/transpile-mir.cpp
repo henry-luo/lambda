@@ -3700,9 +3700,13 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         AstNode* item = arr_node->item;
         while (item) {
             MIR_reg_t val = transpile_expr(mt, item);
-            // val is native double (MIR_T_D) for float literals/expressions
-            TypeId val_tid = item->type ? item->type->type_id : LMD_TYPE_ANY;
-            if (val_tid != LMD_TYPE_FLOAT) {
+            // val is native double (MIR_T_D) for float literals/expressions,
+            // but may be a boxed Item for captured variables (LMD_TYPE_ANY)
+            TypeId val_tid = get_effective_type(mt, item);
+            if (val_tid == LMD_TYPE_ANY) {
+                // unbox Item to double
+                val = emit_unbox(mt, val, LMD_TYPE_FLOAT);
+            } else if (val_tid != LMD_TYPE_FLOAT) {
                 // coerce non-float to double via i2d or unbox
                 if (val_tid == LMD_TYPE_INT) {
                     MIR_reg_t dval = new_reg(mt, "i2d", MIR_T_D);
@@ -3732,7 +3736,12 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         AstNode* item = arr_node->item;
         while (item) {
             MIR_reg_t val = transpile_expr(mt, item);
-            // val is native int64 for int literals/expressions
+            // val is native int64 for int literals/expressions,
+            // but may be a boxed Item for captured variables (LMD_TYPE_ANY)
+            TypeId val_tid = get_effective_type(mt, item);
+            if (val_tid == LMD_TYPE_ANY) {
+                val = emit_unbox(mt, val, LMD_TYPE_INT);
+            }
             emit_call_void_3(mt, "array_int_set",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
