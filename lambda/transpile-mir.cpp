@@ -3461,10 +3461,18 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         TypeId elem_tid = operand ? operand->type_id : LMD_TYPE_ANY;
                         // box the expression value to Item if not already boxed
                         MIR_reg_t boxed = emit_box(mt, val, expr_tid);
-                        // call ensure_typed_array(item, element_type_id) → void* (pointer)
-                        val = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                        if (elem_tid == LMD_TYPE_NUM_SIZED && operand) {
+                            // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
+                            ArrayNumElemType et = num_sized_to_elem_type(((TypeNumSized*)operand)->num_type);
+                            val = emit_call_2(mt, "ensure_sized_array", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)et));
+                        } else {
+                            // call ensure_typed_array(item, element_type_id) → void* (pointer)
+                            val = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
+                        }
                         // result is a pointer (stored as I64), treat as ANY
                         var_tid = LMD_TYPE_ANY;
                     }
@@ -3689,6 +3697,11 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
     TypeArray* arr_type = (TypeArray*)arr_node->type;
     bool is_int_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_INT;
     bool is_float_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_FLOAT;
+    bool is_sized_array = arr_type && arr_type->nested && arr_type->nested->type_id == LMD_TYPE_NUM_SIZED;
+    ArrayNumElemType sized_elem_type = ELEM_INT;  // default, overwritten below
+    if (is_sized_array) {
+        sized_elem_type = num_sized_to_elem_type(((TypeNumSized*)arr_type->nested)->num_type);
+    }
 
     // Specialized ArrayFloat path: array_float_new(count) + array_float_set(arr, i, val)
     // Skip specialized paths when array has let bindings (let nodes are transparent)
@@ -3751,6 +3764,29 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         }
         if (has_let) pop_scope(mt);
         return arr;  // ArrayInt* is a container pointer
+    }
+
+    // Specialized compact sized array path: array_num_new(elem_type, count) + array_num_set_item(arr, i, boxed)
+    if (is_sized_array && !any_spread && !has_let && arr_node->item) {
+        int count = (int)arr_type->length;
+        MIR_reg_t arr = emit_call_2(mt, "array_num_new", MIR_T_P,
+            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sized_elem_type),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, count));
+        int idx = 0;
+        AstNode* item = arr_node->item;
+        while (item) {
+            MIR_reg_t val = transpile_expr(mt, item);
+            TypeId val_tid = get_effective_type(mt, item);
+            MIR_reg_t boxed = emit_box(mt, val, val_tid);
+            emit_call_void_3(mt, "array_num_set_item",
+                MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, idx),
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+            idx++;
+            item = item->next;
+        }
+        if (has_let) pop_scope(mt);
+        return arr;  // ArrayNum* compact container pointer
     }
 
     // Generic array path

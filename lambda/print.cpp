@@ -5,6 +5,23 @@
 #include <inttypes.h>  // for PRId64
 #include "ast.hpp"
 
+// inline reader for compact sized array elements (avoids cross-lib dependency on array_num_get)
+static Item read_compact_elem(ArrayNum* arr, int i) {
+    switch (arr->get_elem_type()) {
+    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)arr->data)[i])};
+    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)arr->data)[i])};
+    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)arr->data)[i])};
+    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
+    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)arr->data)[i])};
+    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)arr->data)[i])};
+    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[i]))};
+    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)arr->data)[i])};
+    case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
+    case ELEM_FLOAT64: return (Item){.item = i2it((int64_t)((double*)arr->data)[i])};
+    default:           return ItemNull;
+    }
+}
+
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
@@ -589,15 +606,23 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_ARRAY_NUM: {
         strbuf_append_char(strbuf, '[');
         ArrayNum *array = item.array_num;
-        if (array->get_elem_type() == ELEM_FLOAT) {
+        ArrayNumElemType et = array->get_elem_type();
+        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
                 print_double(strbuf, array->float_items[i]);
             }
-        } else {
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_str(strbuf, ", ");
                 strbuf_append_format(strbuf, "%lld", array->items[i]);
+            }
+        } else {
+            // compact sized types: read and print each element
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_str(strbuf, ", ");
+                Item val = read_compact_elem(array, i);
+                print_item(strbuf, val, depth + 1, indent);
             }
         }
         strbuf_append_str(strbuf, "]");
@@ -746,15 +771,23 @@ void print_root_item(StrBuf *strbuf, Item item, char* indent) {
         }
     } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_content) {
         ArrayNum *array = item.array_num;
-        if (array->get_elem_type() == ELEM_FLOAT) {
+        ArrayNumElemType et = array->get_elem_type();
+        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
                 print_double(strbuf, array->float_items[i]);
             }
-        } else {
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, '\n');
                 strbuf_append_format(strbuf, "%lld", array->items[i]);
+            }
+        } else {
+            // compact sized types
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, '\n');
+                Item val = read_compact_elem(array, i);
+                print_item(strbuf, val, 0, indent);
             }
         }
     } else {

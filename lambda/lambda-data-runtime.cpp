@@ -97,7 +97,8 @@ ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
     arr->type_id = LMD_TYPE_ARRAY_NUM;
     arr->flags = elem_type;  // elem_type stored in Container::flags byte
     arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));  // 8 bytes per element for all Phase 1 types
+    int elem_size = ELEM_TYPE_SIZE[elem_type >> 4];
+    arr->data = heap_data_alloc(length * elem_size);
     return arr;
 }
 
@@ -119,6 +120,23 @@ Item array_num_get(ArrayNum *array, int64_t index) {
         return push_l(array->items[index]);
     case ELEM_FLOAT:
         return push_d(array->float_items[index]);
+    // compact sized types
+    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)array->data)[index])};
+    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)array->data)[index])};
+    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)array->data)[index])};
+    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)array->data)[index])};
+    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)array->data)[index])};
+    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)array->data)[index])};
+    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)array->data)[index]))};
+    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)array->data)[index])};
+    case ELEM_UINT64: {
+        uint64_t val = ((uint64_t*)array->data)[index];
+        uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+        *heap_val = val;
+        return (Item){.item = u64_to_item(heap_val)};
+    }
+    case ELEM_FLOAT64:
+        return push_d(((double*)array->data)[index]);
     default:
         return ItemNull;
     }
@@ -311,6 +329,109 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
 
     arr->float_items[index] = dval;
     // Update length if we're setting beyond current length
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
+}
+
+// helper: extract any numeric Item as int64_t for compact integer store
+static int64_t item_to_int_value(Item value) {
+    TypeId tid = get_type_id(value);
+    switch (tid) {
+    case LMD_TYPE_INT:       return value.get_int56();
+    case LMD_TYPE_INT64:     return value.get_int64();
+    case LMD_TYPE_FLOAT:     return (int64_t)value.get_double();
+    case LMD_TYPE_NUM_SIZED: {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
+        switch (st) {
+        case NUM_INT8:    return item_to_i8(value.item);
+        case NUM_INT16:   return item_to_i16(value.item);
+        case NUM_INT32:   return item_to_i32(value.item);
+        case NUM_UINT8:   return item_to_u8(value.item);
+        case NUM_UINT16:  return item_to_u16(value.item);
+        case NUM_UINT32:  return item_to_u32(value.item);
+        case NUM_FLOAT16: return (int64_t)item_to_f16(value.item);
+        case NUM_FLOAT32: return (int64_t)item_to_f32(value.item);
+        default:          return 0;
+        }
+    }
+    case LMD_TYPE_UINT64:    return (int64_t)value.get_uint64();
+    default:                 return 0;
+    }
+}
+
+// helper: extract any numeric Item as double for compact float store
+static double item_to_float_value(Item value) {
+    TypeId tid = get_type_id(value);
+    switch (tid) {
+    case LMD_TYPE_FLOAT:     return value.get_double();
+    case LMD_TYPE_INT:       return (double)value.get_int56();
+    case LMD_TYPE_INT64:     return (double)value.get_int64();
+    case LMD_TYPE_NUM_SIZED: {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(value.item);
+        switch (st) {
+        case NUM_FLOAT32: return (double)item_to_f32(value.item);
+        case NUM_FLOAT16: return (double)item_to_f16(value.item);
+        case NUM_INT8:    return (double)item_to_i8(value.item);
+        case NUM_INT16:   return (double)item_to_i16(value.item);
+        case NUM_INT32:   return (double)item_to_i32(value.item);
+        case NUM_UINT8:   return (double)item_to_u8(value.item);
+        case NUM_UINT16:  return (double)item_to_u16(value.item);
+        case NUM_UINT32:  return (double)item_to_u32(value.item);
+        default:          return 0.0;
+        }
+    }
+    case LMD_TYPE_UINT64:    return (double)value.get_uint64();
+    default:                 return 0.0;
+    }
+}
+
+// Generic setter for all ArrayNum elem_types, dispatches on elem_type
+void array_num_set_item(ArrayNum *arr, int64_t index, Item value) {
+    if (!arr || index < 0 || index >= arr->capacity) return;
+    switch (arr->get_elem_type()) {
+    case ELEM_INT:
+        arr->items[index] = item_to_int_value(value);
+        break;
+    case ELEM_INT64:
+        arr->items[index] = item_to_int_value(value);
+        break;
+    case ELEM_FLOAT:
+        arr->float_items[index] = item_to_float_value(value);
+        break;
+    case ELEM_INT8:
+        ((int8_t*)arr->data)[index] = (int8_t)item_to_int_value(value);
+        break;
+    case ELEM_INT16:
+        ((int16_t*)arr->data)[index] = (int16_t)item_to_int_value(value);
+        break;
+    case ELEM_INT32:
+        ((int32_t*)arr->data)[index] = (int32_t)item_to_int_value(value);
+        break;
+    case ELEM_UINT8:
+        ((uint8_t*)arr->data)[index] = (uint8_t)item_to_int_value(value);
+        break;
+    case ELEM_UINT16:
+        ((uint16_t*)arr->data)[index] = (uint16_t)item_to_int_value(value);
+        break;
+    case ELEM_UINT32:
+        ((uint32_t*)arr->data)[index] = (uint32_t)item_to_int_value(value);
+        break;
+    case ELEM_FLOAT16:
+        ((uint16_t*)arr->data)[index] = f32_to_f16_bits((float)item_to_float_value(value));
+        break;
+    case ELEM_FLOAT32:
+        ((float*)arr->data)[index] = (float)item_to_float_value(value);
+        break;
+    case ELEM_UINT64:
+        ((uint64_t*)arr->data)[index] = (uint64_t)item_to_int_value(value);
+        break;
+    case ELEM_FLOAT64:
+        ((double*)arr->data)[index] = item_to_float_value(value);
+        break;
+    default:
+        return;
+    }
     if (index >= arr->length) {
         arr->length = index + 1;
     }
@@ -1304,5 +1425,44 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
 
     // incompatible type (e.g., int[] but got a string)
     log_error("ensure_typed_array: cannot coerce %s to %s[]", get_type_name(item_tid), get_type_name(element_type_id));
+    return NULL;
+}
+
+// Runtime coercion for compact sized typed arrays (u8[], i16[], f32[], etc.)
+// Converts generic Array/List or ARRAY_NUM → compact sized ARRAY_NUM.
+void* ensure_sized_array(Item item, int64_t elem_type_int) {
+    ArrayNumElemType target_et = (ArrayNumElemType)(int)elem_type_int;
+    TypeId item_tid = get_type_id(item);
+
+    // already the correct compact typed array — pass through
+    if (item_tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == target_et) {
+            return (void*)arr;
+        }
+        // cross-convert from different ARRAY_NUM elem_type
+        int64_t length = arr->length;
+        ArrayNum* typed = array_num_new(target_et, length);
+        for (int64_t i = 0; i < length; i++) {
+            Item val = array_num_get(arr, i);
+            array_num_set_item(typed, i, val);
+        }
+        return typed;
+    }
+
+    if (item_tid == LMD_TYPE_NULL) return NULL;
+
+    // convert generic Array/List to compact sized array
+    if (item_tid == LMD_TYPE_ARRAY) {
+        Array* arr = item.array;
+        int64_t length = arr->length;
+        ArrayNum* typed = array_num_new(target_et, length);
+        for (int64_t i = 0; i < length; i++) {
+            array_num_set_item(typed, i, arr->items[i]);
+        }
+        return typed;
+    }
+
+    log_error("ensure_sized_array: cannot coerce %s to compact typed array", get_type_name(item_tid));
     return NULL;
 }

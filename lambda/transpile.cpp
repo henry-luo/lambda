@@ -2164,14 +2164,22 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         bool needs_coerce = (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL ||
                              rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_ARRAY);
         if (needs_coerce && operand) {
-            const char* cast_type = "Array";
             TypeId elem_tid = operand->type_id;
-            if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
-            else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
-            else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
-            strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
-            transpile_box_item(tp, asn_node->as);
-            strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+            if (elem_tid == LMD_TYPE_NUM_SIZED) {
+                // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
+                ArrayNumElemType et = num_sized_to_elem_type(((TypeNumSized*)operand)->num_type);
+                strbuf_append_str(tp->code_buf, "(ArrayNum*)ensure_sized_array(");
+                transpile_box_item(tp, asn_node->as);
+                strbuf_append_format(tp->code_buf, ",%d)", (int)et);
+            } else {
+                const char* cast_type = "Array";
+                if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
+                else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
+                else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
+                strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
+                transpile_box_item(tp, asn_node->as);
+                strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+            }
         } else {
             transpile_expr(tp, asn_node->as);
         }
@@ -4407,9 +4415,10 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
+    bool is_sized_array = type->nested && type->nested->type_id == LMD_TYPE_NUM_SIZED;
 
     // for arrays with spreadable items (for-expressions, spread, pipe), use push path
-    if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
+    if (!is_int_array && !is_int64_array && !is_float_array && !is_sized_array && has_spreadable_item(array_node->item)) {
         strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
         AstNode* item = array_node->item;
         while (item) {
@@ -4424,6 +4433,29 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
         }
         // return arr as Array* (consistent with non-spreadable path which returns array_fill result)
         // boxing to Item will be done by transpile_box_item when needed
+        strbuf_append_str(tp->code_buf, " arr; })");
+        return;
+    }
+
+    // Specialized compact sized array path: array_num_new(elem_type, count) + array_num_set_item(arr, i, boxed)
+    if (is_sized_array && array_node->item) {
+        ArrayNumElemType elem_type = num_sized_to_elem_type(((TypeNumSized*)type->nested)->num_type);
+        strbuf_append_str(tp->code_buf, "({ArrayNum* arr = array_num_new(");
+        strbuf_append_int(tp->code_buf, (int)elem_type);
+        strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_int(tp->code_buf, type->length);
+        strbuf_append_str(tp->code_buf, ");\n");
+        int idx = 0;
+        AstNode* item = array_node->item;
+        while (item) {
+            strbuf_append_str(tp->code_buf, " array_num_set_item(arr,");
+            strbuf_append_int(tp->code_buf, idx);
+            strbuf_append_str(tp->code_buf, ",");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            idx++;
+            item = item->next;
+        }
         strbuf_append_str(tp->code_buf, " arr; })");
         return;
     }

@@ -146,12 +146,70 @@ typedef uint8_t NumSizedType;
 // (is_content, is_spreadable, is_heap, is_data_migrated)
 // ============================================================================
 enum EnumArrayNumElemType {
+    // Lambda's standard numeric types (8 bytes/element each):
     ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
     ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
     ELEM_INT64 = 0x20,   // 8 bytes  — int64 (was ARRAY_INT64)
-    ELEM_NUM_COUNT = 3
+
+    // Compact sized integer types:
+    ELEM_INT8    = 0x30,  // 1 byte   — maps to NUM_INT8
+    ELEM_INT16   = 0x40,  // 2 bytes  — maps to NUM_INT16
+    ELEM_INT32   = 0x50,  // 4 bytes  — maps to NUM_INT32
+    ELEM_UINT8   = 0x60,  // 1 byte   — maps to NUM_UINT8
+    ELEM_UINT16  = 0x70,  // 2 bytes  — maps to NUM_UINT16
+    ELEM_UINT32  = 0x80,  // 4 bytes  — maps to NUM_UINT32
+
+    // Compact sized float types:
+    ELEM_FLOAT16 = 0x90,  // 2 bytes  — maps to NUM_FLOAT16
+    ELEM_FLOAT32 = 0xA0,  // 4 bytes  — maps to NUM_FLOAT32
+
+    // Explicit 64-bit types:
+    ELEM_UINT64  = 0xB0,  // 8 bytes
+    ELEM_FLOAT64 = 0xC0,  // 8 bytes  — explicit f64 (same storage as ELEM_FLOAT)
+
+    ELEM_NUM_COUNT = 14
 };
 typedef uint8_t ArrayNumElemType;
+
+// Bytes per element, indexed by (elem_type >> 4)
+static const uint8_t ELEM_TYPE_SIZE[16] = {
+    8, // 0x00 ELEM_INT     — int64_t
+    8, // 0x10 ELEM_FLOAT   — double
+    8, // 0x20 ELEM_INT64   — int64_t
+    1, // 0x30 ELEM_INT8
+    2, // 0x40 ELEM_INT16
+    4, // 0x50 ELEM_INT32
+    1, // 0x60 ELEM_UINT8
+    2, // 0x70 ELEM_UINT16
+    4, // 0x80 ELEM_UINT32
+    2, // 0x90 ELEM_FLOAT16
+    4, // 0xA0 ELEM_FLOAT32
+    8, // 0xB0 ELEM_UINT64
+    8, // 0xC0 ELEM_FLOAT64
+    0, // 0xD0 reserved
+    0, // 0xE0 reserved
+    0, // 0xF0 reserved
+};
+
+// Convert NumSizedType to ArrayNumElemType
+static inline ArrayNumElemType num_sized_to_elem_type(NumSizedType nst) {
+    switch (nst) {
+        case NUM_INT8:    return ELEM_INT8;
+        case NUM_INT16:   return ELEM_INT16;
+        case NUM_INT32:   return ELEM_INT32;
+        case NUM_UINT8:   return ELEM_UINT8;
+        case NUM_UINT16:  return ELEM_UINT16;
+        case NUM_UINT32:  return ELEM_UINT32;
+        case NUM_FLOAT16: return ELEM_FLOAT16;
+        case NUM_FLOAT32: return ELEM_FLOAT32;
+        default:          return ELEM_INT;
+    }
+}
+
+// Check if an elem_type uses compact (sub-8-byte) storage
+static inline int elem_type_is_compact(ArrayNumElemType et) {
+    return ELEM_TYPE_SIZE[et >> 4] < 8;
+}
 
 // Sized numeric packing: value in [31:0], sub-type in [55:48], type_id in [63:56]
 // Bits [47:32] are unused padding.
@@ -481,6 +539,7 @@ struct Container {
         union {
             int64_t* items;        // for ELEM_INT, ELEM_INT64
             double* float_items;   // for ELEM_FLOAT
+            void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
         };
         int64_t length;  // number of elements
         int64_t extra;   // count of extra elements stored at end
@@ -991,6 +1050,7 @@ extern "C" {
 
     void array_float_set(ArrayNum *arr, int64_t index, double value);
     void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
+    void array_num_set_item(ArrayNum *arr, int64_t index, Item value);
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
@@ -1377,6 +1437,7 @@ extern "C" {
     // converts generic Array/List to typed array, or validates existing typed array
     // returns pointer to the coerced typed array, or NULL if elements are incompatible
     void* ensure_typed_array(Item item, TypeId element_type_id);
+    void* ensure_sized_array(Item item, int64_t elem_type);
 
     // VMap system functions
     Item vmap_new();

@@ -816,20 +816,32 @@ NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lam
 
 ## Implementation Phases
 
-### Phase 1: Core `ArrayNum` Infrastructure
-- Define `ArrayNumElemType` enum and `ArrayNum` struct
-- Replace `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` → `LMD_TYPE_ARRAY_NUM`
-- Implement `array_num_new()`, `array_num_get()`, `array_num_set_*()`
-- Add compatibility shims: `array_int_new()` → `array_num_new(ELEM_INT, ...)`, etc.
-- Migrate existing `ArrayInt`/`ArrayInt64`/`ArrayFloat` code to `ArrayNum` with `ELEM_INT`/`ELEM_INT64`/`ELEM_FLOAT`
-- Collapse triplicated `case` branches across 16 files into single `case LMD_TYPE_ARRAY_NUM:`
-- Update `get_type_name()` to return `"int[]"`, `"float[]"`, `"i8[]"`, `"u8[]"`, etc. based on `elem_type`
-- Register new functions in `sys_func_registry.c`
-- Update GC heap (`gc_heap.c`) to handle single `ARRAY_NUM` type
+### Phase 1: Core `ArrayNum` Infrastructure ✅ COMPLETED
+- ✅ Define `ArrayNumElemType` enum and `ArrayNum` struct
+- ✅ Replace `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` → `LMD_TYPE_ARRAY_NUM`
+- ✅ Implement `array_num_new()`, `array_num_get()`, `array_num_set_*()`
+- ✅ Add compatibility shims: `array_int_new()` → `array_num_new(ELEM_INT, ...)`, etc.
+- ✅ Migrate existing `ArrayInt`/`ArrayInt64`/`ArrayFloat` code to `ArrayNum` with `ELEM_INT`/`ELEM_INT64`/`ELEM_FLOAT`
+- ✅ Collapse triplicated `case` branches across 16 files into single `case LMD_TYPE_ARRAY_NUM:`
+- ✅ Update `get_type_name()` to return `"int[]"`, `"float[]"`, `"i8[]"`, `"u8[]"`, etc. based on `elem_type`
+- ✅ Register new functions in `sys_func_registry.c`
+- ✅ Update GC heap (`gc_heap.c`) to handle single `ARRAY_NUM` type
 
-### Phase 2: Literal Parsing & Type Annotations
-- Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (replaces `array_int_new`)
-- Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (replaces `array_float_new`)
+**Files modified (~22):** lambda.h, lambda.hpp, lambda-data.cpp, lambda-data-runtime.cpp, lambda-eval.cpp, lambda-eval-num.cpp, lambda-vector.cpp, lambda-mem.cpp *(not listed but touched)*, print.cpp, transpile.cpp, transpile-mir.cpp, transpile-call.cpp, build_ast.cpp, mark_builder.cpp, mark_editor.cpp, mark_reader.cpp *(not listed but touched)*, input/input.cpp, js/js_runtime.cpp, validator/validate.cpp, validator/validate_pattern.cpp, template_registry.cpp, lib/gc_heap.c
+
+**Key design decisions during implementation:**
+- `EnumArrayNumElemType` values stored in upper nibble of `Container::flags` byte: `ELEM_INT=0x00`, `ELEM_FLOAT=0x10`, `ELEM_INT64=0x20`. Lower nibble preserves `is_content`/`is_spreadable`/`is_heap`/`is_data_migrated` flag bits.
+- `get_elem_type()` = `(ArrayNumElemType)(flags & 0xF0)` — masks upper nibble only.
+- Enum shift: `LMD_TYPE_ARRAY_NUM=16` occupies the old `ARRAY_INT` slot. `ARRAY` and all subsequent types shifted down by 2 (old `ARRAY_INT64=17` and `ARRAY_FLOAT=18` slots freed).
+- `ELEM_INT` arrays from literal `[1,2,3]` behave as "content" in `take`/`drop`/`slice`/`reverse` (returning generic Lists with `is_content=1`), matching old `ARRAY_INT` fallback behavior. `ELEM_INT64`/`ELEM_FLOAT` arrays from `sort`/arithmetic return typed `ArrayNum` (value types, displayed with brackets).
+- MIR transpiler's runtime type-check path for `arr[i] = int_val` checks `flags` upper nibble at runtime to avoid storing raw int64 bits into `ELEM_FLOAT` arrays (would corrupt float storage).
+- MIR transpiler's specialized ArrayInt/ArrayFloat literal paths now unbox captured closure variables and for-loop key variables (`LMD_TYPE_ANY`) before storing into typed arrays.
+
+**Test results: 565/565 baseline tests passing.**
+
+### Phase 2: Literal Parsing & Type Annotations (partially complete)
+- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (via `array_int_new` shim)
+- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (via `array_float_new` shim)
 - Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)`
 - Extend `ensure_typed_array()` for `ARRAY_NUM` coercion
 - Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
