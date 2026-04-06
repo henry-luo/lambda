@@ -87,6 +87,10 @@ struct DomNode {
     // source line number in the original HTML file (0 = not tracked)
     int source_line;
 
+    // Phase 16: incremental layout support
+    bool layout_dirty;                // marked for relayout in incremental mode
+    float layout_height_contribution; // advance_y delta from this node during parent's layout
+
     // node_name() is for all nodes, including text and comment nodes
     // whereas tag_name is only for element nodes
     const char* node_name() const;
@@ -173,7 +177,8 @@ protected:
     // Constructor (only callable by derived classes)
     DomNode(DomNodeType type) : node_type(type), parent(nullptr),
         next_sibling(nullptr), prev_sibling(nullptr), view_type(RDT_VIEW_NONE),
-        x(0), y(0), width(0), height(0), source_line(0) {}
+        x(0), y(0), width(0), height(0), source_line(0),
+        layout_dirty(false), layout_height_contribution(0) {}
 };
 
 // ============================================================================

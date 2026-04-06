@@ -3138,7 +3138,32 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
                     // inline content flow
                     do {
-                        layout_flow_node(lycon, child);
+                        float pre_advance_y = lycon->block.advance_y;
+                        // Phase 16: skip unchanged block elements in incremental layout
+                        if (lycon->doc && lycon->doc->incremental_layout
+                            && child->is_element() && !child->layout_dirty
+                            && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
+                            DomElement* skip_elem = (DomElement*)child;
+                            // Adjust y position (may have shifted due to upstream changes)
+                            skip_elem->y = lycon->block.advance_y;
+                            // Advance by stored contribution from previous layout pass
+                            lycon->block.advance_y += skip_elem->layout_height_contribution;
+                            // Track width for parent shrink-to-fit
+                            if (skip_elem->bound) {
+                                lycon->block.max_width = max(lycon->block.max_width,
+                                    lycon->line.left + skip_elem->width
+                                    + skip_elem->bound->margin.left + skip_elem->bound->margin.right);
+                            } else {
+                                lycon->block.max_width = max(lycon->block.max_width,
+                                    lycon->line.left + skip_elem->width);
+                            }
+                            log_info("[TIMING] Phase 16: skip unchanged subtree %s (h=%.1f, contrib=%.1f)",
+                                skip_elem->source_loc(), skip_elem->height, skip_elem->layout_height_contribution);
+                        } else {
+                            layout_flow_node(lycon, child);
+                        }
+                        // Phase 16: save height contribution for future incremental passes
+                        child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         child = child->next_sibling;
                     } while (child);
                     // handle last line

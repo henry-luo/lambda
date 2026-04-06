@@ -200,6 +200,9 @@ FontContext* font_context_create(FontContextConfig* config) {
     // create bitmap cache for rendered glyphs (LRU, up to max_cached_glyphs)
     ctx->bitmap_cache = NULL; // lazily created in font_render_glyph on first use
 
+    // Phase 17: loaded glyph cache (lazily created in font_load_glyph)
+    ctx->loaded_glyph_cache = NULL;
+
     log_info("font_context_create: initialized (pixel_ratio=%.1f, max_faces=%d, max_glyphs=%d)",
              ctx->config.pixel_ratio, ctx->config.max_cached_faces, ctx->config.max_cached_glyphs);
 
@@ -224,6 +227,12 @@ void font_context_destroy(FontContext* ctx) {
     if (ctx->bitmap_cache) {
         hashmap_free(ctx->bitmap_cache);
         ctx->bitmap_cache = NULL;
+    }
+
+    // Phase 17: free loaded glyph cache
+    if (ctx->loaded_glyph_cache) {
+        hashmap_free(ctx->loaded_glyph_cache);
+        ctx->loaded_glyph_cache = NULL;
     }
 
     // destroy font database

@@ -804,6 +804,7 @@ void caret_set(RadiantState* state, View* view, int char_offset) {
             return;
         }
         memset(state->caret, 0, sizeof(CaretState));
+        state->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
     }
 
     CaretState* caret = state->caret;
@@ -826,6 +827,7 @@ void caret_set_position(RadiantState* state, View* view, int line, int column) {
         state->caret = (CaretState*)arena_alloc(state->arena, sizeof(CaretState));
         if (!state->caret) return;
         memset(state->caret, 0, sizeof(CaretState));
+        state->caret->prev_abs_x = -1;  // Phase 19: not yet rendered
     }
 
     CaretState* caret = state->caret;

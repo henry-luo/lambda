@@ -234,6 +234,9 @@ struct FontContext {
     // glyph bitmap cache
     struct hashmap*  bitmap_cache;
 
+    // Phase 17: full LoadedGlyph cache for font_load_glyph (persistent across frames)
+    struct hashmap*  loaded_glyph_cache;
+
     // codepoint → fallback handle cache (for font_find_codepoint_fallback)
     struct hashmap*  codepoint_fallback_cache;
 
@@ -278,6 +281,19 @@ typedef struct BitmapCacheEntry {
     FontHandle*     handle;
     GlyphBitmap     bitmap;
 } BitmapCacheEntry;
+
+// ============================================================================
+// Phase 17: Full LoadedGlyph cache entry for font_load_glyph
+// Caches the complete glyph (bitmap + metrics) to avoid repeated FT_Load_Glyph.
+// Bitmap data is deep-copied into glyph_arena for persistence across frames.
+// ============================================================================
+
+typedef struct LoadedGlyphCacheEntry {
+    FontHandle* caller_handle;  // handle passed by caller (key part 1)
+    uint32_t    codepoint;      // (key part 2)
+    bool        for_rendering;  // (key part 3)
+    LoadedGlyph glyph;          // full copy; bitmap.buffer points to glyph_arena
+} LoadedGlyphCacheEntry;
 
 // ============================================================================
 // Internal functions — called across font module source files

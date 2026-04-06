@@ -4300,6 +4300,44 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     // --- Incremental path ---
     log_debug("rebuild_lambda_doc_incremental: patching %d subtree(s)", result_count);
 
+    // Phase 16: Helper to mark a subtree as layout_dirty (stack-based, handles arbitrary depth)
+    auto mark_dirty_subtree = [](DomNode* root) {
+        if (!root) return;
+        DomNode* stack[256];
+        int top = 0;
+        stack[top++] = root;
+        while (top > 0) {
+            DomNode* n = stack[--top];
+            n->layout_dirty = true;
+            if (n->is_element()) {
+                DomNode* c = ((DomElement*)n)->first_child;
+                while (c && top < 255) {
+                    stack[top++] = c;
+                    c = c->next_sibling;
+                }
+            }
+        }
+    };
+
+    // Phase 16: Helper to clear layout_dirty on all nodes
+    auto clear_dirty_subtree = [](DomNode* root) {
+        if (!root) return;
+        DomNode* stack[256];
+        int top = 0;
+        stack[top++] = root;
+        while (top > 0) {
+            DomNode* n = stack[--top];
+            n->layout_dirty = false;
+            if (n->is_element()) {
+                DomNode* c = ((DomElement*)n)->first_child;
+                while (c && top < 255) {
+                    stack[top++] = c;
+                    c = c->next_sibling;
+                }
+            }
+        }
+    };
+
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
@@ -4363,6 +4401,20 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
         if (i < 16) new_doms[i] = new_dom;
 
+        // Phase 16: Mark new subtree as layout_dirty
+        mark_dirty_subtree((DomNode*)new_dom);
+
+        // Phase 15: Invalidate ancestor styles only (new subtree nodes already have styles_resolved=false)
+        // Phase 16: Mark ancestors as layout_dirty for incremental layout
+        DomNode* ancestor = (DomNode*)parent_dom;
+        while (ancestor) {
+            if (ancestor->is_element()) {
+                ((DomElement*)ancestor)->styles_resolved = false;
+            }
+            ancestor->layout_dirty = true;
+            ancestor = ancestor->parent;
+        }
+
         // Phase 12.2: Apply CSS cascade to new subtree only
         if (css_engine && inline_sheets && inline_count > 0) {
             SelectorMatcher* matcher = selector_matcher_create(doc->pool);
@@ -4379,10 +4431,18 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
     auto t_dom_css = high_resolution_clock::now();
 
-    // Reuse ViewTree instead of leaking it (destroy pool, keep struct)
+    // Reuse ViewTree — Phase 16: incremental layout preserves pool for clean elements
     if (doc->view_tree) {
-        view_pool_destroy(doc->view_tree);
+        // Phase 16: DON'T destroy pool — preserve BoundaryProp etc. for unchanged elements
+        // view_pool_destroy(doc->view_tree);  // disabled for incremental layout
+        doc->incremental_layout = true;
+        // Phase 15: Skip blanket reset_styles_resolved — only ancestors + new nodes need re-resolution
+        doc->skip_style_reset = true;
         layout_html_doc(uicon, doc, true);
+        doc->skip_style_reset = false;
+        doc->incremental_layout = false;
+        // Phase 16: Clear layout_dirty flags for next pass
+        if (doc->root) clear_dirty_subtree((DomNode*)doc->root);
     } else {
         layout_html_doc(uicon, doc, false);
     }
