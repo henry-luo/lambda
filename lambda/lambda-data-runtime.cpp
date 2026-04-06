@@ -89,22 +89,54 @@ Item array_get(Array *array, int64_t index) {
     }
 }
 
-ArrayInt* array_int() {
-    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;
+// ============================================================================
+// Unified ArrayNum factory
+// ============================================================================
+ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length) {
+    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->flags = elem_type;  // elem_type stored in Container::flags byte
+    arr->length = length;  arr->capacity = length;
+    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));  // 8 bytes per element for all Phase 1 types
+    return arr;
+}
+
+// Unified ArrayNum getter — dispatches on elem_type
+Item array_num_get(ArrayNum *array, int64_t index) {
+    if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
+    if (array->type_id != LMD_TYPE_ARRAY_NUM)
+        return array_get((Array*)array, index);
+    if (index < 0 || index >= array->length) {
+        return ItemNull;
+    }
+    switch (array->get_elem_type()) {
+    case ELEM_INT: {
+        int64_t val = array->items[index];
+        Item item = (Item){.item = i2it(val)};
+        return item;
+    }
+    case ELEM_INT64:
+        return push_l(array->items[index]);
+    case ELEM_FLOAT:
+        return push_d(array->float_items[index]);
+    default:
+        return ItemNull;
+    }
+}
+
+ArrayNum* array_int() {
+    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->flags = ELEM_INT;
     return arr;
 }
 
 // used when there's no interleaving with transpiled code
-ArrayInt* array_int_new(int64_t length) {
-    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));
-    return arr;
+ArrayNum* array_int_new(int64_t length) {
+    return array_num_new(ELEM_INT, length);
 }
 
-ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
+ArrayNum* array_int_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
@@ -118,10 +150,10 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
     return arr;
 }
 
-Item array_int_get(ArrayInt *array, int64_t index) {
+Item array_int_get(ArrayNum *array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_INT)
+    if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_debug("array_int_get: index out of bounds: %lld", (long long)index);
@@ -134,27 +166,24 @@ Item array_int_get(ArrayInt *array, int64_t index) {
 
 // Fast path: return raw int64_t without boxing — for use when result type is known int
 // Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int_get_raw(ArrayInt *array, int64_t index) {
+int64_t array_int_get_raw(ArrayNum *array, int64_t index) {
     if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
     return array->items[index];
 }
 
-ArrayInt64* array_int64() {
-    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
-    arr->type_id = LMD_TYPE_ARRAY_INT64;
+ArrayNum* array_int64() {
+    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->flags = ELEM_INT64;
     return arr;
 }
 
 // used when there's no interleaving with transpiled code
-ArrayInt64* array_int64_new(int64_t length) {
-    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
-    arr->type_id = LMD_TYPE_ARRAY_INT64;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)heap_data_alloc(length * sizeof(int64_t));
-    return arr;
+ArrayNum* array_int64_new(int64_t length) {
+    return array_num_new(ELEM_INT64, length);
 }
 
-ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
+ArrayNum* array_int64_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
@@ -168,10 +197,10 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
     return arr;
 }
 
-Item array_int64_get(ArrayInt64* array, int64_t index) {
+Item array_int64_get(ArrayNum* array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_INT64)
+    if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_debug("array_int64_get: index out of bounds: %lld", (long long)index);
@@ -182,73 +211,71 @@ Item array_int64_get(ArrayInt64* array, int64_t index) {
 
 // Fast path: return raw int64_t without boxing
 // Only used for immutable arrays (let) where type widening cannot occur.
-int64_t array_int64_get_raw(ArrayInt64 *array, int64_t index) {
+int64_t array_int64_get_raw(ArrayNum *array, int64_t index) {
     if (!array || (uint64_t)index >= (uint64_t)array->length) return 0;
     return array->items[index];
 }
 
-ArrayFloat* array_float() {
-    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+ArrayNum* array_float() {
+    ArrayNum *arr = (ArrayNum*)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+    arr->type_id = LMD_TYPE_ARRAY_NUM;
+    arr->flags = ELEM_FLOAT;
     return arr;
 }
 
 // used when there's no interleaving with transpiled code
-ArrayFloat* array_float_new(int64_t length) {
-    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (double*)heap_data_alloc(length * sizeof(double));
-    return arr;
+ArrayNum* array_float_new(int64_t length) {
+    return array_num_new(ELEM_FLOAT, length);
 }
 
-ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
+ArrayNum* array_float_fill(ArrayNum *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-        arr->items = (double*)heap_data_alloc(count * sizeof(double));
+        arr->type_id = LMD_TYPE_ARRAY_NUM;
+        arr->flags = ELEM_FLOAT;
+        arr->float_items = (double*)heap_data_alloc(count * sizeof(double));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, double);
+            arr->float_items[i] = va_arg(args, double);
         }
         va_end(args);
     }
     return arr;
 }
 
-Item array_float_get(ArrayFloat* array, int64_t index) {
+Item array_float_get(ArrayNum* array, int64_t index) {
     if (!array || ((uintptr_t)array >> 56)) { return ItemNull; }
     // runtime type check: array may have been converted to generic by fn_array_set
-    if (array->type_id != LMD_TYPE_ARRAY_FLOAT)
+    if (array->type_id != LMD_TYPE_ARRAY_NUM)
         return array_get((Array*)array, index);
     if (index < 0 || index >= array->length) {
         log_debug("array_float_get: index out of bounds: %lld", (long long)index);
         return ItemNull;
     }
-    return push_d(array->items[index]);
+    return push_d(array->float_items[index]);
 }
 
 // fast path — only used for immutable arrays where type widening cannot occur
-double array_float_get_value(ArrayFloat *arr, int64_t index) {
+double array_float_get_value(ArrayNum *arr, int64_t index) {
     if (!arr || index < 0 || index >= arr->length) {
         return NAN;  // Return NaN for invalid access
     }
-    return arr->items[index];
+    return arr->float_items[index];
 }
 
-void array_float_set(ArrayFloat *arr, int64_t index, double value) {
+void array_float_set(ArrayNum *arr, int64_t index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
-    arr->items[index] = value;
+    arr->float_items[index] = value;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
         arr->length = index + 1;
     }
 }
 
-void array_int_set(ArrayInt *arr, int64_t index, int64_t value) {
+void array_int_set(ArrayNum *arr, int64_t index, int64_t value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;
     }
@@ -259,7 +286,7 @@ void array_int_set(ArrayInt *arr, int64_t index, int64_t value) {
 }
 
 // set with item value
-void array_float_set_item(ArrayFloat *arr, int64_t index, Item value) {
+void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
@@ -282,7 +309,7 @@ void array_float_set_item(ArrayFloat *arr, int64_t index, Item value) {
             return;  // Unsupported type, do nothing
     }
 
-    arr->items[index] = dval;
+    arr->float_items[index] = dval;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
         arr->length = index + 1;
@@ -384,32 +411,12 @@ void array_push_spread(Array* arr, Item item) {
             return;
         }
     }
-    // check if this is a spreadable ArrayInt
-    if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* inner = item.array_int;
+    // check if this is a spreadable ArrayNum
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* inner = item.array_num;
         if (inner && inner->is_spreadable) {
-            for (int i = 0; i < inner->length; i++) {
-                array_push(arr, {.item = i2it(inner->items[i])});
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayInt64
-    if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* inner = item.array_int64;
-        if (inner && inner->is_spreadable) {
-            for (int i = 0; i < inner->length; i++) {
-                array_push(arr, {.item = l2it(inner->items[i])});
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayFloat
-    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* inner = item.array_float;
-        if (inner && inner->is_spreadable) {
-            for (int i = 0; i < inner->length; i++) {
-                array_push(arr, {.item = d2it(inner->items[i])});
+            for (int64_t i = 0; i < inner->length; i++) {
+                array_push(arr, array_num_get(inner, i));
             }
             return;
         }
@@ -430,24 +437,10 @@ void array_push_spread_all(Array* arr, Item item) {
             return;
         }
     }
-    if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* inner = item.array_int;
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* inner = item.array_num;
         if (inner) {
-            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = i2it(inner->items[i])});
-            return;
-        }
-    }
-    if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* inner = item.array_int64;
-        if (inner) {
-            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = l2it(inner->items[i])});
-            return;
-        }
-    }
-    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* inner = item.array_float;
-        if (inner) {
-            for (int i = 0; i < inner->length; i++) array_push(arr, {.item = d2it(inner->items[i])});
+            for (int64_t i = 0; i < inner->length; i++) array_push(arr, array_num_get(inner, i));
             return;
         }
     }
@@ -466,14 +459,8 @@ Item item_spread(Item item) {
     } else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.list;
         if (list) list->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item.array_int;
-        if (arr) arr->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        if (arr) arr->is_spreadable = true;
-    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
         if (arr) arr->is_spreadable = true;
     }
     // for other types, just return as-is (they will be pushed normally)
@@ -604,7 +591,7 @@ Item _map_read_field(ShapeEntry* field, void* map_data) {
         return {.item = y2it(*(char**)field_ptr)};
     case LMD_TYPE_BINARY:
         return {.item = x2it(*(char**)field_ptr)};
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         Container* container = *(Container**)field_ptr;
         if (!container) return ItemNull;
@@ -862,12 +849,8 @@ Item item_at(Item data, int64_t index) {
         return ItemNull;  // indexing scalars returns null silently
     case LMD_TYPE_ARRAY:
         return array_get(data.array, index);
-    case LMD_TYPE_ARRAY_INT:
-        return array_int_get(data.array_int, index);
-    case LMD_TYPE_ARRAY_INT64:
-        return array_int64_get(data.array_int64, index);
-    case LMD_TYPE_ARRAY_FLOAT:
-        return array_float_get(data.array_float, index);
+    case LMD_TYPE_ARRAY_NUM:
+        return array_num_get(data.array_num, index);
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
         if (index < 0 || index >= range->length) { return ItemNull; }
@@ -1213,14 +1196,17 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     TypeId item_tid = get_type_id(item);
 
     // already the correct typed array — pass through (container types are direct pointers)
-    if (element_type_id == LMD_TYPE_INT &&
-        (item_tid == LMD_TYPE_ARRAY_INT || item_tid == LMD_TYPE_RANGE)) {
-        return (void*)item.container;
+    // already the correct typed array — pass through
+    if (item_tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        ArrayNumElemType et = arr->get_elem_type();
+        if ((element_type_id == LMD_TYPE_INT && et == ELEM_INT) ||
+            (element_type_id == LMD_TYPE_FLOAT && et == ELEM_FLOAT) ||
+            (element_type_id == LMD_TYPE_INT64 && et == ELEM_INT64)) {
+            return (void*)arr;
+        }
     }
-    if (element_type_id == LMD_TYPE_FLOAT && item_tid == LMD_TYPE_ARRAY_FLOAT) {
-        return (void*)item.container;
-    }
-    if (element_type_id == LMD_TYPE_INT64 && item_tid == LMD_TYPE_ARRAY_INT64) {
+    if (element_type_id == LMD_TYPE_INT && item_tid == LMD_TYPE_RANGE) {
         return (void*)item.container;
     }
 
@@ -1228,44 +1214,40 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     if (item_tid == LMD_TYPE_NULL) return NULL;
 
     // -----------------------------------------------------------------------
-    // Cross-convert any typed array (ArrayInt, ArrayInt64, ArrayFloat) to the
-    // target typed array.  Handles every mismatch combination generically:
-    //   e.g.  var arr:int[]   = fill(10, 0.0)   — ArrayFloat  → ArrayInt
-    //         var arr:float[] = fill(10, 0)     — ArrayInt    → ArrayFloat
-    //         var arr:int[]   = some_int64_arr  — ArrayInt64  → ArrayInt
+    // Cross-convert between ArrayNum elem_types
     // -----------------------------------------------------------------------
-    if (item_tid == LMD_TYPE_ARRAY_INT || item_tid == LMD_TYPE_ARRAY_INT64 ||
-        item_tid == LMD_TYPE_ARRAY_FLOAT) {
-        // extract source length and per-element accessor
-        int64_t length;
-        if (item_tid == LMD_TYPE_ARRAY_INT)        length = item.array_int->length;
-        else if (item_tid == LMD_TYPE_ARRAY_INT64)  length = item.array_int64->length;
-        else                                        length = item.array_float->length;
+    if (item_tid == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* src = item.array_num;
+        int64_t length = src->length;
+        ArrayNumElemType src_et = src->get_elem_type();
 
         if (element_type_id == LMD_TYPE_INT) {
-            ArrayInt* typed = array_int_new(length);
+            ArrayNum* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (item_tid == LMD_TYPE_ARRAY_INT)        typed->items[i] = item.array_int->items[i];
-                else if (item_tid == LMD_TYPE_ARRAY_INT64) typed->items[i] = item.array_int64->items[i];
-                else                                       typed->items[i] = (int64_t)item.array_float->items[i];
+                if (src_et == ELEM_INT || src_et == ELEM_INT64)
+                    typed->items[i] = src->items[i];
+                else
+                    typed->items[i] = (int64_t)src->float_items[i];
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
-            ArrayFloat* typed = array_float_new(length);
+            ArrayNum* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (item_tid == LMD_TYPE_ARRAY_FLOAT)      typed->items[i] = item.array_float->items[i];
-                else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = (double)item.array_int->items[i];
-                else                                        typed->items[i] = (double)item.array_int64->items[i];
+                if (src_et == ELEM_FLOAT)
+                    typed->float_items[i] = src->float_items[i];
+                else
+                    typed->float_items[i] = (double)src->items[i];
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_INT64) {
-            ArrayInt64* typed = array_int64_new(length);
+            ArrayNum* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
-                if (item_tid == LMD_TYPE_ARRAY_INT64)      typed->items[i] = item.array_int64->items[i];
-                else if (item_tid == LMD_TYPE_ARRAY_INT)    typed->items[i] = item.array_int->items[i];
-                else                                        typed->items[i] = (int64_t)item.array_float->items[i];
+                if (src_et == ELEM_INT || src_et == ELEM_INT64)
+                    typed->items[i] = src->items[i];
+                else
+                    typed->items[i] = (int64_t)src->float_items[i];
             }
             return typed;
         }
@@ -1278,7 +1260,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         int64_t length = arr->length;
 
         if (element_type_id == LMD_TYPE_INT) {
-            ArrayInt* typed = array_int_new(length);
+            ArrayNum* typed = array_int_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {
@@ -1290,7 +1272,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
-            ArrayFloat* typed = array_float_new(length);
+            ArrayNum* typed = array_float_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
@@ -1300,14 +1282,14 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                     return NULL;
                 }
                 if (elem_tid == LMD_TYPE_BOOL)
-                    typed->items[i] = items[i].bool_val ? 1.0 : 0.0;
+                    typed->float_items[i] = items[i].bool_val ? 1.0 : 0.0;
                 else
-                    typed->items[i] = it2d(items[i]);
+                    typed->float_items[i] = it2d(items[i]);
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_INT64) {
-            ArrayInt64* typed = array_int64_new(length);
+            ArrayNum* typed = array_int64_new(length);
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_INT && elem_tid != LMD_TYPE_INT64 && elem_tid != LMD_TYPE_BOOL) {

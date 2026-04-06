@@ -92,30 +92,30 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 #define LMD_TYPE_RAW_POINTER_ 0
 #define LMD_TYPE_NULL_     1
 #define LMD_TYPE_BOOL_     2
-#define LMD_TYPE_INT_      3
-#define LMD_TYPE_INT64_    4
-#define LMD_TYPE_FLOAT_    5
-#define LMD_TYPE_DECIMAL_  6
-#define LMD_TYPE_NUMBER_   7
-#define LMD_TYPE_DTIME_    8
-#define LMD_TYPE_SYMBOL_   9
-#define LMD_TYPE_STRING_  10
-#define LMD_TYPE_BINARY_  11
-#define LMD_TYPE_RANGE_   12
-#define LMD_TYPE_ARRAY_INT_ 13
-#define LMD_TYPE_ARRAY_INT64_ 14
-#define LMD_TYPE_ARRAY_FLOAT_ 15
-#define LMD_TYPE_ARRAY_   16
-#define LMD_TYPE_MAP_     17
-#define LMD_TYPE_VMAP_    18
-#define LMD_TYPE_ELEMENT_ 19
-#define LMD_TYPE_OBJECT_  20
-#define LMD_TYPE_TYPE_    21
-#define LMD_TYPE_FUNC_    22
-#define LMD_TYPE_ANY_     23
-#define LMD_TYPE_ERROR_   24
-#define LMD_TYPE_UNDEFINED_ 25
-#define LMD_TYPE_PATH_    26
+#define LMD_TYPE_NUM_SIZED_ 3
+#define LMD_TYPE_INT_      4
+#define LMD_TYPE_INT64_    5
+#define LMD_TYPE_UINT64_   6
+#define LMD_TYPE_FLOAT_    7
+#define LMD_TYPE_DECIMAL_  8
+#define LMD_TYPE_NUMBER_   9
+#define LMD_TYPE_DTIME_   10
+#define LMD_TYPE_SYMBOL_  11
+#define LMD_TYPE_STRING_  12
+#define LMD_TYPE_BINARY_  13
+#define LMD_TYPE_PATH_    14
+#define LMD_TYPE_RANGE_   15
+#define LMD_TYPE_ARRAY_NUM_ 16
+#define LMD_TYPE_ARRAY_   17
+#define LMD_TYPE_MAP_     18
+#define LMD_TYPE_VMAP_    19
+#define LMD_TYPE_ELEMENT_ 20
+#define LMD_TYPE_OBJECT_  21
+#define LMD_TYPE_TYPE_    22
+#define LMD_TYPE_FUNC_    23
+#define LMD_TYPE_ANY_     24
+#define LMD_TYPE_ERROR_   25
+#define LMD_TYPE_UNDEFINED_ 26
 
 // ============================================================================
 // Lifecycle
@@ -601,9 +601,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case LMD_TYPE_BINARY_:
     case LMD_TYPE_DECIMAL_:
     case LMD_TYPE_RANGE_:
-    case LMD_TYPE_ARRAY_INT_:
-    case LMD_TYPE_ARRAY_INT64_:
-    case LMD_TYPE_ARRAY_FLOAT_:
+    case LMD_TYPE_ARRAY_NUM_:
     case LMD_TYPE_PATH_:
         break;
 
@@ -907,27 +905,12 @@ static void gc_compact_data(gc_heap_t* gc) {
             }
             break;
         }
-        case LMD_TYPE_ARRAY_INT_:
-        case LMD_TYPE_ARRAY_INT64_: {
+        case LMD_TYPE_ARRAY_NUM_: {
             uint8_t* p = (uint8_t*)obj;
             void** items_slot = (void**)(p + 8);
             int64_t capacity = *(int64_t*)(p + 32);
             if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                size_t size = capacity * sizeof(int64_t);
-                void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
-                if (new_items) {
-                    *items_slot = new_items;
-                    compacted++;
-                }
-            }
-            break;
-        }
-        case LMD_TYPE_ARRAY_FLOAT_: {
-            uint8_t* p = (uint8_t*)obj;
-            void** items_slot = (void**)(p + 8);
-            int64_t capacity = *(int64_t*)(p + 32);
-            if (*items_slot && gc_data_zone_owns(gc->data_zone, *items_slot)) {
-                size_t size = capacity * sizeof(double);
+                size_t size = capacity * 8;  // all elem types are 8 bytes (int64_t or double)
                 void* new_items = gc_data_zone_copy(gc->tenured_data, *items_slot, size);
                 if (new_items) {
                     *items_slot = new_items;

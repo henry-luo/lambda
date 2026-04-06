@@ -1214,14 +1214,10 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     }
 
     TypeId obj_tid = ast_node->object->type->type_id;
-    if (obj_tid == LMD_TYPE_ARRAY_INT) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT, sizeof(Type));
-    }
-    else if (obj_tid == LMD_TYPE_ARRAY_INT64) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(Type));
-    }
-    else if (obj_tid == LMD_TYPE_ARRAY_FLOAT) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(Type));
+    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+        // element type depends on the array's elem_type, but at AST phase we don't know it yet
+        // default to ANY; the transpiler will refine this
+        ast_node->type = &TYPE_ANY;
     }
     else if (obj_tid == LMD_TYPE_ARRAY) {
         ast_node->type = &TYPE_ANY;

@@ -85,9 +85,7 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_STRING: return "string";
         case LMD_TYPE_BINARY: return "binary";
         case LMD_TYPE_RANGE: return "range";
-        case LMD_TYPE_ARRAY_INT: return "array[int]";
-        case LMD_TYPE_ARRAY_INT64: return "array[int64]";
-        case LMD_TYPE_ARRAY_FLOAT: return "array[float]";
+        case LMD_TYPE_ARRAY_NUM: return "array[num]";
         case LMD_TYPE_ARRAY: return "array";
         case LMD_TYPE_MAP: return "map";
         case LMD_TYPE_VMAP: return "map";  // VMap appears as "map" to Lambda scripts
@@ -238,9 +236,7 @@ void init_type_info() {
     type_info[LMD_TYPE_BINARY] = {sizeof(char*), "binary", &TYPE_BINARY, (Type*)&LIT_TYPE_BINARY};
     type_info[LMD_TYPE_RANGE] = {sizeof(void*), "range", &TYPE_RANGE, (Type*)&LIT_TYPE_RANGE};
     type_info[LMD_TYPE_ARRAY] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
-    type_info[LMD_TYPE_ARRAY_INT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
-    type_info[LMD_TYPE_ARRAY_FLOAT] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
-    type_info[LMD_TYPE_ARRAY_INT64] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
+    type_info[LMD_TYPE_ARRAY_NUM] = {sizeof(void*), "array", (Type*)&TYPE_ARRAY, (Type*)&LIT_TYPE_ARRAY};
     type_info[LMD_TYPE_MAP] = {sizeof(void*), "map", &TYPE_MAP, (Type*)&LIT_TYPE_MAP};
     type_info[LMD_TYPE_ELEMENT] = {sizeof(void*), "element", &TYPE_ELMT, (Type*)&LIT_TYPE_ELMT};
     type_info[LMD_TYPE_OBJECT] = {sizeof(void*), "object", &TYPE_OBJECT, (Type*)&LIT_TYPE_OBJECT};
@@ -701,32 +697,24 @@ void list_push_spread(List *list, Item item) {
             return;
         }
     }
-    // check if this is a spreadable ArrayInt
-    if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item.array_int;
+    // check if this is a spreadable ArrayNum
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
         if (arr && arr->is_spreadable) {
-            for (int i = 0; i < arr->length; i++) {
-                list_push(list, {.item = i2it(arr->items[i])});
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayInt64
-    if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        if (arr && arr->is_spreadable) {
-            for (int i = 0; i < arr->length; i++) {
-                list_push(list, {.item = l2it(arr->items[i])});
-            }
-            return;
-        }
-    }
-    // check if this is a spreadable ArrayFloat
-    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        if (arr && arr->is_spreadable) {
-            for (int i = 0; i < arr->length; i++) {
-                list_push(list, {.item = d2it(arr->items[i])});
+            switch (arr->get_elem_type()) {
+            case ELEM_INT:
+                for (int64_t i = 0; i < arr->length; i++)
+                    list_push(list, {.item = i2it(arr->items[i])});
+                break;
+            case ELEM_INT64:
+                for (int64_t i = 0; i < arr->length; i++)
+                    list_push(list, {.item = l2it(arr->items[i])});
+                break;
+            case ELEM_FLOAT:
+                for (int64_t i = 0; i < arr->length; i++)
+                    list_push(list, {.item = d2it(arr->items[i])});
+                break;
+            default: break;
             }
             return;
         }
@@ -827,7 +815,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(Symbol**)field_ptr = sym;
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
             case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                 // item.container on ITEM_NULL gives bogus (Container*)0x0100000000000000
                 // instead of NULL — must check value type to store raw NULL for null items
@@ -888,7 +876,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.symbol = sym;
                     break;
                 }
-                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
                 case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
                     Container *container = item.container;
                     titem.container = container;
@@ -962,7 +950,7 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = y2it(titem->symbol)};
     case LMD_TYPE_BINARY:
         return {.item = x2it(titem->string)};
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
         return {.item = titem->item};
     default:
@@ -1009,8 +997,7 @@ Item _map_field_to_item(void* field_ptr, TypeId type_id) {
         result = {.item = x2it(*(String**)field_ptr)};
         break;
 
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         result.container = *(Container**)field_ptr;

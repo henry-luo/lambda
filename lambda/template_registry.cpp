@@ -119,8 +119,7 @@ static bool template_matches(TemplateEntry* tmpl, Item target) {
 
     // array also matches list
     if (tmpl->match_type_id == LMD_TYPE_ARRAY &&
-        (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_INT ||
-         tid == LMD_TYPE_ARRAY_INT64 || tid == LMD_TYPE_ARRAY_FLOAT)) {
+        (tid == LMD_TYPE_ARRAY || tid == LMD_TYPE_ARRAY_NUM)) {
         return true;
     }
 

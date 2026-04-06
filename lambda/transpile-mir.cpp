@@ -1072,8 +1072,7 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
         return emit_box_string(mt, val_reg);
     case LMD_TYPE_SYMBOL:
         return emit_box_symbol(mt, val_reg);
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE: case LMD_TYPE_FUNC:
     case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_box_container(mt, val_reg);
@@ -1126,8 +1125,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
     case LMD_TYPE_INT64:
         return emit_call_1(mt, "it2l", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg));
     // Container types: strip upper 8 tag bits to recover raw pointer
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: case LMD_TYPE_RANGE:
     case LMD_TYPE_FUNC: case LMD_TYPE_TYPE: case LMD_TYPE_PATH: case LMD_TYPE_VMAP:
         return emit_unbox_container(mt, item_reg);
@@ -1187,8 +1185,7 @@ static bool mir_is_direct_access_type(TypeId type_id) {
     case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
@@ -1204,8 +1201,7 @@ static bool mir_is_direct_access_type(TypeId type_id) {
 static bool mir_is_container_field_type(TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         return true;
@@ -1903,8 +1899,6 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
                 snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
                 MirVarEntry* ov = find_var(mt, oname);
                 if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
-                // P4-3.2: ARRAY_INT variable → element is INT
-                if (ov && ov->type_id == LMD_TYPE_ARRAY_INT) return LMD_TYPE_INT;
             }
         }
     }
@@ -2031,19 +2025,25 @@ static TypeId get_effective_type(MirTranspiler* mt, AstNode* node) {
         AstAssignStamNode* assign = (AstAssignStamNode*)node;
         if (assign->value) return get_effective_type(mt, assign->value);
     }
-    // For INDEX nodes: if object is known ArrayInt and index is INT, element type is INT
-    //                   if object is known ArrayFloat and index is INT, element type is FLOAT
+    // For INDEX nodes: if object is known ArrayNum and index is INT, derive element type
     if (node->node_type == AST_NODE_INDEX_EXPR) {
         AstFieldNode* fn = (AstFieldNode*)node;
         TypeId obj_eff = get_effective_type(mt, fn->object);
         TypeId idx_eff = get_effective_type(mt, fn->field);
-        if (obj_eff == LMD_TYPE_ARRAY_INT &&
+        if (obj_eff == LMD_TYPE_ARRAY_NUM &&
             (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
-            return LMD_TYPE_INT;
-        }
-        if (obj_eff == LMD_TYPE_ARRAY_FLOAT &&
-            (idx_eff == LMD_TYPE_INT || idx_eff == LMD_TYPE_INT64)) {
-            return LMD_TYPE_FLOAT;
+            // try to determine element type from the object variable
+            AstNode* obj_unwrapped = fn->object;
+            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
+                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
+            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
+                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
+                char oname[128];
+                snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
+                MirVarEntry* ov = find_var(mt, oname);
+                if (ov && ov->elem_type != LMD_TYPE_ANY) return ov->elem_type;
+            }
+            return LMD_TYPE_INT;  // default for ARRAY_NUM without known elem_type
         }
         // ARRAY with nested=INT + INT index: return type is ANY (not INT)
         // because the array may have been converted from ArrayInt to generic
@@ -3425,9 +3425,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                                 if (arg2) {
                                     TypeId fill_val_tid = get_effective_type(mt, arg2);
                                     if (fill_val_tid == LMD_TYPE_INT || fill_val_tid == LMD_TYPE_INT64) {
-                                        var_tid = LMD_TYPE_ARRAY_INT;
+                                        var_tid = LMD_TYPE_ARRAY_NUM;
+                                        fill_elem_type = LMD_TYPE_INT;
                                     } else if (fill_val_tid == LMD_TYPE_FLOAT) {
-                                        var_tid = LMD_TYPE_ARRAY_FLOAT;
+                                        var_tid = LMD_TYPE_ARRAY_NUM;
+                                        fill_elem_type = LMD_TYPE_FLOAT;
                                     } else if (fill_val_tid == LMD_TYPE_BOOL) {
                                         // P4-3.1: fill(n, bool) → generic Array of bools
                                         var_tid = LMD_TYPE_ARRAY;
@@ -3448,8 +3450,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 if (declare->type && declare->type->kind == TYPE_KIND_UNARY) {
                     bool needs_coerce = (expr_tid == LMD_TYPE_ANY || expr_tid == LMD_TYPE_NULL ||
                                          expr_tid == LMD_TYPE_ARRAY || expr_tid == LMD_TYPE_ARRAY ||
-                                         expr_tid == LMD_TYPE_ARRAY_INT || expr_tid == LMD_TYPE_ARRAY_INT64 ||
-                                         expr_tid == LMD_TYPE_ARRAY_FLOAT);
+                                         expr_tid == LMD_TYPE_ARRAY_NUM);
                     if (needs_coerce) {
                         // extract element type from TypeUnary operand
                         TypeUnary* unary = (TypeUnary*)declare->type;
@@ -3503,7 +3504,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
 
                 // P4-3.1: Set element type for container variables (from fill() narrowing)
                 // Only set when var_tid is still ARRAY (not overridden by typed array coercion)
-                if (fill_elem_type != LMD_TYPE_ANY && var_tid == LMD_TYPE_ARRAY) {
+                if (fill_elem_type != LMD_TYPE_ANY && (var_tid == LMD_TYPE_ARRAY || var_tid == LMD_TYPE_ARRAY_NUM)) {
                     MirVarEntry* v = find_var(mt, name_buf);
                     if (v) v->elem_type = fill_elem_type;
                 }
@@ -4947,16 +4948,32 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_idx));
     }
 
+    // Extract elem_type for ARRAY_NUM objects (used by fast paths below)
+    TypeId obj_elem_type = LMD_TYPE_ANY;
+    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+        AstNode* obj_unwrapped = field_node->object;
+        while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
+            obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
+        if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
+            AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
+            char oname[128];
+            snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
+            MirVarEntry* ov = find_var(mt, oname);
+            if (ov) obj_elem_type = ov->elem_type;
+        }
+    }
+
     // ======================================================================
-    // FAST PATH 1: Compile-time known ArrayInt (from fill() narrowing)
-    // No runtime type check needed — we KNOW it's ArrayInt.
+    // FAST PATH 1: Compile-time known ArrayNum with int elements (from fill() narrowing)
+    // No runtime type check needed — we KNOW it's ArrayNum with int items.
     // Returns NATIVE INT (not boxed), enabling native arithmetic downstream.
     // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY_INT &&
+    if (obj_tid == LMD_TYPE_ARRAY_NUM &&
+        (obj_elem_type == LMD_TYPE_INT || obj_elem_type == LMD_TYPE_INT64) &&
         (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
         MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
-        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayInt*
+        MIR_reg_t arr_ptr = emit_unbox_container(mt, obj_item);       // strip tag → raw ArrayNum*
 
         // Bounds check
         MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
@@ -5013,13 +5030,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     }
 
     // ======================================================================
-    // FAST PATH 1a: Compile-time known ArrayFloat (from fill() narrowing)
-    // No runtime type check needed — we KNOW it's ArrayFloat.
+    // FAST PATH 1a: Compile-time known ArrayNum with float elements (from fill() narrowing)
+    // No runtime type check needed — we KNOW it's ArrayNum with double items.
     // Returns NATIVE FLOAT (double), enabling native FP arithmetic downstream.
-    // ArrayFloat stores raw doubles in items[], same struct layout as ArrayInt:
-    //   offset 0: type_id (uint8_t), offset 8: double* items, offset 16: int64_t length
+    // ArrayNum stores raw doubles in float_items[], same struct layout:
+    //   offset 0: type_id (uint8_t), offset 1: elem_type, offset 8: double* float_items, offset 16: int64_t length
     // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY_FLOAT &&
+    if (obj_tid == LMD_TYPE_ARRAY_NUM &&
+        obj_elem_type == LMD_TYPE_FLOAT &&
         (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64)) {
         MIR_reg_t idx_native = transpile_expr(mt, field_node->field);
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);  // tagged container Item
@@ -5141,7 +5159,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
             MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
 
             MIR_label_t l_fast = new_label(mt);
             MIR_label_t l_slow = new_label(mt);
@@ -5347,12 +5365,14 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     }
 
     // ======================================================================
-    // FAST PATH 1c: ARRAY_INT + ANY index — unbox index then inline read
-    // Object is known ArrayInt (from fill() narrowing), index type unknown.
+    // FAST PATH 1c: ARRAY_NUM (int elem) + ANY index — unbox index then inline read
+    // Object is known ArrayNum with int elements (from fill() narrowing), index type unknown.
     // Unbox the field with it2i() to get native int, then inline items[idx].
-    // Returns NATIVE INT (AST type for ARRAY_INT[*] is always INT).
+    // Returns NATIVE INT (AST type for ARRAY_NUM[*] is always INT).
     // ======================================================================
-    if (obj_tid == LMD_TYPE_ARRAY_INT && idx_tid == LMD_TYPE_ANY) {
+    if (obj_tid == LMD_TYPE_ARRAY_NUM &&
+        (obj_elem_type == LMD_TYPE_INT || obj_elem_type == LMD_TYPE_INT64) &&
+        idx_tid == LMD_TYPE_ANY) {
         MIR_reg_t boxed_field = transpile_box_item(mt, field_node->field);
         MIR_reg_t idx_native = emit_unbox(mt, boxed_field, LMD_TYPE_INT);  // it2i
         MIR_reg_t obj_item = transpile_expr(mt, field_node->object);
@@ -5472,7 +5492,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
             MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+                MIR_new_reg_op(mt->ctx, rt_tid), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
 
             MIR_label_t l_fast = new_label(mt);
             MIR_label_t l_slow = new_label(mt);
@@ -5664,7 +5684,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
     // ======================================================================
     // FAST PATH 2: Runtime type check for unknown containers with INT index
-    // Object might be ArrayInt at runtime — check type tag.
+    // Object might be ArrayNum at runtime — check type tag.
     // Returns BOXED Item (type is unknown at compile time).
     // ======================================================================
     if (idx_tid == LMD_TYPE_INT && obj_tid == LMD_TYPE_ANY) {
@@ -5677,7 +5697,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
 
         MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-            MIR_new_reg_op(mt->ctx, obj_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+            MIR_new_reg_op(mt->ctx, obj_tag), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
 
         MIR_label_t l_fast = new_label(mt);
         MIR_label_t l_slow = new_label(mt);
@@ -5778,7 +5798,7 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
             AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
             // Check inner object's effective type (handles fill() narrowing)
             TypeId inner_obj_eff = get_effective_type(mt, inner_idx->object);
-            if (inner_obj_eff == LMD_TYPE_ARRAY_INT || inner_obj_eff == LMD_TYPE_ARRAY_INT64) {
+            if (inner_obj_eff == LMD_TYPE_ARRAY_NUM) {
                 field_known_int = true;
             } else if (inner_obj_eff == LMD_TYPE_ARRAY) {
                 // Check AST nested type
@@ -5878,8 +5898,7 @@ static MIR_reg_t transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
-            if (arg_tid == LMD_TYPE_ARRAY || arg_tid == LMD_TYPE_ARRAY_INT ||
-                arg_tid == LMD_TYPE_ARRAY_INT64 || arg_tid == LMD_TYPE_ARRAY_FLOAT) {
+            if (arg_tid == LMD_TYPE_ARRAY || arg_tid == LMD_TYPE_ARRAY_NUM) {
                 MIR_reg_t a1 = transpile_expr(mt, arg);
                 return emit_call_1(mt, "fn_len_a", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
             }
@@ -6975,7 +6994,7 @@ static MIR_reg_t transpile_pipe(MirTranspiler* mt, AstPipeNode* pipe_node) {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_arr),
             MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
-            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+            MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_range),
             MIR_new_reg_op(mt->ctx, type_id_reg), MIR_new_int_op(mt->ctx, LMD_TYPE_RANGE)));
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_elmt),
@@ -7653,7 +7672,7 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
     // Only for integer-typed results — float fast paths return 0.0 in a double register
     // which can't be compared with MIR_BNE against an int operand.
     if (node->node_type == AST_NODE_INDEX_EXPR &&
-        tid != LMD_TYPE_FLOAT && tid != LMD_TYPE_ARRAY_FLOAT) {
+        tid != LMD_TYPE_FLOAT) {
         MIR_label_t l_not_null = MIR_new_label(mt->ctx);
         MIR_label_t l_done = MIR_new_label(mt->ctx);
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -7887,7 +7906,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         MIR_reg_t arr_ptr;
         if (obj_tid == LMD_TYPE_ANY || obj_tid == LMD_TYPE_NULL) {
             arr_ptr = emit_unbox_container(mt, obj);
-        } else if (obj_tid == LMD_TYPE_ARRAY_INT || obj_tid == LMD_TYPE_ARRAY_FLOAT ||
+        } else if (obj_tid == LMD_TYPE_ARRAY_NUM ||
                    obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_ARRAY) {
             // Container variable: stored as tagged Item, strip tag to get pointer
             arr_ptr = emit_unbox_container(mt, obj);
@@ -7905,11 +7924,27 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
 
         TypeId val_tid = get_effective_type(mt, ca->value);
 
+        // Extract elem_type for ARRAY_NUM objects (used by fast paths below)
+        TypeId assign_obj_elem = LMD_TYPE_ANY;
+        if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+            AstNode* obj_unwrapped = ca->object;
+            while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
+                obj_unwrapped = ((AstPrimaryNode*)obj_unwrapped)->expr;
+            if (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_IDENT) {
+                AstIdentNode* obj_ident = (AstIdentNode*)obj_unwrapped;
+                char oname[128];
+                snprintf(oname, sizeof(oname), "%.*s", (int)obj_ident->name->len, obj_ident->name->chars);
+                MirVarEntry* ov = find_var(mt, oname);
+                if (ov) assign_obj_elem = ov->elem_type;
+            }
+        }
+
         // ==================================================================
-        // FAST PATH: Compile-time known ArrayInt + native INT index + native INT value
+        // FAST PATH: Compile-time known ArrayNum (int) + native INT index + native INT value
         // No runtime type check — direct inline store to items[idx].
         // ==================================================================
-        if (obj_tid == LMD_TYPE_ARRAY_INT &&
+        if (obj_tid == LMD_TYPE_ARRAY_NUM &&
+            (assign_obj_elem == LMD_TYPE_INT || assign_obj_elem == LMD_TYPE_INT64) &&
             (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
             val_tid == LMD_TYPE_INT) {
             MIR_reg_t val_native = transpile_expr(mt, ca->value);
@@ -7984,7 +8019,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t is_aint = new_reg(mt, "isai", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_aint),
                 MIR_new_reg_op(mt->ctx, tid_byte),
-                MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_INT)));
+                MIR_new_int_op(mt->ctx, LMD_TYPE_ARRAY_NUM)));
 
             MIR_label_t l_fast = new_label(mt);
             MIR_label_t l_slow = new_label(mt);
@@ -7995,9 +8030,22 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
                 MIR_new_reg_op(mt->ctx, is_aint)));
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_slow)));
 
-            // Inline ArrayInt store
+            // Inline ArrayNum int store (only for ELEM_INT / ELEM_INT64, not ELEM_FLOAT)
             emit_label(mt, l_fast);
             {
+                // Check flags upper nibble: ELEM_FLOAT=0x10 → fall back to fn_array_set
+                MIR_reg_t flags_byte = new_reg(mt, "flgb", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, flags_byte),
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 1, arr_ptr, 0, 1)));
+                MIR_reg_t etype = new_reg(mt, "etyp", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, etype),
+                    MIR_new_reg_op(mt->ctx, flags_byte), MIR_new_int_op(mt->ctx, 0xF0)));
+                MIR_reg_t is_float = new_reg(mt, "isfl", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_float),
+                    MIR_new_reg_op(mt->ctx, etype), MIR_new_int_op(mt->ctx, 0x10)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_slow),
+                    MIR_new_reg_op(mt->ctx, is_float)));
+
                 MIR_reg_t arr_len = new_reg(mt, "alen", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, arr_len),
                     MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, arr_ptr, 0, 1)));
@@ -8056,10 +8104,11 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             emit_label(mt, l_end);
         }
         // ==================================================================
-        // FAST PATH: Compile-time known ArrayFloat + INT index + FLOAT value
-        // Direct inline store of native double to items[idx].
+        // FAST PATH: Compile-time known ArrayNum (float) + INT index + FLOAT value
+        // Direct inline store of native double to float_items[idx].
         // ==================================================================
-        else if (obj_tid == LMD_TYPE_ARRAY_FLOAT &&
+        else if (obj_tid == LMD_TYPE_ARRAY_NUM &&
+                 assign_obj_elem == LMD_TYPE_FLOAT &&
                  (idx_tid == LMD_TYPE_INT || idx_tid == LMD_TYPE_INT64) &&
                  val_tid == LMD_TYPE_FLOAT) {
             MIR_reg_t val_native = transpile_expr(mt, ca->value);
@@ -9037,9 +9086,7 @@ static void gather_evidence(AstNode* node, InferCtx* ctx) {
                 // key may be a string, so we must NOT assume the index is INT.
                 TypeId left_tid = (idx->left && idx->left->type)
                     ? idx->left->type->type_id : LMD_TYPE_ANY;
-                bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_INT  ||
-                                       left_tid == LMD_TYPE_ARRAY_FLOAT ||
-                                       left_tid == LMD_TYPE_ARRAY_INT64);
+                bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_NUM);
                 if (is_typed_array) ctx->evidence |= INFER_INT;
             }
             gather_evidence(idx->left, ctx);
@@ -9280,9 +9327,7 @@ static void gather_evidence_multi(AstNode* node, InferCtx* ctxs, int ctx_count) 
                 if (is_tracked_ref(idx->right, &ctxs[c])) {
                     TypeId left_tid = (idx->left && idx->left->type)
                         ? idx->left->type->type_id : LMD_TYPE_ANY;
-                    bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_INT  ||
-                                           left_tid == LMD_TYPE_ARRAY_FLOAT ||
-                                           left_tid == LMD_TYPE_ARRAY_INT64);
+                    bool is_typed_array = (left_tid == LMD_TYPE_ARRAY_NUM);
                     if (is_typed_array) ctxs[c].evidence |= INFER_INT;
                 }
             }
@@ -9633,7 +9678,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             TypeId tid = p->type ? p->type->type_id : LMD_TYPE_ANY;
             bool may_be_null = tp_iter && tp_iter->is_optional && !tp_iter->default_value;
 
-            // Resolve typed array annotations: float[] → ARRAY_FLOAT, int[] → ARRAY_INT, etc.
+            // Resolve typed array annotations: float[] → ARRAY_NUM, int[] → ARRAY_NUM, etc.
             if (p->type && p->type->kind == TYPE_KIND_UNARY) {
                 TypeParam* tp_cast = (TypeParam*)p->type;
                 Type* full = tp_cast->full_type;
@@ -9645,9 +9690,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     }
                     if (operand) {
                         switch (operand->type_id) {
-                        case LMD_TYPE_FLOAT: tid = LMD_TYPE_ARRAY_FLOAT; break;
-                        case LMD_TYPE_INT: tid = LMD_TYPE_ARRAY_INT; break;
-                        case LMD_TYPE_INT64: tid = LMD_TYPE_ARRAY_INT64; break;
+                        case LMD_TYPE_FLOAT:
+                        case LMD_TYPE_INT:
+                        case LMD_TYPE_INT64:
+                            tid = LMD_TYPE_ARRAY_NUM;
+                            break;
                         default: break;
                         }
                     }
@@ -9989,28 +10036,43 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             set_var(mt, pname, unboxed, mtype, tid);
         } else {
             // Untyped, nullable optional, or complex type: keep as boxed Item.
-            // Preserve known container type (e.g. ARRAY_FLOAT from annotation) so
+            // Preserve known container type (e.g. ARRAY_NUM from annotation) so
             // the transpiler can generate fast paths for array access.
-            TypeId var_type = (tid == LMD_TYPE_ARRAY_FLOAT || tid == LMD_TYPE_ARRAY_INT ||
-                               tid == LMD_TYPE_ARRAY_INT64) ? tid : LMD_TYPE_ANY;
+            TypeId var_type = (tid == LMD_TYPE_ARRAY_NUM) ? tid : LMD_TYPE_ANY;
 
             MIR_reg_t final_reg = preg;
             // For typed array params: ensure the incoming array is the correct
             // typed representation.  The caller may pass a generic Array that
-            // needs to be converted to ArrayInt/ArrayFloat/ArrayInt64 so that
-            // the FAST PATH inline reads operate on the correct memory layout.
-            if (var_type == LMD_TYPE_ARRAY_INT || var_type == LMD_TYPE_ARRAY_FLOAT ||
-                var_type == LMD_TYPE_ARRAY_INT64) {
-                TypeId elem_tid = (var_type == LMD_TYPE_ARRAY_INT)   ? LMD_TYPE_INT   :
-                                  (var_type == LMD_TYPE_ARRAY_FLOAT) ? LMD_TYPE_FLOAT  :
-                                                                       LMD_TYPE_INT64;
+            // needs to be converted to ArrayNum so that the FAST PATH inline
+            // reads operate on the correct memory layout.
+            TypeId param_elem_tid = LMD_TYPE_ANY;
+            if (var_type == LMD_TYPE_ARRAY_NUM) {
+                // Re-derive element type from the param's type annotation
+                param_elem_tid = LMD_TYPE_INT;  // default
+                if (param->type && param->type->kind == TYPE_KIND_UNARY) {
+                    TypeParam* tp_cast = (TypeParam*)param->type;
+                    Type* full = tp_cast->full_type;
+                    if (full && full->kind == TYPE_KIND_UNARY) {
+                        TypeUnary* unary = (TypeUnary*)full;
+                        Type* operand = unary->operand;
+                        if (operand && operand->type_id == LMD_TYPE_TYPE && operand->kind == TYPE_KIND_SIMPLE)
+                            operand = ((TypeType*)operand)->type;
+                        if (operand) param_elem_tid = operand->type_id;
+                    }
+                }
                 final_reg = emit_call_2(mt, "ensure_typed_array", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, preg),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, elem_tid));
-                log_debug("mir: param '%s' — inserted ensure_typed_array (elem=%d)", pname, elem_tid);
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, param_elem_tid));
+                log_debug("mir: param '%s' — inserted ensure_typed_array (elem=%d)", pname, param_elem_tid);
             }
 
             set_var(mt, pname, final_reg, MIR_T_I64, var_type);
+
+            // Set elem_type on the variable entry for fast path dispatch
+            if (var_type == LMD_TYPE_ARRAY_NUM && param_elem_tid != LMD_TYPE_ANY) {
+                MirVarEntry* v = find_var(mt, pname);
+                if (v) v->elem_type = param_elem_tid;
+            }
         }
 
         pi++;

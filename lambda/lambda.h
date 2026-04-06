@@ -104,9 +104,7 @@ enum EnumTypeId {
 
     // container types, LMD_TYPE_CONTAINER
     LMD_TYPE_RANGE,
-    LMD_TYPE_ARRAY_INT,
-    LMD_TYPE_ARRAY_INT64,
-    LMD_TYPE_ARRAY_FLOAT,
+    LMD_TYPE_ARRAY_NUM,   // unified numeric array (elem_type selects int/int64/float)
     LMD_TYPE_ARRAY,  // array of Items
     LMD_TYPE_MAP,
     LMD_TYPE_VMAP,  // virtual map with vtable dispatch (hashmap, treemap, etc.)
@@ -141,6 +139,19 @@ enum EnumNumSizedType {
     NUM_SIZED_COUNT
 };
 typedef uint8_t NumSizedType;
+
+// ============================================================================
+// ArrayNum element sub-types (stored in upper 4 bits of Container.flags byte)
+// Lower 4 bits of flags are reserved for Container boolean flags
+// (is_content, is_spreadable, is_heap, is_data_migrated)
+// ============================================================================
+enum EnumArrayNumElemType {
+    ELEM_INT   = 0x00,   // 8 bytes  — int56-as-int64 (was ARRAY_INT)
+    ELEM_FLOAT = 0x10,   // 8 bytes  — double (was ARRAY_FLOAT)
+    ELEM_INT64 = 0x20,   // 8 bytes  — int64 (was ARRAY_INT64)
+    ELEM_NUM_COUNT = 3
+};
+typedef uint8_t ArrayNumElemType;
 
 // Sized numeric packing: value in [31:0], sub-type in [55:48], type_id in [63:56]
 // Bits [47:32] are unused padding.
@@ -382,9 +393,10 @@ typedef struct Container Container;
 typedef struct Range Range;
 typedef struct List List;
 typedef struct List Array;
-typedef struct ArrayInt ArrayInt;
-typedef struct ArrayInt64 ArrayInt64;
-typedef struct ArrayFloat ArrayFloat;
+typedef struct ArrayNum ArrayNum;
+typedef ArrayNum ArrayInt;    // compat alias: int56 arrays (elem_type == ELEM_INT)
+typedef ArrayNum ArrayInt64;  // compat alias: int64 arrays (elem_type == ELEM_INT64)
+typedef ArrayNum ArrayFloat;  // compat alias: float arrays (elem_type == ELEM_FLOAT)
 typedef struct Map Map;
 typedef struct VMap VMap;
 typedef struct Element Element;
@@ -462,33 +474,16 @@ struct Container {
         int64_t capacity;  // allocated capacity
     };
 
-    struct ArrayInt {
+    struct ArrayNum {
         TypeId type_id;
-        uint8_t flags;
+        uint8_t elem_type;     // ArrayNumElemType (replaces flags for typed arrays)
         //---------------------
-        int64_t* items;  // pointer to int56 values (stored as int64)
-        int64_t length;  // number of items
-        int64_t extra;   // count of extra items stored at the end of the array
-        int64_t capacity;  // allocated capacity
-    };
-
-    struct ArrayInt64 {
-        TypeId type_id;
-        uint8_t flags;
-        //---------------------
-        int64_t* items;  // pointer to 64-bit integer items
-        int64_t length;  // number of items
-        int64_t extra;   // count of extra items stored at the end of the array
-        int64_t capacity;  // allocated capacity
-    };
-
-    struct ArrayFloat {
-        TypeId type_id;
-        uint8_t flags;
-        //---------------------
-        double* items;  // pointer to items
-        int64_t length;  // number of items
-        int64_t extra;   // count of extra items stored at the end of the array
+        union {
+            int64_t* items;        // for ELEM_INT, ELEM_INT64
+            double* float_items;   // for ELEM_FLOAT
+        };
+        int64_t length;  // number of elements
+        int64_t extra;   // count of extra elements stored at end
         int64_t capacity;  // allocated capacity
     };
 
@@ -951,9 +946,9 @@ static inline Item ri_to_item(RetItem ri) {
 #endif // !__cplusplus
 
 Array* array_fill(Array* arr, int count, ...);
-ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
-ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
-ArrayFloat* array_float_fill(ArrayFloat* arr, int count, ...);
+ArrayNum* array_int_fill(ArrayNum* arr, int count, ...);
+ArrayNum* array_int64_fill(ArrayNum* arr, int count, ...);
+ArrayNum* array_float_fill(ArrayNum* arr, int count, ...);
 
 typedef struct Map Map;
 Map* map_fill(Map* map, ...);
@@ -985,16 +980,17 @@ typedef struct Context {
 extern "C" {
 #endif
     Array* array();
-    ArrayInt* array_int();
-    ArrayInt64* array_int64();
-    ArrayFloat* array_float();
+    ArrayNum* array_int();
+    ArrayNum* array_int64();
+    ArrayNum* array_float();
 
-    ArrayInt* array_int_new(int64_t length);
-    ArrayInt64* array_int64_new(int64_t length);
-    ArrayFloat* array_float_new(int64_t length);
+    ArrayNum* array_num_new(ArrayNumElemType elem_type, int64_t length);
+    ArrayNum* array_int_new(int64_t length);
+    ArrayNum* array_int64_new(int64_t length);
+    ArrayNum* array_float_new(int64_t length);
 
-    void array_float_set(ArrayFloat *arr, int64_t index, double value);
-    void array_int_set(ArrayInt *arr, int64_t index, int64_t value);
+    void array_float_set(ArrayNum *arr, int64_t index, double value);
+    void array_int_set(ArrayNum *arr, int64_t index, int64_t value);
 
     Map* map(int64_t type_index);
     Map* map_with_data(int64_t type_index);
@@ -1008,13 +1004,14 @@ extern "C" {
 
     // these getters use runtime num_stack
     Item array_get(Array *array, int64_t index);
-    Item array_int_get(ArrayInt *array, int64_t index);
-    Item array_int64_get(ArrayInt64* array, int64_t index);
-    Item array_float_get(ArrayFloat* array, int64_t index);
+    Item array_num_get(ArrayNum *array, int64_t index);
+    Item array_int_get(ArrayNum *array, int64_t index);
+    Item array_int64_get(ArrayNum* array, int64_t index);
+    Item array_float_get(ArrayNum* array, int64_t index);
     // fast-path getters: return native types, skip boxing
-    int64_t array_int_get_raw(ArrayInt *array, int64_t index);
-    int64_t array_int64_get_raw(ArrayInt64 *array, int64_t index);
-    double array_float_get_value(ArrayFloat *arr, int64_t index);
+    int64_t array_int_get_raw(ArrayNum *array, int64_t index);
+    int64_t array_int64_get_raw(ArrayNum *array, int64_t index);
+    double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
     Item map_get(Map* map, Item key);
     Item elmt_get(Element *elmt, Item key);
