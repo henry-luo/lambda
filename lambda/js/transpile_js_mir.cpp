@@ -52,6 +52,10 @@ extern "C" void js_reset_module_vars();
 // If non-NULL, installed after each jit_init() to prevent exit(1) on MIR errors.
 MIR_error_func_t g_batch_mir_error_handler = NULL;
 
+// Global MIR optimization level for JS compilation (default: 2).
+// Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
+unsigned int g_js_mir_optimize_level = 2;
+
 // External declarations for parallel module compilation
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
@@ -18272,7 +18276,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
 
     // NOTE: No jm_load_imports() — dependencies compiled separately
 
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-parallel: MIR init failed for '%s'", node->path);
         js_transpiler_destroy(tp);
@@ -18536,7 +18540,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     // Recursively load this module's imports first
     jm_load_imports(runtime, js_ast, filename);
 
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: module: MIR context init failed for '%s'", filename);
         js_transpiler_destroy(tp);
@@ -18783,7 +18787,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         return ItemNull;
     }
 
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-new-function: MIR context init failed");
         js_transpiler_destroy(tp);
@@ -18914,7 +18918,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     js_runtime_set_input(js_input);
 
     // initialize MIR context
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir-ast: MIR context init failed");
         context = old_context;
@@ -19163,7 +19167,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     jm_load_imports(runtime, js_ast, filename);
 
     // Initialize MIR context
-    MIR_context_t ctx = jit_init(2);
+    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
         js_transpiler_destroy(tp);
@@ -19392,7 +19396,11 @@ Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const
     g_jm_preamble_mode = true;
     g_jm_preamble_out = out_state;
     g_jm_preamble_in = NULL;
+    // Preamble (harness) always compiled at -O3 for best runtime performance
+    unsigned int saved_level = g_js_mir_optimize_level;
+    g_js_mir_optimize_level = 3;
     Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    g_js_mir_optimize_level = saved_level;
     g_jm_preamble_mode = false;
     g_jm_preamble_out = NULL;
     return result;
