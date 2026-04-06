@@ -4226,6 +4226,23 @@ void rebuild_lambda_doc(UiContext* uicon) {
             state->focus->current = new_focused;
             log_debug("rebuild_lambda_doc: restored focus to new view %p (tag=%s class=%s)",
                      new_focused, focus_tag ? focus_tag : "", focus_class ? focus_class : "");
+        } else if (state->focus) {
+            // old focused element was removed; clear stale pointer so autofocus can fire
+            state->focus->current = nullptr;
+        }
+    }
+
+    // autofocus — if no focus was restored, scan the new tree for an autofocus input
+    if (state && (!state->focus || !state->focus->current) &&
+        doc->view_tree && doc->view_tree->root) {
+        View* af = find_matching_input((View*)doc->view_tree->root, "input", nullptr);
+        if (af && af->is_element()) {
+            DomElement* af_elem = (DomElement*)af;
+            if (af_elem->has_attribute("autofocus")) {
+                focus_set(state, af, false);
+                caret_set(state, af, 0);
+                log_debug("rebuild_lambda_doc: autofocus set on new input");
+            }
         }
     }
 
@@ -4235,6 +4252,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         state->dirty_tracker.full_repaint = true;
         state->is_dirty = true;
         state->needs_reflow = false;  // layout already done by rebuild
+        reflow_clear(state);          // discard stale pending reflow requests
     }
     auto t_end = high_resolution_clock::now();
 
@@ -4473,42 +4491,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     if (state) {
         dirty_clear(&state->dirty_tracker);
 
-        bool size_changed = false;
-        int bounded = (result_count < 16) ? result_count : 16;
-        for (int i = 0; i < bounded; i++) {
-            if (!new_doms[i]) continue;
-            // Compare old/new sizes — if size changed, layout cascades to siblings/ancestors
-            float nw = new_doms[i]->width;
-            float nh = new_doms[i]->height;
-            if (fabsf(old_bounds[i].w - nw) > 0.5f || fabsf(old_bounds[i].h - nh) > 0.5f) {
-                size_changed = true;
-                break;
-            }
-        }
-
-        if (size_changed) {
-            // Size changed → layout cascaded, must repaint everything
-            state->dirty_tracker.full_repaint = true;
-            log_debug("rebuild_incr dirty: size changed, full repaint");
-        } else {
-            // Same size → only repaint changed regions
-            for (int i = 0; i < bounded; i++) {
-                if (!new_doms[i]) continue;
-                // Mark old bounds dirty
-                if (old_bounds[i].w > 0 && old_bounds[i].h > 0) {
-                    dirty_mark_rect(&state->dirty_tracker,
-                        old_bounds[i].x, old_bounds[i].y, old_bounds[i].w, old_bounds[i].h);
-                }
-                // Mark new bounds dirty (after layout, new_dom now has updated x/y/w/h)
-                float nx, ny, nw, nh;
-                compute_absolute_bounds((DomNode*)new_doms[i], &nx, &ny, &nw, &nh);
-                if (nw > 0 && nh > 0) {
-                    dirty_mark_rect(&state->dirty_tracker, nx, ny, nw, nh);
-                }
-            }
-            log_debug("rebuild_incr dirty: selective repaint, %s",
-                dirty_has_regions(&state->dirty_tracker) ? "has regions" : "no regions");
-        }
+        // Template retransform can affect any part of the page (counters, headers, etc.),
+        // not just the replaced subtree.  Always do a full repaint for correctness.
+        state->dirty_tracker.full_repaint = true;
+        log_debug("rebuild_incr dirty: full repaint (template retransform)");
     }
 
     // Restore focus
@@ -4518,6 +4504,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         if (new_focused) {
             state->focus->current = new_focused;
             log_debug("rebuild_lambda_doc_incremental: restored focus");
+        } else if (state->focus) {
+            // old focused element was removed; clear stale pointer so autofocus can fire
+            state->focus->current = nullptr;
         }
     }
 
@@ -4541,10 +4530,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     }
 
     // Skip render here — let the main loop handle it via render().
-    // Dirty tracker retains regions computed above so the main loop can do selective repaint.
     if (state) {
         state->is_dirty = true;
         state->needs_reflow = false;  // layout already done by rebuild
+        reflow_clear(state);          // discard stale pending reflow requests
     }
     bool has_selective = state && !state->dirty_tracker.full_repaint
                          && dirty_has_regions(&state->dirty_tracker);

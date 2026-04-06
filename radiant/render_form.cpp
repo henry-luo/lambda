@@ -644,7 +644,90 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantStat
 }
 
 /**
- * Render a textarea control.
+ * Measure the advance width of a UTF-8 string segment using the given font handle.
+ * Returns width in physical pixels (pre-scaled by pixel_ratio inside font system).
+ */
+static float measure_text_width(FontHandle* font_handle, FontProp* font, float pixel_ratio,
+                                const char* text, int byte_len) {
+    if (!text || byte_len <= 0 || !font_handle) return 0;
+    const unsigned char* p = (const unsigned char*)text;
+    const unsigned char* p_end = p + byte_len;
+    float tw = 0;
+    while (p < p_end) {
+        uint32_t codepoint;
+        int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+        if (bytes <= 0) { p++; continue; }
+        p += bytes;
+        FontStyleDesc sd = font_style_desc_from_prop(font);
+        LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
+        if (glyph) tw += glyph->advance_x / pixel_ratio;
+    }
+    return tw;
+}
+
+/**
+ * Find the start-of-line byte offset for a given line number in text.
+ * Line 0 starts at offset 0. Lines are delimited by '\n'.
+ */
+static int textarea_line_start(const char* text, int line) {
+    if (!text || line <= 0) return 0;
+    int cur_line = 0;
+    int i = 0;
+    while (text[i]) {
+        if (text[i] == '\n') {
+            cur_line++;
+            if (cur_line == line) return i + 1;
+        }
+        i++;
+    }
+    // past last line — return end of string
+    return i;
+}
+
+/**
+ * Find the length (in bytes) of a given line, not including the trailing '\n'.
+ */
+static int textarea_line_len(const char* text, int line_start_off) {
+    if (!text) return 0;
+    int i = 0;
+    while (text[line_start_off + i] && text[line_start_off + i] != '\n') i++;
+    return i;
+}
+
+/**
+ * Count total lines in text (number of '\n' + 1).
+ */
+static int textarea_line_count(const char* text) {
+    if (!text || !*text) return 1;
+    int count = 1;
+    for (const char* p = text; *p; p++) {
+        if (*p == '\n') count++;
+    }
+    return count;
+}
+
+/**
+ * Compute line and column from a byte offset in the text.
+ * Column is in bytes from line start.
+ */
+static void textarea_offset_to_line_col(const char* text, int byte_offset, int* out_line, int* out_col) {
+    int line = 0, col = 0;
+    if (text) {
+        for (int i = 0; i < byte_offset && text[i]; i++) {
+            if (text[i] == '\n') {
+                line++;
+                col = 0;
+            } else {
+                col++;
+            }
+        }
+    }
+    *out_line = line;
+    *out_col = col;
+}
+
+/**
+ * Render a textarea control with multi-line text, caret, and placeholder.
  */
 void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     float s = rdcon->scale;
@@ -660,8 +743,139 @@ void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* fo
     // Border (inset style)
     draw_3d_border(rdcon, x, y, w, h, true, 1 * s);
 
-    // Text content would be rendered via child nodes or value
-    // Placeholder shown if no content
+    // Determine text content or placeholder
+    const char* text = form->value;
+    bool is_placeholder = false;
+    if (!text || !*text) {
+        text = form->placeholder;
+        is_placeholder = true;
+    }
+
+    // Compute internal metrics
+    float padding = (block->bound ? block->bound->padding.left : FormDefaults::TEXTAREA_PADDING) * s;
+    float border_w_px = (block->bound && block->bound->border ? block->bound->border->width.left : 1) * s;
+    float content_x = x + border_w_px + padding;
+    float content_y = y + border_w_px + padding;
+    float content_w = w - 2 * (border_w_px + padding);
+    float font_size_scaled = block->font ? block->font->font_size * s : 13.333f * s;
+    float line_height = font_size_scaled * 1.4f;
+
+    // Render text lines
+    if (text && *text && block->font) {
+        Color text_color;
+        if (is_placeholder) {
+            text_color = make_color(117, 117, 117);
+        } else if (block->in_line) {
+            text_color.r = block->in_line->color.r;
+            text_color.g = block->in_line->color.g;
+            text_color.b = block->in_line->color.b;
+            text_color.a = block->in_line->color.a;
+        } else {
+            text_color = make_color(0, 0, 0);
+        }
+
+        // Setup font
+        FontBox fbox = {0};
+        setup_font(rdcon->ui_context, &fbox, block->font);
+        if (fbox.font_handle) {
+            const FontMetrics* fm = font_get_metrics(fbox.font_handle);
+            float ascender = fm ? (fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
+
+            Color saved_color = rdcon->color;
+            rdcon->color = text_color;
+
+            float pen_y = content_y;
+            const char* line_start = text;
+
+            while (*line_start && pen_y + line_height <= y + h) {
+                // find end of this logical line
+                const char* line_end = line_start;
+                while (*line_end && *line_end != '\n') line_end++;
+                int line_byte_len = (int)(line_end - line_start);
+
+                // render this line's characters
+                float pen_x = content_x;
+                const unsigned char* p = (const unsigned char*)line_start;
+                const unsigned char* p_end = p + line_byte_len;
+                while (p < p_end) {
+                    uint32_t codepoint;
+                    int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                    if (bytes <= 0) { p++; continue; }
+                    p += bytes;
+
+                    FontStyleDesc sd = font_style_desc_from_prop(block->font);
+                    LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, true);
+                    if (!glyph) {
+                        pen_x += font_size_scaled * 0.5f;
+                        continue;
+                    }
+
+                    // soft wrap: if glyph exceeds content width, wrap to next visual line
+                    if (pen_x + glyph->advance_x > content_x + content_w && pen_x > content_x) {
+                        pen_y += line_height;
+                        pen_x = content_x;
+                        if (pen_y + line_height > y + h) break;
+                    }
+
+                    draw_glyph(rdcon, &glyph->bitmap,
+                               (int)(pen_x + glyph->bitmap.bearing_x),
+                               (int)(pen_y + ascender - glyph->bitmap.bearing_y));
+                    pen_x += glyph->advance_x;
+                }
+
+                pen_y += line_height;
+                // advance past the '\n'
+                line_start = *line_end ? line_end + 1 : line_end;
+            }
+
+            rdcon->color = saved_color;
+        }
+    }
+
+    // Draw caret if this textarea has focus
+    RadiantState* state = (RadiantState*)rdcon->ui_context->document->state;
+    if (state) {
+        View* focused = focus_get(state);
+        if (focused == (View*)block && state->caret && !is_placeholder) {
+            const char* value = form->value;
+            int caret_off = state->caret->char_offset;
+            int val_len = value ? (int)strlen(value) : 0;
+            if (caret_off > val_len) caret_off = val_len;
+
+            // compute caret line/column from byte offset
+            int caret_line = 0, caret_col = 0;
+            textarea_offset_to_line_col(value, caret_off, &caret_line, &caret_col);
+
+            // compute caret y = content_y + caret_line * line_height
+            float caret_y_pos = content_y + caret_line * line_height;
+
+            // compute caret x by measuring text from line start to caret column
+            float caret_x = content_x;
+            if (value && caret_col > 0 && block->font) {
+                FontBox fbox = {0};
+                setup_font(rdcon->ui_context, &fbox, block->font);
+                if (fbox.font_handle) {
+                    float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
+                        ? rdcon->ui_context->pixel_ratio : 1.0f;
+                    int line_off = textarea_line_start(value, caret_line);
+                    caret_x = content_x + measure_text_width(fbox.font_handle, block->font,
+                                                              pixel_ratio, value + line_off, caret_col) * s;
+                }
+            }
+
+            float caret_h = font_size_scaled;
+            float caret_w = 2.0f * s;
+
+            Tvg_Paint shape = tvg_shape_new();
+            if (shape) {
+                tvg_shape_append_rect(shape, caret_x, caret_y_pos, caret_w, caret_h, 0, 0, true);
+                tvg_shape_set_fill_color(shape, 0x33, 0x33, 0x33, 0xCC);
+                tvg_canvas_push(rdcon->canvas, shape);
+                tvg_canvas_reset_and_draw(rdcon, false);
+                tvg_canvas_remove(rdcon->canvas, NULL);
+            }
+        }
+    }
 
     log_debug("[FORM] render_textarea at (%.1f, %.1f) size %.1fx%.1f", x, y, w, h);
 }

@@ -8,27 +8,35 @@ let data_dir = './data/todo/'
 // Templates — reactive components with state and event handlers
 // ============================================================================
 
-// Todo item component: toggle, delete, inline edit
-view <todo_item> state toggled: false, editing: false, edit_text: "" {
+// Todo item component: toggle, delete, inline edit, notes textarea
+view <todo_item> state toggled: false, editing: false, edit_text: "", edit_notes: "" {
   let done = if (toggled) (!~.done) else ~.done
   let check_mark = if (done) "✓" else "○"
   let done_class = if (done) "todo-item done" else "todo-item"
+  let notes = if (~.notes != null) ~.notes else ""
   <li class:done_class
     <span class:"checkbox"; check_mark>
-    if (editing) {
-      <input type:"text", class:"inline-edit", value:edit_text, autofocus:"true">
-    } else {
-      <span class:"todo-text"; ~.text>
-    }
+    <div class:"item-content"
+      if (editing) {
+        <input type:"text", class:"inline-edit", value:edit_text, autofocus:"true">
+        <textarea class:"notes-edit", rows:"3", value:edit_notes, placeholder:"Add notes...">
+      } else {
+        <span class:"todo-text"; ~.text>
+        if (notes != "") {
+          <span class:"todo-notes"; notes>
+        }
+      }
+    >
     <span class:"delete-btn"; "×">
   >
 }
 on click(evt) {
   if (evt.target_class == "delete-btn") {
     emit("delete_item", ~)
-  } else if (evt.target_class == "todo-text") {
+  } else if (evt.target_class == "todo-text" or evt.target_class == "todo-notes") {
     editing = true
     edit_text = ~.text
+    edit_notes = if (~.notes != null) ~.notes else ""
   } else if (evt.target_class == "checkbox") {
     toggled = not toggled
   }
@@ -36,30 +44,51 @@ on click(evt) {
 on input(evt) {
   if (editing) {
     let pos = evt.caret_pos
-    edit_text = slice(edit_text, 0, pos) ++ evt.char ++ slice(edit_text, pos, len(edit_text))
+    if (evt.target_class == "notes-edit") {
+      edit_notes = slice(edit_notes, 0, pos) ++ evt.char ++ slice(edit_notes, pos, len(edit_notes))
+    } else {
+      edit_text = slice(edit_text, 0, pos) ++ evt.char ++ slice(edit_text, pos, len(edit_text))
+    }
   }
 }
 on keydown(evt) {
   if (editing) {
-    if (evt.key == "Backspace") {
-      let pos = evt.caret_pos
-      if (pos > 0) {
-        edit_text = slice(edit_text, 0, pos - 1) ++ slice(edit_text, pos, len(edit_text))
+    if (evt.target_class == "notes-edit") {
+      if (evt.key == "Backspace") {
+        let pos = evt.caret_pos
+        if (pos > 0) {
+          edit_notes = slice(edit_notes, 0, pos - 1) ++ slice(edit_notes, pos, len(edit_notes))
+        }
       }
-    }
-    if (evt.key == "Enter") {
-      emit("update_text", {id: ~.id, text: edit_text})
-      editing = false
-    }
-    if (evt.key == "Escape") {
-      editing = false
+      if (evt.key == "Enter") {
+        let pos = evt.caret_pos
+        edit_notes = slice(edit_notes, 0, pos) ++ "\n" ++ slice(edit_notes, pos, len(edit_notes))
+      }
+      if (evt.key == "Escape") {
+        emit("update_item", {id: ~.id, text: edit_text, notes: edit_notes})
+        editing = false
+      }
+    } else {
+      if (evt.key == "Backspace") {
+        let pos = evt.caret_pos
+        if (pos > 0) {
+          edit_text = slice(edit_text, 0, pos - 1) ++ slice(edit_text, pos, len(edit_text))
+        }
+      }
+      if (evt.key == "Enter") {
+        emit("update_item", {id: ~.id, text: edit_text, notes: edit_notes})
+        editing = false
+      }
+      if (evt.key == "Escape") {
+        editing = false
+      }
     }
   }
 }
 on blur(evt) {
   if (editing) {
-    if (edit_text != "" and edit_text != ~.text) {
-      emit("update_text", {id: ~.id, text: edit_text})
+    if (edit_text != "" and (edit_text != ~.text or edit_notes != ~.notes)) {
+      emit("update_item", {id: ~.id, text: edit_text, notes: edit_notes})
     }
     editing = false
   }
@@ -78,7 +107,7 @@ edit <todo_list> state adding: false, new_text: "" {
     >
     <ul class:"items"
       for (item in items)
-        apply(<todo_item text:item.text, done:item.done, id:item.id>)
+        apply(<todo_item text:item.text, done:item.done, id:item.id, notes:item.notes>)
     >
     if (adding) {
       <div class:"add-inline"
@@ -122,7 +151,7 @@ on keydown(evt) {
       if (new_text != "") {
         let max_id = if (len(~.items) == 0) 0 else max(for (i in ~.items) i.id)
         let next_id = max_id + 1
-        let new_item = {id: next_id, text: new_text, done: false}
+        let new_item = {id: next_id, text: new_text, done: false, notes: ""}
         ~.items = ~.items ++ [new_item]
         new_text = ""
         adding = false
@@ -137,9 +166,9 @@ on keydown(evt) {
 on delete_item(evt) {
   ~.items = for (item in ~.items where item.id != evt.id) item
 }
-on update_text(evt) {
+on update_item(evt) {
   ~.items = for (item in ~.items)
-    if (item.id == evt.id) {id: item.id, text: evt.text, done: item.done}
+    if (item.id == evt.id) {id: item.id, text: evt.text, done: item.done, notes: evt.notes}
     else item
 }
 
@@ -413,6 +442,32 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "" {
       .delete-btn:hover {
         color: #e53935;
         background: #ffebee;
+      }
+      .item-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .todo-notes {
+        font-size: 0.8em;
+        color: #888;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .todo-item.done .todo-notes {
+        color: #bbb;
+      }
+      .notes-edit {
+        width: 100%;
+        font-size: 0.85em;
+        padding: 4px 6px;
+        border: 1px solid #5c6bc0;
+        border-radius: 4px;
+        color: #555;
+        margin-top: 4px;
+        resize: none;
       }
       .add-inline {
         padding: 4px 10px 4px 46px;

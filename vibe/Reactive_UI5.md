@@ -598,6 +598,33 @@ Key risks:
 
 Mitigation: Start with fixed-width (monospace) rendering where wrapping is predictable. Proportional fonts can be added later.
 
+### 7.4 Implementation Results ✅
+
+**Status: IMPLEMENTED**
+
+All Phase 23 tasks complete. Multi-line textarea rendering, keyboard handling, and caret navigation are fully functional.
+
+#### Engine changes
+- **render_form.cpp**: Complete rewrite of `render_textarea()` with multi-line text rendering, line-by-line iteration, soft-wrap, caret positioning by line/column, and placeholder text. Added 5 static helper functions: `measure_text_width()`, `textarea_line_start()`, `textarea_line_len()`, `textarea_line_count()`, `textarea_offset_to_line_col()`.
+- **event.cpp**: Added `FORM_CONTROL_TEXTAREA` keyboard handling (~100 lines) for Left/Right (UTF-8 aware), Up/Down (line navigation preserving column), Home/End (line start/end), Backspace (caret adjustment), Enter (advances caret past inserted `\n`). Updated `RDT_EVENT_TEXT_INPUT` handler to advance caret for textarea.
+- **render.cpp**: Added `FORM_CONTROL_TEXTAREA` to `render_caret()` early-return list (textarea draws its own caret inline).
+- **cmd_layout.cpp**: Fixed stale focus pointer bug — when DOM rebuild replaces the focused element (e.g., `span.todo-text` → `input.inline-edit`), the old focus pointer is now cleared so autofocus can fire. Added autofocus support to the full rebuild path (was only in incremental rebuild).
+
+#### Application changes
+- **todo2.ls**: Added `notes` field support — `todo_item` template has `edit_notes` state, `<textarea class:"notes-edit">` in edit mode, separate keydown/input handlers for notes vs title editing, notes display as `<span class:"todo-notes">`.
+- **data/todo/*.json**: All data files updated with `notes` fields.
+- **CSS**: Added `.item-content` (flex column), `.todo-notes` (truncated preview), `.notes-edit` (textarea styling).
+
+#### Bug fixed during implementation
+- **Stale focus pointer after DOM rebuild**: When editing mode switches the template from `<span class:"todo-text">` to `<input class:"inline-edit" autofocus:"true">`, the old focus pointer wasn't cleared. This prevented autofocus from firing, breaking keyboard events (like Escape to close editing). Fixed in both `rebuild_lambda_doc` and `rebuild_lambda_doc_incremental`.
+
+#### Tests
+- `test/ui/todo2_textarea.json`: New test verifying textarea appears in editing mode, Escape closes editing, and clicking notes reopens editing — 5/5 assertions pass.
+- `test/ui/todo2_basic.json`: 5/5 pass (no regression).
+- `test/ui/todo2_file_switch.json`: 3/3 pass (no regression). Fixed missing `html` field.
+- Lambda baseline: 564/565 pass (1 pre-existing JS transpiler failure).
+- Radiant baseline: 40/46 pass (same 6 pre-existing todo v1 failures).
+
 ---
 
 ## 8. Phase 24: Text Selection in Text Area

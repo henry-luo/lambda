@@ -2748,6 +2748,124 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
+        // Handle arrow keys and caret adjustment for textarea form controls
+        if (focused && focused->is_element() && state->caret) {
+            DomElement* focus_elem = (DomElement*)focused;
+            if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                focus_elem->form &&
+                focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+
+                const char* value = focus_elem->form->value;
+                int value_len = value ? (int)strlen(value) : 0;
+                int cur = state->caret->char_offset;
+
+                // helper: compute line start offset and line length for a given line
+                auto line_start_off = [&](int line) -> int {
+                    if (!value || line <= 0) return 0;
+                    int ln = 0;
+                    for (int i = 0; i < value_len; i++) {
+                        if (value[i] == '\n') {
+                            ln++;
+                            if (ln == line) return i + 1;
+                        }
+                    }
+                    return value_len;
+                };
+
+                auto line_len_from = [&](int off) -> int {
+                    int i = 0;
+                    while (off + i < value_len && value[off + i] != '\n') i++;
+                    return i;
+                };
+
+                // compute current line and column (byte offset within line)
+                int cur_line = 0, cur_col = 0;
+                if (value) {
+                    for (int i = 0; i < cur && i < value_len; i++) {
+                        if (value[i] == '\n') { cur_line++; cur_col = 0; }
+                        else cur_col++;
+                    }
+                }
+
+                // count total lines
+                int total_lines = 1;
+                if (value) {
+                    for (int i = 0; i < value_len; i++) {
+                        if (value[i] == '\n') total_lines++;
+                    }
+                }
+
+                if (key_event->key == RDT_KEY_LEFT) {
+                    if (cur > 0 && value) {
+                        int new_off = cur - 1;
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_RIGHT) {
+                    if (cur < value_len && value) {
+                        uint32_t cp;
+                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
+                        if (bytes > 0)
+                            state->caret->char_offset = cur + bytes;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_UP) {
+                    // move caret up one line, preserving column
+                    if (cur_line > 0) {
+                        int prev_line_off = line_start_off(cur_line - 1);
+                        int prev_line_len = line_len_from(prev_line_off);
+                        int target_col = cur_col < prev_line_len ? cur_col : prev_line_len;
+                        state->caret->char_offset = prev_line_off + target_col;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_DOWN) {
+                    // move caret down one line, preserving column
+                    if (cur_line < total_lines - 1) {
+                        int next_line_off = line_start_off(cur_line + 1);
+                        int next_line_len = line_len_from(next_line_off);
+                        int target_col = cur_col < next_line_len ? cur_col : next_line_len;
+                        state->caret->char_offset = next_line_off + target_col;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_HOME) {
+                    // move to start of current line
+                    state->caret->char_offset = line_start_off(cur_line);
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_END) {
+                    // move to end of current line
+                    int loff = line_start_off(cur_line);
+                    state->caret->char_offset = loff + line_len_from(loff);
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_BACKSPACE) {
+                    // Lambda handler deleted char; move caret back by 1 char
+                    if (cur > 0 && value) {
+                        int new_off = cur - 1;
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                    }
+                    evcon.need_repaint = true;
+                } else if (key_event->key == RDT_KEY_ENTER) {
+                    // Lambda handler inserted '\n'; advance caret by 1 byte
+                    int new_len = focus_elem->form->value
+                        ? (int)strlen(focus_elem->form->value) : 0;
+                    int new_off = cur + 1;
+                    state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                    evcon.need_repaint = true;
+                }
+            }
+        }
+
         // Handle caret/selection navigation when we have a caret with a view
         // The caret view is set when clicking on text, which may not be a focusable element
         View* caret_view = (state->caret && state->caret->view) ? state->caret->view : nullptr;
@@ -2946,13 +3064,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Re-fetch focused element (dispatch may have rebuilt the DOM)
         focused = focus_get(state);
 
-        // For form text inputs, advance caret by the typed character's byte length
+        // For form text inputs and textareas, advance caret by the typed character's byte length
         bool is_form_input = false;
         if (focused && focused->is_element()) {
             DomElement* elem = (DomElement*)focused;
             if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 elem->form &&
-                elem->form->control_type == FORM_CONTROL_TEXT) {
+                (elem->form->control_type == FORM_CONTROL_TEXT ||
+                 elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
                 if (state->caret) {
                     uint32_t cp = text_event->codepoint;

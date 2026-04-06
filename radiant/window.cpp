@@ -467,11 +467,16 @@ void render(GLFWwindow* window) {
 
     // rerender if the document is dirty or needs repaint (e.g., caret changed)
     if (ui_context.document && ui_context.document->state &&
-        (ui_context.document->state->is_dirty || ui_context.document->state->needs_repaint)) {
+        (ui_context.document->state->is_dirty ||
+         (ui_context.document->state->needs_repaint &&
+          dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
         ui_context.document->state->needs_repaint = false;
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
         dirty_clear(&ui_context.document->state->dirty_tracker);
+    } else if (ui_context.document && ui_context.document->state) {
+        // Clear stale needs_repaint when there are no dirty regions to render
+        ui_context.document->state->needs_repaint = false;
     }
 
     // repaint to screen

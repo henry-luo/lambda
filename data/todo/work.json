@@ -4,16 +4,16 @@
     {
       "name": "In Progress",
       "items": [
-        {"id": 1, "text": "Review pull requests", "done": false},
-        {"id": 2, "text": "Update documentation", "done": true},
-        {"id": 3, "text": "Fix CI pipeline", "done": false}
+        {"id": 1, "text": "Review pull requests", "done": false, "notes": "Check the open PRs on GitHub.\nFocus on the API changes."},
+        {"id": 2, "text": "Update documentation", "done": true, "notes": ""},
+        {"id": 3, "text": "Fix CI pipeline", "done": false, "notes": "Need to investigate the\nfailing test on Linux."}
       ]
     },
     {
       "name": "Backlog",
       "items": [
-        {"id": 4, "text": "Refactor auth module", "done": false},
-        {"id": 5, "text": "Write unit tests", "done": false}
+        {"id": 4, "text": "Refactor auth module", "done": false, "notes": ""},
+        {"id": 5, "text": "Write unit tests", "done": false, "notes": ""}
       ]
     }
   ]
