@@ -1424,6 +1424,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float float_max_sum = 0.0f;   // Sum of floated children's max-content widths
     float float_min_max = 0.0f;   // Max of individual floated children's min-content widths
 
+    // CSS 2.1 §9.5: At max-content, floats and inline content share the same line.
+    // The total max-content width = float_widths + inline_content_width.
+    // Track accumulated float widths that are adjacent to inline content so we
+    // can add them to inline_max_sum at the end.
+    float float_width_alongside_inline = 0.0f;
+
     // Check if this element is a flex container (text content doesn't contribute to intrinsic size)
     // Also check if it's a ROW flex container (children laid out horizontally -> SUM widths)
     bool is_flex_container = false;
@@ -2254,6 +2260,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // preventing float wrapping caused by cumulative rounding error.
                 float rounded_child = ceilf(child_width * 2.0f) / 2.0f;
                 float_max_sum += rounded_child;
+                float_width_alongside_inline += rounded_child;
                 float_min_max = max(float_min_max, child_sizes.min_content);
                 log_debug("  float child: accumulating max_sum=%.1f, min_max=%.1f",
                           float_max_sum, float_min_max);
@@ -2268,6 +2275,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     float_max_sum = 0;
                     float_min_max = 0;
                 }
+                // A non-float block child creates a full-width line, separating
+                // preceding floats from subsequent inline content.
+                float_width_alongside_inline = 0;
                 sizes.min_content = max(sizes.min_content, child_sizes.min_content);
                 sizes.max_content = max(sizes.max_content, child_width);
             }
@@ -2556,7 +2566,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
         }
         sizes.min_content = max(sizes.min_content, inline_min_sum);
-        sizes.max_content = max(sizes.max_content, inline_max_sum);
+        // CSS 2.1 §9.5 + CSS Sizing 3 §4: At max-content (infinite width),
+        // floats and inline content share the same line. The total width needed
+        // is the sum of float widths + inline content width.
+        sizes.max_content = max(sizes.max_content, inline_max_sum + float_width_alongside_inline);
+        // For min-content, floats stack vertically so inline content gets full width
+        // (float_width not added to inline_min_sum)
 
         // CSS Text 3 §5.2: Propagate forced break info for inline spans.
         // This allows the parent to split its inline run when this element

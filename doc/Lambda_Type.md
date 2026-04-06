@@ -56,6 +56,7 @@ Lambda's type system forms a hierarchy with `any` at the top and `null` at the b
 | ---------- | ----------- | ----------------------------- |
 | `int`      | `number`    | `42 is number` → `true`       |
 | `float`    | `number`    | `3.14 is number` → `true`     |
+| `i8` `i16` `i32` etc. | `number` | `42i8 is number` → `true` |
 | `range`    | `container` | `(1 to 10) is range` → `true` |
 | `int[]`    | `any[]`     | `[1,2,3] is any[]` → `true`   |
 | `null`     | `T?`        | `null is int?` → `true`       |
@@ -96,6 +97,12 @@ type("hello")      // type string
 type([1, 2, 3])    // type array
 type({a: 1})       // type map
 
+// Sized numeric types return specific type
+type(42i8)         // type i8
+type(255u16)       // type u16
+type(3.14f32)      // type f32
+type(1000u64)      // type u64
+
 // Type comparison
 type(42) == int           // true
 type(123) != string       // true
@@ -121,6 +128,11 @@ binary      // Binary data
 datetime    // Date and time
 range       // Integer range (e.g. 1 to 10)
 path        // File path or URL
+
+// Sized numeric type literals
+i8  i16  i32  i64    // Sized signed integers
+u8  u16  u32  u64    // Sized unsigned integers
+f16  f32  f64        // Sized floats
 ```
 
 ### Type Constants
@@ -129,7 +141,7 @@ path        // File path or URL
 // Special type values
 any         // Top type (supertype of all)
 error       // Error type
-number      // Union: int | float
+number      // Union: int | float | sized numerics
 ```
 
 ### Type Examples
@@ -142,6 +154,27 @@ let pi: float = 3.14159
 let active: bool = true
 let created: datetime = t'2025-01-01'
 let config_path: path = .config.json
+
+// Sized numeric type annotations
+let a: i8 = 42i8
+let b: u32 = 255u32
+let c: f32 = 3.14f32
+let d: u64 = 1000u64
+```
+
+### Sized Numeric Type Checking
+
+The `is` operator checks for the exact sized type. All sized numerics also match `number`:
+
+```lambda
+42i8 is i8           // true
+42i8 is u8           // false (different signedness)
+42i8 is i16          // false (different width)
+42i8 is number       // true  (all numerics match number)
+3.14f32 is f32       // true
+3.14f32 is f16       // false
+1000u64 is u64       // true
+1000u64 is number    // true
 ```
 
 ---

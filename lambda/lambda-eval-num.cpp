@@ -32,7 +32,25 @@ Item push_c(int64_t cval) {
                            (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
 #define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
-                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL)
+                              (t) == LMD_TYPE_FLOAT || (t) == LMD_TYPE_DECIMAL || \
+                              (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
+
+// promote NUM_SIZED / UINT64 to standard INT64 or FLOAT for arithmetic
+static inline void normalize_sized(Item &item, TypeId &type) {
+    if (type == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            item = push_d(item.get_num_sized_as_double());
+            type = LMD_TYPE_FLOAT;
+        } else {
+            item = push_l(item.get_num_sized_as_int64());
+            type = LMD_TYPE_INT64;
+        }
+    } else if (type == LMD_TYPE_UINT64) {
+        item = push_l((int64_t)item.get_uint64());
+        type = LMD_TYPE_INT64;
+    }
+}
 
 // forward declarations for vector ops (defined in lambda-vector.cpp)
 Item vec_add(Item a, Item b);
@@ -87,6 +105,9 @@ Item fn_add(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_add(item_a, item_b);
     }
+
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
 
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
@@ -200,6 +221,9 @@ Item fn_mul(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mul(item_a, item_b);
     }
+
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
 
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
@@ -319,6 +343,9 @@ Item fn_sub(Item item_a, Item item_b) {
         return vec_sub(item_a, item_b);
     }
 
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
+
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t a = item_a.get_int56();
         int64_t b = item_b.get_int56();
@@ -424,6 +451,9 @@ Item fn_div(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_div(item_a, item_b);
     }
+
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
 
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         int64_t b = item_b.get_int56();
@@ -565,6 +595,9 @@ Item fn_idiv(Item item_a, Item item_b) {
     TypeId ta = get_type_id(item_a), tb = get_type_id(item_b);
     if (ta == LMD_TYPE_NULL || tb == LMD_TYPE_NULL) return ItemNull;
 
+    normalize_sized(item_a, ta);
+    normalize_sized(item_b, tb);
+
     // Check for division by zero
     bool is_zero = false;
     if (item_b._type_id == LMD_TYPE_INT) {
@@ -625,6 +658,9 @@ Item fn_pow(Item item_a, Item item_b) {
         return vec_pow(item_a, item_b);
     }
 
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
+
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
         return decimal_pow(item_a, item_b, context);
     }
@@ -677,6 +713,9 @@ Item fn_mod(Item item_a, Item item_b) {
         (IS_VECTOR_TYPE(type_a) && IS_VECTOR_TYPE(type_b))) {
         return vec_mod(item_a, item_b);
     }
+
+    normalize_sized(item_a, type_a);
+    normalize_sized(item_b, type_b);
 
     // Handle decimal types - delegate to centralized decimal handling
     if (item_a._type_id == LMD_TYPE_DECIMAL || item_b._type_id == LMD_TYPE_DECIMAL) {
@@ -746,6 +785,7 @@ Item fn_abs(Item item) {
     GUARD_ERROR1(item);
     // abs() - absolute value of a number or element-wise for arrays
     TypeId type = get_type_id(item);
+    normalize_sized(item, type);
     if (type == LMD_TYPE_INT) {
         int64_t val = item.get_int56();
         return (Item) { .item = i2it(val < 0 ? -val : val) };
@@ -799,6 +839,7 @@ Item fn_round(Item item) {
     GUARD_ERROR1(item);
     // round() - round to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
+    normalize_sized(item, type);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         // Already an integer, return as-is
         return item;
@@ -846,6 +887,7 @@ Item fn_floor(Item item) {
     GUARD_ERROR1(item);
     // floor() - round down to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
+    normalize_sized(item, type);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
@@ -892,6 +934,7 @@ Item fn_ceil(Item item) {
     GUARD_ERROR1(item);
     // ceil() - round up to nearest integer, or element-wise for arrays
     TypeId type = get_type_id(item);
+    normalize_sized(item, type);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) {
         return item;  // return as-is
     }
@@ -951,6 +994,14 @@ Item fn_min2(Item item_a, Item item_b) {
         a_val = item_a.get_double();
         is_float = true;
     }
+    else if (item_a._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item_a.get_num_type();
+        a_val = item_a.get_num_sized_as_double();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
+    }
+    else if (item_a._type_id == LMD_TYPE_UINT64) {
+        a_val = (double)item_a.get_uint64();
+    }
     else if (item_a._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
         return ItemError;
@@ -970,6 +1021,14 @@ Item fn_min2(Item item_a, Item item_b) {
     else if (item_b._type_id == LMD_TYPE_FLOAT) {
         b_val = item_b.get_double();
         is_float = true;
+    }
+    else if (item_b._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item_b.get_num_type();
+        b_val = item_b.get_num_sized_as_double();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
+    }
+    else if (item_b._type_id == LMD_TYPE_UINT64) {
+        b_val = (double)item_b.get_uint64();
     }
     else if (item_b._type_id == LMD_TYPE_DECIMAL) {
         log_error("decimal not supported yet in fn_min");
@@ -1139,6 +1198,14 @@ Item fn_max2(Item item_a, Item item_b) {
         a_val = item_a.get_double();
         is_float = true;
     }
+    else if (item_a._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item_a.get_num_type();
+        a_val = item_a.get_num_sized_as_double();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
+    }
+    else if (item_a._type_id == LMD_TYPE_UINT64) {
+        a_val = (double)item_a.get_uint64();
+    }
     else {
         log_debug("max not supported for type: %d", item_a._type_id);
         return ItemError;
@@ -1154,6 +1221,14 @@ Item fn_max2(Item item_a, Item item_b) {
     else if (item_b._type_id == LMD_TYPE_FLOAT) {
         b_val = item_b.get_double();
         is_float = true;
+    }
+    else if (item_b._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item_b.get_num_type();
+        b_val = item_b.get_num_sized_as_double();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) is_float = true;
+    }
+    else if (item_b._type_id == LMD_TYPE_UINT64) {
+        b_val = (double)item_b.get_uint64();
     }
     else {
         log_debug("max not supported for type: %d", item_b._type_id);
@@ -1548,6 +1623,9 @@ Item fn_pos(Item item) {
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         return item;  // For decimal, unary + returns the same value
     }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED || item._type_id == LMD_TYPE_UINT64) {
+        return item;  // Already numeric
+    }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number
         const char* chars = item.get_chars();
@@ -1600,6 +1678,17 @@ Item fn_neg(Item item) {
     }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         return decimal_neg(item, context);
+    }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            return push_d(-item.get_num_sized_as_double());
+        } else {
+            return push_l(-item.get_num_sized_as_int64());
+        }
+    }
+    else if (item._type_id == LMD_TYPE_UINT64) {
+        return push_l(-(int64_t)item.get_uint64());
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
@@ -1658,6 +1747,23 @@ Item fn_int(Item item) {
         }
         return {.item = i2it((int32_t)dval)};
     }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            dval = item.get_num_sized_as_double();
+            ival = (int64_t)dval;
+            dval = (double)ival;
+            goto CHECK_DVAL;
+        }
+        ival = item.get_num_sized_as_int64();
+        if (ival > INT32_MAX || ival < INT32_MIN) return push_l(ival);
+        return {.item = i2it((int32_t)ival)};
+    }
+    else if (item._type_id == LMD_TYPE_UINT64) {
+        uint64_t uval = item.get_uint64();
+        if (uval > (uint64_t)INT32_MAX) return push_l((int64_t)uval);
+        return {.item = i2it((int32_t)uval)};
+    }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         // truncate fractional part and convert to int64
         int64_t result = decimal_to_int64(item);
@@ -1712,6 +1818,17 @@ int64_t fn_int64(Item item) {
         }
         return truncated;
     }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            double dval = item.get_num_sized_as_double();
+            return (int64_t)dval;
+        }
+        return item.get_num_sized_as_int64();
+    }
+    else if (item._type_id == LMD_TYPE_UINT64) {
+        return (int64_t)item.get_uint64();
+    }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         // Convert decimal to int64 using centralized function
         return decimal_to_int64(item);
@@ -1755,6 +1872,16 @@ Item fn_decimal(Item item) {
     }
     else if (item._type_id == LMD_TYPE_FLOAT) {
         return decimal_from_double(item.get_double(), context);
+    }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            return decimal_from_double(item.get_num_sized_as_double(), context);
+        }
+        return decimal_from_int64(item.get_num_sized_as_int64(), context);
+    }
+    else if (item._type_id == LMD_TYPE_UINT64) {
+        return decimal_from_int64((int64_t)item.get_uint64(), context);
     }
     else if (item._type_id == LMD_TYPE_STRING || item._type_id == LMD_TYPE_SYMBOL) {
         const char* chars = item.get_chars();
@@ -2053,6 +2180,12 @@ Item fn_float(Item item) {
 
         return (Item) { .item = d2it(val) };
     }
+    else if (item._type_id == LMD_TYPE_NUM_SIZED) {
+        return push_d(item.get_num_sized_as_double());
+    }
+    else if (item._type_id == LMD_TYPE_UINT64) {
+        return push_d((double)item.get_uint64());
+    }
     else if (item._type_id == LMD_TYPE_DECIMAL) {
         double dval = decimal_to_double(item);
         double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -2324,6 +2457,10 @@ extern "C" int64_t _barg(Item v) {
         return (int64_t)v.get_double();
     case LMD_TYPE_BOOL:
         return v.bool_val ? 1 : 0;
+    case LMD_TYPE_NUM_SIZED:
+        return v.get_num_sized_as_int64();
+    case LMD_TYPE_UINT64:
+        return (int64_t)v.get_uint64();
     case LMD_TYPE_RAW_POINTER:
         // raw int64_t (high byte == 0): from other bitwise ops or literals
         return (int64_t)v.item;

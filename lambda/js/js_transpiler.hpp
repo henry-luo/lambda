@@ -135,6 +135,20 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 // Direct MIR transpilation entry point
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
+// Batch mode preamble support (two-module MIR split)
+struct JsModuleConstEntry;  // forward declaration
+struct JsPreambleState {
+    void* mir_ctx;              // MIR_context_t kept alive for harness function objects
+    int module_var_count;       // number of harness module vars
+    JsModuleConstEntry* entries;// snapshot of harness module_consts
+    int entry_count;
+};
+Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                   JsPreambleState* out_state);
+Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                        const JsPreambleState* preamble);
+void preamble_state_destroy(JsPreambleState* state);
+
 // Transpile a pre-built JS AST to MIR (used by TS transpiler)
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast, const char* filename);
 

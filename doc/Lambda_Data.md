@@ -46,6 +46,12 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `bool`     | Boolean values              | `true`, `false`       |
 | `int`      | 56-bit signed integers      | `42`, `-123`          |
 | `float`    | 64-bit floating point       | `3.14`, `1.5e-10`     |
+| `i8` `i16` `i32` | Sized signed integers | `42i8`, `1000i16`     |
+| `u8` `u16` `u32` | Sized unsigned integers | `255u8`, `60000u16` |
+| `i64`      | 64-bit signed (alias for `int64`) | `100i64`        |
+| `u64`      | 64-bit unsigned integer     | `1000u64`             |
+| `f16` `f32`| Sized floating point        | `0.5f16`, `3.14f32`   |
+| `f64`      | 64-bit float (alias for `float`) | `2.7f64`         |
 | `decimal`  | Arbitrary precision decimal | `123.456n`,`456.789N` |
 | `string`   | UTF-8 text strings          | `"hello"`             |
 | `symbol`   | Interned identifiers        | `'symbol'`            |
@@ -103,6 +109,29 @@ nan
 // Decimals (arbitrary precision)
 123.456n       // decimal128
 -789.012N      // unlimited precision decimal
+
+// Sized integers (postfix suffix)
+42i8           // 8-bit signed  [-128, 127]
+1000i16        // 16-bit signed [-32768, 32767]
+100000i32      // 32-bit signed [-2^31, 2^31-1]
+100i64         // 64-bit signed (alias for int64)
+255u8          // 8-bit unsigned [0, 255]
+60000u16       // 16-bit unsigned [0, 65535]
+3000000000u32  // 32-bit unsigned [0, 2^32-1]
+1000u64        // 64-bit unsigned [0, 2^64-1]
+
+// Sized floats (postfix suffix)
+0.5f16         // 16-bit float (half precision)
+3.14f32        // 32-bit float (single precision)
+2.7f64         // 64-bit float (alias for float)
+```
+
+**Sized numeric types** use a postfix suffix on numeric literals. Types `i8` through `u32` and `f16`/`f32` are packed inline in the 64-bit `Item` representation (zero heap allocation). Types `i64`, `u64`, and `f64` are heap-allocated.
+
+**Overflow behavior**: Sized integer arithmetic wraps silently (modular arithmetic):
+```lambda
+127i8 + 1i8    // -128 (wraps)
+255u8 + 1u8    // 0 (wraps)
 ```
 
 **Special float values**:
@@ -966,6 +995,28 @@ Lambda performs limited implicit coercion:
 // String concatenation coerces other types
 "value: " ++ 42             // "value: 42"
 ```
+
+#### Sized Numeric Promotion
+
+Mixed arithmetic with sized types follows these promotion rules:
+
+```lambda
+// Same signedness, different widths → widen to larger
+42i8 + 1000i16              // i16 result
+
+// Signed + unsigned (same width) → next wider signed
+42i8 + 10u8                 // promoted to i16
+
+// Sized + standard int/float → promote to standard
+42i8 + 100                  // int result (142)
+100i32 + 3.14               // float result (103.14)
+
+// All sized types are compatible with number
+42i8 is number              // true
+3.14f32 is number           // true
+```
+
+Sized types can be passed to functions expecting `int`, `float`, or `number` parameters, and vice versa.
 
 ### Explicit Conversion
 

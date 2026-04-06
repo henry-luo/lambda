@@ -655,8 +655,10 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
         lycon->line.effective_right = local_right;
         lycon->line.has_float_intrusion = true;
 
-        // If advance_x is before effective_left, move it
-        if (lycon->line.advance_x < lycon->line.effective_left) {
+        // If advance_x is before effective_left, move it — but respect
+        // negative text-indent which legitimately places items before line.left
+        if (lycon->line.advance_x < lycon->line.effective_left &&
+            lycon->line.advance_x >= lycon->line.left) {
             lycon->line.advance_x = lycon->line.effective_left;
         }
 

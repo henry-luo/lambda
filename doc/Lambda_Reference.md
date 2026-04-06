@@ -86,6 +86,12 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | --------- | -------------------------------- | ----------------------------- |
 | `int`     | 56-bit signed integer            | `42`, `-123`                  |
 | `float`   | 64-bit floating point            | `3.14`, `1e-10`               |
+| `i8` `i16` `i32` | Sized signed integers   | `42i8`, `1000i16`, `100i32`   |
+| `u8` `u16` `u32` | Sized unsigned integers | `255u8`, `60000u16`           |
+| `i64`     | Alias for `int64`                | `100i64`                      |
+| `u64`     | 64-bit unsigned integer          | `1000u64`                     |
+| `f16` `f32` | Sized floating point           | `0.5f16`, `3.14f32`           |
+| `f64`     | Alias for `float`                | `2.7f64`                      |
 | `string`  | UTF-8 text                       | `"hello"`                     |
 | `symbol`  | Interned identifier              | `'json'`                       |
 | `bool`    | Boolean                          | `true`, `false`               |
@@ -103,6 +109,11 @@ The Lambda language documentation is organized into focused sub-documents for ea
 // Type annotations
 let x: int = 42
 let items: string[] = ["a", "b"]
+
+// Sized numeric type annotations
+let a: i8 = 42i8
+let b: u32 = 255u32
+let c: f32 = 3.14f32
 
 // Typed array annotations
 var arr: int[] = [1, 2, 3]     // Native int array

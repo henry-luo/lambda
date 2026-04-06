@@ -48,6 +48,10 @@ extern void heap_init();
 // External from js_runtime.cpp
 extern "C" void js_reset_module_vars();
 
+// Global MIR error handler override for batch mode.
+// If non-NULL, installed after each jit_init() to prevent exit(1) on MIR errors.
+MIR_error_func_t g_batch_mir_error_handler = NULL;
+
 // External declarations for parallel module compilation
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
@@ -299,6 +303,13 @@ struct JsMirTranspiler {
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)
     int arguments_param_count;       // number of formal params mapped to arguments
     char arguments_param_names[16][128]; // formal param var names (_js_xxx)
+
+    // Batch preamble mode: compile harness (sta.js + assert.js) so func decls persist as module vars
+    bool preamble_mode;
+    // With-preamble mode: pre-seed module_consts from harness compilation
+    JsModuleConstEntry* preamble_entries;   // array of entries to pre-seed (owned by caller)
+    int preamble_entry_count;
+    int preamble_var_count;                 // starting module_var_count from preamble
 };
 
 // ============================================================================
@@ -406,6 +417,10 @@ static void jm_emit(JsMirTranspiler* mt, MIR_insn_t insn) {
 }
 
 static void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
+    if (!label) {
+        log_error("js-mir: attempt to emit NULL label — skipping");
+        return;
+    }
     MIR_append_insn(mt->ctx, mt->current_func_item, label);
 }
 
@@ -628,7 +643,7 @@ static int jm_count_yields(JsAstNode* node) {
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT: {
         JsForOfNode* fo = (JsForOfNode*)node;
-        return jm_count_yields(fo->right) + jm_count_yields(fo->body);
+        return jm_count_yields(fo->left) + jm_count_yields(fo->right) + jm_count_yields(fo->body);
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* sw = (JsSwitchNode*)node;
@@ -727,6 +742,33 @@ static int jm_count_yields(JsAstNode* node) {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         return jm_count_yields(ls->body);
     }
+    // destructuring patterns: yield can appear in default values
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
+        return jm_count_yields(ap->left) + jm_count_yields(ap->right);
+    }
+    case JS_AST_NODE_ARRAY_PATTERN: {
+        JsArrayPatternNode* arrp = (JsArrayPatternNode*)node;
+        int count = 0;
+        JsAstNode* e = arrp->elements;
+        while (e) { count += jm_count_yields(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN: {
+        JsObjectPatternNode* objp = (JsObjectPatternNode*)node;
+        int count = 0;
+        JsAstNode* p = objp->properties;
+        while (p) { count += jm_count_yields(p); p = p->next; }
+        return count;
+    }
+    case JS_AST_NODE_REST_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        return jm_count_yields(sp->argument);
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* thr = (JsThrowNode*)node;
+        return jm_count_yields(thr->argument);
+    }
     default:
         return 0;
     }
@@ -790,7 +832,7 @@ static int jm_count_awaits(JsAstNode* node) {
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT: {
         JsForOfNode* fo = (JsForOfNode*)node;
-        return jm_count_awaits(fo->right) + jm_count_awaits(fo->body);
+        return jm_count_awaits(fo->left) + jm_count_awaits(fo->right) + jm_count_awaits(fo->body);
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {
         JsSwitchNode* sw = (JsSwitchNode*)node;
@@ -887,6 +929,33 @@ static int jm_count_awaits(JsAstNode* node) {
     case JS_AST_NODE_LABELED_STATEMENT: {
         JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
         return jm_count_awaits(ls->body);
+    }
+    // destructuring patterns: await can appear in default values
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
+        return jm_count_awaits(ap->left) + jm_count_awaits(ap->right);
+    }
+    case JS_AST_NODE_ARRAY_PATTERN: {
+        JsArrayPatternNode* arrp = (JsArrayPatternNode*)node;
+        int count = 0;
+        JsAstNode* e = arrp->elements;
+        while (e) { count += jm_count_awaits(e); e = e->next; }
+        return count;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN: {
+        JsObjectPatternNode* objp = (JsObjectPatternNode*)node;
+        int count = 0;
+        JsAstNode* p = objp->properties;
+        while (p) { count += jm_count_awaits(p); p = p->next; }
+        return count;
+    }
+    case JS_AST_NODE_REST_ELEMENT: {
+        JsSpreadElementNode* sp = (JsSpreadElementNode*)node;
+        return jm_count_awaits(sp->argument);
+    }
+    case JS_AST_NODE_THROW_STATEMENT: {
+        JsThrowNode* thr = (JsThrowNode*)node;
+        return jm_count_awaits(thr->argument);
     }
     default:
         return 0;
@@ -10746,6 +10815,14 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
             // v15: Generator state machine — emit save/return/resume/load
             int next_state = ++mt->gen_yield_index;
 
+            // safety: if yield count was underestimated (e.g., yields in destructuring patterns
+            // not counted by jm_count_yields), return undefined instead of crashing
+            if (next_state > mt->gen_yield_count || next_state >= 64) {
+                log_error("js-mir: yield index %d exceeds allocated state labels (%d) — returning undefined",
+                    next_state, mt->gen_yield_count);
+                return val;
+            }
+
             // Save all generator locals to env before yielding
             for (int sd = 1; sd <= mt->scope_depth; sd++) {
                 if (!mt->var_scopes[sd]) continue;
@@ -10807,6 +10884,13 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // Phase 6: Async state machine — conditional suspend/resume
         if (mt->in_generator && mt->in_async) {
             int next_state = ++mt->gen_yield_index;
+
+            // safety: if await count was underestimated, return the promise value directly
+            if (next_state > mt->gen_yield_count || next_state >= 64) {
+                log_error("js-mir: await index %d exceeds allocated state labels (%d) — returning value",
+                    next_state, mt->gen_yield_count);
+                return promise_val;
+            }
 
             MIR_label_t suspend_label = jm_new_label(mt);
             MIR_label_t after_await_label = jm_new_label(mt);
@@ -15647,6 +15731,15 @@ static void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
                 jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, val)));
+                // Emit exception propagation landing pad if any exception checks
+                // were emitted during expression transpilation (e.g. runtime calls).
+                // Without this, the BT→func_except_label branch targets an
+                // uninserted label, causing a NULL label crash during MIR inlining.
+                if (mt->func_except_label != 0) {
+                    jm_emit_label(mt, mt->func_except_label);
+                    MIR_reg_t exc_ret = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1, MIR_new_reg_op(mt->ctx, exc_ret)));
+                }
                 if (fn->is_async && mt->try_ctx_depth > 0) mt->try_ctx_depth--;
                 mt->in_async = saved_in_async;
                 goto finish_boxed;
@@ -16088,6 +16181,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->module_consts = hashmap_new(sizeof(JsModuleConstEntry), 16, 0, 0,
         js_module_const_hash, js_module_const_cmp, NULL, NULL);
 
+    // Pre-seed module_consts from preamble (batch mode: test inherits harness definitions)
+    if (mt->preamble_entries && mt->preamble_entry_count > 0) {
+        for (int i = 0; i < mt->preamble_entry_count; i++) {
+            hashmap_set(mt->module_consts, &mt->preamble_entries[i]);
+        }
+        log_debug("js-mir: pre-seeded %d preamble entries (var_count=%d)",
+            mt->preamble_entry_count, mt->preamble_var_count);
+    }
+
     // First pass: collect simple literal constants (const declarations only)
     {
         JsAstNode* s = program->body;
@@ -16216,7 +16318,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Third pass: assign module var indices for non-literal top-level declarations.
     // These are runtime-computed values (const som = {...}, const X = new Y(), etc.)
     // that need to be accessible from class method closures via js_get_module_var().
-    mt->module_var_count = 0;
+    mt->module_var_count = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
     {
         JsAstNode* s = program->body;
         while (s) {
@@ -16552,11 +16655,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsModuleConstEntry lookup;
                         snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
                         if (!hashmap_get(mt->module_consts, &lookup)) {
-                            mce.const_type = MCONST_FUNC;
-                            // Store index to find in func_entries
-                            mce.int_val = (int64_t)(fc - mt->func_entries);
-                            hashmap_set(mt->module_consts, &mce);
-                            log_debug("js-mir: module func '%s' (idx=%d)", mce.name, (int)mce.int_val);
+                            if (mt->preamble_mode) {
+                                // Preamble: store as module var so it persists after js_main returns
+                                mce.const_type = MCONST_MODVAR;
+                                mce.int_val = mt->module_var_count++;
+                                hashmap_set(mt->module_consts, &mce);
+                                log_debug("js-mir: preamble func '%s' → module_var[%d]",
+                                    mce.name, (int)mce.int_val);
+                            } else {
+                                mce.const_type = MCONST_FUNC;
+                                // Store index to find in func_entries
+                                mce.int_val = (int64_t)(fc - mt->func_entries);
+                                hashmap_set(mt->module_consts, &mce);
+                                log_debug("js-mir: module func '%s' (idx=%d)", mce.name, (int)mce.int_val);
+                            }
                         }
                     }
                 }
@@ -17300,6 +17412,18 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
                     jm_set_var(mt, vname, var_reg);
+                    // Preamble mode: also persist function object as module var
+                    // so it survives after js_main returns
+                    if (mt->preamble_mode) {
+                        JsModuleConstEntry pmlookup;
+                        snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
+                        JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);
+                        if (pmc && pmc->const_type == MCONST_MODVAR) {
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pmc->int_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                        }
+                    }
                 }
             }
         }
@@ -18090,6 +18214,37 @@ static int jm_compute_depth(JsImportGraphNode* nodes, int idx) {
     return nodes[idx].depth;
 }
 
+// Pre-link validation: scan all MIR instructions for NULL label operands.
+// Returns true if safe to link, false if NULL labels found (would crash MIR_link).
+static bool jm_validate_mir_labels(MIR_context_t ctx) {
+    bool safe = true;
+    int func_count = 0, insn_count = 0;
+    for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
+         m = DLIST_NEXT(MIR_module_t, m)) {
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
+             item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_func_item) continue;
+            MIR_func_t func = item->u.func;
+            func_count++;
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, func->insns); insn != NULL;
+                 insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                insn_count++;
+                for (size_t i = 0; i < insn->nops; i++) {
+                    if (insn->ops[i].mode == MIR_OP_LABEL && insn->ops[i].u.label == NULL) {
+                        fprintf(stderr, "js-mir: NULL label in func '%s' insn_code=%d op=%zu\n",
+                            func->name, insn->code, (size_t)i);
+                        log_error("js-mir: NULL label in func '%s' insn code=%d op=%zu — aborting link",
+                            func->name, insn->code, i);
+                        safe = false;
+                    }
+                }
+            }
+        }
+    }
+    fprintf(stderr, "js-mir: validate scanned %d funcs %d insns safe=%d\n", func_count, insn_count, safe);
+    return safe;
+}
+
 // Compile a single JS module (parse + AST + MIR transpile + link).
 // Does NOT execute the module or call jm_load_imports() — dependencies
 // are pre-compiled and will be registered before this module executes.
@@ -18124,6 +18279,11 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         return false;
     }
 
+    // Install batch error handler if set
+    if (g_batch_mir_error_handler) {
+        MIR_set_error_func(ctx, g_batch_mir_error_handler);
+    }
+
     JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
     if (!mt) {
         log_error("js-parallel: failed to allocate JsMirTranspiler for '%s'", node->path);
@@ -18151,6 +18311,21 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
     mt->module = MIR_new_module(ctx, "js_module");
 
     transpile_js_mir_ast(mt, js_ast);
+
+    if (!jm_validate_mir_labels(ctx)) {
+        log_error("js-parallel: NULL labels detected for '%s'", node->path);
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        js_transpiler_destroy(tp);
+        MIR_finish(ctx);
+        return false;
+    }
 
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
@@ -18396,6 +18571,21 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
 
     transpile_js_mir_ast(mt, js_ast);
 
+    if (!jm_validate_mir_labels(ctx)) {
+        log_error("js-mir: module: NULL labels detected for '%s'", filename);
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
@@ -18600,6 +18790,11 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         return ItemNull;
     }
 
+    // Install batch error handler if set (prevents exit(1) on MIR errors)
+    if (g_batch_mir_error_handler) {
+        MIR_set_error_func(ctx, g_batch_mir_error_handler);
+    }
+
     JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
     if (!mt) {
         log_error("js-new-function: failed to allocate transpiler");
@@ -18629,6 +18824,20 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     mt->module = MIR_new_module(ctx, module_name);
 
     transpile_js_mir_ast(mt, js_ast);
+
+    if (!jm_validate_mir_labels(ctx)) {
+        log_error("js-new-function: NULL labels detected");
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return ItemNull;
+    }
 
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
@@ -18778,6 +18987,21 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     } // JS_MIR_DUMP
 #endif
 
+    if (!jm_validate_mir_labels(ctx)) {
+        log_error("js-mir-ast: NULL labels detected");
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        if (mt->module_consts) hashmap_free(mt->module_consts);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
@@ -18844,10 +19068,20 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 }
 
 // ============================================================================
+// Preamble support for batch mode two-module split
+// ============================================================================
+
+// Static globals for preamble mode control.
+// Set by wrapper functions before calling the core transpiler.
+static bool g_jm_preamble_mode = false;               // compile as preamble (func decls → module vars)
+static JsPreambleState* g_jm_preamble_out = NULL;      // output: preamble snapshot (preamble mode)
+static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from preamble (test mode)
+
+// ============================================================================
 // Public entry point for JS transpilation via direct MIR generation
 // ============================================================================
 
-Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
 
     // Save runtime for dynamic function compilation (new Function(...)) support
@@ -18936,6 +19170,11 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
+    // Install batch error handler if set (prevents exit(1) on MIR errors)
+    if (g_batch_mir_error_handler) {
+        MIR_set_error_func(ctx, g_batch_mir_error_handler);
+    }
+
     // Set up MIR transpiler (heap-allocated: struct is ~3 MB due to func_entries[256])
     JsMirTranspiler* mt = (JsMirTranspiler*)malloc(sizeof(JsMirTranspiler));
     if (!mt) {
@@ -18959,6 +19198,14 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     mt->scope_env_slot_count = 0;
     mt->current_func_index = -1;
     mt->filename = filename;
+
+    // Preamble mode setup
+    mt->preamble_mode = g_jm_preamble_mode;
+    if (g_jm_preamble_in) {
+        mt->preamble_entries = g_jm_preamble_in->entries;
+        mt->preamble_entry_count = g_jm_preamble_in->entry_count;
+        mt->preamble_var_count = g_jm_preamble_in->module_var_count;
+    }
 
     // Create module
     mt->module = MIR_new_module(ctx, "js_script");
@@ -19006,6 +19253,21 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     } // JS_MIR_DUMP
 #endif
 
+    // Pre-link validation: abort gracefully if NULL labels found
+    if (!jm_validate_mir_labels(ctx)) {
+        log_error("js-mir: NULL labels detected, aborting link for '%s'", filename ? filename : "<string>");
+        hashmap_free(mt->import_cache);
+        hashmap_free(mt->local_funcs);
+        if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
+        for (int i = 0; i <= mt->scope_depth; i++) {
+            if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
+        }
+        free(mt);
+        MIR_finish(ctx);
+        js_transpiler_destroy(tp);
+        return (Item){.item = ITEM_ERROR};
+    }
+
     // Link and generate
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
 
@@ -19038,7 +19300,11 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 
     // Execute
     log_debug("js-mir: executing JIT compiled code");
-    js_reset_module_vars();
+    if (!g_jm_preamble_in) {
+        // Normal/preamble mode: reset all module vars before execution
+        js_reset_module_vars();
+    }
+    // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
     Item result = js_main((Context*)context);
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
 
@@ -19046,6 +19312,21 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
     log_debug("js-mir: event loop drained");
+
+    // Preamble mode: snapshot module_consts so tests can inherit harness definitions
+    if (g_jm_preamble_out && mt->module_consts) {
+        g_jm_preamble_out->module_var_count = mt->module_var_count;
+        int count = (int)hashmap_count(mt->module_consts);
+        g_jm_preamble_out->entries = (JsModuleConstEntry*)malloc(count * sizeof(JsModuleConstEntry));
+        g_jm_preamble_out->entry_count = 0;
+        size_t snap_iter = 0; void* snap_item;
+        while (hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
+            g_jm_preamble_out->entries[g_jm_preamble_out->entry_count++] =
+                *(JsModuleConstEntry*)snap_item;
+        }
+        log_debug("js-mir: preamble snapshot: %d entries, %d module vars",
+            g_jm_preamble_out->entry_count, g_jm_preamble_out->module_var_count);
+    }
 
     // Handle result (same logic as js_transpiler_compile)
     Item final_result;
@@ -19082,12 +19363,61 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
     free(mt);
-    MIR_finish(ctx);
+    if (g_jm_preamble_out) {
+        // Preamble mode: keep MIR context alive — harness function objects reference compiled code
+        g_jm_preamble_out->mir_ctx = ctx;
+    } else {
+        MIR_finish(ctx);
+    }
     jm_cleanup_deferred_mir();
     js_transpiler_destroy(tp);
 
     log_debug("js-mir: transpilation completed");
     return final_result;
+}
+
+// ============================================================================
+// Public API wrappers for preamble support
+// ============================================================================
+
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
+    return transpile_js_to_mir_core(runtime, js_source, filename);
+}
+
+Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                   JsPreambleState* out_state) {
+    g_jm_preamble_mode = true;
+    g_jm_preamble_out = out_state;
+    g_jm_preamble_in = NULL;
+    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    return result;
+}
+
+Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                        const JsPreambleState* preamble) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = preamble;
+    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    g_jm_preamble_in = NULL;
+    return result;
+}
+
+void preamble_state_destroy(JsPreambleState* state) {
+    if (!state) return;
+    if (state->mir_ctx) {
+        MIR_finish((MIR_context_t)state->mir_ctx);
+        state->mir_ctx = NULL;
+    }
+    free(state->entries);
+    state->entries = NULL;
+    state->entry_count = 0;
+    state->module_var_count = 0;
 }
 
 // ============================================================================
