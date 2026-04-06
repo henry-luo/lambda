@@ -1289,6 +1289,28 @@ void line_align(LayoutContext* lycon) {
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("layout node %s, advance_y: %f", node->source_loc(), lycon->block.advance_y);
 
+    // HTML spec §4.11.1: <details> without the 'open' attribute only renders
+    // its first <summary> child. All other children (including text nodes) are
+    // hidden. CSS selectors cannot target text nodes, so this must be handled
+    // programmatically rather than via the UA stylesheet.
+    if (node->parent && node->parent->is_element()) {
+        DomElement* parent_elem = node->parent->as_element();
+        if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->get_attribute("open")) {
+            // Only allow the first <summary> child through
+            bool is_summary = node->is_element() && node->tag() == HTM_TAG_SUMMARY;
+            if (!is_summary) {
+                if (node->is_element()) {
+                    DomElement* elem = node->as_element();
+                    elem->view_type = RDT_VIEW_NONE;
+                    elem->width = 0;
+                    elem->height = 0;
+                }
+                log_debug("%s skipping non-summary child of closed <details>", node->source_loc());
+                return;
+            }
+        }
+    }
+
     // Log for IMG elements
     uintptr_t node_tag = node->tag();
     if (node_tag == HTM_TAG_IMG) {

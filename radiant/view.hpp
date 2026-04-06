@@ -1000,7 +1000,7 @@ typedef struct BlockProp {
 typedef struct FontBox {
     FontProp *style;  // current font style
     struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
-    int current_font_size;  // font size of current element
+    float current_font_size;  // font size of current element
 } FontBox;
 
 typedef struct TextRect {

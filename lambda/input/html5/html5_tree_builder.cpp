@@ -1019,6 +1019,13 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
         return;
     }
 
+    // Per HTML spec: ignore_next_lf only applies to the very next character token
+    // after <pre>/<listing>/<textarea>. If any non-character token intervenes
+    // (e.g., <code> start tag), clear the flag so the newline is preserved.
+    if (token->type != HTML5_TOKEN_CHARACTER) {
+        parser->ignore_next_lf = false;
+    }
+
     if (token->type == HTML5_TOKEN_COMMENT) {
         html5_insert_comment(parser, token);
         return;
