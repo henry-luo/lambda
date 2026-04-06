@@ -19,6 +19,25 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block);
 void setup_inline(LayoutContext* lycon, ViewBlock* block);
 
 /**
+ * CSS 2.1 §10.3.7: Check if an element's CSS-specified display was inline-level
+ * (before §9.7 blockification for abspos/float).
+ * Reads from the style tree rather than elem->display, which is overwritten
+ * with the blockified value during layout_block().
+ */
+static bool was_specified_inline(DomElement* elem) {
+    if (!elem || !elem->specified_style || !elem->specified_style->tree) return false;
+    AvlNode* disp_node = avl_tree_search(elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
+    if (!disp_node) return false;
+    StyleNode* sn = (StyleNode*)disp_node->declaration;
+    if (!sn || !sn->winning_decl || !sn->winning_decl->value) return false;
+    if (sn->winning_decl->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum kw = sn->winning_decl->value->data.keyword;
+    return kw == CSS_VALUE_INLINE || kw == CSS_VALUE_INLINE_BLOCK ||
+           kw == CSS_VALUE_INLINE_FLEX || kw == CSS_VALUE_INLINE_GRID ||
+           kw == CSS_VALUE_INLINE_TABLE;
+}
+
+/**
  * Recursively offset all child views by the given amounts
  * Used for inline relative positioning where children have block-relative coordinates
  *
@@ -1211,17 +1230,53 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
         // CSS 2.1 §10.3.7: Use the static position — where the element would
         // be in normal flow.
         // For originally-inline elements (blockified by §9.7), the static X is
-        // the inline cursor (advance_x).
+        // the inline cursor (advance_x), adjusted for float avoidance and text-align.
         // For originally-block elements, the static X is the left edge of the
         // line (pa_line->left), since block elements start on a new line.
         bool was_inline = false;
         if (elmt->is_element()) {
             DomElement* elem = elmt->as_element();
-            if (elem->display.outer == CSS_VALUE_INLINE) {
-                was_inline = true;
-            }
+            was_inline = was_specified_inline(elem);
         }
         float line_x = was_inline ? pa_line->advance_x : pa_line->left;
+
+        // CSS 2.1 §10.3.7: For inline-level elements at line start, the static
+        // position must account for float avoidance and text-align. The hypothetical
+        // inline box would be placed in the available space after floats, aligned
+        // according to text-align.
+        if (was_inline && line_x <= pa_line->left + 0.01f) {
+            BlockContext* bfc = block_context_find_bfc(pa_block);
+            if (bfc) {
+                float static_y_bfc = pa_block->advance_y + pa_block->bfc_offset_y;
+                float lh = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
+                FloatAvailableSpace space = block_context_space_at_y(bfc, static_y_bfc, lh);
+
+                // Convert from BFC coordinates to local coordinates
+                float avail_left = space.left - pa_block->bfc_offset_x;
+                float avail_right = space.right - pa_block->bfc_offset_x;
+
+                // Clamp to content area
+                avail_left = fmax(avail_left, pa_line->left);
+                avail_right = fmin(avail_right, pa_line->right);
+
+                // Apply text-align to determine position within available space
+                CssEnum ta = pa_block->text_align;
+                if (ta == CSS_VALUE_CENTER) {
+                    line_x = (avail_left + avail_right) / 2.0f;
+                } else if ((ta == CSS_VALUE_RIGHT && static_direction == TD_LTR) ||
+                           (ta == CSS_VALUE_LEFT && static_direction == TD_RTL) ||
+                           (ta == CSS_VALUE_END)) {
+                    // End-side alignment: right for LTR, left for RTL
+                    line_x = (static_direction == TD_LTR) ? avail_right : avail_left;
+                } else {
+                    // Start-side alignment (left, start, justify, default):
+                    // left for LTR, right for RTL
+                    line_x = (static_direction == TD_LTR) ? avail_left : avail_right;
+                }
+                log_debug("[STATIC POS] Float+align adjusted line_x=%.1f (avail=[%.1f,%.1f], text-align=%d)",
+                          line_x, avail_left, avail_right, (int)ta);
+            }
+        }
 
         if (static_direction == TD_RTL) {
             float static_x = parent_to_cb_offset_x + line_x;
@@ -1444,18 +1499,48 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
 
     // CSS 2.1 §10.3.7: For RTL direction with neither left nor right specified,
     // set 'right' to the static position, then solve for 'left'.
-    // The hypothetical box's right margin edge is at:
-    //   - Block elements: parent's right content edge (pa_line->right)
-    //   - Inline elements: inline cursor (pa_line->advance_x)
-    // pa_line->right = border_left + padding_left + content_width (from setup_inline),
-    // which gives the right content edge in the parent's local coordinates.
+    // The hypothetical box's right margin edge determines the static 'right' value.
+    // For inline-level elements, account for float avoidance and text-align.
     if (static_direction == TD_RTL && !block->position->has_left && !block->position->has_right) {
         bool was_inline_rtl = false;
         if (elmt->is_element()) {
             DomElement* elem = elmt->as_element();
-            if (elem->display.outer == CSS_VALUE_INLINE) was_inline_rtl = true;
+            was_inline_rtl = was_specified_inline(elem);
         }
-        float line_right = was_inline_rtl ? pa_line->advance_x : pa_line->right;
+        // In RTL, the inline cursor starts at the right edge of the line.
+        // pa_line->advance_x tracks the LEFT cursor, not the right.
+        float line_right = pa_line->right;
+
+        // For inline-level elements, apply float avoidance + text-align
+        if (was_inline_rtl) {
+            BlockContext* bfc = block_context_find_bfc(pa_block);
+            if (bfc) {
+                float static_y_bfc = pa_block->advance_y + pa_block->bfc_offset_y;
+                float lh = pa_block->line_height > 0 ? pa_block->line_height : 16.0f;
+                FloatAvailableSpace space = block_context_space_at_y(bfc, static_y_bfc, lh);
+
+                float avail_left = space.left - pa_block->bfc_offset_x;
+                float avail_right = space.right - pa_block->bfc_offset_x;
+                avail_left = fmax(avail_left, pa_line->left);
+                avail_right = fmin(avail_right, pa_line->right);
+
+                // Apply text-align: position is where the hypothetical box's
+                // right margin edge would be
+                CssEnum ta = pa_block->text_align;
+                if (ta == CSS_VALUE_CENTER) {
+                    line_right = (avail_left + avail_right) / 2.0f;
+                } else if ((ta == CSS_VALUE_LEFT) || (ta == CSS_VALUE_END)) {
+                    // End for RTL = left
+                    line_right = avail_left;
+                } else {
+                    // Start for RTL (right, start, justify, default)
+                    line_right = avail_right;
+                }
+                log_debug("[STATIC POS] RTL float+align adjusted line_right=%.1f (avail=[%.1f,%.1f], ta=%d)",
+                          line_right, avail_left, avail_right, (int)ta);
+            }
+        }
+
         float margin_right = (block->bound) ? block->bound->margin.right : 0;
         block->x = parent_to_cb_offset_x + line_right - block->width - margin_right;
         log_debug("[STATIC POS] RTL adjustment: x=%.1f (parent_offset=%.1f, line_right=%.1f, block_w=%.1f, mr=%.1f)",

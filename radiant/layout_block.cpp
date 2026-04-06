@@ -5923,8 +5923,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.has_float_intrusion, lycon->line.effective_left, lycon->line.effective_right,
                 lycon->line.left, lycon->line.right, lycon->line.advance_x);
 
-            // Ensure advance_x is at least at effective_left
-            if (lycon->line.advance_x < effective_left) {
+            // Ensure advance_x is at least at effective_left.
+            // CSS 2.1 §16.1: negative text-indent can legitimately position first-line
+            // items before the content area edge (advance_x < line.left).  Only clamp
+            // when advance_x is within the content area but behind a float edge.
+            if (lycon->line.advance_x < effective_left &&
+                lycon->line.advance_x >= lycon->line.left) {
                 lycon->line.advance_x = effective_left;
             }
 
@@ -6309,8 +6313,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         break;
                     }
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
-                    // Skip floats
-                    if (vb->position && element_has_float(vb)) {
+                    // Skip out-of-flow elements (floats, absolute, fixed)
+                    // CSS 2.1 §9.4.1: Out-of-flow elements don't participate in
+                    // parent-child margin collapsing
+                    if (is_out_of_flow_block(vb)) {
                         View* next = (View*)first_in_flow_child->next_sibling;
                         while (next && !next->view_type) {
                             next = (View*)next->next_sibling;
