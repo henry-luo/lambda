@@ -819,11 +819,11 @@ Detailed phase breakdown (full run, after tuning):
 
 #### Batch size tradeoff analysis
 
-| Batch Size | Phase 2 | Batch-Lost | Retry Time | Total Exec | Wall Clock |
-|:----------:|--------:|-----------:|-----------:|-----------:|-----------:|
-| 5 (original) | 146s | 839 | — | 146s | 2:38 |
-| 25 | 89s | 3,228 | 31s | 120s | 2:05 |
-| **50 (chosen)** | **79s** | **5,669** | **38s** | **117s** | **2:01** |
+|   Batch Size    | Phase 2 | Batch-Lost | Retry Time | Total Exec | Wall Clock |
+| :-------------: | ------: | ---------: | ---------: | ---------: | ---------: |
+|  5 (original)   |    146s |        839 |          — |       146s |       2:38 |
+|       25        |     89s |      3,228 |        31s |       120s |       2:05 |
+| **50 (chosen)** | **79s** |  **5,669** |    **38s** |   **117s** |   **2:01** |
 
 Batch size 50 is optimal: the time saved from fewer spawns outweighs the retry overhead.
 
