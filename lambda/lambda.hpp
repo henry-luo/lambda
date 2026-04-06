@@ -144,9 +144,10 @@ typedef struct Item {
         Range* range;
         List* list;
         Array* array;
-        ArrayInt* array_int;      // Renamed from array_long
-        ArrayInt64* array_int64;  // New: 64-bit integer arrays
-        ArrayFloat* array_float;
+        ArrayNum* array_num;
+        ArrayNum* array_int;      // compat alias (elem_type == ELEM_INT)
+        ArrayNum* array_int64;    // compat alias (elem_type == ELEM_INT64)
+        ArrayNum* array_float;    // compat alias (elem_type == ELEM_FLOAT)
         Map* map;
         VMap* vmap;
         Element* element;
@@ -253,9 +254,10 @@ struct ConstItem {
         const Range* range;
         const List* list;
         const Array* array;
-        const ArrayInt* array_int;      // Renamed from array_long
-        const ArrayInt64* array_int64;  // New: 64-bit integer arrays
-        const ArrayFloat* array_float;
+        const ArrayNum* array_num;
+        const ArrayNum* array_int;      // compat alias
+        const ArrayNum* array_int64;    // compat alias
+        const ArrayNum* array_float;    // compat alias
         const Map* map;
         const Element* element;
         const Object* object;
@@ -344,25 +346,18 @@ struct List : Container {
     ConstItem get(int index) const;
 };
 
-struct ArrayInt : Container {
-    int64_t* items;  // int56 values (stored as int64)
+struct ArrayNum : Container {
+    // Container::flags byte: upper 4 bits = elem_type, lower 4 bits = Container flags
+    union {
+        int64_t* items;        // for ELEM_INT, ELEM_INT64
+        double* float_items;   // for ELEM_FLOAT
+        void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
+    };
     int64_t length;
     int64_t extra;  // count of extra items
     int64_t capacity;
-};
 
-struct ArrayInt64 : Container {
-    int64_t* items;  // 64-bit integer items
-    int64_t length;
-    int64_t extra;  // count of extra items
-    int64_t capacity;
-};
-
-struct ArrayFloat : Container {
-    double* items;
-    int64_t length;
-    int64_t extra;  // count of extra items
-    int64_t capacity;
+    ArrayNumElemType get_elem_type() const { return (ArrayNumElemType)(flags & 0xF0); }
 };
 
 struct Map : Container {

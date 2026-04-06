@@ -48,9 +48,7 @@ const char* get_container_unbox_fn(TypeId type_id) {
     case LMD_TYPE_ELEMENT: return "it2elmt";
     case LMD_TYPE_OBJECT:  return "it2obj";
     case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY_NUM:
                            return "it2arr";
     case LMD_TYPE_RANGE:   return "it2range";
     case LMD_TYPE_PATH:    return "it2path";
@@ -91,9 +89,7 @@ static const TypeBoxInfo type_box_table[] = {
     {LMD_TYPE_ELEMENT,    "Element*",  "it2elmt",  NULL,      NULL,          "NULL"},
     {LMD_TYPE_OBJECT,     "Object*",   "it2obj",   NULL,      NULL,          "NULL"},
     {LMD_TYPE_ARRAY,      "Array*",    "it2arr",   NULL,      NULL,          "NULL"},
-    {LMD_TYPE_ARRAY_INT,  "ArrayInt*", "it2arr",   NULL,      NULL,          "NULL"},
-    {LMD_TYPE_ARRAY_INT64,"ArrayInt64*","it2arr",   NULL,      NULL,          "NULL"},
-    {LMD_TYPE_ARRAY_FLOAT,"ArrayFloat*","it2arr",   NULL,      NULL,          "NULL"},
+    {LMD_TYPE_ARRAY_NUM,  "ArrayNum*", "it2arr",   NULL,      NULL,          "NULL"},
     {LMD_TYPE_RANGE,      "Range*",    "it2range", NULL,      NULL,          "NULL"},
     {LMD_TYPE_PATH,       "Path*",     "it2path",  NULL,      NULL,          "NULL"},
     {LMD_TYPE_FUNC,       "Function*", "it2p",     NULL,      NULL,          "NULL"},
@@ -1158,7 +1154,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_PATH:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
         // All container types including Function*, Path*, and Type* (patterns, type expressions) are direct pointers
         strbuf_append_str(tp->code_buf, "(Item)(");
@@ -2168,14 +2164,22 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_globa
         bool needs_coerce = (rhs_tid == LMD_TYPE_ANY || rhs_tid == LMD_TYPE_NULL ||
                              rhs_tid == LMD_TYPE_ARRAY || rhs_tid == LMD_TYPE_ARRAY);
         if (needs_coerce && operand) {
-            const char* cast_type = "Array";
             TypeId elem_tid = operand->type_id;
-            if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
-            else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
-            else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
-            strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
-            transpile_box_item(tp, asn_node->as);
-            strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+            if (elem_tid == LMD_TYPE_NUM_SIZED) {
+                // compact sized array: use ensure_sized_array(item, ArrayNumElemType)
+                ArrayNumElemType et = num_sized_to_elem_type(((TypeNumSized*)operand)->num_type);
+                strbuf_append_str(tp->code_buf, "(ArrayNum*)ensure_sized_array(");
+                transpile_box_item(tp, asn_node->as);
+                strbuf_append_format(tp->code_buf, ",%d)", (int)et);
+            } else {
+                const char* cast_type = "Array";
+                if (elem_tid == LMD_TYPE_INT) cast_type = "ArrayInt";
+                else if (elem_tid == LMD_TYPE_INT64) cast_type = "ArrayInt64";
+                else if (elem_tid == LMD_TYPE_FLOAT) cast_type = "ArrayFloat";
+                strbuf_append_format(tp->code_buf, "(%s*)ensure_typed_array(", cast_type);
+                transpile_box_item(tp, asn_node->as);
+                strbuf_append_format(tp->code_buf, ",%d)", elem_tid);
+            }
         } else {
             transpile_expr(tp, asn_node->as);
         }
@@ -2382,9 +2386,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                     nested_type_id = arr_type->nested->type_id;
                 }
             }
-            bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
-                                   expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
-                                   expr_type->type_id == LMD_TYPE_ARRAY_FLOAT);
+            bool is_typed_array = (expr_type->type_id == LMD_TYPE_ARRAY_NUM);
             bool is_any_array = is_typed_array || is_generic_array;
             bool is_range = (expr_type->type_id == LMD_TYPE_RANGE);
             bool is_known_indexed = is_range || is_any_array || expr_type->type_id == LMD_TYPE_ARRAY;
@@ -2406,12 +2408,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 const char* arr_decl;
                 if (is_range) {
                     arr_decl = " Range *rng=";
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT || nested_type_id == LMD_TYPE_INT) {
-                    arr_decl = " ArrayInt *arr=";
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT64 || nested_type_id == LMD_TYPE_INT64) {
-                    arr_decl = " ArrayInt64 *arr=";
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_FLOAT || nested_type_id == LMD_TYPE_FLOAT) {
-                    arr_decl = " ArrayFloat *arr=";
+                } else if (expr_type->type_id == LMD_TYPE_ARRAY_NUM || nested_type_id == LMD_TYPE_INT || nested_type_id == LMD_TYPE_INT64 || nested_type_id == LMD_TYPE_FLOAT) {
+                    arr_decl = " ArrayNum *arr=";
                 } else if (is_generic_array) {
                     arr_decl = " Array *arr=";
                 } else {
@@ -2442,12 +2440,8 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 if (expr_type->type_id == LMD_TYPE_ARRAY) {
                     TypeArray* array_type = (TypeArray*)expr_type;
                     if (array_type && array_type->nested) item_type = array_type->nested;
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_FLOAT) {
-                    item_type = &TYPE_FLOAT;
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT) {
-                    item_type = &TYPE_INT;
-                } else if (expr_type->type_id == LMD_TYPE_ARRAY_INT64) {
-                    item_type = &TYPE_INT64;
+                } else if (expr_type->type_id == LMD_TYPE_ARRAY_NUM) {
+                    item_type = &TYPE_ANY; // elem_type determined at runtime
                 } else if (is_range) {
                     item_type = &TYPE_INT;
                 }
@@ -2457,6 +2451,9 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
                 strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
                 if (is_range) {
                     strbuf_append_str(tp->code_buf, "=idx;\n");
+                } else if (is_typed_array) {
+                    // ArrayNum: use runtime dispatch accessor
+                    strbuf_append_str(tp->code_buf, "=array_num_get(arr,idx);\n");
                 } else if (is_any_array) {
                     // generic Array with non-native nested type stores Item values; unbox if type is known
                     bool arr_stores_items = is_generic_array &&
@@ -2589,9 +2586,7 @@ void transpile_for(Transpiler* tp, AstForNode *for_node) {
             }
 
             // Close main loop - fast-path indexed arrays/ranges have extra closing brace
-            bool is_any_array_type = (expr_type->type_id == LMD_TYPE_ARRAY_INT ||
-                                      expr_type->type_id == LMD_TYPE_ARRAY_INT64 ||
-                                      expr_type->type_id == LMD_TYPE_ARRAY_FLOAT ||
+            bool is_any_array_type = (expr_type->type_id == LMD_TYPE_ARRAY_NUM ||
                                       expr_type->type_id == LMD_TYPE_ARRAY);
             bool used_fast_indexed = is_known_indexed && key_filter != LOOP_KEY_SYMBOL;
             if (used_fast_indexed && (is_range || is_any_array_type)) {
@@ -2775,8 +2770,7 @@ void transpile_pipe_expr(Transpiler* tp, AstPipeNode *pipe_node) {
     // Check if collection type - if not, apply to single item
     strbuf_append_str(tp->code_buf, "  if (pipe_type == LMD_TYPE_ARRAY || pipe_type == LMD_TYPE_ARRAY || ");
     strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_RANGE || pipe_type == LMD_TYPE_MAP || ");
-    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_INT || pipe_type == LMD_TYPE_ARRAY_INT64 || ");
-    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_FLOAT || pipe_type == LMD_TYPE_ELEMENT || pipe_type == LMD_TYPE_OBJECT) {\n");
+    strbuf_append_str(tp->code_buf, "pipe_type == LMD_TYPE_ARRAY_NUM || pipe_type == LMD_TYPE_ELEMENT || pipe_type == LMD_TYPE_OBJECT) {\n");
 
     // Map case - iterate over key-value pairs
     strbuf_append_str(tp->code_buf, "    if (pipe_type == LMD_TYPE_MAP || pipe_type == LMD_TYPE_OBJECT) {\n");
@@ -3225,9 +3219,7 @@ static void reinfer_body_types(AstNode* node) {
         // re-derive result type based on (possibly updated) object type
         if (idx->object->type) {
             TypeId obj_tid = idx->object->type->type_id;
-            if (obj_tid == LMD_TYPE_ARRAY_INT)        idx->type = &TYPE_INT;
-            else if (obj_tid == LMD_TYPE_ARRAY_INT64)  idx->type = &TYPE_INT64;
-            else if (obj_tid == LMD_TYPE_ARRAY_FLOAT)  idx->type = &TYPE_FLOAT;
+            if (obj_tid == LMD_TYPE_ARRAY_NUM)        idx->type = &TYPE_ANY;
         }
         break;
     }
@@ -4423,9 +4415,10 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
     bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
+    bool is_sized_array = type->nested && type->nested->type_id == LMD_TYPE_NUM_SIZED;
 
     // for arrays with spreadable items (for-expressions, spread, pipe), use push path
-    if (!is_int_array && !is_int64_array && !is_float_array && has_spreadable_item(array_node->item)) {
+    if (!is_int_array && !is_int64_array && !is_float_array && !is_sized_array && has_spreadable_item(array_node->item)) {
         strbuf_append_str(tp->code_buf, "({\n Array* arr = array();\n");
         AstNode* item = array_node->item;
         while (item) {
@@ -4440,6 +4433,29 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
         }
         // return arr as Array* (consistent with non-spreadable path which returns array_fill result)
         // boxing to Item will be done by transpile_box_item when needed
+        strbuf_append_str(tp->code_buf, " arr; })");
+        return;
+    }
+
+    // Specialized compact sized array path: array_num_new(elem_type, count) + array_num_set_item(arr, i, boxed)
+    if (is_sized_array && array_node->item) {
+        ArrayNumElemType elem_type = num_sized_to_elem_type(((TypeNumSized*)type->nested)->num_type);
+        strbuf_append_str(tp->code_buf, "({ArrayNum* arr = array_num_new(");
+        strbuf_append_int(tp->code_buf, (int)elem_type);
+        strbuf_append_str(tp->code_buf, ",");
+        strbuf_append_int(tp->code_buf, type->length);
+        strbuf_append_str(tp->code_buf, ");\n");
+        int idx = 0;
+        AstNode* item = array_node->item;
+        while (item) {
+            strbuf_append_str(tp->code_buf, " array_num_set_item(arr,");
+            strbuf_append_int(tp->code_buf, idx);
+            strbuf_append_str(tp->code_buf, ",");
+            transpile_box_item(tp, item);
+            strbuf_append_str(tp->code_buf, ");\n");
+            idx++;
+            item = item->next;
+        }
         strbuf_append_str(tp->code_buf, " arr; })");
         return;
     }
@@ -5293,9 +5309,8 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
             operand = ((TypeType*)operand)->type;
         }
         if (operand) {
-            if (operand->type_id == LMD_TYPE_INT) object_type = LMD_TYPE_ARRAY_INT;
-            else if (operand->type_id == LMD_TYPE_INT64) object_type = LMD_TYPE_ARRAY_INT64;
-            else if (operand->type_id == LMD_TYPE_FLOAT) object_type = LMD_TYPE_ARRAY_FLOAT;
+            if (operand->type_id == LMD_TYPE_INT || operand->type_id == LMD_TYPE_INT64
+                || operand->type_id == LMD_TYPE_FLOAT) object_type = LMD_TYPE_ARRAY_NUM;
             else object_type = LMD_TYPE_ARRAY;
         }
     }
@@ -5304,8 +5319,8 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Allow ANY-typed fields through when object is a known array type —
     // the fast paths below will unbox the index with it2i()
     bool field_is_numeric = (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64 || field_type == LMD_TYPE_FLOAT);
-    bool object_is_typed_array = (object_type == LMD_TYPE_ARRAY_INT || object_type == LMD_TYPE_ARRAY_INT64
-        || object_type == LMD_TYPE_ARRAY_FLOAT || object_type == LMD_TYPE_ARRAY || object_type == LMD_TYPE_ARRAY);
+    bool object_is_typed_array = (object_type == LMD_TYPE_ARRAY_NUM
+        || object_type == LMD_TYPE_ARRAY);
     if (!field_is_numeric && field_type != LMD_TYPE_ANY) {
         // Non-numeric, non-ANY index (e.g. range, string key), must use generic fn_index
         strbuf_append_str(tp->code_buf, "fn_index(");
@@ -5330,7 +5345,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
                 AstFieldNode* inner_idx = (AstFieldNode*)field_expr;
                 TypeId inner_obj_type = inner_idx->object && inner_idx->object->type
                     ? inner_idx->object->type->type_id : LMD_TYPE_ANY;
-                if (inner_obj_type == LMD_TYPE_ARRAY_INT || inner_obj_type == LMD_TYPE_ARRAY_INT64) {
+                if (inner_obj_type == LMD_TYPE_ARRAY_NUM) {
                     field_known_int = true;
                 } else if (inner_obj_type == LMD_TYPE_ARRAY) {
                     TypeArray* arr_type = (TypeArray*)inner_idx->object->type;
@@ -5370,36 +5385,8 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     bool field_is_any = (field_type == LMD_TYPE_ANY);
 
     // Fast path optimizations for specific type combinations
-    if (object_type == LMD_TYPE_ARRAY_INT && (field_is_int || field_is_any)) {
-        strbuf_append_str(tp->code_buf, use_raw_int ? "array_int_get_raw(" : "array_int_get(");
-        transpile_expr(tp, field_node->object);
-        strbuf_append_str(tp->code_buf, ",(int)");
-        if (field_is_any) {
-            strbuf_append_str(tp->code_buf, "it2i(");
-            transpile_expr(tp, field_node->field);
-            strbuf_append_char(tp->code_buf, ')');
-        } else {
-            transpile_expr(tp, field_node->field);
-        }
-        strbuf_append_char(tp->code_buf, ')');
-        return;
-    }
-    else if (object_type == LMD_TYPE_ARRAY_INT64 && (field_is_int || field_is_any)) {
-        strbuf_append_str(tp->code_buf, use_raw_int ? "array_int64_get_raw(" : "array_int64_get(");
-        transpile_expr(tp, field_node->object);
-        strbuf_append_str(tp->code_buf, ",(int)");
-        if (field_is_any) {
-            strbuf_append_str(tp->code_buf, "it2i(");
-            transpile_expr(tp, field_node->field);
-            strbuf_append_char(tp->code_buf, ')');
-        } else {
-            transpile_expr(tp, field_node->field);
-        }
-        strbuf_append_char(tp->code_buf, ')');
-        return;
-    }
-    else if (object_type == LMD_TYPE_ARRAY_FLOAT && (field_is_int || field_is_any)) {
-        strbuf_append_str(tp->code_buf, use_raw_float ? "array_float_get_value(" : "array_float_get(");
+    if (object_type == LMD_TYPE_ARRAY_NUM && (field_is_int || field_is_any)) {
+        strbuf_append_str(tp->code_buf, "array_num_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, ",(int)");
         if (field_is_any) {
@@ -5684,8 +5671,7 @@ static bool is_direct_access_type(TypeId type_id) {
     case LMD_TYPE_BOOL: case LMD_TYPE_INT: case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT: case LMD_TYPE_DTIME: case LMD_TYPE_DECIMAL:
     case LMD_TYPE_STRING: case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY:
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
     case LMD_TYPE_OBJECT: case LMD_TYPE_TYPE: case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:

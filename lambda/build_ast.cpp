@@ -857,6 +857,16 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
                         log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
                         nested_type = NULL;
                     }
+                    // for NUM_SIZED, also check sub-type uniformity
+                    else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED) {
+                        TypeNumSized* a = (TypeNumSized*)nested_type;
+                        TypeNumSized* b = (TypeNumSized*)item->type;
+                        if (a->num_type != b->num_type) {
+                            log_debug("DEBUG: NUM_SIZED sub-type mismatch (%d vs %d), resetting nested_type to NULL",
+                                a->num_type, b->num_type);
+                            nested_type = NULL;
+                        }
+                    }
                     type->length++;
                 }
             }
@@ -1214,14 +1224,10 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     }
 
     TypeId obj_tid = ast_node->object->type->type_id;
-    if (obj_tid == LMD_TYPE_ARRAY_INT) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT, sizeof(Type));
-    }
-    else if (obj_tid == LMD_TYPE_ARRAY_INT64) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_INT64, sizeof(Type));
-    }
-    else if (obj_tid == LMD_TYPE_ARRAY_FLOAT) {
-        ast_node->type = alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(Type));
+    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+        // element type depends on the array's elem_type, but at AST phase we don't know it yet
+        // default to ANY; the transpiler will refine this
+        ast_node->type = &TYPE_ANY;
     }
     else if (obj_tid == LMD_TYPE_ARRAY) {
         ast_node->type = &TYPE_ANY;

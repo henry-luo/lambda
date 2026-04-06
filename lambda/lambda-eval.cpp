@@ -239,47 +239,27 @@ Item fn_join(Item left, Item right) {
         Symbol* sym = heap_create_symbol(result->chars, result->len);
         return {.item = y2it(sym)};
     }
-    // merge two array-like types (List, Array, ArrayInt, ArrayInt64, ArrayFloat, Range)
-    else if ((left_type >= LMD_TYPE_ARRAY_INT && left_type <= LMD_TYPE_ARRAY) || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE) {
-        if (!((right_type >= LMD_TYPE_ARRAY_INT && right_type <= LMD_TYPE_ARRAY) || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
+    // merge two array-like types (List, Array, ArrayNum, Range)
+    else if (left_type == LMD_TYPE_ARRAY_NUM || left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_RANGE) {
+        if (!(right_type == LMD_TYPE_ARRAY_NUM || right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_RANGE)) {
             set_runtime_error(ERR_TYPE_MISMATCH, "fn_join: unsupported operand types: %s and %s",
                 type_info[left_type].name, type_info[right_type].name);
             return ItemError;
         }
         // same-type optimization: direct memcpy of native items (not for Range)
         if (left_type == right_type && left_type != LMD_TYPE_RANGE) {
-            if (left_type == LMD_TYPE_ARRAY_INT) {
-                ArrayInt *la = left.array_int, *ra = right.array_int;
+            if (left_type == LMD_TYPE_ARRAY_NUM) {
+                ArrayNum *la = left.array_num, *ra = right.array_num;
                 int64_t total = la->length + ra->length;
-                ArrayInt *result = (ArrayInt *)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
-                result->type_id = LMD_TYPE_ARRAY_INT;
+                ArrayNum *result = (ArrayNum *)heap_calloc(sizeof(ArrayNum), LMD_TYPE_ARRAY_NUM);
+                result->type_id = LMD_TYPE_ARRAY_NUM;
+                result->flags = la->get_elem_type();
                 result->length = total;  result->capacity = total;
-                result->items = (int64_t*)heap_data_alloc(total * sizeof(int64_t));
-                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
-                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
-                return {.array_int = result};
-            }
-            else if (left_type == LMD_TYPE_ARRAY_INT64) {
-                ArrayInt64 *la = left.array_int64, *ra = right.array_int64;
-                int64_t total = la->length + ra->length;
-                ArrayInt64 *result = (ArrayInt64 *)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
-                result->type_id = LMD_TYPE_ARRAY_INT64;
-                result->length = total;  result->capacity = total;
-                result->items = (int64_t*)heap_data_alloc(total * sizeof(int64_t));
-                memcpy(result->items, la->items, sizeof(int64_t)*la->length);
-                memcpy(result->items + la->length, ra->items, sizeof(int64_t)*ra->length);
-                return {.array_int64 = result};
-            }
-            else if (left_type == LMD_TYPE_ARRAY_FLOAT) {
-                ArrayFloat *la = left.array_float, *ra = right.array_float;
-                int64_t total = la->length + ra->length;
-                ArrayFloat *result = (ArrayFloat *)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-                result->type_id = LMD_TYPE_ARRAY_FLOAT;
-                result->length = total;  result->capacity = total;
-                result->items = (double*)heap_data_alloc(total * sizeof(double));
-                memcpy(result->items, la->items, sizeof(double)*la->length);
-                memcpy(result->items + la->length, ra->items, sizeof(double)*ra->length);
-                return {.array_float = result};
+                size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
+                result->data = heap_data_alloc(total * elem_size);
+                memcpy(result->data, la->data, elem_size*la->length);
+                memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
+                return {.array_num = result};
             }
             // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
             Array *la = left.array, *ra = right.array;
@@ -820,8 +800,7 @@ Bool fn_is(Item a, Item b) {
         return BOOL_TRUE;  // is datetime (any precision matches)
     case LMD_TYPE_ARRAY: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT:
         if (type_b == &LIT_TYPE_ARRAY) {  // fast path
-            return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
-                a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
+            return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_NUM;
         }
         else if (type_b == &LIT_TYPE_LIST) {  // fast path for generic list type
             return BOOL_FALSE;  // LMD_TYPE_LIST no longer exists; 'list' never matches
@@ -896,29 +875,28 @@ static Bool list_eq(List* a, List* b, int depth) {
     return BOOL_TRUE;
 }
 
-// helper: structural equality for typed int arrays
-static Bool array_int_eq(ArrayInt* a, ArrayInt* b) {
+// helper: structural equality for typed numeric arrays
+static Bool array_num_eq(ArrayNum* a, ArrayNum* b) {
     if (a == b) return BOOL_TRUE;
     if (a->length != b->length) return BOOL_FALSE;
-    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
-}
-
-// helper: structural equality for typed int64 arrays
-static Bool array_int64_eq(ArrayInt64* a, ArrayInt64* b) {
-    if (a == b) return BOOL_TRUE;
-    if (a->length != b->length) return BOOL_FALSE;
-    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
-}
-
-// helper: structural equality for typed float arrays
-static Bool array_float_eq(ArrayFloat* a, ArrayFloat* b) {
-    if (a == b) return BOOL_TRUE;
-    if (a->length != b->length) return BOOL_FALSE;
-    // element-wise comparison to respect NaN != NaN
-    for (int64_t i = 0; i < a->length; i++) {
-        if (a->items[i] != b->items[i]) return BOOL_FALSE;
+    if (a->get_elem_type() != b->get_elem_type()) {
+        // different elem types: compare element-wise with numeric promotion
+        for (int64_t i = 0; i < a->length; i++) {
+            Item ea = array_num_get(a, i);
+            Item eb = array_num_get(b, i);
+            if (it2d(ea) != it2d(eb)) return BOOL_FALSE;
+        }
+        return BOOL_TRUE;
     }
-    return BOOL_TRUE;
+    if (a->get_elem_type() == ELEM_FLOAT) {
+        // element-wise comparison to respect NaN != NaN
+        for (int64_t i = 0; i < a->length; i++) {
+            if (a->float_items[i] != b->float_items[i]) return BOOL_FALSE;
+        }
+        return BOOL_TRUE;
+    }
+    // ELEM_INT and ELEM_INT64 both use items (int64_t*)
+    return (memcmp(a->items, b->items, a->length * sizeof(int64_t)) == 0) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // helper: structural equality for maps (order-independent key-value comparison)
@@ -1026,14 +1004,10 @@ static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
     TypeId b_tid = get_type_id(b_item);
 
     if (a_tid == LMD_TYPE_ARRAY)       len_a = a_item.array->length;
-    else if (a_tid == LMD_TYPE_ARRAY_INT)   len_a = a_item.array_int->length;
-    else if (a_tid == LMD_TYPE_ARRAY_INT64) len_a = a_item.array_int64->length;
-    else if (a_tid == LMD_TYPE_ARRAY_FLOAT) len_a = a_item.array_float->length;
+    else if (a_tid == LMD_TYPE_ARRAY_NUM)   len_a = a_item.array_num->length;
 
     if (b_tid == LMD_TYPE_ARRAY)       len_b = b_item.array->length;
-    else if (b_tid == LMD_TYPE_ARRAY_INT)   len_b = b_item.array_int->length;
-    else if (b_tid == LMD_TYPE_ARRAY_INT64) len_b = b_item.array_int64->length;
-    else if (b_tid == LMD_TYPE_ARRAY_FLOAT) len_b = b_item.array_float->length;
+    else if (b_tid == LMD_TYPE_ARRAY_NUM)   len_b = b_item.array_num->length;
 
     if (len_a != len_b) return BOOL_FALSE;
 
@@ -1041,14 +1015,10 @@ static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
         Item elem_a, elem_b;
         // extract element from a
         if (a_tid == LMD_TYPE_ARRAY)       elem_a = a_item.array->items[i];
-        else if (a_tid == LMD_TYPE_ARRAY_INT)   elem_a = {.item = i2it(a_item.array_int->items[i])};
-        else if (a_tid == LMD_TYPE_ARRAY_INT64) elem_a = push_l(a_item.array_int64->items[i]);
-        else                                    elem_a = push_d(a_item.array_float->items[i]);
+        else                               elem_a = array_num_get(a_item.array_num, i);
         // extract element from b
         if (b_tid == LMD_TYPE_ARRAY)       elem_b = b_item.array->items[i];
-        else if (b_tid == LMD_TYPE_ARRAY_INT)   elem_b = {.item = i2it(b_item.array_int->items[i])};
-        else if (b_tid == LMD_TYPE_ARRAY_INT64) elem_b = push_l(b_item.array_int64->items[i]);
-        else                                    elem_b = push_d(b_item.array_float->items[i]);
+        else                               elem_b = array_num_get(b_item.array_num, i);
 
         Bool r = fn_eq_depth(elem_a, elem_b, depth + 1);
         if (r == BOOL_ERROR) return BOOL_ERROR;
@@ -1061,9 +1031,7 @@ static Bool cross_array_eq(Item a_item, Item b_item, int depth) {
 static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return item.list->items[i];
-    case LMD_TYPE_ARRAY_INT:   return {.item = i2it(item.array_int->items[i])};
-    case LMD_TYPE_ARRAY_INT64: return push_l(item.array_int64->items[i]);
-    case LMD_TYPE_ARRAY_FLOAT: return push_d(item.array_float->items[i]);
+    case LMD_TYPE_ARRAY_NUM:   return array_num_get(item.array_num, i);
     case LMD_TYPE_RANGE:       return {.item = i2it(item.range->start + i)};
     default:                   return ItemNull;
     }
@@ -1073,9 +1041,7 @@ static inline Item seq_get_element(Item item, TypeId tid, int64_t i) {
 static inline int64_t seq_get_length(Item item, TypeId tid) {
     switch (tid) {
     case LMD_TYPE_ARRAY:        return item.list->length;
-    case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
-    case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
-    case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
+    case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
     case LMD_TYPE_RANGE:       return item.range->length;
     default:                   return -1;
     }
@@ -1136,11 +1102,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         TypeId a_tid = (a_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(a_item) : (TypeId)a_item._type_id;
         TypeId b_tid = (b_item._type_id == LMD_TYPE_RAW_POINTER) ? get_type_id(b_item) : (TypeId)b_item._type_id;
         bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
-                         a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
-                         a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
+                         a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
         bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
-                         b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
-                         b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
+                         b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
         if (a_is_seq && b_is_seq) {
             return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
         }
@@ -1215,11 +1179,9 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         if (a_tid != b_tid) {
             // cross-type sequence comparison (array[int] vs array[float], list vs range, etc.)
             bool a_is_seq = (a_tid == LMD_TYPE_ARRAY || a_tid == LMD_TYPE_ARRAY ||
-                             a_tid == LMD_TYPE_ARRAY_INT || a_tid == LMD_TYPE_ARRAY_INT64 ||
-                             a_tid == LMD_TYPE_ARRAY_FLOAT || a_tid == LMD_TYPE_RANGE);
+                             a_tid == LMD_TYPE_ARRAY_NUM || a_tid == LMD_TYPE_RANGE);
             bool b_is_seq = (b_tid == LMD_TYPE_ARRAY || b_tid == LMD_TYPE_ARRAY ||
-                             b_tid == LMD_TYPE_ARRAY_INT || b_tid == LMD_TYPE_ARRAY_INT64 ||
-                             b_tid == LMD_TYPE_ARRAY_FLOAT || b_tid == LMD_TYPE_RANGE);
+                             b_tid == LMD_TYPE_ARRAY_NUM || b_tid == LMD_TYPE_RANGE);
             if (a_is_seq && b_is_seq) {
                 return cross_seq_eq(a_item, a_tid, b_item, b_tid, depth);
             }
@@ -1235,14 +1197,8 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             return list_eq((List*)a_item.array, (List*)b_item.array, depth);
         }
         // typed array equality
-        if (a_tid == LMD_TYPE_ARRAY_INT) {
-            return array_int_eq(a_item.array_int, b_item.array_int);
-        }
-        if (a_tid == LMD_TYPE_ARRAY_INT64) {
-            return array_int64_eq(a_item.array_int64, b_item.array_int64);
-        }
-        if (a_tid == LMD_TYPE_ARRAY_FLOAT) {
-            return array_float_eq(a_item.array_float, b_item.array_float);
+        if (a_tid == LMD_TYPE_ARRAY_NUM) {
+            return array_num_eq(a_item.array_num, b_item.array_num);
         }
         // map structural equality (order-independent)
         if (a_tid == LMD_TYPE_MAP) {
@@ -1488,8 +1444,7 @@ static Item _map_field_value(TypeMap* map_type, void* data, ShapeEntry* field) {
     case LMD_TYPE_STRING: return {.item = s2it(*(char**)field_ptr)};
     case LMD_TYPE_SYMBOL: return {.item = y2it(*(char**)field_ptr)};
     case LMD_TYPE_BINARY: return {.item = x2it(*(char**)field_ptr)};
-    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = *(Container**)field_ptr;
         if (!c) return ItemNull;
@@ -1552,22 +1507,10 @@ static void query_collect(Item data, Item type_val, bool self_inclusive, Array* 
         for (int64_t i = 0; i < arr->length; i++) {
             query_collect(arr->items[i], type_val, true, result, depth + 1);
         }
-    } else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = data.array_int;
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = data.array_num;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int_get(arr, i);
-            query_collect(val, type_val, true, result, depth + 1);
-        }
-    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = data.array_int64;
-        for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int64_get(arr, i);
-            query_collect(val, type_val, true, result, depth + 1);
-        }
-    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = data.array_float;
-        for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_float_get(arr, i);
+            Item val = array_num_get(arr, i);
             query_collect(val, type_val, true, result, depth + 1);
         }
     }
@@ -1649,26 +1592,10 @@ static void child_query_collect(Item data, Item type_val, Array* result) {
                 array_push(result, child);
             }
         }
-    } else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = data.array_int;
+    } else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = data.array_num;
         for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int_get(arr, i);
-            if (fn_is(val, type_val) == BOOL_TRUE) {
-                array_push(result, val);
-            }
-        }
-    } else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = data.array_int64;
-        for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_int64_get(arr, i);
-            if (fn_is(val, type_val) == BOOL_TRUE) {
-                array_push(result, val);
-            }
-        }
-    } else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = data.array_float;
-        for (int64_t i = 0; i < arr->length; i++) {
-            Item val = array_float_get(arr, i);
+            Item val = array_num_get(arr, i);
             if (fn_is(val, type_val) == BOOL_TRUE) {
                 array_push(result, val);
             }
@@ -1716,32 +1643,21 @@ Bool fn_in(Item a_item, Item b_item) {
             }
             return false;
         }
-        else if (b_type == LMD_TYPE_ARRAY_INT) {
-            ArrayInt *arr = b_item.array_int;
-            int64_t a_val = it2l(a_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->items[i] == a_val) {
-                    return true;
+        else if (b_type == LMD_TYPE_ARRAY_NUM) {
+            ArrayNum *arr = b_item.array_num;
+            if (arr->get_elem_type() == ELEM_FLOAT) {
+                double a_val = it2d(a_item);
+                for (int64_t i = 0; i < arr->length; i++) {
+                    if (arr->float_items[i] == a_val) {
+                        return true;
+                    }
                 }
-            }
-            return false;
-        }
-        else if (b_type == LMD_TYPE_ARRAY_INT64) {
-            ArrayInt64 *arr = b_item.array_int64;
-            int64_t a_val = it2l(a_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->items[i] == a_val) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        else if (b_type == LMD_TYPE_ARRAY_FLOAT) {
-            ArrayFloat *arr = b_item.array_float;
-            double a_val = it2d(a_item);
-            for (int64_t i = 0; i < arr->length; i++) {
-                if (arr->items[i] == a_val) {
-                    return true;
+            } else {
+                int64_t a_val = it2l(a_item);
+                for (int64_t i = 0; i < arr->length; i++) {
+                    if (arr->items[i] == a_val) {
+                        return true;
+                    }
                 }
             }
             return false;
@@ -1949,7 +1865,7 @@ String* fn_string(Item itm) {
         return heap_strcpy(buf, len);
     }
     case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         StrBuf* sb = strbuf_new();
         print_item(sb, itm, 1, null);  // make list print as list, instead of beaking onto multiple lines
@@ -2055,7 +1971,7 @@ Type* fn_type(Item item) {
     // e.g., array[int], array[int64], array[float] all map to 'array'
     //        vmap maps to 'map'
     TypeId tid = item_type->type_id;
-    if (tid == LMD_TYPE_ARRAY_INT || tid == LMD_TYPE_ARRAY_INT64 || tid == LMD_TYPE_ARRAY_FLOAT) {
+    if (tid == LMD_TYPE_ARRAY_NUM) {
         item_type->type_id = LMD_TYPE_ARRAY;
     } else if (tid == LMD_TYPE_VMAP) {
         item_type->type_id = LMD_TYPE_MAP;
@@ -2871,14 +2787,8 @@ int64_t fn_len(Item item) {
     case LMD_TYPE_RANGE:
         size = item.range->length;
         break;
-    case LMD_TYPE_ARRAY_INT:
-        size = item.array_int->length;
-        break;
-    case LMD_TYPE_ARRAY_INT64:
-        size = item.array_int64->length;
-        break;
-    case LMD_TYPE_ARRAY_FLOAT:
-        size = item.array_float->length;
+    case LMD_TYPE_ARRAY_NUM:
+        size = item.array_num->length;
         break;
     case LMD_TYPE_MAP: {
         size = 0;
@@ -3091,21 +3001,19 @@ Bool fn_contains(Item str_item, Item substr_item) {
         }
         return BOOL_FALSE;
     }
-    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = str_item.array_int64;
+    if (coll_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = str_item.array_num;
         if (!arr) return BOOL_FALSE;
-        int64_t val = it2l(substr_item);
-        for (int64_t i = 0; i < arr->length; i++) {
-            if (arr->items[i] == val) return BOOL_TRUE;
-        }
-        return BOOL_FALSE;
-    }
-    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = str_item.array_float;
-        if (!arr) return BOOL_FALSE;
-        double val = it2d(substr_item);
-        for (int64_t i = 0; i < arr->length; i++) {
-            if (arr->items[i] == val) return BOOL_TRUE;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            double val = it2d(substr_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->float_items[i] == val) return BOOL_TRUE;
+            }
+        } else {
+            int64_t val = it2l(substr_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->items[i] == val) return BOOL_TRUE;
+            }
         }
         return BOOL_FALSE;
     }
@@ -3259,21 +3167,19 @@ int64_t fn_index_of(Item str_item, Item sub_item) {
         }
         return -1;
     }
-    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = str_item.array_int64;
+    if (coll_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = str_item.array_num;
         if (!arr) return -1;
-        int64_t val = it2l(sub_item);
-        for (int64_t i = 0; i < arr->length; i++) {
-            if (arr->items[i] == val) return i;
-        }
-        return -1;
-    }
-    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = str_item.array_float;
-        if (!arr) return -1;
-        double val = it2d(sub_item);
-        for (int64_t i = 0; i < arr->length; i++) {
-            if (arr->items[i] == val) return i;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            double val = it2d(sub_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->float_items[i] == val) return i;
+            }
+        } else {
+            int64_t val = it2l(sub_item);
+            for (int64_t i = 0; i < arr->length; i++) {
+                if (arr->items[i] == val) return i;
+            }
         }
         return -1;
     }
@@ -3337,21 +3243,19 @@ int64_t fn_last_index_of(Item str_item, Item sub_item) {
         }
         return -1;
     }
-    if (coll_type == LMD_TYPE_ARRAY_INT || coll_type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = str_item.array_int64;
+    if (coll_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = str_item.array_num;
         if (!arr) return -1;
-        int64_t val = it2l(sub_item);
-        for (int64_t i = arr->length - 1; i >= 0; i--) {
-            if (arr->items[i] == val) return i;
-        }
-        return -1;
-    }
-    if (coll_type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = str_item.array_float;
-        if (!arr) return -1;
-        double val = it2d(sub_item);
-        for (int64_t i = arr->length - 1; i >= 0; i--) {
-            if (arr->items[i] == val) return i;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            double val = it2d(sub_item);
+            for (int64_t i = arr->length - 1; i >= 0; i--) {
+                if (arr->float_items[i] == val) return i;
+            }
+        } else {
+            int64_t val = it2l(sub_item);
+            for (int64_t i = arr->length - 1; i >= 0; i--) {
+                if (arr->items[i] == val) return i;
+            }
         }
         return -1;
     }
@@ -4672,37 +4576,36 @@ static void convert_specialized_to_generic(Array* arr) {
         return;
     }
 
-    if (old_type == LMD_TYPE_ARRAY_INT) {
-        int64_t* old_items = ((ArrayInt*)arr)->items;
-        // int56 values pack directly into Item — no extra area needed
-        for (int64_t i = 0; i < len; i++) {
-            new_items[i] = {.item = i2it(old_items[i])};
+    if (old_type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* num_arr = (ArrayNum*)arr;
+        ArrayNumElemType etype = num_arr->get_elem_type();
+        if (etype == ELEM_FLOAT) {
+            double* old_items = num_arr->float_items;
+            int64_t extra_count = 0;
+            for (int64_t i = 0; i < len; i++) {
+                double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
+                *slot = old_items[i];
+                new_items[i] = {.item = d2it(slot)};
+                extra_count++;
+            }
+            arr->extra = extra_count;
+        } else if (etype == ELEM_INT64) {
+            int64_t* old_items = num_arr->items;
+            int64_t extra_count = 0;
+            for (int64_t i = 0; i < len; i++) {
+                int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
+                *slot = old_items[i];
+                new_items[i] = {.item = l2it(slot)};
+                extra_count++;
+            }
+            arr->extra = extra_count;
+        } else {
+            // ELEM_INT: int56 values pack directly into Item
+            int64_t* old_items = num_arr->items;
+            for (int64_t i = 0; i < len; i++) {
+                new_items[i] = {.item = i2it(old_items[i])};
+            }
         }
-        // old_items abandoned in data zone — reclaimed by GC
-    } else if (old_type == LMD_TYPE_ARRAY_INT64) {
-        int64_t* old_items = ((ArrayInt64*)arr)->items;
-        // int64 values need to be stored in the extra area (end of buffer)
-        int64_t extra_count = 0;
-        for (int64_t i = 0; i < len; i++) {
-            int64_t* slot = (int64_t*)(new_items + (new_capacity - extra_count - 1));
-            *slot = old_items[i];
-            new_items[i] = {.item = l2it(slot)};
-            extra_count++;
-        }
-        arr->extra = extra_count;
-        // old_items abandoned in data zone — reclaimed by GC
-    } else if (old_type == LMD_TYPE_ARRAY_FLOAT) {
-        double* old_items = ((ArrayFloat*)arr)->items;
-        // double values need to be stored in the extra area (end of buffer)
-        int64_t extra_count = 0;
-        for (int64_t i = 0; i < len; i++) {
-            double* slot = (double*)(new_items + (new_capacity - extra_count - 1));
-            *slot = old_items[i];
-            new_items[i] = {.item = d2it(slot)};
-            extra_count++;
-        }
-        arr->extra = extra_count;
-        // old_items abandoned in data zone — reclaimed by GC
     } else {
         // shouldn't happen — caller should only call for specialized types
         return;
@@ -4742,60 +4645,46 @@ void fn_array_set(Array* arr, int64_t index, Item value) {
         array_set(arr, index, value);
         break;
     }
-    case LMD_TYPE_ARRAY_INT: {
+    case LMD_TYPE_ARRAY_NUM: {
+        ArrayNum* num_arr = (ArrayNum*)arr;
         TypeId val_type = get_type_id(value);
-        if (val_type == LMD_TYPE_INT) {
-            // compatible: store int56 directly
-            ArrayInt* ai = (ArrayInt*)arr;
-            ai->items[index] = (int64_t)value.get_int56();
-        } else if (val_type == LMD_TYPE_INT64) {
-            // int64 might fit in int56 — try, else convert
-            int64_t lval = value.get_int64();
-            if (lval >= INT56_MIN && lval <= INT56_MAX) {
-                ArrayInt* ai = (ArrayInt*)arr;
-                ai->items[index] = lval;
+        ArrayNumElemType etype = num_arr->get_elem_type();
+        if (etype == ELEM_FLOAT) {
+            if (val_type == LMD_TYPE_FLOAT) {
+                num_arr->float_items[index] = value.get_double();
+            } else if (val_type == LMD_TYPE_INT) {
+                num_arr->float_items[index] = (double)value.get_int56();
+            } else if (val_type == LMD_TYPE_INT64) {
+                num_arr->float_items[index] = (double)value.get_int64();
+            } else {
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
+        } else if (etype == ELEM_INT64) {
+            if (val_type == LMD_TYPE_INT64) {
+                num_arr->items[index] = value.get_int64();
+            } else if (val_type == LMD_TYPE_INT) {
+                num_arr->items[index] = (int64_t)value.get_int56();
             } else {
                 convert_specialized_to_generic(arr);
                 array_set(arr, index, value);
             }
         } else {
-            // incompatible type — convert to generic array first
-            convert_specialized_to_generic(arr);
-            array_set(arr, index, value);
-        }
-        break;
-    }
-    case LMD_TYPE_ARRAY_INT64: {
-        TypeId val_type = get_type_id(value);
-        if (val_type == LMD_TYPE_INT64) {
-            ArrayInt64* ai64 = (ArrayInt64*)arr;
-            ai64->items[index] = value.get_int64();
-        } else if (val_type == LMD_TYPE_INT) {
-            // widen int56 to int64
-            ArrayInt64* ai64 = (ArrayInt64*)arr;
-            ai64->items[index] = (int64_t)value.get_int56();
-        } else {
-            convert_specialized_to_generic(arr);
-            array_set(arr, index, value);
-        }
-        break;
-    }
-    case LMD_TYPE_ARRAY_FLOAT: {
-        TypeId val_type = get_type_id(value);
-        if (val_type == LMD_TYPE_FLOAT) {
-            ArrayFloat* af = (ArrayFloat*)arr;
-            af->items[index] = value.get_double();
-        } else if (val_type == LMD_TYPE_INT) {
-            // widen int to double
-            ArrayFloat* af = (ArrayFloat*)arr;
-            af->items[index] = (double)value.get_int56();
-        } else if (val_type == LMD_TYPE_INT64) {
-            // widen int64 to double (may lose precision)
-            ArrayFloat* af = (ArrayFloat*)arr;
-            af->items[index] = (double)value.get_int64();
-        } else {
-            convert_specialized_to_generic(arr);
-            array_set(arr, index, value);
+            // ELEM_INT
+            if (val_type == LMD_TYPE_INT) {
+                num_arr->items[index] = (int64_t)value.get_int56();
+            } else if (val_type == LMD_TYPE_INT64) {
+                int64_t lval = value.get_int64();
+                if (lval >= INT56_MIN && lval <= INT56_MAX) {
+                    num_arr->items[index] = lval;
+                } else {
+                    convert_specialized_to_generic(arr);
+                    array_set(arr, index, value);
+                }
+            } else {
+                convert_specialized_to_generic(arr);
+                array_set(arr, index, value);
+            }
         }
         break;
     }
@@ -4817,8 +4706,8 @@ static void map_field_decrement_ref(void* field_ptr, TypeId field_type) {
         String* old_str = *(String**)field_ptr;
         break;
     }
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* old_c = *(Container**)field_ptr;
         break;
@@ -4850,8 +4739,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         *(String**)field_ptr = s;
         break;
     }
-    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_INT: case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT: case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY: case LMD_TYPE_ARRAY_NUM: case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT: case LMD_TYPE_OBJECT: {
         Container* c = value.container;
         *(Container**)field_ptr = c;
@@ -5149,13 +5037,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
             {
                 bool old_is_ptr = (field_type == LMD_TYPE_NULL || field_type == LMD_TYPE_MAP ||
                     field_type == LMD_TYPE_ELEMENT || field_type == LMD_TYPE_OBJECT ||
-                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_INT ||
-                    field_type == LMD_TYPE_ARRAY_INT64 || field_type == LMD_TYPE_ARRAY_FLOAT ||
+                    field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_ARRAY_NUM ||
                     field_type == LMD_TYPE_ARRAY || field_type == LMD_TYPE_RANGE);
                 bool new_is_ptr = (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_MAP ||
                     value_type == LMD_TYPE_ELEMENT || value_type == LMD_TYPE_OBJECT ||
-                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_INT ||
-                    value_type == LMD_TYPE_ARRAY_INT64 || value_type == LMD_TYPE_ARRAY_FLOAT ||
+                    value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM ||
                     value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_RANGE);
                 if (old_is_ptr && new_is_ptr) {
                     map_field_decrement_ref(field_ptr, field_type);

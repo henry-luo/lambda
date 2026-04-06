@@ -18,35 +18,31 @@ Item push_l(int64_t val);
 // check if type is a scalar numeric type
 static inline bool is_scalar_numeric(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL;
+           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL ||
+           type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64;
 }
 
 // check if type is a collection that supports vectorized operations
 static inline bool is_vector_type(TypeId type) {
-    return type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-           type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+    return type == LMD_TYPE_ARRAY_NUM ||
            type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE;
 }
 
 // check if type is a homogeneous numeric array
 static inline bool is_homogeneous_array(TypeId type) {
-    return type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-           type == LMD_TYPE_ARRAY_FLOAT;
+    return type == LMD_TYPE_ARRAY_NUM;
 }
 
 // check if type is any array type (homogeneous or heterogeneous)
 static inline bool is_array_type(TypeId type) {
-    return type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-           type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY;
+    return type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY;
 }
 
 // get length of a vector-like item
 static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
-        case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
-        case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
+        case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
         case LMD_TYPE_ARRAY:        return item.list->length;
         case LMD_TYPE_RANGE:       return item.range->length;
         default:                   return -1;
@@ -57,12 +53,30 @@ static int64_t vector_length(Item item) {
 static Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_ARRAY_INT:
-            return { .item = i2it(item.array_int->items[index]) };
-        case LMD_TYPE_ARRAY_INT64:
-            return push_l(item.array_int64->items[index]);
-        case LMD_TYPE_ARRAY_FLOAT:
-            return push_d(item.array_float->items[index]);
+        case LMD_TYPE_ARRAY_NUM: {
+            ArrayNum* arr = item.array_num;
+            switch (arr->get_elem_type()) {
+                case ELEM_FLOAT:   return push_d(arr->float_items[index]);
+                case ELEM_INT64:   return push_l(arr->items[index]);
+                case ELEM_INT:     return { .item = i2it(arr->items[index]) };
+                case ELEM_INT8:    return { .item = i8_to_item(((int8_t*)arr->data)[index]) };
+                case ELEM_INT16:   return { .item = i16_to_item(((int16_t*)arr->data)[index]) };
+                case ELEM_INT32:   return { .item = i32_to_item(((int32_t*)arr->data)[index]) };
+                case ELEM_UINT8:   return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
+                case ELEM_UINT16:  return { .item = u16_to_item(((uint16_t*)arr->data)[index]) };
+                case ELEM_UINT32:  return { .item = u32_to_item(((uint32_t*)arr->data)[index]) };
+                case ELEM_FLOAT16: return { .item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[index])) };
+                case ELEM_FLOAT32: return { .item = f32_to_item(((float*)arr->data)[index]) };
+                case ELEM_UINT64: {
+                    uint64_t val = ((uint64_t*)arr->data)[index];
+                    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+                    *heap_val = val;
+                    return { .item = u64_to_item(heap_val) };
+                }
+                case ELEM_FLOAT64: return push_d(((double*)arr->data)[index]);
+                default:           return ItemError;
+            }
+        }
         case LMD_TYPE_ARRAY:
             return item.list->items[index];
         case LMD_TYPE_RANGE:
@@ -76,17 +90,57 @@ static Item vector_get(Item item, int64_t index) {
 static double item_to_double(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_INT:   return (double)item.get_int56();
-        case LMD_TYPE_INT64: return (double)item.get_int64();
-        case LMD_TYPE_FLOAT: return item.get_double();
-        default:             return NAN;
+        case LMD_TYPE_INT:       return (double)item.get_int56();
+        case LMD_TYPE_INT64:     return (double)item.get_int64();
+        case LMD_TYPE_FLOAT:     return item.get_double();
+        case LMD_TYPE_UINT64:    return (double)item.get_uint64();
+        case LMD_TYPE_NUM_SIZED: return item.get_num_sized_as_double();
+        case LMD_TYPE_DECIMAL:   return item.get_double();
+        default:                 return NAN;
+    }
+}
+
+// check if an elem_type represents a float variant
+static inline bool is_float_elem_type(ArrayNumElemType et) {
+    return et == ELEM_FLOAT || et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
+}
+
+// read compact array element as double without boxing to Item
+static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
+    switch (arr->get_elem_type()) {
+        case ELEM_INT:     return (double)arr->items[index];
+        case ELEM_INT64:   return (double)arr->items[index];
+        case ELEM_FLOAT:   return arr->float_items[index];
+        case ELEM_INT8:    return (double)((int8_t*)arr->data)[index];
+        case ELEM_INT16:   return (double)((int16_t*)arr->data)[index];
+        case ELEM_INT32:   return (double)((int32_t*)arr->data)[index];
+        case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[index];
+        case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[index];
+        case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[index];
+        case ELEM_FLOAT16: return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
+        case ELEM_FLOAT32: return (double)((float*)arr->data)[index];
+        case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[index];
+        case ELEM_FLOAT64: return ((double*)arr->data)[index];
+        default:           return NAN;
     }
 }
 
 // check if result should be float (any operand is float)
-static bool needs_float_result(TypeId a, TypeId b) {
-    return a == LMD_TYPE_FLOAT || b == LMD_TYPE_FLOAT ||
-           a == LMD_TYPE_ARRAY_FLOAT || b == LMD_TYPE_ARRAY_FLOAT;
+static bool needs_float_result(Item a, Item b) {
+    TypeId ta = get_type_id(a);
+    TypeId tb = get_type_id(b);
+    if (ta == LMD_TYPE_FLOAT || tb == LMD_TYPE_FLOAT) return true;
+    if (ta == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(a.item);
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return true;
+    }
+    if (tb == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(b.item);
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return true;
+    }
+    if (ta == LMD_TYPE_ARRAY_NUM && is_float_elem_type(a.array_num->get_elem_type())) return true;
+    if (tb == LMD_TYPE_ARRAY_NUM && is_float_elem_type(b.array_num->get_elem_type())) return true;
+    return false;
 }
 
 //==============================================================================
@@ -116,13 +170,13 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     }
 
     // determine result type
-    bool use_float = needs_float_result(vec_type, scalar_type) || op == 3; // div always float
+    bool use_float = needs_float_result(vec, scalar) || op == 3; // div always float
 
-    // fast path for homogeneous arrays
-    if (vec_type == LMD_TYPE_ARRAY_INT64 && !use_float && op != 3 && op != 5) {
-        ArrayInt64* arr = vec.array_int64;
+    // fast path for ELEM_INT64 arrays
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT64 && !use_float && op != 3 && op != 5) {
+        ArrayNum* arr = vec.array_num;
         int64_t sval = (int64_t)scalar_val;
-        ArrayInt64* result = array_int64_new(len);
+        ArrayNum* result = array_int64_new(len);
         for (int64_t i = 0; i < len; i++) {
             int64_t elem = arr->items[i];
             switch (op) {
@@ -134,14 +188,59 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
                 default: result->items[i] = elem; break;
             }
         }
-        return { .array_int64 = result };
+        return { .array_num = result };
     }
 
-    if (vec_type == LMD_TYPE_ARRAY_FLOAT || use_float) {
-        ArrayFloat* result = array_float_new(len);
+    // fast path for ELEM_INT arrays (packed int56)
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT && !use_float && op != 3 && op != 5) {
+        ArrayNum* arr = vec.array_num;
+        int64_t sval = (int64_t)scalar_val;
+        ArrayNum* result = array_num_new(ELEM_INT, len);
         for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(vec, i);
-            double elem_val = item_to_double(elem);
+            int64_t elem = arr->items[i];
+            switch (op) {
+                case 0: result->items[i] = scalar_first ? sval + elem : elem + sval; break;
+                case 1: result->items[i] = scalar_first ? sval - elem : elem - sval; break;
+                case 2: result->items[i] = scalar_first ? sval * elem : elem * sval; break;
+                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
+                                                        : (sval != 0 ? elem % sval : 0); break;
+                default: result->items[i] = elem; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    // fast path for ELEM_FLOAT32 compact arrays
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_FLOAT32) {
+        ArrayNum* arr = vec.array_num;
+        float sval = (float)scalar_val;
+        ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
+        float* src = (float*)arr->data;
+        float* dst = (float*)result->data;
+        for (int64_t i = 0; i < len; i++) {
+            float a = scalar_first ? sval : src[i];
+            float b = scalar_first ? src[i] : sval;
+            switch (op) {
+                case 0: dst[i] = a + b; break;
+                case 1: dst[i] = a - b; break;
+                case 2: dst[i] = a * b; break;
+                case 3: dst[i] = a / b; break;
+                case 4: dst[i] = fmodf(a, b); break;
+                case 5: dst[i] = powf(a, b); break;
+                default: dst[i] = src[i]; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    if (use_float) {
+        ArrayNum* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            double elem_val;
+            if (vec_type == LMD_TYPE_ARRAY_NUM)
+                elem_val = compact_elem_to_double(vec.array_num, i);
+            else
+                elem_val = item_to_double(vector_get(vec, i));
             double res;
             if (std::isnan(elem_val)) {
                 // non-numeric element: store NAN as error indicator
@@ -159,9 +258,9 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
                     default: res = NAN; break;
                 }
             }
-            result->items[i] = res;
+            result->float_items[i] = res;
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
 
     // heterogeneous: element-wise with ERROR for non-numeric
@@ -249,14 +348,15 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     }
 
     int64_t len = len_a;
-    bool use_float = needs_float_result(type_a, type_b) || op == 3;
+    bool use_float = needs_float_result(vec_a, vec_b) || op == 3;
 
-    // fast path: both ArrayInt64
-    if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64 &&
+    // fast path: both ELEM_INT64
+    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT64 &&
+        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT64 &&
         !use_float && op != 3 && op != 5) {
-        ArrayInt64* a = vec_a.array_int64;
-        ArrayInt64* b = vec_b.array_int64;
-        ArrayInt64* result = array_int64_new(len);
+        ArrayNum* a = vec_a.array_num;
+        ArrayNum* b = vec_b.array_num;
+        ArrayNum* result = array_int64_new(len);
         for (int64_t i = 0; i < len; i++) {
             switch (op) {
                 case 0: result->items[i] = a->items[i] + b->items[i]; break;
@@ -266,27 +366,88 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
                 default: result->items[i] = a->items[i]; break;
             }
         }
-        return { .array_int64 = result };
+        return { .array_num = result };
     }
 
-    // fast path: both ArrayFloat or need float result
-    if ((type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) ||
-        (is_homogeneous_array(type_a) && is_homogeneous_array(type_b) && use_float)) {
-        ArrayFloat* result = array_float_new(len);
+    // fast path: both ELEM_INT (packed int56)
+    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT &&
+        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT &&
+        !use_float && op != 3 && op != 5) {
+        ArrayNum* a = vec_a.array_num;
+        ArrayNum* b = vec_b.array_num;
+        ArrayNum* result = array_num_new(ELEM_INT, len);
         for (int64_t i = 0; i < len; i++) {
-            double a = item_to_double(vector_get(vec_a, i));
-            double b = item_to_double(vector_get(vec_b, i));
             switch (op) {
-                case 0: result->items[i] = a + b; break;
-                case 1: result->items[i] = a - b; break;
-                case 2: result->items[i] = a * b; break;
-                case 3: result->items[i] = a / b; break;
-                case 4: result->items[i] = fmod(a, b); break;
-                case 5: result->items[i] = pow(a, b); break;
-                default: result->items[i] = a; break;
+                case 0: result->items[i] = a->items[i] + b->items[i]; break;
+                case 1: result->items[i] = a->items[i] - b->items[i]; break;
+                case 2: result->items[i] = a->items[i] * b->items[i]; break;
+                case 4: result->items[i] = b->items[i] != 0 ? a->items[i] % b->items[i] : 0; break;
+                default: result->items[i] = a->items[i]; break;
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
+    }
+
+    // fast path: both ELEM_FLOAT32
+    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_FLOAT32 &&
+        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_FLOAT32) {
+        float* sa = (float*)vec_a.array_num->data;
+        float* sb = (float*)vec_b.array_num->data;
+        ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
+        float* dst = (float*)result->data;
+        for (int64_t i = 0; i < len; i++) {
+            switch (op) {
+                case 0: dst[i] = sa[i] + sb[i]; break;
+                case 1: dst[i] = sa[i] - sb[i]; break;
+                case 2: dst[i] = sa[i] * sb[i]; break;
+                case 3: dst[i] = sa[i] / sb[i]; break;
+                case 4: dst[i] = fmodf(sa[i], sb[i]); break;
+                case 5: dst[i] = powf(sa[i], sb[i]); break;
+                default: dst[i] = sa[i]; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    // fast path: both homogeneous numeric arrays with float result
+    if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM && use_float) {
+        ArrayNum* result = array_float_new(len);
+        for (int64_t i = 0; i < len; i++) {
+            double a = compact_elem_to_double(vec_a.array_num, i);
+            double b = compact_elem_to_double(vec_b.array_num, i);
+            switch (op) {
+                case 0: result->float_items[i] = a + b; break;
+                case 1: result->float_items[i] = a - b; break;
+                case 2: result->float_items[i] = a * b; break;
+                case 3: result->float_items[i] = a / b; break;
+                case 4: result->float_items[i] = fmod(a, b); break;
+                case 5: result->float_items[i] = pow(a, b); break;
+                default: result->float_items[i] = a; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    // fast path: one ARRAY_NUM + one non-ARRAY_NUM (range or list) with integer result
+    if (!use_float && op != 3 && op != 5) {
+        bool a_is_num = type_a == LMD_TYPE_ARRAY_NUM;
+        bool b_is_num = type_b == LMD_TYPE_ARRAY_NUM;
+        if (a_is_num || b_is_num) {
+            ArrayNum* result = array_int64_new(len);
+            for (int64_t i = 0; i < len; i++) {
+                double a = a_is_num ? compact_elem_to_double(vec_a.array_num, i) : item_to_double(vector_get(vec_a, i));
+                double b = b_is_num ? compact_elem_to_double(vec_b.array_num, i) : item_to_double(vector_get(vec_b, i));
+                int64_t ia = (int64_t)a, ib = (int64_t)b;
+                switch (op) {
+                    case 0: result->items[i] = ia + ib; break;
+                    case 1: result->items[i] = ia - ib; break;
+                    case 2: result->items[i] = ia * ib; break;
+                    case 4: result->items[i] = ib != 0 ? ia % ib : 0; break;
+                    default: result->items[i] = ia; break;
+                }
+            }
+            return { .array_num = result };
+        }
     }
 
     // heterogeneous: element-wise with ERROR for non-numeric
@@ -453,32 +614,37 @@ Item fn_math_prod(Item item) {
     TypeId type = get_type_id(item);
     log_debug("fn_math_prod: type=%d", type);
 
-    if (type == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item.array_int;
-        if (arr->length == 0) return { .item = i2it(1) };
-        int64_t prod = 1;
-        for (int64_t i = 0; i < arr->length; i++) {
-            prod *= arr->items[i];
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->length == 0) {
+            return is_float_elem_type(arr->get_elem_type()) ? push_d(1.0) : Item{ .item = i2it(1) };
         }
-        return push_l(prod);
-    }
-    else if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        if (arr->length == 0) return { .item = i2it(1) };
-        int64_t prod = 1;
-        for (int64_t i = 0; i < arr->length; i++) {
-            prod *= arr->items[i];
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            double prod = 1.0;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= arr->float_items[i];
+            }
+            return push_d(prod);
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
+            int64_t prod = 1;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= arr->items[i];
+            }
+            return push_l(prod);
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            double prod = 1.0;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= compact_elem_to_double(arr, i);
+            }
+            return push_d(prod);
+        } else {
+            // compact integer types
+            int64_t prod = 1;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= (int64_t)compact_elem_to_double(arr, i);
+            }
+            return push_l(prod);
         }
-        return push_l(prod);
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        if (arr->length == 0) return push_d(1.0);
-        double prod = 1.0;
-        for (int64_t i = 0; i < arr->length; i++) {
-            prod *= arr->items[i];
-        }
-        return push_d(prod);
     }
     else if (type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY) {
         List* lst = item.list;
@@ -525,44 +691,58 @@ Item fn_math_cumsum(Item item) {
 
     TypeId type = get_type_id(item);
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        ArrayInt64* result = array_int64_new(len);
-        int64_t sum = 0;
-        for (int64_t i = 0; i < len; i++) {
-            sum += arr->items[i];
-            result->items[i] = sum;
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(len);
+            double sum = 0.0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += arr->float_items[i];
+                result->float_items[i] = sum;
+            }
+            return { .array_num = result };
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
+            ArrayNum* result = array_int64_new(len);
+            int64_t sum = 0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += arr->items[i];
+                result->items[i] = sum;
+            }
+            return { .array_num = result };
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            ArrayNum* result = array_float_new(len);
+            double sum = 0.0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += compact_elem_to_double(arr, i);
+                result->float_items[i] = sum;
+            }
+            return { .array_num = result };
+        } else {
+            // compact integer types → int64 cumsum
+            ArrayNum* result = array_int64_new(len);
+            int64_t sum = 0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += (int64_t)compact_elem_to_double(arr, i);
+                result->items[i] = sum;
+            }
+            return { .array_num = result };
         }
-        result->is_content = 1;
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        ArrayFloat* result = array_float_new(len);
-        double sum = 0.0;
-        for (int64_t i = 0; i < len; i++) {
-            sum += arr->items[i];
-            result->items[i] = sum;
-        }
-        result->is_content = 1;
-        return { .array_float = result };
     }
     else {
         // heterogeneous list
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         double sum = 0.0;
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             double val = item_to_double(elem);
             if (std::isnan(val)) {
-                result->items[i] = NAN;
+                result->float_items[i] = NAN;
             } else {
                 sum += val;
-                result->items[i] = sum;
+                result->float_items[i] = sum;
             }
         }
-        result->is_content = 1;
-        return { .array_float = result };
+        return { .array_num = result };
     }
 }
 
@@ -579,43 +759,57 @@ Item fn_math_cumprod(Item item) {
 
     TypeId type = get_type_id(item);
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        ArrayInt64* result = array_int64_new(len);
-        int64_t prod = 1;
-        for (int64_t i = 0; i < len; i++) {
-            prod *= arr->items[i];
-            result->items[i] = prod;
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(len);
+            double prod = 1.0;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= arr->float_items[i];
+                result->float_items[i] = prod;
+            }
+            return { .array_num = result };
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
+            ArrayNum* result = array_int64_new(len);
+            int64_t prod = 1;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= arr->items[i];
+                result->items[i] = prod;
+            }
+            return { .array_num = result };
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            ArrayNum* result = array_float_new(len);
+            double prod = 1.0;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= compact_elem_to_double(arr, i);
+                result->float_items[i] = prod;
+            }
+            return { .array_num = result };
+        } else {
+            // compact integer types → int64 cumprod
+            ArrayNum* result = array_int64_new(len);
+            int64_t prod = 1;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= (int64_t)compact_elem_to_double(arr, i);
+                result->items[i] = prod;
+            }
+            return { .array_num = result };
         }
-        result->is_content = 1;
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        ArrayFloat* result = array_float_new(len);
-        double prod = 1.0;
-        for (int64_t i = 0; i < len; i++) {
-            prod *= arr->items[i];
-            result->items[i] = prod;
-        }
-        result->is_content = 1;
-        return { .array_float = result };
     }
     else {
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         double prod = 1.0;
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             double val = item_to_double(elem);
             if (std::isnan(val)) {
-                result->items[i] = NAN;
+                result->float_items[i] = NAN;
             } else {
                 prod *= val;
-                result->items[i] = prod;
+                result->float_items[i] = prod;
             }
         }
-        result->is_content = 1;
-        return { .array_float = result };
+        return { .array_num = result };
     }
 }
 
@@ -685,19 +879,19 @@ Item fn_fill(Item n_item, Item value) {
 
     if (val_type == LMD_TYPE_INT || val_type == LMD_TYPE_INT64) {
         int64_t val = (val_type == LMD_TYPE_INT) ? value.get_int56() : value.get_int64();
-        ArrayInt* result = array_int_new(n);
+        ArrayNum* result = array_int_new(n);
         for (int64_t i = 0; i < n; i++) {
             result->items[i] = val;
         }
-        return { .array_int = result };
+        return { .array_num = result };
     }
     else if (val_type == LMD_TYPE_FLOAT) {
         double val = value.get_double();
-        ArrayFloat* result = array_float_new(n);
+        ArrayNum* result = array_float_new(n);
         for (int64_t i = 0; i < n; i++) {
-            result->items[i] = val;
+            result->float_items[i] = val;
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else {
         // spreadable array for non-numeric values (avoids list merge behavior for strings)
@@ -777,31 +971,31 @@ Item fn_math_median(Item item) {
     if (len == 0) return ItemNull;
 
     // Copy values to sortable array
-    ArrayFloat* sorted = array_float_new(len);
+    ArrayNum* sorted = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
             log_error("fn_math_median: non-numeric element at index %ld", i);
             return ItemError;
         }
-        sorted->items[i] = val;
+        sorted->float_items[i] = val;
     }
 
     // Simple bubble sort (can optimize later)
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - i - 1; j++) {
-            if (sorted->items[j] > sorted->items[j + 1]) {
-                double tmp = sorted->items[j];
-                sorted->items[j] = sorted->items[j + 1];
-                sorted->items[j + 1] = tmp;
+            if (sorted->float_items[j] > sorted->float_items[j + 1]) {
+                double tmp = sorted->float_items[j];
+                sorted->float_items[j] = sorted->float_items[j + 1];
+                sorted->float_items[j + 1] = tmp;
             }
         }
     }
 
     if (len % 2 == 1) {
-        return push_d(sorted->items[len / 2]);
+        return push_d(sorted->float_items[len / 2]);
     } else {
-        return push_d((sorted->items[len / 2 - 1] + sorted->items[len / 2]) / 2.0);
+        return push_d((sorted->float_items[len / 2 - 1] + sorted->float_items[len / 2]) / 2.0);
     }
 }
 
@@ -859,23 +1053,23 @@ Item fn_math_quantile(Item item, Item p_item) {
     }
 
     // Copy values to sortable array
-    ArrayFloat* sorted = array_float_new(len);
+    ArrayNum* sorted = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
             log_error("fn_math_quantile: non-numeric element at index %ld", i);
             return ItemError;
         }
-        sorted->items[i] = val;
+        sorted->float_items[i] = val;
     }
 
     // Sort
     for (int64_t i = 0; i < len - 1; i++) {
         for (int64_t j = 0; j < len - i - 1; j++) {
-            if (sorted->items[j] > sorted->items[j + 1]) {
-                double tmp = sorted->items[j];
-                sorted->items[j] = sorted->items[j + 1];
-                sorted->items[j + 1] = tmp;
+            if (sorted->float_items[j] > sorted->float_items[j + 1]) {
+                double tmp = sorted->float_items[j];
+                sorted->float_items[j] = sorted->float_items[j + 1];
+                sorted->float_items[j + 1] = tmp;
             }
         }
     }
@@ -886,11 +1080,11 @@ Item fn_math_quantile(Item item, Item p_item) {
     int64_t hi = (int64_t)ceil(idx);
 
     if (lo == hi || hi >= len) {
-        return push_d(sorted->items[lo]);
+        return push_d(sorted->float_items[lo]);
     }
 
     double frac = idx - lo;
-    return push_d(sorted->items[lo] * (1.0 - frac) + sorted->items[hi] * frac);
+    return push_d(sorted->float_items[lo] * (1.0 - frac) + sorted->float_items[hi] * frac);
 }
 
 //==============================================================================
@@ -902,20 +1096,20 @@ static Item vec_unary_math(Item item, double (*func)(double), const char* name) 
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
-        ArrayFloat* result = array_float_new(0);
-        return { .array_float = result };
+        ArrayNum* result = array_float_new(0);
+        return { .array_num = result };
     }
 
-    ArrayFloat* result = array_float_new(len);
+    ArrayNum* result = array_float_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
-            result->items[i] = NAN;  // propagate error as NaN
+            result->float_items[i] = NAN;  // propagate error as NaN
         } else {
-            result->items[i] = func(val);
+            result->float_items[i] = func(val);
         }
     }
-    return { .array_float = result };
+    return { .array_num = result };
 }
 
 //==============================================================================
@@ -938,8 +1132,7 @@ Item fn_pipe_map(Item collection, PipeMapFn transform) {
     // scalar case: apply transform directly
     if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
-        type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
-        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT &&
+        type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
         type != LMD_TYPE_OBJECT) {
         return transform(collection, ItemNull);
     }
@@ -1003,8 +1196,7 @@ Item fn_pipe_where(Item collection, PipeMapFn predicate) {
     // scalar case: return collection if truthy, else null
     if (type != LMD_TYPE_ARRAY && type != LMD_TYPE_ARRAY &&
         type != LMD_TYPE_RANGE && type != LMD_TYPE_MAP &&
-        type != LMD_TYPE_ARRAY_INT && type != LMD_TYPE_ARRAY_INT64 &&
-        type != LMD_TYPE_ARRAY_FLOAT && type != LMD_TYPE_ELEMENT &&
+        type != LMD_TYPE_ARRAY_NUM && type != LMD_TYPE_ELEMENT &&
         type != LMD_TYPE_OBJECT) {
         Item result = predicate(collection, ItemNull);
         if (is_truthy(result)) {
@@ -1387,11 +1579,11 @@ Item fn_sign(Item item) {
     int64_t len = vector_length(item);
     if (len < 0) return ItemError;
     if (len == 0) {
-        ArrayInt64* result = array_int64_new(0);
-        return { .array_int64 = result };
+        ArrayNum* result = array_int64_new(0);
+        return { .array_num = result };
     }
 
-    ArrayInt64* result = array_int64_new(len);
+    ArrayNum* result = array_int64_new(len);
     for (int64_t i = 0; i < len; i++) {
         double val = item_to_double(vector_get(item, i));
         if (std::isnan(val)) {
@@ -1400,7 +1592,7 @@ Item fn_sign(Item item) {
             result->items[i] = (val > 0) ? 1 : (val < 0) ? -1 : 0;
         }
     }
-    return { .array_int64 = result };
+    return { .array_num = result };
 }
 
 // math.random(seed) - pure functional PRNG using SplitMix64
@@ -1441,21 +1633,26 @@ Item fn_reverse(Item item) {
         return { .list = result };
     }
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        ArrayInt64* result = array_int64_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            result->items[i] = arr->items[len - 1 - i];
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == ELEM_INT) {
+            // ELEM_INT (from literals): return content List for spreading
+            List* result = list();
+            for (int64_t i = len - 1; i >= 0; i--)
+                list_push(result, vector_get(item, i));
+            result->is_content = 1;
+            return { .list = result };
+        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(len);
+            for (int64_t i = 0; i < len; i++)
+                result->float_items[i] = arr->float_items[len - 1 - i];
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(len);
+            for (int64_t i = 0; i < len; i++)
+                result->items[i] = arr->items[len - 1 - i];
+            return { .array_num = result };
         }
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        ArrayFloat* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) {
-            result->items[i] = arr->items[len - 1 - i];
-        }
-        return { .array_float = result };
     }
     else {
         List* result = list();
@@ -1481,53 +1678,53 @@ Item fn_sort1(Item item) {
         return { .list = result };
     }
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        ArrayInt64* result = array_int64_new(len);
-        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-        // Simple bubble sort
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                if (result->items[j] > result->items[j + 1]) {
-                    int64_t tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(len);
+            for (int64_t i = 0; i < len; i++) result->float_items[i] = arr->float_items[i];
+            for (int64_t i = 0; i < len - 1; i++) {
+                for (int64_t j = 0; j < len - i - 1; j++) {
+                    if (result->float_items[j] > result->float_items[j + 1]) {
+                        double tmp = result->float_items[j];
+                        result->float_items[j] = result->float_items[j + 1];
+                        result->float_items[j + 1] = tmp;
+                    }
                 }
             }
-        }
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        ArrayFloat* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                if (result->items[j] > result->items[j + 1]) {
-                    double tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(len);
+            for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+            // Simple bubble sort
+            for (int64_t i = 0; i < len - 1; i++) {
+                for (int64_t j = 0; j < len - i - 1; j++) {
+                    if (result->items[j] > result->items[j + 1]) {
+                        int64_t tmp = result->items[j];
+                        result->items[j] = result->items[j + 1];
+                        result->items[j + 1] = tmp;
+                    }
                 }
             }
+            return { .array_num = result };
         }
-        return { .array_float = result };
     }
     else {
         // For mixed types, convert to float and sort
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
-            result->items[i] = item_to_double(vector_get(item, i));
+            result->float_items[i] = item_to_double(vector_get(item, i));
         }
         for (int64_t i = 0; i < len - 1; i++) {
             for (int64_t j = 0; j < len - i - 1; j++) {
-                if (result->items[j] > result->items[j + 1]) {
-                    double tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+                if (result->float_items[j] > result->float_items[j + 1]) {
+                    double tmp = result->float_items[j];
+                    result->float_items[j] = result->float_items[j + 1];
+                    result->float_items[j + 1] = tmp;
                 }
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
 }
 
@@ -1698,57 +1895,57 @@ Item fn_sort2(Item item, Item dir_item) {
     }
 
     // No key function - sort by value with direction (original behavior)
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        ArrayInt64* result = array_int64_new(len);
-        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                bool swap = descending ? (result->items[j] < result->items[j + 1])
-                                       : (result->items[j] > result->items[j + 1]);
-                if (swap) {
-                    int64_t tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(len);
+            for (int64_t i = 0; i < len; i++) result->float_items[i] = arr->float_items[i];
+            for (int64_t i = 0; i < len - 1; i++) {
+                for (int64_t j = 0; j < len - i - 1; j++) {
+                    bool swap = descending ? (result->float_items[j] < result->float_items[j + 1])
+                                           : (result->float_items[j] > result->float_items[j + 1]);
+                    if (swap) {
+                        double tmp = result->float_items[j];
+                        result->float_items[j] = result->float_items[j + 1];
+                        result->float_items[j + 1] = tmp;
+                    }
                 }
             }
-        }
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        ArrayFloat* result = array_float_new(len);
-        for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                bool swap = descending ? (result->items[j] < result->items[j + 1])
-                                       : (result->items[j] > result->items[j + 1]);
-                if (swap) {
-                    double tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(len);
+            for (int64_t i = 0; i < len; i++) result->items[i] = arr->items[i];
+            for (int64_t i = 0; i < len - 1; i++) {
+                for (int64_t j = 0; j < len - i - 1; j++) {
+                    bool swap = descending ? (result->items[j] < result->items[j + 1])
+                                           : (result->items[j] > result->items[j + 1]);
+                    if (swap) {
+                        int64_t tmp = result->items[j];
+                        result->items[j] = result->items[j + 1];
+                        result->items[j + 1] = tmp;
+                    }
                 }
             }
+            return { .array_num = result };
         }
-        return { .array_float = result };
     }
     else {
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
-            result->items[i] = item_to_double(vector_get(item, i));
+            result->float_items[i] = item_to_double(vector_get(item, i));
         }
         for (int64_t i = 0; i < len - 1; i++) {
             for (int64_t j = 0; j < len - i - 1; j++) {
-                bool swap = descending ? (result->items[j] < result->items[j + 1])
-                                       : (result->items[j] > result->items[j + 1]);
+                bool swap = descending ? (result->float_items[j] < result->float_items[j + 1])
+                                       : (result->float_items[j] > result->float_items[j + 1]);
                 if (swap) {
-                    double tmp = result->items[j];
-                    result->items[j] = result->items[j + 1];
-                    result->items[j + 1] = tmp;
+                    double tmp = result->float_items[j];
+                    result->float_items[j] = result->float_items[j + 1];
+                    result->float_items[j + 1] = tmp;
                 }
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
 }
 
@@ -1793,9 +1990,8 @@ Item fn_unique(Item item) {
     bool spreadable = true; // default for list input
     if (type == LMD_TYPE_ARRAY) {
         spreadable = item.array->is_spreadable;
-    } else if (type == LMD_TYPE_ARRAY_INT64 || type == LMD_TYPE_ARRAY_FLOAT) {
-        spreadable = false; // typed arrays don't have the flag
     }
+    // ARRAY_NUM: always spreadable for display (like old ARRAY_INT fallback)
 
     if (len == 0) {
         Array* result = array();
@@ -1803,43 +1999,38 @@ Item fn_unique(Item item) {
         return { .array = result };
     }
 
-    // fast path for homogeneous int64 arrays (direct numeric comparison)
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
+    // fast path for homogeneous numeric arrays
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
         Array* result = array();
-        for (int64_t i = 0; i < len; i++) {
-            int64_t val = arr->items[i];
-            bool found = false;
-            for (int64_t j = 0; j < (int64_t)result->length; j++) {
-                if (result->items[j].get_int64() == val) {
-                    found = true;
-                    break;
+        if (arr->get_elem_type() == ELEM_FLOAT) {
+            for (int64_t i = 0; i < len; i++) {
+                double val = arr->float_items[i];
+                bool found = false;
+                for (int64_t j = 0; j < (int64_t)result->length; j++) {
+                    double res_val = result->items[j].get_double();
+                    if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    array_push(result, push_d(val));
                 }
             }
-            if (!found) {
-                array_push(result, push_l(val));
-            }
-        }
-        result->is_spreadable = spreadable;
-        return { .array = result };
-    }
-
-    // fast path for homogeneous float arrays (direct numeric comparison)
-    if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;
-        Array* result = array();
-        for (int64_t i = 0; i < len; i++) {
-            double val = arr->items[i];
-            bool found = false;
-            for (int64_t j = 0; j < (int64_t)result->length; j++) {
-                double res_val = result->items[j].get_double();
-                if (val == res_val || (std::isnan(val) && std::isnan(res_val))) {
-                    found = true;
-                    break;
+        } else {
+            for (int64_t i = 0; i < len; i++) {
+                int64_t val = arr->items[i];
+                bool found = false;
+                for (int64_t j = 0; j < (int64_t)result->length; j++) {
+                    if (result->items[j].get_int64() == val) {
+                        found = true;
+                        break;
+                    }
                 }
-            }
-            if (!found) {
-                array_push(result, push_d(val));
+                if (!found) {
+                    array_push(result, push_l(val));
+                }
             }
         }
         result->is_spreadable = spreadable;
@@ -1891,15 +2082,23 @@ Item fn_take(Item vec, Item n_item) {
     if (n < 0) n = 0;
     if (n > len) n = len;
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* result = array_int64_new(n);
-        for (int64_t i = 0; i < n; i++) result->items[i] = vec.array_int64->items[i];
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* result = array_float_new(n);
-        for (int64_t i = 0; i < n; i++) result->items[i] = vec.array_float->items[i];
-        return { .array_float = result };
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = vec.array_num;
+        if (arr->get_elem_type() == ELEM_INT) {
+            // ELEM_INT (from literals): return content List for spreading
+            List* result = list();
+            for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
+            result->is_content = 1;
+            return { .list = result };
+        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(n);
+            for (int64_t i = 0; i < n; i++) result->float_items[i] = arr->float_items[i];
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(n);
+            for (int64_t i = 0; i < n; i++) result->items[i] = arr->items[i];
+            return { .array_num = result };
+        }
     }
     else {
         List* result = list();
@@ -1937,15 +2136,23 @@ Item fn_drop(Item vec, Item n_item) {
 
     int64_t new_len = len - n;
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* result = array_int64_new(new_len);
-        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[n + i];
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* result = array_float_new(new_len);
-        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_float->items[n + i];
-        return { .array_float = result };
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = vec.array_num;
+        if (arr->get_elem_type() == ELEM_INT) {
+            // ELEM_INT (from literals): return content List for spreading
+            List* result = list();
+            for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
+            result->is_content = 1;
+            return { .list = result };
+        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(new_len);
+            for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[n + i];
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(new_len);
+            for (int64_t i = 0; i < new_len; i++) result->items[i] = arr->items[n + i];
+            return { .array_num = result };
+        }
     }
     else {
         List* result = list();
@@ -1994,15 +2201,23 @@ Item fn_slice(Item vec, Item start_item, Item end_item) {
 
     int64_t new_len = end - start;
 
-    if (type == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* result = array_int64_new(new_len);
-        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_int64->items[start + i];
-        return { .array_int64 = result };
-    }
-    else if (type == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* result = array_float_new(new_len);
-        for (int64_t i = 0; i < new_len; i++) result->items[i] = vec.array_float->items[start + i];
-        return { .array_float = result };
+    if (type == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = vec.array_num;
+        if (arr->get_elem_type() == ELEM_INT) {
+            // ELEM_INT (from literals): return content List for spreading
+            List* result = list();
+            for (int64_t i = start; i < end; i++) list_push(result, vector_get(vec, i));
+            result->is_content = 1;
+            return { .list = result };
+        } else if (arr->get_elem_type() == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(new_len);
+            for (int64_t i = 0; i < new_len; i++) result->float_items[i] = arr->float_items[start + i];
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = array_int64_new(new_len);
+            for (int64_t i = 0; i < new_len; i++) result->items[i] = arr->items[start + i];
+            return { .array_num = result };
+        }
     }
     else {
         List* result = list();
@@ -2059,14 +2274,14 @@ Item fn_range3(Item start_item, Item end_item, Item step_item) {
     }
 
     if (n <= 0) {
-        ArrayFloat* result = array_float_new(0);
-        return { .array_float = result };
+        ArrayNum* result = array_float_new(0);
+        return { .array_num = result };
     }
 
-    ArrayFloat* result = array_float_new(n);
+    ArrayNum* result = array_float_new(n);
     for (int64_t i = 0; i < n; i++) {
-        result->items[i] = start + i * step;
+        result->float_items[i] = start + i * step;
     }
 
-    return { .array_float = result };
+    return { .array_num = result };
 }

@@ -5,6 +5,23 @@
 #include <inttypes.h>  // for PRId64
 #include "ast.hpp"
 
+// inline reader for compact sized array elements (avoids cross-lib dependency on array_num_get)
+static Item read_compact_elem(ArrayNum* arr, int i) {
+    switch (arr->get_elem_type()) {
+    case ELEM_INT8:    return (Item){.item = i8_to_item(((int8_t*)arr->data)[i])};
+    case ELEM_INT16:   return (Item){.item = i16_to_item(((int16_t*)arr->data)[i])};
+    case ELEM_INT32:   return (Item){.item = i32_to_item(((int32_t*)arr->data)[i])};
+    case ELEM_UINT8:   return (Item){.item = u8_to_item(((uint8_t*)arr->data)[i])};
+    case ELEM_UINT16:  return (Item){.item = u16_to_item(((uint16_t*)arr->data)[i])};
+    case ELEM_UINT32:  return (Item){.item = u32_to_item(((uint32_t*)arr->data)[i])};
+    case ELEM_FLOAT16: return (Item){.item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[i]))};
+    case ELEM_FLOAT32: return (Item){.item = f32_to_item(((float*)arr->data)[i])};
+    case ELEM_UINT64:  return (Item){.item = i2it((int64_t)((uint64_t*)arr->data)[i])};
+    case ELEM_FLOAT64: return (Item){.item = i2it((int64_t)((double*)arr->data)[i])};
+    default:           return ItemNull;
+    }
+}
+
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
@@ -349,7 +366,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 path_to_string(path, strbuf);
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT:
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 print_item(strbuf, *(Item*)data, depth, indent);
@@ -442,7 +459,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
     case LMD_TYPE_PATH:
         path_to_string(titem->path, strbuf);
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
         // For complex types, create a temporary Item and use existing print_item logic
         Item temp_item = {.item = titem->item};
@@ -586,32 +603,27 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_char(strbuf, ']');
         break;
     }
-    case LMD_TYPE_ARRAY_INT: {
+    case LMD_TYPE_ARRAY_NUM: {
         strbuf_append_char(strbuf, '[');
-        ArrayInt *array = item.array_int;
-        for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_str(strbuf, ", ");
-            strbuf_append_format(strbuf, "%d", array->items[i]);
-        }
-        strbuf_append_char(strbuf, ']');
-        break;
-    }
-    case LMD_TYPE_ARRAY_INT64: {
-        strbuf_append_str(strbuf, "[");
-        ArrayInt64 *array = item.array_int64;
-        for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_str(strbuf, ", ");
-            strbuf_append_format(strbuf, "%lld", array->items[i]);
-        }
-        strbuf_append_str(strbuf, "]");
-        break;
-    }
-    case LMD_TYPE_ARRAY_FLOAT: {
-        strbuf_append_str(strbuf, "[");
-        ArrayFloat *array = item.array_float;
-        for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_str(strbuf, ", ");
-            print_double(strbuf, array->items[i]);
+        ArrayNum *array = item.array_num;
+        ArrayNumElemType et = array->get_elem_type();
+        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_str(strbuf, ", ");
+                print_double(strbuf, array->float_items[i]);
+            }
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_str(strbuf, ", ");
+                strbuf_append_format(strbuf, "%lld", array->items[i]);
+            }
+        } else {
+            // compact sized types: read and print each element
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_str(strbuf, ", ");
+                Item val = read_compact_elem(array, i);
+                print_item(strbuf, val, depth + 1, indent);
+            }
         }
         strbuf_append_str(strbuf, "]");
         break;
@@ -751,19 +763,32 @@ void print_root_item(StrBuf *strbuf, Item item, char* indent) {
         Array *array = item.array;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_char(strbuf, '\n');
-            print_item(strbuf, array->items[i], 0, indent);
+            print_root_item(strbuf, array->items[i], indent);
+            // remove the trailing '\n' that print_root_item appends
+            if (strbuf->length > 0 && strbuf->str[strbuf->length - 1] == '\n') {
+                strbuf->str[--strbuf->length] = '\0';
+            }
         }
-    } else if (type_id == LMD_TYPE_ARRAY_INT64 && item.array_int64->is_content) {
-        ArrayInt64 *array = item.array_int64;
-        for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_char(strbuf, '\n');
-            strbuf_append_format(strbuf, "%lld", array->items[i]);
-        }
-    } else if (type_id == LMD_TYPE_ARRAY_FLOAT && item.array_float->is_content) {
-        ArrayFloat *array = item.array_float;
-        for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_char(strbuf, '\n');
-            print_double(strbuf, array->items[i]);
+    } else if (type_id == LMD_TYPE_ARRAY_NUM && item.array_num->is_content) {
+        ArrayNum *array = item.array_num;
+        ArrayNumElemType et = array->get_elem_type();
+        if (et == ELEM_FLOAT || et == ELEM_FLOAT64) {
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, '\n');
+                print_double(strbuf, array->float_items[i]);
+            }
+        } else if (et == ELEM_INT || et == ELEM_INT64) {
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, '\n');
+                strbuf_append_format(strbuf, "%lld", array->items[i]);
+            }
+        } else {
+            // compact sized types
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, '\n');
+                Item val = read_compact_elem(array, i);
+                print_item(strbuf, val, 0, indent);
+            }
         }
     } else {
         print_item(strbuf, item, 0, indent);
@@ -837,12 +862,8 @@ char* format_type(Type *type) {
             return "Array*";
         }
     }
-    case LMD_TYPE_ARRAY_INT:
-        return "ArrayInt*";
-    case LMD_TYPE_ARRAY_INT64:
-        return "ArrayInt64*";
-    case LMD_TYPE_ARRAY_FLOAT:
-        return "ArrayFloat*";
+    case LMD_TYPE_ARRAY_NUM:
+        return "ArrayNum*";
     case LMD_TYPE_MAP:
         return "Map*";
     case LMD_TYPE_OBJECT:

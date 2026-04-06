@@ -264,9 +264,7 @@ void MarkEditor::store_value_at_offset(void* field_ptr, Item value, TypeId type_
         break;
     }
     case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:
@@ -288,9 +286,7 @@ void MarkEditor::decrement_ref_count(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_BINARY:
         break;
     case LMD_TYPE_ARRAY:
-    case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_ARRAY_INT64:
-    case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY_NUM:
     case LMD_TYPE_RANGE:
     case LMD_TYPE_MAP:
     case LMD_TYPE_ELEMENT:

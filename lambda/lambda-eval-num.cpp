@@ -27,8 +27,7 @@ Item push_c(int64_t cval) {
 // decimal_is_zero is now in lambda-decimal.cpp
 
 // helper macro for vector type detection
-#define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_INT || (t) == LMD_TYPE_ARRAY_INT64 || \
-                           (t) == LMD_TYPE_ARRAY_FLOAT || (t) == LMD_TYPE_ARRAY || \
+#define IS_VECTOR_TYPE(t) ((t) == LMD_TYPE_ARRAY_NUM || (t) == LMD_TYPE_ARRAY || \
                            (t) == LMD_TYPE_ARRAY || (t) == LMD_TYPE_RANGE)
 
 #define IS_SCALAR_NUMERIC(t) ((t) == LMD_TYPE_INT || (t) == LMD_TYPE_INT64 || \
@@ -64,9 +63,7 @@ Item vec_pow(Item a, Item b);
 static int64_t vector_length(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_ARRAY_INT:   return item.array_int->length;
-        case LMD_TYPE_ARRAY_INT64: return item.array_int64->length;
-        case LMD_TYPE_ARRAY_FLOAT: return item.array_float->length;
+        case LMD_TYPE_ARRAY_NUM:   return item.array_num->length;
         case LMD_TYPE_ARRAY:        return item.list->length;
         case LMD_TYPE_RANGE:       return item.range->length;
         default:                   return -1;
@@ -77,12 +74,15 @@ static int64_t vector_length(Item item) {
 static Item vector_get(Item item, int64_t index) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_ARRAY_INT:
-            return { .item = i2it(item.array_int->items[index]) };
-        case LMD_TYPE_ARRAY_INT64:
-            return push_l(item.array_int64->items[index]);
-        case LMD_TYPE_ARRAY_FLOAT:
-            return push_d(item.array_float->items[index]);
+        case LMD_TYPE_ARRAY_NUM: {
+            ArrayNum* arr = item.array_num;
+            switch (arr->get_elem_type()) {
+                case ELEM_INT:   return { .item = i2it(arr->items[index]) };
+                case ELEM_INT64: return push_l(arr->items[index]);
+                case ELEM_FLOAT: return push_d(arr->float_items[index]);
+                default: return ItemError;
+            }
+        }
         case LMD_TYPE_ARRAY:
             return item.list->items[index];
         case LMD_TYPE_RANGE:
@@ -160,46 +160,27 @@ Item fn_add(Item item_a, Item item_b) {
     // vectorized addition for Arrays
     // todo: array + number
     // ArrayInt and ArrayInt64 support
-    else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr_a = item_a.array_int;
-        ArrayInt* arr_b = item_b.array_int;
+    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr_a = item_a.array_num;
+        ArrayNum* arr_b = item_b.array_num;
         if (arr_a->length != arr_b->length) {
             log_error("Array length mismatch in addition");
             return ItemError;
         }
-        ArrayInt* result = array_int_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] + arr_b->items[i];
+        ArrayNumElemType et = arr_a->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->float_items[i] = arr_a->float_items[i] + arr_b->float_items[i];
+            }
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->items[i] = arr_a->items[i] + arr_b->items[i];
+            }
+            return { .array_num = result };
         }
-        return { .array_int = result };
-    }
-    // ArrayInt64 support
-    else if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr_a = item_a.array_int64;
-        ArrayInt64* arr_b = item_b.array_int64;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in addition");
-            return ItemError;
-        }
-        ArrayInt64* result = array_int64_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] + arr_b->items[i];
-        }
-        return { .array_int64 = result };
-    }
-    // ArrayFloat support
-    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr_a = item_a.array_float;
-        ArrayFloat* arr_b = item_b.array_float;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in addition");
-            return ItemError;
-        }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] + arr_b->items[i];
-        }
-        return { .array_float = result };
     }
     // todo: mixed array types
     else {
@@ -284,44 +265,27 @@ Item fn_mul(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         return decimal_mul(item_a, item_b, context);
     }
-    else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr_a = item_a.array_int;
-        ArrayInt* arr_b = item_b.array_int;
+    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr_a = item_a.array_num;
+        ArrayNum* arr_b = item_b.array_num;
         if (arr_a->length != arr_b->length) {
             log_error("Array length mismatch in multiplication");
             return ItemError;
         }
-        ArrayInt* result = array_int_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] * arr_b->items[i];
+        ArrayNumElemType et = arr_a->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->float_items[i] = arr_a->float_items[i] * arr_b->float_items[i];
+            }
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->items[i] = arr_a->items[i] * arr_b->items[i];
+            }
+            return { .array_num = result };
         }
-        return { .array_int = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr_a = item_a.array_int64;
-        ArrayInt64* arr_b = item_b.array_int64;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in multiplication");
-            return ItemError;
-        }
-        ArrayInt64* result = array_int64_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] * arr_b->items[i];
-        }
-        return { .array_int64 = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr_a = item_a.array_float;
-        ArrayFloat* arr_b = item_b.array_float;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in multiplication");
-            return ItemError;
-        }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] * arr_b->items[i];
-        }
-        return { .array_float = result };
     }
     else {
         log_error("unknown mul type: %d, %d", item_a._type_id, item_b._type_id);
@@ -393,44 +357,27 @@ Item fn_sub(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         return decimal_sub(item_a, item_b, context);
     }
-    else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr_a = item_a.array_int;
-        ArrayInt* arr_b = item_b.array_int;
+    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr_a = item_a.array_num;
+        ArrayNum* arr_b = item_b.array_num;
         if (arr_a->length != arr_b->length) {
             log_error("Array length mismatch in subtraction");
             return ItemError;
         }
-        ArrayInt* result = array_int_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] - arr_b->items[i];
+        ArrayNumElemType et = arr_a->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            ArrayNum* result = array_float_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->float_items[i] = arr_a->float_items[i] - arr_b->float_items[i];
+            }
+            return { .array_num = result };
+        } else {
+            ArrayNum* result = (et == ELEM_INT64) ? array_int64_new(arr_a->length) : array_int_new(arr_a->length);
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                result->items[i] = arr_a->items[i] - arr_b->items[i];
+            }
+            return { .array_num = result };
         }
-        return { .array_int = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr_a = item_a.array_int64;
-        ArrayInt64* arr_b = item_b.array_int64;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in subtraction");
-            return ItemError;
-        }
-        ArrayInt64* result = array_int64_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] - arr_b->items[i];
-        }
-        return { .array_int64 = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr_a = item_a.array_float;
-        ArrayFloat* arr_b = item_b.array_float;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in subtraction");
-            return ItemError;
-        }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            result->items[i] = arr_a->items[i] - arr_b->items[i];
-        }
-        return { .array_float = result };
     }
     else {
         log_error("unknown sub type: %d, %d", item_a._type_id, item_b._type_id);
@@ -528,59 +475,33 @@ Item fn_div(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         return decimal_div(item_a, item_b, context);
     }
-    else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr_a = item_a.array_int;
-        ArrayInt* arr_b = item_b.array_int;
+    else if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr_a = item_a.array_num;
+        ArrayNum* arr_b = item_b.array_num;
         if (arr_a->length != arr_b->length) {
             log_error("Array length mismatch in division");
             return ItemError;
         }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            if (arr_b->items[i] == 0) {
-                log_error("integer division by zero error in array element %" PRId64, i);
-                // result abandoned in GC heap/data zone — reclaimed by GC
-                return ItemError;
+        ArrayNumElemType et = arr_a->get_elem_type();
+        ArrayNum* result = array_float_new(arr_a->length);
+        if (et == ELEM_FLOAT) {
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                if (arr_b->float_items[i] == 0.0) {
+                    log_error("float division by zero error in array element %" PRId64, i);
+                    return ItemError;
+                }
+                result->float_items[i] = arr_a->float_items[i] / arr_b->float_items[i];
             }
-            result->items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
-        }
-        return { .array_float = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_INT64 && type_b == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr_a = item_a.array_int64;
-        ArrayInt64* arr_b = item_b.array_int64;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in division");
-            return ItemError;
-        }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            if (arr_b->items[i] == 0) {
-                log_error("integer division by zero error in array element %" PRId64, i);
-                // result abandoned in GC heap/data zone — reclaimed by GC
-                return ItemError;
+        } else {
+            for (int64_t i = 0; i < arr_a->length; i++) {
+                if (arr_b->items[i] == 0) {
+                    log_error("integer division by zero error in array element %" PRId64, i);
+                    return ItemError;
+                }
+                result->float_items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
             }
-            result->items[i] = (double)arr_a->items[i] / (double)arr_b->items[i];
         }
-        return { .array_float = result };
-    }
-    else if (type_a == LMD_TYPE_ARRAY_FLOAT && type_b == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr_a = item_a.array_float;
-        ArrayFloat* arr_b = item_b.array_float;
-        if (arr_a->length != arr_b->length) {
-            log_error("Array length mismatch in division");
-            return ItemError;
-        }
-        ArrayFloat* result = array_float_new(arr_a->length);
-        for (int64_t i = 0; i < arr_a->length; i++) {
-            if (arr_b->items[i] == 0.0) {
-                log_error("float division by zero error in array element %" PRId64, i);
-                // result abandoned in GC heap/data zone — reclaimed by GC
-                return ItemError;
-            }
-            result->items[i] = arr_a->items[i] / arr_b->items[i];
-        }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else {
         log_error("unknown div type: %d, %d\n", item_a._type_id, item_b._type_id);
@@ -798,33 +719,32 @@ Item fn_abs(Item item) {
         double val = item.get_double();
         return push_d(fabs(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
-            ArrayFloat* result = array_float_new(0);
-            return { .array_float = result };
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
         }
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             TypeId elem_type = get_type_id(elem);
             if (elem_type == LMD_TYPE_INT) {
                 int64_t val = elem.get_int56();
-                result->items[i] = (double)(val < 0 ? -val : val);
+                result->float_items[i] = (double)(val < 0 ? -val : val);
             } else if (elem_type == LMD_TYPE_INT64) {
                 int64_t val = elem.get_int64();
-                result->items[i] = (double)(val < 0 ? -val : val);
+                result->float_items[i] = (double)(val < 0 ? -val : val);
             } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->items[i] = fabs(elem.get_double());
+                result->float_items[i] = fabs(elem.get_double());
             } else {
                 log_error("abs: non-numeric element at index %ld, type: %d", i, elem_type);
                 return ItemError;
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_abs(item, context);
@@ -848,31 +768,30 @@ Item fn_round(Item item) {
         double val = item.get_double();
         return push_d(round(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
-            ArrayFloat* result = array_float_new(0);
-            return { .array_float = result };
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
         }
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             TypeId elem_type = get_type_id(elem);
             if (elem_type == LMD_TYPE_INT) {
-                result->items[i] = (double)elem.get_int56();
+                result->float_items[i] = (double)elem.get_int56();
             } else if (elem_type == LMD_TYPE_INT64) {
-                result->items[i] = (double)elem.get_int64();
+                result->float_items[i] = (double)elem.get_int64();
             } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->items[i] = round(elem.get_double());
+                result->float_items[i] = round(elem.get_double());
             } else {
                 log_error("round: non-numeric element at index %ld, type: %d", i, elem_type);
                 return ItemError;
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_round(item, context);
@@ -895,31 +814,30 @@ Item fn_floor(Item item) {
         double val = item.get_double();
         return push_d(floor(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
-            ArrayFloat* result = array_float_new(0);
-            return { .array_float = result };
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
         }
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             TypeId elem_type = get_type_id(elem);
             if (elem_type == LMD_TYPE_INT) {
-                result->items[i] = (double)elem.get_int56();
+                result->float_items[i] = (double)elem.get_int56();
             } else if (elem_type == LMD_TYPE_INT64) {
-                result->items[i] = (double)elem.get_int64();
+                result->float_items[i] = (double)elem.get_int64();
             } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->items[i] = floor(elem.get_double());
+                result->float_items[i] = floor(elem.get_double());
             } else {
                 log_error("floor: non-numeric element at index %ld, type: %d", i, elem_type);
                 return ItemError;
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_floor(item, context);
@@ -942,31 +860,30 @@ Item fn_ceil(Item item) {
         double val = item.get_double();
         return push_d(ceil(val));
     }
-    else if (type == LMD_TYPE_ARRAY_INT || type == LMD_TYPE_ARRAY_INT64 ||
-             type == LMD_TYPE_ARRAY_FLOAT || type == LMD_TYPE_ARRAY ||
+    else if (type == LMD_TYPE_ARRAY_NUM || type == LMD_TYPE_ARRAY ||
              type == LMD_TYPE_ARRAY || type == LMD_TYPE_RANGE) {
         int64_t len = vector_length(item);
         if (len < 0) return ItemError;
         if (len == 0) {
-            ArrayFloat* result = array_float_new(0);
-            return { .array_float = result };
+            ArrayNum* result = array_float_new(0);
+            return { .array_num = result };
         }
-        ArrayFloat* result = array_float_new(len);
+        ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
             Item elem = vector_get(item, i);
             TypeId elem_type = get_type_id(elem);
             if (elem_type == LMD_TYPE_INT) {
-                result->items[i] = (double)elem.get_int56();
+                result->float_items[i] = (double)elem.get_int56();
             } else if (elem_type == LMD_TYPE_INT64) {
-                result->items[i] = (double)elem.get_int64();
+                result->float_items[i] = (double)elem.get_int64();
             } else if (elem_type == LMD_TYPE_FLOAT) {
-                result->items[i] = ceil(elem.get_double());
+                result->float_items[i] = ceil(elem.get_double());
             } else {
                 log_error("ceil: non-numeric element at index %ld, type: %d", i, elem_type);
                 return ItemError;
             }
         }
-        return { .array_float = result };
+        return { .array_num = result };
     }
     else if (type == LMD_TYPE_DECIMAL) {
         return decimal_ceil(item, context);
@@ -1056,44 +973,37 @@ Item fn_min1(Item item_a) {
     TypeId type_id = get_type_id(item_a);
     // string/symbol passthrough: strings are singular, not iterable
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
-    if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item_a.array_int;
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
             return ItemError; // Empty array has no minimum
         }
-        int32_t min_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] < min_val) {
-                min_val = arr->items[i];
+        ArrayNumElemType et = arr->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            double min_val = arr->float_items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->float_items[i] < min_val) {
+                    min_val = arr->float_items[i];
+                }
             }
-        }
-        return { .item = i2it(min_val) };
-    }
-    else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item_a.array_int64;
-        if (arr->length == 0) {
-            return ItemError; // Empty array has no minimum
-        }
-        int64_t min_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] < min_val) {
-                min_val = arr->items[i];
+            return push_d(min_val);
+        } else if (et == ELEM_INT64) {
+            int64_t min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
             }
-        }
-        return push_l(min_val);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item_a.array_float;
-        if (arr->length == 0) {
-            return ItemError; // Empty array has no minimum
-        }
-        double min_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] < min_val) {
-                min_val = arr->items[i];
+            return push_l(min_val);
+        } else {
+            int64_t min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
             }
+            return { .item = i2it(min_val) };
         }
-        return push_d(min_val);
     }
     else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
         List* arr = item_a.list;
@@ -1252,44 +1162,37 @@ Item fn_max1(Item item_a) {
     TypeId type_id = get_type_id(item_a);
     // string/symbol passthrough: strings are singular, not iterable
     if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) return item_a;
-    if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item_a.array_float;
+    if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item_a.array_num;
         if (arr->length == 0) {
             return ItemError; // Empty array has no maximum
         }
-        double max_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] > max_val) {
-                max_val = arr->items[i];
+        ArrayNumElemType et = arr->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            double max_val = arr->float_items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->float_items[i] > max_val) {
+                    max_val = arr->float_items[i];
+                }
             }
-        }
-        return push_d(max_val);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item_a.array_int;
-        if (arr->length == 0) {
-            return ItemError; // Empty array has no maximum
-        }
-        int32_t max_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] > max_val) {
-                max_val = arr->items[i];
+            return push_d(max_val);
+        } else if (et == ELEM_INT64) {
+            int64_t max_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] > max_val) {
+                    max_val = arr->items[i];
+                }
             }
-        }
-        return { .item = i2it(max_val) };
-    }
-    else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item_a.array_int64;
-        if (arr->length == 0) {
-            return ItemError; // Empty array has no maximum
-        }
-        int64_t max_val = arr->items[0];
-        for (size_t i = 1; i < arr->length; i++) {
-            if (arr->items[i] > max_val) {
-                max_val = arr->items[i];
+            return push_l(max_val);
+        } else {
+            int64_t max_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] > max_val) {
+                    max_val = arr->items[i];
+                }
             }
+            return { .item = i2it(max_val) };
         }
-        return push_l(max_val);
     }
     else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY) {
         Array* arr = item_a.array;
@@ -1411,38 +1314,28 @@ Item fn_sum(Item item) {
             }
         }
     }
-    else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item.array_int;  // Use the correct field
-        if (arr->length == 0) {
-            return (Item) { .item = i2it(0) };  // Empty array sums to 0
+    else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
+        ArrayNumElemType et = arr->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            if (arr->length == 0) {
+                return push_d(0.0);
+            }
+            double sum = 0.0;
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += arr->float_items[i];
+            }
+            return push_d(sum);
+        } else {
+            if (arr->length == 0) {
+                return (Item) { .item = i2it(0) };
+            }
+            int64_t sum = 0;
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += arr->items[i];
+            }
+            return push_l(sum);
         }
-        int64_t sum = 0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += arr->items[i];
-        }
-        return push_l(sum);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        if (arr->length == 0) {
-            return (Item) { .item = i2it(0) };  // Empty array sums to 0
-        }
-        int64_t sum = 0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += arr->items[i];
-        }
-        return push_l(sum);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;  // Use the correct field
-        if (arr->length == 0) {
-            return push_d(0.0);  // Empty array sums to 0.0
-        }
-        double sum = 0.0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += arr->items[i];
-        }
-        return push_d(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.list;
@@ -1531,36 +1424,21 @@ Item fn_avg(Item item) {
         }
         return push_d(sum / (double)arr->length);
     }
-    else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayInt* arr = item.array_int;  // Use the correct field
+    else if (type_id == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* arr = item.array_num;
         if (!arr || arr->length == 0) {
             return ItemError;
         }
         double sum = 0.0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += (double)arr->items[i];
-        }
-        return push_d(sum / (double)arr->length);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_INT64) {
-        ArrayInt64* arr = item.array_int64;
-        if (!arr || arr->length == 0) {
-            return ItemError;
-        }
-        double sum = 0.0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += (double)arr->items[i];
-        }
-        return push_d(sum / (double)arr->length);
-    }
-    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-        ArrayFloat* arr = item.array_float;  // Use the correct field
-        if (!arr || arr->length == 0) {
-            return ItemError;
-        }
-        double sum = 0.0;
-        for (size_t i = 0; i < arr->length; i++) {
-            sum += arr->items[i];
+        ArrayNumElemType et = arr->get_elem_type();
+        if (et == ELEM_FLOAT) {
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += arr->float_items[i];
+            }
+        } else {
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += (double)arr->items[i];
+            }
         }
         return push_d(sum / (double)arr->length);
     }

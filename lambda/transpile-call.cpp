@@ -507,8 +507,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     strbuf_append_str(tp->code_buf, "))");
                     return;
                 }
-                if (arg_type == LMD_TYPE_ARRAY || arg_type == LMD_TYPE_ARRAY_INT ||
-                    arg_type == LMD_TYPE_ARRAY_INT64 || arg_type == LMD_TYPE_ARRAY_FLOAT) {
+                if (arg_type == LMD_TYPE_ARRAY || arg_type == LMD_TYPE_ARRAY_NUM) {
                     strbuf_append_str(tp->code_buf, "fn_len_a((Array*)(");
                     transpile_expr(tp, first_arg);
                     strbuf_append_str(tp->code_buf, "))");

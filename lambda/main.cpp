@@ -18,6 +18,7 @@
 #include <setjmp.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/time.h>
 #endif
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
@@ -136,6 +137,9 @@ extern Element* get_html_root_element(Input* input);
 extern DomDocument* dom_document_create(Input* input);
 extern DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
+
+// MIR JIT optimization level for JS (from transpile_js_mir.cpp)
+extern unsigned int g_js_mir_optimize_level;
 
 // External function declarations
 extern "C" {
@@ -1124,6 +1128,9 @@ int main(int argc, char *argv[]) {
             }
             if (js_check_exception()) {
                 js_had_error = true;
+                const char* exc_msg = js_get_exception_message();
+                if (exc_msg[0]) fprintf(stderr, "Uncaught %s\n", exc_msg);
+                js_clear_exception();
             }
 
             free(js_source);
@@ -2619,6 +2626,9 @@ int main(int argc, char *argv[]) {
                 if (batch_timeout <= 0) batch_timeout = 10;
             } else if (strcmp(argv[i], "--no-hot-reload") == 0) {
                 hot_reload = false;
+            } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
+                int level = atoi(argv[i] + 12);
+                if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
             }
         }
 
@@ -2723,10 +2733,13 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
+            struct timeval tv_start, tv_end;
+            gettimeofday(&tv_start, NULL);
+
             if (!inline_source) {
                 if (!file_exists(script_path)) {
                     fprintf(stderr, "Error: Script file '%s' does not exist\n", script_path);
-                    printf("\x01" "BATCH_END 1\n");
+                    printf("\x01" "BATCH_END 1 0\n");
                     fflush(stdout);
                     continue;
                 }
@@ -2734,7 +2747,7 @@ int main(int argc, char *argv[]) {
                 js_source = read_text_file(script_path);
                 if (!js_source) {
                     fprintf(stderr, "Error: Could not read file '%s'\n", script_path);
-                    printf("\x01" "BATCH_END 1\n");
+                    printf("\x01" "BATCH_END 1 0\n");
                     fflush(stdout);
                     continue;
                 }
@@ -2832,7 +2845,17 @@ int main(int argc, char *argv[]) {
             free(js_source);
             fflush(stdout);
 
-            printf("\x01" "BATCH_END %d\n", result);
+            // Print uncaught exception to stdout for batch capture
+            if (result == 1 && js_check_exception()) {
+                const char* exc_msg = js_get_exception_message();
+                if (exc_msg[0]) printf("Uncaught %s\n", exc_msg);
+                js_clear_exception();
+                fflush(stdout);
+            }
+
+            gettimeofday(&tv_end, NULL);
+            long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
+            printf("\x01" "BATCH_END %d %ld\n", result, elapsed_us);
             fflush(stdout);
 
             if (hot_reload) {

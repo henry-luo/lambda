@@ -692,6 +692,7 @@ static std::string assemble_combined_source(const Test262Prepared& p) {
 struct BatchResult {
     std::string output;
     int exit_code;
+    long elapsed_us;  // per-test execution time in microseconds
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
@@ -706,6 +707,8 @@ static std::set<std::string> g_known_crashers;
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
 static bool g_no_hot_reload = false;
+static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
+static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 
 // Load known crashers from previous run's crasher log.
 // Tests listed here are quarantined into their own small batches
@@ -879,11 +882,15 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* argv[5] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL
+    char* argv[6] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL
     };
+    int argi = 3;
     if (g_no_hot_reload) {
-        argv[3] = (char*)"--no-hot-reload";
+        argv[argi++] = (char*)"--no-hot-reload";
+    }
+    if (g_opt_level >= 0) {
+        argv[argi++] = g_opt_level_arg;
     }
     extern char** environ;
     pid_t pid;
@@ -916,7 +923,10 @@ static void run_t262_sub_batch(
                     in_script = true;
                 } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                     int status = atoi(buffer + 11);
-                    results[current_script] = {current_output, status};
+                    long elapsed_us = 0;
+                    const char* space2 = strchr(buffer + 11, ' ');
+                    if (space2) elapsed_us = atol(space2 + 1);
+                    results[current_script] = {current_output, status, elapsed_us};
                     in_script = false;
                 }
             } else if (in_script) {
@@ -1257,6 +1267,24 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
     }
 
+    // Write per-test timing data to temp/_t262_timing.tsv (or _o0/_o3 suffix when --opt-level used)
+    {
+        char timing_path[128] = "temp/_t262_timing.tsv";
+        if (g_opt_level >= 0)
+            snprintf(timing_path, sizeof(timing_path), "temp/_t262_timing_o%d.tsv", g_opt_level);
+        FILE* timing_log = fopen(timing_path, "w");
+        if (timing_log) {
+            fprintf(timing_log, "test_name\texit_code\telapsed_us\n");
+            for (auto& kv : batch_results) {
+                fprintf(timing_log, "%s\t%d\t%ld\n",
+                        kv.first.c_str(), kv.second.exit_code, kv.second.elapsed_us);
+            }
+            fclose(timing_log);
+            fprintf(stderr, "[test262] Timing data: %zu entries → %s\n",
+                    batch_results.size(), timing_path);
+        }
+    }
+
     // Phase 3: evaluate results and cache
     for (size_t i = 0; i < prepared.size(); i++) {
         Test262RunResult result = evaluate_batch_result(prepared[i], batch_results);
@@ -1470,6 +1498,11 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
+        }
+        if (strncmp(argv[i], "--opt-level=", 12) == 0) {
+            g_opt_level = atoi(argv[i] + 12);
+            if (g_opt_level < 0 || g_opt_level > 3) g_opt_level = 0;
+            snprintf(g_opt_level_arg, sizeof(g_opt_level_arg), "--opt-level=%d", g_opt_level);
         }
     }
 

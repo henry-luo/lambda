@@ -165,8 +165,7 @@ ValidationResult* validate_against_base_type(SchemaValidator* validator, ConstIt
         if (base_type == (Type*)&TYPE_ARRAY) {
             // Generic array type - just check if item is an array/list
             if (item.type_id() == LMD_TYPE_ARRAY || item.type_id() == LMD_TYPE_ARRAY ||
-                item.type_id() == LMD_TYPE_ARRAY_INT || item.type_id() == LMD_TYPE_ARRAY_INT64 ||
-                item.type_id() == LMD_TYPE_ARRAY_FLOAT) {
+                item.type_id() == LMD_TYPE_ARRAY_NUM) {
                 result->valid = true;
             } else {
                 add_type_mismatch_error(result, validator, "array", item.type_id());
