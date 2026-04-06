@@ -390,7 +390,29 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         // CSS 2.1 §9.2.1.1 and §17.2.1: Block children and orphaned table-internal children
         // both break the inline flow. Table-internal elements have been wrapped in anonymous
         // block-level tables by wrap_orphaned_table_children() when block children exist.
-        bool is_block_or_table_internal = child->is_element() &&
+        // CSS 2.1 §9.5: Floats are out of flow and should not break the inline
+        // flow.  They are handled by layout_flow_node → layout_block → layout_float_element.
+        bool child_is_float = false;
+        if (child->is_element()) {
+            DomElement* ce = child->as_element();
+            if (ce->position &&
+                (ce->position->float_prop == CSS_VALUE_LEFT ||
+                 ce->position->float_prop == CSS_VALUE_RIGHT)) {
+                child_is_float = true;
+            } else if (ce->specified_style && ce->specified_style->tree) {
+                AvlNode* fn = avl_tree_search(ce->specified_style->tree, CSS_PROPERTY_FLOAT);
+                if (fn) {
+                    StyleNode* sn = (StyleNode*)fn->declaration;
+                    if (sn && sn->winning_decl && sn->winning_decl->value &&
+                        sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                        (sn->winning_decl->value->data.keyword == CSS_VALUE_LEFT ||
+                         sn->winning_decl->value->data.keyword == CSS_VALUE_RIGHT)) {
+                        child_is_float = true;
+                    }
+                }
+            }
+        }
+        bool is_block_or_table_internal = child->is_element() && !child_is_float &&
             (child_display.outer == CSS_VALUE_BLOCK ||
              child_display.outer == CSS_VALUE_LIST_ITEM ||
              child_display.outer == CSS_VALUE_TABLE ||
@@ -775,16 +797,22 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (child_display.outer == CSS_VALUE_BLOCK ||
                 child_display.outer == CSS_VALUE_LIST_ITEM ||
                 child_display.outer == CSS_VALUE_TABLE) {
-                // CSS 2.1 §9.6.1: Absolutely/fixed positioned elements are out of flow
-                // and should not trigger block-in-inline splitting, even though their
-                // display is blockified per §9.7.
+                // CSS 2.1 §9.5, §9.6.1: Absolutely/fixed positioned and floated
+                // elements are out of flow and should not trigger block-in-inline
+                // splitting, even though their display is blockified per §9.7.
                 DomElement* child_elem = scan->as_element();
-                bool child_is_abspos = false;
-                if (child_elem->position &&
-                    (child_elem->position->position == CSS_VALUE_ABSOLUTE ||
-                     child_elem->position->position == CSS_VALUE_FIXED)) {
-                    child_is_abspos = true;
-                } else if (child_elem->specified_style && child_elem->specified_style->tree) {
+                bool child_is_out_of_flow = false;
+                if (child_elem->position) {
+                    if (child_elem->position->position == CSS_VALUE_ABSOLUTE ||
+                        child_elem->position->position == CSS_VALUE_FIXED) {
+                        child_is_out_of_flow = true;
+                    }
+                    if (child_elem->position->float_prop == CSS_VALUE_LEFT ||
+                        child_elem->position->float_prop == CSS_VALUE_RIGHT) {
+                        child_is_out_of_flow = true;
+                    }
+                }
+                if (!child_is_out_of_flow && child_elem->specified_style && child_elem->specified_style->tree) {
                     AvlNode* pos_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_POSITION);
                     if (pos_node) {
                         StyleNode* sn = (StyleNode*)pos_node->declaration;
@@ -792,11 +820,21 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
                             (sn->winning_decl->value->data.keyword == CSS_VALUE_ABSOLUTE ||
                              sn->winning_decl->value->data.keyword == CSS_VALUE_FIXED)) {
-                            child_is_abspos = true;
+                            child_is_out_of_flow = true;
+                        }
+                    }
+                    AvlNode* float_node = avl_tree_search(child_elem->specified_style->tree, CSS_PROPERTY_FLOAT);
+                    if (float_node) {
+                        StyleNode* sn = (StyleNode*)float_node->declaration;
+                        if (sn && sn->winning_decl && sn->winning_decl->value &&
+                            sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                            (sn->winning_decl->value->data.keyword == CSS_VALUE_LEFT ||
+                             sn->winning_decl->value->data.keyword == CSS_VALUE_RIGHT)) {
+                            child_is_out_of_flow = true;
                         }
                     }
                 }
-                if (!child_is_abspos) {
+                if (!child_is_out_of_flow) {
                     has_block_children = true;
                 }
             }

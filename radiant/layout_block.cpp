@@ -5152,6 +5152,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             }
             line_init(lycon, inner_left, inner_left + block->content_width);
         }
+
+        // CSS 2.1 §10.3.3: Re-resolve auto margins after shrink-to-fit changed the
+        // block width. The initial margin resolution (above) saw the placeholder
+        // available width; now that the actual width is known, recalculate.
+        // Also update block->x since margin.left was already applied earlier.
+        if (block->bound && !is_float &&
+            block->display.outer != CSS_VALUE_INLINE_BLOCK &&
+            block->display.outer != CSS_VALUE_INLINE &&
+            (block->bound->margin.left_type == CSS_VALUE_AUTO || block->bound->margin.right_type == CSS_VALUE_AUTO)) {
+            float old_margin_left = block->bound->margin.left;
+            float margin_available = pa_block->content_width - bfc_available_width_reduction;
+            if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO) {
+                block->bound->margin.left = block->bound->margin.right = max((margin_available - block->width) / 2, 0.0f);
+            } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
+                block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
+            } else {
+                block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
+            }
+            block->x += block->bound->margin.left - old_margin_left;
+            log_debug("%s Re-resolved auto margins after shrink-to-fit: margin_left=%.1f, margin_right=%.1f, width=%.1f, x=%.1f",
+                block->source_loc(), block->bound->margin.left, block->bound->margin.right, block->width, block->x);
+        }
     }
 
     // layout block content, and determine flow width and height
@@ -5928,7 +5950,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
         // flow the block in parent context
-        if (display.outer == CSS_VALUE_INLINE_BLOCK) {
+        // CSS 2.1 §9.7: Floats are blockified — a floated element that was
+        // originally inline-block should NOT be positioned as inline-block.
+        // The float positioning in finalize_block already set the correct x/y.
+        bool is_float_element = block->position && element_has_float(block);
+        if (display.outer == CSS_VALUE_INLINE_BLOCK && !is_float_element) {
             if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
 
             // Update effective line bounds for floats at current Y position
