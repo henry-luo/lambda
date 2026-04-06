@@ -18,7 +18,8 @@ Item push_l(int64_t val);
 // check if type is a scalar numeric type
 static inline bool is_scalar_numeric(TypeId type) {
     return type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL;
+           type == LMD_TYPE_FLOAT || type == LMD_TYPE_DECIMAL ||
+           type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64;
 }
 
 // check if type is a collection that supports vectorized operations
@@ -54,12 +55,27 @@ static Item vector_get(Item item, int64_t index) {
     switch (type) {
         case LMD_TYPE_ARRAY_NUM: {
             ArrayNum* arr = item.array_num;
-            if (arr->get_elem_type() == ELEM_FLOAT)
-                return push_d(arr->float_items[index]);
-            else if (arr->get_elem_type() == ELEM_INT64)
-                return push_l(arr->items[index]);
-            else
-                return { .item = i2it(arr->items[index]) };
+            switch (arr->get_elem_type()) {
+                case ELEM_FLOAT:   return push_d(arr->float_items[index]);
+                case ELEM_INT64:   return push_l(arr->items[index]);
+                case ELEM_INT:     return { .item = i2it(arr->items[index]) };
+                case ELEM_INT8:    return { .item = i8_to_item(((int8_t*)arr->data)[index]) };
+                case ELEM_INT16:   return { .item = i16_to_item(((int16_t*)arr->data)[index]) };
+                case ELEM_INT32:   return { .item = i32_to_item(((int32_t*)arr->data)[index]) };
+                case ELEM_UINT8:   return { .item = u8_to_item(((uint8_t*)arr->data)[index]) };
+                case ELEM_UINT16:  return { .item = u16_to_item(((uint16_t*)arr->data)[index]) };
+                case ELEM_UINT32:  return { .item = u32_to_item(((uint32_t*)arr->data)[index]) };
+                case ELEM_FLOAT16: return { .item = f16_to_item(f16_bits_to_f32(((uint16_t*)arr->data)[index])) };
+                case ELEM_FLOAT32: return { .item = f32_to_item(((float*)arr->data)[index]) };
+                case ELEM_UINT64: {
+                    uint64_t val = ((uint64_t*)arr->data)[index];
+                    uint64_t* heap_val = (uint64_t*)heap_calloc(sizeof(uint64_t), LMD_TYPE_UINT64);
+                    *heap_val = val;
+                    return { .item = u64_to_item(heap_val) };
+                }
+                case ELEM_FLOAT64: return push_d(((double*)arr->data)[index]);
+                default:           return ItemError;
+            }
         }
         case LMD_TYPE_ARRAY:
             return item.list->items[index];
@@ -74,10 +90,38 @@ static Item vector_get(Item item, int64_t index) {
 static double item_to_double(Item item) {
     TypeId type = get_type_id(item);
     switch (type) {
-        case LMD_TYPE_INT:   return (double)item.get_int56();
-        case LMD_TYPE_INT64: return (double)item.get_int64();
-        case LMD_TYPE_FLOAT: return item.get_double();
-        default:             return NAN;
+        case LMD_TYPE_INT:       return (double)item.get_int56();
+        case LMD_TYPE_INT64:     return (double)item.get_int64();
+        case LMD_TYPE_FLOAT:     return item.get_double();
+        case LMD_TYPE_UINT64:    return (double)item.get_uint64();
+        case LMD_TYPE_NUM_SIZED: return item.get_num_sized_as_double();
+        case LMD_TYPE_DECIMAL:   return item.get_double();
+        default:                 return NAN;
+    }
+}
+
+// check if an elem_type represents a float variant
+static inline bool is_float_elem_type(ArrayNumElemType et) {
+    return et == ELEM_FLOAT || et == ELEM_FLOAT16 || et == ELEM_FLOAT32 || et == ELEM_FLOAT64;
+}
+
+// read compact array element as double without boxing to Item
+static inline double compact_elem_to_double(ArrayNum* arr, int64_t index) {
+    switch (arr->get_elem_type()) {
+        case ELEM_INT:     return (double)arr->items[index];
+        case ELEM_INT64:   return (double)arr->items[index];
+        case ELEM_FLOAT:   return arr->float_items[index];
+        case ELEM_INT8:    return (double)((int8_t*)arr->data)[index];
+        case ELEM_INT16:   return (double)((int16_t*)arr->data)[index];
+        case ELEM_INT32:   return (double)((int32_t*)arr->data)[index];
+        case ELEM_UINT8:   return (double)((uint8_t*)arr->data)[index];
+        case ELEM_UINT16:  return (double)((uint16_t*)arr->data)[index];
+        case ELEM_UINT32:  return (double)((uint32_t*)arr->data)[index];
+        case ELEM_FLOAT16: return (double)f16_bits_to_f32(((uint16_t*)arr->data)[index]);
+        case ELEM_FLOAT32: return (double)((float*)arr->data)[index];
+        case ELEM_UINT64:  return (double)((uint64_t*)arr->data)[index];
+        case ELEM_FLOAT64: return ((double*)arr->data)[index];
+        default:           return NAN;
     }
 }
 
@@ -86,8 +130,16 @@ static bool needs_float_result(Item a, Item b) {
     TypeId ta = get_type_id(a);
     TypeId tb = get_type_id(b);
     if (ta == LMD_TYPE_FLOAT || tb == LMD_TYPE_FLOAT) return true;
-    if (ta == LMD_TYPE_ARRAY_NUM && a.array_num->get_elem_type() == ELEM_FLOAT) return true;
-    if (tb == LMD_TYPE_ARRAY_NUM && b.array_num->get_elem_type() == ELEM_FLOAT) return true;
+    if (ta == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(a.item);
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return true;
+    }
+    if (tb == LMD_TYPE_NUM_SIZED) {
+        NumSizedType st = (NumSizedType)NUM_SIZED_SUBTYPE(b.item);
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) return true;
+    }
+    if (ta == LMD_TYPE_ARRAY_NUM && is_float_elem_type(a.array_num->get_elem_type())) return true;
+    if (tb == LMD_TYPE_ARRAY_NUM && is_float_elem_type(b.array_num->get_elem_type())) return true;
     return false;
 }
 
@@ -120,7 +172,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
     // determine result type
     bool use_float = needs_float_result(vec, scalar) || op == 3; // div always float
 
-    // fast path for homogeneous arrays
+    // fast path for ELEM_INT64 arrays
     if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT64 && !use_float && op != 3 && op != 5) {
         ArrayNum* arr = vec.array_num;
         int64_t sval = (int64_t)scalar_val;
@@ -139,11 +191,56 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         return { .array_num = result };
     }
 
+    // fast path for ELEM_INT arrays (packed int56)
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_INT && !use_float && op != 3 && op != 5) {
+        ArrayNum* arr = vec.array_num;
+        int64_t sval = (int64_t)scalar_val;
+        ArrayNum* result = array_num_new(ELEM_INT, len);
+        for (int64_t i = 0; i < len; i++) {
+            int64_t elem = arr->items[i];
+            switch (op) {
+                case 0: result->items[i] = scalar_first ? sval + elem : elem + sval; break;
+                case 1: result->items[i] = scalar_first ? sval - elem : elem - sval; break;
+                case 2: result->items[i] = scalar_first ? sval * elem : elem * sval; break;
+                case 4: result->items[i] = scalar_first ? (elem != 0 ? sval % elem : 0)
+                                                        : (sval != 0 ? elem % sval : 0); break;
+                default: result->items[i] = elem; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    // fast path for ELEM_FLOAT32 compact arrays
+    if (vec_type == LMD_TYPE_ARRAY_NUM && vec.array_num->get_elem_type() == ELEM_FLOAT32) {
+        ArrayNum* arr = vec.array_num;
+        float sval = (float)scalar_val;
+        ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
+        float* src = (float*)arr->data;
+        float* dst = (float*)result->data;
+        for (int64_t i = 0; i < len; i++) {
+            float a = scalar_first ? sval : src[i];
+            float b = scalar_first ? src[i] : sval;
+            switch (op) {
+                case 0: dst[i] = a + b; break;
+                case 1: dst[i] = a - b; break;
+                case 2: dst[i] = a * b; break;
+                case 3: dst[i] = a / b; break;
+                case 4: dst[i] = fmodf(a, b); break;
+                case 5: dst[i] = powf(a, b); break;
+                default: dst[i] = src[i]; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
     if (use_float) {
         ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
-            Item elem = vector_get(vec, i);
-            double elem_val = item_to_double(elem);
+            double elem_val;
+            if (vec_type == LMD_TYPE_ARRAY_NUM)
+                elem_val = compact_elem_to_double(vec.array_num, i);
+            else
+                elem_val = item_to_double(vector_get(vec, i));
             double res;
             if (std::isnan(elem_val)) {
                 // non-numeric element: store NAN as error indicator
@@ -253,7 +350,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
     int64_t len = len_a;
     bool use_float = needs_float_result(vec_a, vec_b) || op == 3;
 
-    // fast path: both ArrayInt64
+    // fast path: both ELEM_INT64
     if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT64 &&
         type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT64 &&
         !use_float && op != 3 && op != 5) {
@@ -272,12 +369,52 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         return { .array_num = result };
     }
 
+    // fast path: both ELEM_INT (packed int56)
+    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_INT &&
+        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_INT &&
+        !use_float && op != 3 && op != 5) {
+        ArrayNum* a = vec_a.array_num;
+        ArrayNum* b = vec_b.array_num;
+        ArrayNum* result = array_num_new(ELEM_INT, len);
+        for (int64_t i = 0; i < len; i++) {
+            switch (op) {
+                case 0: result->items[i] = a->items[i] + b->items[i]; break;
+                case 1: result->items[i] = a->items[i] - b->items[i]; break;
+                case 2: result->items[i] = a->items[i] * b->items[i]; break;
+                case 4: result->items[i] = b->items[i] != 0 ? a->items[i] % b->items[i] : 0; break;
+                default: result->items[i] = a->items[i]; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
+    // fast path: both ELEM_FLOAT32
+    if (type_a == LMD_TYPE_ARRAY_NUM && vec_a.array_num->get_elem_type() == ELEM_FLOAT32 &&
+        type_b == LMD_TYPE_ARRAY_NUM && vec_b.array_num->get_elem_type() == ELEM_FLOAT32) {
+        float* sa = (float*)vec_a.array_num->data;
+        float* sb = (float*)vec_b.array_num->data;
+        ArrayNum* result = array_num_new(ELEM_FLOAT32, len);
+        float* dst = (float*)result->data;
+        for (int64_t i = 0; i < len; i++) {
+            switch (op) {
+                case 0: dst[i] = sa[i] + sb[i]; break;
+                case 1: dst[i] = sa[i] - sb[i]; break;
+                case 2: dst[i] = sa[i] * sb[i]; break;
+                case 3: dst[i] = sa[i] / sb[i]; break;
+                case 4: dst[i] = fmodf(sa[i], sb[i]); break;
+                case 5: dst[i] = powf(sa[i], sb[i]); break;
+                default: dst[i] = sa[i]; break;
+            }
+        }
+        return { .array_num = result };
+    }
+
     // fast path: both homogeneous numeric arrays with float result
     if (type_a == LMD_TYPE_ARRAY_NUM && type_b == LMD_TYPE_ARRAY_NUM && use_float) {
         ArrayNum* result = array_float_new(len);
         for (int64_t i = 0; i < len; i++) {
-            double a = item_to_double(vector_get(vec_a, i));
-            double b = item_to_double(vector_get(vec_b, i));
+            double a = compact_elem_to_double(vec_a.array_num, i);
+            double b = compact_elem_to_double(vec_b.array_num, i);
             switch (op) {
                 case 0: result->float_items[i] = a + b; break;
                 case 1: result->float_items[i] = a - b; break;
@@ -289,6 +426,28 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
             }
         }
         return { .array_num = result };
+    }
+
+    // fast path: one ARRAY_NUM + one non-ARRAY_NUM (range or list) with integer result
+    if (!use_float && op != 3 && op != 5) {
+        bool a_is_num = type_a == LMD_TYPE_ARRAY_NUM;
+        bool b_is_num = type_b == LMD_TYPE_ARRAY_NUM;
+        if (a_is_num || b_is_num) {
+            ArrayNum* result = array_int64_new(len);
+            for (int64_t i = 0; i < len; i++) {
+                double a = a_is_num ? compact_elem_to_double(vec_a.array_num, i) : item_to_double(vector_get(vec_a, i));
+                double b = b_is_num ? compact_elem_to_double(vec_b.array_num, i) : item_to_double(vector_get(vec_b, i));
+                int64_t ia = (int64_t)a, ib = (int64_t)b;
+                switch (op) {
+                    case 0: result->items[i] = ia + ib; break;
+                    case 1: result->items[i] = ia - ib; break;
+                    case 2: result->items[i] = ia * ib; break;
+                    case 4: result->items[i] = ib != 0 ? ia % ib : 0; break;
+                    default: result->items[i] = ia; break;
+                }
+            }
+            return { .array_num = result };
+        }
     }
 
     // heterogeneous: element-wise with ERROR for non-numeric
@@ -457,18 +616,32 @@ Item fn_math_prod(Item item) {
 
     if (type == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = item.array_num;
+        if (arr->length == 0) {
+            return is_float_elem_type(arr->get_elem_type()) ? push_d(1.0) : Item{ .item = i2it(1) };
+        }
         if (arr->get_elem_type() == ELEM_FLOAT) {
-            if (arr->length == 0) return push_d(1.0);
             double prod = 1.0;
             for (int64_t i = 0; i < arr->length; i++) {
                 prod *= arr->float_items[i];
             }
             return push_d(prod);
-        } else {
-            if (arr->length == 0) return { .item = i2it(1) };
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
             int64_t prod = 1;
             for (int64_t i = 0; i < arr->length; i++) {
                 prod *= arr->items[i];
+            }
+            return push_l(prod);
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            double prod = 1.0;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= compact_elem_to_double(arr, i);
+            }
+            return push_d(prod);
+        } else {
+            // compact integer types
+            int64_t prod = 1;
+            for (int64_t i = 0; i < arr->length; i++) {
+                prod *= (int64_t)compact_elem_to_double(arr, i);
             }
             return push_l(prod);
         }
@@ -528,11 +701,28 @@ Item fn_math_cumsum(Item item) {
                 result->float_items[i] = sum;
             }
             return { .array_num = result };
-        } else {
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
             ArrayNum* result = array_int64_new(len);
             int64_t sum = 0;
             for (int64_t i = 0; i < len; i++) {
                 sum += arr->items[i];
+                result->items[i] = sum;
+            }
+            return { .array_num = result };
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            ArrayNum* result = array_float_new(len);
+            double sum = 0.0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += compact_elem_to_double(arr, i);
+                result->float_items[i] = sum;
+            }
+            return { .array_num = result };
+        } else {
+            // compact integer types → int64 cumsum
+            ArrayNum* result = array_int64_new(len);
+            int64_t sum = 0;
+            for (int64_t i = 0; i < len; i++) {
+                sum += (int64_t)compact_elem_to_double(arr, i);
                 result->items[i] = sum;
             }
             return { .array_num = result };
@@ -579,11 +769,28 @@ Item fn_math_cumprod(Item item) {
                 result->float_items[i] = prod;
             }
             return { .array_num = result };
-        } else {
+        } else if (arr->get_elem_type() == ELEM_INT || arr->get_elem_type() == ELEM_INT64) {
             ArrayNum* result = array_int64_new(len);
             int64_t prod = 1;
             for (int64_t i = 0; i < len; i++) {
                 prod *= arr->items[i];
+                result->items[i] = prod;
+            }
+            return { .array_num = result };
+        } else if (is_float_elem_type(arr->get_elem_type())) {
+            ArrayNum* result = array_float_new(len);
+            double prod = 1.0;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= compact_elem_to_double(arr, i);
+                result->float_items[i] = prod;
+            }
+            return { .array_num = result };
+        } else {
+            // compact integer types → int64 cumprod
+            ArrayNum* result = array_int64_new(len);
+            int64_t prod = 1;
+            for (int64_t i = 0; i < len; i++) {
+                prod *= (int64_t)compact_elem_to_double(arr, i);
                 result->items[i] = prod;
             }
             return { .array_num = result };
