@@ -661,13 +661,39 @@ struct BatchResult {
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
 static const size_t T262_MAX_PARALLEL_BATCHES = 8;
+static const size_t RETRY_BATCH_SIZE = 5;
 
 struct SubBatch { size_t start; size_t end; };
 
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
+static std::set<std::string> g_known_crashers;
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
+static bool g_no_hot_reload = false;
+
+// Load known crashers from previous run's crasher log.
+// Tests listed here are quarantined into their own small batches
+// to avoid collateral damage to co-batched tests.
+static void load_known_crashers(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    char buf[2048];
+    while (fgets(buf, sizeof(buf), f)) {
+        // format: "MISSING\t<test_name>\t<test_path>" or "CRASH_N\t<test_name>\t<test_path>"
+        char* first_tab = strchr(buf, '\t');
+        if (!first_tab) continue;
+        char* name_start = first_tab + 1;
+        char* second_tab = strchr(name_start, '\t');
+        if (second_tab) *second_tab = '\0';
+        // trim trailing whitespace
+        size_t len = strlen(name_start);
+        while (len > 0 && (name_start[len-1] == '\n' || name_start[len-1] == '\r'))
+            name_start[--len] = '\0';
+        if (len > 0) g_known_crashers.insert(std::string(name_start));
+    }
+    fclose(f);
+}
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
 //          Source assembly is deferred to Phase 2 workers (lazy assembly).
@@ -818,9 +844,12 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* const argv[] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL
+    char* argv[5] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL
     };
+    if (g_no_hot_reload) {
+        argv[3] = (char*)"--no-hot-reload";
+    }
     extern char** environ;
     pid_t pid;
     int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
@@ -997,24 +1026,88 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     std::vector<size_t> batch_indices;
     prepare_all_tests(tests, prepared, batch_indices);
 
+    // Partition batch_indices: quarantine known crashers into separate small batches
+    // to prevent collateral damage to co-batched tests.
+    std::vector<size_t> clean_indices;
+    std::vector<size_t> crasher_indices;
+    if (!g_known_crashers.empty()) {
+        for (size_t idx : batch_indices) {
+            if (g_known_crashers.count(prepared[idx].test_name)) {
+                crasher_indices.push_back(idx);
+            } else {
+                clean_indices.push_back(idx);
+            }
+        }
+    } else {
+        clean_indices = batch_indices;
+    }
+
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch\n",
-            prep_secs, batch_indices.size());
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu quarantined)\n",
+            prep_secs, batch_indices.size(), clean_indices.size(), crasher_indices.size());
 
-    // Phase 2: execute through js-test-batch (lazy assembly + manifest files)
-    auto batch_results = execute_t262_batch(prepared, batch_indices);
+    // Phase 2: execute clean tests through js-test-batch (batch size 50)
+    auto batch_results = execute_t262_batch(prepared, clean_indices);
 
     auto exec_time = std::chrono::steady_clock::now();
     double exec_secs = std::chrono::duration<double>(exec_time - prep_time).count();
     fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
             exec_secs, batch_results.size());
 
+    // Phase 2a: execute quarantined crashers in small batches (batch size 5)
+    // These are known to crash from previous run — isolate each to prevent collateral.
+    if (!crasher_indices.empty()) {
+        {
+            std::vector<SubBatch> crasher_batches;
+            for (size_t s = 0; s < crasher_indices.size(); s += RETRY_BATCH_SIZE) {
+                size_t e = std::min(s + RETRY_BATCH_SIZE, crasher_indices.size());
+                crasher_batches.push_back({s, e});
+            }
+            std::vector<std::unordered_map<std::string, BatchResult>> thread_results(crasher_batches.size());
+            std::atomic<size_t> next_batch{0};
+            size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, crasher_batches.size());
+            std::vector<std::thread> threads;
+            for (size_t w = 0; w < num_workers; w++) {
+                threads.emplace_back([&, w]() {
+                    char manifest_path[256];
+                    snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_crasher_%zu.manifest", w);
+                    while (true) {
+                        size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
+                        if (i >= crasher_batches.size()) break;
+                        FILE* mf = fopen(manifest_path, "wb");
+                        if (!mf) continue;
+                        for (size_t idx = crasher_batches[i].start; idx < crasher_batches[i].end; idx++) {
+                            size_t pi = crasher_indices[idx];
+                            const auto& p = prepared[pi];
+                            std::string combined = assemble_combined_source(p);
+                            fprintf(mf, "source:%s:%zu\n", p.test_name.c_str(), combined.size());
+                            fwrite(combined.data(), 1, combined.size(), mf);
+                            fputc('\n', mf);
+                        }
+                        fclose(mf);
+                        run_t262_sub_batch(manifest_path, thread_results[i]);
+                    }
+                    unlink(manifest_path);
+                });
+            }
+            for (auto& t : threads) t.join();
+            for (auto& partial : thread_results) {
+                for (auto& kv : partial) batch_results[kv.first] = std::move(kv.second);
+            }
+        }
+        auto crasher_time = std::chrono::steady_clock::now();
+        double crasher_secs = std::chrono::duration<double>(crasher_time - exec_time).count();
+        fprintf(stderr, "[test262] Phase 2a (crashers): %.1fs — %zu quarantined in batches of %zu\n",
+                crasher_secs, crasher_indices.size(), RETRY_BATCH_SIZE);
+        exec_time = crasher_time;
+    }
+
     // Phase 2b: retry batch-lost tests in small batches (crash recovery)
-    // When a test crashes, it kills the whole batch process and all remaining
-    // tests in that batch are lost. Re-run those in small batches of 5.
+    // Only needed for NEW unexpected crashes not in the quarantine list.
+    // Only retry clean tests that got lost (not quarantined crashers — they already ran in Phase 2a)
     std::vector<size_t> lost_indices;
-    for (size_t idx : batch_indices) {
+    for (size_t idx : clean_indices) {
         const auto& p = prepared[idx];
         if (batch_results.find(p.test_name) == batch_results.end()) {
             lost_indices.push_back(idx);
@@ -1024,7 +1117,6 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         fprintf(stderr, "[test262] Phase 2b (retry): %zu batch-lost tests, re-running in small batches...\n",
                 lost_indices.size());
 
-        static const size_t RETRY_BATCH_SIZE = 5;
         auto retry_results = [&]() {
             std::unordered_map<std::string, BatchResult> results;
             std::vector<SubBatch> retry_batches;
@@ -1078,15 +1170,31 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         fprintf(stderr, "[test262] Phase 2b (retry): %.1fs — recovered %zu of %zu lost tests\n",
                 retry_secs, recovered, lost_indices.size());
 
-        // Log still-lost tests (genuine crashers + collateral) to temp/_t262_crashers.txt
-        // After retry, tests can be:
-        //   - missing from batch_results: process crashed before BATCH_END (crasher or collateral)
-        //   - present with exit_code > 128: crash was caught by batch handler
+        exec_time = retry_time;  // update for total calculation
+    }
+
+    // Write crasher log for next run's quarantine optimization.
+    // Include: clean tests still lost after Phase 2b retry + quarantined crashers still lost after Phase 2a.
+    {
         FILE* crasher_log = fopen("temp/_t262_crashers.txt", "w");
         if (crasher_log) {
             size_t still_lost = 0;
             size_t crash_exit = 0;
+            // Clean tests that are still missing after Phase 2b retry
             for (size_t idx : lost_indices) {
+                const auto& p = prepared[idx];
+                auto it = batch_results.find(p.test_name);
+                if (it == batch_results.end()) {
+                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    still_lost++;
+                } else if (it->second.exit_code > 128) {
+                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
+                            p.test_name.c_str(), p.test_path.c_str());
+                    crash_exit++;
+                }
+            }
+            // Quarantined crashers that are still missing after Phase 2a
+            for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
                 if (it == batch_results.end()) {
@@ -1104,8 +1212,6 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         still_lost, crash_exit);
             }
         }
-
-        exec_time = retry_time;  // update for total calculation
     }
 
     // Phase 3: evaluate results and cache
@@ -1319,6 +1425,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
         }
+        if (strcmp(argv[i], "--no-hot-reload") == 0) {
+            g_no_hot_reload = true;
+        }
     }
 
     // Load baseline file for regression checking
@@ -1356,6 +1465,13 @@ int main(int argc, char** argv) {
     if (!g_metadata_cache.empty()) {
         fprintf(stderr, "[test262] Loaded metadata cache: %zu entries from %s\n",
                 g_metadata_cache.size(), METADATA_CACHE_FILE);
+    }
+
+    // Load known crashers from previous run for quarantine optimization
+    load_known_crashers("temp/_t262_crashers.txt");
+    if (!g_known_crashers.empty()) {
+        fprintf(stderr, "[test262] Loaded %zu known crashers for quarantine\n",
+                g_known_crashers.size());
     }
 
     // register summary listener

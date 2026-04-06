@@ -691,18 +691,30 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     int count = render_map_retransform_with_results(results, 16);
                                     auto t_retransform = high_resolution_clock::now();
 
-                                    // incremental DOM rebuild (falls back to full if map not ready)
+                                    // Phase 14: No-op elision — skip rebuild if output unchanged
+                                    bool any_changed = false;
                                     int reported = count <= 16 ? count : 16;
-                                    rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+                                    for (int i = 0; i < reported; i++) {
+                                        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+                                            any_changed = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (any_changed) {
+                                        // incremental DOM rebuild (falls back to full if map not ready)
+                                        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+                                    }
                                     auto t_rebuild = high_resolution_clock::now();
 
                                     using std::chrono::duration;
                                     using std::chrono::duration_cast;
-                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms",
+                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
                                         duration<double, std::milli>(t_handler - t_start).count(),
                                         duration<double, std::milli>(t_retransform - t_handler).count(),
                                         duration<double, std::milli>(t_rebuild - t_retransform).count(),
-                                        duration<double, std::milli>(t_rebuild - t_start).count());
+                                        duration<double, std::milli>(t_rebuild - t_start).count(),
+                                        any_changed ? "" : " (no-op elided)");
                                 } else {
                                     log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
                                         duration<double, std::milli>(t_handler - t_start).count());
@@ -2981,6 +2993,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             evcon.need_repaint = true;  // repaint includes relayout
             log_debug("Reflow required, will trigger relayout");
         }
+    }
+
+    // Phase 19: detect caret-only repaint — no DOM changes, no reflow, only caret moved
+    if (evcon.need_repaint && state && !state->needs_reflow
+        && !state->dirty_tracker.full_repaint && !dirty_has_regions(&state->dirty_tracker)
+        && state->caret && state->caret->view) {
+        // Populate dirty tracker with old + new caret regions for selective repaint
+        float caret_w = 5.0f;  // 3px caret + margin
+        if (state->caret->prev_abs_x >= 0) {
+            dirty_mark_rect(&state->dirty_tracker,
+                state->caret->prev_abs_x - 1, state->caret->prev_abs_y - 1,
+                caret_w + 2, state->caret->prev_abs_height + 2);
+        }
+        // Mark new caret region — use the caret view's parent element as dirty
+        View* caret_parent = state->caret->view->parent;
+        if (caret_parent) {
+            dirty_mark_element(state, caret_parent);
+        }
+        log_info("[TIMING] caret-only repaint detected, marking dirty for caret regions");
     }
 
     if (evcon.need_repaint) {

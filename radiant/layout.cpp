@@ -2025,9 +2025,12 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     clear_measurement_cache();
     advance_measurement_cache_generation();
 
-    // Reset styles_resolved flags for all elements before layout
-    // This ensures CSS style resolution happens exactly once per element per layout pass
-    reset_styles_resolved(doc);
+    // Reset styles_resolved flags before layout
+    // Phase 15: Skip blanket reset during incremental rebuilds — new DOM nodes
+    // already have styles_resolved=false, and ancestors are cleared explicitly
+    if (!doc->skip_style_reset) {
+        reset_styles_resolved(doc);
+    }
 
     // Initialize text flow logging
     init_text_flow_logging();
@@ -2085,7 +2088,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
         log_debug("allocated view tree");
     }
-    view_pool_init(doc->view_tree);
+    // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.)
+    if (!doc->incremental_layout) {
+        view_pool_init(doc->view_tree);
+    }
     log_debug("initialized view pool");
     log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);
