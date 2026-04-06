@@ -843,7 +843,8 @@ DisplayValue resolve_display_value(void* child) {
                                 log_debug("[CSS] display: inherit — no parent, using tag default");
                                 // no parent (root element) — fall through to tag-based default
                             } else if (keyword == CSS_VALUE_RUN_IN) {
-                                // run-in is unsupported (Chrome dropped it); fall through to tag default
+                                // Chrome treats run-in as tag default (dropped CSS 2.1 run-in support)
+                                // Fall through to tag-based defaults below
                             } else if (keyword == CSS_VALUE_FLOW_ROOT) {
                                 // CSS Display Level 3: display:flow-root establishes a BFC
                                 display.outer = CSS_VALUE_BLOCK;
@@ -2427,7 +2428,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                     if (!has_explicit_size) {
                         bool parent_is_mono = lycon->font.style && lycon->font.style->family &&
                             str_ieq_const(lycon->font.style->family, strlen(lycon->font.style->family), "monospace");
-                        if (!parent_is_mono && span->font->font_size > 0) {
+                        if (!parent_is_mono && span->font->font_size > 0 && span->font->font_size_from_medium) {
                             float parent_size = span->font->font_size;
                             span->font->font_size = span->font->font_size * 13.0f / 16.0f;
                             log_debug("[CSS] Monospace font-size quirk: %.1f -> %.1f", parent_size, span->font->font_size);

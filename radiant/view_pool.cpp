@@ -1117,8 +1117,26 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         // Output single text node with all its rects
         ViewText* text = text_nodes[0].text;
         TextRect* rect = text->rect;
+        bool first_emitted = true;
 
         while (rect) {
+            // Skip zero-width rects that contain only whitespace (e.g., trailing
+            // spaces at line ends).  Chrome's extraction omits these invisible
+            // fragments, so we must match that behaviour for stable comparison.
+            if (rect->width <= 0 && rect->length > 0 && rect->next) {
+                unsigned char* td = text->text_data();
+                bool all_ws = true;
+                for (int i = 0; i < rect->length && all_ws; i++) {
+                    unsigned char ch = td[rect->start_index + i];
+                    if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r')
+                        all_ws = false;
+                }
+                if (all_ws) { rect = rect->next; continue; }
+            }
+
+            if (!first_emitted) strbuf_append_str(buf, ",\n");
+            first_emitted = false;
+
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_str(buf, "{\n");
 
@@ -1174,9 +1192,6 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
             strbuf_append_str(buf, "}");
 
             rect = rect->next;
-            if (rect) {
-                strbuf_append_str(buf, ",\n");
-            }
         }
 
         return first_text;  // Return the single text node

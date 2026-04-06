@@ -226,6 +226,38 @@ extern "C" void js_batch_reset() {
     js_builtin_cache_reset();
 }
 
+// Get current module var count (for checkpointing)
+extern "C" int js_get_module_var_count() {
+    return js_module_var_count;
+}
+
+// Partial batch reset: restore module vars to a checkpoint and clear test state,
+// but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
+// to avoid re-initializing the harness between tests.
+extern "C" void js_batch_reset_to(int checkpoint_var_count) {
+    // zero out module vars beyond the checkpoint
+    for (int i = checkpoint_var_count; i < JS_MAX_MODULE_VARS; i++) {
+        js_module_vars[i] = (Item){0};
+    }
+    js_module_var_count = checkpoint_var_count;
+    // clear pending exception
+    js_exception_pending = false;
+    js_exception_value = (Item){0};
+    // clear this/new.target
+    js_current_this = (Item){0};
+    js_new_target = (Item){0};
+    js_pending_new_target = (Item){0};
+    js_has_pending_new_target = false;
+    js_array_method_real_this = (Item){0};
+    // clear Input context (recreated per script by transpile_js_to_mir)
+    js_input = NULL;
+    // Reset cached globals — tests may modify Math/JSON/console properties
+    extern void js_reset_math_object();
+    js_reset_math_object();
+    extern void js_builtin_cache_reset();
+    js_builtin_cache_reset();
+}
+
 extern "C" Item js_new_error(Item message) {
     return js_new_error_with_stack(message, (Item){.item = ITEM_JS_UNDEFINED});
 }

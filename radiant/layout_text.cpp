@@ -645,14 +645,20 @@ void update_line_for_bfc_floats(LayoutContext* lycon) {
     float local_left = fmax(local_space_left, lycon->line.left);
     float local_right = fmin(local_space_right, lycon->line.right);
 
-    // Update effective bounds
-    if (local_left > lycon->line.left || local_right < lycon->line.right) {
+    // Update effective bounds only if actual floats constrain the space.
+    // Without this check, a coordinate system mismatch between BFC content-area
+    // coordinates and line border-box coordinates causes false "float intrusion"
+    // for any BFC root with border or padding, even when no floats exist.
+    bool has_actual_float = space.has_left_float || space.has_right_float;
+    if (has_actual_float && (local_left > lycon->line.left || local_right < lycon->line.right)) {
         lycon->line.effective_left = local_left;
         lycon->line.effective_right = local_right;
         lycon->line.has_float_intrusion = true;
 
-        // If advance_x is before effective_left, move it
-        if (lycon->line.advance_x < lycon->line.effective_left) {
+        // If advance_x is before effective_left, move it — but respect
+        // negative text-indent which legitimately places items before line.left
+        if (lycon->line.advance_x < lycon->line.effective_left &&
+            lycon->line.advance_x >= lycon->line.left) {
             lycon->line.advance_x = lycon->line.effective_left;
         }
 
@@ -1940,7 +1946,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
-            lycon->line.has_space = true;
+            // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces.
+            // A preserved space (white-space: pre/pre-wrap) must NOT cause a
+            // subsequent collapsible space in a different element to be collapsed.
+            // "Any collapsible space immediately following another collapsible
+            // space is collapsed" — preserved spaces are not collapsible.
+            if (collapse_spaces) {
+                lycon->line.has_space = true;
+            }
             // CSS 2.1 §16.6.1: Only track trailing space for end-of-line trimming
             // when spaces are collapsible (normal/nowrap/pre-line). Per spec,
             // trailing spaces are removed only for those values. For pre and
@@ -1971,7 +1984,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;
             lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;
-            lycon->line.has_space = true;
+            // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces
+            if (collapse_spaces) {
+                lycon->line.has_space = true;
+            }
             lycon->line.is_line_start = false;
             // Track as hanging space — its width doesn't count for line box width.
             // For break-spaces, spaces don't hang (CSS Text 3 §3), so skip accumulation.

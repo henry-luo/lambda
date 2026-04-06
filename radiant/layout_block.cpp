@@ -3138,7 +3138,32 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
 
                     // inline content flow
                     do {
-                        layout_flow_node(lycon, child);
+                        float pre_advance_y = lycon->block.advance_y;
+                        // Phase 16: skip unchanged block elements in incremental layout
+                        if (lycon->doc && lycon->doc->incremental_layout
+                            && child->is_element() && !child->layout_dirty
+                            && child->height > 0 && child->view_type != RDT_VIEW_NONE) {
+                            DomElement* skip_elem = (DomElement*)child;
+                            // Adjust y position (may have shifted due to upstream changes)
+                            skip_elem->y = lycon->block.advance_y;
+                            // Advance by stored contribution from previous layout pass
+                            lycon->block.advance_y += skip_elem->layout_height_contribution;
+                            // Track width for parent shrink-to-fit
+                            if (skip_elem->bound) {
+                                lycon->block.max_width = max(lycon->block.max_width,
+                                    lycon->line.left + skip_elem->width
+                                    + skip_elem->bound->margin.left + skip_elem->bound->margin.right);
+                            } else {
+                                lycon->block.max_width = max(lycon->block.max_width,
+                                    lycon->line.left + skip_elem->width);
+                            }
+                            log_info("[TIMING] Phase 16: skip unchanged subtree %s (h=%.1f, contrib=%.1f)",
+                                skip_elem->source_loc(), skip_elem->height, skip_elem->layout_height_contribution);
+                        } else {
+                            layout_flow_node(lycon, child);
+                        }
+                        // Phase 16: save height contribution for future incremental passes
+                        child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         child = child->next_sibling;
                     } while (child);
                     // handle last line
@@ -5101,6 +5126,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block->content_width = max(new_content_width, 0.0f);
             lycon->block.content_width = block->content_width;
 
+            // Update BFC float edges to match new content width after shrink-to-fit.
+            // The BFC edges were set earlier (line ~4608) with the initial content_width
+            // before shrink-to-fit. If not updated, inline-block children will see
+            // stale float boundaries and be mispositioned.
+            if (lycon->block.is_bfc_root && lycon->block.establishing_element == block) {
+                lycon->block.float_left_edge = 0;
+                lycon->block.float_right_edge = block->content_width;
+                log_debug("%s [BFC] Updated float edges after shrink-to-fit: right=%.1f",
+                          block->source_loc(), block->content_width);
+            }
+
             // CSS 2.1 §16.1: Reset is_first_line BEFORE line_init so that
             // line_reset() (called inside line_init) applies text-indent on the
             // actual first content line. The initial setup_inline → line_reset
@@ -5912,8 +5948,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 lycon->line.has_float_intrusion, lycon->line.effective_left, lycon->line.effective_right,
                 lycon->line.left, lycon->line.right, lycon->line.advance_x);
 
-            // Ensure advance_x is at least at effective_left
-            if (lycon->line.advance_x < effective_left) {
+            // Ensure advance_x is at least at effective_left.
+            // CSS 2.1 §16.1: negative text-indent can legitimately position first-line
+            // items before the content area edge (advance_x < line.left).  Only clamp
+            // when advance_x is within the content area but behind a float edge.
+            if (lycon->line.advance_x < effective_left &&
+                lycon->line.advance_x >= lycon->line.left) {
                 lycon->line.advance_x = effective_left;
             }
 
@@ -6298,8 +6338,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         break;
                     }
                     ViewBlock* vb = (ViewBlock*)first_in_flow_child;
-                    // Skip floats
-                    if (vb->position && element_has_float(vb)) {
+                    // Skip out-of-flow elements (floats, absolute, fixed)
+                    // CSS 2.1 §9.4.1: Out-of-flow elements don't participate in
+                    // parent-child margin collapsing
+                    if (is_out_of_flow_block(vb)) {
                         View* next = (View*)first_in_flow_child->next_sibling;
                         while (next && !next->view_type) {
                             next = (View*)next->next_sibling;

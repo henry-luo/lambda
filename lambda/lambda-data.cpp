@@ -1165,3 +1165,89 @@ bool Element::has_attr(const char* attr_name) {
     }
     return false;
 }
+
+// Phase 14: Deep structural equality for Items
+// Used by no-op elision to detect when retransformed output is identical
+bool item_deep_equal(Item a, Item b) {
+    // identical Item value (same pointer or same packed scalar)
+    if (a.item == b.item) return true;
+
+    TypeId ta = get_type_id(a);
+    TypeId tb = get_type_id(b);
+    if (ta != tb) return false;
+
+    switch (ta) {
+        case LMD_TYPE_NULL:
+            return true;
+        case LMD_TYPE_BOOL:
+        case LMD_TYPE_INT:
+            // packed in-line — already compared by a.item == b.item
+            return false;
+        case LMD_TYPE_INT64:
+            return a.get_int64() == b.get_int64();
+        case LMD_TYPE_FLOAT:
+            return a.get_double() == b.get_double();
+        case LMD_TYPE_STRING: {
+            String* sa = a.get_string();
+            String* sb = b.get_string();
+            if (sa == sb) return true;
+            if (!sa || !sb) return false;
+            if (sa->len != sb->len) return false;
+            return memcmp(sa->chars, sb->chars, sa->len) == 0;
+        }
+        case LMD_TYPE_SYMBOL: {
+            Symbol* sa = a.get_symbol();
+            Symbol* sb = b.get_symbol();
+            if (sa == sb) return true;
+            if (!sa || !sb) return false;
+            if (sa->len != sb->len) return false;
+            return memcmp(sa->chars, sb->chars, sa->len) == 0;
+        }
+        case LMD_TYPE_ELEMENT: {
+            Element* ea = a.element;
+            Element* eb = b.element;
+            if (ea == eb) return true;
+            if (!ea || !eb) return false;
+
+            // compare element tag (TypeElmt name)
+            TypeElmt* ta_e = (TypeElmt*)ea->type;
+            TypeElmt* tb_e = (TypeElmt*)eb->type;
+            if (!ta_e || !tb_e) return false;
+            if (ta_e->name.length != tb_e->name.length) return false;
+            if (ta_e->name.str != tb_e->name.str &&
+                memcmp(ta_e->name.str, tb_e->name.str, ta_e->name.length) != 0) return false;
+
+            // compare shape (field structure)
+            if (ta_e->length != tb_e->length) return false;
+
+            // compare attribute data bytes
+            if (ta_e->byte_size > 0) {
+                if (!ea->data || !eb->data) return false;
+                if (memcmp(ea->data, eb->data, ta_e->byte_size) != 0) return false;
+            }
+
+            // compare children count
+            if (ea->length != eb->length) return false;
+
+            // recursively compare children
+            for (int64_t i = 0; i < ea->length; i++) {
+                if (!item_deep_equal(ea->items[i], eb->items[i])) return false;
+            }
+            return true;
+        }
+        case LMD_TYPE_ARRAY: {
+            Array* la = a.array;
+            Array* lb = b.array;
+            if (la == lb) return true;
+            if (!la || !lb) return false;
+            if (la->length != lb->length) return false;
+            for (int64_t i = 0; i < la->length; i++) {
+                if (!item_deep_equal(la->items[i], lb->items[i])) return false;
+            }
+            return true;
+        }
+        default:
+            // for other types (map, function, etc.), fall back to pointer equality
+            return false;
+    }
+}

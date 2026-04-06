@@ -576,6 +576,9 @@ void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 void map_finalize_shape(TypeMap* type_map, Input* input);
 void elmt_finalize_shape(TypeElmt* type_elmt, Input* input);
 
+// Deep structural equality for Items (Phase 14: no-op elision)
+bool item_deep_equal(Item a, Item b);
+
 #ifdef __cplusplus
 }
 #endif
