@@ -25,6 +25,18 @@ Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 Type TYPE_PATH = {.type_id = LMD_TYPE_PATH};
+Type TYPE_NUM_SIZED = {.type_id = LMD_TYPE_NUM_SIZED};
+Type TYPE_UINT64 = {.type_id = LMD_TYPE_UINT64};
+// sub-type Type objects for sized numerics (used by LIT_TYPE_I8..LIT_TYPE_F32)
+// kind field stores the NumSizedType discriminator
+Type TYPE_I8  = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_INT8};
+Type TYPE_I16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_INT16};
+Type TYPE_I32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_INT32};
+Type TYPE_U8  = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT8};
+Type TYPE_U16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT16};
+Type TYPE_U32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_UINT32};
+Type TYPE_F16 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT16};
+Type TYPE_F32 = {.type_id = LMD_TYPE_NUM_SIZED, .kind = NUM_FLOAT32};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_DATE = {.type_id = LMD_TYPE_DTIME};   // sub-type: date-only datetime
 Type TYPE_TIME = {.type_id = LMD_TYPE_DTIME};   // sub-type: time-only datetime
@@ -52,6 +64,8 @@ Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_literal = 1, .is_const = 1};
 Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_literal = 1, .is_const = 1};
 Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_literal = 1, .is_const = 1};
 Type LIT_DTIME = {.type_id = LMD_TYPE_DTIME, .is_literal = 1, .is_const = 1};
+Type LIT_NUM_SIZED = {.type_id = LMD_TYPE_NUM_SIZED, .is_literal = 1, .is_const = 1};
+Type LIT_UINT64 = {.type_id = LMD_TYPE_UINT64, .is_literal = 1, .is_const = 1};
 Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_literal = 1, .is_const = 1};
 
 // get_type_name: human-readable name for a TypeId (for error messages)
@@ -85,7 +99,23 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_ERROR: return "error";
         case LMD_TYPE_UNDEFINED: return "undefined";
         case LMD_TYPE_PATH: return "path";
+        case LMD_TYPE_NUM_SIZED: return "num_sized";  // generic; use get_num_sized_type_name() for specific name
+        case LMD_TYPE_UINT64: return "u64";
         default: return "unknown";
+    }
+}
+
+extern "C" const char* get_num_sized_type_name(NumSizedType num_type) {
+    switch (num_type) {
+        case NUM_INT8:    return "i8";
+        case NUM_INT16:   return "i16";
+        case NUM_INT32:   return "i32";
+        case NUM_UINT8:   return "u8";
+        case NUM_UINT16:  return "u16";
+        case NUM_UINT32:  return "u32";
+        case NUM_FLOAT16: return "f16";
+        case NUM_FLOAT32: return "f32";
+        default: return "num_sized";
     }
 }
 
@@ -113,6 +143,16 @@ TypeType LIT_TYPE_FUNC;
 TypeType LIT_TYPE_TYPE;
 TypeType LIT_TYPE_ANY;
 TypeType LIT_TYPE_ERROR;
+// sized numeric type references (for `is` checks on specific sub-types)
+TypeType LIT_TYPE_I8;
+TypeType LIT_TYPE_I16;
+TypeType LIT_TYPE_I32;
+TypeType LIT_TYPE_U8;
+TypeType LIT_TYPE_U16;
+TypeType LIT_TYPE_U32;
+TypeType LIT_TYPE_U64;
+TypeType LIT_TYPE_F16;
+TypeType LIT_TYPE_F32;
 
 TypeMap EmptyMap;
 TypeElmt EmptyElmt;
@@ -159,6 +199,16 @@ void init_typetype() {
     *(Type*)(&LIT_TYPE_TYPE) = LIT_TYPE;  LIT_TYPE_TYPE.type = &TYPE_TYPE;
     *(Type*)(&LIT_TYPE_ANY) = LIT_TYPE;  LIT_TYPE_ANY.type = &TYPE_ANY;
     *(Type*)(&LIT_TYPE_ERROR) = LIT_TYPE;  LIT_TYPE_ERROR.type = &TYPE_ERROR;
+    // sized numeric type references
+    *(Type*)(&LIT_TYPE_I8)  = LIT_TYPE;  LIT_TYPE_I8.type  = &TYPE_I8;
+    *(Type*)(&LIT_TYPE_I16) = LIT_TYPE;  LIT_TYPE_I16.type = &TYPE_I16;
+    *(Type*)(&LIT_TYPE_I32) = LIT_TYPE;  LIT_TYPE_I32.type = &TYPE_I32;
+    *(Type*)(&LIT_TYPE_U8)  = LIT_TYPE;  LIT_TYPE_U8.type  = &TYPE_U8;
+    *(Type*)(&LIT_TYPE_U16) = LIT_TYPE;  LIT_TYPE_U16.type = &TYPE_U16;
+    *(Type*)(&LIT_TYPE_U32) = LIT_TYPE;  LIT_TYPE_U32.type = &TYPE_U32;
+    *(Type*)(&LIT_TYPE_U64) = LIT_TYPE;  LIT_TYPE_U64.type = &TYPE_UINT64;
+    *(Type*)(&LIT_TYPE_F16) = LIT_TYPE;  LIT_TYPE_F16.type = &TYPE_F16;
+    *(Type*)(&LIT_TYPE_F32) = LIT_TYPE;  LIT_TYPE_F32.type = &TYPE_F32;
 
     memset(&EmptyMap, 0, sizeof(TypeMap));
     EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
@@ -199,6 +249,8 @@ void init_type_info() {
     type_info[LMD_TYPE_ANY] = {sizeof(TypedItem), "any", &TYPE_ANY, (Type*)&LIT_TYPE_ANY};
     type_info[LMD_TYPE_ERROR] = {sizeof(void*), "error", &TYPE_ERROR, (Type*)&LIT_TYPE_ERROR};
     type_info[LMD_TYPE_PATH] = {sizeof(void*), "path", &TYPE_PATH, (Type*)&LIT_TYPE_PATH};
+    type_info[LMD_TYPE_NUM_SIZED] = {sizeof(uint64_t), "num_sized", &TYPE_NUM_SIZED, (Type*)&LIT_TYPE_INT};  // inline packed
+    type_info[LMD_TYPE_UINT64] = {sizeof(uint64_t), "u64", &TYPE_UINT64, (Type*)&LIT_TYPE_U64};
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
 }
 
@@ -247,6 +299,12 @@ double it2d(Item itm) {
     }
     else if (itm._type_id == LMD_TYPE_DECIMAL) {
         return decimal_to_double(itm);
+    }
+    else if (itm._type_id == LMD_TYPE_NUM_SIZED) {
+        return itm.get_num_sized_as_double();
+    }
+    else if (itm._type_id == LMD_TYPE_UINT64) {
+        return (double)itm.get_uint64();
     }
     else if (itm._type_id == LMD_TYPE_ERROR) {
         return NAN;  // poison NaN — auto-propagates through all downstream arithmetic

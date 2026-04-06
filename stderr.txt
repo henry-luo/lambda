@@ -1,33 +1,10 @@
-23:02:10 [36m[NOTE][0m ############################################
-23:02:10 [36m[NOTE][0m !!! Running DEBUG build of lambda.exe  !!!
-23:02:10 [36m[NOTE][0m !!! Do NOT use it for performance test !!!
-23:02:10 [36m[NOTE][0m ############################################
-23:02:10 [36m[NOTE][0m view: loading document...
-23:02:10 [36m[NOTE][0m Running script with MIR JIT compilation (direct)
-23:02:10 [36m[NOTE][0m Start transpiling /Users/henry/Projects/lambda/test/lambda/ui/todo.ls...
-23:02:10 [36m[NOTE][0m MIR Direct: compiling module '/Users/henry/Projects/lambda/test/lambda/ui/todo.ls'
-23:02:10 [36m[NOTE][0m transpile AST to MIR (direct)
-23:02:10 [36m[NOTE][0m Generating native code...
-23:02:10 [36m[NOTE][0m Executing JIT compiled code...
-23:02:10 [36m[NOTE][0m [Lambda Script] Script document loaded and styled
-23:02:10 [36m[NOTE][0m view: document loaded, starting layout...
-23:02:10 [33m[WARN][0m SLOW BLOCK: body took 51ms (count=33)
-23:02:10 [36m[NOTE][0m view: layout complete, rendering...
-23:02:10 [36m[NOTE][0m view: render complete
-[EVENT_SIM] === Todo Performance Timing Test ===\n[EVENT_SIM] --- Initial state ---\n[EVENT_SIM] --- TOGGLE TEST: click first item (toggle on) ---\n[EVENT_SIM] --- TOGGLE TEST: click first item again (toggle off) ---\n[EVENT_SIM] --- TOGGLE TEST: click 2nd item ---\n[EVENT_SIM] --- TOGGLE TEST: click 3rd item ---\n[EVENT_SIM] --- DELETE TEST: click delete button on first item ---\n[EVENT_SIM] --- DELETE TEST: click delete button again ---\n[EVENT_SIM] --- TEXT INPUT TEST: click input field to focus ---\n[EVENT_SIM] --- TEXT INPUT TEST: type 'Hello World' ---\n[EVENT_SIM] --- ADD ITEM TEST: click Add button ---\n[EVENT_SIM] --- ADD VIA ENTER TEST: focus input, type, press Enter ---\n23:02:13 [33m[WARN][0m     SLOW BLOCK: div took 53ms (count=1053)
-23:02:13 [33m[WARN][0m   SLOW BLOCK: div took 57ms (count=1054)
-23:02:13 [33m[WARN][0m SLOW BLOCK: body took 57ms (count=1054)
-[EVENT_SIM] --- CLEAR COMPLETED TEST: click clear completed ---\n23:02:13 [33m[WARN][0m   SLOW BLOCK: div took 51ms (count=1082)
-23:02:13 [33m[WARN][0m SLOW BLOCK: body took 51ms (count=1082)
-[EVENT_SIM] --- BACKSPACE TEST: focus input, type, backspace ---\n23:02:13 [33m[WARN][0m   SLOW BLOCK: div took 51ms (count=1110)
-23:02:13 [33m[WARN][0m SLOW BLOCK: body took 51ms (count=1110)
-[EVENT_SIM] === Todo Performance Timing Test Complete ===\n
-========================================
- EVENT SIMULATION RESULTS
- Test: Todo performance timing - all event types
-========================================
- Events executed: 57
- Assertions: 7 passed, 0 failed
- Result: PASS
-========================================
-view command completed with result: 0
+11:21:26 [NOTE] ############################################
+11:21:26 [NOTE] !!! Running DEBUG build of lambda.exe  !!!
+11:21:26 [NOTE] !!! Do NOT use it for performance test !!!
+11:21:26 [NOTE] ############################################
+11:21:26 [NOTE] Running script with MIR JIT compilation (direct)
+11:21:26 [NOTE] Start transpiling test/lambda/sized_numeric_collections.ls...
+11:21:26 [NOTE] MIR Direct: compiling module 'test/lambda/sized_numeric_collections.ls'
+11:21:26 [NOTE] transpile AST to MIR (direct)
+11:21:26 [NOTE] Generating native code...
+11:21:26 [NOTE] Executing JIT compiled code...

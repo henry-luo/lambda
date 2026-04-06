@@ -13,6 +13,8 @@ extern "C" {
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_DECIMAL sym_decimal
+#define SYM_SIZED_INT sym_sized_integer
+#define SYM_SIZED_FLOAT sym_sized_float
 #define SYM_STRING sym_string
 #define SYM_SYMBOL sym_symbol
 // Note: string_content, symbol_content, escape_sequence no longer exist

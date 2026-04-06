@@ -86,8 +86,11 @@ enum EnumTypeId {
 
     // scalar types
     LMD_TYPE_BOOL,
-    LMD_TYPE_INT,  // int literal, just 32-bit
+    // Sized numeric types
+    LMD_TYPE_NUM_SIZED,  // inline sized numerics (i8..u32, f16, f32) — packed in Item
+    LMD_TYPE_INT,    // int literal, just 32-bit
     LMD_TYPE_INT64,  // int literal, 64-bit
+    LMD_TYPE_UINT64, // unsigned 64-bit integer (heap-allocated pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
     LMD_TYPE_DECIMAL,
     LMD_TYPE_NUMBER,  // explicit number, which includes decimal
@@ -95,6 +98,9 @@ enum EnumTypeId {
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
+
+    // Path type for file/URL paths
+    LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
 
     // container types, LMD_TYPE_CONTAINER
     LMD_TYPE_RANGE,
@@ -115,13 +121,53 @@ enum EnumTypeId {
     // JavaScript-specific types (added at end to preserve existing type IDs)
     LMD_TYPE_UNDEFINED,  // JavaScript undefined (distinct from null)
 
-    // Path type for file/URL paths
-    LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
-
     LMD_TYPE_COUNT,  // number of type IDs — must be last before HEAP_START
     LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
+
+// ============================================================================
+// Sized numeric sub-types (stored in bits [55:48] of NUM_SIZED Items)
+// ============================================================================
+enum EnumNumSizedType {
+    NUM_INT8 = 0,     // signed 8-bit   [-128, 127]
+    NUM_INT16,        // signed 16-bit  [-32768, 32767]
+    NUM_INT32,        // signed 32-bit  [-2^31, 2^31-1]
+    NUM_UINT8,        // unsigned 8-bit  [0, 255]
+    NUM_UINT16,       // unsigned 16-bit [0, 65535]
+    NUM_UINT32,       // unsigned 32-bit [0, 2^32-1]
+    NUM_FLOAT16,      // IEEE 754 half-precision (16-bit)
+    NUM_FLOAT32,      // IEEE 754 single-precision (32-bit)
+    NUM_SIZED_COUNT
+};
+typedef uint8_t NumSizedType;
+
+// Sized numeric packing: value in [31:0], sub-type in [55:48], type_id in [63:56]
+// Bits [47:32] are unused padding.
+#define NUM_SIZED_PACK(num_type, val32) \
+    (((uint64_t)LMD_TYPE_NUM_SIZED << 56) | ((uint64_t)(num_type) << 48) | ((uint32_t)(val32)))
+
+// Unpack sub-type and raw 32-bit value from a NUM_SIZED Item
+#define NUM_SIZED_SUBTYPE(item)  ((uint8_t)(((uint64_t)(item) >> 48) & 0xFF))
+#define NUM_SIZED_RAW32(item)    ((uint32_t)((uint64_t)(item) & 0xFFFFFFFF))
+
+// Convenience packers for each sub-type
+#define i8_to_item(v)   NUM_SIZED_PACK(NUM_INT8,   (uint32_t)(uint8_t)(int8_t)(v))
+#define i16_to_item(v)  NUM_SIZED_PACK(NUM_INT16,  (uint32_t)(uint16_t)(int16_t)(v))
+#define i32_to_item(v)  NUM_SIZED_PACK(NUM_INT32,  (uint32_t)(int32_t)(v))
+#define u8_to_item(v)   NUM_SIZED_PACK(NUM_UINT8,  (uint32_t)(uint8_t)(v))
+#define u16_to_item(v)  NUM_SIZED_PACK(NUM_UINT16, (uint32_t)(uint16_t)(v))
+#define u32_to_item(v)  NUM_SIZED_PACK(NUM_UINT32, (uint32_t)(v))
+
+// uint64 packing macro (heap-allocated pointer, like int64)
+#define u64_to_item(uint64_ptr) \
+    ((uint64_ptr) ? ((((uint64_t)LMD_TYPE_UINT64) << 56) | (uint64_t)(uint64_ptr)) : ITEM_NULL)
+
+// Get human-readable name for a NumSizedType sub-type
+#ifdef __cplusplus
+extern "C"
+#endif
+const char* get_num_sized_type_name(NumSizedType num_type);
 
 // TypeKind enum moved to lambda.hpp (not needed by JIT)
 
@@ -621,6 +667,11 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
+
+// numeric type range check — includes sized types outside INT..NUMBER range
+#define IS_NUMERIC_ID(t) (((t) >= LMD_TYPE_INT && (t) <= LMD_TYPE_NUMBER) || \
+                          (t) == LMD_TYPE_NUM_SIZED || (t) == LMD_TYPE_UINT64)
+
 #define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
 #define ITEM_FALSE          ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0
 
@@ -644,6 +695,44 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define y2it(sym_ptr)        ((sym_ptr)? ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr)): ITEM_NULL)
 #define x2it(bin_ptr)        ((bin_ptr)? ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr)): ITEM_NULL)
 #define k2it(dtime_ptr)      ((dtime_ptr)? ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr)): ITEM_NULL)
+#define u2it(uint64_ptr)     ((uint64_ptr)? ((((uint64_t)LMD_TYPE_UINT64)<<56) | (uint64_t)(uint64_ptr)): ITEM_NULL)
+
+// Float16/Float32 packing into NUM_SIZED Items
+// float32: store IEEE 754 binary32 bit pattern in low 32 bits
+static inline uint32_t f32_to_bits(float f) { uint32_t u; __builtin_memcpy(&u, &f, 4); return u; }
+static inline float bits_to_f32(uint32_t u) { float f; __builtin_memcpy(&f, &u, 4); return f; }
+#define f32_to_item(v) NUM_SIZED_PACK(NUM_FLOAT32, f32_to_bits((float)(v)))
+
+// float16: software conversion (IEEE 754 binary16)
+static inline uint16_t f32_to_f16_bits(float f) {
+    uint32_t b = f32_to_bits(f);
+    uint32_t sign = (b >> 16) & 0x8000;
+    int32_t  expo = ((b >> 23) & 0xFF) - 127 + 15;
+    uint32_t mant = (b >> 13) & 0x03FF;
+    if (expo <= 0) return (uint16_t)sign;         // underflow → ±0
+    if (expo >= 31) return (uint16_t)(sign | 0x7C00); // overflow → ±inf
+    return (uint16_t)(sign | (expo << 10) | mant);
+}
+static inline float f16_bits_to_f32(uint16_t h) {
+    uint32_t sign = ((uint32_t)h & 0x8000) << 16;
+    uint32_t expo = (h >> 10) & 0x1F;
+    uint32_t mant = h & 0x03FF;
+    if (expo == 0) { if (mant == 0) return bits_to_f32(sign); /* denorm → 0 */ }
+    if (expo == 31) return bits_to_f32(sign | 0x7F800000 | (mant << 13)); // inf/nan
+    uint32_t result = sign | ((expo - 15 + 127) << 23) | (mant << 13);
+    return bits_to_f32(result);
+}
+#define f16_to_item(v) NUM_SIZED_PACK(NUM_FLOAT16, (uint32_t)f32_to_f16_bits((float)(v)))
+
+// Unpack sized numeric value from Item
+static inline int8_t   item_to_i8(uint64_t it)  { return (int8_t)(NUM_SIZED_RAW32(it) & 0xFF); }
+static inline int16_t  item_to_i16(uint64_t it) { return (int16_t)(NUM_SIZED_RAW32(it) & 0xFFFF); }
+static inline int32_t  item_to_i32(uint64_t it) { return (int32_t)NUM_SIZED_RAW32(it); }
+static inline uint8_t  item_to_u8(uint64_t it)  { return (uint8_t)(NUM_SIZED_RAW32(it) & 0xFF); }
+static inline uint16_t item_to_u16(uint64_t it) { return (uint16_t)(NUM_SIZED_RAW32(it) & 0xFFFF); }
+static inline uint32_t item_to_u32(uint64_t it) { return NUM_SIZED_RAW32(it); }
+static inline float    item_to_f32(uint64_t it) { return bits_to_f32(NUM_SIZED_RAW32(it)); }
+static inline float    item_to_f16(uint64_t it) { return f16_bits_to_f32((uint16_t)(NUM_SIZED_RAW32(it) & 0xFFFF)); }
 
 // ============================================================================
 // Forward declaration for structured error handling
