@@ -168,6 +168,19 @@ typedef struct CursorState {
 } CursorState;
 
 /**
+ * Drag-and-drop state for element dragging between containers
+ */
+typedef struct DragDropState {
+    View* source_view;             // the view being dragged
+    float start_x, start_y;       // mousedown position (physical px)
+    float current_x, current_y;   // current drag position (physical px)
+    bool active;                   // true after movement exceeds threshold
+    bool pending;                  // true between mousedown and threshold check
+    View* drop_target;             // current drop target under cursor (has dropzone attr)
+    const char* drag_data;         // application-defined drag data type
+} DragDropState;
+
+/**
  * Visited links tracking (privacy-preserving via hash)
  */
 typedef struct VisitedLinks {
@@ -208,6 +221,7 @@ typedef struct RadiantState {
     View* active_target;           // currently active (pressed) element
     View* drag_target;             // drag source element
     bool is_dragging;              // true if drag operation in progress
+    DragDropState* drag_drop;      // element drag-and-drop state (NULL when inactive)
     
     // Dropdown state (for select elements)
     View* open_dropdown;           // currently open select dropdown (null if none)

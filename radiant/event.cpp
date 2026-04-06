@@ -479,6 +479,28 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("text", evcon->paste_text);
     }
 
+    // for drag-and-drop events: add drag_data field
+    if (evcon && (strcmp(event_name, "dragstart") == 0 || strcmp(event_name, "dragmove") == 0 ||
+                  strcmp(event_name, "drop") == 0 || strcmp(event_name, "dragend") == 0)) {
+        RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
+        if (st && st->drag_drop && st->drag_drop->drag_data) {
+            mb.put("drag_data", st->drag_drop->drag_data);
+        }
+        // add drop target info for drop events
+        if (strcmp(event_name, "drop") == 0 && st && st->drag_drop && st->drag_drop->drop_target) {
+            View* dt = st->drag_drop->drop_target;
+            if (dt->is_element()) {
+                DomElement* dte = (DomElement*)dt;
+                if (dte->class_count > 0 && dte->class_names) {
+                    mb.put("drop_target_class", dte->class_names[0]);
+                }
+                if (dte->tag_name) {
+                    mb.put("drop_target_tag", dte->tag_name);
+                }
+            }
+        }
+    }
+
     return mb.final();
 }
 
@@ -2123,6 +2145,63 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // fire drag event if dragging in progress
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
 
+        // Handle element drag-and-drop
+        if (state && state->drag_drop && (state->drag_drop->pending || state->drag_drop->active)) {
+            DragDropState* dd = state->drag_drop;
+            dd->current_x = (float)motion->x;
+            dd->current_y = (float)motion->y;
+
+            if (dd->pending && !dd->active) {
+                // check movement threshold (5px in physical pixels)
+                float dx = dd->current_x - dd->start_x;
+                float dy = dd->current_y - dd->start_y;
+                if (dx * dx + dy * dy > 25.0f) {
+                    dd->pending = false;
+                    dd->active = true;
+                    log_debug("DRAG START: source=%p distance=%.1f", dd->source_view, sqrtf(dx*dx + dy*dy));
+                    // dispatch "dragstart" to source element
+                    dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
+                }
+            }
+
+            if (dd->active) {
+                // find drop target: walk up from hit-test target to find element with dropzone attr
+                View* new_drop_target = nullptr;
+                if (evcon.target) {
+                    DomNode* node = (DomNode*)evcon.target;
+                    while (node) {
+                        if (node->node_type == DOM_NODE_ELEMENT) {
+                            DomElement* elem = (DomElement*)node;
+                            const char* dropzone = dom_element_get_attribute(elem, "dropzone");
+                            if (dropzone && *dropzone) {
+                                new_drop_target = (View*)elem;
+                                break;
+                            }
+                        }
+                        node = node->parent;
+                    }
+                }
+
+                // dispatch dragover/dragleave on drop target changes
+                if (new_drop_target != dd->drop_target) {
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                    }
+                    dd->drop_target = new_drop_target;
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragover");
+                    }
+                }
+
+                // dispatch "dragmove" to source (throttled by frame rate inherently)
+                dispatch_lambda_handler(&evcon, dd->source_view, "dragmove");
+
+                // set cursor to grabbing
+                evcon.new_cursor = CSS_VALUE_POINTER;
+                evcon.need_repaint = true;
+            }
+        }
+
         // Handle text selection drag (supports cross-view selection)
         if (state && state->selection && state->selection->is_selecting) {
             View* anchor_view = state->selection->anchor_view;
@@ -2680,7 +2759,70 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 selection_clear(state);
                 evcon.need_repaint = true;
             }
-        } else if (event->type == RDT_EVENT_MOUSE_UP) {
+        }
+
+        // Check for draggable element on MOUSE_DOWN — initiate pending drag
+        if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target && state) {
+            // walk up from target to find element with draggable="true"
+            DomNode* node = (DomNode*)evcon.target;
+            DomElement* draggable_elem = nullptr;
+            while (node) {
+                if (node->node_type == DOM_NODE_ELEMENT) {
+                    DomElement* elem = (DomElement*)node;
+                    const char* draggable = dom_element_get_attribute(elem, "draggable");
+                    if (draggable && strcmp(draggable, "true") == 0) {
+                        draggable_elem = elem;
+                        break;
+                    }
+                }
+                node = node->parent;
+            }
+            if (draggable_elem) {
+                // allocate drag-drop state on state arena
+                if (!state->drag_drop) {
+                    state->drag_drop = (DragDropState*)arena_alloc(state->arena, sizeof(DragDropState));
+                }
+                memset(state->drag_drop, 0, sizeof(DragDropState));
+                state->drag_drop->source_view = (View*)draggable_elem;
+                state->drag_drop->start_x = (float)btn_event->x;
+                state->drag_drop->start_y = (float)btn_event->y;
+                state->drag_drop->current_x = (float)btn_event->x;
+                state->drag_drop->current_y = (float)btn_event->y;
+                state->drag_drop->pending = true;
+                // read drag data type from dragdata attribute
+                const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
+                state->drag_drop->drag_data = drag_data;
+                log_debug("DRAG PENDING: source=%p start=(%.0f,%.0f) data=%s",
+                    draggable_elem, state->drag_drop->start_x, state->drag_drop->start_y,
+                    drag_data ? drag_data : "(none)");
+            }
+        }
+
+        if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Handle drag-and-drop completion first
+            bool drag_handled = false;
+            if (state && state->drag_drop) {
+                DragDropState* dd = state->drag_drop;
+                if (dd->active) {
+                    // drag was active — dispatch drop or dragend
+                    if (dd->drop_target) {
+                        // dispatch "drop" to the drop target element
+                        log_debug("DRAG DROP: source=%p target=%p", dd->source_view, dd->drop_target);
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "drop");
+                    }
+                    // dispatch "dragend" to source
+                    dispatch_lambda_handler(&evcon, dd->source_view, "dragend");
+                    // clear any dragover highlight on previous drop target
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                    }
+                    drag_handled = true;
+                    evcon.need_repaint = true;
+                }
+                // clear drag state
+                memset(dd, 0, sizeof(DragDropState));
+            }
+
             // Clear :active state
             update_active_state(&evcon, NULL, false);
 
@@ -2699,8 +2841,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            // Only process other click handlers if dropdown wasn't involved
-            if (!dropdown_handled) {
+            // Only process other click handlers if dropdown wasn't involved and not a drag
+            if (!dropdown_handled && !drag_handled) {
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
                 if (evcon.target) {

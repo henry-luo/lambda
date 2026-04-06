@@ -14,7 +14,7 @@ view <todo_item> state toggled: false, editing: false, edit_text: "", edit_notes
   let check_mark = if (done) "✓" else "○"
   let done_class = if (done) "todo-item done" else "todo-item"
   let notes = if (~.notes != null) ~.notes else ""
-  <li class:done_class
+  <li class:done_class, draggable:"true", dragdata:"todo-item"
     <span class:"checkbox"; check_mark>
     <div class:"item-content"
       if (editing) {
@@ -142,15 +142,19 @@ on blur(evt) {
     editing = false
   }
 }
+on dragstart(evt) {
+  emit("item_drag_start", {item: ~})
+}
 
 // Todo list / category section: edit template for model mutation
-edit <todo_list> state adding: false, new_text: "" {
+edit <todo_list> state adding: false, new_text: "", drag_over: false {
   let items = ~.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
   let count_text = string(done_count) ++ "/" ++ string(item_count)
+  let header_class = if (drag_over) "list-header drop-active" else "list-header"
   <div class:"todo-list"
-    <div class:"list-header"
+    <div class:header_class, dropzone:"todo-item"
       <span class:"list-name"; ~.name>
       <span class:"list-count"; count_text>
     >
@@ -220,6 +224,19 @@ on update_item(evt) {
     if (item.id == evt.id) {id: item.id, text: evt.text, done: item.done, notes: evt.notes}
     else item
 }
+on dragover(evt) {
+  drag_over = true
+}
+on dragleave(evt) {
+  drag_over = false
+}
+on item_drag_start(evt) {
+  emit("begin_drag", {item: evt.item, source_list: ~.name})
+}
+on drop(evt) {
+  drag_over = false
+  emit("complete_drop", {target_list: ~.name})
+}
 
 // File entry in the sidebar
 view <file_entry> state pending_delete: false {
@@ -252,7 +269,7 @@ on click(evt) {
 }
 
 // Main app: edit template manages file list and active file
-edit <todo_app> state active_file: "", creating_file: false, new_file_name: "" {
+edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", drag_item: null, drag_source: "" {
   let dir_listing^err = input(data_dir)
   let json_files = if (err != null) [] else for (f in dir_listing where ends_with(f.name, ".json")) f
   let file_names = for (f in json_files) replace(f.name, ".json", "")
@@ -562,6 +579,11 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "" {
         background: #e9ecef;
         color: #555;
       }
+      .list-header.drop-active {
+        background: #e3f2fd;
+        border: 2px dashed #2196F3;
+        border-radius: 8px;
+      }
       .footer {
         text-align: center;
         padding: 12px;
@@ -665,6 +687,37 @@ on delete_file(evt) {
   if (active_file == evt.name) {
     active_file = ""
   }
+}
+on begin_drag(evt) {
+  drag_item = evt.item
+  drag_source = evt.source_list
+}
+on complete_drop(evt) {
+  if (drag_item != null and drag_source != evt.target_list) {
+    let active_path = data_dir ++ eff_active ++ ".json"
+    let data^err = input(active_path, 'json')
+    if (err == null) {
+      // Remove item from source list, add to target list
+      let new_lists = for (lst in data.lists)
+        if (lst.name == drag_source) {
+          {name: lst.name, items: for (i in lst.items where i.id != drag_item.id) i}
+        } else if (lst.name == evt.target_list) {
+          let max_id = if (len(lst.items) == 0) 0 else max(for (i in lst.items) i.id)
+          let moved = {id: max_id + 1, text: drag_item.text, done: drag_item.done, notes: drag_item.notes}
+          {name: lst.name, items: lst.items ++ [moved]}
+        } else {
+          lst
+        }
+      let new_data = {name: data.name, lists: new_lists}
+      let _^w_err = output(new_data, active_path, 'json')
+    }
+  }
+  drag_item = null
+  drag_source = ""
+}
+on dragend(evt) {
+  drag_item = null
+  drag_source = ""
 }
 
 // ============================================================================
