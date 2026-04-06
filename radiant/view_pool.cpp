@@ -1608,7 +1608,22 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     // Add block properties if available
     if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"line_height\": %.1f,\n", block->blk->line_height);
+        // line_height is const CssValue*; resolve to a numeric value for JSON output
+        float lh_value = 0;
+        if (block->blk->line_height) {
+            const CssValue* lh = block->blk->line_height;
+            float fs = (block->font && block->font->font_size > 0) ? block->font->font_size : 16.0f;
+            if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                lh_value = lh->data.number.value * fs;
+            } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                lh_value = (float)lh->data.length.value;
+            } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                lh_value = fs * (float)(lh->data.percentage.value / 100.0);
+            } else if (lh->type == CSS_VALUE_TYPE_KEYWORD && lh->data.keyword == CSS_VALUE_NORMAL) {
+                lh_value = fs * 1.2f; // approximate normal
+            }
+        }
+        strbuf_append_format(buf, "\"line_height\": %.1f,\n", lh_value);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"text_align\": \"%s\",\n", css_enum_info(block->blk->text_align)->name);
         strbuf_append_char_n(buf, ' ', indent + 4);

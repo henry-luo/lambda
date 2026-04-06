@@ -530,14 +530,20 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                     const char* raw = ctx->tp->source + start;
                     // check for octal escapes \0-\7 in string literals
                     for (int i = 0; i < slen - 1; i++) {
-                        if (raw[i] == '\\' && raw[i+1] >= '1' && raw[i+1] <= '7') {
-                            ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
-                            break;
-                        }
-                        if (raw[i] == '\\' && raw[i+1] == '0' && i + 2 < slen &&
-                            raw[i+2] >= '0' && raw[i+2] <= '9') {
-                            ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
-                            break;
+                        if (raw[i] == '\\') {
+                            if (raw[i+1] == '\\') {
+                                i++; // skip escaped backslash
+                                continue;
+                            }
+                            if (raw[i+1] >= '1' && raw[i+1] <= '7') {
+                                ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
+                                break;
+                            }
+                            if (raw[i+1] == '0' && i + 2 < slen &&
+                                raw[i+2] >= '0' && raw[i+2] <= '9') {
+                                ee_error(ctx, node, "Octal escape sequences are not allowed in strict mode");
+                                break;
+                            }
                         }
                     }
                 }

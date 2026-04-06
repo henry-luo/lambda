@@ -203,13 +203,25 @@ static bool scan_ternary_qmark(TSLexer *lexer) {
     if (lexer->lookahead == '?') {
         advance(lexer);
 
-        /* Optional chaining. */
-        if (lexer->lookahead == '?' || lexer->lookahead == '.') {
+        /* Nullish coalescing. */
+        if (lexer->lookahead == '?') {
             return false;
         }
 
         lexer->mark_end(lexer);
         lexer->result_symbol = TERNARY_QMARK;
+
+        /* Optional chaining vs ternary with decimal literal (e.g., x?.12:0).
+           If '.' is followed by a digit, this is ternary '?' + decimal '.12',
+           not optional chaining '?.'. mark_end already set after '?' so the
+           token covers only '?', and '.12' will be parsed as a number literal. */
+        if (lexer->lookahead == '.') {
+            advance(lexer);
+            if (iswdigit(lexer->lookahead)) {
+                return true;
+            }
+            return false;
+        }
 
         /* TypeScript optional arguments contain the ?: sequence, possibly
            with whitespace. */
