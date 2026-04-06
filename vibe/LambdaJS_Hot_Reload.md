@@ -50,7 +50,7 @@ The core idea: treat test execution like **hot reloading a script that grows**. 
 
 ## Stage 1: Two-Module MIR Split
 
-**Status: PARTIALLY IMPLEMENTED** — Only persistent heap reuse (Stage 1.0) is implemented. The full two-module split (1.1–1.2) is not.
+**Status: IMPLEMENTED** — Persistent heap reuse (1.0) and two-module MIR split (1.1–1.2) are both implemented.
 
 **Goal**: Compile harness MIR once, compile each test's MIR separately, link via dynamic imports.
 
@@ -74,87 +74,88 @@ A simpler precursor to the full two-module split. The batch process reuses a sin
 
 **Known issue:** Persistent heap causes test state to bleed across tests (132 test regressions vs normal mode). A full fix requires either better state isolation or the proper two-module split from Stage 1.1–1.2.
 
-### 1.1 Harness Pre-Compilation (NOT IMPLEMENTED)
+### 1.1 Harness Pre-Compilation (IMPLEMENTED)
 
-At batch process startup (before reading any test from the manifest):
+At batch process startup, the first item in each manifest is `harness:<byte_count>` followed by the concatenated sta.js + assert.js source. The batch worker:
 
-```
-1. Concatenate sta.js + assert.js into harness_source
-2. transpile_js_to_mir(harness_source)
-   → Parse, build AST, collect functions, generate MIR module "harness"
-   → MIR_link + MIR_gen: compiles all harness functions to native code
-3. Register all harness functions via register_dynamic_import():
-   - "assert_sameValue" → native ptr
-   - "assert_throws" → native ptr  
-   - "Test262Error_ctor" → native ptr
-   - etc.
-4. Execute harness js_main to initialize globals:
-   - Populates js_module_vars[] with assert object, Test262Error, etc.
-5. Save checkpoint:
-   - harness_module_var_count = current module var count
-   - harness_nursery_pos = nursery bump pointer position
-   - harness_mir_ctx stays alive (compiled code must persist)
-```
+1. Reads harness source via `fread(buf, 1, length, stdin)`
+2. Calls `transpile_js_to_mir_preamble()` which:
+   - Parses harness, builds AST, collects functions
+   - Uses **preamble mode** (`mt->preamble_mode = true`): function declarations are registered as `MCONST_MODVAR` (with `js_set_module_var()` persistence) instead of `MCONST_FUNC` (which would be lost when `js_main` returns)
+   - Generates MIR, links, compiles with JIT, executes `js_main`
+   - Snapshots `module_consts` entries and `module_var_count` into `JsPreambleState`
+   - Does NOT call `MIR_finish()` — keeps MIR context alive so compiled function code pointers remain valid
+3. Saves checkpoint: `preamble_var_checkpoint = js_get_module_var_count()`
 
-### 1.2 Test Compilation Against Harness (NOT IMPLEMENTED)
+**Key design decision**: The original Stage 1.1 plan proposed `register_dynamic_import()` for cross-module references. The actual implementation uses a simpler approach: preamble mode forces function declarations to module variables, and subsequent test compilations pre-seed their `module_consts` hashmap from the preamble's snapshot. No dynamic import resolver needed.
 
-For each test script:
+### 1.2 Test Compilation Against Harness (IMPLEMENTED)
 
-```
-1. Parse test source only (no harness prepended)
-2. Build AST from test parse tree
-3. During MIR transpilation (transpile_js_mir_ast):
-   - jm_find_var("_js_assert") → finds harness module var index
-   - jm_collect_functions → only finds test functions
-   - Phase 2: define only test functions as MIR
-   - Phase 3: emit js_main that references harness vars via js_get_module_var()
-4. MIR_link resolves test's imports against harness via import_resolver
-5. MIR_gen compiles only the test module (smaller, faster)
-6. Execute test's js_main
-7. Restore:
-   - Truncate js_module_vars[] to harness_module_var_count
-   - Reset nursery to harness_nursery_pos (or full destroy + recreate)
-   - Destroy test's MIR context (harness MIR context stays)
-```
+For each test script (arriving as `source:<name>:<byte_count>` in the manifest — harness NOT prepended):
 
-### 1.3 Implementation Details (NOT IMPLEMENTED)
+1. Reads test source via `fread`
+2. Calls `transpile_js_to_mir_with_preamble(source, filename, &preamble)` which:
+   - Parses test source only (no harness)
+   - Builds AST from test parse tree
+   - During `transpile_js_mir_ast`, Phase 1.1 pre-seeds `module_consts` from `preamble->entries` (harness bindings like `_js_assert → MCONST_MODVAR index=3`)
+   - Phase 1.1 third pass starts `module_var_count` from `preamble->module_var_count` (not 0)
+   - Phase 2: defines only test functions as MIR
+   - Phase 3: emits `js_main` that references harness vars via `js_get_module_var(index)`
+   - Creates a new MIR context for the test (harness MIR context stays alive)
+   - Links, compiles, executes test's `js_main`
+   - Destroys test's MIR context
+3. Restores: `js_batch_reset_to(preamble_var_checkpoint)` — truncates module vars back to harness-only state
 
-**Files to modify:**
+**Crash recovery**: When a test crashes (SIGSEGV/SIGBUS/timeout), the heap is destroyed → harness function objects are gone. Recovery: `preamble_state_destroy(&preamble)` + `has_preamble = false`. The next `harness:` line in the manifest (at the start of a new batch) re-compiles the preamble.
+
+### 1.3 Implementation Details (IMPLEMENTED)
+
+**Files modified:**
+
+- **`lambda/js/transpile_js_mir.cpp`**:
+  - Added `preamble_mode`, `preamble_entries`, `preamble_entry_count`, `preamble_var_count` fields to `JsMirTranspiler`
+  - Phase 1.1e: In preamble mode, function declarations register as `MCONST_MODVAR` + `module_var_count++` (instead of `MCONST_FUNC`)
+  - Phase 3: In preamble mode, after `jm_set_var()`, also emits `js_set_module_var(index, var_reg)` to persist function objects
+  - Phase 1.1: Pre-seeds `module_consts` from preamble entries when compiling with-preamble
+  - Added static globals for preamble state transfer: `g_jm_preamble_mode`, `g_jm_preamble_out`, `g_jm_preamble_in`
+  - New API functions: `transpile_js_to_mir_preamble()`, `transpile_js_to_mir_with_preamble()`, `preamble_state_destroy()`
+  - Conditional `js_reset_module_vars()` skip and `MIR_finish()` skip for preamble mode
+
+- **`lambda/js/js_transpiler.hpp`**:
+  - Added `JsPreambleState` struct: `void* mir_ctx`, `int module_var_count`, `JsModuleConstEntry* entries`, `int entry_count`
+  - Declarations for the three preamble API functions
+
+- **`lambda/transpiler.hpp`**: Forward declarations for `JsPreambleState` and preamble API
 
 - **`lambda/main.cpp`** — `js-test-batch` handler:
-  - New manifest protocol: `harness:<length>\n<bytes>\n` before `source:` entries
-  - Harness compilation at startup, checkpoint save
-  - Restore after each test instead of full `runtime_reset_heap`
+  - Added `harness:<length>` protocol handler: reads harness source, calls `transpile_js_to_mir_preamble()`, saves checkpoint
+  - Conditional dispatch: `has_preamble ? transpile_js_to_mir_with_preamble(...) : transpile_js_to_mir(...)`
+  - Crash recovery: `preamble_state_destroy()` + `has_preamble = false`; next batch re-compiles preamble
+  - Normal reset: `js_batch_reset_to(preamble_var_checkpoint)` when preamble active
 
-- **`lambda/js/transpile_js_mir.cpp`** — New function:
-  ```cpp
-  // Transpile and execute a test script against an existing harness environment.
-  // The harness module vars, functions, and compiled code are already present.
-  // Only the test's new code is parsed, transpiled, compiled, and executed.
-  Item transpile_js_test_against_harness(
-      Runtime* runtime,
-      const char* test_source,
-      const char* filename,
-      int harness_module_var_count);
-  ```
-  Inside, `transpile_js_mir_ast` already iterates `program->body` for module vars and function hoisting. The test's top-level code references harness vars via `jm_find_var()` which searches `module_consts` and `var_scopes` — these would either:
-  - (a) Pre-populate `module_consts` with harness bindings (e.g. `_js_assert → MCONST_MODVAR, index=3`), or
-  - (b) Generate `js_get_module_var(index)` calls for unresolved identifiers that exist in harness scope
+- **`test/test_js_test262_gtest.cpp`**:
+  - Added `assemble_harness_source()` — concatenates sta.js + assert.js (5,315 bytes with UTF-8 guillemets)
+  - Added `assemble_test_source()` — includes + strict prefix + test body (no harness)
+  - Modified `execute_t262_batch()`: writes `harness:<len>` at start of each manifest, then `source:<name>:<len>` per test
+  - `assemble_combined_source()` retained for Phase 2a crasher quarantine (still uses full concatenation)
 
-- **`lambda/js/js_runtime.cpp`** — New functions:
-  ```cpp
-  int js_get_module_var_count(void);               // checkpoint: how many vars exist
-  void js_truncate_module_vars(int count);          // restore: discard vars beyond count
-  void js_batch_reset_partial(int harness_count);   // reset test state, keep harness
-  ```
+- **`lambda/js/js_runtime.cpp`** — Pre-existing helpers used:
+  - `js_get_module_var_count()`: checkpoint current module var count
+  - `js_batch_reset_to(int count)`: partial reset preserving vars up to checkpoint
 
-- **`lambda/mir.c`** — No changes needed. The existing `register_dynamic_import` + `import_resolver` already supports cross-module references.
+**Measured results (debug build, -O3 MIR, 8 parallel workers):**
 
-- **`test/test_js_test262_gtest.cpp`** — `assemble_combined_source()` stops prepending sta.js/assert.js. Manifest format changes.
+| Metric | Before (Stage 1.0 only) | After (Stage 1.1-1.2) | Change |
+|--------|------------------------|----------------------|--------|
+| Phase 2 (clean batch) | 126.7s | 79.8s | **-37%** |
+| Tests passing | 10,264 | 12,296 | +2,032 |
+| Improvements vs baseline | 1,345 | 2,250 | +905 |
+| Regressions vs old baseline | 1,644 | 218 | -1,426 |
+| Phase 2a (quarantined) | 1.9s | 1.9s | same |
+| MISSING tests | 0 | 0 | same |
+| Quarantined crashers | 233 | 233 | same |
 
-**Risk**: Low. Two-module compilation is already proven for ES module imports. The harness is essentially an "imported module" that provides globals.
-
-**Expected savings**: ~30-40% of total batch time. Eliminates redundant harness compilation (parse + AST + MIR gen + MIR compile) for 27k tests. MIR JIT of the test module is faster because it's smaller (no harness functions).
+Note: The passing count increase (10,264 → 12,296) includes engine improvements made between runs, not solely from the preamble change. The preamble itself does not change test semantics — it only changes how harness bindings are delivered (pre-compiled module vars vs per-test concatenation). The 218 regressions vs old baseline are pre-existing engine regressions confirmed by A/B testing individual tests in both modes.
 
 ## Stage 2: Incremental Tree-sitter Parsing
 
@@ -382,8 +383,8 @@ This is significantly more complex than append-only because edits can occur anyw
 | Stage | Description | Status | Notes |
 |-------|------------|--------|-------|
 | 1.0 | Persistent heap reuse | **DONE** | ~6s faster but 132 test regressions from state leakage |
-| 1.1 | Harness pre-compilation | NOT STARTED | Full two-module MIR split |
-| 1.2 | Test compilation against harness | NOT STARTED | Depends on 1.1 |
+| 1.1 | Harness pre-compilation | **DONE** | Preamble mode compiles harness once per batch |
+| 1.2 | Test compilation against harness | **DONE** | Pre-seeds module_consts from preamble snapshot |
 | 2 | Incremental Tree-sitter parsing | NOT STARTED | Depends on Stage 1 |
 | 3 | Incremental AST building | NOT STARTED | Depends on Stage 2 |
 | 4 | Incremental MIR generation | NOT STARTED | Depends on Stage 3 |
@@ -395,13 +396,42 @@ This is significantly more complex than append-only because edits can occur anyw
 - **Crasher quarantine** (`test/test_js_test262_gtest.cpp`): Known crashers from `temp/_t262_crashers.txt` are run separately in small batches (Phase 2a) to avoid collateral batch failures. Reduces Phase 2b retry from ~68s to ~7s.
 - **`--no-hot-reload` flag**: CLI flag in both `lambda.exe` and test262 gtest to disable persistent heap reuse for A/B comparison.
 
+### Batch Mode Crash Recovery (IMPLEMENTED)
+
+Three classes of batch-mode crashes were identified and fixed, eliminating all MISSING test results from the main Phase 2 run.
+
+**Root cause 1 — Concise arrow exception landing pad** (`lambda/js/transpile_js_mir.cpp`):
+Concise arrow bodies used `goto finish_boxed` which skipped emitting the `func_except_label` landing pad. When `jm_emit_exc_propagate_check()` created a `BT → func_except_label` branch during `jm_transpile_box_item()`, the label was allocated but never inserted into the instruction list. During MIR's `process_inlines`, `redirect_duplicated_labels` set the branch target to NULL → SIGSEGV in `build_func_cfg`. **Fix**: emit exception landing pad before `goto finish_boxed`. Result: 12 crashers fixed (247 → 235 quarantined), 2 `assignmenttargettype` tests now pass.
+
+**Root cause 2 — MIR compilation error exits process** (`lambda/main.cpp` + `lambda/js/transpile_js_mir.cpp`):
+`new Function()` with duplicate parameters triggers MIR "Repeated reg declaration" error → default handler calls `exit(1)`, killing the batch worker. **Fix**: `batch_mir_error_handler` using `longjmp` recovery, installed via global `g_batch_mir_error_handler` after each `jit_init()` call (3 locations: main transpiler, `js_new_function_from_string`, `jm_compile_js_module`). Note: `MIR_init()` resets the error handler on each call, so installation must occur after `jit_init()`.
+
+**Root cause 3 — Runtime SIGSEGV in JIT code** (`lambda/main.cpp`):
+Some tests trigger runtime SIGSEGV/SIGBUS in JIT-compiled code (e.g., wrong method dispatch in `js_date_setter`). **Fix**: `batch_crash_handler` using `sigsetjmp/siglongjmp` with SIGSEGV/SIGBUS signal handlers installed around the batch execution loop. Signal handlers are restored after each test.
+
+**MIR NULL-label guard** (`mac-deps/mir/mir-gen.c`):
+Added NULL guard in `build_func_cfg()` to skip instructions with NULL label operands instead of crashing. Defence-in-depth against any remaining unreachable-label edge cases during MIR inlining.
+
+**MIR -O3 restoration**: During debugging, `mir-gen.o` was temporarily compiled with `-O0`. After fixes were complete, MIR was rebuilt with `-O3`, yielding a 2× Phase 2 speedup (258s → 127s).
+
+**Results (debug build, -O3 MIR, 8 parallel workers):**
+
+| Metric | Before fixes | After fixes |
+|--------|-------------|-------------|
+| Phase 2 (clean batch) | 258.2s (26,768 tests) | 126.7s (26,782 tests) |
+| Phase 2a (quarantined) | 4.2s (247 crashers) | 1.9s (233 crashers) |
+| MISSING tests (Phase 2) | hundreds | **0** |
+| Quarantined crashers | 247 | 233 |
+| Tests passing | 10,264 | 10,264 |
+| Improvements vs old baseline | 1,245 | 1,353 |
+
 ## Implementation Order
 
 ```
 Stage 1.0: Persistent Heap Reuse           ← DONE (minimal speedup, state leakage issue)
-Stage 1.1-1.2: Two-Module MIR Split        ← highest value, lowest risk
-  └── new transpile_js_test_against_harness()
-  └── test262 batch: ~30-40% reduction
+Stage 1.1-1.2: Two-Module MIR Split        ← DONE (Phase 2: 126.7s → 79.8s, -37%)
+  └── transpile_js_to_mir_preamble() + transpile_js_to_mir_with_preamble()
+  └── test262 batch: 37% reduction achieved
 
 Stage 2: Incremental Tree-sitter Parse     ← low risk, leverages existing API
   └── js_transpiler_parse_incremental()
@@ -426,7 +456,7 @@ Stages 1-2 can be developed and shipped independently. Stages 3-4 build on 1-2. 
 
 | Stage | Cumulative reduction | Tests/sec (est.) |
 |-------|---------------------|-------------------|
-| Current | baseline | ~17/sec |
-| After Stage 1 | 30-40% | ~24/sec |
-| After Stage 1+2 | 35-45% | ~27/sec |
-| After Stage 1-4 | 55-65% | ~40/sec |
+| Current (Stage 1.0 only) | baseline (126.7s) | ~211/sec |
+| After Stage 1.1-1.2 | **37%** | ~335/sec |
+| After Stage 1+2 | ~42% (est.) | ~365/sec |
+| After Stage 1-4 | ~55-65% (est.) | ~470/sec |

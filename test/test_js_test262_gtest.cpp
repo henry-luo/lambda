@@ -627,6 +627,41 @@ struct Test262Prepared {
 
 // Assemble combined source on-the-fly from metadata.
 // Reads test file from disk (OS-cached) and prepends harness files.
+// Assemble the harness source (sta.js + assert.js) — sent once per batch via harness: protocol
+static std::string assemble_harness_source() {
+    std::string harness;
+    harness.reserve(g_harness_sta.size() + g_harness_assert.size() + 4);
+    harness += g_harness_sta;
+    harness += '\n';
+    harness += g_harness_assert;
+    harness += '\n';
+    return harness;
+}
+
+// Assemble test source WITHOUT harness (for two-module split: harness sent separately)
+static std::string assemble_test_source(const Test262Prepared& p) {
+    std::string source = read_file_contents(p.test_path);
+    if (source.empty()) return "";
+
+    std::string combined;
+    combined.reserve(source.size() + 4096);
+
+    for (auto& inc : p.includes) {
+        const std::string& harness_src = get_harness_file(inc);
+        if (!harness_src.empty()) {
+            combined += harness_src;
+            combined += '\n';
+        }
+    }
+
+    if (p.is_strict) {
+        combined += "\"use strict\";\n";
+    }
+    combined += source;
+    return combined;
+}
+
+// Legacy: assemble combined source with harness included (for backward compatibility)
 static std::string assemble_combined_source(const Test262Prepared& p) {
     std::string source = read_file_contents(p.test_path);
     if (source.empty()) return "";
@@ -929,16 +964,24 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
                 if (i >= batches.size()) break;
 
-                // Write manifest for this sub-batch (assemble source on-the-fly)
+                // Write manifest for this sub-batch (two-module split: harness first, then tests)
                 FILE* mf = fopen(manifest_path, "wb");
                 if (!mf) continue;
+
+                // Send harness once per sub-batch via harness: protocol
+                std::string harness = assemble_harness_source();
+                fprintf(mf, "harness:%zu\n", harness.size());
+                fwrite(harness.data(), 1, harness.size(), mf);
+                fputc('\n', mf);
+
+                // Send each test WITHOUT harness (inherits from preamble)
                 for (size_t idx = batches[i].start; idx < batches[i].end; idx++) {
                     size_t pi = indices[idx];
                     const auto& p = prepared[pi];
-                    std::string combined = assemble_combined_source(p);
+                    std::string test_src = assemble_test_source(p);
                     fprintf(mf, "source:%s:%zu\n",
-                            p.test_name.c_str(), combined.size());
-                    fwrite(combined.data(), 1, combined.size(), mf);
+                            p.test_name.c_str(), test_src.size());
+                    fwrite(test_src.data(), 1, test_src.size(), mf);
                     fputc('\n', mf);
                 }
                 fclose(mf);

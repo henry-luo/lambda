@@ -2640,6 +2640,12 @@ int main(int argc, char *argv[]) {
             batch_context.type_list = arraylist_new(64);
         }
 
+        // Preamble state for two-module MIR split (harness compiled once per batch)
+        JsPreambleState preamble;
+        memset(&preamble, 0, sizeof(preamble));
+        bool has_preamble = false;
+        int preamble_var_checkpoint = 0;
+
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
             // trim trailing whitespace
@@ -2647,6 +2653,41 @@ int main(int argc, char *argv[]) {
             while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
                 line[--len] = '\0';
             if (len == 0) continue;
+
+            // Handle harness protocol: harness:<length>
+            // Compiles harness source once as preamble; function objects persist as module vars.
+            if (strncmp(line, "harness:", 8) == 0) {
+                size_t harness_len = (size_t)atol(line + 8);
+                if (harness_len == 0 || harness_len > 10 * 1024 * 1024) continue;
+                char* harness_src = (char*)malloc(harness_len + 1);
+                if (!harness_src) continue;
+                size_t total_read = 0;
+                while (total_read < harness_len) {
+                    size_t n = fread(harness_src + total_read, 1, harness_len - total_read, stdin);
+                    if (n == 0) break;
+                    total_read += n;
+                }
+                harness_src[total_read] = '\0';
+                int ch = fgetc(stdin);
+                if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
+
+                // Destroy any previous preamble state
+                if (has_preamble) {
+                    preamble_state_destroy(&preamble);
+                    has_preamble = false;
+                }
+
+                // Compile and execute harness as preamble
+                memset(&preamble, 0, sizeof(preamble));
+                Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
+                free(harness_src);
+
+                if (pres.item != ITEM_ERROR) {
+                    has_preamble = true;
+                    preamble_var_checkpoint = preamble.module_var_count;
+                }
+                continue;
+            }
 
             char* script_path = line;
             if (*script_path == '\0') continue;
@@ -2734,7 +2775,9 @@ int main(int argc, char *argv[]) {
                 if (setjmp(mir_error_jmp) == 0) {
                     if (setjmp(batch_timeout_jmp) == 0) {
                         alarm(batch_timeout);
-                        Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                        Item res = has_preamble
+                            ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
+                            : transpile_js_to_mir(&runtime, js_source, script_path);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -2760,7 +2803,9 @@ int main(int argc, char *argv[]) {
             } else {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
-                    Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                    Item res = has_preamble
+                        ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
+                        : transpile_js_to_mir(&runtime, js_source, script_path);
                     mir_error_active = 0;
                     batch_crash_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
@@ -2777,7 +2822,9 @@ int main(int argc, char *argv[]) {
             sigaction(SIGSEGV, &old_segv_sa, NULL);
             sigaction(SIGBUS, &old_bus_sa, NULL);
 #else
-            Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+            Item res = has_preamble
+                ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)
+                : transpile_js_to_mir(&runtime, js_source, script_path);
             if (res.item == ITEM_ERROR || js_check_exception()) {
                 result = 1;
             }
@@ -2804,6 +2851,15 @@ int main(int argc, char *argv[]) {
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
+                    // Crash destroyed heap — preamble function objects are gone.
+                    // Invalidate preamble so it gets re-sent by the next harness: line.
+                    if (has_preamble) {
+                        preamble_state_destroy(&preamble);
+                        has_preamble = false;
+                    }
+                } else if (has_preamble) {
+                    // Partial reset: preserve harness module vars, clear test state
+                    js_batch_reset_to(preamble_var_checkpoint);
                 } else {
                     js_batch_reset();
                 }
@@ -2813,6 +2869,12 @@ int main(int argc, char *argv[]) {
                 js_batch_reset();
                 runtime_reset_heap(&runtime);
             }
+        }
+
+        // Clean up preamble MIR context (must happen before heap teardown)
+        if (has_preamble) {
+            preamble_state_destroy(&preamble);
+            has_preamble = false;
         }
 
         // tear down persistent heap (hot reload mode only)
