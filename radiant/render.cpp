@@ -2255,6 +2255,11 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     float css_x = x;
     float css_y = y;
 
+    // Phase 19: save absolute CSS position for dirty-rect caret repaint
+    caret->prev_abs_x = css_x;
+    caret->prev_abs_y = css_y;
+    caret->prev_abs_height = caret->height;
+
     // Scale to physical pixels
     x *= s;  y *= s;
     float height = caret->height * s;

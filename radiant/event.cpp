@@ -2995,6 +2995,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
     }
 
+    // Phase 19: detect caret-only repaint — no DOM changes, no reflow, only caret moved
+    if (evcon.need_repaint && state && !state->needs_reflow
+        && !state->dirty_tracker.full_repaint && !dirty_has_regions(&state->dirty_tracker)
+        && state->caret && state->caret->view) {
+        // Populate dirty tracker with old + new caret regions for selective repaint
+        float caret_w = 5.0f;  // 3px caret + margin
+        if (state->caret->prev_abs_x >= 0) {
+            dirty_mark_rect(&state->dirty_tracker,
+                state->caret->prev_abs_x - 1, state->caret->prev_abs_y - 1,
+                caret_w + 2, state->caret->prev_abs_height + 2);
+        }
+        // Mark new caret region — use the caret view's parent element as dirty
+        View* caret_parent = state->caret->view->parent;
+        if (caret_parent) {
+            dirty_mark_element(state, caret_parent);
+        }
+        log_info("[TIMING] caret-only repaint detected, marking dirty for caret regions");
+    }
+
     if (evcon.need_repaint) {
         uicon->document->state->is_dirty = true;
         to_repaint();

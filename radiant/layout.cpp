@@ -2086,7 +2086,10 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT);
         log_debug("allocated view tree");
     }
-    view_pool_init(doc->view_tree);
+    // Phase 16: In incremental layout, keep existing view pool (preserves BoundaryProp etc.)
+    if (!doc->incremental_layout) {
+        view_pool_init(doc->view_tree);
+    }
     log_debug("initialized view pool");
     log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);

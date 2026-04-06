@@ -70,6 +70,73 @@ static struct hashmap* ensure_bitmap_cache(FontContext* ctx) {
 }
 
 // ============================================================================
+// Phase 17: LoadedGlyph cache for font_load_glyph
+// ============================================================================
+
+// forward declaration — defined later alongside font_load_glyph
+static LoadedGlyph s_loaded_glyph;
+
+static uint64_t loaded_glyph_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const LoadedGlyphCacheEntry* entry = (const LoadedGlyphCacheEntry*)item;
+    uint64_t data[2];
+    data[0] = (uint64_t)(uintptr_t)entry->caller_handle;
+    data[1] = ((uint64_t)entry->codepoint << 1) | (uint64_t)(entry->for_rendering ? 1 : 0);
+    return hashmap_xxhash3(data, sizeof(data), seed0, seed1);
+}
+
+static int loaded_glyph_cache_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const LoadedGlyphCacheEntry* ea = (const LoadedGlyphCacheEntry*)a;
+    const LoadedGlyphCacheEntry* eb = (const LoadedGlyphCacheEntry*)b;
+    if (ea->caller_handle != eb->caller_handle) return ea->caller_handle < eb->caller_handle ? -1 : 1;
+    if (ea->codepoint != eb->codepoint) return ea->codepoint < eb->codepoint ? -1 : 1;
+    if (ea->for_rendering != eb->for_rendering) return ea->for_rendering ? 1 : -1;
+    return 0;
+}
+
+static struct hashmap* ensure_loaded_glyph_cache(FontContext* ctx) {
+    if (!ctx->loaded_glyph_cache) {
+        int cap = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+        ctx->loaded_glyph_cache = hashmap_new(sizeof(LoadedGlyphCacheEntry), (size_t)cap, 0, 0,
+                                               loaded_glyph_cache_hash, loaded_glyph_cache_compare, NULL, NULL);
+    }
+    return ctx->loaded_glyph_cache;
+}
+
+// deep-copy the current s_loaded_glyph into the loaded glyph cache
+static void cache_loaded_glyph(FontContext* ctx, FontHandle* caller_handle,
+                                uint32_t codepoint, bool for_rendering) {
+    struct hashmap* cache = ensure_loaded_glyph_cache(ctx);
+    if (!cache) return;
+
+    // evict if full
+    int max_entries = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+    if ((int)hashmap_count(cache) >= max_entries) {
+        hashmap_clear(cache, false);
+    }
+
+    LoadedGlyphCacheEntry entry;
+    entry.caller_handle = caller_handle;
+    entry.codepoint = codepoint;
+    entry.for_rendering = for_rendering;
+    entry.glyph = s_loaded_glyph;
+
+    // deep-copy bitmap buffer into glyph_arena for persistence
+    if (s_loaded_glyph.bitmap.buffer && s_loaded_glyph.bitmap.height > 0) {
+        size_t buf_size = (size_t)(abs(s_loaded_glyph.bitmap.pitch) * s_loaded_glyph.bitmap.height);
+        if (buf_size > 0 && ctx->glyph_arena) {
+            uint8_t* copy = (uint8_t*)arena_alloc(ctx->glyph_arena, buf_size);
+            if (copy) {
+                memcpy(copy, s_loaded_glyph.bitmap.buffer, buf_size);
+                entry.glyph.bitmap.buffer = copy;
+            }
+        }
+    }
+
+    hashmap_set(cache, &entry);
+}
+
+// ============================================================================
 // Core: get glyph index for a codepoint
 // ============================================================================
 
@@ -295,9 +362,6 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
 // font_load_glyph — glyph loading with automatic codepoint fallback
 // ============================================================================
 
-// static storage for the loaded glyph (valid until next font_load_glyph call)
-static LoadedGlyph s_loaded_glyph;
-
 // fill the static LoadedGlyph from an FT_GlyphSlot
 // bitmap_scale: for fixed-size bitmap fonts (e.g. emoji at 109ppem scaled to 16px), <1.0
 static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot, float bitmap_scale) {
@@ -356,6 +420,23 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering) {
     if (!handle || !handle->ft_face) return NULL;
 
+    // Phase 17: check loaded glyph cache before FreeType loading
+    FontContext* ctx = handle->ctx;
+    if (ctx) {
+        struct hashmap* lgcache = ctx->loaded_glyph_cache;
+        if (lgcache) {
+            LoadedGlyphCacheEntry search;
+            search.caller_handle = handle;
+            search.codepoint = codepoint;
+            search.for_rendering = for_rendering;
+            LoadedGlyphCacheEntry* cached = (LoadedGlyphCacheEntry*)hashmap_get(lgcache, &search);
+            if (cached) {
+                s_loaded_glyph = cached->glyph;
+                return &s_loaded_glyph;
+            }
+        }
+    }
+
     // FT_LOAD_NO_HINTING matches browser closely
     // FT_LOAD_COLOR is required for color emoji fonts
     FT_Int32 load_flags = for_rendering
@@ -366,11 +447,12 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     LoadedGlyph* result = try_load_from_handle(handle, codepoint, load_flags);
     if (result) {
         fill_loaded_glyph_font_metrics(handle);
+        // Phase 17: cache the loaded glyph
+        if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
         return result;
     }
 
     // step 2: try codepoint fallback via FontContext
-    FontContext* ctx = handle->ctx;
     if (!ctx || !style) return NULL;
 
     FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
@@ -379,6 +461,8 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         if (result) {
             // populate metrics from the fallback font, not the primary
             fill_loaded_glyph_font_metrics(fallback);
+            // Phase 17: cache with caller's handle so subsequent lookups hit
+            cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
         }
         font_handle_release(fallback); // release the ref from font_find_codepoint_fallback
         if (result) return result;

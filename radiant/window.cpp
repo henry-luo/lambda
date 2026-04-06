@@ -468,6 +468,8 @@ void render(GLFWwindow* window) {
         (ui_context.document->state->is_dirty || ui_context.document->state->needs_repaint)) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
         ui_context.document->state->needs_repaint = false;
+        // Phase 19: clear dirty tracker after render (for caret-only repaints)
+        dirty_clear(&ui_context.document->state->dirty_tracker);
     }
 
     // repaint to screen

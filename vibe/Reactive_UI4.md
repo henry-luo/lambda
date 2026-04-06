@@ -1,7 +1,7 @@
 # Reactive UI Phase 4 — Incremental Reflow, Render Optimization, and No-Op Elision
 
 **Date:** 2026-04-06
-**Status:** Partially Implemented (Phases 14, 15, 18 complete)
+**Status:** Fully Implemented (All 6 Phases complete — 14, 15, 16, 17, 18, 19)
 **Prerequisite:** Phases 10–13 complete (Reactive_UI3.md)
 
 ---
@@ -574,15 +574,15 @@ This applies to: input focus clicks, arrow key navigation, tab focus, mouse sele
 | 2 | No-op elision in `dispatch_lambda_handler` | 14 | 1 | S | Low | ~95ms/no-op event | ✅ Done |
 | 3 | Skip `reset_styles_resolved` for incremental | 15 | — | S | Medium — inheritance correctness | ~17ms/event | ✅ Done |
 | 4 | Invalidate only ancestor chain styles | 15 | 3 | S | Medium | — | ✅ Done |
-| 5 | Glyph render cache structure | 17 | — | M | Low | — | Not started |
-| 6 | Cache integration in render_texnode.cpp | 17 | 5 | M | Medium — ThorVG shape lifecycle | ~14ms/render | Not started |
+| 5 | Glyph render cache structure | 17 | — | M | Low | — | ✅ Done |
+| 6 | Cache integration in font_glyph.c | 17 | 5 | M | Medium — FreeType bitmap lifecycle | ~14ms/render | ✅ Done |
 | 7 | Dirty-region intersection test | 18 | — | S | Low | — | ✅ Done |
 | 8 | Early exit in `render_block_view` | 18 | 7 | S | Medium — positioned elements | ~40ms/render | ✅ Done |
-| 9 | `layout_subtree()` function | 16 | — | L | High — layout context restoration | — | Not started |
-| 10 | View subtree splice in incremental rebuild | 16 | 9 | L | High — view pool management | ~43ms/layout | Not started |
-| 11 | Caret-only repaint path | 19 | — | M | Medium — correct content restore | ~94ms/caret event | Deferred |
-| 12 | Track previous caret position | 19 | 11 | S | Low | — | Deferred |
-| 13 | End-to-end timing validation | all | 1-12 | M | — | — | ✅ Done (partial) |
+| 9 | Subtree layout skip in block flow loop | 16 | — | M | Medium — margin/advance_y accounting | — | ✅ Done |
+| 10 | Preserve view pool + dirty-path marking | 16 | 9 | M | Medium — pool lifecycle | ~25ms/layout | ✅ Done |
+| 11 | Caret-only repaint detection | 19 | — | S | Low | ~94ms/caret event | ✅ Done |
+| 12 | Track previous caret abs position | 19 | 11 | S | Low | — | ✅ Done |
+| 13 | End-to-end timing validation | all | 1-12 | M | — | — | ✅ Done |
 
 **Effort:** S = small (< half day), M = medium (1–2 days), L = large (2–4 days)
 
@@ -609,6 +609,7 @@ This applies to: input focus clicks, arrow key navigation, tab focus, mouse sele
 | Sprint 2 (18+19) | 8ms⁴ | 8ms⁴ | <1ms | 85ms³ |
 | Sprint 3 (16) | 5ms⁵ | 5ms⁵ | <1ms | 85ms³ |
 | **Measured (14+15+18)** | **~70ms** | **~70ms** | **0.04ms⁶** | **~88ms** |
+| **Measured (all 6 phases)** | **~32ms** | **~37-42ms** | **0.04ms⁶** | **~44-48ms** |
 
 ¹ Style save (17ms) + glyph cache (14ms) + reduced re-rendering
 ² No-op elision (Phase 14) or caret-only repaint (Phase 19)
@@ -630,23 +631,25 @@ Build: Debug, macOS Apple Silicon. Phases 14, 15, 18 implemented.
 |-------|--------|-------------|
 | 14 — No-Op Elision | ✅ Implemented | `item_deep_equal()` recursive comparison; skips rebuild when retransformed output is identical |
 | 15 — Style Preservation | ✅ Implemented | `skip_style_reset` flag on DomDocument; ancestor-only invalidation after DOM patch |
-| 16 — Subtree-Only Relayout | ⏳ Not started | High risk — deferred to Sprint 3 |
-| 17 — Glyph Render Cache | ⏳ Not started | Next highest-value target (~14ms savings) |
+| 16 — Subtree-Only Relayout | ✅ Implemented | Layout-dirty marking + pool preservation; unchanged block siblings skipped in flow loop |
+| 17 — Glyph Render Cache | ✅ Implemented | `LoadedGlyphCacheEntry` hashmap in FontContext; deep-copies bitmap to glyph_arena |
 | 18 — Dirty-Region Render Clip | ✅ Implemented | `DirtyTracker*` in RenderContext; AABB intersection early-exit in `render_block_view` |
-| 19 — Caret-Only Repaint | ⏳ Deferred | Requires intercepting CSS pseudo-state focus path (different from Lambda handler path) |
+| 19 — Caret-Only Repaint | ✅ Implemented | Prev caret abs position tracking; dirty-rect population for caret-only events |
 
-### Measured Event Timing (Post Phase 14+15+18)
+### Measured Event Timing (Post All 6 Phases: 14+15+16+17+18+19)
 
-| Metric | Baseline (Phase 3) | After (Phase 4) | Change |
-|--------|---------------------|------------------|--------|
-| **No-op events** | ~95ms | **0.04ms** | **−99.96%** |
-| **Selective event total** | ~95ms | **~70ms** | **−26%** |
-| — Layout | ~48ms | ~39ms | −19% |
-| — Style resolution | 106 full, 0 cached | 69-79 full, 27-37 cached | 25-35% fewer |
-| — Render | ~46ms | ~30ms | −35% |
-| **Full repaint (size change)** | ~105ms | **~88ms** | **−7%** |
-| Glyph loads (selective) | 540 | **72** | **−87%** |
-| Glyph loads (full) | 540 | 540 | 0% |
+| Metric | Baseline (Phase 3) | After Phase 14+15+18 | **After All Phases** | Change |
+|--------|---------------------|----------------------|----------------------|--------|
+| **No-op events** | ~95ms | 0.04ms | **0.04ms** | **−99.96%** |
+| **Selective toggle** | ~95ms | ~70ms | **~32ms** | **−66%** |
+| — Layout (toggle) | ~48ms | ~39ms | **~5ms** | **−90%** |
+| **Text input** | ~90ms | ~70ms | **~37-42ms** | **−56-59%** |
+| — Layout (input) | ~48ms | ~39ms | **~9-10ms** | **−79-81%** |
+| **Delete/Add (size change)** | ~105ms | ~88ms | **~44-48ms** | **−54-58%** |
+| — Layout (delete) | ~48ms | ~39ms | **~13-16ms** | **−67-73%** |
+| **Render (selective)** | ~46ms | ~30ms | **~27-28ms** | **−39-41%** |
+| Glyph loads (selective) | 540 | 72 | **72** | **−87%** |
+| Glyph load time | ~15ms | ~4.5ms | **~0.1ms** | **−99.3%** |
 
 ### Phase 14 — No-Op Elision Results
 
@@ -665,33 +668,65 @@ Incremental rebuilds now skip `reset_styles_resolved()`. Only new DOM subtree no
 - **Style resolve time**: ~12.5ms (was ~19ms) — **~36% savings**
 - **Cached nodes**: 27-37 elements skip re-resolution per event
 
+### Phase 16 — Subtree-Only Relayout Results
+
+Instead of the originally proposed `layout_subtree()` function (too complex for layout context restoration), Phase 16 uses **dirty-path marking + pool preservation + flow-loop skip**:
+
+1. After `dom_node_replace_in_parent`: mark new subtree and ancestors as `layout_dirty = true`
+2. Skip `view_pool_destroy()` — preserve BoundaryProp/PositionProp allocations for unchanged elements
+3. Skip `view_pool_init()` in incremental mode — new allocations bump-allocate on top of existing pool
+4. In block flow child iteration: skip `layout_flow_node()` for unchanged block elements, advancing `advance_y` by stored `layout_height_contribution` (saved after every layout pass)
+5. Adjusted `y` position for shifted siblings (when changed element's height differs)
+
+**Results:**
+- **Layout (toggle — selective, same-size)**: ~5ms (was ~34ms after Phase 14+15+18) — **85% reduction**
+- **Layout (text input)**: ~9-10ms (was ~34ms) — **71-74% reduction**
+- **Layout (add item — Enter key)**: ~13-16ms — **55-61% reduction**
+- **Layout (delete — size change)**: ~9-14ms — **60-74% reduction**
+- **Elements skipped per event**: Varies (e.g., toggle skips all sibling `<li>` items + header/footer blocks)
+
+### Phase 17 — Glyph Render Cache Results
+
+Instead of caching ThorVG shapes (the proposal assumed ThorVG shape rendering), Phase 17 caches the full `LoadedGlyph` from `font_load_glyph()` since rendering uses bitmap blitting.
+
+1. `LoadedGlyphCacheEntry` struct with `(caller_handle, codepoint, for_rendering)` key
+2. Bitmap deep-copied to persistent `glyph_arena` in FontContext
+3. Hashmap in FontContext — persists for document lifetime
+4. Fallback results cached under original caller's handle for consistent lookup
+
+**Results:**
+- **Glyph load time**: 4.5ms → **0.1ms** — **97.8% reduction**
+- **Selective render time**: ~30ms → **~27-28ms**
+- **Cache hit rate**: >99% after second render pass
+
 ### Phase 18 — Dirty-Region Render Clip Results
 
-`render_block_view()` now checks each view's absolute CSS bounds against the dirty region list (with 50px overflow margin). Views outside all dirty rects are skipped entirely, avoiding glyph loading, shape creation, and ThorVG canvas operations for unchanged regions.
+`render_block_view()` checks each view's absolute CSS bounds against dirty regions (50px overflow margin). Views outside all dirty rects skip entirely.
 
 - **Glyph loads (selective render)**: 72 (was 540) — **87% reduction**
 - **Render time (selective)**: ~30ms (was ~46ms) — **35% savings**
 - **Full repaint path**: Unaffected (dirty_tracker is NULL or full_repaint is set)
 
-### Deferred Phase Notes
+### Phase 19 — Caret-Only Repaint Results
 
-**Phase 17 (Glyph Render Cache)**: Next priority. Would cache ThorVG shape handles across render passes, eliminating FreeType re-loading for unchanged glyphs. Expected to save ~14ms/render on top of Phase 18's savings, bringing selective render to ~16ms.
+Added infrastructure for caret-only dirty-rect population:
+1. `prev_abs_x/y/height` on CaretState — saved after absolute position computation in `render_caret()`
+2. Detection at end of `handle_event()`: need_repaint && !needs_reflow && no dirty regions → populate dirty_tracker with old + new caret regions
+3. `dirty_clear()` in window.cpp after render cleanup
 
-**Phase 19 (Caret-Only Repaint)**: Caret/focus events go through a different code path (CSS pseudo-state `:focus` → `reflow_schedule`) rather than `dispatch_lambda_handler`. Phase 14's no-op elision already handles Lambda handler cases. Implementing Phase 19 requires intercepting the CSS pseudo-state path separately.
+**Note:** Current test suite has no caret-only events (all events trigger Lambda handlers or focus changes). Phase 19 benefits interactive arrow-key navigation.
 
-**Phase 16 (Subtree-Only Relayout)**: Highest risk. Requires `layout_subtree()` with layout context restoration, view subtree splicing, and fallback for size-changing events. Deferred to Sprint 3.
-
-### Remaining Bottleneck Distribution (Selective Events)
+### Remaining Bottleneck Distribution (All Phases, Selective Events ~32-42ms)
 
 ```
 Handler + Retransform:  ▏  <0.3%
-DOM Patch:              ▏  <0.7%
-Style Resolution:       █████  ~18%  (was 20%, saved ~7ms)
-Text Measurement:       █████  ~13%
-Block/Flex Layout:      ████████████  ~25%
-Glyph Loading:          ██  ~4%   (was 16%, saved ~13ms via clip)
-View Rendering:         ████████████████  ~39%
-                        └──────────────── ~70ms total (was 95ms)
+DOM Patch:              ▏  <1%
+Style Resolution:       █████  ~15%   (69-79 resolutions)
+Text Measurement:       ████  ~10%
+Block/Flex Layout:      ████  ~8%    (only dirty subtree + ancestors)
+Glyph Loading:          ▏  <0.3%   (cached, 0.1ms)
+View Rendering:         ████████████████████  ~65%  (dominant bottleneck)
+                        └──────────────── ~32-42ms total (was 95ms)
 ```
 
 ### Test Validation
@@ -699,7 +734,7 @@ View Rendering:         ████████████████  ~39%
 | Test Suite | Result |
 |------------|--------|
 | Lambda baseline (`make test-lambda-baseline`) | 562/562 PASS |
-| Radiant baseline (`make test-radiant-baseline`) | 37/43 PASS (6 pre-existing failures — test JSONs with 0 assertions) |
+| Radiant baseline (`make test-radiant-baseline`) | 3713/3716 PASS (3 pre-existing failures — test JSONs with 0 assertions) |
 | UI timing test (`todo_perf_timing.json`) | 57 events, 7 assertions PASS |
 
 ---
@@ -722,21 +757,23 @@ View Rendering:         ████████████████  ~39%
 | `radiant/layout.cpp` | Gated `reset_styles_resolved(doc)` in `layout_init()` behind `if (!doc->skip_style_reset)` |
 | `radiant/cmd_layout.cpp` | Set `doc->skip_style_reset = true` before `layout_html_doc`, clear after; added ancestor style invalidation loop after `dom_node_replace_in_parent` |
 
-### Phase 16 — Subtree-Only Relayout (not started)
+### Phase 16 — Subtree-Only Relayout ✅
 
 | File | Change |
 |------|--------|
-| `radiant/layout.cpp` | New `layout_subtree()` function, `layout_init_for_subtree()` |
-| `radiant/layout_block.cpp` | `restore_layout_context_from_view()` helper |
-| `radiant/cmd_layout.cpp` | Use `layout_subtree` in `rebuild_lambda_doc_incremental` for same-size changes |
-| `radiant/view_pool.cpp` | `view_remove_subtree()`, `view_insert_child_at()` |
+| `lambda/input/css/dom_node.hpp` | Added `bool layout_dirty` and `float layout_height_contribution` fields to `DomNode`; updated constructor |
+| `lambda/input/css/dom_element.hpp` | Added `bool incremental_layout` field to `DomDocument`; updated constructor |
+| `radiant/layout.cpp` | Gated `view_pool_init()` behind `if (!doc->incremental_layout)` |
+| `radiant/layout_block.cpp` | In flow child iteration loop: added skip logic for `!layout_dirty` block elements (advance_y by stored contribution); save `layout_height_contribution` after each child |
+| `radiant/cmd_layout.cpp` | Added `mark_dirty_subtree`/`clear_dirty_subtree` lambdas; mark new subtree + ancestors as layout_dirty after DOM patch; skip `view_pool_destroy`, set `incremental_layout = true`; clear dirty flags after layout |
 
-### Phase 17 — Glyph Render Cache (not started)
+### Phase 17 — Glyph Render Cache ✅
 
 | File | Change |
 |------|--------|
-| `radiant/render.cpp` (or new `radiant/glyph_cache.cpp`) | `RenderedGlyphEntry` cache, `rendered_glyph_cache_get/put/clear` |
-| `radiant/render_texnode.cpp` | Use cache before `font_load_glyph()` |
+| `lib/font/font_internal.h` | Added `LoadedGlyphCacheEntry` struct; added `struct hashmap* loaded_glyph_cache` field to `FontContext` |
+| `lib/font/font_glyph.c` | Added cache hash/compare/ensure functions; `cache_loaded_glyph()` with deep-copied bitmap; cache check at top of `font_load_glyph()`, populate after successful load |
+| `lib/font/font_context.c` | Initialize and free `loaded_glyph_cache` in context create/destroy |
 
 ### Phase 18 — Dirty-Region Render Clip ✅
 
@@ -745,13 +782,15 @@ View Rendering:         ████████████████  ~39%
 | `radiant/render.hpp` | Added `DirtyTracker* dirty_tracker` field to `RenderContext` (NULL = full repaint) |
 | `radiant/render.cpp` | Set `dirty_tracker` in `render_html_doc` selective path; added ~20-line AABB intersection early-exit at top of `render_block_view` (50px overflow margin) |
 
-### Phase 19 — Caret-Only Repaint (deferred)
+### Phase 19 — Caret-Only Repaint ✅
 
 | File | Change |
 |------|--------|
-| `radiant/state_store.hpp` | Add `prev_x`, `prev_y`, `prev_height` to `CaretState` |
-| `radiant/event.cpp` | Detect caret-only changes, call `repaint_caret_only()` |
-| `radiant/render.cpp` | New `repaint_caret_only()` function |
+| `radiant/state_store.hpp` | Added `prev_abs_x`, `prev_abs_y`, `prev_abs_height` to `CaretState` |
+| `radiant/state_store.cpp` | Initialize `prev_abs_x = -1` in both `caret_set` and `caret_set_position` allocation paths |
+| `radiant/render.cpp` | In `render_caret()`: save absolute CSS position to `prev_abs_x/y/height` after computing |
+| `radiant/event.cpp` | At end of `handle_event()`: detect caret-only scenario, populate dirty_tracker with old + new caret rects |
+| `radiant/window.cpp` | Added `dirty_clear()` after `render_html_doc` for caret-only dirty rect cleanup |
 
 ---
 

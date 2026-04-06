@@ -116,6 +116,10 @@ typedef struct CaretState {
     float iframe_offset_y;         // iframe y offset if caret is inside an iframe
     bool visible;                  // caret visibility (for blinking)
     uint64_t blink_time;           // timestamp for blink cycle
+    // Phase 19: previous rendered absolute CSS position for dirty-rect caret repaint
+    float prev_abs_x;             // -1 = not yet rendered
+    float prev_abs_y;
+    float prev_abs_height;
 } CaretState;
 
 /**

@@ -106,6 +106,9 @@ struct DomDocument {
     // Phase 15: Skip blanket styles_resolved reset during incremental layout
     bool skip_style_reset;
 
+    // Phase 16: Incremental layout mode — skip pool recreate, skip clean subtrees
+    bool incremental_layout;
+
     // Constructor
     DomDocument() : input(nullptr), pool(nullptr), arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -120,7 +123,8 @@ struct DomDocument {
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
                     cached_css_engine(nullptr),
                     element_dom_map(nullptr),
-                    skip_style_reset(false) {}
+                    skip_style_reset(false),
+                    incremental_layout(false) {}
 };
 
 typedef struct {
