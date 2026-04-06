@@ -763,7 +763,8 @@ Bool fn_is(Item a, Item b) {
     TypeId a_type_id = get_type_id(a);
 
     // Check if inner type is TypeUnary (occurrence operator: ?, +, *, [n], [n+], [n,m])
-    if (type_b->type->kind == TYPE_KIND_UNARY) {
+    // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
+    if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_UNARY) {
         TypeUnary* type_unary = (TypeUnary*)type_b->type;
         // Use full type validation for occurrence types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
@@ -775,7 +776,8 @@ Bool fn_is(Item a, Item b) {
     }
 
     // Check if inner type is TypeBinary (union/intersection: |, &, \)
-    if (type_b->type->kind == TYPE_KIND_BINARY) {
+    // Must not match NUM_SIZED types where kind is a NumSizedType, not TypeKind
+    if (type_b->type->type_id != LMD_TYPE_NUM_SIZED && type_b->type->kind == TYPE_KIND_BINARY) {
         TypeBinary* type_binary = (TypeBinary*)type_b->type;
         // Use full type validation for union/intersection types
         ValidationResult* result = schema_validator_validate_type(context->validator, a.to_const(), type_b->type);
@@ -790,7 +792,19 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_ANY:
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_NUMBER:
+        // also match NUM_SIZED integer sub-types and UINT64 as numeric
+        if (a_type_id == LMD_TYPE_NUM_SIZED || a_type_id == LMD_TYPE_UINT64) return BOOL_TRUE;
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
+    case LMD_TYPE_NUM_SIZED: {
+        // specific sized numeric type check (e.g., `x is i8`)
+        if (a_type_id != LMD_TYPE_NUM_SIZED) return BOOL_FALSE;
+        // check the sub-type: type_b->type->kind stores the NumSizedType
+        NumSizedType expected = (NumSizedType)type_b->type->kind;
+        NumSizedType actual = a.get_num_type();
+        return (actual == expected) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    case LMD_TYPE_UINT64:
+        return (a_type_id == LMD_TYPE_UINT64) ? BOOL_TRUE : BOOL_FALSE;
     case LMD_TYPE_DTIME:
         if (a_type_id != LMD_TYPE_DTIME) return BOOL_FALSE;
         // sub-type checks: date and time are sub-types of datetime
@@ -1111,9 +1125,8 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
             TypeType* tt = (TypeType*)type_item.type;
             return (tt->type->type_id == get_type_id(value_item)) ? BOOL_TRUE : BOOL_FALSE;
         }
-        // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
+        // number promotion - only for numeric types (int/int64/float/decimal/num_sized/uint64)
+        if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1150,6 +1163,12 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
         return (a_item.get_double() == b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_NUM_SIZED) {
+        return (a_item.get_num_sized_as_double() == b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_UINT64) {
+        return (a_item.get_uint64() == b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
         int cmp = decimal_cmp_items(a_item, b_item);
@@ -1299,9 +1318,8 @@ Bool fn_lt(Item a_item, Item b_item) {
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
             return BOOL_FALSE;
         }
-        // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
+        // number promotion - only for numeric types
+        if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1323,6 +1341,12 @@ Bool fn_lt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
         return (a_item.get_double() < b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_NUM_SIZED) {
+        return (a_item.get_num_sized_as_double() < b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_UINT64) {
+        return (a_item.get_uint64() < b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
         int cmp = decimal_cmp_items(a_item, b_item);
@@ -1349,9 +1373,8 @@ Bool fn_gt(Item a_item, Item b_item) {
         if (a_item._type_id == LMD_TYPE_NULL || b_item._type_id == LMD_TYPE_NULL) {
             return BOOL_FALSE;
         }
-        // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item._type_id && a_item._type_id <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= b_item._type_id && b_item._type_id <= LMD_TYPE_NUMBER) {
+        // number promotion - only for numeric types
+        if (IS_NUMERIC_ID(a_item._type_id) && IS_NUMERIC_ID(b_item._type_id)) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
@@ -1373,6 +1396,12 @@ Bool fn_gt(Item a_item, Item b_item) {
     }
     else if (a_item._type_id == LMD_TYPE_FLOAT) {
         return (a_item.get_double() > b_item.get_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_NUM_SIZED) {
+        return (a_item.get_num_sized_as_double() > b_item.get_num_sized_as_double()) ? BOOL_TRUE : BOOL_FALSE;
+    }
+    else if (a_item._type_id == LMD_TYPE_UINT64) {
+        return (a_item.get_uint64() > b_item.get_uint64()) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item._type_id == LMD_TYPE_DECIMAL) {
         int cmp = decimal_cmp_items(a_item, b_item);
@@ -1902,6 +1931,23 @@ String* fn_string(Item itm) {
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
+    case LMD_TYPE_NUM_SIZED: {
+        char buf[32];
+        NumSizedType st = itm.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            snprintf(buf, sizeof(buf), "%g", itm.get_num_sized_as_double());
+        } else {
+            snprintf(buf, sizeof(buf), "%" PRId64, itm.get_num_sized_as_int64());
+        }
+        int len = strlen(buf);
+        return heap_strcpy(buf, len);
+    }
+    case LMD_TYPE_UINT64: {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%" PRIu64, itm.get_uint64());
+        int len = strlen(buf);
+        return heap_strcpy(buf, len);
+    }
     case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_OBJECT: {
@@ -1924,7 +1970,12 @@ String* fn_string(Item itm) {
         // convert Type value to its name string, e.g. type(123) → "int"
         TypeType* type_type = (TypeType*)itm.type;
         if (!type_type || !type_type->type) return &STR_NULL;
-        const char* name = get_type_name(type_type->type->type_id);
+        const char* name;
+        if (type_type->type->type_id == LMD_TYPE_NUM_SIZED) {
+            name = get_num_sized_type_name((NumSizedType)type_type->type->kind);
+        } else {
+            name = get_type_name(type_type->type->type_id);
+        }
         if (name) return heap_strcpy((char*)name, strlen(name));
         return &STR_NULL;
     }
@@ -2008,6 +2059,9 @@ Type* fn_type(Item item) {
         item_type->type_id = LMD_TYPE_ARRAY;
     } else if (tid == LMD_TYPE_VMAP) {
         item_type->type_id = LMD_TYPE_MAP;
+    } else if (tid == LMD_TYPE_NUM_SIZED) {
+        // preserve the sub-type in the kind field for sized numerics
+        item_type->kind = item.get_num_type();
     }
     return (Type*)type;
 }

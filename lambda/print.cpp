@@ -85,6 +85,12 @@ void write_type(StrBuf* code_buf, Type *type) {
     case LMD_TYPE_FLOAT:
         strbuf_append_str(code_buf, "double");
         break;
+    case LMD_TYPE_NUM_SIZED:
+        strbuf_append_str(code_buf, "uint64_t");
+        break;
+    case LMD_TYPE_UINT64:
+        strbuf_append_str(code_buf, "uint64_t");
+        break;
     case LMD_TYPE_DTIME:
         strbuf_append_str(code_buf, "DateTime");
         break;
@@ -286,6 +292,19 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             case LMD_TYPE_FLOAT:
                 print_double(strbuf, *(double*)data);
                 break;
+            case LMD_TYPE_NUM_SIZED: {
+                Item it = {.item = *(uint64_t*)data};
+                NumSizedType st = it.get_num_type();
+                if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+                    print_double(strbuf, it.get_num_sized_as_double());
+                } else {
+                    strbuf_append_format(strbuf, "%" PRId64, it.get_num_sized_as_int64());
+                }
+                break;
+            }
+            case LMD_TYPE_UINT64:
+                strbuf_append_format(strbuf, "%" PRIu64, *(uint64_t*)data);
+                break;
             case LMD_TYPE_DTIME: {
                 DateTime dt = *(DateTime*)data;
                 strbuf_append_str(strbuf, "t'");
@@ -375,6 +394,20 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
     case LMD_TYPE_FLOAT:
         print_double(strbuf, titem->double_val);
         break;
+    case LMD_TYPE_NUM_SIZED: {
+        Item it = {.item = titem->item};
+        NumSizedType st = it.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            print_double(strbuf, it.get_num_sized_as_double());
+        } else {
+            strbuf_append_format(strbuf, "%" PRId64, it.get_num_sized_as_int64());
+        }
+        strbuf_append_str(strbuf, get_num_sized_type_name(st));
+        break;
+    }
+    case LMD_TYPE_UINT64:
+        strbuf_append_format(strbuf, "%" PRIu64, (uint64_t)titem->long_val);
+        break;
     case LMD_TYPE_DTIME: {
         DateTime dt = titem->datetime_val;
         strbuf_append_str(strbuf, "t'");
@@ -456,6 +489,20 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_FLOAT: {
         double num = item.get_double();
         print_double(strbuf, num);
+        break;
+    }
+    case LMD_TYPE_NUM_SIZED: {
+        NumSizedType st = item.get_num_type();
+        if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
+            print_double(strbuf, item.get_num_sized_as_double());
+        } else {
+            strbuf_append_format(strbuf, "%" PRId64, item.get_num_sized_as_int64());
+        }
+        break;
+    }
+    case LMD_TYPE_UINT64: {
+        uint64_t val = item.get_uint64();
+        strbuf_append_format(strbuf, "%" PRIu64, val);
         break;
     }
     case LMD_TYPE_DECIMAL: {
@@ -651,6 +698,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_TYPE: {
         TypeType *type = (TypeType*)item.type;
+        if (type->type->type_id == LMD_TYPE_NUM_SIZED) {
+            // print specific sub-type name (i8, i16, f32, etc.)
+            strbuf_append_str(strbuf, get_num_sized_type_name((NumSizedType)type->type->kind));
+            break;
+        }
         // Check if inner type is a TypeBinary (union/intersection)
         if (type->type->kind == TYPE_KIND_BINARY) {
             strbuf_append_str(strbuf, "type");  // union types print as "type"
@@ -758,6 +810,10 @@ char* format_type(Type *type) {
         return "int64";
     case LMD_TYPE_FLOAT:
         return "float";
+    case LMD_TYPE_NUM_SIZED:
+        return "num_sized";
+    case LMD_TYPE_UINT64:
+        return "uint64";
     case LMD_TYPE_DECIMAL:
         return "decimal";
     case LMD_TYPE_NUMBER:
@@ -815,7 +871,8 @@ void print_label(int indent, const char *label) {
 
 void print_const(Script *script, Type* type) {
     char* type_name = type_info[type->type_id].name;
-    if (type->type_id == LMD_TYPE_NULL || type->type_id == LMD_TYPE_BOOL || type->type_id == LMD_TYPE_INT) {
+    if (type->type_id == LMD_TYPE_NULL || type->type_id == LMD_TYPE_BOOL || type->type_id == LMD_TYPE_INT
+        || type->type_id == LMD_TYPE_NUM_SIZED) {
         log_debug("[const: %s]", type_name);  return;
     }
     TypeConst *const_type = (TypeConst*)type;
@@ -829,6 +886,11 @@ void print_const(Script *script, Type* type) {
     case LMD_TYPE_INT64: {
         int64_t num = *(int64_t*)data;
         log_debug("[const@%d, %s, %" PRId64 "]", const_type->const_index, type_name, num);
+        break;
+    }
+    case LMD_TYPE_UINT64: {
+        uint64_t num = *(uint64_t*)data;
+        log_debug("[const@%d, %s, %" PRIu64 "]", const_type->const_index, type_name, num);
         break;
     }
     case LMD_TYPE_DTIME: {

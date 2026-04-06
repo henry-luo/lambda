@@ -16,10 +16,10 @@ let i = 4
 "6. 10 * 2.5:"; (10 * 2.5)
 
 // 3. Int64 × Float multiplication (using smaller values to avoid overflow)
-let i64 = 10000000  // int64 but small enough
+let i64v = 10000000  // int64 but small enough
 let f2 = 1.5
-"7. int64 * float:"; (i64 * f2)
-"8. float * int64:"; (f2 * i64)
+"7. int64 * float:"; (i64v * f2)
+"8. float * int64:"; (f2 * i64v)
 
 // 4. Int × Int64 multiplication  
 let small = 100
