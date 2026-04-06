@@ -360,6 +360,13 @@ int js_check_exception(void);
 Item js_clear_exception(void);
 
 /**
+ * Get the pre-captured exception message string.
+ * Captured at throw time while context is still alive.
+ * Returns empty string if no exception message available.
+ */
+const char* js_get_exception_message(void);
+
+/**
  * Create a new Error object with a message.
  * Returns a Map with {name: "Error", message: msg, stack: trace}.
  */

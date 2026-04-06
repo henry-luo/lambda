@@ -2149,9 +2149,11 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
     // use hasOwnProperty to correctly detect presence of "value" key
     Item has_value = js_in(value_key, descriptor);
     bool is_accessor = false;
+    log_info("defineProperty: has_value=%d desc_type=%d", it2b(has_value), get_type_id(descriptor));
     if (it2b(has_value)) {
         // data property descriptor: set value directly
         Item value = js_property_get(descriptor, value_key);
+        log_info("defineProperty: data descriptor value type=%d", get_type_id(value));
         js_property_set(obj, name, value);
         // v18m: when converting accessor→data, remove accessor markers
         Item name_str_conv = js_to_string(name);
@@ -2179,11 +2181,14 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             char key_buf[256];
             Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
             Item getter = js_property_get(descriptor, get_key);
+            log_debug("defineProperty accessor: prop='%.*s' getter type=%d (FUNC=%d)",
+                      (int)ns->len, ns->chars, get_type_id(getter), LMD_TYPE_FUNC);
             if (get_type_id(getter) == LMD_TYPE_FUNC) {
                 is_accessor = true;
                 snprintf(key_buf, sizeof(key_buf), "__get_%.*s", (int)ns->len, ns->chars);
                 Item gk = (Item){.item = s2it(heap_create_name(key_buf, strlen(key_buf)))};
                 js_property_set(obj, gk, getter);
+                log_debug("defineProperty: stored __get_%.*s", (int)ns->len, ns->chars);
             }
             Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
             Item setter = js_property_get(descriptor, set_key);

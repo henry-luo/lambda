@@ -168,11 +168,41 @@ extern "C" void js_reset_module_vars() {
 
 static bool js_exception_pending = false;
 static Item js_exception_value = {0};
+static char js_exception_msg_buf[1024] = {0};
 
 extern "C" void js_throw_value(Item value) {
     js_exception_pending = true;
     js_exception_value = value;
     log_debug("js: throw_value called, exception pending");
+    // Capture exception message into static buffer while context is alive
+    js_exception_msg_buf[0] = '\0';
+    if (get_type_id(value) == LMD_TYPE_MAP) {
+        Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+        Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
+        Item name_val = js_property_get(value, name_key);
+        Item msg_val = js_property_get(value, msg_key);
+        const char* nstr = "Error"; int nlen = 5;
+        if (get_type_id(name_val) == LMD_TYPE_STRING) {
+            String* ns = it2s(name_val);
+            nstr = ns->chars; nlen = ns->len;
+        }
+        if (get_type_id(msg_val) == LMD_TYPE_STRING) {
+            String* ms = it2s(msg_val);
+            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+                     "%.*s: %.*s", nlen, nstr, ms->len, ms->chars);
+        } else {
+            snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+                     "%.*s", nlen, nstr);
+        }
+    } else if (get_type_id(value) == LMD_TYPE_STRING) {
+        String* s = it2s(value);
+        snprintf(js_exception_msg_buf, sizeof(js_exception_msg_buf),
+                 "%.*s", s->len, s->chars);
+    }
+}
+
+extern "C" const char* js_get_exception_message(void) {
+    return js_exception_msg_buf;
 }
 
 extern "C" int js_check_exception(void) {
