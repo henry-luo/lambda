@@ -670,6 +670,7 @@ static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
+static bool g_no_hot_reload = false;
 
 // Load known crashers from previous run's crasher log.
 // Tests listed here are quarantined into their own small batches
@@ -843,9 +844,12 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* const argv[] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL
+    char* argv[5] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL
     };
+    if (g_no_hot_reload) {
+        argv[3] = (char*)"--no-hot-reload";
+    }
     extern char** environ;
     pid_t pid;
     int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
@@ -1420,6 +1424,9 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
+        }
+        if (strcmp(argv[i], "--no-hot-reload") == 0) {
+            g_no_hot_reload = true;
         }
     }
 

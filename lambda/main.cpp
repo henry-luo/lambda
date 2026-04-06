@@ -809,6 +809,39 @@ int exec_convert(int argc, char* argv[]) {
 static jmp_buf batch_timeout_jmp;
 static volatile sig_atomic_t batch_timeout_active = 0;
 
+// MIR error recovery for batch mode: longjmp instead of exit(1)
+static jmp_buf mir_error_jmp;
+static volatile sig_atomic_t mir_error_active = 0;
+static char mir_error_msg[256];
+
+static void __attribute__((noreturn)) batch_mir_error_handler(MIR_error_type_t error_type, const char *format, ...) {
+    va_list ap;
+    va_start(ap, format);
+    vsnprintf(mir_error_msg, sizeof(mir_error_msg), format, ap);
+    va_end(ap);
+    fprintf(stderr, "MIR error: %s\n", mir_error_msg);
+    if (mir_error_active) {
+        mir_error_active = 0;
+        longjmp(mir_error_jmp, 1);
+    }
+    // fallback: if not in protected region, exit
+    exit(1);
+}
+
+// SIGSEGV/SIGBUS recovery for batch mode: catch runtime crashes in JIT code
+static sigjmp_buf batch_crash_jmp;
+static volatile sig_atomic_t batch_crash_active = 0;
+
+static void batch_crash_handler(int sig) {
+    if (batch_crash_active) {
+        batch_crash_active = 0;
+        siglongjmp(batch_crash_jmp, sig);
+    }
+    // not in protected region — re-raise with default handler
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 static void batch_alarm_handler(int sig) {
     (void)sig;
     if (batch_timeout_active) {
@@ -2579,10 +2612,13 @@ int main(int argc, char *argv[]) {
         log_disable_all();
 
         int batch_timeout = 10; // default per-script timeout in seconds
+        bool hot_reload = true; // persistent heap between tests (default: on)
         for (int i = 2; i < argc; i++) {
             if (strncmp(argv[i], "--timeout=", 10) == 0) {
                 batch_timeout = atoi(argv[i] + 10);
                 if (batch_timeout <= 0) batch_timeout = 10;
+            } else if (strcmp(argv[i], "--no-hot-reload") == 0) {
+                hot_reload = false;
             }
         }
 
@@ -2590,17 +2626,19 @@ int main(int argc, char *argv[]) {
         runtime_init(&runtime);
         lambda_stack_init();
 
-        // Set up a persistent EvalContext with pre-initialized heap.
+        // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
         // Enables the reusing_context fast-path in transpile_js_to_mir,
         // avoiding heap/nursery/name_pool teardown+recreation between tests.
         EvalContext batch_context;
         memset(&batch_context, 0, sizeof(EvalContext));
-        context = &batch_context;
-        batch_context.nursery = gc_nursery_create(0);
-        heap_init();
-        batch_context.pool = batch_context.heap->pool;
-        batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
-        batch_context.type_list = arraylist_new(64);
+        if (hot_reload) {
+            context = &batch_context;
+            batch_context.nursery = gc_nursery_create(0);
+            heap_init();
+            batch_context.pool = batch_context.heap->pool;
+            batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+            batch_context.type_list = arraylist_new(64);
+        }
 
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
@@ -2663,33 +2701,81 @@ int main(int argc, char *argv[]) {
 
             int result = 0;
 #ifndef _WIN32
-            if (batch_timeout > 0) {
+            // Set MIR error handler to recover from MIR compilation errors
+            extern MIR_error_func_t g_batch_mir_error_handler;
+            g_batch_mir_error_handler = batch_mir_error_handler;
+
+            // Install SIGSEGV/SIGBUS handler to catch runtime crashes in JIT code
+            struct sigaction crash_sa, old_segv_sa, old_bus_sa;
+            crash_sa.sa_handler = batch_crash_handler;
+            sigemptyset(&crash_sa.sa_mask);
+            crash_sa.sa_flags = 0;
+            sigaction(SIGSEGV, &crash_sa, &old_segv_sa);
+            sigaction(SIGBUS, &crash_sa, &old_bus_sa);
+            batch_crash_active = 1;
+
+            int crash_sig = sigsetjmp(batch_crash_jmp, 1);
+            if (crash_sig != 0) {
+                // Recovered from SIGSEGV/SIGBUS
+                fprintf(stderr, "Crash: script '%s' caught signal %d (recovered)\n", script_path, crash_sig);
+                alarm(0);
+                batch_timeout_active = 0;
+                mir_error_active = 0;
+                batch_crash_active = 0;
+                result = 128 + crash_sig;
+            } else if (batch_timeout > 0) {
                 struct sigaction sa, old_sa;
                 sa.sa_handler = batch_alarm_handler;
                 sigemptyset(&sa.sa_mask);
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
                 batch_timeout_active = 1;
-                if (setjmp(batch_timeout_jmp) == 0) {
-                    alarm(batch_timeout);
-                    Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                mir_error_active = 1;
+                if (setjmp(mir_error_jmp) == 0) {
+                    if (setjmp(batch_timeout_jmp) == 0) {
+                        alarm(batch_timeout);
+                        Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                        alarm(0);
+                        batch_timeout_active = 0;
+                        mir_error_active = 0;
+                        batch_crash_active = 0;
+                        if (res.item == ITEM_ERROR || js_check_exception()) {
+                            result = 1;
+                        }
+                    } else {
+                        // timed out
+                        mir_error_active = 0;
+                        batch_crash_active = 0;
+                        fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
+                        result = 124;
+                    }
+                } else {
+                    // MIR error recovery
                     alarm(0);
                     batch_timeout_active = 0;
+                    batch_crash_active = 0;
+                    result = 1;
+                }
+                sigaction(SIGALRM, &old_sa, NULL);
+            } else {
+                mir_error_active = 1;
+                if (setjmp(mir_error_jmp) == 0) {
+                    Item res = transpile_js_to_mir(&runtime, js_source, script_path);
+                    mir_error_active = 0;
+                    batch_crash_active = 0;
                     if (res.item == ITEM_ERROR || js_check_exception()) {
                         result = 1;
                     }
                 } else {
-                    // timed out
-                    fprintf(stderr, "Timeout: script '%s' exceeded %ds limit\n", script_path, batch_timeout);
-                    result = 124;
-                }
-                sigaction(SIGALRM, &old_sa, NULL);
-            } else {
-                Item res = transpile_js_to_mir(&runtime, js_source, script_path);
-                if (res.item == ITEM_ERROR || js_check_exception()) {
+                    // MIR error recovery
+                    batch_crash_active = 0;
                     result = 1;
                 }
             }
+
+            // Restore signal handlers
+            sigaction(SIGSEGV, &old_segv_sa, NULL);
+            sigaction(SIGBUS, &old_bus_sa, NULL);
 #else
             Item res = transpile_js_to_mir(&runtime, js_source, script_path);
             if (res.item == ITEM_ERROR || js_check_exception()) {
@@ -2702,31 +2788,40 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_END %d\n", result);
             fflush(stdout);
 
-            // Restore context (longjmp on timeout may leave it dangling)
-            context = &batch_context;
-
-            if (result == 124) {
-                // Timeout — longjmp may have left heap in inconsistent state.
-                js_batch_reset();
-                heap_destroy();
-                if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
-                memset(&batch_context, 0, sizeof(EvalContext));
+            if (hot_reload) {
+                // Restore context (longjmp on timeout/crash may leave it dangling)
                 context = &batch_context;
-                batch_context.nursery = gc_nursery_create(0);
-                heap_init();
-                batch_context.pool = batch_context.heap->pool;
-                batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
-                batch_context.type_list = arraylist_new(64);
+
+                if (result == 124 || result >= 128) {
+                    // Timeout or crash — longjmp may have left heap in inconsistent state.
+                    js_batch_reset();
+                    heap_destroy();
+                    if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+                    memset(&batch_context, 0, sizeof(EvalContext));
+                    context = &batch_context;
+                    batch_context.nursery = gc_nursery_create(0);
+                    heap_init();
+                    batch_context.pool = batch_context.heap->pool;
+                    batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
+                    batch_context.type_list = arraylist_new(64);
+                } else {
+                    js_batch_reset();
+                }
             } else {
+                // Normal mode: transpile_js_to_mir created/destroyed its own heap.
+                // Just reset JS runtime state between tests.
                 js_batch_reset();
+                runtime_reset_heap(&runtime);
             }
         }
 
-        // tear down persistent heap
-        context = &batch_context;
-        heap_destroy();
-        if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
-        context = NULL;
+        // tear down persistent heap (hot reload mode only)
+        if (hot_reload) {
+            context = &batch_context;
+            heap_destroy();
+            if (batch_context.nursery) gc_nursery_destroy(batch_context.nursery);
+            context = NULL;
+        }
 
         runtime_cleanup(&runtime);
         return 0;
