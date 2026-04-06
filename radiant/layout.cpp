@@ -1295,7 +1295,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // programmatically rather than via the UA stylesheet.
     if (node->parent && node->parent->is_element()) {
         DomElement* parent_elem = node->parent->as_element();
-        if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->get_attribute("open")) {
+        if (parent_elem->tag() == HTM_TAG_DETAILS && !parent_elem->has_attribute("open")) {
             // Only allow the first <summary> child through
             bool is_summary = node->is_element() && node->tag() == HTM_TAG_SUMMARY;
             if (!is_summary) {
