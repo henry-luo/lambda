@@ -5874,13 +5874,45 @@ void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContainerLayou
                                             lycon, text, text_len);
                                         if (tw.max_content > item_content_width && tw.min_content > 0) {
                                             // Text wraps: compute height at constrained width
-                                            // Use CSS line-height if available, else font-size
-                                            float line_height = 10.0f; // default
-                                            if (item->fi && item->fi->has_intrinsic_height &&
-                                                item->fi->intrinsic_height.max_content > 0) {
-                                                line_height = item->fi->intrinsic_height.max_content;
-                                            } else if (lycon->font.style && lycon->font.style->font_size > 0) {
-                                                line_height = lycon->font.style->font_size;
+                                            // Resolve CSS line-height by walking ancestor chain
+                                            float font_size = (lycon->font.style && lycon->font.style->font_size > 0)
+                                                ? lycon->font.style->font_size : 16.0f;
+                                            float line_height = font_size * 1.2f;
+                                            if (lycon->font.font_handle) {
+                                                float normal_lh = calc_normal_line_height(lycon->font.font_handle);
+                                                if (normal_lh > 0) line_height = normal_lh;
+                                            }
+                                            for (DomNode* anc = ((DomNode*)item)->parent; anc; anc = anc->parent) {
+                                                if (!anc->is_element()) continue;
+                                                ViewBlock* anc_view = (ViewBlock*)anc->as_element();
+                                                if (anc_view->blk && anc_view->blk->line_height) {
+                                                    const CssValue* lh = anc_view->blk->line_height;
+                                                    if (lh->type == CSS_VALUE_TYPE_NUMBER) {
+                                                        line_height = font_size * (float)lh->data.number.value;
+                                                    } else if (lh->type == CSS_VALUE_TYPE_LENGTH) {
+                                                        float lh_px = (float)lh->data.length.value;
+                                                        if (lh_px > 0) line_height = lh_px;
+                                                    } else if (lh->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                                        line_height = font_size * (float)(lh->data.percentage.value / 100.0);
+                                                    }
+                                                    break;
+                                                }
+                                                if (anc_view->specified_style) {
+                                                    CssDeclaration* lh_decl = style_tree_get_declaration(
+                                                        anc_view->specified_style, CSS_PROPERTY_LINE_HEIGHT);
+                                                    if (lh_decl && lh_decl->value) {
+                                                        const CssValue* lhv = lh_decl->value;
+                                                        if (lhv->type == CSS_VALUE_TYPE_NUMBER) {
+                                                            line_height = font_size * (float)lhv->data.number.value;
+                                                        } else if (lhv->type == CSS_VALUE_TYPE_LENGTH) {
+                                                            float lh_px = resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, lhv);
+                                                            if (lh_px > 0) line_height = lh_px;
+                                                        } else if (lhv->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                                                            line_height = font_size * (float)(lhv->data.percentage.value / 100.0);
+                                                        }
+                                                        break;
+                                                    }
+                                                }
                                             }
                                             text_height_at_width = compute_text_height_at_width(
                                                 lycon, text, text_len, item_content_width, line_height);

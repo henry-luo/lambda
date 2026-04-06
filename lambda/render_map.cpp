@@ -146,7 +146,6 @@ void render_map_record(Item source_item, const char* template_ref,
 
     log_debug("render_map_record: tmpl=%s result=0x%llx reverse_map_count=%zu",
               template_ref ? template_ref : "(anon)",
-              (unsigned long long)result_node.item,
               s_reverse_map ? hashmap_count(s_reverse_map) : 0);
 }
 
@@ -263,8 +262,15 @@ int render_map_retransform(void) {
                 }
             }
         } else if (s_doc_root.item && old_result.item != new_result.item) {
-            // parent unknown — walk the doc root tree to find and replace
-            replace_in_element_tree(s_doc_root, old_result, new_result);
+            if (s_doc_root.item == old_result.item) {
+                // the retransformed template IS the doc root — update directly
+                s_doc_root = new_result;
+                log_debug("render_map_retransform: updated s_doc_root to new result 0x%llx",
+                          (unsigned long long)new_result.item);
+            } else {
+                // parent unknown — walk the doc root tree to find and replace
+                replace_in_element_tree(s_doc_root, old_result, new_result);
+            }
         }
 
         // write back the updated entry to the map
@@ -355,7 +361,15 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
                 }
             }
         } else if (s_doc_root.item && old_result.item != new_result.item) {
-            replace_in_element_tree(s_doc_root, old_result, new_result);
+            if (s_doc_root.item == old_result.item) {
+                // the retransformed template IS the doc root — update directly
+                s_doc_root = new_result;
+                log_debug("render_map_retransform_with_results: updated s_doc_root to new result 0x%llx",
+                          (unsigned long long)new_result.item);
+            } else {
+                // parent unknown — walk the doc root tree to find and replace
+                replace_in_element_tree(s_doc_root, old_result, new_result);
+            }
         }
 
         hashmap_set(map, entry);
@@ -418,6 +432,10 @@ void render_map_set_doc_root(Item root) {
         root_registered = true;
     }
     s_doc_root = root;
+}
+
+Item render_map_get_doc_root(void) {
+    return s_doc_root;
 }
 
 // Recursively search the element tree for old_child and replace with new_child.

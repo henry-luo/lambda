@@ -23,6 +23,9 @@
 #include <string>
 #include <re2/re2.h>
 
+// v22: Maximum gap allowed for dense array expansion; beyond this, skip to avoid OOM
+#define SPARSE_GAP_MAX 1000000
+
 // Forward declarations for Unicode normalization (implemented in utf_string.cpp)
 extern "C" char* normalize_utf8proc_nfc(const char* str, int len, int* out_len);
 extern "C" char* normalize_utf8proc_nfd(const char* str, int len, int* out_len);
@@ -2324,27 +2327,31 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
             if (str_key->len == 6 && strncmp(str_key->chars, "length", 6) == 0) {
-                int new_len = (int)js_get_number(value);
+                int64_t new_len = (int64_t)js_get_number(value);
                 Array* arr = object.array;
                 if (new_len >= 0) {
                     if (new_len > arr->length) {
+                        // v22: Guard against huge length expansion (> 1M gap)
+                        int64_t gap = new_len - arr->length;
+                        if (gap > SPARSE_GAP_MAX) {
+                            log_debug("js_property_set: array length expansion %lld->%lld (gap %lld) too large, skipping",
+                                      (long long)arr->length, (long long)new_len, (long long)gap);
+                            return value;
+                        }
                         // Extend: ensure capacity and fill with undefined.
                         // Use direct realloc to avoid GC-triggering array_push loops.
                         if (new_len + 4 > arr->capacity) {
-                            int new_cap = new_len + 4;
+                            int64_t new_cap = new_len + 4;
                             Item* new_items = (Item*)malloc(new_cap * sizeof(Item));
                             if (arr->items && arr->length > 0) {
                                 memcpy(new_items, arr->items, arr->length * sizeof(Item));
                             }
-                            // Note: old items may be malloc'd or data-zone allocated.
-                            // If malloc'd, we should free. If data-zone, it's abandoned.
-                            // For simplicity, we don't free (matches expand_list behavior).
                             arr->items = new_items;
                             arr->capacity = new_cap;
                         }
                         // Fill new slots with undefined
                         Item undef = make_js_undefined();
-                        for (int i = arr->length; i < new_len; i++) {
+                        for (int64_t i = arr->length; i < new_len; i++) {
                             arr->items[i] = undef;
                         }
                         arr->length = new_len;
@@ -2792,12 +2799,19 @@ extern "C" Item js_array_set_int(Item array, int64_t index, Item value) {
     if (index >= 0 && index < arr->length) {
         arr->items[index] = value;
     } else if (index >= 0) {
+        int64_t gap = index - arr->length;
+        if (gap > SPARSE_GAP_MAX) {
+            // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
+            log_debug("js_array_set_int: sparse index %lld (gap %lld), skipping dense expansion",
+                      (long long)index, (long long)gap);
+            return value;
+        }
         // Expand array: fill gaps with undefined, then set the value
         Item undef = make_js_undefined();
-        while (arr->length < (int)index) {
+        while (arr->length < index) {
             array_push(arr, undef);
         }
-        if ((int)index == arr->length) {
+        if (index == arr->length) {
             array_push(arr, value);
         } else {
             arr->items[index] = value;
@@ -2811,12 +2825,19 @@ extern "C" Item js_array_set(Item array, Item index, Item value) {
         return value;
     }
 
-    int idx = (int)js_get_number(index);
+    int64_t idx = (int64_t)js_get_number(index);
     Array* arr = array.array;
 
     if (idx >= 0 && idx < arr->length) {
         arr->items[idx] = value;
     } else if (idx >= 0) {
+        int64_t gap = idx - arr->length;
+        if (gap > SPARSE_GAP_MAX) {
+            // v22: Sparse index — gap too large, skip dense expansion to prevent OOM
+            log_debug("js_array_set: sparse index %lld (gap %lld), skipping dense expansion",
+                      (long long)idx, (long long)gap);
+            return value;
+        }
         // Expand array: fill gaps with undefined, then set the value
         Item undef = make_js_undefined();
         while (arr->length < idx) {

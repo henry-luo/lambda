@@ -2211,12 +2211,13 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     CaretState* caret = state->caret;
     View* view = caret->view;
 
-    // Form text inputs draw their own caret in render_text_input()
+    // Form controls draw their own caret in render_text_input() / render_textarea()
     if (view->is_element()) {
         DomElement* elem = (DomElement*)view;
         if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
             elem->form &&
-            elem->form->control_type == FORM_CONTROL_TEXT) {
+            (elem->form->control_type == FORM_CONTROL_TEXT ||
+             elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
             return;
         }
     }
@@ -2389,6 +2390,64 @@ void render_ui_overlays(RenderContext* rdcon, RadiantState* state) {
     if (state->open_dropdown) {
         ViewBlock* select = (ViewBlock*)state->open_dropdown;
         render_select_dropdown(rdcon, select, state);
+    }
+
+    // Render drag-and-drop overlay (drop target highlight + drag indicator)
+    if (state->drag_drop && state->drag_drop->active) {
+        DragDropState* dd = state->drag_drop;
+        float s = rdcon->scale;
+
+        // Highlight the current drop target with a blue border
+        if (dd->drop_target && dd->drop_target->view_type == RDT_VIEW_BLOCK) {
+            ViewBlock* dt = (ViewBlock*)dd->drop_target;
+            float dx = dt->x, dy = dt->y;
+            View* par = dt->parent;
+            while (par) {
+                if (par->view_type == RDT_VIEW_BLOCK) {
+                    dx += ((ViewBlock*)par)->x;
+                    dy += ((ViewBlock*)par)->y;
+                }
+                par = par->parent;
+            }
+            dx *= s;  dy *= s;
+            float dw = dt->width * s;
+            float dh = dt->height * s;
+
+            // draw highlight border around drop target
+            Tvg_Paint drop_shape = tvg_shape_new();
+            if (drop_shape) {
+                tvg_shape_append_rect(drop_shape, dx - 2*s, dy - 2*s, dw + 4*s, dh + 4*s, 4*s, 4*s, true);
+                tvg_shape_set_stroke_color(drop_shape, 0x33, 0x99, 0xFF, 0xC0);
+                tvg_shape_set_stroke_width(drop_shape, 2.0f * s);
+                tvg_canvas_push(rdcon->canvas, drop_shape);
+            }
+
+            // draw semi-transparent blue fill
+            Tvg_Paint drop_fill = tvg_shape_new();
+            if (drop_fill) {
+                tvg_shape_append_rect(drop_fill, dx, dy, dw, dh, 0, 0, true);
+                tvg_shape_set_fill_color(drop_fill, 0x33, 0x99, 0xFF, 0x20);
+                tvg_canvas_push(rdcon->canvas, drop_fill);
+            }
+
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(rdcon->canvas, NULL);
+            log_debug("[DRAG] Drop target highlight at (%.0f,%.0f) size %.0fx%.0f", dx, dy, dw, dh);
+        }
+
+        // Draw a small drag indicator at cursor position
+        float cx = dd->current_x;
+        float cy = dd->current_y;
+        Tvg_Paint drag_ind = tvg_shape_new();
+        if (drag_ind) {
+            tvg_shape_append_rect(drag_ind, cx - 4*s, cy - 4*s, 8*s, 8*s, 2*s, 2*s, true);
+            tvg_shape_set_fill_color(drag_ind, 0x33, 0x99, 0xFF, 0x80);
+            tvg_shape_set_stroke_color(drag_ind, 0x33, 0x99, 0xFF, 0xFF);
+            tvg_shape_set_stroke_width(drag_ind, 1.0f * s);
+            tvg_canvas_push(rdcon->canvas, drag_ind);
+            tvg_canvas_reset_and_draw(rdcon, false);
+            tvg_canvas_remove(rdcon->canvas, NULL);
+        }
     }
 
     // Caret rendered on top of content

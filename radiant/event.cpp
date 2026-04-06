@@ -432,20 +432,23 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("key", key_name);
     }
 
-    // add caret position (as character index) for input and keydown events
-    if (evcon && (strcmp(event_name, "input") == 0 || strcmp(event_name, "keydown") == 0)) {
+    // add caret position (as character index) for input, keydown, paste, and cut events
+    if (evcon && (strcmp(event_name, "input") == 0 || strcmp(event_name, "keydown") == 0 ||
+                  strcmp(event_name, "paste") == 0 || strcmp(event_name, "cut") == 0)) {
         RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
         if (st && st->caret) {
             int byte_off = st->caret->char_offset;
             // use 'target' (the focused element passed to us, valid before retransform)
             // to convert byte offset → character index for Lambda
             int char_idx = byte_off;  // default: same (correct for ASCII)
+            const char* val = nullptr;
+            int val_len = 0;
             if (target && target->is_element()) {
                 DomElement* el = (DomElement*)target;
                 if (el->item_prop_type == DomElement::ITEM_PROP_FORM && el->form) {
-                    const char* val = el->form->value;
+                    val = el->form->value;
+                    val_len = val ? (int)strlen(val) : 0;
                     if (val && byte_off > 0) {
-                        int val_len = (int)strlen(val);
                         int safe_off = byte_off <= val_len ? byte_off : val_len;
                         char_idx = (int)str_utf8_count(val, safe_off);
                     } else {
@@ -454,6 +457,47 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
                 }
             }
             mb.put("caret_pos", (int64_t)char_idx);
+
+            // add selection range (as character indices) when selection is active
+            if (st->selection && !st->selection->is_collapsed) {
+                int sel_s, sel_e;
+                selection_get_range(st, &sel_s, &sel_e);
+                int sel_start_char = sel_s;
+                int sel_end_char = sel_e;
+                if (val) {
+                    sel_start_char = (int)str_utf8_count(val, sel_s <= val_len ? sel_s : val_len);
+                    sel_end_char = (int)str_utf8_count(val, sel_e <= val_len ? sel_e : val_len);
+                }
+                mb.put("selection_start", (int64_t)sel_start_char);
+                mb.put("selection_end", (int64_t)sel_end_char);
+            }
+        }
+    }
+
+    // for "paste" events: add clipboard text
+    if (evcon && strcmp(event_name, "paste") == 0 && evcon->paste_text) {
+        mb.put("text", evcon->paste_text);
+    }
+
+    // for drag-and-drop events: add drag_data field
+    if (evcon && (strcmp(event_name, "dragstart") == 0 || strcmp(event_name, "dragmove") == 0 ||
+                  strcmp(event_name, "drop") == 0 || strcmp(event_name, "dragend") == 0)) {
+        RadiantState* st = doc->state ? (RadiantState*)doc->state : nullptr;
+        if (st && st->drag_drop && st->drag_drop->drag_data) {
+            mb.put("drag_data", st->drag_drop->drag_data);
+        }
+        // add drop target info for drop events
+        if (strcmp(event_name, "drop") == 0 && st && st->drag_drop && st->drag_drop->drop_target) {
+            View* dt = st->drag_drop->drop_target;
+            if (dt->is_element()) {
+                DomElement* dte = (DomElement*)dt;
+                if (dte->class_count > 0 && dte->class_names) {
+                    mb.put("drop_target_class", dte->class_names[0]);
+                }
+                if (dte->tag_name) {
+                    mb.put("drop_target_tag", dte->tag_name);
+                }
+            }
         }
     }
 
@@ -1590,6 +1634,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 
         // Sync DOM pseudo-states for previous focus
         if (prev_focus) {
+            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
+            dispatch_lambda_handler(evcon, prev_focus, "blur");
+
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
             // Clear :focus-within from previous ancestor chain
@@ -1613,6 +1660,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         focus_clear(state);
 
         if (prev_focus) {
+            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
+            dispatch_lambda_handler(evcon, prev_focus, "blur");
+
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
             // Clear :focus-within from ancestor chain
@@ -2095,6 +2145,63 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // fire drag event if dragging in progress
         RadiantState* state = (RadiantState*)evcon.ui_context->document->state;
 
+        // Handle element drag-and-drop
+        if (state && state->drag_drop && (state->drag_drop->pending || state->drag_drop->active)) {
+            DragDropState* dd = state->drag_drop;
+            dd->current_x = (float)motion->x;
+            dd->current_y = (float)motion->y;
+
+            if (dd->pending && !dd->active) {
+                // check movement threshold (5px in physical pixels)
+                float dx = dd->current_x - dd->start_x;
+                float dy = dd->current_y - dd->start_y;
+                if (dx * dx + dy * dy > 25.0f) {
+                    dd->pending = false;
+                    dd->active = true;
+                    log_debug("DRAG START: source=%p distance=%.1f", dd->source_view, sqrtf(dx*dx + dy*dy));
+                    // dispatch "dragstart" to source element
+                    dispatch_lambda_handler(&evcon, dd->source_view, "dragstart");
+                }
+            }
+
+            if (dd->active) {
+                // find drop target: walk up from hit-test target to find element with dropzone attr
+                View* new_drop_target = nullptr;
+                if (evcon.target) {
+                    DomNode* node = (DomNode*)evcon.target;
+                    while (node) {
+                        if (node->node_type == DOM_NODE_ELEMENT) {
+                            DomElement* elem = (DomElement*)node;
+                            const char* dropzone = dom_element_get_attribute(elem, "dropzone");
+                            if (dropzone && *dropzone) {
+                                new_drop_target = (View*)elem;
+                                break;
+                            }
+                        }
+                        node = node->parent;
+                    }
+                }
+
+                // dispatch dragover/dragleave on drop target changes
+                if (new_drop_target != dd->drop_target) {
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                    }
+                    dd->drop_target = new_drop_target;
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragover");
+                    }
+                }
+
+                // dispatch "dragmove" to source (throttled by frame rate inherently)
+                dispatch_lambda_handler(&evcon, dd->source_view, "dragmove");
+
+                // set cursor to grabbing
+                evcon.new_cursor = CSS_VALUE_POINTER;
+                evcon.need_repaint = true;
+            }
+        }
+
         // Handle text selection drag (supports cross-view selection)
         if (state && state->selection && state->selection->is_selecting) {
             View* anchor_view = state->selection->anchor_view;
@@ -2102,6 +2209,104 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             log_debug("[SELECTION DRAG] is_selecting=true, anchor_view=%p, current_target=%p (type=%d)",
                 anchor_view, current_target, current_target ? current_target->view_type : -1);
+
+            // Handle textarea form control drag selection
+            if (anchor_view && anchor_view->is_element()) {
+                DomElement* anchor_elem = (DomElement*)anchor_view;
+                if (anchor_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                    anchor_elem->form &&
+                    anchor_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                    ViewBlock* ta_block = (ViewBlock*)anchor_elem;
+                    const char* value = anchor_elem->form->value;
+                    int value_len = value ? (int)strlen(value) : 0;
+
+                    float border = (ta_block->bound && ta_block->bound->border)
+                        ? ta_block->bound->border->width.left : 1.0f;
+                    float padding = ta_block->bound
+                        ? ta_block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
+                    float font_size = ta_block->font ? ta_block->font->font_size : 13.333f;
+                    float line_height = font_size * 1.4f;
+
+                    // compute absolute position of textarea
+                    float ta_abs_x = 0, ta_abs_y = 0;
+                    View* parent = (View*)ta_block;
+                    while (parent) {
+                        if (parent->view_type == RDT_VIEW_BLOCK ||
+                            parent->view_type == RDT_VIEW_INLINE_BLOCK ||
+                            parent->view_type == RDT_VIEW_LIST_ITEM) {
+                            ta_abs_x += ((ViewBlock*)parent)->x;
+                            ta_abs_y += ((ViewBlock*)parent)->y;
+                        }
+                        parent = parent->parent;
+                    }
+
+                    float scale = evcon.ui_context->pixel_ratio;
+                    float rel_x = (motion->x / scale) - ta_abs_x - border - padding;
+                    float rel_y = (motion->y / scale) - ta_abs_y - border - padding;
+                    if (rel_x < 0) rel_x = 0;
+                    if (rel_y < 0) rel_y = 0;
+
+                    int click_line = (int)(rel_y / line_height);
+                    int total_lines = 1;
+                    if (value) {
+                        for (int i = 0; i < value_len; i++)
+                            if (value[i] == '\n') total_lines++;
+                    }
+                    if (click_line >= total_lines) click_line = total_lines - 1;
+                    if (click_line < 0) click_line = 0;
+
+                    // find line start offset
+                    int line_off = 0;
+                    {
+                        int ln = 0;
+                        for (int i = 0; i < value_len && ln < click_line; i++) {
+                            if (value[i] == '\n') {
+                                ln++;
+                                if (ln == click_line) { line_off = i + 1; break; }
+                            }
+                        }
+                    }
+                    int line_len = 0;
+                    while (line_off + line_len < value_len && value[line_off + line_len] != '\n')
+                        line_len++;
+
+                    // compute char offset from mouse position
+                    int char_offset = line_off + line_len;
+                    if (value && line_len > 0 && ta_block->font && rel_x >= 0) {
+                        FontBox fbox = {0};
+                        setup_font(evcon.ui_context, &fbox, ta_block->font);
+                        if (fbox.font_handle) {
+                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
+                                ? evcon.ui_context->pixel_ratio : 1.0f;
+                            const unsigned char* p = (const unsigned char*)(value + line_off);
+                            const unsigned char* p_end = p + line_len;
+                            float accum_w = 0;
+                            int byte_off = 0;
+                            while (p < p_end) {
+                                uint32_t codepoint;
+                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                                if (bytes <= 0) { p++; byte_off++; continue; }
+                                FontStyleDesc sd = font_style_desc_from_prop(ta_block->font);
+                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
+                                if (rel_x < accum_w + gw / 2.0f) {
+                                    char_offset = line_off + byte_off;
+                                    break;
+                                }
+                                accum_w += gw;
+                                p += bytes;
+                                byte_off += bytes;
+                            }
+                        }
+                    }
+
+                    selection_extend(state, char_offset);
+                    caret_set(state, anchor_view, char_offset);
+                    evcon.need_repaint = true;
+                    // skip text selection drag below
+                    goto textarea_drag_done;
+                }
+            }
 
             // Check if we're dragging over a text view (could be the same or different)
             View* drag_target_view = nullptr;
@@ -2200,6 +2405,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 evcon.need_repaint = true;
             }
         }
+        textarea_drag_done:
 
         if (state && state->drag_target) {
             log_debug("Dragging in progress");
@@ -2443,6 +2649,101 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         char_offset, caret_x, caret_y, caret_height);
                     evcon.need_repaint = true;
 
+                } else if (target_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                           target_elem->form &&
+                           target_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                    // Textarea form controls: click-to-position caret
+                    ViewBlock* ta_block = (ViewBlock*)target_elem;
+                    const char* value = target_elem->form->value;
+                    int value_len = value ? (int)strlen(value) : 0;
+
+                    float border = (ta_block->bound && ta_block->bound->border)
+                        ? ta_block->bound->border->width.left : 1.0f;
+                    float padding = ta_block->bound
+                        ? ta_block->bound->padding.left : FormDefaults::TEXTAREA_PADDING;
+                    float font_size = ta_block->font ? ta_block->font->font_size : 13.333f;
+                    float line_height = font_size * 1.4f;
+
+                    // Click position relative to textarea content area (CSS px)
+                    float rel_x = evcon.offset_x - border - padding;
+                    float rel_y = evcon.offset_y - border - padding;
+                    if (rel_x < 0) rel_x = 0;
+                    if (rel_y < 0) rel_y = 0;
+
+                    // Determine which line was clicked
+                    int click_line = (int)(rel_y / line_height);
+
+                    // Count total lines
+                    int total_lines = 1;
+                    if (value) {
+                        for (int i = 0; i < value_len; i++)
+                            if (value[i] == '\n') total_lines++;
+                    }
+                    if (click_line >= total_lines) click_line = total_lines - 1;
+                    if (click_line < 0) click_line = 0;
+
+                    // Find line start offset
+                    int line_off = 0;
+                    {
+                        int ln = 0;
+                        for (int i = 0; i < value_len && ln < click_line; i++) {
+                            if (value[i] == '\n') {
+                                ln++;
+                                if (ln == click_line) { line_off = i + 1; break; }
+                            }
+                        }
+                    }
+
+                    // Find line length
+                    int line_len = 0;
+                    while (line_off + line_len < value_len && value[line_off + line_len] != '\n')
+                        line_len++;
+
+                    // Calculate char offset within line by measuring glyph widths
+                    int char_offset = line_off + line_len;  // default: end of line
+                    if (value && line_len > 0 && ta_block->font && rel_x >= 0) {
+                        FontBox fbox = {0};
+                        setup_font(evcon.ui_context, &fbox, ta_block->font);
+                        if (fbox.font_handle) {
+                            float pixel_ratio = (evcon.ui_context && evcon.ui_context->pixel_ratio > 0)
+                                ? evcon.ui_context->pixel_ratio : 1.0f;
+                            const unsigned char* p = (const unsigned char*)(value + line_off);
+                            const unsigned char* p_end = p + line_len;
+                            float accum_w = 0;
+                            int byte_off = 0;
+                            while (p < p_end) {
+                                uint32_t codepoint;
+                                int bytes = str_utf8_decode((const char*)p, (size_t)(p_end - p), &codepoint);
+                                if (bytes <= 0) { p++; byte_off++; continue; }
+                                FontStyleDesc sd = font_style_desc_from_prop(ta_block->font);
+                                LoadedGlyph* glyph = font_load_glyph(fbox.font_handle, &sd, codepoint, false);
+                                float gw = glyph ? glyph->advance_x / pixel_ratio : 0;
+                                if (rel_x < accum_w + gw / 2.0f) {
+                                    char_offset = line_off + byte_off;
+                                    break;
+                                }
+                                accum_w += gw;
+                                p += bytes;
+                                byte_off += bytes;
+                            }
+                        }
+                    } else if (rel_x < 0) {
+                        char_offset = line_off;
+                    }
+
+                    caret_set(state, evcon.target, char_offset);
+
+                    // Start/extend textarea selection
+                    if (!(event->mouse_button.mods & RDT_MOD_SHIFT)) {
+                        selection_start(state, evcon.target, char_offset);
+                        state->selection->is_selecting = true;
+                    } else if (state->selection) {
+                        selection_extend(state, char_offset);
+                    }
+
+                    log_debug("TEXTAREA CARET: offset=%d line=%d", char_offset, click_line);
+                    evcon.need_repaint = true;
+
                 } else if (target_elem->display.inner == RDT_DISPLAY_REPLACED) {
                     // Non-text replaced elements: clear caret
                     caret_clear(state);
@@ -2458,7 +2759,70 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 selection_clear(state);
                 evcon.need_repaint = true;
             }
-        } else if (event->type == RDT_EVENT_MOUSE_UP) {
+        }
+
+        // Check for draggable element on MOUSE_DOWN — initiate pending drag
+        if (event->type == RDT_EVENT_MOUSE_DOWN && evcon.target && state) {
+            // walk up from target to find element with draggable="true"
+            DomNode* node = (DomNode*)evcon.target;
+            DomElement* draggable_elem = nullptr;
+            while (node) {
+                if (node->node_type == DOM_NODE_ELEMENT) {
+                    DomElement* elem = (DomElement*)node;
+                    const char* draggable = dom_element_get_attribute(elem, "draggable");
+                    if (draggable && strcmp(draggable, "true") == 0) {
+                        draggable_elem = elem;
+                        break;
+                    }
+                }
+                node = node->parent;
+            }
+            if (draggable_elem) {
+                // allocate drag-drop state on state arena
+                if (!state->drag_drop) {
+                    state->drag_drop = (DragDropState*)arena_alloc(state->arena, sizeof(DragDropState));
+                }
+                memset(state->drag_drop, 0, sizeof(DragDropState));
+                state->drag_drop->source_view = (View*)draggable_elem;
+                state->drag_drop->start_x = (float)btn_event->x;
+                state->drag_drop->start_y = (float)btn_event->y;
+                state->drag_drop->current_x = (float)btn_event->x;
+                state->drag_drop->current_y = (float)btn_event->y;
+                state->drag_drop->pending = true;
+                // read drag data type from dragdata attribute
+                const char* drag_data = dom_element_get_attribute(draggable_elem, "dragdata");
+                state->drag_drop->drag_data = drag_data;
+                log_debug("DRAG PENDING: source=%p start=(%.0f,%.0f) data=%s",
+                    draggable_elem, state->drag_drop->start_x, state->drag_drop->start_y,
+                    drag_data ? drag_data : "(none)");
+            }
+        }
+
+        if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Handle drag-and-drop completion first
+            bool drag_handled = false;
+            if (state && state->drag_drop) {
+                DragDropState* dd = state->drag_drop;
+                if (dd->active) {
+                    // drag was active — dispatch drop or dragend
+                    if (dd->drop_target) {
+                        // dispatch "drop" to the drop target element
+                        log_debug("DRAG DROP: source=%p target=%p", dd->source_view, dd->drop_target);
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "drop");
+                    }
+                    // dispatch "dragend" to source
+                    dispatch_lambda_handler(&evcon, dd->source_view, "dragend");
+                    // clear any dragover highlight on previous drop target
+                    if (dd->drop_target) {
+                        dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
+                    }
+                    drag_handled = true;
+                    evcon.need_repaint = true;
+                }
+                // clear drag state
+                memset(dd, 0, sizeof(DragDropState));
+            }
+
             // Clear :active state
             update_active_state(&evcon, NULL, false);
 
@@ -2477,8 +2841,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
-            // Only process other click handlers if dropdown wasn't involved
-            if (!dropdown_handled) {
+            // Only process other click handlers if dropdown wasn't involved and not a drag
+            if (!dropdown_handled && !drag_handled) {
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
                 if (evcon.target) {
@@ -2673,6 +3037,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             break;
         }
 
+        // capture selection state before dispatch (needed for caret adjustment after)
+        bool had_keydown_selection = false;
+        int keydown_sel_start = 0;
+        if (state->selection && !state->selection->is_collapsed) {
+            had_keydown_selection = true;
+            int keydown_sel_end;
+            selection_get_range(state, &keydown_sel_start, &keydown_sel_end);
+        }
+
         // dispatch "keydown" event to Lambda handler for actionable keys
         if (focused && (key_event->key == RDT_KEY_BACKSPACE ||
                         key_event->key == RDT_KEY_DELETE ||
@@ -2738,6 +3111,308 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
                     // don't break — let other backspace handling continue if needed
+                }
+            }
+        }
+
+        // Handle arrow keys and caret adjustment for textarea form controls
+        if (focused && focused->is_element() && state->caret) {
+            DomElement* focus_elem = (DomElement*)focused;
+            if (focus_elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
+                focus_elem->form &&
+                focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+
+                const char* value = focus_elem->form->value;
+                int value_len = value ? (int)strlen(value) : 0;
+                int cur = state->caret->char_offset;
+
+                // helper: compute line start offset and line length for a given line
+                auto line_start_off = [&](int line) -> int {
+                    if (!value || line <= 0) return 0;
+                    int ln = 0;
+                    for (int i = 0; i < value_len; i++) {
+                        if (value[i] == '\n') {
+                            ln++;
+                            if (ln == line) return i + 1;
+                        }
+                    }
+                    return value_len;
+                };
+
+                auto line_len_from = [&](int off) -> int {
+                    int i = 0;
+                    while (off + i < value_len && value[off + i] != '\n') i++;
+                    return i;
+                };
+
+                // compute current line and column (byte offset within line)
+                int cur_line = 0, cur_col = 0;
+                if (value) {
+                    for (int i = 0; i < cur && i < value_len; i++) {
+                        if (value[i] == '\n') { cur_line++; cur_col = 0; }
+                        else cur_col++;
+                    }
+                }
+
+                // count total lines
+                int total_lines = 1;
+                if (value) {
+                    for (int i = 0; i < value_len; i++) {
+                        if (value[i] == '\n') total_lines++;
+                    }
+                }
+
+                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
+                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+
+                // helper: begin or extend selection for shift-modified keys
+                auto sel_begin_or_extend = [&](int new_off) {
+                    if (!state->selection || state->selection->is_collapsed) {
+                        selection_start(state, focused, cur);
+                        state->selection->is_selecting = false;
+                    }
+                    selection_extend(state, new_off);
+                    state->caret->char_offset = new_off;
+                };
+
+                // Cmd+C: copy selected textarea text to clipboard
+                if (cmd && key_event->key == RDT_KEY_C) {
+                    if (state->selection && !state->selection->is_collapsed && value) {
+                        int s, e;
+                        selection_get_range(state, &s, &e);
+                        if (s >= 0 && e > s && e <= value_len) {
+                            Pool* tp = pool_create();
+                            Arena* ta = arena_create_default(tp);
+                            char* buf = (char*)arena_alloc(ta, e - s + 1);
+                            memcpy(buf, value + s, e - s);
+                            buf[e - s] = '\0';
+                            clipboard_copy_text(buf);
+                            log_debug("Textarea copy: %d bytes", e - s);
+                            arena_destroy(ta);
+                            pool_destroy(tp);
+                        }
+                    }
+                    break;
+                }
+
+                // Cmd+X: cut selected textarea text (copy + dispatch "cut" to Lambda)
+                if (cmd && key_event->key == RDT_KEY_X) {
+                    if (state->selection && !state->selection->is_collapsed && value) {
+                        int s, e;
+                        selection_get_range(state, &s, &e);
+                        if (s >= 0 && e > s && e <= value_len) {
+                            // copy to clipboard
+                            Pool* tp = pool_create();
+                            Arena* ta = arena_create_default(tp);
+                            char* buf = (char*)arena_alloc(ta, e - s + 1);
+                            memcpy(buf, value + s, e - s);
+                            buf[e - s] = '\0';
+                            clipboard_copy_text(buf);
+                            log_debug("Textarea cut: %d bytes", e - s);
+                            arena_destroy(ta);
+                            pool_destroy(tp);
+
+                            // set caret to selection start before dispatch
+                            state->caret->char_offset = s;
+
+                            // dispatch "cut" event to Lambda handler
+                            dispatch_lambda_handler(&evcon, focused, "cut");
+                            focused = focus_get(state);
+
+                            // clear selection, clamp caret to new value length
+                            selection_clear(state);
+                            if (focused && focused->is_element()) {
+                                DomElement* fe = (DomElement*)focused;
+                                if (fe->form && fe->form->value) {
+                                    int new_len = (int)strlen(fe->form->value);
+                                    if (state->caret->char_offset > new_len)
+                                        state->caret->char_offset = new_len;
+                                }
+                            }
+                        }
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // Cmd+V: paste clipboard text into textarea
+                if (cmd && key_event->key == RDT_KEY_V) {
+                    const char* clip = clipboard_get_text();
+                    if (clip && *clip) {
+                        // if selection active, move caret to selection start
+                        bool had_selection = state->selection && !state->selection->is_collapsed;
+                        int sel_s = 0;
+                        if (had_selection) {
+                            int sel_e;
+                            selection_get_range(state, &sel_s, &sel_e);
+                            state->caret->char_offset = sel_s;
+                        }
+
+                        // dispatch "paste" event to Lambda handler with clipboard text
+                        evcon.paste_text = clip;
+                        dispatch_lambda_handler(&evcon, focused, "paste");
+                        evcon.paste_text = nullptr;
+                        focused = focus_get(state);
+
+                        // clear selection, advance caret by paste length
+                        selection_clear(state);
+                        int paste_byte_len = (int)strlen(clip);
+                        int new_caret = (had_selection ? sel_s : cur) + paste_byte_len;
+                        if (focused && focused->is_element()) {
+                            DomElement* fe = (DomElement*)focused;
+                            if (fe->form && fe->form->value) {
+                                int new_len = (int)strlen(fe->form->value);
+                                if (new_caret > new_len) new_caret = new_len;
+                            }
+                        }
+                        state->caret->char_offset = new_caret;
+                        log_debug("Textarea paste: %d bytes", paste_byte_len);
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                // Cmd+A: select all text in textarea
+                if (cmd && key_event->key == RDT_KEY_A) {
+                    selection_start(state, focused, 0);
+                    state->selection->is_selecting = false;
+                    selection_extend(state, value_len);
+                    state->caret->char_offset = value_len;
+                    evcon.need_repaint = true;
+                    break;
+                }
+
+                if (key_event->key == RDT_KEY_LEFT) {
+                    int new_off = cur;
+                    if (cur > 0 && value) {
+                        new_off = cur - 1;
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                    }
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        // collapse selection if active, else move caret
+                        if (state->selection && !state->selection->is_collapsed) {
+                            int start = state->selection->anchor_offset < state->selection->focus_offset
+                                ? state->selection->anchor_offset : state->selection->focus_offset;
+                            state->caret->char_offset = start;
+                            selection_clear(state);
+                        } else {
+                            state->caret->char_offset = new_off;
+                        }
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_RIGHT) {
+                    int new_off = cur;
+                    if (cur < value_len && value) {
+                        uint32_t cp;
+                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
+                        if (bytes > 0) new_off = cur + bytes;
+                    }
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        if (state->selection && !state->selection->is_collapsed) {
+                            int end = state->selection->anchor_offset > state->selection->focus_offset
+                                ? state->selection->anchor_offset : state->selection->focus_offset;
+                            state->caret->char_offset = end;
+                            selection_clear(state);
+                        } else {
+                            state->caret->char_offset = new_off;
+                        }
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_UP) {
+                    int new_off = cur;
+                    if (cur_line > 0) {
+                        int prev_line_off = line_start_off(cur_line - 1);
+                        int prev_line_len = line_len_from(prev_line_off);
+                        int target_col = cur_col < prev_line_len ? cur_col : prev_line_len;
+                        new_off = prev_line_off + target_col;
+                    }
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        selection_clear(state);
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_DOWN) {
+                    int new_off = cur;
+                    if (cur_line < total_lines - 1) {
+                        int next_line_off = line_start_off(cur_line + 1);
+                        int next_line_len = line_len_from(next_line_off);
+                        int target_col = cur_col < next_line_len ? cur_col : next_line_len;
+                        new_off = next_line_off + target_col;
+                    }
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        selection_clear(state);
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_HOME) {
+                    int new_off = shift && cmd ? 0 : line_start_off(cur_line);
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        selection_clear(state);
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_END) {
+                    int loff = line_start_off(cur_line);
+                    int new_off = shift && cmd ? value_len : loff + line_len_from(loff);
+                    if (shift) {
+                        sel_begin_or_extend(new_off);
+                    } else {
+                        selection_clear(state);
+                        state->caret->char_offset = new_off;
+                    }
+                    evcon.need_repaint = true;
+                    break;
+                } else if (key_event->key == RDT_KEY_BACKSPACE) {
+                    // Lambda handler already processed the delete; adjust caret
+                    if (had_keydown_selection) {
+                        // selection was deleted: caret goes to selection start
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        state->caret->char_offset = keydown_sel_start <= new_len ? keydown_sel_start : new_len;
+                        selection_clear(state);
+                    } else if (cur > 0 && value) {
+                        // single char delete: move caret back by 1 UTF-8 char
+                        int new_off = cur - 1;
+                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
+                            new_off--;
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                    }
+                    evcon.need_repaint = true;
+                } else if (key_event->key == RDT_KEY_ENTER) {
+                    // Lambda handler processed the enter; adjust caret
+                    if (had_keydown_selection) {
+                        // selection was replaced with '\n': caret goes to sel_start + 1
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        int new_off = keydown_sel_start + 1;
+                        state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                        selection_clear(state);
+                    } else {
+                        // normal enter: advance caret by 1 byte
+                        int new_len = focus_elem->form->value
+                            ? (int)strlen(focus_elem->form->value) : 0;
+                        int new_off = cur + 1;
+                        state->caret->char_offset = new_off <= new_len ? new_off : new_len;
+                    }
+                    evcon.need_repaint = true;
                 }
             }
         }
@@ -2930,6 +3605,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         View* focused = focus_get(state);
         log_debug("Text input: codepoint=U+%04X, focused=%p", text_event->codepoint, focused);
 
+        // capture selection state before dispatch for correct caret adjustment
+        bool had_input_selection = false;
+        int input_sel_start = 0;
+        if (state->selection && !state->selection->is_collapsed) {
+            had_input_selection = true;
+            int input_sel_end;
+            selection_get_range(state, &input_sel_start, &input_sel_end);
+        }
+
         // dispatch "input" event to Lambda handler if registered
         if (focused) {
             if (dispatch_lambda_handler(&evcon, focused, "input")) {
@@ -2940,18 +3624,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // Re-fetch focused element (dispatch may have rebuilt the DOM)
         focused = focus_get(state);
 
-        // For form text inputs, advance caret by the typed character's byte length
+        // For form text inputs and textareas, advance caret by the typed character's byte length
         bool is_form_input = false;
         if (focused && focused->is_element()) {
             DomElement* elem = (DomElement*)focused;
             if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
                 elem->form &&
-                elem->form->control_type == FORM_CONTROL_TEXT) {
+                (elem->form->control_type == FORM_CONTROL_TEXT ||
+                 elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
                 if (state->caret) {
                     uint32_t cp = text_event->codepoint;
                     int char_bytes = (cp < 0x80) ? 1 : (cp < 0x800) ? 2 : (cp < 0x10000) ? 3 : 4;
-                    int new_off = state->caret->char_offset + char_bytes;
+                    int new_off;
+                    if (had_input_selection) {
+                        // selection was replaced with typed char: caret to sel_start + char_bytes
+                        new_off = input_sel_start + char_bytes;
+                        selection_clear(state);
+                    } else {
+                        new_off = state->caret->char_offset + char_bytes;
+                    }
                     // clamp to current value length
                     const char* val = elem->form->value;
                     int val_len = val ? (int)strlen(val) : 0;

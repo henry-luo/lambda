@@ -1,0 +1,29 @@
+{
+  "name": "Todo2 textarea selection",
+  "html": "test/lambda/ui/todo2.ls",
+  "viewport": {"width": 900, "height": 700},
+  "events": [
+    {"type": "log", "message": "=== Textarea Selection Test ==="},
+    {"type": "wait", "ms": 500},
+
+    {"type": "log", "message": "--- Click first todo text to enter edit mode ---"},
+    {"type": "click", "target": {"selector": ".todo-text", "index": 0}},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": "textarea"}, "count": 1, "comment": "Textarea visible in edit mode"},
+
+    {"type": "log", "message": "--- Click inside textarea to position caret ---"},
+    {"type": "click", "target": {"selector": "textarea"}},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "--- Select all with Cmd+A ---"},
+    {"type": "key_press", "key": "A", "mods_str": "super"},
+    {"type": "wait", "ms": 200},
+
+    {"type": "log", "message": "--- Escape to leave edit mode ---"},
+    {"type": "key_press", "key": "Escape"},
+    {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": "textarea"}, "count": 0, "comment": "Textarea closed after Escape"},
+
+    {"type": "log", "message": "=== Textarea Selection Test Complete ==="}
+  ]
+}
