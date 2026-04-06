@@ -4363,6 +4363,15 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         dom_node_replace_in_parent(parent_dom, (DomNode*)old_dom, (DomNode*)new_dom);
         if (i < 16) new_doms[i] = new_dom;
 
+        // Phase 15: Invalidate ancestor styles only (new subtree nodes already have styles_resolved=false)
+        DomNode* ancestor = (DomNode*)parent_dom;
+        while (ancestor) {
+            if (ancestor->is_element()) {
+                ((DomElement*)ancestor)->styles_resolved = false;
+            }
+            ancestor = ancestor->parent;
+        }
+
         // Phase 12.2: Apply CSS cascade to new subtree only
         if (css_engine && inline_sheets && inline_count > 0) {
             SelectorMatcher* matcher = selector_matcher_create(doc->pool);
@@ -4382,7 +4391,10 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     // Reuse ViewTree instead of leaking it (destroy pool, keep struct)
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
+        // Phase 15: Skip blanket reset_styles_resolved — only ancestors + new nodes need re-resolution
+        doc->skip_style_reset = true;
         layout_html_doc(uicon, doc, true);
+        doc->skip_style_reset = false;
     } else {
         layout_html_doc(uicon, doc, false);
     }

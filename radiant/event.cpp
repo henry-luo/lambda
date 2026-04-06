@@ -691,18 +691,30 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                     int count = render_map_retransform_with_results(results, 16);
                                     auto t_retransform = high_resolution_clock::now();
 
-                                    // incremental DOM rebuild (falls back to full if map not ready)
+                                    // Phase 14: No-op elision — skip rebuild if output unchanged
+                                    bool any_changed = false;
                                     int reported = count <= 16 ? count : 16;
-                                    rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+                                    for (int i = 0; i < reported; i++) {
+                                        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+                                            any_changed = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (any_changed) {
+                                        // incremental DOM rebuild (falls back to full if map not ready)
+                                        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+                                    }
                                     auto t_rebuild = high_resolution_clock::now();
 
                                     using std::chrono::duration;
                                     using std::chrono::duration_cast;
-                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms",
+                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
                                         duration<double, std::milli>(t_handler - t_start).count(),
                                         duration<double, std::milli>(t_retransform - t_handler).count(),
                                         duration<double, std::milli>(t_rebuild - t_retransform).count(),
-                                        duration<double, std::milli>(t_rebuild - t_start).count());
+                                        duration<double, std::milli>(t_rebuild - t_start).count(),
+                                        any_changed ? "" : " (no-op elided)");
                                 } else {
                                     log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
                                         duration<double, std::milli>(t_handler - t_start).count());

@@ -2023,9 +2023,12 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     clear_measurement_cache();
     advance_measurement_cache_generation();
 
-    // Reset styles_resolved flags for all elements before layout
-    // This ensures CSS style resolution happens exactly once per element per layout pass
-    reset_styles_resolved(doc);
+    // Reset styles_resolved flags before layout
+    // Phase 15: Skip blanket reset during incremental rebuilds — new DOM nodes
+    // already have styles_resolved=false, and ancestors are cleared explicitly
+    if (!doc->skip_style_reset) {
+        reset_styles_resolved(doc);
+    }
 
     // Initialize text flow logging
     init_text_flow_logging();

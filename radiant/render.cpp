@@ -1544,6 +1544,29 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
+    // Phase 18: Early exit if block is entirely outside all dirty regions
+    if (rdcon->dirty_tracker && !rdcon->dirty_tracker->full_repaint && rdcon->dirty_tracker->dirty_list) {
+        float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+        float abs_x = rdcon->block.x / s + block->x;
+        float abs_y = rdcon->block.y / s + block->y;
+        float bw = block->width;
+        float bh = block->height;
+        // add margin to avoid clipping positioned descendants that overflow
+        float margin = 50.0f;
+        abs_x -= margin; abs_y -= margin; bw += margin * 2; bh += margin * 2;
+        bool intersects = false;
+        DirtyRect* dr = rdcon->dirty_tracker->dirty_list;
+        while (dr) {
+            if (abs_x < dr->x + dr->width && abs_x + bw > dr->x &&
+                abs_y < dr->y + dr->height && abs_y + bh > dr->y) {
+                intersects = true;
+                break;
+            }
+            dr = dr->next;
+        }
+        if (!intersects) return;
+    }
+
     log_debug("render block view:%s, clip:[%.0f,%.0f,%.0f,%.0f]", block->node_name(),
         rdcon->block.clip.left, rdcon->block.clip.top, rdcon->block.clip.right, rdcon->block.clip.bottom);
     log_enter();
@@ -2480,6 +2503,8 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
             dr = dr->next;
         }
         selective = true;
+        // Phase 18: Pass dirty tracker to render context for subtree clipping
+        rdcon.dirty_tracker = &state->dirty_tracker;
         log_debug("render_html_doc: selective clear (dirty regions present)");
     } else {
         // Full clear

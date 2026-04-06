@@ -24,6 +24,9 @@ typedef struct {
     
     // Selection state for text rendering
     SelectionState* selection;     // Current selection (if any)
+
+    // Phase 18: Dirty-region tracking for render tree clipping
+    DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
 } RenderContext;
 
 // Function declarations
