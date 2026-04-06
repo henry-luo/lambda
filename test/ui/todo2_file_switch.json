@@ -1,0 +1,6 @@
+{"html": "test/lambda/ui/todo2.ls", "viewport": {"width": 900, "height": 700}, "events": [
+  {"type": "assert_count", "target": {"selector": ".file-entry.active"}, "count": 1, "comment": "Initially one active"},
+  {"type": "assert_text", "target": {"selector": ".file-entry.active .file-name"}, "contains": "work", "comment": "work is initially active"},
+  {"type": "click", "target": {"selector": ".file-name", "index": 1}, "comment": "Click learning file"},
+  {"type": "assert_text", "target": {"selector": ".file-entry.active .file-name"}, "contains": "learning", "comment": "learning should now be active"}
+]}

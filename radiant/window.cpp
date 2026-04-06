@@ -229,9 +229,11 @@ void reflow_html_doc(DomDocument* doc) {
         return;
     }
     layout_html_doc(&ui_context, doc, true);
-    // render html doc
-    if (doc->view_tree) {
-        render_html_doc(&ui_context, doc->view_tree, NULL);
+    // Skip render here — let the main loop handle it via render().
+    // Mark dirty so the main loop knows to repaint.
+    if (doc->state) {
+        RadiantState* state = (RadiantState*)doc->state;
+        state->is_dirty = true;
     }
 }
 
@@ -465,11 +467,16 @@ void render(GLFWwindow* window) {
 
     // rerender if the document is dirty or needs repaint (e.g., caret changed)
     if (ui_context.document && ui_context.document->state &&
-        (ui_context.document->state->is_dirty || ui_context.document->state->needs_repaint)) {
+        (ui_context.document->state->is_dirty ||
+         (ui_context.document->state->needs_repaint &&
+          dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
         ui_context.document->state->needs_repaint = false;
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
         dirty_clear(&ui_context.document->state->dirty_tracker);
+    } else if (ui_context.document && ui_context.document->state) {
+        // Clear stale needs_repaint when there are no dirty regions to render
+        ui_context.document->state->needs_repaint = false;
     }
 
     // repaint to screen

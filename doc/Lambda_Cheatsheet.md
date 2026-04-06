@@ -19,6 +19,9 @@ lambda validate file.json            # Default schema
 ```lambda
 null  bool  int  float  decimal
 string  symbol  binary  datetime  path
+i8  i16  i32  i64        // Sized signed integers
+u8  u16  u32  u64        // Sized unsigned integers
+f16  f32  f64            // Sized floats
 ```
 
 **Container Types:**
@@ -112,6 +115,11 @@ type Vec {
 123.45n   // Decimal128 (~34 digits)
 123.45N   // Decimal (ultra precision, 200 digits)
 inf  nan  // Special values
+
+// Sized numeric literals (postfix suffix)
+42i8  -128i8  1000i16  100000i32  100i64
+255u8  60000u16  3000000000u32  1000u64
+0.5f16  3.14f32  2.7f64
 ```
 
 **Strings & Symbols:**
@@ -194,6 +202,8 @@ symbol("href", 'xlink_url') // Namespaced symbol
 ```lambda
 let x = 42;               // Immutable binding
 let y : int = 100;        // With type annotation
+let a: i8 = 42i8;         // Sized type annotation
+let b: f32 = 3.14f32;     // Sized float annotation
 let a = 1, b = 2;         // Multiple bindings
 x = 10     // ERROR E211: cannot reassign let binding
 ```
@@ -463,6 +473,8 @@ symbol keyword = 'if' | 'else' | 'for' // symbol pattern
 **Type:**
 
 `int(v)` `int64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
+
+`type()` returns the specific type name for sized numerics: `type(42i8)` → `"i8"`, `type(3.14f32)` → `"f32"`
 
 **Math:**
 

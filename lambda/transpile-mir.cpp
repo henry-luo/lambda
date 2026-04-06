@@ -1084,6 +1084,8 @@ static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id) 
     case LMD_TYPE_NULL:
     case LMD_TYPE_ANY:
     case LMD_TYPE_ERROR:
+    case LMD_TYPE_NUM_SIZED:  // already packed as Item (type_id + sub_type + value)
+    case LMD_TYPE_UINT64:     // tagged pointer, already boxed
     default:
         // Already boxed Item or NULL
         return val_reg;
@@ -1517,6 +1519,25 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
         case LMD_TYPE_BINARY: {
             TypeConst* tc = (TypeConst*)node->type;
             return emit_load_const(mt, tc->const_index, MIR_T_P);
+        }
+        case LMD_TYPE_NUM_SIZED: {
+            // sized numeric: pack inline as a 64-bit immediate
+            TypeNumSized* ns = (TypeNumSized*)node->type;
+            uint64_t packed = NUM_SIZED_PACK(ns->num_type, ns->raw_bits);
+            MIR_reg_t r = new_reg(mt, "nsz", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, (int64_t)packed)));
+            return r;
+        }
+        case LMD_TYPE_UINT64: {
+            // u64: tag the const pool pointer to create a valid Item
+            TypeConst* tc = (TypeConst*)node->type;
+            MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
+            MIR_reg_t r = new_reg(mt, "u64", MIR_T_I64);
+            uint64_t UINT64_TAG = (uint64_t)LMD_TYPE_UINT64 << 56;
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, (int64_t)UINT64_TAG), MIR_new_reg_op(mt->ctx, ptr)));
+            return r;
         }
         default: {
             log_error("mir: unhandled literal type %d", tid);
@@ -7701,6 +7722,31 @@ static MIR_reg_t transpile_base_type(MirTranspiler* mt, AstTypeNode* type_node) 
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&LIT_TYPE_LIST)));
                 return r;
+            }
+            // For NUM_SIZED sub-types (i8..f32), load the specific LIT_TYPE_Xxx pointer
+            // so fn_is can distinguish between different sized type checks
+            if (tt->type->type_id == LMD_TYPE_NUM_SIZED) {
+                extern TypeType LIT_TYPE_I8, LIT_TYPE_I16, LIT_TYPE_I32;
+                extern TypeType LIT_TYPE_U8, LIT_TYPE_U16, LIT_TYPE_U32;
+                extern TypeType LIT_TYPE_F16, LIT_TYPE_F32;
+                TypeType* sized_lit = nullptr;
+                switch ((NumSizedType)tt->type->kind) {
+                    case NUM_INT8:    sized_lit = &LIT_TYPE_I8;  break;
+                    case NUM_INT16:   sized_lit = &LIT_TYPE_I16; break;
+                    case NUM_INT32:   sized_lit = &LIT_TYPE_I32; break;
+                    case NUM_UINT8:   sized_lit = &LIT_TYPE_U8;  break;
+                    case NUM_UINT16:  sized_lit = &LIT_TYPE_U16; break;
+                    case NUM_UINT32:  sized_lit = &LIT_TYPE_U32; break;
+                    case NUM_FLOAT16: sized_lit = &LIT_TYPE_F16; break;
+                    case NUM_FLOAT32: sized_lit = &LIT_TYPE_F32; break;
+                    default: break;
+                }
+                if (sized_lit) {
+                    MIR_reg_t r = new_reg(mt, "tsized", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)sized_lit)));
+                    return r;
+                }
             }
             tid = tt->type->type_id;
         }

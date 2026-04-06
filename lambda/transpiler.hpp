@@ -147,6 +147,14 @@ void runtime_reset_heap(Runtime* runtime);  // reset heap between independent ev
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
+// Batch mode preamble support (two-module MIR split)
+struct JsPreambleState;
+Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                   JsPreambleState* out_state);
+Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                        const JsPreambleState* preamble);
+void preamble_state_destroy(JsPreambleState* state);
+
 // Compile a JS file as a module and return the namespace object.
 // Used for cross-language imports (Lambda → JS).
 Item load_js_module(Runtime* runtime, const char* js_path);

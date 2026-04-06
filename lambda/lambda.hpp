@@ -125,6 +125,17 @@ typedef struct Item {
             uint64_t binary_ptr: 56;  // tagged pointer to Binary
             uint64_t _8_x: 8;
         };
+        // sized numeric: value in [31:0], sub-type in [55:48], type_id in [63:56]
+        struct {
+            uint32_t num_value;         // [31:0]  — raw 32-bit value
+            uint16_t _num_pad;          // [47:32] — unused padding
+            uint8_t  num_type;          // [55:48] — NumSizedType
+            uint8_t  _type_id_num;      // [63:56] — LMD_TYPE_NUM_SIZED
+        };
+        struct {
+            uint64_t uint64_ptr: 56;    // tagged pointer to uint64 value
+            uint64_t _8_u: 8;
+        };
         // raw 64-bit value
         uint64_t item;
 
@@ -160,11 +171,49 @@ typedef struct Item {
     // get raw value out of an Item
     inline double get_double() const{ return *(double*)this->double_ptr; }
     inline int64_t get_int64() const { return *(int64_t*)this->int64_ptr; }
+    inline uint64_t get_uint64() const { return *(uint64_t*)this->uint64_ptr; }
     inline DateTime get_datetime() const { return *(DateTime*)this->datetime_ptr; }
     inline Decimal* get_decimal() const { return (Decimal*)this->decimal_ptr; }
     inline String* get_string() const { return (String*)this->string_ptr; }
     inline Symbol* get_symbol() const { return (Symbol*)this->symbol_ptr; }
     inline String* get_binary() const{ return (String*)this->binary_ptr; }
+
+    // sized numeric getters (NUM_SIZED)
+    inline NumSizedType get_num_type() const { return this->num_type; }
+    inline int8_t   get_i8()  const { return (int8_t)(num_value & 0xFF); }
+    inline int16_t  get_i16() const { return (int16_t)(num_value & 0xFFFF); }
+    inline int32_t  get_i32() const { return (int32_t)num_value; }
+    inline uint8_t  get_u8()  const { return (uint8_t)(num_value & 0xFF); }
+    inline uint16_t get_u16() const { return (uint16_t)(num_value & 0xFFFF); }
+    inline uint32_t get_u32() const { return num_value; }
+    inline float    get_f32() const { return bits_to_f32(num_value); }
+    inline float    get_f16() const { return f16_bits_to_f32((uint16_t)(num_value & 0xFFFF)); }
+    // get the numeric value as double (for arithmetic promotion)
+    inline double get_num_sized_as_double() const {
+        switch (num_type) {
+            case NUM_INT8:    return (double)get_i8();
+            case NUM_INT16:   return (double)get_i16();
+            case NUM_INT32:   return (double)get_i32();
+            case NUM_UINT8:   return (double)get_u8();
+            case NUM_UINT16:  return (double)get_u16();
+            case NUM_UINT32:  return (double)get_u32();
+            case NUM_FLOAT16: return (double)get_f16();
+            case NUM_FLOAT32: return (double)get_f32();
+            default: return 0.0;
+        }
+    }
+    // get the numeric value as int64 (for integer operations)
+    inline int64_t get_num_sized_as_int64() const {
+        switch (num_type) {
+            case NUM_INT8:    return (int64_t)get_i8();
+            case NUM_INT16:   return (int64_t)get_i16();
+            case NUM_INT32:   return (int64_t)get_i32();
+            case NUM_UINT8:   return (int64_t)get_u8();
+            case NUM_UINT16:  return (int64_t)get_u16();
+            case NUM_UINT32:  return (int64_t)get_u32();
+            default: return 0;
+        }
+    }
 
     // get chars/len for string-like types (STRING, SYMBOL, BINARY)
     // Symbol has the same leading layout: len, then chars (with ns in between)

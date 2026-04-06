@@ -498,6 +498,12 @@ char* extract_selected_html(RadiantState* state, Arena* arena);
 void clipboard_copy_text(const char* text);
 
 /**
+ * Get text from system clipboard
+ * @return Clipboard text (pointer valid until next GLFW call), or NULL
+ */
+const char* clipboard_get_text();
+
+/**
  * Copy HTML to system clipboard (sets both text/html and text/plain)
  * @param html The HTML fragment to copy
  */

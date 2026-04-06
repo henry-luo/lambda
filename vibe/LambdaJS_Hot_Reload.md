@@ -1,160 +1,39 @@
-# LambdaJS Hot Reload Design
+# LambdaJS Hot Reload Design — Future Stages
 
 Incremental compilation for the JS engine, enabling near-instant re-execution on code changes. Primary application: test262 batch mode (27k tests sharing common harness). Secondary application: REPL and live development.
 
-## Status: PARTIALLY IMPLEMENTED
+## Completed Work
 
-See [Implementation Status](#implementation-status) below for per-stage breakdown.
+**Stage 1 (Two-Module MIR Split)** is fully implemented. See [`vibe/Transpile_Js21.md`](Transpile_Js21.md) for details.
 
-## Problem
+| Stage | Status | Result |
+|-------|--------|--------|
+| 1.0 Persistent heap reuse | **DONE** | ~6s faster, state leakage issue |
+| 1.1 Harness pre-compilation | **DONE** | Preamble mode, harness compiled once per batch |
+| 1.2 Test compilation against harness | **DONE** | Pre-seeds module_consts from preamble snapshot |
+| Crash recovery | **DONE** | 3 crash root causes fixed, 0 MISSING tests |
 
-The current `js-test-batch` pipeline repeats the full compilation for every test:
+**Current performance**: Phase 2 clean batch in **79.8s** (was 126.7s, **-37%**), 12,296 tests passing (45.5% pass rate).
 
-```
-For each of 27k tests:
-  concat(sta.js + assert.js + includes + test.js)   ~5-17KB
-  → Tree-sitter parse (full)                         ~0.2ms
-  → build_js_ast (full)                               ~0.1ms
-  → jm_collect_functions (full)                        ~0.1ms
-  → Phase 1.1-1.3: module const/var scan (full)        ~0.05ms
-  → Phase 2: define all functions to MIR (full)        ~0.3ms
-  → Phase 3: emit js_main to MIR (full)               ~0.2ms
-  → MIR_link + MIR_gen (full JIT)                      ~0.5ms
-  → execute js_main                                    varies
-  → destroy MIR context + reset heap                   ~0.1ms
-```
+## Remaining Design: Incremental Append Model
 
-The harness (sta.js + assert.js) defines `Test262Error`, `assert`, `assert.sameValue`, `assert.notSameValue`, `assert.throws`, `$DONOTEVALUATE`, etc. These are identical across all tests but get recompiled 27k times.
-
-## Design: Incremental Append Model
-
-The core idea: treat test execution like **hot reloading a script that grows**. The common harness is the base document. Each test appends to it. The system incrementally processes only the appended portion at each stage.
+The next stages build on the two-module split by incrementalizing the per-test compilation pipeline further. Instead of full parse → AST → MIR for each test, the system will reuse harness artifacts and only process the appended test portion.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Once (batch startup):                                   │
+│ Already done (Stage 1):                                 │
 │   parse(harness) → AST(harness) → MIR(harness) →       │
-│   compile(harness) → register_dynamic_import(...)       │
-│   checkpoint: save parse tree, AST, compilation state   │
+│   compile(harness) → preamble checkpoint                │
 ├─────────────────────────────────────────────────────────┤
-│ Per test:                                               │
-│   append(test_source) to source buffer                  │
-│   ts_tree_edit + incremental re-parse (only new tokens) │
-│   incremental AST build (only new statements)           │
-│   incremental MIR gen (only new functions + js_main)    │
-│   MIR_link + MIR_gen (test module only, imports harness)│
+│ Current per-test (Stages 2-4 will optimize):            │
+│   parse(test_only)        ← Stage 2: incremental parse  │
+│   build_ast(test_only)    ← Stage 3: incremental AST    │
+│   MIR gen(test_only)      ← Stage 4: incremental MIR    │
+│   MIR_link + MIR_gen (test module)                      │
 │   execute js_main                                       │
-│   restore checkpoint                                    │
+│   restore to preamble checkpoint                        │
 └─────────────────────────────────────────────────────────┘
 ```
-
-## Stage 1: Two-Module MIR Split
-
-**Status: PARTIALLY IMPLEMENTED** — Only persistent heap reuse (Stage 1.0) is implemented. The full two-module split (1.1–1.2) is not.
-
-**Goal**: Compile harness MIR once, compile each test's MIR separately, link via dynamic imports.
-
-This is the highest-value, lowest-risk change. No incremental parsing needed yet.
-
-### 1.0 Persistent Heap Reuse (IMPLEMENTED)
-
-A simpler precursor to the full two-module split. The batch process reuses a single `EvalContext` (heap, nursery, name_pool) across all tests instead of creating/destroying one per test.
-
-**What was implemented:**
-- **`lambda/main.cpp`** (`js-test-batch` handler): When `hot_reload=true` (default), pre-initializes a persistent `EvalContext batch_context` with heap/nursery/name_pool before the test loop. Each test reuses this context. `js_batch_reset()` clears JS runtime state between tests. On timeout, the context is fully destroyed and recreated.
-- **`lambda/js/js_runtime.cpp`**: Added `js_get_module_var_count()` and `js_batch_reset_to(int count)` for checkpoint/restore of module variable count.
-- **`lambda/js/transpile_js_mir.cpp`**: `reusing_context` fast-path (~line 18685) — when `old_context->heap != NULL`, reuses the existing heap instead of allocating a new one.
-- **`lambda/main.cpp`**: Added `--no-hot-reload` CLI flag to disable heap reuse for A/B comparison.
-- **`test/test_js_test262_gtest.cpp`**: Added `g_no_hot_reload` global and pass-through of `--no-hot-reload` to child processes via posix_spawn argv.
-
-**Measured results (A/B comparison):**
-- Hot reload ON: 2:56 wall time, 10,256 passed
-- Hot reload OFF: 3:02 wall time, 10,388 passed
-- Heap reuse saves ~6 seconds but causes 132 fewer tests to pass due to state leakage between tests.
-
-**Known issue:** Persistent heap causes test state to bleed across tests (132 test regressions vs normal mode). A full fix requires either better state isolation or the proper two-module split from Stage 1.1–1.2.
-
-### 1.1 Harness Pre-Compilation (NOT IMPLEMENTED)
-
-At batch process startup (before reading any test from the manifest):
-
-```
-1. Concatenate sta.js + assert.js into harness_source
-2. transpile_js_to_mir(harness_source)
-   → Parse, build AST, collect functions, generate MIR module "harness"
-   → MIR_link + MIR_gen: compiles all harness functions to native code
-3. Register all harness functions via register_dynamic_import():
-   - "assert_sameValue" → native ptr
-   - "assert_throws" → native ptr  
-   - "Test262Error_ctor" → native ptr
-   - etc.
-4. Execute harness js_main to initialize globals:
-   - Populates js_module_vars[] with assert object, Test262Error, etc.
-5. Save checkpoint:
-   - harness_module_var_count = current module var count
-   - harness_nursery_pos = nursery bump pointer position
-   - harness_mir_ctx stays alive (compiled code must persist)
-```
-
-### 1.2 Test Compilation Against Harness (NOT IMPLEMENTED)
-
-For each test script:
-
-```
-1. Parse test source only (no harness prepended)
-2. Build AST from test parse tree
-3. During MIR transpilation (transpile_js_mir_ast):
-   - jm_find_var("_js_assert") → finds harness module var index
-   - jm_collect_functions → only finds test functions
-   - Phase 2: define only test functions as MIR
-   - Phase 3: emit js_main that references harness vars via js_get_module_var()
-4. MIR_link resolves test's imports against harness via import_resolver
-5. MIR_gen compiles only the test module (smaller, faster)
-6. Execute test's js_main
-7. Restore:
-   - Truncate js_module_vars[] to harness_module_var_count
-   - Reset nursery to harness_nursery_pos (or full destroy + recreate)
-   - Destroy test's MIR context (harness MIR context stays)
-```
-
-### 1.3 Implementation Details (NOT IMPLEMENTED)
-
-**Files to modify:**
-
-- **`lambda/main.cpp`** — `js-test-batch` handler:
-  - New manifest protocol: `harness:<length>\n<bytes>\n` before `source:` entries
-  - Harness compilation at startup, checkpoint save
-  - Restore after each test instead of full `runtime_reset_heap`
-
-- **`lambda/js/transpile_js_mir.cpp`** — New function:
-  ```cpp
-  // Transpile and execute a test script against an existing harness environment.
-  // The harness module vars, functions, and compiled code are already present.
-  // Only the test's new code is parsed, transpiled, compiled, and executed.
-  Item transpile_js_test_against_harness(
-      Runtime* runtime,
-      const char* test_source,
-      const char* filename,
-      int harness_module_var_count);
-  ```
-  Inside, `transpile_js_mir_ast` already iterates `program->body` for module vars and function hoisting. The test's top-level code references harness vars via `jm_find_var()` which searches `module_consts` and `var_scopes` — these would either:
-  - (a) Pre-populate `module_consts` with harness bindings (e.g. `_js_assert → MCONST_MODVAR, index=3`), or
-  - (b) Generate `js_get_module_var(index)` calls for unresolved identifiers that exist in harness scope
-
-- **`lambda/js/js_runtime.cpp`** — New functions:
-  ```cpp
-  int js_get_module_var_count(void);               // checkpoint: how many vars exist
-  void js_truncate_module_vars(int count);          // restore: discard vars beyond count
-  void js_batch_reset_partial(int harness_count);   // reset test state, keep harness
-  ```
-
-- **`lambda/mir.c`** — No changes needed. The existing `register_dynamic_import` + `import_resolver` already supports cross-module references.
-
-- **`test/test_js_test262_gtest.cpp`** — `assemble_combined_source()` stops prepending sta.js/assert.js. Manifest format changes.
-
-**Risk**: Low. Two-module compilation is already proven for ES module imports. The harness is essentially an "imported module" that provides globals.
-
-**Expected savings**: ~30-40% of total batch time. Eliminates redundant harness compilation (parse + AST + MIR gen + MIR compile) for 27k tests. MIR JIT of the test module is faster because it's smaller (no harness functions).
 
 ## Stage 2: Incremental Tree-sitter Parsing
 
@@ -381,28 +260,15 @@ This is significantly more complex than append-only because edits can occur anyw
 
 | Stage | Description | Status | Notes |
 |-------|------------|--------|-------|
-| 1.0 | Persistent heap reuse | **DONE** | ~6s faster but 132 test regressions from state leakage |
-| 1.1 | Harness pre-compilation | NOT STARTED | Full two-module MIR split |
-| 1.2 | Test compilation against harness | NOT STARTED | Depends on 1.1 |
-| 2 | Incremental Tree-sitter parsing | NOT STARTED | Depends on Stage 1 |
-| 3 | Incremental AST building | NOT STARTED | Depends on Stage 2 |
-| 4 | Incremental MIR generation | NOT STARTED | Depends on Stage 3 |
-| 5 | General hot reload (REPL/dev) | NOT STARTED | Depends on Stages 1-4 |
+| 1.0–1.2 | Two-Module MIR Split | **DONE** | See [Transpile_Js21.md](Transpile_Js21.md) |
+| 2 | Incremental Tree-sitter parsing | NOT STARTED | Low risk, ~5-10% additional reduction |
+| 3 | Incremental AST building | NOT STARTED | Medium risk, ~3-5% additional reduction |
+| 4 | Incremental MIR generation | NOT STARTED | Medium-high risk, ~15-20% additional reduction |
+| 5 | General hot reload (REPL/dev) | NOT STARTED | Highest complexity |
 
-### Other Infrastructure Implemented
-
-- **Metadata cache** (`utils/generate_test262_metadata.py` + C++ loader): TSV-based test metadata cache for fast test discovery. Auto-generates on first run.
-- **Crasher quarantine** (`test/test_js_test262_gtest.cpp`): Known crashers from `temp/_t262_crashers.txt` are run separately in small batches (Phase 2a) to avoid collateral batch failures. Reduces Phase 2b retry from ~68s to ~7s.
-- **`--no-hot-reload` flag**: CLI flag in both `lambda.exe` and test262 gtest to disable persistent heap reuse for A/B comparison.
-
-## Implementation Order
+## Roadmap
 
 ```
-Stage 1.0: Persistent Heap Reuse           ← DONE (minimal speedup, state leakage issue)
-Stage 1.1-1.2: Two-Module MIR Split        ← highest value, lowest risk
-  └── new transpile_js_test_against_harness()
-  └── test262 batch: ~30-40% reduction
-
 Stage 2: Incremental Tree-sitter Parse     ← low risk, leverages existing API
   └── js_transpiler_parse_incremental()
   └── additional ~5-10% reduction
@@ -420,13 +286,13 @@ Stage 5: General Hot Reload                ← highest complexity, broadest impa
   └── sub-second reload for REPL and live dev
 ```
 
-Stages 1-2 can be developed and shipped independently. Stages 3-4 build on 1-2. Stage 5 builds on all prior stages.
+Stages 2-3 can be developed independently. Stage 4 builds on 2-3. Stage 5 builds on all prior stages.
 
-## Combined Savings Estimate (test262)
+## Estimated Cumulative Savings (test262)
 
-| Stage | Cumulative reduction | Tests/sec (est.) |
-|-------|---------------------|-------------------|
-| Current | baseline | ~17/sec |
-| After Stage 1 | 30-40% | ~24/sec |
-| After Stage 1+2 | 35-45% | ~27/sec |
-| After Stage 1-4 | 55-65% | ~40/sec |
+| Stage | Phase 2 time (est.) | Cumulative reduction |
+|-------|-------------------|---------------------|
+| After Stage 1 (current) | 79.8s | baseline |
+| After Stage 2 | ~72s | ~10% |
+| After Stage 2+3 | ~69s | ~14% |
+| After Stage 2-4 | ~55s | ~31% |

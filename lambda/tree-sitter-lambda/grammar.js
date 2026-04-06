@@ -30,6 +30,11 @@ const decimal_literal = choice(
   seq('.', decimal_digits),
 );
 
+// sized integer suffixes: i8, i16, i32, i64, u8, u16, u32, u64
+const sized_int_suffix = choice('i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64');
+// sized float suffixes: f16, f32, f64
+const sized_float_suffix = choice('f16', 'f32', 'f64');
+
 // need to exclude relational exprs in attr (to avoid conflicts with element tags)
 // pipe operators are always included
 function binary_expr($, in_attr) {
@@ -235,7 +240,7 @@ module.exports = grammar({
     // Actual parsing done by AST builder
     binary: _ => token(seq("b'", repeat(/[^']/), "'")),
 
-    _number: $ => choice($.integer, $.float, $.decimal),
+    _number: $ => choice($.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
 
     integer: _ => token(integer_literal),
 
@@ -245,6 +250,21 @@ module.exports = grammar({
       // no e-notation for decimal, following JS bigint
       return token( seq(choice(decimal_literal, integer_literal), choice('n','N')) );
     },
+
+    // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)
+    sized_integer: _ => token(seq(
+      choice('0', seq(/[1-9]/, optional(/\d+/))),
+      sized_int_suffix
+    )),
+
+    // sized float: float literal with type suffix (f16, f32, f64)
+    sized_float: _ => token(seq(
+      choice(
+        seq(choice('0', seq(/[1-9]/, optional(/\d+/))), '.', /\d+/),
+        seq('.', /\d+/)
+      ),
+      sized_float_suffix
+    )),
 
     // datetime token: t'...' containing date/time text
     // Actual parsing done by AST builder via datetime_parse()
@@ -857,7 +877,8 @@ module.exports = grammar({
     _base_type_kw: _ => token(prec(1, choice(
       'null', 'any', 'bool', 'int64', 'int', 'float', 'decimal', 'number',
       'datetime', 'date', 'time', 'binary', 'range',
-      'list', 'array', 'map', 'element', 'entity', 'object', 'function'
+      'list', 'array', 'map', 'element', 'entity', 'object', 'function',
+      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32'
     ))),
 
     base_type: $ => prec(1, choice(

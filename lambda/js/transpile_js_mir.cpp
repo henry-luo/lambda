@@ -303,6 +303,13 @@ struct JsMirTranspiler {
     MIR_reg_t arguments_reg;         // register holding 'arguments' object (0 if not active)
     int arguments_param_count;       // number of formal params mapped to arguments
     char arguments_param_names[16][128]; // formal param var names (_js_xxx)
+
+    // Batch preamble mode: compile harness (sta.js + assert.js) so func decls persist as module vars
+    bool preamble_mode;
+    // With-preamble mode: pre-seed module_consts from harness compilation
+    JsModuleConstEntry* preamble_entries;   // array of entries to pre-seed (owned by caller)
+    int preamble_entry_count;
+    int preamble_var_count;                 // starting module_var_count from preamble
 };
 
 // ============================================================================
@@ -16174,6 +16181,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     mt->module_consts = hashmap_new(sizeof(JsModuleConstEntry), 16, 0, 0,
         js_module_const_hash, js_module_const_cmp, NULL, NULL);
 
+    // Pre-seed module_consts from preamble (batch mode: test inherits harness definitions)
+    if (mt->preamble_entries && mt->preamble_entry_count > 0) {
+        for (int i = 0; i < mt->preamble_entry_count; i++) {
+            hashmap_set(mt->module_consts, &mt->preamble_entries[i]);
+        }
+        log_debug("js-mir: pre-seeded %d preamble entries (var_count=%d)",
+            mt->preamble_entry_count, mt->preamble_var_count);
+    }
+
     // First pass: collect simple literal constants (const declarations only)
     {
         JsAstNode* s = program->body;
@@ -16302,7 +16318,8 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Third pass: assign module var indices for non-literal top-level declarations.
     // These are runtime-computed values (const som = {...}, const X = new Y(), etc.)
     // that need to be accessible from class method closures via js_get_module_var().
-    mt->module_var_count = 0;
+    mt->module_var_count = (mt->preamble_entries && mt->preamble_entry_count > 0)
+        ? mt->preamble_var_count : 0;
     {
         JsAstNode* s = program->body;
         while (s) {
@@ -16638,11 +16655,20 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         JsModuleConstEntry lookup;
                         snprintf(lookup.name, sizeof(lookup.name), "%s", mce.name);
                         if (!hashmap_get(mt->module_consts, &lookup)) {
-                            mce.const_type = MCONST_FUNC;
-                            // Store index to find in func_entries
-                            mce.int_val = (int64_t)(fc - mt->func_entries);
-                            hashmap_set(mt->module_consts, &mce);
-                            log_debug("js-mir: module func '%s' (idx=%d)", mce.name, (int)mce.int_val);
+                            if (mt->preamble_mode) {
+                                // Preamble: store as module var so it persists after js_main returns
+                                mce.const_type = MCONST_MODVAR;
+                                mce.int_val = mt->module_var_count++;
+                                hashmap_set(mt->module_consts, &mce);
+                                log_debug("js-mir: preamble func '%s' → module_var[%d]",
+                                    mce.name, (int)mce.int_val);
+                            } else {
+                                mce.const_type = MCONST_FUNC;
+                                // Store index to find in func_entries
+                                mce.int_val = (int64_t)(fc - mt->func_entries);
+                                hashmap_set(mt->module_consts, &mce);
+                                log_debug("js-mir: module func '%s' (idx=%d)", mce.name, (int)mce.int_val);
+                            }
                         }
                     }
                 }
@@ -17386,6 +17412,18 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                         MIR_new_reg_op(mt->ctx, var_reg),
                         MIR_new_reg_op(mt->ctx, fn_item)));
                     jm_set_var(mt, vname, var_reg);
+                    // Preamble mode: also persist function object as module var
+                    // so it survives after js_main returns
+                    if (mt->preamble_mode) {
+                        JsModuleConstEntry pmlookup;
+                        snprintf(pmlookup.name, sizeof(pmlookup.name), "%s", vname);
+                        JsModuleConstEntry* pmc = (JsModuleConstEntry*)hashmap_get(mt->module_consts, &pmlookup);
+                        if (pmc && pmc->const_type == MCONST_MODVAR) {
+                            jm_call_void_2(mt, "js_set_module_var",
+                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pmc->int_val),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                        }
+                    }
                 }
             }
         }
@@ -19030,10 +19068,20 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 }
 
 // ============================================================================
+// Preamble support for batch mode two-module split
+// ============================================================================
+
+// Static globals for preamble mode control.
+// Set by wrapper functions before calling the core transpiler.
+static bool g_jm_preamble_mode = false;               // compile as preamble (func decls → module vars)
+static JsPreambleState* g_jm_preamble_out = NULL;      // output: preamble snapshot (preamble mode)
+static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from preamble (test mode)
+
+// ============================================================================
 // Public entry point for JS transpilation via direct MIR generation
 // ============================================================================
 
-Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
 
     // Save runtime for dynamic function compilation (new Function(...)) support
@@ -19151,6 +19199,14 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     mt->current_func_index = -1;
     mt->filename = filename;
 
+    // Preamble mode setup
+    mt->preamble_mode = g_jm_preamble_mode;
+    if (g_jm_preamble_in) {
+        mt->preamble_entries = g_jm_preamble_in->entries;
+        mt->preamble_entry_count = g_jm_preamble_in->entry_count;
+        mt->preamble_var_count = g_jm_preamble_in->module_var_count;
+    }
+
     // Create module
     mt->module = MIR_new_module(ctx, "js_script");
 
@@ -19244,7 +19300,11 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 
     // Execute
     log_debug("js-mir: executing JIT compiled code");
-    js_reset_module_vars();
+    if (!g_jm_preamble_in) {
+        // Normal/preamble mode: reset all module vars before execution
+        js_reset_module_vars();
+    }
+    // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
     Item result = js_main((Context*)context);
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));
 
@@ -19252,6 +19312,21 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
     // (MIR_finish below destroys compiled code, so timers must fire here)
     js_event_loop_drain();
     log_debug("js-mir: event loop drained");
+
+    // Preamble mode: snapshot module_consts so tests can inherit harness definitions
+    if (g_jm_preamble_out && mt->module_consts) {
+        g_jm_preamble_out->module_var_count = mt->module_var_count;
+        int count = (int)hashmap_count(mt->module_consts);
+        g_jm_preamble_out->entries = (JsModuleConstEntry*)malloc(count * sizeof(JsModuleConstEntry));
+        g_jm_preamble_out->entry_count = 0;
+        size_t snap_iter = 0; void* snap_item;
+        while (hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
+            g_jm_preamble_out->entries[g_jm_preamble_out->entry_count++] =
+                *(JsModuleConstEntry*)snap_item;
+        }
+        log_debug("js-mir: preamble snapshot: %d entries, %d module vars",
+            g_jm_preamble_out->entry_count, g_jm_preamble_out->module_var_count);
+    }
 
     // Handle result (same logic as js_transpiler_compile)
     Item final_result;
@@ -19288,12 +19363,61 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
     free(mt);
-    MIR_finish(ctx);
+    if (g_jm_preamble_out) {
+        // Preamble mode: keep MIR context alive — harness function objects reference compiled code
+        g_jm_preamble_out->mir_ctx = ctx;
+    } else {
+        MIR_finish(ctx);
+    }
     jm_cleanup_deferred_mir();
     js_transpiler_destroy(tp);
 
     log_debug("js-mir: transpilation completed");
     return final_result;
+}
+
+// ============================================================================
+// Public API wrappers for preamble support
+// ============================================================================
+
+Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
+    return transpile_js_to_mir_core(runtime, js_source, filename);
+}
+
+Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                   JsPreambleState* out_state) {
+    g_jm_preamble_mode = true;
+    g_jm_preamble_out = out_state;
+    g_jm_preamble_in = NULL;
+    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    return result;
+}
+
+Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
+                                        const JsPreambleState* preamble) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = preamble;
+    Item result = transpile_js_to_mir_core(runtime, js_source, filename);
+    g_jm_preamble_in = NULL;
+    return result;
+}
+
+void preamble_state_destroy(JsPreambleState* state) {
+    if (!state) return;
+    if (state->mir_ctx) {
+        MIR_finish((MIR_context_t)state->mir_ctx);
+        state->mir_ctx = NULL;
+    }
+    free(state->entries);
+    state->entries = NULL;
+    state->entry_count = 0;
+    state->module_var_count = 0;
 }
 
 // ============================================================================

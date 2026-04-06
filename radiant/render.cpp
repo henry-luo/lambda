@@ -2211,12 +2211,13 @@ void render_caret(RenderContext* rdcon, RadiantState* state) {
     CaretState* caret = state->caret;
     View* view = caret->view;
 
-    // Form text inputs draw their own caret in render_text_input()
+    // Form controls draw their own caret in render_text_input() / render_textarea()
     if (view->is_element()) {
         DomElement* elem = (DomElement*)view;
         if (elem->item_prop_type == DomElement::ITEM_PROP_FORM &&
             elem->form &&
-            elem->form->control_type == FORM_CONTROL_TEXT) {
+            (elem->form->control_type == FORM_CONTROL_TEXT ||
+             elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
             return;
         }
     }

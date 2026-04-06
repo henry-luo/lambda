@@ -160,6 +160,15 @@ typedef struct TypeInt64 : TypeConst {
     int64_t int64_val;
 } TypeInt64;
 
+typedef struct TypeNumSized : TypeConst {
+    NumSizedType num_type;  // which sized numeric sub-type
+    uint32_t raw_bits;      // raw 32-bit value (bit pattern)
+} TypeNumSized;
+
+typedef struct TypeUint64 : TypeConst {
+    uint64_t uint64_val;
+} TypeUint64;
+
 typedef struct TypeDateTime : TypeConst {
     DateTime datetime;
 } TypeDateTime;
@@ -443,6 +452,17 @@ extern Type TYPE_STRING;
 extern Type TYPE_BINARY;
 extern Type TYPE_SYMBOL;
 extern Type TYPE_PATH;
+extern Type TYPE_NUM_SIZED;
+extern Type TYPE_UINT64;
+// sub-type Type objects for sized numerics (kind = NumSizedType)
+extern Type TYPE_I8;
+extern Type TYPE_I16;
+extern Type TYPE_I32;
+extern Type TYPE_U8;
+extern Type TYPE_U16;
+extern Type TYPE_U32;
+extern Type TYPE_F16;
+extern Type TYPE_F32;
 extern Type TYPE_DTIME;
 extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
 extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
@@ -470,11 +490,14 @@ extern Type LIT_FLOAT;
 extern Type LIT_DECIMAL;
 extern Type LIT_STRING;
 extern Type LIT_DTIME;
+extern Type LIT_NUM_SIZED;
+extern Type LIT_UINT64;
 extern Type LIT_TYPE;
 
 extern TypeType LIT_TYPE_NULL;
 extern TypeType LIT_TYPE_BOOL;
 extern TypeType LIT_TYPE_INT;
+extern TypeType LIT_TYPE_INT64;
 extern TypeType LIT_TYPE_FLOAT;
 extern TypeType LIT_TYPE_DECIMAL;
 extern TypeType LIT_TYPE_NUMBER;
@@ -495,6 +518,16 @@ extern TypeType LIT_TYPE_FUNC;
 extern TypeType LIT_TYPE_TYPE;
 extern TypeType LIT_TYPE_ANY;
 extern TypeType LIT_TYPE_ERROR;
+// sized numeric type references
+extern TypeType LIT_TYPE_I8;
+extern TypeType LIT_TYPE_I16;
+extern TypeType LIT_TYPE_I32;
+extern TypeType LIT_TYPE_U8;
+extern TypeType LIT_TYPE_U16;
+extern TypeType LIT_TYPE_U32;
+extern TypeType LIT_TYPE_U64;
+extern TypeType LIT_TYPE_F16;
+extern TypeType LIT_TYPE_F32;
 
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;
