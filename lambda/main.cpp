@@ -1128,6 +1128,9 @@ int main(int argc, char *argv[]) {
             }
             if (js_check_exception()) {
                 js_had_error = true;
+                const char* exc_msg = js_get_exception_message();
+                if (exc_msg[0]) fprintf(stderr, "Uncaught %s\n", exc_msg);
+                js_clear_exception();
             }
 
             free(js_source);
@@ -2841,6 +2844,14 @@ int main(int argc, char *argv[]) {
 #endif
             free(js_source);
             fflush(stdout);
+
+            // Print uncaught exception to stdout for batch capture
+            if (result == 1 && js_check_exception()) {
+                const char* exc_msg = js_get_exception_message();
+                if (exc_msg[0]) printf("Uncaught %s\n", exc_msg);
+                js_clear_exception();
+                fflush(stdout);
+            }
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
