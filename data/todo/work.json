@@ -1,0 +1,20 @@
+{
+  "name": "Work",
+  "lists": [
+    {
+      "name": "In Progress",
+      "items": [
+        {"id": 1, "text": "Review pull requests", "done": false},
+        {"id": 2, "text": "Update documentation", "done": true},
+        {"id": 3, "text": "Fix CI pipeline", "done": false}
+      ]
+    },
+    {
+      "name": "Backlog",
+      "items": [
+        {"id": 4, "text": "Refactor auth module", "done": false},
+        {"id": 5, "text": "Write unit tests", "done": false}
+      ]
+    }
+  ]
+}

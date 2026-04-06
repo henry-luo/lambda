@@ -4123,6 +4123,15 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     DomDocument* doc = uicon->document;
     Element* html_elem = doc->html_root;
+
+    // sync html_root with render_map's doc_root (may have been updated by retransform)
+    Item current_doc_root = render_map_get_doc_root();
+    if (current_doc_root.item && current_doc_root.element != html_elem) {
+        html_elem = current_doc_root.element;
+        doc->html_root = html_elem;
+        log_debug("rebuild_lambda_doc: synced html_root from render_map doc_root");
+    }
+
     if (!html_elem) {
         log_error("rebuild_lambda_doc: no html_root in document");
         return;
@@ -4220,17 +4229,20 @@ void rebuild_lambda_doc(UiContext* uicon) {
         }
     }
 
-    if (doc->view_tree) {
-        render_html_doc(uicon, doc->view_tree, NULL);
+    // Skip render here — let the main loop handle it via render().
+    // Full rebuild: mark dirty tracker for full repaint so the main loop does a full render.
+    if (state) {
+        state->dirty_tracker.full_repaint = true;
+        state->is_dirty = true;
+        state->needs_reflow = false;  // layout already done by rebuild
     }
-    auto t_render = high_resolution_clock::now();
+    auto t_end = high_resolution_clock::now();
 
-    log_info("[TIMING] rebuild: dom_build=%.2fms css_cascade=%.2fms layout=%.2fms render=%.2fms total=%.2fms",
+    log_info("[TIMING] rebuild: dom_build=%.2fms css_cascade=%.2fms layout=%.2fms total=%.2fms",
         duration<double, std::milli>(t_dom - t_start).count(),
         duration<double, std::milli>(t_css - t_dom).count(),
         duration<double, std::milli>(t_layout - t_css).count(),
-        duration<double, std::milli>(t_render - t_layout).count(),
-        duration<double, std::milli>(t_render - t_start).count());
+        duration<double, std::milli>(t_end - t_start).count());
 }
 
 // ============================================================================
@@ -4261,6 +4273,15 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
 
     DomDocument* doc = uicon->document;
     Element* html_elem = doc->html_root;
+
+    // sync html_root with render_map's doc_root (may have been updated by retransform)
+    Item current_doc_root = render_map_get_doc_root();
+    if (current_doc_root.item && current_doc_root.element != html_elem) {
+        html_elem = current_doc_root.element;
+        doc->html_root = html_elem;
+        log_debug("rebuild_lambda_doc_incremental: synced html_root from render_map doc_root");
+    }
+
     if (!html_elem) {
         log_error("rebuild_lambda_doc_incremental: no html_root in document");
         return;
@@ -4500,25 +4521,41 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
     }
 
-    // Render (Phase 12.4: render_html_doc checks dirty tracker for selective repaint)
-    bool used_selective = state && !state->dirty_tracker.full_repaint
-                          && dirty_has_regions(&state->dirty_tracker);
-    if (doc->view_tree) {
-        render_html_doc(uicon, doc->view_tree, NULL);
+    // Phase 20: autofocus — if no focus was restored and new subtree contains an input,
+    // check for autofocus attribute and set focus to it
+    if (state && (!state->focus || !state->focus->current)) {
+        for (int i = 0; i < result_count; i++) {
+            if (new_doms[i]) {
+                View* af = find_matching_input((View*)new_doms[i], "input", nullptr);
+                if (af && af->is_element()) {
+                    DomElement* af_elem = (DomElement*)af;
+                    if (af_elem->has_attribute("autofocus")) {
+                        focus_set(state, af, false);
+                        caret_set(state, af, 0);
+                        log_debug("rebuild_incr: autofocus set on new input");
+                        break;
+                    }
+                }
+            }
+        }
     }
-    // Clear dirty tracker after render
-    if (state) {
-        dirty_clear(&state->dirty_tracker);
-    }
-    auto t_render = high_resolution_clock::now();
 
-    log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms render=%.2fms total=%.2fms (subtrees=%d, selective=%s)",
+    // Skip render here — let the main loop handle it via render().
+    // Dirty tracker retains regions computed above so the main loop can do selective repaint.
+    if (state) {
+        state->is_dirty = true;
+        state->needs_reflow = false;  // layout already done by rebuild
+    }
+    bool has_selective = state && !state->dirty_tracker.full_repaint
+                         && dirty_has_regions(&state->dirty_tracker);
+    auto t_end = high_resolution_clock::now();
+
+    log_info("[TIMING] rebuild_incr: dom_patch=%.2fms layout=%.2fms total=%.2fms (subtrees=%d, selective=%s)",
         duration<double, std::milli>(t_dom_css - t_start).count(),
         duration<double, std::milli>(t_layout - t_dom_css).count(),
-        duration<double, std::milli>(t_render - t_layout).count(),
-        duration<double, std::milli>(t_render - t_start).count(),
+        duration<double, std::milli>(t_end - t_start).count(),
         result_count,
-        used_selective ? "yes" : "no");
+        has_selective ? "yes" : "no");
 }
 
 /**

@@ -102,9 +102,6 @@ void tmpl_state_set(Item model_item, const char* template_ref,
 
     // mark the render map entry dirty for observer-based reconciliation
     render_map_mark_dirty(model_item, template_ref);
-
-    log_debug("tmpl_state_set: tmpl=%s state=%s (render map marked dirty)",
-              template_ref ? template_ref : "(anon)", state_name);
 }
 
 Item tmpl_state_get_or_init(Item model_item, const char* template_ref,

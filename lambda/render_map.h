@@ -92,6 +92,7 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out);
 // Set the document root element so retransform can fix parent references.
 // Call this after producing the top-level element tree in load_lambda_script_doc.
 void render_map_set_doc_root(Item root);
+Item render_map_get_doc_root(void);
 
 #ifdef __cplusplus
 }

@@ -1590,6 +1590,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
 
         // Sync DOM pseudo-states for previous focus
         if (prev_focus) {
+            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
+            dispatch_lambda_handler(evcon, prev_focus, "blur");
+
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
             // Clear :focus-within from previous ancestor chain
@@ -1613,6 +1616,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         focus_clear(state);
 
         if (prev_focus) {
+            // Phase 20: dispatch blur event to Lambda handler before clearing focus state
+            dispatch_lambda_handler(evcon, prev_focus, "blur");
+
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS, false);
             sync_pseudo_state(prev_focus, PSEUDO_STATE_FOCUS_VISIBLE, false);
             // Clear :focus-within from ancestor chain

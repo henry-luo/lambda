@@ -229,9 +229,11 @@ void reflow_html_doc(DomDocument* doc) {
         return;
     }
     layout_html_doc(&ui_context, doc, true);
-    // render html doc
-    if (doc->view_tree) {
-        render_html_doc(&ui_context, doc->view_tree, NULL);
+    // Skip render here — let the main loop handle it via render().
+    // Mark dirty so the main loop knows to repaint.
+    if (doc->state) {
+        RadiantState* state = (RadiantState*)doc->state;
+        state->is_dirty = true;
     }
 }
 
