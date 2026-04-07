@@ -2521,6 +2521,22 @@ static void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* nam
     }
 }
 
+// v23: truthiness check with inline fast-path for known boolean Items.
+// For known-BOOL expressions (comparisons, !expr), extracts the low bit directly
+// instead of calling js_is_truthy (saves a function call).
+static MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr) {
+    if (expr && jm_get_effective_type(mt, expr) == LMD_TYPE_BOOL) {
+        MIR_reg_t result = jm_new_reg(mt, "trthy", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, val),
+            MIR_new_int_op(mt->ctx, 1)));
+        return result;
+    }
+    return jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, val)));
+}
+
 // Forward declarations for native expression transpilation
 static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 static MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
@@ -5158,8 +5174,7 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, left_val));
         } else {
             // || and &&: check truthiness
-            cond = jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, left_val));
+            cond = jm_emit_is_truthy(mt, left_val, bin->left);
         }
 
         if (bin->op == JS_OP_OR) {
@@ -5197,6 +5212,67 @@ static MIR_reg_t jm_transpile_binary(JsMirTranspiler* mt, JsBinaryNode* bin) {
 
         jm_emit_label(mt, l_end);
         return result;
+    }
+
+    // v23: typeof pattern optimization: typeof x === "literal" → js_typeof_is(x, "literal")
+    // Reduces 3 operations (typeof + box_string + strict_equal) to 1 call returning int.
+    {
+        bool is_typeof_eq = (bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_EQ);
+        bool is_typeof_ne = (bin->op == JS_OP_STRICT_NE || bin->op == JS_OP_NE);
+        if (is_typeof_eq || is_typeof_ne) {
+            JsAstNode* typeof_side = NULL;
+            JsAstNode* literal_side = NULL;
+            if (bin->left && bin->left->node_type == JS_AST_NODE_UNARY_EXPRESSION &&
+                ((JsUnaryNode*)bin->left)->op == JS_OP_TYPEOF) {
+                typeof_side = bin->left; literal_side = bin->right;
+            } else if (bin->right && bin->right->node_type == JS_AST_NODE_UNARY_EXPRESSION &&
+                       ((JsUnaryNode*)bin->right)->op == JS_OP_TYPEOF) {
+                typeof_side = bin->right; literal_side = bin->left;
+            }
+            if (typeof_side && literal_side &&
+                literal_side->node_type == JS_AST_NODE_LITERAL) {
+                JsLiteralNode* lit = (JsLiteralNode*)literal_side;
+                if (lit->literal_type == JS_LITERAL_STRING && lit->value.string_value) {
+                    JsUnaryNode* type_un = (JsUnaryNode*)typeof_side;
+                    JsAstNode* operand = type_un->operand;
+                    // Only optimize when operand is in scope (avoids issues with
+                    // builtins like parseInt/Math and undeclared variables)
+                    bool can_optimize = true;
+                    if (operand && operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                        JsIdentifierNode* id = (JsIdentifierNode*)operand;
+                        if (id->name && !jm_find_var(mt, id->name->chars))
+                            can_optimize = false;
+                    }
+                    if (can_optimize) {
+                        MIR_reg_t operand_reg = jm_transpile_box_item(mt, operand);
+                        const char* type_str = lit->value.string_value->chars;
+                        int type_len = (int)lit->value.string_value->len;
+                        NamePool* np = (mt->is_module && context && context->name_pool)
+                                       ? context->name_pool : mt->tp->name_pool;
+                        String* interned = name_pool_create_len(np, type_str, type_len);
+                        // call js_typeof_is(value, type_str_ptr) → int64_t 0/1
+                        MIR_reg_t raw = jm_call_2(mt, "js_typeof_is", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, operand_reg),
+                            MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)interned->chars));
+                        // for !==, invert the result
+                        if (is_typeof_ne) {
+                            MIR_reg_t inv = jm_new_reg(mt, "typeof_inv", MIR_T_I64);
+                            jm_emit(mt, MIR_new_insn(mt->ctx, MIR_XOR,
+                                MIR_new_reg_op(mt->ctx, inv),
+                                MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 1)));
+                            raw = inv;
+                        }
+                        // box as boolean Item: ITEM_FALSE | raw_bit
+                        MIR_reg_t result = jm_new_reg(mt, "typeof_r", MIR_T_I64);
+                        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR,
+                            MIR_new_reg_op(mt->ctx, result),
+                            MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE_VAL),
+                            MIR_new_reg_op(mt->ctx, raw)));
+                        return result;
+                    }
+                }
+            }
+        }
     }
 
     // --- Boxed runtime path (original) ---
@@ -10471,8 +10547,7 @@ static MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
 // Conditional expression (ternary)
 static MIR_reg_t jm_transpile_conditional(JsMirTranspiler* mt, JsConditionalNode* cond) {
     MIR_reg_t test = jm_transpile_box_item(mt, cond->test);
-    MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
+    MIR_reg_t truthy = jm_emit_is_truthy(mt, test, cond->test);
 
     MIR_reg_t result = jm_new_reg(mt, "tern", MIR_T_I64);
     MIR_label_t l_false = jm_new_label(mt);
@@ -12258,8 +12333,7 @@ static void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         test_val = jm_transpile_expression(mt, if_node->test);
     } else {
         MIR_reg_t test = jm_transpile_box_item(mt, if_node->test);
-        test_val = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
+        test_val = jm_emit_is_truthy(mt, test, if_node->test);
     }
 
     MIR_label_t l_else = jm_new_label(mt);
@@ -12420,8 +12494,7 @@ static void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
             MIR_new_reg_op(mt->ctx, test)));
     } else {
         MIR_reg_t test = jm_transpile_box_item(mt, wh->test);
-        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
+        MIR_reg_t truthy = jm_emit_is_truthy(mt, test, wh->test);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
@@ -12619,8 +12692,7 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
                     MIR_new_reg_op(mt->ctx, test)));
             } else {
                 MIR_reg_t test = jm_transpile_box_item(mt, for_node->test);
-                MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
+                MIR_reg_t truthy = jm_emit_is_truthy(mt, test, for_node->test);
                 jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
                     MIR_new_reg_op(mt->ctx, truthy)));
             }
@@ -13411,8 +13483,12 @@ static void jm_transpile_switch(JsMirTranspiler* mt, JsSwitchNode* sw) {
         MIR_reg_t eq = jm_call_2(mt, "js_strict_equal", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, discriminant),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, test_val));
-        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, eq)));
+        // v23: js_strict_equal returns boxed boolean — extract low bit directly
+        MIR_reg_t truthy = jm_new_reg(mt, "trthy", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND,
+            MIR_new_reg_op(mt->ctx, truthy),
+            MIR_new_reg_op(mt->ctx, eq),
+            MIR_new_int_op(mt->ctx, 1)));
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, case_labels[i]),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
@@ -13468,8 +13544,7 @@ static void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
     jm_scope_env_reload_vars(mt);
     if (dw->test) {
         MIR_reg_t test = jm_transpile_box_item(mt, dw->test);
-        MIR_reg_t truthy = jm_emit_uext8(mt, jm_call_1(mt, "js_is_truthy", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, test)));
+        MIR_reg_t truthy = jm_emit_is_truthy(mt, test, dw->test);
         jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_body),
             MIR_new_reg_op(mt->ctx, truthy)));
     }
