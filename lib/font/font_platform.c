@@ -532,3 +532,127 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
 }
 
 #endif
+
+// ============================================================================
+// CoreText GPOS kerning (macOS only)
+//
+// FreeType's FT_Get_Kerning only reads the legacy 'kern' table. Modern fonts
+// (especially Apple's System Font / SF Pro) store kerning in the OpenType GPOS
+// table. CoreText reads GPOS natively, so we use it as a fallback for pair
+// kerning when FreeType reports has_kerning=false.
+// ============================================================================
+
+#ifdef __APPLE__
+
+void* font_platform_create_ct_font(const char* postscript_name,
+                                    const char* family_name,
+                                    float size_px) {
+    CTFontRef ct_font = NULL;
+
+    // try PostScript name first (most precise match)
+    if (postscript_name && postscript_name[0]) {
+        CFStringRef ps = CFStringCreateWithCString(NULL, postscript_name, kCFStringEncodingUTF8);
+        if (ps) {
+            ct_font = CTFontCreateWithName(ps, (CGFloat)size_px, NULL);
+            CFRelease(ps);
+        }
+    }
+
+    // fall back to family name
+    if (!ct_font && family_name && family_name[0]) {
+        CFStringRef fam = CFStringCreateWithCString(NULL, family_name, kCFStringEncodingUTF8);
+        if (fam) {
+            ct_font = CTFontCreateWithName(fam, (CGFloat)size_px, NULL);
+            CFRelease(fam);
+        }
+    }
+
+    if (ct_font) {
+        log_debug("font_platform: created CTFont for kerning (ps=%s, size=%.0f)",
+                  postscript_name ? postscript_name : "?", size_px);
+    }
+    return (void*)ct_font;
+}
+
+void font_platform_destroy_ct_font(void* ct_font_ref) {
+    if (ct_font_ref) {
+        CFRelease((CTFontRef)ct_font_ref);
+    }
+}
+
+float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32_t right_cp) {
+    if (!ct_font_ref) return 0.0f;
+
+    CTFontRef font = (CTFontRef)ct_font_ref;
+
+    // encode both codepoints as UTF-16
+    UniChar utf16[4];
+    CFIndex len = 0;
+
+    if (left_cp <= 0xFFFF) {
+        utf16[len++] = (UniChar)left_cp;
+    } else if (left_cp <= 0x10FFFF) {
+        uint32_t cp = left_cp - 0x10000;
+        utf16[len++] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
+    } else {
+        return 0.0f;
+    }
+
+    CFIndex left_len = len;
+
+    if (right_cp <= 0xFFFF) {
+        utf16[len++] = (UniChar)right_cp;
+    } else if (right_cp <= 0x10FFFF) {
+        uint32_t cp = right_cp - 0x10000;
+        utf16[len++] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[len++] = (UniChar)(0xDC00 + (cp & 0x3FF));
+    } else {
+        return 0.0f;
+    }
+
+    // get nominal advance for left glyph
+    CGGlyph left_glyph;
+    CTFontGetGlyphsForCharacters(font, utf16, &left_glyph, (CFIndex)left_len);
+    if (left_glyph == 0) return 0.0f;
+
+    CGSize nominal_adv;
+    CTFontGetAdvancesForGlyphs(font, kCTFontOrientationHorizontal, &left_glyph, &nominal_adv, 1);
+
+    // create attributed string for the pair and measure via CTLine/CTRun
+    CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, len);
+    if (!str) return 0.0f;
+
+    CFStringRef keys[] = { kCTFontAttributeName };
+    CFTypeRef values[] = { font };
+    CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+        (const void**)keys, (const void**)values, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+    CFAttributedStringRef astr = CFAttributedStringCreate(NULL, str, attrs);
+    CFRelease(str);
+    CFRelease(attrs);
+    if (!astr) return 0.0f;
+
+    CTLineRef line = CTLineCreateWithAttributedString(astr);
+    CFRelease(astr);
+    if (!line) return 0.0f;
+
+    // get the first glyph's advance from the run (includes GPOS kerning)
+    float kerning = 0.0f;
+    CFArrayRef runs = CTLineGetGlyphRuns(line);
+    if (CFArrayGetCount(runs) > 0) {
+        CTRunRef run = (CTRunRef)CFArrayGetValueAtIndex(runs, 0);
+        CFIndex glyph_count = CTRunGetGlyphCount(run);
+        if (glyph_count >= 2) {
+            CGSize advances[2];
+            CTRunGetAdvances(run, CFRangeMake(0, 1), advances);
+            kerning = (float)(advances[0].width - nominal_adv.width);
+        }
+    }
+
+    CFRelease(line);
+    return kerning;
+}
+
+#endif

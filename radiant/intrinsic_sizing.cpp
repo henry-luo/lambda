@@ -72,6 +72,32 @@ CssEnum get_white_space_value(DomNode* node);
 // Text Measurement (Core Implementation)
 // ============================================================================
 
+/**
+ * Check if a codepoint is an emoji that participates in ZWJ composition.
+ * Only emoji characters form composed glyphs when joined by ZWJ.
+ */
+static inline bool is_emoji_for_zwj(uint32_t cp) {
+    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks
+           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
+           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical
+           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
+           cp == 0x200D || cp == 0x2764;
+}
+
+/**
+ * Check if a codepoint can serve as the base (left side) of a ZWJ emoji
+ * composition sequence. (Unicode UTS #51, emoji-zwj-sequences.txt)
+ */
+static inline bool is_zwj_composition_base(uint32_t cp) {
+    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
+           cp == 0x1F9D1 ||                       // Person (gender-neutral)
+           cp == 0x1F441 ||                       // Eye
+           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
+           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
+           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
+           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+}
+
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
@@ -119,9 +145,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float longest_word = 0.0f;
 
     uint32_t prev_glyph = 0;
+    uint32_t prev_codepoint = 0;
     bool has_kerning = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
     const unsigned char* str = (const unsigned char*)text;
     bool is_word_start = true;  // for text-transform: capitalize
+    bool after_zwj = false;     // track ZWJ for emoji sequence composition
+    bool prev_is_zwj_base = false;  // track if previous char is a ZWJ composition base
 
     for (size_t i = 0; i < length; ) {
         unsigned char ch = str[i];
@@ -151,7 +180,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         // Check for other zero-width characters (ZWNJ U+200C, ZWJ U+200D)
         // UTF-8: U+200C = 0xE2 0x80 0x8C, U+200D = 0xE2 0x80 0x8D
         if (ch == 0xE2 && i + 2 < length && str[i+1] == 0x80 && (str[i+2] == 0x8C || str[i+2] == 0x8D)) {
-            // Zero width, no break, just skip
+            // ZWJ: only trigger composition if preceded by a valid base
+            if (str[i+2] == 0x8D && prev_is_zwj_base) after_zwj = true;
             prev_glyph = 0;
             i += 3;
             continue;
@@ -166,8 +196,9 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             uint32_t space_glyph = font_get_glyph_index(lycon->font.font_handle, ch);
 
             // Apply kerning between prev character and space (matching layout_text.cpp)
-            if (has_kerning && prev_glyph && space_glyph) {
-                total_width += font_get_kerning_by_index(lycon->font.font_handle, prev_glyph, space_glyph);
+            if (has_kerning && prev_codepoint) {
+                float k = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
+                total_width += k;
             }
 
             // Use the same space_width as layout_text.cpp for consistency
@@ -189,8 +220,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
             total_width += space_width;
 
-            // Keep tracking glyph for kerning continuity (layout_text.cpp doesn't reset)
+            // Keep tracking glyph/codepoint for kerning continuity (layout_text.cpp doesn't reset)
             prev_glyph = space_glyph;
+            prev_codepoint = (uint32_t)ch;
+            prev_is_zwj_base = false;
             is_word_start = true;  // Next character starts a new word
             i++;
             continue;
@@ -213,6 +246,32 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (text_transform != CSS_VALUE_NONE && text_transform != 0) {
             codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
         }
+
+        // Emoji combining marks: skin tone modifiers, variation selectors, and
+        // combining enclosing keycap have zero advance width in composed sequences.
+        // (Unicode UAX #29 grapheme clusters, CSS Text 3)
+        if ((codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) ||  // skin tone modifiers
+            codepoint == 0xFE0E || codepoint == 0xFE0F ||       // variation selectors
+            codepoint == 0x20E3) {                               // combining keycap
+            prev_glyph = 0;
+            i += bytes;
+            continue;
+        }
+
+        // Character after ZWJ: only suppress advance for emoji codepoints that
+        // form composed glyphs in ZWJ sequences. Other scripts (CJK, Latin, etc.)
+        // keep their independent advance widths. (Unicode UTS #51)
+        if (after_zwj) {
+            after_zwj = false;
+            if (is_emoji_for_zwj(codepoint)) {
+                prev_is_zwj_base = is_zwj_composition_base(codepoint);
+                prev_glyph = 0;
+                i += bytes;
+                continue;
+            }
+        }
+
+        prev_is_zwj_base = is_zwj_composition_base(codepoint);
 
         // CSS font-variant: small-caps — convert lowercase to uppercase glyphs
         // rendered at ~0.7× size (CSS 2.1 §15.8, matching layout_text.cpp)
@@ -258,8 +317,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         // Apply kerning if available (returns CSS pixels directly)
         float kerning = 0.0f;
-        if (has_kerning && prev_glyph) {
-            kerning = font_get_kerning_by_index(lycon->font.font_handle, prev_glyph, glyph_index);
+        if (has_kerning && prev_codepoint) {
+            kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
         }
 
         // Get glyph advance via font module (returns CSS pixels directly)
@@ -282,6 +341,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         }
 
         prev_glyph = glyph_index;
+        prev_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
     }
 
@@ -325,6 +385,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
     bool has_font = lycon->font.font_handle != nullptr;
     bool has_kerning = has_font ? font_get_metrics(lycon->font.font_handle)->has_kerning : false;
     uint32_t prev_glyph = 0;
+    uint32_t prev_codepoint = 0;
     bool is_word_start = true;
 
     const unsigned char* str = (const unsigned char*)text;
@@ -375,6 +436,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
             }
             current_line_width += space_width;
             prev_glyph = has_font ? font_get_glyph_index(lycon->font.font_handle, ch) : 0;
+            prev_codepoint = (uint32_t)ch;
             is_word_start = true;
             i++;
             continue;
@@ -410,8 +472,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
             uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
             if (glyph_index) {
                 float kerning = 0;
-                if (has_kerning && prev_glyph) {
-                    kerning = font_get_kerning_by_index(lycon->font.font_handle, prev_glyph, glyph_index);
+                if (has_kerning && prev_codepoint) {
+                    kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
                 }
                 GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
                 float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
@@ -432,6 +494,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
                 advance += lycon->font.style->letter_spacing;
             }
             prev_glyph = font_get_glyph_index(lycon->font.font_handle, codepoint);
+            prev_codepoint = codepoint;
         } else {
             advance = 11.0f;
         }
