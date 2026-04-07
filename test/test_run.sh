@@ -387,7 +387,7 @@ run_test_with_timeout() {
     local test_timeout="$TIMEOUT_DURATION"
     local orig_base="$(basename "$test_exe" .exe)"
     case "$orig_base" in
-        test_c2mir_gtest|test_lambda_gtest|test_py_gtest)
+        test_c2mir_gtest|test_lambda_gtest|test_py_gtest|test_js_test262_gtest)
             test_timeout="600s"  # batch mode: many scripts via subprocess
             ;;
     esac
