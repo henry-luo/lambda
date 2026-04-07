@@ -25,7 +25,7 @@ typedef struct mpd_t mpd_t;
 #include "../lib/arena.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
-#include "../lib/gc_nursery.h"
+#include "../lib/gc/gc_nursery.h"
 #include "../lib/datetime.h"
 #include "../lib/url.h"
 

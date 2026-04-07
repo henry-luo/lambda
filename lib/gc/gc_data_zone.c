@@ -5,7 +5,7 @@
  * No individual deallocation — bulk reset after GC compaction.
  */
 #include "gc_data_zone.h"
-#include "log.h"
+#include "../log.h"
 #include <stdlib.h>
 #include <string.h>
 

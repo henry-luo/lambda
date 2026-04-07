@@ -19,14 +19,14 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "font_config.h"
-#include "mempool.h"
-#include "arena.h"
-#include "arraylist.h"
-#include "hashmap.h"
-#include "str.h"
-#include "strbuf.h"
-#include "file.h"
-#include "log.h"
+#include "../mempool.h"
+#include "../arena.h"
+#include "../arraylist.h"
+#include "../hashmap.h"
+#include "../str.h"
+#include "../strbuf.h"
+#include "../file.h"
+#include "../log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

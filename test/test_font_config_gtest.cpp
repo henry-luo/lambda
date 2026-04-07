@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "../lib/font_config.h"
+#include "../lib/font/font_config.h"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"

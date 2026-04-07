@@ -8,7 +8,7 @@
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/hashmap.h"
-#include "../lib/gc_heap.h"
+#include "../lib/gc/gc_heap.h"
 #include "validator/validator.hpp"
 #include "lambda-stack.h"
 #include <mir.h>

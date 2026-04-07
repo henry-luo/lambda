@@ -94,6 +94,30 @@ lib_lines=$((lib_lines + lib_lines_hpp))
 echo "  Files: $(format_number $lib_files)"
 echo "  Lines: $(format_number $lib_lines)"
 echo ""
+
+# Count subdirectories of lib
+for subdir in $(find ./lib -maxdepth 1 -type d ! -path "./lib" | sort | sed 's|./lib/||'); do
+    if [ -d "./lib/$subdir" ]; then
+        result=$(count_loc "./lib/$subdir" "*.c" "")
+        sub_files=$(echo "$result" | awk '{print $1}')
+        sub_lines=$(echo "$result" | awk '{print $2}')
+        result_h=$(count_loc "./lib/$subdir" "*.h" "")
+        sub_files=$((sub_files + $(echo "$result_h" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_h" | awk '{print $2}')))
+        result_cpp=$(count_loc "./lib/$subdir" "*.cpp" "")
+        sub_files=$((sub_files + $(echo "$result_cpp" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_cpp" | awk '{print $2}')))
+        result_hpp=$(count_loc "./lib/$subdir" "*.hpp" "")
+        sub_files=$((sub_files + $(echo "$result_hpp" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_hpp" | awk '{print $2}')))
+
+        echo -e "${YELLOW}  ./lib/$subdir${NC}"
+        echo "    Files: $(format_number $sub_files)"
+        echo "    Lines: $(format_number $sub_lines)"
+        echo ""
+    fi
+done
+
 total_files=$((total_files + lib_files))
 total_lines=$((total_lines + lib_lines))
 

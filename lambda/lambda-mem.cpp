@@ -1,7 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
-#include "../lib/gc_heap.h"
+#include "../lib/gc/gc_heap.h"
 #include "lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include <mpdecimal.h>
