@@ -8,6 +8,12 @@ set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Build exclusion pattern for all tree-sitter directories dynamically
+exclude_ts=""
+for ts_dir in $(find "./lambda" -maxdepth 1 -name "tree-sitter*" -type d | sort); do
+    exclude_ts="$exclude_ts -not -path \"${ts_dir}/*\""
+done
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -93,9 +99,6 @@ total_lines=$((total_lines + lib_lines))
 
 # Count ./lambda (excluding tree-sitter directories)
 echo -e "${YELLOW}./lambda${NC} (excluding tree-sitter dirs)"
-
-# Build exclusion pattern for tree-sitter directories
-exclude_ts="-not -path \"./lambda/tree-sitter/*\" -not -path \"./lambda/tree-sitter-lambda/*\" -not -path \"./lambda/tree-sitter-javascript/*\""
 
 # Count C files
 result=$(count_loc "./lambda" "*.c" "$exclude_ts")
@@ -193,6 +196,29 @@ echo ""
 total_files=$((total_files + radiant_files))
 total_lines=$((total_lines + radiant_lines))
 
+# Count subdirectories of radiant
+for subdir in $(find ./radiant -maxdepth 1 -type d ! -path "./radiant" | sort | sed 's|./radiant/||'); do
+    if [ -d "./radiant/$subdir" ]; then
+        result=$(count_loc "./radiant/$subdir" "*.c" "")
+        sub_files=$(echo "$result" | awk '{print $1}')
+        sub_lines=$(echo "$result" | awk '{print $2}')
+        result_h=$(count_loc "./radiant/$subdir" "*.h" "")
+        sub_files=$((sub_files + $(echo "$result_h" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_h" | awk '{print $2}')))
+        result_cpp=$(count_loc "./radiant/$subdir" "*.cpp" "")
+        sub_files=$((sub_files + $(echo "$result_cpp" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_cpp" | awk '{print $2}')))
+        result_hpp=$(count_loc "./radiant/$subdir" "*.hpp" "")
+        sub_files=$((sub_files + $(echo "$result_hpp" | awk '{print $1}')))
+        sub_lines=$((sub_lines + $(echo "$result_hpp" | awk '{print $2}')))
+
+        echo -e "${YELLOW}  ./radiant/$subdir${NC}"
+        echo "    Files: $(format_number $sub_files)"
+        echo "    Lines: $(format_number $sub_lines)"
+        echo ""
+    fi
+done
+
 # Count ./test (only .cpp and .ls files)
 echo -e "${YELLOW}./test${NC} (only .cpp and .ls files)"
 result=$(count_loc "./test" "*.cpp" "")
@@ -213,7 +239,6 @@ total_lines=$((total_lines + test_lines))
 # Count subdirectories of test
 for subdir in $(find ./test -maxdepth 1 -type d ! -path "./test" | sort | sed 's|./test/||'); do
     if [ -d "./test/$subdir" ]; then
-        echo -e "${YELLOW}  ./test/$subdir${NC}"
 
         # Count .cpp files
         result=$(count_loc "./test/$subdir" "*.cpp" "")
@@ -227,11 +252,29 @@ for subdir in $(find ./test -maxdepth 1 -type d ! -path "./test" | sort | sed 's
         sub_files=$((sub_files + sub_files_ls))
         sub_lines=$((sub_lines + sub_lines_ls))
 
+        # Skip subdirs with no lines
+        if [ "$sub_lines" -eq 0 ]; then
+            continue
+        fi
+
+        echo -e "${YELLOW}  ./test/$subdir${NC}"
         echo "    Files: $(format_number $sub_files)"
         echo "    Lines: $(format_number $sub_lines)"
         echo ""
     fi
 done
+
+# Print top-level summary
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}  Summary by Top-Level Directory${NC}"
+echo -e "${BLUE}======================================${NC}"
+printf "  %-12s  %8s  %10s\n" "Directory" "Files" "Lines"
+printf "  %-12s  %8s  %10s\n" "------------" "--------" "----------"
+printf "  %-12s  %8s  %10s\n" "./lib"     "$(format_number $lib_files)"     "$(format_number $lib_lines)"
+printf "  %-12s  %8s  %10s\n" "./lambda"  "$(format_number $lambda_files)"  "$(format_number $lambda_lines)"
+printf "  %-12s  %8s  %10s\n" "./radiant" "$(format_number $radiant_files)" "$(format_number $radiant_lines)"
+printf "  %-12s  %8s  %10s\n" "./test"    "$(format_number $test_files)"    "$(format_number $test_lines)"
+echo ""
 
 # Print totals
 echo -e "${BLUE}======================================${NC}"
