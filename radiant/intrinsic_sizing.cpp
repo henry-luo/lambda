@@ -1292,10 +1292,71 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 border_spacing = element->tb->border_spacing_h;
             }
 
-            // Helper lambda: measure cells in a row and sum horizontally
-            auto measure_row = [&](DomElement* row_elem) {
-                float row_min = 0, row_max = 0;
-                int cell_count = 0;
+            // CSS Tables §4.1: Table intrinsic width = sum of per-column
+            // intrinsic widths, NOT max of per-row sums. Each column's
+            // min/max-content width is the maximum of cell min/max-content
+            // widths across all rows in that column.
+
+            // Helper: count cells in a row
+            auto count_cells = [](DomElement* row_elem) -> int {
+                int n = 0;
+                for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
+                    if (!cell->is_element()) continue;
+                    DomElement* cell_elem = cell->as_element();
+                    ViewBlock* cell_view = (ViewBlock*)cell_elem;
+                    bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
+                                    cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
+                    if (is_cell) n++;
+                }
+                return n;
+            };
+
+            // Helper: iterate rows in table (handles direct rows and row groups)
+            auto for_each_row = [&](auto&& callback) {
+                for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                    if (!child->is_element()) continue;
+                    DomElement* child_elem = child->as_element();
+                    ViewBlock* child_view = (ViewBlock*)child_elem;
+                    uintptr_t ctag = child_elem->tag();
+                    bool is_row = (child_view->display.inner == CSS_VALUE_TABLE_ROW || ctag == HTM_TAG_TR);
+                    bool is_row_group = (!is_row && (
+                        child_view->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
+                        child_view->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
+                        child_view->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
+                        ctag == HTM_TAG_TBODY || ctag == HTM_TAG_THEAD || ctag == HTM_TAG_TFOOT));
+                    if (is_row) {
+                        callback(child_elem);
+                    } else if (is_row_group) {
+                        for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
+                            if (!row->is_element()) continue;
+                            DomElement* row_elem = row->as_element();
+                            ViewBlock* row_view = (ViewBlock*)row_elem;
+                            if (row_view->display.inner == CSS_VALUE_TABLE_ROW || row_elem->tag() == HTM_TAG_TR) {
+                                callback(row_elem);
+                            }
+                        }
+                    }
+                }
+            };
+
+            // Pass 1: determine column count
+            int num_columns = 0;
+            for_each_row([&](DomElement* row_elem) {
+                int n = count_cells(row_elem);
+                if (n > num_columns) num_columns = n;
+            });
+
+            // Allocate per-column min/max arrays on the stack
+            float* col_min = (float*)alloca(num_columns * sizeof(float));
+            float* col_max = (float*)alloca(num_columns * sizeof(float));
+            for (int i = 0; i < num_columns; i++) {
+                col_min[i] = 0;
+                col_max[i] = 0;
+            }
+
+            // Pass 2: measure cells, update per-column min/max
+            for_each_row([&](DomElement* row_elem) {
+                int col = 0;
                 for (DomNode* cell = row_elem->first_child; cell; cell = cell->next_sibling) {
                     if (!cell->is_element()) continue;
                     DomElement* cell_elem = cell->as_element();
@@ -1303,47 +1364,37 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bool is_cell = (cell_view->display.inner == CSS_VALUE_TABLE_CELL ||
                                     cell_elem->tag() == HTM_TAG_TD || cell_elem->tag() == HTM_TAG_TH);
                     if (!is_cell) continue;
+                    if (col >= num_columns) break;
                     IntrinsicSizes cell_sizes = measure_element_intrinsic_widths(lycon, cell_elem);
-                    // ceil each cell width to match table layout's integer-pixel allocation
-                    row_min += ceilf(cell_sizes.min_content);
-                    row_max += ceilf(cell_sizes.max_content);
-                    cell_count++;
+                    float cmin = ceilf(cell_sizes.min_content);
+                    float cmax = ceilf(cell_sizes.max_content);
+                    if (cmin > col_min[col]) col_min[col] = cmin;
+                    if (cmax > col_max[col]) col_max[col] = cmax;
+                    col++;
                 }
-                if (cell_count > 1) {
-                    row_min += border_spacing * (cell_count - 1);
-                    row_max += border_spacing * (cell_count - 1);
-                }
-                sizes.min_content = max(sizes.min_content, row_min);
-                sizes.max_content = max(sizes.max_content, row_max);
-                log_debug("  table row: %d cells, min=%.1f, max=%.1f", cell_count, row_min, row_max);
-            };
+            });
 
+            // Sum per-column widths to get table intrinsic widths
+            float table_min = 0, table_max = 0;
+            for (int i = 0; i < num_columns; i++) {
+                table_min += col_min[i];
+                table_max += col_max[i];
+            }
+            if (num_columns > 1) {
+                table_min += border_spacing * (num_columns - 1);
+                table_max += border_spacing * (num_columns - 1);
+            }
+            sizes.min_content = max(sizes.min_content, table_min);
+            sizes.max_content = max(sizes.max_content, table_max);
+            log_debug("  table intrinsic: %d cols, min=%.1f, max=%.1f",
+                      num_columns, table_min, table_max);
+
+            // Handle captions
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
                 if (!child->is_element()) continue;
                 DomElement* child_elem = child->as_element();
                 ViewBlock* child_view = (ViewBlock*)child_elem;
                 uintptr_t ctag = child_elem->tag();
-
-                bool is_row = (child_view->display.inner == CSS_VALUE_TABLE_ROW || ctag == HTM_TAG_TR);
-                bool is_row_group = (!is_row && (
-                    child_view->display.inner == CSS_VALUE_TABLE_ROW_GROUP ||
-                    child_view->display.inner == CSS_VALUE_TABLE_HEADER_GROUP ||
-                    child_view->display.inner == CSS_VALUE_TABLE_FOOTER_GROUP ||
-                    ctag == HTM_TAG_TBODY || ctag == HTM_TAG_THEAD || ctag == HTM_TAG_TFOOT));
-
-                if (is_row) {
-                    measure_row(child_elem);
-                } else if (is_row_group) {
-                    for (DomNode* row = child_elem->first_child; row; row = row->next_sibling) {
-                        if (!row->is_element()) continue;
-                        DomElement* row_elem = row->as_element();
-                        ViewBlock* row_view = (ViewBlock*)row_elem;
-                        if (row_view->display.inner == CSS_VALUE_TABLE_ROW || row_elem->tag() == HTM_TAG_TR) {
-                            measure_row(row_elem);
-                        }
-                    }
-                }
-                // Captions: treat like block children (take max)
                 bool is_caption = (child_view->display.inner == CSS_VALUE_TABLE_CAPTION || ctag == HTM_TAG_CAPTION);
                 if (is_caption) {
                     IntrinsicSizes cap = measure_element_intrinsic_widths(lycon, child_elem);

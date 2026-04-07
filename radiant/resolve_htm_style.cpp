@@ -236,6 +236,24 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = CSS_VALUE_CENTER;
         break;
+    case HTM_TAG_DIV: {
+        // HTML spec §14.3.3: <div align> maps to text-align
+        const char* align_attr = elmt->get_attribute("align");
+        if (align_attr) {
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            size_t alen = strlen(align_attr);
+            if (str_ieq_const(align_attr, alen, "left")) {
+                block->blk->text_align = CSS_VALUE_LEFT;
+            } else if (str_ieq_const(align_attr, alen, "right")) {
+                block->blk->text_align = CSS_VALUE_RIGHT;
+            } else if (str_ieq_const(align_attr, alen, "center")) {
+                block->blk->text_align = CSS_VALUE_CENTER;
+            } else if (str_ieq_const(align_attr, alen, "justify")) {
+                block->blk->text_align = CSS_VALUE_JUSTIFY;
+            }
+        }
+        break;
+    }
     case HTM_TAG_IMG:  { // get html width and height (before the css styles)
         size_t value_len;  const char *value;
         value = elmt->get_attribute("width");
@@ -256,7 +274,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     }
                     log_debug("[HTML] IMG width attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_width);
                 }
-            } else {
+            } else if (value_len > 0 && value[0] >= '0' && value[0] <= '9') {
+                // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
                 StrView width_view = strview_init(value, value_len);
                 float width = strview_to_int(&width_view);
                 if (width >= 0) lycon->block.given_width = width;  // CSS logical pixels
@@ -279,10 +298,25 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                     }
                     log_debug("[HTML] IMG height attribute: %.0f%% -> %.1fpx", percent, lycon->block.given_height);
                 }
-            } else {
+            } else if (value_len > 0 && value[0] >= '0' && value[0] <= '9') {
+                // HTML spec: non-negative integer must start with ASCII digit; skip "auto" etc.
                 StrView height_view = strview_init(value, value_len);
                 float height = strview_to_int(&height_view);
                 if (height >= 0) lycon->block.given_height = height;  // CSS logical pixels
+            }
+        }
+        // HTML spec §14.3.3: <img align="left|right"> maps to float: left|right
+        {
+            const char* align_attr = elmt->get_attribute("align");
+            if (align_attr) {
+                size_t align_len = strlen(align_attr);
+                if (str_ieq_const(align_attr, align_len, "left")) {
+                    if (!block->position) { block->position = alloc_position_prop(lycon); }
+                    block->position->float_prop = CSS_VALUE_LEFT;
+                } else if (str_ieq_const(align_attr, align_len, "right")) {
+                    if (!block->position) { block->position = alloc_position_prop(lycon); }
+                    block->position->float_prop = CSS_VALUE_RIGHT;
+                }
             }
         }
         break;
@@ -755,6 +789,27 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->bound->border->top_color.a = block->bound->border->right_color.a =
                     block->bound->border->bottom_color.a = block->bound->border->left_color.a = 255;
                 log_debug("[HTML] TABLE border attribute: %.0fpx outset grey", border_width);
+            }
+        }
+        // HTML spec §14.3.3: <table align="center"> maps to margin-left: auto; margin-right: auto
+        // <table align="left|right"> maps to float: left|right
+        const char* align_attr = elmt->get_attribute("align");
+        if (align_attr) {
+            size_t alen = strlen(align_attr);
+            if (str_ieq_const(align_attr, alen, "center")) {
+                if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+                block->bound->margin.left_type = CSS_VALUE_AUTO;
+                block->bound->margin.right_type = CSS_VALUE_AUTO;
+                block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
+                log_debug("[HTML] TABLE align=center: margin-left/right auto");
+            } else if (str_ieq_const(align_attr, alen, "left")) {
+                if (!block->position) { block->position = alloc_position_prop(lycon); }
+                block->position->float_prop = CSS_VALUE_LEFT;
+                log_debug("[HTML] TABLE align=left: float left");
+            } else if (str_ieq_const(align_attr, alen, "right")) {
+                if (!block->position) { block->position = alloc_position_prop(lycon); }
+                block->position->float_prop = CSS_VALUE_RIGHT;
+                log_debug("[HTML] TABLE align=right: float right");
             }
         }
         break;
