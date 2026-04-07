@@ -8,7 +8,7 @@
  */
 
 #include "rdb.h"
-#include "sqlite3.h"
+#include "sqlite/sqlite3.h"
 #include "log.h"
 #include "strbuf.h"
 #include <string.h>
