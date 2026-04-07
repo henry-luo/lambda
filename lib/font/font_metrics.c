@@ -208,6 +208,13 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->em_size     = (float)face->units_per_EM;
     m->has_kerning = FT_HAS_KERNING(face);
 
+#ifdef __APPLE__
+    // CoreText can read GPOS kerning even when FreeType has no kern table
+    if (!m->has_kerning && handle->ct_font_ref) {
+        m->has_kerning = true;
+    }
+#endif
+
     handle->metrics_ready = true;
 
     log_info("font_metrics: %s @%.0fpx — asc=%.1f desc=%.1f lh=%.1f xh=%.1f ch=%.1f sp=%.1f em=%.0f kern=%d",

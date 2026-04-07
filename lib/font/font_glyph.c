@@ -216,22 +216,82 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
 // Kerning
 // ============================================================================
 
+// kern pair cache hashmap callbacks
+#define KERN_CACHE_MAX_ENTRIES 4096
+
+static uint64_t kern_pair_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const KernPairEntry* e = (const KernPairEntry*)item;
+    uint64_t key = ((uint64_t)e->left_cp << 32) | (uint64_t)e->right_cp;
+    return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
+}
+
+static int kern_pair_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const KernPairEntry* ea = (const KernPairEntry*)a;
+    const KernPairEntry* eb = (const KernPairEntry*)b;
+    if (ea->left_cp != eb->left_cp) return ea->left_cp < eb->left_cp ? -1 : 1;
+    if (ea->right_cp != eb->right_cp) return ea->right_cp < eb->right_cp ? -1 : 1;
+    return 0;
+}
+
+#ifdef __APPLE__
+static float font_get_kerning_coretext(FontHandle* handle, uint32_t left, uint32_t right) {
+    if (!handle->ct_font_ref) return 0.0f;
+
+    // check kern pair cache
+    if (!handle->kern_cache) {
+        handle->kern_cache = hashmap_new(sizeof(KernPairEntry), 256, 0, 0,
+                                          kern_pair_hash, kern_pair_compare, NULL, NULL);
+    }
+
+    KernPairEntry probe = { .left_cp = left, .right_cp = right };
+    const KernPairEntry* cached = (const KernPairEntry*)hashmap_get(handle->kern_cache, &probe);
+    if (cached) return cached->kerning;
+
+    // compute via CoreText
+    float kerning = font_platform_get_pair_kerning(handle->ct_font_ref, left, right);
+
+    // cache the result
+    if (hashmap_count(handle->kern_cache) >= KERN_CACHE_MAX_ENTRIES) {
+        hashmap_clear(handle->kern_cache, false);
+    }
+    probe.kerning = kerning;
+    hashmap_set(handle->kern_cache, &probe);
+
+    return kerning;
+}
+#endif
+
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     if (!handle || !handle->ft_face) return 0;
 
     FT_Face face = handle->ft_face;
-    if (!FT_HAS_KERNING(face)) return 0;
 
-    float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
-                            ? handle->ctx->config.pixel_ratio : 1.0f;
+    // try FreeType kern table first — if font has kern, use it exclusively
+    if (FT_HAS_KERNING(face)) {
+        float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
+                                ? handle->ctx->config.pixel_ratio : 1.0f;
 
-    FT_UInt li = FT_Get_Char_Index(face, left);
-    FT_UInt ri = FT_Get_Char_Index(face, right);
-    if (li == 0 || ri == 0) return 0;
+        FT_UInt li = FT_Get_Char_Index(face, left);
+        FT_UInt ri = FT_Get_Char_Index(face, right);
+        if (li == 0 || ri == 0) return 0;
 
-    FT_Vector delta;
-    FT_Get_Kerning(face, li, ri, FT_KERNING_DEFAULT, &delta);
-    return (delta.x / 64.0f) / pixel_ratio;
+        FT_Vector delta;
+        FT_Get_Kerning(face, li, ri, FT_KERNING_DEFAULT, &delta);
+        return (delta.x / 64.0f) / pixel_ratio;
+    }
+
+#ifdef __APPLE__
+    // fallback for fonts without kern table: CoreText GPOS kerning
+    // CTFont is created at physical_size_px; divide by pixel_ratio for CSS pixels
+    {
+        float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
+                                ? handle->ctx->config.pixel_ratio : 1.0f;
+        return font_get_kerning_coretext(handle, left, right) / pixel_ratio;
+    }
+#else
+    return 0;
+#endif
 }
 
 float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_t right_index) {
@@ -475,6 +535,32 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
 // Text measurement
 // ============================================================================
 
+/**
+ * Check if a codepoint is an emoji that participates in ZWJ composition.
+ * Only emoji characters form composed glyphs when joined by ZWJ.
+ */
+static inline bool is_emoji_for_zwj(uint32_t cp) {
+    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks
+           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
+           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical
+           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
+           cp == 0x200D || cp == 0x2764;
+}
+
+/**
+ * Check if a codepoint can serve as the base (left side) of a ZWJ emoji
+ * composition sequence. (Unicode UTS #51, emoji-zwj-sequences.txt)
+ */
+static inline bool is_zwj_composition_base(uint32_t cp) {
+    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
+           cp == 0x1F9D1 ||                       // Person (gender-neutral)
+           cp == 0x1F441 ||                       // Eye
+           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
+           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
+           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
+           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+}
+
 TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len) {
     TextExtents ext = {0};
     if (!handle || !text || byte_len <= 0) return ext;
@@ -489,6 +575,8 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
     }
 
     uint32_t prev_codepoint = 0;
+    bool after_zwj = false;
+    bool prev_is_zwj_base = false;
     const uint8_t* p = (const uint8_t*)text;
     const uint8_t* end = p + len;
 
@@ -511,6 +599,32 @@ TextExtents font_measure_text(FontHandle* handle, const char* text, int byte_len
             cp = (cp << 6) | (p[i] & 0x3F);
         }
         p += bytes;
+
+        // ZWJ (U+200D): zero advance, trigger composition only if preceded by a valid base
+        if (cp == 0x200D) {
+            if (prev_is_zwj_base) after_zwj = true;
+            continue;
+        }
+
+        // Emoji combining marks: zero advance in composed sequences
+        if ((cp >= 0x1F3FB && cp <= 0x1F3FF) ||  // skin tone modifiers
+            cp == 0xFE0E || cp == 0xFE0F ||       // variation selectors
+            cp == 0x20E3) {                        // combining enclosing keycap
+            continue;
+        }
+
+        // Character after ZWJ: only suppress advance for emoji codepoints
+        // that form composed glyphs in ZWJ sequences (Unicode UTS #51).
+        if (after_zwj) {
+            after_zwj = false;
+            if (is_emoji_for_zwj(cp)) {
+                prev_is_zwj_base = is_zwj_composition_base(cp);
+                prev_codepoint = cp;
+                continue;
+            }
+        }
+
+        prev_is_zwj_base = is_zwj_composition_base(cp);
 
         GlyphInfo glyph = font_get_glyph(handle, cp);
         if (glyph.id == 0) continue;

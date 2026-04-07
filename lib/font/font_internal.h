@@ -81,6 +81,14 @@ struct FontHandle {
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
 
+    // per-face CoreText kerning cache: (left_cp, right_cp) → kerning value
+    struct hashmap* kern_cache;
+
+#ifdef __APPLE__
+    // CoreText font reference for GPOS kerning (when FreeType lacks kern table)
+    void* ct_font_ref;  // actually CTFontRef, void* to avoid CoreText headers
+#endif
+
     // back-pointer to owning context (for pool access)
     FontContext* ctx;
 
@@ -272,6 +280,16 @@ typedef struct GlyphAdvanceEntry {
 } GlyphAdvanceEntry;
 
 // ============================================================================
+// Internal helper: kerning pair cache entry (for CoreText GPOS kerning)
+// ============================================================================
+
+typedef struct KernPairEntry {
+    uint32_t left_cp;
+    uint32_t right_cp;
+    float    kerning;       // kerning value in CSS pixels
+} KernPairEntry;
+
+// ============================================================================
 // Internal helper: glyph bitmap cache entry
 // ============================================================================
 
@@ -321,6 +339,16 @@ int                 get_font_metrics_platform(const char* font_family, float fon
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
 char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);
+
+// CoreText GPOS kerning (macOS only): create/destroy CTFont, get pair kerning
+#ifdef __APPLE__
+void*               font_platform_create_ct_font(const char* postscript_name,
+                                                  const char* family_name,
+                                                  float size_px);
+void                font_platform_destroy_ct_font(void* ct_font_ref);
+float               font_platform_get_pair_kerning(void* ct_font_ref,
+                                                    uint32_t left_cp, uint32_t right_cp);
+#endif
 
 // font_loader.c
 FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
