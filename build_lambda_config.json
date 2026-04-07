@@ -28,7 +28,7 @@
         "radiant/webdriver"
     ],
     "source_files": [
-        "lib/sqlite3.c"
+        "lib/sqlite/sqlite3.c"
     ],
     "sqlite_version": "3.45.3",
     "exclude_source_files": [
@@ -303,7 +303,7 @@
                 "lib/mime-types.c",
                 "lib/shell.c",
                 "lib/file_utils.c",
-                "lib/sqlite3.c",
+                "lib/sqlite/sqlite3.c",
                 "lib/rdb.c",
                 "lib/rdb_sqlite.c"
             ],

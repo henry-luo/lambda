@@ -192,11 +192,13 @@ void rb_transpiler_destroy(RbTranspiler* tp) {
     if (tp->parser) {
         ts_parser_delete(tp->parser);
     }
-    if (tp->ast_pool) {
-        pool_destroy(tp->ast_pool);
-    }
+    // Release name_pool BEFORE destroying ast_pool: name_pool was allocated
+    // from ast_pool, so pool_destroy would unmap its memory.
     if (tp->name_pool) {
         name_pool_release(tp->name_pool);
+    }
+    if (tp->ast_pool) {
+        pool_destroy(tp->ast_pool);
     }
     if (tp->code_buf) {
         strbuf_free(tp->code_buf);

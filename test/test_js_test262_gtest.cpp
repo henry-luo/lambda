@@ -114,10 +114,10 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // hashbang
     "hashbang",
     // Symbols — well-known symbol protocols not fully implemented
-    "Symbol.toPrimitive", "Symbol.species", "Symbol.iterator",
-    "Symbol.hasInstance", "Symbol.match", "Symbol.replace", "Symbol.search",
+    "Symbol.species",
+    "Symbol.match", "Symbol.replace", "Symbol.search",
     "Symbol.split", "Symbol.toStringTag", "Symbol.unscopables",
-    "Symbol.asyncIterator", "Symbol.matchAll", "Symbol",
+    "Symbol.asyncIterator", "Symbol.matchAll",
     // Async iteration — event loop semantics diverge from test262 harness
     "async-iteration",
     // Other
@@ -1112,10 +1112,11 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     // These are known to crash from previous run — isolate each to prevent collateral.
     if (!crasher_indices.empty()) {
         {
+            // Phase 2a: run each quarantined crasher individually (batch of 1)
+            // to prevent one crash from killing neighbor tests
             std::vector<SubBatch> crasher_batches;
-            for (size_t s = 0; s < crasher_indices.size(); s += RETRY_BATCH_SIZE) {
-                size_t e = std::min(s + RETRY_BATCH_SIZE, crasher_indices.size());
-                crasher_batches.push_back({s, e});
+            for (size_t s = 0; s < crasher_indices.size(); s++) {
+                crasher_batches.push_back({s, s + 1});
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(crasher_batches.size());
             std::atomic<size_t> next_batch{0};
@@ -1151,8 +1152,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         }
         auto crasher_time = std::chrono::steady_clock::now();
         double crasher_secs = std::chrono::duration<double>(crasher_time - exec_time).count();
-        fprintf(stderr, "[test262] Phase 2a (crashers): %.1fs — %zu quarantined in batches of %zu\n",
-                crasher_secs, crasher_indices.size(), RETRY_BATCH_SIZE);
+        fprintf(stderr, "[test262] Phase 2a (crashers): %.1fs — %zu quarantined individually\n",
+                crasher_secs, crasher_indices.size());
         exec_time = crasher_time;
     }
 

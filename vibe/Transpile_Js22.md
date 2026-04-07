@@ -330,3 +330,151 @@ built-ins_Array_isArray_15.4.3.2-1-1_js\t0\t3422
 ```
 
 Exit codes: 0=pass, 1=fail, 124=timeout, 139=crash (SIGSEGV)
+
+## 6. Post-v22 Progress: Runtime Fixes and Feature Gate Openings
+
+### Current Baseline (post-v22 sessions)
+
+| Metric                               | Value                                         |
+| ------------------------------------ | --------------------------------------------- |
+| Total test262 files                  | 53,399                                        |
+| Tests batched (non-skipped)          | 38,649                                        |
+| Tests skipped (unsupported features) | 10,172                                        |
+| **Passing tests**                    | **28,477 (73.7% of batched, 53.3% of total)** |
+| Quarantined crashers                 | 185 (136 crash-exit + 48 missing)             |
+| Phase 2 wall clock (8 workers, -O0)  | 83.1s                                         |
+
+### Progression from v22 baseline (11,554) → current (28,477)
+
+| Run | Change | Passing | Delta | Regressions |
+|-----|--------|---------|-------|-------------|
+| v22 baseline | — | 11,554 | — | — |
+| +Stage 2 sparse fix | Runtime | 11,750 | +196 | 0 |
+| +v21→v22 rebase | Committed code | 12,713 | +963 | 0 |
+| +9 runtime fixes | Runtime | 27,015 | +14,302 | 0 |
+| +Symbol.iterator gate | Feature gate | 27,778 | +763 | 0 |
+| +Symbol gate | Feature gate | 28,310 | +532 | 0 |
+| +Symbol.toPrimitive, Symbol.hasInstance | Feature gate | 28,477 | +167 | 0 |
+
+**Total improvement: +16,923 tests (146% increase), 0 regressions across all runs.**
+
+### Runtime Fixes Applied (v22 sessions)
+
+1. **Sequence expression / pattern / labeled statement function collection** — `jm_collect_functions` in `transpile_js_mir.cpp` missed SEQUENCE_EXPRESSION, LABELED_STATEMENT, ARRAY_PATTERN, OBJECT_PATTERN node types, causing undeclared function errors.
+
+2. **typeof for built-in global functions** — `jm_transpile_unary` typeof now performs compile-time detection for 14 built-in function names (parseInt, parseFloat, eval, isNaN, isFinite, decodeURI, etc.), returning `"function"` directly.
+
+3. **hasOwnProperty for accessor properties** — `js_has_own_property` in `js_globals.cpp` now checks for `__get_<key>` and `__set_<key>` accessor markers in addition to own data properties.
+
+4. **js_get_length_item + Array.prototype.length** — New `js_get_length_item()` returns raw Item for `.length` access (avoids boxing/unboxing). MAP fallback changed from `make_js_undefined()` to `js_property_get(object, key)` for full property access chain. Added `Array.prototype.length = 0` in prototype initialization.
+
+5. **`.length` type inference fix** — `jm_get_effective_type` in `transpile_js_mir.cpp` hardcoded `.length` as `LMD_TYPE_INT`. For unknown MAP objects, the native int fast path treated raw Item bits as an integer (producing garbage like 12893290736). Fixed to return `LMD_TYPE_ANY` for unknown object types.
+
+6. **ToPrimitive in js_add** — `js_add` now performs valueOf→toString chain for MAP operands and converts FUNC to string, matching ES spec ToPrimitive abstract operation.
+
+7. **js_to_string MAP case** — Recursive conversion for non-string `toString()` results.
+
+8. **ToPrimitive in js_equal** — Full valueOf→toString ToPrimitive chain in abstract equality.
+
+9. **ToPrimitive in js_less_than** — Same ToPrimitive fix for comparison operators (`<`, `>`, `<=`, `>=`).
+
+### Feature Gates Opened
+
+| Feature removed from UNSUPPORTED_FEATURES | Tests unlocked | Tests passing |
+|-------------------------------------------|---------------|---------------|
+| `Symbol.iterator` | ~1,830 | +763 |
+| `Symbol` | ~1,205 | +532 |
+| `Symbol.toPrimitive` | ~98 | +167 (combined) |
+| `Symbol.hasInstance` | ~69 | (combined above) |
+
+### Known Limitations Discovered
+
+- **Symbol.toStringTag**: `Object.prototype.toString` does not check `Symbol.toStringTag` — gate remains closed (131 tests)
+- **Named regex groups**: RE2 does not support `(?<name>...)` syntax — gate remains closed (100 tests)
+- **JSON.parse/stringify as values**: Only work at call sites, not as property references or first-class function values
+- **Symbol.asyncIterator**: Protocol doesn't work for `for-await-of` on custom objects — gate remains closed (538 tests)
+
+## 7. Remaining Unsupported Features (Skipped Tests)
+
+Total skipped: **10,172 tests** across features in UNSUPPORTED_FEATURES set + module/async flags.
+
+### By Feature (sorted by total blocked tests)
+
+"Sole" = tests where this is the **only** blocking feature (i.e., enabling it would directly unlock those tests).
+
+| Feature | Total | Sole | Category |
+|---------|------:|-----:|----------|
+| `Temporal` | 6,662 | 6,534 | Stage 3 API — very large surface area |
+| `async-iteration` | 4,968 | 4,340 | Async generators + Symbol.asyncIterator protocol |
+| `dynamic-import` | 946 | 593 | `import()` expressions |
+| `Reflect.construct` | 696 | 445 | Basic Reflect API |
+| `regexp-unicode-property-escapes` | 681 | 585 | `\p{...}` in regex (RE2 limitation) |
+| `iterator-helpers` | 567 | 558 | Iterator.prototype methods (Stage 3) |
+| `Symbol.asyncIterator` | 538 | 1 | Mostly overlaps with async-iteration |
+| `explicit-resource-management` | 477 | 443 | `using` / `Symbol.dispose` (Stage 3) |
+| `Proxy` | 468 | 331 | Proxy handler traps |
+| `Reflect` | 468 | 230 | Overlaps with Reflect.construct etc. |
+| `resizable-arraybuffer` | 463 | 384 | ArrayBuffer.prototype.resize |
+| `SharedArrayBuffer` | 463 | 144 | Shared memory (concurrency) |
+| `Atomics` | 376 | 112 | Atomic operations (concurrency) |
+| `Symbol.species` | 276 | 205 | @@species protocol for subclassing |
+| `top-level-await` | 271 | 252 | Module-level await |
+| `regexp-modifiers` | 230 | 230 | `(?ims:...)` inline flags |
+| `source-phase-imports` | 228 | 12 | `import source` syntax |
+| `cross-realm` | 201 | 57 | Cross-realm object identity |
+| `regexp-v-flag` | 187 | 85 | Unicode sets (`/v` flag) |
+| `change-array-by-copy` | 132 | 121 | `toSorted`, `toReversed`, `toSpliced`, `with` |
+| `Symbol.toStringTag` | 131 | 81 | `Object.prototype.toString` tag |
+| `Atomics.waitAsync` | 101 | 0 | All overlap with Atomics |
+| `regexp-named-groups` | 100 | 82 | `(?<name>...)` (RE2 limitation) |
+| `import-attributes` | 100 | 23 | `import ... with { type: "json" }` |
+| `Symbol.replace` | 98 | 81 | @@replace protocol |
+| `Array.fromAsync` | 95 | 94 | Async array creation |
+| `Symbol.match` | 88 | 77 | @@match protocol |
+| `ShadowRealm` | 64 | 57 | Isolated evaluation contexts |
+| `Symbol.matchAll` | 63 | 49 | @@matchAll protocol |
+| `Symbol.split` | 58 | 32 | @@split protocol |
+| `Float16Array` | 49 | 44 | Float16 typed array |
+| `FinalizationRegistry` | 49 | 35 | GC callback hooks |
+| `Reflect.set` | 46 | 18 | Reflect.set() |
+| `Symbol.unscopables` | 44 | 36 | `with` statement filtering |
+| `IsHTMLDDA` | 42 | 31 | `document.all` special behavior |
+| `Symbol.search` | 37 | 32 | @@search protocol |
+| `WeakRef` | 37 | 23 | Weak references |
+| `tail-call-optimization` | 35 | 34 | Proper tail calls |
+| `AggregateError` | 31 | 28 | Error subclass for Promise.any |
+| `regexp-match-indices` | 31 | 19 | `d` flag / `.indices` property |
+| `symbols-as-weakmap-keys` | 29 | 25 | Symbol keys in WeakMap/WeakSet |
+| `hashbang` | 29 | 29 | `#!` line support |
+| `decorators` | 27 | 27 | Class decorators (Stage 3) |
+| `caller` | 23 | 23 | `Function.prototype.caller` |
+| `Reflect.setPrototypeOf` | 23 | 4 | Reflect.setPrototypeOf() |
+| `import.meta` | 23 | 20 | Module metadata |
+| `json-parse-with-source` | 22 | 20 | JSON.parse source text access |
+| `regexp-lookbehind` | 19 | 17 | `(?<=...)` / `(?<!...)` (RE2 limitation) |
+| `regexp-duplicate-named-groups` | 19 | 16 | Same group name in alternatives |
+| `arbitrary-module-namespace-names` | 16 | 15 | Non-identifier module export names |
+| `json-modules` | 13 | 0 | JSON import modules |
+| `Uint8Array` | 11 | 7 | Uint8Array base64/hex methods |
+| `Atomics.pause` | 6 | 5 | Atomics.pause() |
+| `well-formed-json-stringify` | 1 | 1 | Lone surrogate escaping |
+
+### Highest-Impact Opportunities (by sole-blocked tests)
+
+| Priority | Feature | Sole tests | Effort | Notes |
+|----------|---------|-----------|--------|-------|
+| 1 | `Temporal` | 6,534 | Very High | Entire Date/Time API — hundreds of methods |
+| 2 | `async-iteration` | 4,340 | Medium | Symbol.asyncIterator protocol on custom objects |
+| 3 | `regexp-unicode-property-escapes` | 585 | Hard | RE2 doesn't support `\p{}`; would need ICU or PCRE2 |
+| 4 | `iterator-helpers` | 558 | Medium | Iterator.prototype.{map,filter,take,drop,...} |
+| 5 | `dynamic-import` | 593 | Medium | `import()` expression support |
+| 6 | `Reflect.construct` | 445 | Medium | `new.target` + proxy-like construction |
+| 7 | `explicit-resource-management` | 443 | Medium | `using` declaration + Symbol.dispose |
+| 8 | `resizable-arraybuffer` | 384 | Medium | ArrayBuffer.prototype.resize/transfer |
+| 9 | `Proxy` | 331 | High | Full Proxy handler trap implementation |
+| 10 | `regexp-modifiers` | 230 | Medium | Inline regex flag modifiers |
+| 11 | `top-level-await` | 252 | Low | Module-level await |
+| 12 | `Symbol.species` | 205 | Medium | @@species for Array/Promise/RegExp subclassing |
+| 13 | `change-array-by-copy` | 121 | Low | 4 new Array.prototype methods |
+| 14 | `Array.fromAsync` | 94 | Low | Single async method |
+| 15 | `regexp-named-groups` | 82 | Hard | RE2 limitation — needs regex engine change |

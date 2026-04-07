@@ -80,7 +80,7 @@ void pool_destroy(Pool* pool) {
 
     // Free all memory allocated from this heap's spans, then release the heap
     // structure back to the global recycling queue.
-    // NOTE: rpmalloc_heap_release alone does NOT unmap spans — it only moves
+    // NOTE: rpmalloc_heap_free_all alone does NOT unmap spans — it only moves
     // the heap to a queue. Without heap_free_all, spans accumulate across
     // pool create/destroy cycles and eventually corrupt the system allocator.
     if (pool->heap) {
