@@ -67,68 +67,61 @@ static const char* TEST262_ROOT = "ref/test262";
 static const char* HARNESS_DIR = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
 
-// Features that LambdaJS does NOT support — skip tests requiring these
-// v17: removed 25 features that are actually implemented (class fields, optional
-// chaining, nullish coalescing, globalThis, logical assignment, etc.)
+// Features above ES2020 — skip tests requiring these.
+// Target: ES2020 compliance. All features ≤ES2020 are in scope.
+// Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
-    // Concurrency / SharedMemory
-    "Atomics", "SharedArrayBuffer", "Atomics.waitAsync", "Atomics.pause",
-    // Proxy / Reflect
-    "Proxy", "Reflect", "Reflect.construct", "Reflect.apply",
-    "Reflect.defineProperty", "Reflect.deleteProperty", "Reflect.get",
-    "Reflect.getOwnPropertyDescriptor", "Reflect.getPrototypeOf",
-    "Reflect.has", "Reflect.isExtensible", "Reflect.ownKeys",
-    "Reflect.preventExtensions", "Reflect.set", "Reflect.setPrototypeOf",
-    // Temporal (stage 3, large API)
-    "Temporal",
-    // Tail calls
-    "tail-call-optimization",
-    // Realms
-    "ShadowRealm",
-    // Import attributes / assertions
-    "import-attributes", "import-assertions",
-    // Dynamic import
-    "dynamic-import", "import.meta",
-    // Top-level await
-    "top-level-await",
-    // Weak references / FinalizationRegistry
-    "WeakRef", "FinalizationRegistry",
-    // Resizable ArrayBuffer
-    "resizable-arraybuffer", "ArrayBuffer-transfer",
-    // Decorators
-    "decorators",
-    // Iterator helpers (stage 3)
-    "iterator-helpers",
-    // Disposable resources
-    "explicit-resource-management",
-    // Duplicate named capture groups
-    "regexp-duplicate-named-groups",
-    // RegExp features
-    "regexp-lookbehind", "regexp-named-groups", "regexp-unicode-property-escapes",
-    "regexp-match-indices", "regexp-v-flag",
-    "regexp-modifiers",
-    // Well-formed JSON.stringify
-    "well-formed-json-stringify",
-    // String / Array methods (newer)
-    "Array.fromAsync",
-    "change-array-by-copy",
-    // hashbang
-    "hashbang",
-    // Symbols — well-known symbol protocols not fully implemented
-    "Symbol.species",
-    "Symbol.match", "Symbol.replace", "Symbol.search",
-    "Symbol.split", "Symbol.toStringTag", "Symbol.unscopables",
-    "Symbol.asyncIterator", "Symbol.matchAll",
-    // Async iteration — event loop semantics diverge from test262 harness
-    "async-iteration",
-    // Other
-    "cross-realm", "IsHTMLDDA", "caller",
-    "Uint8Array",
-    // Misc
-    "arbitrary-module-namespace-names",
-    "json-modules", "source-phase-imports",
-    "AggregateError",
-    "symbols-as-weakmap-keys",
+    // === ES2021 features ===
+    "WeakRef",                                    // Weak references
+    "FinalizationRegistry",                       // GC callback hooks
+    "AggregateError",                             // Error subclass for Promise.any
+    "logical-assignment-operators",               // &&=, ||=, ??=
+    "numeric-separator-literal",                  // 1_000_000
+    "String.prototype.replaceAll",                // String.prototype.replaceAll
+    "Promise.any",                                // Promise.any
+
+    // === ES2022 features ===
+    "class-fields-public",                        // Public instance fields
+    "class-fields-private",                       // Private instance fields
+    "class-fields-private-in",                    // #x in obj
+    "class-methods-private",                      // Private methods
+    "class-static-fields-public",                 // Static public fields
+    "class-static-fields-private",                // Static private fields
+    "class-static-methods-private",               // Static private methods
+    "class-static-block",                         // static { ... }
+    "top-level-await",                            // Module-level await
+    "regexp-match-indices",                       // /d flag, .indices
+    "Object.hasOwn",                              // Object.hasOwn()
+    "Array.prototype.at",                         // Array.prototype.at()
+    "String.prototype.at",                        // String.prototype.at()
+    "TypedArray.prototype.at",                    // TypedArray.prototype.at()
+    "error-cause",                                // new Error("msg", { cause })
+
+    // === ES2023 features ===
+    "change-array-by-copy",                       // toSorted, toReversed, toSpliced, with
+    "symbols-as-weakmap-keys",                    // Symbol keys in WeakMap/WeakSet
+    "hashbang",                                   // #! shebang lines
+    "array-find-from-last",                       // findLast, findLastIndex
+
+    // === ES2024 features ===
+    "Atomics.waitAsync",                          // Atomics.waitAsync proposal
+    "resizable-arraybuffer",                      // Resizable/growable ArrayBuffers
+    "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
+    "regexp-v-flag",                              // Unicode sets (/v flag)
+    "promise-with-resolvers",                     // Promise.withResolvers
+    "array-grouping",                             // Object.groupBy / Map.groupBy
+    "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
+    "String.prototype.toWellFormed",
+
+    // === ES2025 features ===
+    "import-attributes", "import-assertions",     // Import attributes
+    "regexp-modifiers",                           // (?ims:...) inline flags
+    "regexp-duplicate-named-groups",              // Duplicate named capture groups
+    "iterator-helpers",                           // Iterator.prototype methods
+    "Float16Array",                               // Float16 typed arrays
+    "json-parse-with-source",                     // JSON.parse source text access
+    "json-modules",                               // JSON module imports
+    "set-methods",                                // New Set methods
     "Set.prototype.intersection",
     "Set.prototype.union",
     "Set.prototype.difference",
@@ -136,9 +129,39 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Set.prototype.isSubsetOf",
     "Set.prototype.isSupersetOf",
     "Set.prototype.isDisjointFrom",
-    "Float16Array",
-    "uint8-clamped-array",
-    "json-parse-with-source",
+    "promise-try",                                // Promise.try
+    "RegExp.escape",                              // RegExp.escape
+
+    // === ES2026+ features ===
+    "Array.fromAsync",                            // Array.fromAsync
+    "uint8array-base64",                          // Uint8Array base64/hex
+    "Math.sumPrecise",                            // Math.sumPrecise
+    "Error.isError",                              // Error.isError
+    "iterator-sequencing",                        // Iterator.concat
+    "upsert",                                     // Map.prototype.getOrInsert
+
+    // === Stage 3 / Proposals (not yet in any published spec) ===
+    "Temporal",                                   // Temporal API (ES2027)
+    "ShadowRealm",                                // Isolated evaluation contexts
+    "decorators",                                 // Class decorators
+    "explicit-resource-management",               // using / Symbol.dispose
+    "source-phase-imports", "source-phase-imports-module-source",
+    "Atomics.pause",                              // Atomics.pause
+    "import-defer",                               // Deferred import evaluation
+    "import-text",                                // Import text
+    "import-bytes",                               // Import bytes
+    "canonical-tz",                               // Time zone canonicalization
+    "immutable-arraybuffer",                      // Immutable ArrayBuffer
+    "nonextensible-applies-to-private",           // Non-extensible + private
+    "joint-iteration",                            // Joint iteration
+    "await-dictionary",                           // Await dictionary
+    "legacy-regexp",                              // Legacy RegExp features
+
+    // === Test harness / Annex B / host features ===
+    "IsHTMLDDA",                                  // document.all behavior
+    "host-gc-required",                           // Requires $262.gc()
+    "cross-realm",                                // Requires $262.createRealm()
+    "caller",                                     // Function.prototype.caller (Annex B)
 };
 
 // =============================================================================
