@@ -72,7 +72,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 font_content_h = font_get_cell_height(fh);
             }
             span->width = (int)inline_sum;
-            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             // No inline-axis decorations — the inline box is invisible, collapse to zero
             span->width = 0;
@@ -117,7 +117,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 font_content_h = font_get_cell_height(fh);
             }
             span->width = (int)inline_sum;
-            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             span->width = 0;
             span->height = 0;
@@ -278,8 +278,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // content area. Compute the parent's border extent from content_min/max_y
     // (the text/inline-block positions), then take the union with the visual extent
     // (which includes child inline span borders that may extend further).
-    int parent_border_top_y = content_min_y - (int)border_top - (int)pad_top;
-    int parent_border_bottom_y = content_max_y + (int)border_bottom + (int)pad_bottom;
+    // Use roundf to avoid truncation for fractional em-based padding (e.g. 0.2em = 2.72px).
+    // Truncating 2.72 → 2 loses 0.7px per side, making inline code elements too short.
+    int parent_border_top_y = content_min_y - (int)roundf(border_top) - (int)roundf(pad_top);
+    int parent_border_bottom_y = content_max_y + (int)roundf(border_bottom) + (int)roundf(pad_bottom);
     int final_min_y = min(visual_min_y, parent_border_top_y);
     int final_max_y = max(visual_max_y, parent_border_bottom_y);
 

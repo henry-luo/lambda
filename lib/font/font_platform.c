@@ -546,15 +546,71 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
 
 void* font_platform_create_ct_font(const char* postscript_name,
                                     const char* family_name,
-                                    float size_px) {
+                                    float size_px,
+                                    int css_weight) {
     CTFontRef ct_font = NULL;
 
-    // try PostScript name first (most precise match)
-    if (postscript_name && postscript_name[0]) {
+    // SFNS.ttf (System Font / -apple-system) is a variable font whose FreeType
+    // PostScript names like "SFNS_17opsz" are NOT registered in the macOS font
+    // catalog.  CTFontCreateWithName would silently fall back to Helvetica.
+    // Use the system UI font API which gives exactly the font Chrome uses.
+    // We pass size_px in CSS points so CoreText selects the same opsz instance.
+    bool is_system_ui = (postscript_name && strncmp(postscript_name, "SFNS_", 5) == 0) ||
+                        (family_name     && strcmp(family_name, "System Font") == 0);
+    if (is_system_ui) {
+        // Create at the correct weight so advances match Chrome for bold/semibold too.
+        // Map CSS weight to CoreText weight trait (-1..1 normalized scale).
+        // kCTFontWeight* constants: Semibold≈0.23, Bold≈0.40, Heavy≈0.56, Black≈0.62
+        ct_font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem,
+                                                (CGFloat)size_px, NULL);
+        if (ct_font && css_weight > 500) {
+            // For semibold/bold: create a copy with the requested weight trait
+            // so glyph advances reflect the actual weight, not just Regular.
+            CGFloat ct_weight;
+            if      (css_weight >= 900) ct_weight = 0.62f;
+            else if (css_weight >= 800) ct_weight = 0.56f;
+            else if (css_weight >= 700) ct_weight = 0.40f;
+            else                        ct_weight = 0.23f;  // 600 SemiBold
+            CFNumberRef wt_num = CFNumberCreate(NULL, kCFNumberCGFloatType, &ct_weight);
+            CFStringRef wt_key = kCTFontWeightTrait;
+            CFDictionaryRef traits = CFDictionaryCreate(NULL,
+                (const void**)&wt_key, (const void**)&wt_num, 1,
+                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            CFRelease(wt_num);
+            CFStringRef tk = kCTFontTraitsAttribute;
+            CFDictionaryRef attrs = CFDictionaryCreate(NULL,
+                (const void**)&tk, (const void**)&traits, 1,
+                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            CFRelease(traits);
+            CTFontDescriptorRef desc = CTFontDescriptorCreateWithAttributes(attrs);
+            CFRelease(attrs);
+            CTFontRef weighted = CTFontCreateCopyWithAttributes(ct_font, (CGFloat)size_px, NULL, desc);
+            CFRelease(desc);
+            CFRelease(ct_font);
+            ct_font = weighted ? weighted : CTFontCreateUIFontForLanguage(
+                                               kCTFontUIFontSystem, (CGFloat)size_px, NULL);
+        }
+    }
+
+    // For non-system fonts, try PostScript name lookup
+    if (!ct_font && postscript_name && postscript_name[0]) {
         CFStringRef ps = CFStringCreateWithCString(NULL, postscript_name, kCFStringEncodingUTF8);
         if (ps) {
-            ct_font = CTFontCreateWithName(ps, (CGFloat)size_px, NULL);
+            CTFontRef candidate = CTFontCreateWithName(ps, (CGFloat)size_px, NULL);
             CFRelease(ps);
+            if (candidate) {
+                CFStringRef actual = CTFontCopyPostScriptName(candidate);
+                bool is_fallback = false;
+                if (actual) {
+                    char buf[64] = "";
+                    CFStringGetCString(actual, buf, sizeof(buf), kCFStringEncodingUTF8);
+                    CFRelease(actual);
+                    is_fallback = (strcmp(buf, "Helvetica") == 0 &&
+                                   postscript_name && strcmp(postscript_name, "Helvetica") != 0);
+                }
+                if (is_fallback) { CFRelease(candidate); }
+                else             { ct_font = candidate; }
+            }
         }
     }
 
@@ -568,8 +624,8 @@ void* font_platform_create_ct_font(const char* postscript_name,
     }
 
     if (ct_font) {
-        log_debug("font_platform: created CTFont for kerning (ps=%s, size=%.0f)",
-                  postscript_name ? postscript_name : "?", size_px);
+        log_debug("font_platform: created CTFont (ps=%s, size=%.2f, wgt=%d)",
+                  postscript_name ? postscript_name : "?", size_px, css_weight);
     }
     return (void*)ct_font;
 }
@@ -578,6 +634,53 @@ void font_platform_destroy_ct_font(void* ct_font_ref) {
     if (ct_font_ref) {
         CFRelease((CTFontRef)ct_font_ref);
     }
+}
+
+/**
+ * Get the nominal (un-kerned) advance width of a single glyph using CoreText.
+ *
+ * CoreText and FreeType can differ for variable fonts like SFNS.ttf due to
+ * optical-size axis selection.  CTFont is created at CSS_size so that CoreText
+ * selects the same opsz as Chrome; the returned advance is therefore already
+ * in CSS pixels and requires no pixel_ratio division.
+ *
+ * @param ct_font_ref  CTFontRef (opaque void*) created at CSS size
+ * @param codepoint    Unicode codepoint
+ * @return advance_x in CSS pixels, or -1.0f if the glyph is not available
+ */
+float font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint) {
+    if (!ct_font_ref) return -1.0f;
+
+    CTFontRef font = (CTFontRef)ct_font_ref;
+
+    // encode codepoint as UTF-16
+    UniChar utf16[2];
+    CFIndex char_count;
+    if (codepoint <= 0xFFFF) {
+        utf16[0] = (UniChar)codepoint;
+        char_count = 1;
+    } else if (codepoint <= 0x10FFFF) {
+        uint32_t cp = codepoint - 0x10000;
+        utf16[0] = (UniChar)(0xD800 + (cp >> 10));
+        utf16[1] = (UniChar)(0xDC00 + (cp & 0x3FF));
+        char_count = 2;
+    } else {
+        return -1.0f;
+    }
+
+    // get glyph id — for a surrogate pair, CoreText fills glyphs[0] with the
+    // real glyph and glyphs[1] with 0; we only need glyphs[0]
+    CGGlyph glyphs[2] = {0, 0};
+    bool found = CTFontGetGlyphsForCharacters(font, utf16, glyphs, char_count);
+    if (!found || glyphs[0] == 0) return -1.0f;
+
+    // get nominal advance (un-kerned) for the single glyph
+    CGSize advance = {0, 0};
+    CTFontGetAdvancesForGlyphs(font, kCTFontOrientationHorizontal,
+                                &glyphs[0], &advance, 1);
+
+    // CTFont is at CSS_size, so advance.width is directly in CSS pixels
+    return (float)(advance.width);
 }
 
 float font_platform_get_pair_kerning(void* ct_font_ref, uint32_t left_cp, uint32_t right_cp) {

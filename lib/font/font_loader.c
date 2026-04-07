@@ -116,7 +116,7 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
         if (!has_any_kern_table) {
             const char* ps_name = FT_Get_Postscript_Name(face);
             handle->ct_font_ref = font_platform_create_ct_font(
-                ps_name, face->family_name, physical_size);
+                ps_name, face->family_name, size_px, (int)weight);  // CSS size+weight
         }
     }
 #endif

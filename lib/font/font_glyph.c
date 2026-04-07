@@ -194,6 +194,31 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     info.height    = (int)(slot->metrics.height / 64.0f * bscale);
     info.is_color  = (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
 
+#ifdef __APPLE__
+    // For fonts with a CoreText reference (e.g., SFNS.ttf / -apple-system), use
+    // CoreText advances instead of FreeType.  We create the CTFont at CSS_size so
+    // CoreText selects the same optical-size instance as Chrome.  The returned
+    // advance is already in CSS pixels - no pixel_ratio division needed.
+    if (handle->ct_font_ref) {
+        float ft_adv = info.advance_x;
+        float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
+        if (ct_adv >= 0.0f) {
+            info.advance_x = ct_adv;
+            // one-time log: show FT vs CT for letter 't' to confirm fix works
+            if (codepoint == 't') {
+                static bool logged_t = false;
+                if (!logged_t) {
+                    logged_t = true;
+                    log_debug("font_glyph: CT advance fix active: 't' ft=%.3f ct=%.3f family=%s size=%.0fpx",
+                              ft_adv, ct_adv,
+                              handle->family_name ? handle->family_name : "?",
+                              handle->size_px);
+                }
+            }
+        }
+    }
+#endif
+
     // cache the advance (with size limit)
     if (cache) {
         if (hashmap_count(cache) >= ADVANCE_CACHE_MAX_ENTRIES) {
@@ -282,12 +307,14 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     }
 
 #ifdef __APPLE__
-    // fallback for fonts without kern table: CoreText GPOS kerning
-    // CTFont is created at physical_size_px; divide by pixel_ratio for CSS pixels
+    // For fonts with a CoreText reference, CT per-glyph advances are used for layout
+    // (see font_load_glyph). Chrome (Harfbuzz) uses per-glyph advances without
+    // applying CT GPOS kern on top, so skip CT kern here to match Chrome.
+    if (handle->ct_font_ref) return 0.0f;
+    // fallback for other fonts without kern table: CoreText GPOS kerning
+    // CTFont is created at CSS_size, so the returned kerning is already CSS pixels.
     {
-        float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
-                                ? handle->ctx->config.pixel_ratio : 1.0f;
-        return font_get_kerning_coretext(handle, left, right) / pixel_ratio;
+        return font_get_kerning_coretext(handle, left, right);
     }
 #else
     return 0;
@@ -507,6 +534,33 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     LoadedGlyph* result = try_load_from_handle(handle, codepoint, load_flags);
     if (result) {
         fill_loaded_glyph_font_metrics(handle);
+#ifdef __APPLE__
+        // For layout passes (!for_rendering), override FreeType advance with CoreText
+        // when the font has a CTFont reference (e.g., SFNS.ttf / -apple-system).
+        // CTFont is at CSS_size so its advance is in CSS pixels; multiply by pixel_ratio
+        // to store as physical pixels matching the convention the caller expects.
+        // Bitmap data from FreeType is unchanged and used only during rendering.
+        if (!for_rendering && handle->ct_font_ref) {
+            float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                                    ? ctx->config.pixel_ratio : 1.0f;
+            float ft_adv_before = s_loaded_glyph.advance_x;
+            float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
+            if (ct_adv >= 0.0f) {
+                s_loaded_glyph.advance_x = ct_adv * pixel_ratio;
+            }
+            // one-time log: show FT vs CT for letter 't' to confirm fix works
+            if (codepoint == 't') {
+                static bool logged_t = false;
+                if (!logged_t) {
+                    logged_t = true;
+                    log_debug("font_glyph: CT advance fix active: 't' ft=%.3f ct=%.3f family=%s size=%.0fpx",
+                              ft_adv_before, ct_adv,
+                              handle->family_name ? handle->family_name : "?",
+                              handle->size_px);
+                }
+            }
+        }
+#endif
         // Phase 17: cache the loaded glyph
         if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
         return result;
