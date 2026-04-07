@@ -1141,22 +1141,40 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 }
             }
-            // Fallback for unloadable images — use HTML width/height attributes if present
-            if (replaced_width < 0) {
-                const char* attr_w = element->get_attribute("width");
-                if (attr_w) {
-                    int w = atoi(attr_w);
-                    if (w > 0) {
-                        replaced_width = w;
-                        log_debug("  -> replaced IMG width from HTML attribute: %d", w);
+            // CSS 2.1 §10.3.2: HTML width attribute is a presentational hint that
+            // overrides intrinsic dimensions. When <img width="128"> has a natural
+            // file width of 256, the used width is 128 (the specified value).
+            // Check resolved blk->given_width first, then HTML attribute directly
+            // (styles may not be resolved yet during early intrinsic sizing).
+            {
+                float specified_width = -1;
+                if (view_block_replaced->blk && view_block_replaced->blk->given_width >= 0) {
+                    specified_width = view_block_replaced->blk->given_width;
+                } else {
+                    const char* attr_w = element->get_attribute("width");
+                    if (attr_w && attr_w[0] >= '0' && attr_w[0] <= '9') {
+                        // skip percentage widths (can't resolve during intrinsic sizing)
+                        size_t len = strlen(attr_w);
+                        if (len > 0 && attr_w[len - 1] != '%') {
+                            float w = (float)atof(attr_w);
+                            if (w > 0) specified_width = w;
+                        }
                     }
                 }
+                if (specified_width >= 0 && replaced_width > 0 && replaced_width != specified_width) {
+                    // Only override if image was actually loaded (replaced_width > 0).
+                    // Don't apply to broken images (replaced_width < 0).
+                    log_debug("  -> replaced IMG width overridden by specified: %.0f (was %.0f)", specified_width, replaced_width);
+                    replaced_width = specified_width;
+                }
             }
-            // Ultimate fallback — broken image icon size
-            // Chrome renders broken images at 16x16 (the broken image icon)
+            // Fallback for broken/unloadable images — use small icon size.
+            // CSS Images 3: broken images have no intrinsic dimensions.
+            // Browsers ignore HTML width/height attributes for broken images
+            // and render a small broken image icon with alt text instead.
             if (replaced_width < 0) {
                 replaced_width = 16;
-                log_debug("  -> replaced IMG fallback width: 16 (broken image icon)");
+                log_debug("  -> replaced IMG fallback width: 16 (broken image)");
             }
         }
         else if (replaced_tag == HTM_TAG_IFRAME) {

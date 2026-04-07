@@ -729,8 +729,18 @@ DisplayValue resolve_display_value(void* child) {
         bool is_floated = (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT);
         CssEnum position_value = get_position_value_from_style(dom_elem);
         bool is_abspos = (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED);
+        // CSS Flexbox §4 / CSS Grid §6: Children of flex/grid containers have their
+        // display blockified. E.g. <tr> inside a display:flex <table> becomes block.
+        bool is_flex_or_grid_child = false;
+        if (node->parent && node->parent->is_element()) {
+            DomElement* parent_elem = node->parent->as_element();
+            if (parent_elem && parent_elem->display.inner != 0 && parent_elem->styles_resolved) {
+                is_flex_or_grid_child = (parent_elem->display.inner == CSS_VALUE_FLEX ||
+                                         parent_elem->display.inner == CSS_VALUE_GRID);
+            }
+        }
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
-        bool needs_blockify = is_floated || is_abspos;
+        bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
 
         // Check if element already has display set directly (anonymous elements, pre-resolved)
         // This handles CSS 2.1 anonymous table objects created by layout

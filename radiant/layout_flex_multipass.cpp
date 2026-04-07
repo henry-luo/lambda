@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
+#include "layout_table.hpp"
 #include "intrinsic_sizing.hpp"
 #include "layout_mode.hpp"
 #include "layout_cache.hpp"
@@ -1354,14 +1355,35 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             // Flex items may be laid out multiple times, and margin collapse modifies
             // margin values in-place. Without this reset, the second pass would
             // collapse already-collapsed margins, resulting in incorrect zero margins.
+            // IMPORTANT: Skip anonymous elements (::anon-table, ::anon-tr) created by
+            // wrap_orphaned_table_children(). They have pre-set display values that must
+            // be preserved across multiple layout passes. Resetting their styles_resolved
+            // would cause resolve_display_value() to ignore the pre-set display, turning
+            // {BLOCK,TABLE} into {BLOCK,FLOW} and triggering cascading re-wrapping.
             DomNode* rst = flex_item->first_child;
             do {
                 if (rst->is_element()) {
                     DomElement* re = rst->as_element();
-                    re->styles_resolved = false;
+                    if (!(re->tag_name && re->tag_name[0] == ':' && re->tag_name[1] == ':')) {
+                        re->styles_resolved = false;
+                    }
                 }
                 rst = rst->next_sibling;
             } while (rst);
+
+            // CSS 2.1 §17.2.1: When a flex item has been blockified from a table-internal
+            // display (e.g., tbody blockified to block), its children may be orphaned
+            // table-internal elements (tr, td). These need anonymous table wrappers before
+            // layout. The flex item content layout bypasses layout_block_content() so we
+            // must handle this here. Must happen AFTER styles_resolved reset so the
+            // anonymous elements' pre-set display/styles_resolved are preserved.
+            if (flex_item->display.inner == CSS_VALUE_FLOW ||
+                flex_item->display.inner == CSS_VALUE_FLOW_ROOT) {
+                DomElement* flex_elem = flex_item->as_element();
+                if (flex_elem && wrap_orphaned_table_children(lycon, flex_elem)) {
+                    child = flex_item->first_child;  // re-get after wrapping inserted anon elements
+                }
+            }
 
             do {
                 log_debug("*** PASS3 TRACE: Layout child %s of flex item", child->node_name());

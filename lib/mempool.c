@@ -10,11 +10,6 @@
 
 #define SIZE_LIMIT (1024 * 1024 * 1024)  // 1GB limit for single allocation
 
-/**
- * Pool structure - simple pool tracking without heap handles
- * Uses rpmalloc global functions for thread-safe allocation
- * The pool structure itself is allocated with standard malloc
- */
 struct Pool {
     rpmalloc_heap_t* heap;  // rpmalloc heap handle for this pool
     unsigned pool_id;       // unique pool identifier
@@ -83,9 +78,13 @@ void pool_destroy(Pool* pool) {
 
     log_debug("pool_destroy: destroying pool=%p (id=%u)", (void*)pool, pool->pool_id);
 
-    // Release the heap - this will free all allocations made from it
-    // Note: rpmalloc_heap_release already frees all memory, so we don't need heap_free_all
+    // Free all memory allocated from this heap's spans, then release the heap
+    // structure back to the global recycling queue.
+    // NOTE: rpmalloc_heap_release alone does NOT unmap spans — it only moves
+    // the heap to a queue. Without heap_free_all, spans accumulate across
+    // pool create/destroy cycles and eventually corrupt the system allocator.
     if (pool->heap) {
+        rpmalloc_heap_free_all(pool->heap);
         rpmalloc_heap_release(pool->heap);
     }
 
@@ -171,7 +170,7 @@ void mempool_cleanup(void) {
     if (rpmalloc_initialized) {
         pthread_mutex_lock(&init_mutex);
         if (rpmalloc_initialized) {
-            // rpmalloc_thread_finalize();
+            rpmalloc_thread_finalize();
             rpmalloc_finalize();
             rpmalloc_initialized = 0;
         }
