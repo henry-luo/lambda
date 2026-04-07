@@ -821,9 +821,11 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         // display:contents elements don't generate a box → (0,0,0,0)
         // option/optgroup in combo-box selects are not rendered → getBoundingClientRect returns (0,0,0,0)
         // In listbox mode, options have non-zero dimensions and are reported via normal path.
+        // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
         bool is_unrendered_option = (elem->tag() == HTM_TAG_OPTION || elem->tag() == HTM_TAG_OPTGROUP)
                                     && elem->width == 0 && elem->height == 0;
-        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option) {
+        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
+            || elem->tag() == HTM_TAG_WBR) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1010,7 +1012,7 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     // Output dimensions directly (already in CSS logical pixels)
     float css_x = abs_x;
     float css_y = abs_y;
-    float css_width = rect ? rect->width - rect->hanging_trim : view->width;
+    float css_width = rect ? rect->width : view->width;
     float css_height = rect ? rect->height : view->height;
 
     // For the root <html> element with auto height, viewport clamping sets height
