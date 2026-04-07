@@ -36,6 +36,29 @@ extern "C" char* normalize_utf8proc_nfkd(const char* str, int len, int* out_len)
 // Initialized in transpile_js_to_mir() before JIT execution.
 Input* js_input = NULL;
 
+// v24: Global strict mode flag. Set by transpiler when "use strict" directive is active.
+// Used by js_property_set to throw TypeError instead of silently rejecting writes.
+bool js_strict_mode = false;
+
+extern "C" void js_set_strict_mode(int64_t strict) {
+    js_strict_mode = (strict != 0);
+}
+
+// v24: throw TypeError in strict mode for property write violations
+static void js_strict_throw_property_error(const char* reason, const char* prop_name, int prop_len) {
+    if (!js_strict_mode) return;
+    char msg[512];
+    if (prop_name && prop_len > 0) {
+        snprintf(msg, sizeof(msg), "Cannot %s property '%.*s' of object", reason, prop_len > 200 ? 200 : prop_len, prop_name);
+    } else {
+        snprintf(msg, sizeof(msg), "Cannot %s property of object", reason);
+    }
+    Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
+    Item error = js_new_error_with_name(err_name, err_msg);
+    js_throw_value(error);
+}
+
 // Forward declaration for _map_read_field (defined in lambda-data-runtime.cpp)
 Item _map_read_field(ShapeEntry* field, void* map_data);
 // Forward declaration for _map_get (used as fallback for nested/spread maps)
@@ -2540,6 +2563,13 @@ extern "C" Item js_property_get(Item object, Item key) {
             }
             // Only allow numeric string keys for array index access
             if (str_key->len == 0 || (str_key->chars[0] < '0' || str_key->chars[0] > '9')) {
+                // v25: check companion map for custom properties first
+                if (object.array->extra != 0) {
+                    Map* pm = (Map*)(uintptr_t)object.array->extra;
+                    bool pm_found = false;
+                    Item pm_val = js_map_get_fast_ext(pm, str_key->chars, (int)str_key->len, &pm_found);
+                    if (pm_found && !js_is_deleted_sentinel(pm_val)) return pm_val;
+                }
                 // v18c: .constructor for arrays → Array constructor
                 if (str_key->len == 11 && strncmp(str_key->chars, "constructor", 11) == 0) {
                     Item arr_name = (Item){.item = s2it(heap_create_name("Array", 5))};
@@ -2557,6 +2587,17 @@ extern "C" Item js_property_get(Item object, Item key) {
         // Numeric index access
         int idx = (int)js_get_number(key);
         if (idx >= 0 && idx < object.array->length) {
+            // check for accessor (getter) on companion map
+            if (object.array->extra != 0) {
+                char gk[64];
+                snprintf(gk, sizeof(gk), "__get_%d", idx);
+                Map* props = (Map*)(uintptr_t)object.array->extra;
+                bool gk_found = false;
+                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                    return js_call_function(getter, object, NULL, 0);
+                }
+            }
             return object.array->items[idx];
         }
         return make_js_undefined();
@@ -2796,6 +2837,27 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 return value;
             }
         }
+        // v25: non-numeric string keys on arrays → store in companion map (arr->extra)
+        if (get_type_id(key) == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0) {
+                // check if the key is a numeric array index
+                double idx_d = js_get_number(key);
+                if (idx_d != idx_d) { // NaN → not a valid numeric index
+                    // store in companion map
+                    Array* arr = object.array;
+                    Map* pm;
+                    if (arr->extra == 0) {
+                        Item obj = js_new_object();
+                        arr->extra = (int64_t)(uintptr_t)obj.map;
+                    }
+                    pm = (Map*)(uintptr_t)arr->extra;
+                    Item map_item = (Item){.map = pm};
+                    js_property_set(map_item, key, value);
+                    return value;
+                }
+            }
+        }
         return js_array_set(object, key, value);
     }
 
@@ -2828,6 +2890,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 if (get_type_id(key) == LMD_TYPE_STRING) {
                     String* sk = it2s(key);
                     if (!(sk && sk->len >= 2 && sk->chars[0] == '_' && sk->chars[1] == '_')) {
+                        js_strict_throw_property_error("assign to read only", sk ? sk->chars : NULL, sk ? (int)sk->len : 0);
                         return value; // silently reject write to frozen object
                     }
                 }
@@ -2845,6 +2908,7 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                 bool nw_found = false;
                 Item nw_val = js_map_get_fast(m, nw_key, (int)strlen(nw_key), &nw_found);
                 if (nw_found && js_is_truthy(nw_val)) {
+                    js_strict_throw_property_error("assign to read only", str_key->chars, (int)str_key->len);
                     return value; // silently reject write to non-writable property
                 }
             }
@@ -2927,12 +2991,14 @@ extern "C" Item js_property_set(Item object, Item key, Item value) {
                     bool ne_found = false;
                     Item ne_val = js_map_get_fast(m, "__non_extensible__", 17, &ne_found);
                     if (ne_found && js_is_truthy(ne_val)) {
+                        js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
                         return value; // silently reject — object is not extensible
                     }
                     // also check sealed and frozen (they imply non-extensible)
                     bool sl_found = false;
                     Item sl_val = js_map_get_fast(m, "__sealed__", 10, &sl_found);
                     if (sl_found && js_is_truthy(sl_val)) {
+                        js_strict_throw_property_error("add property", sk->chars, (int)sk->len);
                         return value;
                     }
                 }
@@ -3297,6 +3363,17 @@ extern "C" Item js_array_get(Item array, Item index) {
     Array* arr = array.array;
 
     if (idx >= 0 && idx < arr->length) {
+        // check for accessor (getter) on companion map
+        if (arr->extra != 0) {
+            char gk[64];
+            snprintf(gk, sizeof(gk), "__get_%d", idx);
+            Map* props = (Map*)(uintptr_t)arr->extra;
+            bool gk_found = false;
+            Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+            if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                return js_call_function(getter, array, NULL, 0);
+            }
+        }
         return arr->items[idx];
     }
 
@@ -3308,6 +3385,17 @@ extern "C" Item js_array_get_int(Item array, int64_t index) {
     if (get_type_id(array) == LMD_TYPE_ARRAY) {
         Array* arr = array.array;
         if (index >= 0 && index < arr->length) {
+            // check for accessor (getter) on companion map
+            if (arr->extra != 0) {
+                char gk[64];
+                snprintf(gk, sizeof(gk), "__get_%lld", (long long)index);
+                Map* props = (Map*)(uintptr_t)arr->extra;
+                bool gk_found = false;
+                Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+                if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+                    return js_call_function(getter, array, NULL, 0);
+                }
+            }
             return arr->items[index];
         }
         return make_js_undefined();
@@ -4028,6 +4116,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                             break;
                         }
                         e = e->next;
+                    }
+                    // Also check for accessor properties (__get_<name> or __set_<name>)
+                    if (!found_in_shape && ks->len > 0 && ks->len < 200) {
+                        char get_key[256];
+                        snprintf(get_key, sizeof(get_key), "__get_%.*s", (int)ks->len, ks->chars);
+                        bool get_found = false;
+                        js_map_get_fast_ext(m, get_key, (int)strlen(get_key), &get_found);
+                        if (get_found) found_in_shape = true;
+                        if (!found_in_shape) {
+                            char set_key[256];
+                            snprintf(set_key, sizeof(set_key), "__set_%.*s", (int)ks->len, ks->chars);
+                            bool set_found = false;
+                            js_map_get_fast_ext(m, set_key, (int)strlen(set_key), &set_found);
+                            if (set_found) found_in_shape = true;
+                        }
                     }
                     if (!found_in_shape) return (Item){.item = ITEM_FALSE};
                     // Check __ne_ marker
@@ -6927,6 +7030,22 @@ extern "C" Item js_throw_range_error(const char* message) {
     return ItemNull;
 }
 
+// helper: read array element, checking for accessor properties (getters via defineProperty)
+static inline Item js_array_element(Item arr_item, int idx) {
+    Array* arr = arr_item.array;
+    if (arr->extra != 0) {
+        char gk[64];
+        snprintf(gk, sizeof(gk), "__get_%d", idx);
+        Map* props = (Map*)(uintptr_t)arr->extra;
+        bool gk_found = false;
+        Item getter = js_map_get_fast(props, gk, (int)strlen(gk), &gk_found);
+        if (gk_found && get_type_id(getter) == LMD_TYPE_FUNC) {
+            return js_call_function(getter, arr_item, NULL, 0);
+        }
+    }
+    return arr->items[idx];
+}
+
 extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc) {
     if (get_type_id(method_name) != LMD_TYPE_STRING) return ItemNull;
     String* method = it2s(method_name);
@@ -6962,7 +7081,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         // v24: ES spec - negative fromIndex means length + fromIndex
         if (start < 0) { start = a->length + start; if (start < 0) start = 0; }
         for (int i = start; i < a->length; i++) {
-            if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = i2it(i)};
+            if (it2b(js_strict_equal(js_array_element(arr, i), args[0]))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
     }
@@ -6983,7 +7102,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (from < 0) { from = a->length + from; if (from < 0) from = 0; }
         for (int i = from; i < a->length; i++) {
             // includes uses SameValueZero (NaN === NaN, +0 === -0)
-            Item elem = a->items[i];
+            Item elem = js_array_element(arr, i);
             if (it2b(js_strict_equal(elem, args[0]))) return (Item){.item = b2it(true)};
             // NaN === NaN for includes
             if (get_type_id(elem) == LMD_TYPE_FLOAT && get_type_id(args[0]) == LMD_TYPE_FLOAT) {
@@ -7092,7 +7211,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             // directly assign to preserve arrays (avoid list_push flattening)
             dst->items[i] = mapped;
@@ -7113,10 +7232,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item elem = js_array_element(arr, i);
+            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             if (js_is_truthy(pred)) {
-                list_push(dst, src->items[i]);
+                list_push(dst, elem);
             }
         }
         js_current_this = prev_this;
@@ -7142,11 +7262,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 js_throw_value(error);
                 return ItemNull;
             }
-            accumulator = src->items[0];
+            accumulator = js_array_element(arr, 0);
             start_idx = 1;
         }
         for (int i = start_idx; i < src->length; i++) {
-            Item cb_args[4] = { accumulator, src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 4 ? 4 : (fn->param_count >= 3 ? 3 : 2));
         }
         return accumulator;
@@ -7162,7 +7282,8 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item elem = js_array_element(arr, i);
+            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
         }
         js_current_this = prev_this;
@@ -7179,9 +7300,10 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item elem = js_array_element(arr, i);
+            Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
-            if (js_is_truthy(pred)) { js_current_this = prev_this; return src->items[i]; }
+            if (js_is_truthy(pred)) { js_current_this = prev_this; return elem; }
         }
         js_current_this = prev_this;
         return make_js_undefined();
@@ -7197,7 +7319,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }
         }
@@ -7249,7 +7371,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(true)}; }
         }
@@ -7267,7 +7389,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             if (!js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = b2it(false)}; }
         }
@@ -7571,7 +7693,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (from < 0) from = a->length + from;
         if (from >= a->length) from = a->length - 1;
         for (int i = from; i >= 0; i--) {
-            if (it2b(js_strict_equal(a->items[i], args[0]))) return (Item){.item = i2it(i)};
+            if (it2b(js_strict_equal(js_array_element(arr, i), args[0]))) return (Item){.item = i2it(i)};
         }
         return (Item){.item = i2it(-1)};
     }
@@ -7585,7 +7707,7 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         Array* dst = result.array;
         JsFunction* fn = (JsFunction*)callback.function;
         for (int i = 0; i < src->length; i++) {
-            Item cb_args[3] = { src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item mapped = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             // flatten one level
             if (get_type_id(mapped) == LMD_TYPE_ARRAY) {
@@ -7619,11 +7741,11 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
                 js_throw_value(error);
                 return ItemNull;
             }
-            accumulator = src->items[src->length - 1];
+            accumulator = js_array_element(arr, src->length - 1);
             start_idx = src->length - 2;
         }
         for (int i = start_idx; i >= 0; i--) {
-            Item cb_args[4] = { accumulator, src->items[i], (Item){.item = i2it(i)}, cb_this };
+            Item cb_args[4] = { accumulator, js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             accumulator = js_invoke_fn(fn, cb_args, fn->param_count >= 4 ? 4 : (fn->param_count >= 3 ? 3 : 2));
         }
         return accumulator;
@@ -7816,6 +7938,19 @@ extern "C" Item js_get_console_object_value() {
         heap_register_gc_root(&js_console_object.item);
     }
     return js_console_object;
+}
+
+// v25: Reflect global object for bare identifier resolution
+static Item js_reflect_object = {.item = ITEM_NULL};
+
+extern "C" Item js_get_reflect_object_value() {
+    if (js_reflect_object.item == ITEM_NULL) {
+        js_reflect_object = js_object_create(ItemNull);
+        heap_register_gc_root(&js_reflect_object.item);
+        Item tag_k = (Item){.item = s2it(heap_create_name("__sym_toStringTag", 17))};
+        js_property_set(js_reflect_object, tag_k, (Item){.item = s2it(heap_create_name("Reflect", 7))});
+    }
+    return js_reflect_object;
 }
 
 extern "C" Item js_math_set_property(Item key, Item value) {

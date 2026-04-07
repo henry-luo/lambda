@@ -761,6 +761,19 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 
 // Debug tracing helpers
 
+// v24: strict mode flag setter (js_runtime.cpp)
+extern void js_set_strict_mode(int64_t strict);
+
+// v25: Reflect API wrappers (js_globals.cpp)
+extern Item js_reflect_own_keys(Item obj);
+extern Item js_reflect_set(Item obj, Item key, Item value);
+extern Item js_reflect_define_property(Item obj, Item key, Item desc);
+extern Item js_reflect_delete_property(Item obj, Item key);
+extern Item js_reflect_set_prototype_of(Item obj, Item proto);
+extern Item js_reflect_prevent_extensions(Item obj);
+extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
+extern Item js_get_reflect_object_value();
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -1177,6 +1190,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_new_target", FPTR(js_get_new_target)},
     {"js_set_new_target", FPTR(js_set_new_target)},
     {"js_set_direct_new_target", FPTR(js_set_direct_new_target)},
+    {"js_set_strict_mode", FPTR(js_set_strict_mode)},
     {"js_console_log", FPTR(js_console_log)},
     // exception handling
     {"js_throw_value", FPTR(js_throw_value)},
@@ -1198,6 +1212,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_math_object_value", FPTR(js_get_math_object_value)},
     {"js_get_json_object_value", FPTR(js_get_json_object_value)},
     {"js_get_console_object_value", FPTR(js_get_console_object_value)},
+    {"js_get_reflect_object_value", FPTR(js_get_reflect_object_value)},
     {"js_get_document_object_value", FPTR(js_get_document_object_value)},
     {"js_is_document_proxy", FPTR(js_is_document_proxy)},
     {"js_document_proxy_method", FPTR(js_document_proxy_method)},
@@ -1259,6 +1274,13 @@ JitImport jit_runtime_imports[] = {
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
+    {"js_reflect_own_keys", FPTR(js_reflect_own_keys)},
+    {"js_reflect_set", FPTR(js_reflect_set)},
+    {"js_reflect_define_property", FPTR(js_reflect_define_property)},
+    {"js_reflect_delete_property", FPTR(js_reflect_delete_property)},
+    {"js_reflect_set_prototype_of", FPTR(js_reflect_set_prototype_of)},
+    {"js_reflect_prevent_extensions", FPTR(js_reflect_prevent_extensions)},
+    {"js_reflect_apply", FPTR(js_reflect_apply)},
     {"js_make_getter_key", FPTR(js_make_getter_key)},
     {"js_make_setter_key", FPTR(js_make_setter_key)},
     {"js_array_is_array", FPTR(js_array_is_array)},
