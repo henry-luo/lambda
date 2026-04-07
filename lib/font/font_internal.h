@@ -344,8 +344,10 @@ char*               font_platform_find_codepoint_font(uint32_t codepoint, int* o
 #ifdef __APPLE__
 void*               font_platform_create_ct_font(const char* postscript_name,
                                                   const char* family_name,
-                                                  float size_px);
+                                                  float size_px,
+                                                  int css_weight);  // css_weight: 100–900
 void                font_platform_destroy_ct_font(void* ct_font_ref);
+float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
 #endif

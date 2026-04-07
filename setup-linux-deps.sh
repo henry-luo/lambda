@@ -535,6 +535,17 @@ build_thorvg_v1_0_pre34_for_linux() {
     if echo "$tag" | grep -qv "v1.0-pre34"; then
         echo "⚠️  Warning: mac-deps/thorvg is at tag '$tag', expected v1.0-pre34"
     fi
+
+    # Apply Lambda patches
+    PATCH_FILE="$SCRIPT_DIR/patches/thorvg-svg-font-inheritance.patch"
+    if [ -f "$PATCH_FILE" ]; then
+        echo "Applying ThorVG patches..."
+        git apply "$PATCH_FILE" 2>/dev/null || {
+            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
+                echo "  (patch already applied or skipped)"
+            }
+        }
+    fi
     cd - > /dev/null
 
     # Build in mac-deps/thorvg/build-linux (mirroring Mac's build-mac)

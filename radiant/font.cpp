@@ -61,6 +61,13 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
         const FontMetrics* m = font_get_metrics(handle);
         if (m) {
             fprop->space_width = m->space_width;
+        // When the font has CoreText metrics (e.g., SFNS / -apple-system), prefer
+        // the CT-based space advance over FreeType to match Chrome text widths.
+        // font_get_glyph() returns CT advance in CSS pixels when ct_font_ref is set.
+        {
+            GlyphInfo sp = font_get_glyph(handle, (uint32_t)' ');
+            if (sp.advance_x > 0.0f) fprop->space_width = sp.advance_x;
+        }
             fprop->ascender    = m->hhea_ascender;
             fprop->descender   = -(m->hhea_descender); // FontMetrics.hhea_descender is negative, FontProp expects positive
             fprop->font_height = m->hhea_line_height;
