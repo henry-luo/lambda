@@ -21,9 +21,17 @@ __thread Context* input_context = NULL;
 ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = NULL;
     if (key) {
-        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+        // Allocate ShapeEntry + StrView + a copy of the key string data in one block.
+        // This ensures the string data has the same lifetime as the ShapeEntry, even
+        // when the original key String lives in a shorter-lived pool (e.g. a JS
+        // transpiler's name_pool that is freed by js_transpiler_destroy).
+        size_t str_copy_size = key->len + 1;
+        shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView) + str_copy_size);
         StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-        nv->str = key->chars;  nv->length = key->len;
+        char* str_copy = (char*)nv + sizeof(StrView);
+        memcpy(str_copy, key->chars, key->len);
+        str_copy[key->len] = '\0';
+        nv->str = str_copy;  nv->length = key->len;
         shape_entry->name = nv;
         shape_entry->type = type_info[type_id].type;
     } else {

@@ -2594,6 +2594,13 @@ int main(int argc, char *argv[]) {
             // the script pool, so pool_destroy would unmap its memory.
             runtime_reset_heap(&runtime);
 
+            // Reset path scheme roots. The scheme_roots[] global stores
+            // Path* pointers allocated from the heap pool, which was just
+            // destroyed by runtime_reset_heap. Without this reset the next
+            // script's path_get_root() would use dangling pointers, leading
+            // to corrupted path traversal (infinite loop / SIGSEGV).
+            path_reset();
+
             // Clean up accumulated scripts to prevent state corruption across runs.
             // Keep the parser (expensive to recreate) but free all script data.
             if (runtime.scripts) {

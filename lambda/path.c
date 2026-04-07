@@ -86,6 +86,18 @@ void path_init(void) {
 }
 
 /**
+ * Reset path scheme roots so path_init() re-runs on next use.
+ * Must be called between scripts in batch mode since scheme_roots are
+ * allocated from the script's pool, which is destroyed between scripts.
+ */
+void path_reset(void) {
+    for (int i = 0; i < PATH_SCHEME_COUNT; i++) {
+        scheme_roots[i] = NULL;
+    }
+    log_debug("path_reset: cleared %d scheme roots", PATH_SCHEME_COUNT);
+}
+
+/**
  * Get predefined root path for a scheme.
  */
 Path* path_get_root(PathScheme scheme) {
