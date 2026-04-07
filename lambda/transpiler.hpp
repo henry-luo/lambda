@@ -143,6 +143,7 @@ Input* run_script_with_run_main(Runtime *runtime, char* script_path, bool transp
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 void runtime_reset_heap(Runtime* runtime);  // reset heap between independent evaluations
+void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 
 // JavaScript transpiler integration
 Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* filename);

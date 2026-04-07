@@ -57,6 +57,7 @@ typedef enum {
 
 // Path API (defined in path.c)
 void path_init(void);                                   // Initialize root scheme paths
+void path_reset(void);                                  // Reset scheme roots (call between batch scripts)
 Path* path_get_root(PathScheme scheme);                 // Get predefined root path
 Path* path_append(Path* parent, const char* segment);   // Append segment to path
 Path* path_append_len(Path* parent, const char* segment, size_t len);
