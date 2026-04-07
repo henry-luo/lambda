@@ -4,6 +4,7 @@
     "lang": "c++17",
     "compiler": "clang",
     "output": "lambda.exe",
+    "enable_sanitizer_main": false,
     "source_dirs": [
         "lib",
         "lib/gc",

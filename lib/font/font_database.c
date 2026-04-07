@@ -1034,7 +1034,9 @@ FontDatabaseResult font_database_find_best_match_internal(FontDatabase* db, Font
 
         if (!family) {
             // family confirmed absent — cache for future lookups
-            FontFamily missing = {.family_name = criteria->family_name};
+            // Must arena_strdup the name: criteria->family_name is a stack buffer
+            // that becomes invalid after the caller returns.
+            FontFamily missing = {.family_name = arena_strdup(db->arena, criteria->family_name)};
             hashmap_set(db->missing_families, &missing);
             return result;
         }

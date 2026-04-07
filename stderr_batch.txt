@@ -1,0 +1,4 @@
+09:23:09 [36m[NOTE][0m ############################################
+09:23:09 [36m[NOTE][0m !!! Running DEBUG build of lambda.exe  !!!
+09:23:09 [36m[NOTE][0m !!! Do NOT use it for performance test !!!
+09:23:09 [36m[NOTE][0m ############################################

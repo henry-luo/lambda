@@ -2744,6 +2744,28 @@ class PremakeGenerator:
             ''
         ])
 
+        # AddressSanitizer for main lambda.exe (opt-in via enable_sanitizer_main)
+        if self.config.get('enable_sanitizer_main', False):
+            platforms_config = self.config.get('platforms', {})
+            disable_sanitizer = False
+            if self.use_windows_config:
+                windows_config = platforms_config.get('windows', {})
+                disable_sanitizer = windows_config.get('disable_sanitizer', True)
+            else:
+                linux_config = platforms_config.get('linux', {})
+                disable_sanitizer = linux_config.get('disable_sanitizer', False)
+
+            if not disable_sanitizer:
+                self.premake_content.extend([
+                    '    -- AddressSanitizer for main lambda.exe',
+                    '    filter "configurations:debug"',
+                    '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
+                    '        linkoptions { "-fsanitize=address" }',
+                    '    ',
+                    '    filter {}',
+                    '    ',
+                ])
+
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
         print(f"DEBUG: Starting premake file generation, output_path={output_path}")
