@@ -13,9 +13,9 @@ extern "C" {
 #include "../lambda.h"
 
 // Sentinel value for deleted properties (used by delete operator).
-// Encoded as a tagged INT (LMD_TYPE_INT=3) with a unique payload 0x00DEAD00DEAD00.
+// Encoded as a tagged INT (LMD_TYPE_INT=4) with a unique payload 0x00DEAD00DEAD00.
 // This roundtrips correctly through map_field_store/map_read_field for INT fields.
-#define JS_DELETED_SENTINEL_VAL ((3ULL << 56) | 0x00DEAD00DEAD00ULL)
+#define JS_DELETED_SENTINEL_VAL (((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL)
 
 // =============================================================================
 // Type Conversion Functions
@@ -28,6 +28,7 @@ extern "C" {
 Item js_to_number(Item value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);
+Item js_to_object(Item value);
 
 /**
  * Check if a value is truthy according to JavaScript rules.
@@ -111,6 +112,7 @@ Item js_array_set_int(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
 int64_t js_get_length(Item object);
+Item js_get_length_item(Item object);
 
 // =============================================================================
 // Function Functions
@@ -275,6 +277,8 @@ Item js_method_call_apply(Item obj, Item method_name, Item args_array);
 Item js_alert(Item msg);
 void js_set_prototype(Item object, Item prototype);
 void js_mark_non_enumerable(Item object, Item name);
+void js_mark_non_writable(Item object, Item name);
+void js_func_init_property(Item fn, Item key, Item value);
 void js_mark_all_non_enumerable(Item object);
 Item js_new_number_wrapper(Item arg);
 Item js_new_boolean_wrapper(Item arg);
