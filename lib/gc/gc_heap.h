@@ -24,7 +24,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "mempool.h"
+#include "../mempool.h"
 #include "gc_object_zone.h"
 #include "gc_data_zone.h"
 

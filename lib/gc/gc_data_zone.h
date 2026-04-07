@@ -30,7 +30,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "mempool.h"
+#include "../mempool.h"
 
 // Default data zone block size: 4 MB
 #define GC_DATA_ZONE_BLOCK_SIZE (4 * 1024 * 1024)

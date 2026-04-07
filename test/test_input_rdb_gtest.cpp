@@ -33,7 +33,7 @@ Input* input_rdb_from_path(const char* pathname, const char* type);
 const char* rdb_detect_format(const char* pathname, const char* type);
 
 extern "C" {
-#include "../lib/sqlite3.h"
+#include "../lib/sqlite/sqlite3.h"
 }
 
 /* ══════════════════════════════════════════════════════════════════════

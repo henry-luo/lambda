@@ -255,10 +255,10 @@ Item fn_join(Item left, Item right) {
                 result->type_id = LMD_TYPE_ARRAY_NUM;
                 result->flags = la->get_elem_type();
                 result->length = total;  result->capacity = total;
-                size_t elem_size = (la->get_elem_type() == ELEM_FLOAT) ? sizeof(double) : sizeof(int64_t);
-                result->items = (int64_t*)heap_data_alloc(total * elem_size);
-                memcpy(result->items, la->items, elem_size*la->length);
-                memcpy((char*)result->items + elem_size*la->length, ra->items, elem_size*ra->length);
+                size_t elem_size = ELEM_TYPE_SIZE[la->get_elem_type() >> 4];
+                result->data = heap_data_alloc(total * elem_size);
+                memcpy(result->data, la->data, elem_size*la->length);
+                memcpy((char*)result->data + elem_size*la->length, ra->data, elem_size*ra->length);
                 return {.array_num = result};
             }
             // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)

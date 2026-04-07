@@ -4381,21 +4381,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 }
                 else {
                     // Both width and height unspecified, or width was 0% on 0-width parent
-                    if (img->format == IMAGE_FORMAT_SVG) {
-                        // For SVG, try to use parent width, but fall back to intrinsic if parent is 0
-                        float parent_width = lycon->block.parent ? lycon->block.parent->content_width : 0;
-                        if (parent_width > 0) {
-                            lycon->block.given_width = parent_width;
-                        } else {
-                            // Parent has no width, use intrinsic SVG dimensions
-                            lycon->block.given_width = w;
-                        }
-                        lycon->block.given_height = lycon->block.given_width * h / w;
-                    }
-                    else { // use image intrinsic dimensions
-                        lycon->block.given_width = w;
-                        lycon->block.given_height = h;
-                    }
+                    // CSS 2.1 §10.3.2: For replaced elements with 'width: auto',
+                    // use intrinsic width. This applies to both raster and SVG images
+                    // loaded via <img>. SVGs with width/height attributes on the root
+                    // <svg> element have known intrinsic dimensions; use them directly.
+                    lycon->block.given_width = w;
+                    lycon->block.given_height = h;
                     image_height_auto_derived = true;
                     image_width_auto_derived = true;
                 }
@@ -4418,15 +4409,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             log_debug("%s image dimensions: %f x %f", block->source_loc(), lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
-            // CSS Images 3 + browser behavior: broken images have no intrinsic
-            // dimensions. Leave width as auto so CSS layout determines it:
-            //   - display:block → fills containing block (like non-replaced elements)
-            //   - display:inline-block → shrink-to-fit using intrinsic sizing (16px)
-            // HTML width/height attributes, if present, are already in given_width/
-            // given_height from CSS resolution — only override if truly unset.
-            // Height: Chrome renders broken image icon at 16px height.
-            if (lycon->block.given_height <= 0) lycon->block.given_height = 16;
-            log_debug("%s broken image fallback: given_width=%.1f, given_height=%.1f", block->source_loc(),
+            // CSS Images 3 + browser behavior: when an image fails to load,
+            // browsers ignore the HTML width/height presentational hints and
+            // treat it as a non-replaced inline element showing alt text.
+            // Only preserve dimensions that were explicitly set by CSS (not HTML attrs).
+            // blk->given_width >= 0 means CSS explicitly set the width property;
+            // if blk is null or blk->given_width < 0, the width came from HTML attrs only.
+            if (!(block->blk && block->blk->given_width >= 0)) {
+                lycon->block.given_width = -1;
+            }
+            if (!(block->blk && block->blk->given_height >= 0)) {
+                lycon->block.given_height = -1;
+            }
+            log_debug("%s broken image: cleared presentational hints, given_width=%.1f, given_height=%.1f", block->source_loc(),
                 lycon->block.given_width, lycon->block.given_height);
         }
     }
@@ -5115,6 +5110,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             float rounded_width = ceilf(fit_content * 2.0f) / 2.0f;
             block->width = rounded_width;
 
+            // CSS 2.1 §10.4: Apply min-width/max-width constraints to the
+            // shrink-to-fit width. Elements with max-width (e.g., table with
+            // display:block and max-width:100%) must not expand beyond their
+            // max-width even when intrinsic content is wider.
+            block->width = adjust_min_max_width(block, block->width);
+
             // Also update content_width for child layout
             float new_content_width = block->width;
             if (block->bound) {
@@ -5154,6 +5155,28 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 inner_left += block->bound->padding.left;
             }
             line_init(lycon, inner_left, inner_left + block->content_width);
+        }
+
+        // CSS 2.1 §10.3.3: Re-resolve auto margins after shrink-to-fit changed the
+        // block width. The initial margin resolution (above) saw the placeholder
+        // available width; now that the actual width is known, recalculate.
+        // Also update block->x since margin.left was already applied earlier.
+        if (block->bound && !is_float &&
+            block->display.outer != CSS_VALUE_INLINE_BLOCK &&
+            block->display.outer != CSS_VALUE_INLINE &&
+            (block->bound->margin.left_type == CSS_VALUE_AUTO || block->bound->margin.right_type == CSS_VALUE_AUTO)) {
+            float old_margin_left = block->bound->margin.left;
+            float margin_available = pa_block->content_width - bfc_available_width_reduction;
+            if (block->bound->margin.left_type == CSS_VALUE_AUTO && block->bound->margin.right_type == CSS_VALUE_AUTO) {
+                block->bound->margin.left = block->bound->margin.right = max((margin_available - block->width) / 2, 0.0f);
+            } else if (block->bound->margin.left_type == CSS_VALUE_AUTO) {
+                block->bound->margin.left = max(margin_available - block->width - block->bound->margin.right, 0.0f);
+            } else {
+                block->bound->margin.right = max(margin_available - block->width - block->bound->margin.left, 0.0f);
+            }
+            block->x += block->bound->margin.left - old_margin_left;
+            log_debug("%s Re-resolved auto margins after shrink-to-fit: margin_left=%.1f, margin_right=%.1f, width=%.1f, x=%.1f",
+                block->source_loc(), block->bound->margin.left, block->bound->margin.right, block->width, block->x);
         }
     }
 
@@ -5931,7 +5954,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
         // flow the block in parent context
-        if (display.outer == CSS_VALUE_INLINE_BLOCK) {
+        // CSS 2.1 §9.7: Floats are blockified — a floated element that was
+        // originally inline-block should NOT be positioned as inline-block.
+        // The float positioning in finalize_block already set the correct x/y.
+        bool is_float_element = block->position && element_has_float(block);
+        if (display.outer == CSS_VALUE_INLINE_BLOCK && !is_float_element) {
             if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
 
             // Update effective line bounds for floats at current Y position
@@ -6197,10 +6224,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else {
                     // Replaced element or no in-flow content: baseline at bottom margin edge
                     // CSS 2.1 §10.8.1: The entire margin-box sits above the baseline.
-                    // The strut's descender does NOT independently extend below the baseline
-                    // for replaced elements — Chrome enforces the strut as a minimum total
-                    // line height, not separate asc/desc contributions. Text output
-                    // adds its own descender via output_text independently.
                     if (block->bound) {
                         // margin-box above baseline = height + margin-top + margin-bottom
                         lycon->line.max_ascender = max(lycon->line.max_ascender,
@@ -6208,6 +6231,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     }
                     else {
                         lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+                    }
+                    // CSS 2.1 §10.8.1: The strut defines minimum height above and
+                    // below the baseline. Even when only replaced content is present,
+                    // the strut's below-baseline extent still contributes to the
+                    // line box height. Compute actual half-leading (may be negative
+                    // when line-height < font-size, e.g. line-height: 0).
+                    float half_leading = (lycon->block.line_height -
+                        (lycon->block.init_ascender + lycon->block.init_descender)) / 2;
+                    float strut_below = lycon->block.init_descender + half_leading;
+                    if (strut_below > 0) {
+                        lycon->line.max_descender = max(lycon->line.max_descender, strut_below);
                     }
                 }
                 log_debug("%s inline-block set max_ascender to: %d", elmt->source_loc(), lycon->line.max_ascender);

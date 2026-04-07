@@ -857,6 +857,16 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
                         log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
                         nested_type = NULL;
                     }
+                    // for NUM_SIZED, also check sub-type uniformity
+                    else if (nested_type && nested_type->type_id == LMD_TYPE_NUM_SIZED) {
+                        TypeNumSized* a = (TypeNumSized*)nested_type;
+                        TypeNumSized* b = (TypeNumSized*)item->type;
+                        if (a->num_type != b->num_type) {
+                            log_debug("DEBUG: NUM_SIZED sub-type mismatch (%d vs %d), resetting nested_type to NULL",
+                                a->num_type, b->num_type);
+                            nested_type = NULL;
+                        }
+                    }
                     type->length++;
                 }
             }

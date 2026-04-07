@@ -22,6 +22,10 @@
 #include <stdlib.h>
 #include <chrono>       // timing - acceptable for profiling
 #include <limits.h>
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+
 extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/file.h"
@@ -4823,8 +4827,18 @@ static bool layout_single_file(
         }
     }
 
-    // Cleanup document and pool for this file
-    // Note: free_document is handled by pool_destroy since doc is allocated from pool
+    // Cleanup: destroy view tree, document, and per-file CSS pool.
+    // DomDocument and ViewTree are malloc-allocated with their own internal pools.
+    // Failing to free them leaks pools/arenas across batch files, which can cause
+    // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
+    if (doc) {
+        if (doc->view_tree) {
+            view_pool_destroy(doc->view_tree);
+            mem_free(doc->view_tree);
+            doc->view_tree = nullptr;
+        }
+        dom_document_destroy(doc);
+    }
     pool_destroy(pool);
 
     // Reset JS runtime state to avoid cross-document leakage in batch mode.
@@ -4908,7 +4922,22 @@ static char* generate_output_path(const char* input_file, const char* output_dir
  * Main layout command implementation using Lambda CSS and Radiant layout.
  * Supports both single-file and batch modes.
  */
+// Signal handler to capture crash backtrace (SIGTRAP/SIGABRT/SIGSEGV)
+static void crash_signal_handler(int sig) {
+    fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
+    void* callstack[128];
+    int frames = backtrace(callstack, 128);
+    backtrace_symbols_fd(callstack, frames, STDERR_FILENO);
+    fprintf(stderr, "=== END BACKTRACE ===\n");
+    _exit(128 + sig);
+}
+
 int cmd_layout(int argc, char** argv) {
+    // Install crash signal handlers for diagnostics
+    signal(SIGTRAP, crash_signal_handler);
+    signal(SIGABRT, crash_signal_handler);
+    signal(SIGSEGV, crash_signal_handler);
+
     // Initialize logging system (only write log.txt when log.conf exists, i.e. dev/debug mode)
     if (file_exists("log.conf")) {
         FILE *file = fopen("log.txt", "w");

@@ -15,8 +15,8 @@
 #include <time.h>
 
 // Include Lambda data structures
-#include "arraylist.h"
-#include "hashmap.h"
+#include "../arraylist.h"
+#include "../hashmap.h"
 
 // Forward declarations (avoid redefinition warnings)
 struct Pool;

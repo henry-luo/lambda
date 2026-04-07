@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include "datetime.h"
+#include "../datetime.h"
 
 // GC Nursery: a bump-pointer allocator for numeric temporaries (int64, double, DateTime).
 // Replaces num_stack with a simpler, non-frame-coupled allocator.

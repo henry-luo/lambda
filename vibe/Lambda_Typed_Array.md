@@ -816,31 +816,72 @@ NumPy's power comes from multi-dimensional arrays with shape/strides. Should Lam
 
 ## Implementation Phases
 
-### Phase 1: Core `ArrayNum` Infrastructure
-- Define `ArrayNumElemType` enum and `ArrayNum` struct
-- Replace `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` → `LMD_TYPE_ARRAY_NUM`
-- Implement `array_num_new()`, `array_num_get()`, `array_num_set_*()`
-- Add compatibility shims: `array_int_new()` → `array_num_new(ELEM_INT, ...)`, etc.
-- Migrate existing `ArrayInt`/`ArrayInt64`/`ArrayFloat` code to `ArrayNum` with `ELEM_INT`/`ELEM_INT64`/`ELEM_FLOAT`
-- Collapse triplicated `case` branches across 16 files into single `case LMD_TYPE_ARRAY_NUM:`
-- Update `get_type_name()` to return `"int[]"`, `"float[]"`, `"i8[]"`, `"u8[]"`, etc. based on `elem_type`
-- Register new functions in `sys_func_registry.c`
-- Update GC heap (`gc_heap.c`) to handle single `ARRAY_NUM` type
+### Phase 1: Core `ArrayNum` Infrastructure ✅ COMPLETED
+- ✅ Define `ArrayNumElemType` enum and `ArrayNum` struct
+- ✅ Replace `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT` → `LMD_TYPE_ARRAY_NUM`
+- ✅ Implement `array_num_new()`, `array_num_get()`, `array_num_set_*()`
+- ✅ Add compatibility shims: `array_int_new()` → `array_num_new(ELEM_INT, ...)`, etc.
+- ✅ Migrate existing `ArrayInt`/`ArrayInt64`/`ArrayFloat` code to `ArrayNum` with `ELEM_INT`/`ELEM_INT64`/`ELEM_FLOAT`
+- ✅ Collapse triplicated `case` branches across 16 files into single `case LMD_TYPE_ARRAY_NUM:`
+- ✅ Update `get_type_name()` to return `"int[]"`, `"float[]"`, `"i8[]"`, `"u8[]"`, etc. based on `elem_type`
+- ✅ Register new functions in `sys_func_registry.c`
+- ✅ Update GC heap (`gc_heap.c`) to handle single `ARRAY_NUM` type
 
-### Phase 2: Literal Parsing & Type Annotations
-- Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (replaces `array_int_new`)
-- Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (replaces `array_float_new`)
-- Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)`
-- Extend `ensure_typed_array()` for `ARRAY_NUM` coercion
-- Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
-- Extend `build_base_type()` to recognize all numeric array types
+**Files modified (~22):** lambda.h, lambda.hpp, lambda-data.cpp, lambda-data-runtime.cpp, lambda-eval.cpp, lambda-eval-num.cpp, lambda-vector.cpp, lambda-mem.cpp *(not listed but touched)*, print.cpp, transpile.cpp, transpile-mir.cpp, transpile-call.cpp, build_ast.cpp, mark_builder.cpp, mark_editor.cpp, mark_reader.cpp *(not listed but touched)*, input/input.cpp, js/js_runtime.cpp, validator/validate.cpp, validator/validate_pattern.cpp, template_registry.cpp, lib/gc_heap.c
 
-### Phase 3: Vectorized Arithmetic
-- Extend `is_scalar_numeric()` and `is_vector_type()` for `NUM_SIZED`, `UINT64`, `ARRAY_NUM`
-- Extend `item_to_double()` and `vector_get()` for `ARRAY_NUM`
-- Refactor `vec_scalar_op` / `vec_vec_op` to dispatch on `elem_type` instead of `type_id`
-- Native-width loops for same-type operations (no double conversion)
-- Arithmetic promotion table implementation
+**Key design decisions during implementation:**
+- `EnumArrayNumElemType` values stored in upper nibble of `Container::flags` byte: `ELEM_INT=0x00`, `ELEM_FLOAT=0x10`, `ELEM_INT64=0x20`. Lower nibble preserves `is_content`/`is_spreadable`/`is_heap`/`is_data_migrated` flag bits.
+- `get_elem_type()` = `(ArrayNumElemType)(flags & 0xF0)` — masks upper nibble only.
+- Enum shift: `LMD_TYPE_ARRAY_NUM=16` occupies the old `ARRAY_INT` slot. `ARRAY` and all subsequent types shifted down by 2 (old `ARRAY_INT64=17` and `ARRAY_FLOAT=18` slots freed).
+- `ELEM_INT` arrays from literal `[1,2,3]` behave as "content" in `take`/`drop`/`slice`/`reverse` (returning generic Lists with `is_content=1`), matching old `ARRAY_INT` fallback behavior. `ELEM_INT64`/`ELEM_FLOAT` arrays from `sort`/arithmetic return typed `ArrayNum` (value types, displayed with brackets).
+- MIR transpiler's runtime type-check path for `arr[i] = int_val` checks `flags` upper nibble at runtime to avoid storing raw int64 bits into `ELEM_FLOAT` arrays (would corrupt float storage).
+- MIR transpiler's specialized ArrayInt/ArrayFloat literal paths now unbox captured closure variables and for-loop key variables (`LMD_TYPE_ANY`) before storing into typed arrays.
+
+**Test results: 565/565 baseline tests passing.**
+
+### Phase 2: Literal Parsing & Type Annotations ✅ COMPLETED
+- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_INT, ...)` for int literals (via `array_int_new` shim)
+- ✅ Teach `transpile_array()` to emit `array_num_new(ELEM_FLOAT, ...)` for float literals (via `array_float_new` shim)
+- ✅ Detect homogeneous sized literals → `array_num_new(ELEM_*, ...)` for i8/u8/i16/u16/i32/u32/f16/f32
+- ✅ Extend `ensure_sized_array()` for `ARRAY_NUM` coercion from generic arrays
+- ✅ Support `int[]`, `float[]`, `i8[]`, `u8[]`, `f32[]` etc. in type annotations
+- ✅ Extend `build_base_type()` to recognize all numeric array types
+- ✅ `EnumArrayNumElemType` expanded to 14 values with compact storage (1/2/4 bytes per element)
+- ✅ `ELEM_TYPE_SIZE[16]` lookup table for byte widths
+- ✅ `array_num_get()` handles all 14 elem_types including compact types
+- ✅ `array_num_set_item()` generic setter with dispatch on elem_type
+- ✅ `item_to_int_value()` / `item_to_float_value()` helpers for NUM_SIZED extraction
+- ✅ `fn_join` (concat) updated to use `ELEM_TYPE_SIZE` and `data` pointer for compact arrays
+- ✅ `print.cpp` updated with `read_compact_elem()` helper for compact type printing
+
+**Files modified:** lambda.h, lambda.hpp, lambda-data-runtime.cpp, lambda-eval.cpp, print.cpp, transpile.cpp, transpile-mir.cpp, build_ast.cpp
+
+**Test results: 566/566 baseline tests passing** (565 original + 1 new `compact_typed_arrays`).
+
+### Phase 3: Vectorized Arithmetic ✅ COMPLETED
+- ✅ Extend `is_scalar_numeric()` for `NUM_SIZED`, `UINT64` — sized scalars now route to vector ops
+- ✅ Extend `item_to_double()` for `NUM_SIZED` (via `get_num_sized_as_double()`), `UINT64`, `DECIMAL`
+- ✅ Extend `vector_get()` from 3 elem_type branches to 13, covering all compact types
+- ✅ Extend `needs_float_result()` for `NUM_SIZED` float scalars and compact float elem types (f16/f32/f64)
+- ✅ Add `compact_elem_to_double()` helper — reads compact array elements as double without boxing to Item
+- ✅ Add `is_float_elem_type()` helper — identifies float-variant elem types
+- ✅ Add `ELEM_INT` fast path in `vec_scalar_op` (packed int56 arrays)
+- ✅ Add `ELEM_FLOAT32` native-width fast path in `vec_scalar_op` (native `float` arithmetic, no double conversion)
+- ✅ Add `ELEM_INT` × `ELEM_INT` fast path in `vec_vec_op`
+- ✅ Add `ELEM_FLOAT32` × `ELEM_FLOAT32` native-width fast path in `vec_vec_op`
+- ✅ Add `ARRAY_NUM` + non-`ARRAY_NUM` integer fast path in `vec_vec_op` (uses `compact_elem_to_double`)
+- ✅ Update float paths in `vec_scalar_op` / `vec_vec_op` to use `compact_elem_to_double` instead of `vector_get` + `item_to_double`
+- ✅ Fix `fn_math_prod`, `fn_math_cumsum`, `fn_math_cumprod` for compact typed arrays
+- Arithmetic promotion table (Section 10 widening rules) — deferred to future work
+
+**Files modified:** lambda-vector.cpp
+
+**Key design decisions during implementation:**
+- Integer modulo-by-zero now consistently returns 0 across all array types (previously returned NAN when going through float fallback path for generic lists).
+- `ELEM_FLOAT32` fast paths operate directly on `float*` buffers with `fmodf`/`powf` — compiler can auto-vectorize these loops.
+- Mixed-type compact array arithmetic (e.g., `i8[] + i16[]`) falls through to the generic float path via `compact_elem_to_double`, producing `float[]` result. Same-type fast paths avoid double conversion entirely.
+
+**Test results: 567/567 baseline tests passing** (566 + 1 new `typed_array_vector_ops`).
 
 ### Phase 4: Construction APIs
 - `zeros(count, type)`, `ones(count, type)` — new system functions

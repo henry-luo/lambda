@@ -351,6 +351,7 @@ struct ArrayNum : Container {
     union {
         int64_t* items;        // for ELEM_INT, ELEM_INT64
         double* float_items;   // for ELEM_FLOAT
+        void* data;            // for compact types (ELEM_INT8, ELEM_UINT8, etc.)
     };
     int64_t length;
     int64_t extra;  // count of extra items

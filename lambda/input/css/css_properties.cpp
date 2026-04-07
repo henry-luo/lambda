@@ -630,8 +630,12 @@ bool css_property_system_init(Pool* pool) {
     g_property_pool = pool;
     g_property_count = PROPERTY_DEFINITION_COUNT;
 
-    // Allocate property database
-    g_property_database = (CssProperty*)pool_calloc(pool, sizeof(CssProperty) * g_property_count);
+    // Allocate property database using calloc (not pool_calloc) because this is a
+    // global singleton that must outlive any per-file pool. In batch mode, the pool
+    // passed here belongs to the first file and is destroyed after that file's layout.
+    // Using pool_calloc would leave g_property_database as a dangling pointer for all
+    // subsequent files, causing heap corruption.
+    g_property_database = (CssProperty*)calloc(g_property_count, sizeof(CssProperty));
     if (!g_property_database) {
         return false;
     }
@@ -659,7 +663,8 @@ bool css_property_system_init(Pool* pool) {
 }
 
 void css_property_system_cleanup(void) {
-    // Memory is managed by pool, so nothing to do
+    // Free the malloc-allocated property database
+    free(g_property_database);
     g_system_initialized = false;
     g_property_database = NULL;
     g_property_count = 0;

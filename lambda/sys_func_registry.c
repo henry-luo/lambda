@@ -801,6 +801,8 @@ JitImport jit_runtime_imports[] = {
     {"array_float_set", FPTR(array_float_set)},
     {"array_int_new", FPTR(array_int_new)},
     {"array_int_set", FPTR(array_int_set)},
+    {"array_num_new", FPTR(array_num_new)},
+    {"array_num_set_item", FPTR(array_num_set_item)},
 
     // ========================================================================
     // List operations
@@ -855,6 +857,7 @@ JitImport jit_runtime_imports[] = {
     {"it2s", FPTR(it2s)},
     {"fn_to_cstr", FPTR(fn_to_cstr)},
     {"ensure_typed_array", FPTR(ensure_typed_array)},
+    {"ensure_sized_array", FPTR(ensure_sized_array)},
 
     // ========================================================================
     // Arithmetic and comparison operators

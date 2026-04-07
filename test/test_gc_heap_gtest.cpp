@@ -21,9 +21,9 @@
 
 extern "C" {
 #include "../lambda/lambda.h"
-#include "../lib/gc_heap.h"
-#include "../lib/gc_object_zone.h"
-#include "../lib/gc_data_zone.h"
+#include "../lib/gc/gc_heap.h"
+#include "../lib/gc/gc_object_zone.h"
+#include "../lib/gc/gc_data_zone.h"
 #include "../lib/mempool.h"
 }
 
