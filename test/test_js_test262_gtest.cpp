@@ -31,6 +31,7 @@
 #include <mutex>
 #include <atomic>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <functional>
 #include <chrono>
@@ -1174,9 +1175,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         auto retry_results = [&]() {
             std::unordered_map<std::string, BatchResult> results;
             std::vector<SubBatch> retry_batches;
-            for (size_t s = 0; s < lost_indices.size(); s += RETRY_BATCH_SIZE) {
-                size_t e = std::min(s + RETRY_BATCH_SIZE, lost_indices.size());
-                retry_batches.push_back({s, e});
+            // Retry individually (batch of 1) to prevent a single crasher from
+            // killing other lost tests in the retry batch.
+            for (size_t s = 0; s < lost_indices.size(); s++) {
+                retry_batches.push_back({s, s + 1});
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
             std::atomic<size_t> next_batch{0};
@@ -1228,36 +1230,59 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     }
 
     // Write crasher log for next run's quarantine optimization.
-    // Include: clean tests still lost after Phase 2b retry + quarantined crashers still lost after Phase 2a.
+    // Cumulative: merge previous crashers with newly-discovered ones.
+    // Tests are only removed from quarantine if they PASS when run individually in Phase 2a.
     {
         FILE* crasher_log = fopen("temp/_t262_crashers.txt", "w");
         if (crasher_log) {
             size_t still_lost = 0;
             size_t crash_exit = 0;
-            // Clean tests that are still missing after Phase 2b retry
-            for (size_t idx : lost_indices) {
-                const auto& p = prepared[idx];
-                auto it = batch_results.find(p.test_name);
-                if (it == batch_results.end()) {
-                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
-                    still_lost++;
-                } else if (it->second.exit_code > 128) {
-                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
-                            p.test_name.c_str(), p.test_path.c_str());
-                    crash_exit++;
-                }
-            }
-            // Quarantined crashers that are still missing after Phase 2a
+            std::unordered_set<std::string> written;
+
+            // Retain previously-quarantined crashers that still crash in Phase 2a.
+            // (Tests that pass individually in Phase 2a are removed from quarantine.)
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
                 if (it == batch_results.end()) {
                     fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
                     still_lost++;
                 } else if (it->second.exit_code > 128) {
                     fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
                             p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
                     crash_exit++;
+                }
+                // else: test passed individually → removed from quarantine
+            }
+
+            // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
+            for (auto& kv : batch_results) {
+                if (written.count(kv.first)) continue;
+                if (kv.second.exit_code > 128) {
+                    const char* path = "";
+                    for (size_t idx : clean_indices) {
+                        if (prepared[idx].test_name == kv.first) {
+                            path = prepared[idx].test_path.c_str();
+                            break;
+                        }
+                    }
+                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", kv.second.exit_code,
+                            kv.first.c_str(), path);
+                    written.insert(kv.first);
+                    crash_exit++;
+                }
+            }
+            // Clean tests still missing after Phase 2b
+            for (size_t idx : lost_indices) {
+                const auto& p = prepared[idx];
+                if (written.count(p.test_name)) continue;
+                auto it = batch_results.find(p.test_name);
+                if (it == batch_results.end()) {
+                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
+                    still_lost++;
                 }
             }
             fclose(crasher_log);

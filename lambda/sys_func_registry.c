@@ -1152,6 +1152,7 @@ JitImport jit_runtime_imports[] = {
     {"js_bind_function", FPTR(js_bind_function)},
     {"js_func_bind", FPTR(js_func_bind)},
     {"js_new_function_from_string", FPTR(js_new_function_from_string)},
+    {"js_builtin_eval", FPTR(js_builtin_eval)},
     {"js_create_regex", FPTR(js_create_regex)},
     {"js_regexp_construct", FPTR(js_regexp_construct)},
     {"js_url_construct", FPTR(js_url_construct)},

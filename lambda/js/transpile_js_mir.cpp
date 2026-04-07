@@ -8839,6 +8839,12 @@ static MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 return jm_call_1(mt, "js_btoa", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
             }
+            // eval(code) — dynamic evaluation
+            if (nl == 4 && strncmp(n, "eval", 4) == 0 && !jm_find_var(mt, "eval")) {
+                MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
+                return jm_call_1(mt, "js_builtin_eval", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, arg));
+            }
             // v12: Symbol(desc) — create a new unique symbol
             if (nl == 6 && strncmp(n, "Symbol", 6) == 0) {
                 MIR_reg_t arg = call->arguments ? jm_transpile_box_item(mt, call->arguments) : jm_emit_null(mt);
@@ -19178,7 +19184,10 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     // Execute js_main to get the compiled function Item
     Item fn_item = js_main_fn((Context*)context);
 
-    // Cleanup transpiler but KEEP the MIR context alive (function code must persist)
+    // Cleanup transpiler but KEEP the MIR context alive (function code must persist).
+    // Also keep name_pool and ast_pool alive: JIT code embeds raw String* pointers
+    // interned in the name pool (via jm_box_string_literal). Freeing the pool would
+    // leave dangling pointers in the generated code.
     hashmap_free(mt->import_cache);
     hashmap_free(mt->local_funcs);
     if (mt->widen_to_float) hashmap_free(mt->widen_to_float);
@@ -19188,10 +19197,71 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     }
     free(mt);
     jm_defer_mir_cleanup(ctx);
+    // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
+    // These leak intentionally — their lifetime must match the JIT code.
+    tp->name_pool = NULL;
+    tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
 
     log_debug("js-new-function: compiled dynamic function OK (type=%d)", get_type_id(fn_item));
     return fn_item;
+}
+
+// ============================================================================
+// eval(code) — dynamic evaluation of JavaScript source code
+// Wraps the code in an IIFE and compiles/executes via JIT.
+// ============================================================================
+extern "C" Item js_builtin_eval(Item code_item) {
+    if (!js_source_runtime) {
+        log_error("js-eval: no runtime context for dynamic evaluation");
+        return ItemNull;
+    }
+    if (get_type_id(code_item) != LMD_TYPE_STRING) {
+        // eval(non-string) returns the argument unchanged (ES spec)
+        return code_item;
+    }
+    String* code_str = it2s(code_item);
+    if (!code_str || code_str->len == 0) return ItemNull;
+
+    extern Item js_call_function(Item func, Item this_val, Item* args, int argc);
+    size_t code_len = code_str->len;
+    Item fn_item = ItemNull;
+
+    // Try expression form first: body = "return (code)\n"
+    // js_new_function_from_string wraps as (function() { return (code)\n })
+    {
+        const char* prefix = "return (";
+        const char* suffix = "\n)";
+        size_t plen = strlen(prefix), slen = strlen(suffix);
+        size_t total = plen + code_len + slen + 1;
+        char* body = (char*)malloc(total);
+        if (!body) return ItemNull;
+        memcpy(body, prefix, plen);
+        memcpy(body + plen, code_str->chars, code_len);
+        memcpy(body + plen + code_len, suffix, slen);
+        body[total - 1] = '\0';
+
+        Item body_item = (Item){.item = s2it(heap_create_name(body, total - 1))};
+        free(body);
+        fn_item = js_new_function_from_string(&body_item, 1);
+    }
+
+    // If expression form succeeded, call and return
+    if (fn_item.item != 0 && fn_item.item != ITEM_NULL && fn_item.item != ITEM_ERROR) {
+        return js_call_function(fn_item, ItemNull, NULL, 0);
+    }
+
+    // Try statement form: body = code as-is
+    {
+        Item body_item = code_item;
+        fn_item = js_new_function_from_string(&body_item, 1);
+    }
+
+    if (fn_item.item == 0 || fn_item.item == ITEM_NULL || fn_item.item == ITEM_ERROR) {
+        return ItemNull;
+    }
+
+    return js_call_function(fn_item, ItemNull, NULL, 0);
 }
 
 // ============================================================================

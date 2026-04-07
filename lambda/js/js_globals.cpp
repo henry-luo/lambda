@@ -2167,7 +2167,9 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
         }
     }
 
-    // Check if property is non-configurable before allowing redefinition
+    // Check if property is non-configurable before allowing redefinition.
+    // Only check OWN properties — inherited non-configurable markers must not block
+    // defining a new own property on the object (ES spec 8.12.9 step 1).
     Item name_str_item = js_to_string(name);
     if (get_type_id(name_str_item) == LMD_TYPE_STRING && get_type_id(obj) == LMD_TYPE_MAP) {
         String* name_str = it2s(name_str_item);
@@ -2175,15 +2177,15 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
             char nc_key[256];
             snprintf(nc_key, sizeof(nc_key), "__nc_%.*s", (int)name_str->len, name_str->chars);
             Item nc_k = (Item){.item = s2it(heap_create_name(nc_key, strlen(nc_key)))};
-            Item nc_val = js_property_get(obj, nc_k);
-            if (js_is_truthy(nc_val)) {
+            Item nc_own = js_has_own_property(obj, nc_k);
+            if (it2b(nc_own)) {
                 // Property is non-configurable — check what changes are being attempted
                 // Read current property state
                 char nw_key[256];
                 snprintf(nw_key, sizeof(nw_key), "__nw_%.*s", (int)name_str->len, name_str->chars);
                 Item nw_k = (Item){.item = s2it(heap_create_name(nw_key, strlen(nw_key)))};
-                Item nw_val = js_property_get(obj, nw_k);
-                bool cur_writable = !js_is_truthy(nw_val);
+                Item nw_own = js_has_own_property(obj, nw_k);
+                bool cur_writable = !it2b(nw_own);
 
                 // Check writable change: non-writable → writable is forbidden
                 Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
@@ -2214,8 +2216,8 @@ extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor) 
                 char ne_key[256];
                 snprintf(ne_key, sizeof(ne_key), "__ne_%.*s", (int)name_str->len, name_str->chars);
                 Item ne_k = (Item){.item = s2it(heap_create_name(ne_key, strlen(ne_key)))};
-                Item ne_val = js_property_get(obj, ne_k);
-                bool cur_enumerable = !js_is_truthy(ne_val);
+                Item ne_own = js_has_own_property(obj, ne_k);
+                bool cur_enumerable = !it2b(ne_own);
                 Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
                 Item has_enum = js_in(enumerable_key, descriptor);
                 if (it2b(has_enum)) {

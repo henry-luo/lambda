@@ -2658,6 +2658,7 @@ int main(int argc, char *argv[]) {
         memset(&preamble, 0, sizeof(preamble));
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
+        char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
 
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
@@ -2693,7 +2694,10 @@ int main(int argc, char *argv[]) {
                 // Compile and execute harness as preamble
                 memset(&preamble, 0, sizeof(preamble));
                 Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
-                free(harness_src);
+
+                // Save harness source for recompilation after crash recovery
+                if (saved_harness_src) free(saved_harness_src);
+                saved_harness_src = harness_src;  // take ownership instead of freeing
 
                 if (pres.item != ITEM_ERROR) {
                     has_preamble = true;
@@ -2878,10 +2882,18 @@ int main(int argc, char *argv[]) {
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
                     // Crash destroyed heap — preamble function objects are gone.
-                    // Invalidate preamble so it gets re-sent by the next harness: line.
+                    // Recompile preamble from saved source so subsequent tests still have harness.
                     if (has_preamble) {
                         preamble_state_destroy(&preamble);
                         has_preamble = false;
+                    }
+                    if (saved_harness_src) {
+                        memset(&preamble, 0, sizeof(preamble));
+                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        if (pres.item != ITEM_ERROR) {
+                            has_preamble = true;
+                            preamble_var_checkpoint = preamble.module_var_count;
+                        }
                     }
                 } else if (has_preamble) {
                     // Partial reset: preserve harness module vars, clear test state
@@ -2902,6 +2914,7 @@ int main(int argc, char *argv[]) {
             preamble_state_destroy(&preamble);
             has_preamble = false;
         }
+        if (saved_harness_src) { free(saved_harness_src); saved_harness_src = NULL; }
 
         // tear down persistent heap (hot reload mode only)
         if (hot_reload) {
