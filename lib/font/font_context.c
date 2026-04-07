@@ -372,6 +372,18 @@ void font_handle_release(FontHandle* handle) {
             hashmap_free(handle->advance_cache);
             handle->advance_cache = NULL;
         }
+        // free kern cache
+        if (handle->kern_cache) {
+            hashmap_free(handle->kern_cache);
+            handle->kern_cache = NULL;
+        }
+#ifdef __APPLE__
+        // release CoreText font
+        if (handle->ct_font_ref) {
+            font_platform_destroy_ct_font(handle->ct_font_ref);
+            handle->ct_font_ref = NULL;
+        }
+#endif
         // memory_buffer is arena-allocated, no individual free needed
         // family_name is arena-allocated, no individual free needed
 

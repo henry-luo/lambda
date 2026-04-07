@@ -4411,15 +4411,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         else { // failed to load image
             // CSS Images 3 + browser behavior: when an image fails to load,
             // browsers ignore the HTML width/height presentational hints and
-            // treat it as a non-replaced inline element showing alt text.
+            // render a small broken-image icon (Chrome uses 16×16).
             // Only preserve dimensions that were explicitly set by CSS (not HTML attrs).
             // blk->given_width >= 0 means CSS explicitly set the width property;
             // if blk is null or blk->given_width < 0, the width came from HTML attrs only.
             if (!(block->blk && block->blk->given_width >= 0)) {
-                lycon->block.given_width = -1;
+                lycon->block.given_width = 16;
             }
             if (!(block->blk && block->blk->given_height >= 0)) {
-                lycon->block.given_height = -1;
+                lycon->block.given_height = 16;
             }
             log_debug("%s broken image: cleared presentational hints, given_width=%.1f, given_height=%.1f", block->source_loc(),
                 lycon->block.given_width, lycon->block.given_height);

@@ -2053,8 +2053,14 @@ static MIR_reg_t jm_box_string(JsMirTranspiler* mt, MIR_reg_t ptr_reg) {
 // Create a boxed string Item from a C string literal
 // Calls heap_create_name(chars) -> String*, then boxes with s2it
 static MIR_reg_t jm_box_string_literal(JsMirTranspiler* mt, const char* str, int len) {
-    // Intern the string at transpile time (handles embedded NUL bytes correctly)
-    String* interned = name_pool_create_len(mt->tp->name_pool, str, len);
+    // Intern the string at transpile time (handles embedded NUL bytes correctly).
+    // For module compilation the string constant is baked into JIT code and
+    // accessed at RUNTIME (after js_transpiler_destroy has freed mt->tp->name_pool).
+    // Use context->name_pool (the persistent JS eval-context pool, created in
+    // load_js_module and never freed) so the String* pointer remains valid.
+    NamePool* np = (mt->is_module && context && context->name_pool)
+                   ? context->name_pool : mt->tp->name_pool;
+    String* interned = name_pool_create_len(np, str, len);
     // Box directly: the interned String* is already a valid heap pointer
     // Use s2it(interned) as a compile-time constant Item value
     uint64_t item_val = s2it(interned);

@@ -401,6 +401,38 @@ static uint32_t peek_next_inline_codepoint(DomNode* node) {
 }
 
 /**
+ * Check if a codepoint is an emoji that participates in ZWJ (Zero Width Joiner)
+ * composition sequences. Only emoji characters form composed glyphs when joined
+ * by ZWJ; other scripts (CJK, Latin, etc.) should retain independent advances.
+ * Reference: Unicode Technical Standard #51 (Emoji), UAX #29 (Grapheme Clusters)
+ */
+static inline bool is_emoji_for_zwj(uint32_t cp) {
+    return (cp >= 0x1F000 && cp <= 0x1FFFF) ||  // SMP emoji blocks (Emoticons, Symbols, Transport, etc.)
+           (cp >= 0x2600 && cp <= 0x27BF)  ||    // Misc Symbols and Dingbats
+           (cp >= 0x2300 && cp <= 0x23FF)  ||    // Misc Technical (hourglass, keyboard, etc.)
+           (cp >= 0x2B00 && cp <= 0x2BFF)  ||    // Misc Symbols and Arrows
+           cp == 0x200D ||                        // ZWJ itself
+           cp == 0x2764;                          // Heavy heart (used in heart ZWJ sequences)
+}
+
+/**
+ * Check if a codepoint can serve as the base (left side) of a ZWJ emoji
+ * composition sequence. Only specific emoji characters produce composed
+ * glyphs when followed by ZWJ + another emoji. Without HarfBuzz text
+ * shaping, this heuristic covers the standard Unicode ZWJ sequences.
+ * Reference: Unicode UTS #51, emoji-zwj-sequences.txt
+ */
+static inline bool is_zwj_composition_base(uint32_t cp) {
+    return (cp >= 0x1F466 && cp <= 0x1F469) ||  // Boy, Girl, Man, Woman
+           cp == 0x1F9D1 ||                       // Person (gender-neutral)
+           cp == 0x1F441 ||                       // Eye
+           (cp >= 0x1F3F3 && cp <= 0x1F3F4) ||   // Flags
+           cp == 0x1F408 || cp == 0x1F415 ||      // Cat, Dog
+           cp == 0x1F43B || cp == 0x1F426 ||      // Bear, Bird
+           cp == 0x1F48B || cp == 0x2764;          // Kiss Mark, Heart
+}
+
+/**
  * Get the Unicode-specified width for special space characters.
  * These characters have fixed widths defined by Unicode standard, which browsers
  * enforce regardless of what the font's glyph metrics say.
@@ -410,12 +442,19 @@ static uint32_t peek_next_inline_codepoint(DomNode* node) {
  * Reference: Unicode Standard, Chapter 6 "Writing Systems and Punctuation"
  */
 static inline float get_unicode_space_width_em(uint32_t codepoint) {
+    // Emoji skin tone modifiers (U+1F3FB-U+1F3FF) modify the preceding emoji
+    // and have zero advance in composed sequences (handled by font shaping)
+    if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return -1.0f;
+
     switch (codepoint) {
         // Zero-width characters (return negative to distinguish from "use font width")
         case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
         case 0x200C: return -1.0f;  // Zero Width Non-Joiner (ZWNJ)
         case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
         case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
+        case 0xFE0E: return -1.0f;  // Variation Selector 15 (text presentation)
+        case 0xFE0F: return -1.0f;  // Variation Selector 16 (emoji presentation)
+        case 0x20E3: return -1.0f;  // Combining Enclosing Keycap
 
         // Unicode spaces with defined widths
         case 0x2000: return 0.5f;   // EN QUAD - width of 'n' (nominally 1/2 em)
@@ -750,6 +789,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
+    lycon->line.prev_codepoint = 0;   // reset codepoint kerning state
 
     // IMPORTANT: Reset effective bounds to container bounds before float adjustment
     // line.left/right are the container bounds, set once in line_init()
@@ -1544,6 +1584,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // layout the text glyphs
     bool zwj_preceded = false;  // UAX #14: ZWJ suppresses break between adjacent characters
+    bool prev_is_zwj_base = false;  // track if previous char is a ZWJ composition base
     do {
         float wd;
         uint32_t codepoint = *str;
@@ -1673,7 +1714,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 str = next_ch;
                 lycon->line.is_line_start = false;
                 lycon->line.has_space = false;
-                if (codepoint == 0x200D) zwj_preceded = true;  // ZWJ suppresses next break
+                if (codepoint == 0x200D && prev_is_zwj_base) zwj_preceded = true;
                 continue;  // Skip to next character without adding width
             } else if (unicode_space_em > 0.0f) {
                 // Use Unicode-specified width (fraction of em)
@@ -1686,6 +1727,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // Divide by pixel_ratio to convert back to CSS pixels for layout
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
                 wd = glyph ? (glyph->advance_x / pixel_ratio) : lycon->font.style->space_width;
+                // Emoji ZWJ sequence: the character following ZWJ combines with the
+                // preceding base glyph to form a single composed emoji. Its advance
+                // should not contribute to the line width since the base glyph already
+                // occupies the full emoji width. Only suppress for emoji codepoints;
+                // other scripts (CJK, Latin, etc.) keep their advance after ZWJ.
+                // (Unicode UTS #51 emoji ZWJ sequences, UAX #29 grapheme clusters)
+                if (zwj_preceded && is_emoji_for_zwj(codepoint)) {
+                    wd = 0;
+                }
                 // CSS Fonts 3: small-caps lowercase chars rendered at ~0.7x font size
                 // font_load_glyph returns advance at the handle's fixed size;
                 // scale proportionally since FT_LOAD_NO_HINTING produces linear metrics
@@ -1730,9 +1780,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {
-            uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
-            if (lycon->line.prev_glyph_index) {
-                float kerning_css = font_get_kerning_by_index(lycon->font.font_handle, lycon->line.prev_glyph_index, glyph_index);
+            if (lycon->line.prev_codepoint) {
+                float kerning_css = font_get_kerning(lycon->font.font_handle, lycon->line.prev_codepoint, codepoint);
                 if (kerning_css != 0.0f) {
                     if (str == text_start + rect->start_index) {
                         rect->x += kerning_css;
@@ -1743,10 +1792,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     log_debug("apply kerning: %f to char '%c'", kerning_css, *str);
                 }
             }
-            lycon->line.prev_glyph_index = glyph_index;
+            lycon->line.prev_codepoint = codepoint;
         }
         log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
             *str == '\n' || *str == '\r' ? '^' : *str, rect->x, rect->width, wd, lycon->line.right);
+        prev_is_zwj_base = is_zwj_composition_base(codepoint);
         rect->width += wd;
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
