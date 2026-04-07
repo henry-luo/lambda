@@ -25,7 +25,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
-#include "mempool.h"
+#include "../mempool.h"
 
 // Forward declaration — full definition in gc_heap.h
 typedef struct gc_header gc_header_t;

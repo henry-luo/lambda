@@ -6,7 +6,7 @@
 #include "lambda-data.hpp"
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
-#include "../lib/gc_heap.h"
+#include "../lib/gc/gc_heap.h"
 #include "../lib/log.h"
 #include <cstdlib>
 #include <cstring>

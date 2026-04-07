@@ -9,7 +9,7 @@
  * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
-#include "log.h"
+#include "../log.h"
 #include <stdlib.h>
 #include <string.h>
 

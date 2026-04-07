@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "gc_nursery.h"
-#include "log.h"
+#include "../log.h"
 
 // allocate a new block with the given capacity
 static gc_nursery_block_t* gc_nursery_alloc_block(size_t capacity) {
