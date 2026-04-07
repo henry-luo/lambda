@@ -102,7 +102,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
                                                    size_t length,
                                                    CssEnum text_transform,
-                                                   CssEnum font_variant) {
+                                                   CssEnum font_variant,
+                                                   CssEnum white_space) {
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -125,8 +126,16 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         for (size_t i = 0; i < length; i++) {
             unsigned char ch = (unsigned char)text[i];
             if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-                longest_word = fmax(longest_word, current_word);
-                current_word = 0.0f;
+                if (white_space == CSS_VALUE_BREAK_SPACES) {
+                    // CSS Text 3 §4.2.2: break-spaces — spaces are not hangable,
+                    // contribute to min-content. Break opportunity is AFTER the space.
+                    current_word += 4.0f;
+                    longest_word = fmax(longest_word, current_word);
+                    current_word = 0.0f;
+                } else {
+                    longest_word = fmax(longest_word, current_word);
+                    current_word = 0.0f;
+                }
                 total_width += 4.0f;  // Space width estimate
             } else {
                 current_word += 11.0f;  // Use 11.0 to match font fallback width
@@ -189,16 +198,13 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         // Word boundary detection (whitespace breaks words)
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
-            longest_word = fmax(longest_word, current_word);
-            current_word = 0.0f;
-
             // Get space glyph for kerning continuity (matching layout_text.cpp)
             uint32_t space_glyph = font_get_glyph_index(lycon->font.font_handle, ch);
 
             // Apply kerning between prev character and space (matching layout_text.cpp)
+            float kerning_adj = 0.0f;
             if (has_kerning && prev_codepoint) {
-                float k = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
-                total_width += k;
+                kerning_adj = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
             }
 
             // Use the same space_width as layout_text.cpp for consistency
@@ -218,7 +224,19 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 space_width += lycon->font.style->letter_spacing;
             }
 
-            total_width += space_width;
+            if (white_space == CSS_VALUE_BREAK_SPACES) {
+                // CSS Text 3 §4.2.2: break-spaces — preserved spaces are not hangable
+                // and DO contribute to min-content width. Break opportunity is AFTER
+                // each preserved space, so include space in the preceding segment.
+                current_word += kerning_adj + space_width;
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            } else {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
+
+            total_width += kerning_adj + space_width;
 
             // Keep tracking glyph/codepoint for kerning continuity (layout_text.cpp doesn't reset)
             prev_glyph = space_glyph;
@@ -1952,7 +1970,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         float line_width = 0;
                         if (line_len > 0) {
                             TextIntrinsicWidths lw = measure_text_intrinsic_widths(
-                                lycon, line_start, line_len, text_transform, font_variant);
+                                lycon, line_start, line_len, text_transform, font_variant, ws);
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
                             if (lw.min_content > text_widths.min_content)

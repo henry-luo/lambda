@@ -536,6 +536,29 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->source_loc());
+
+    // HTML5 §4.5.27: <wbr> represents a line break opportunity.
+    // It doesn't generate a box — browsers report (0,0,0,0) via getBoundingClientRect.
+    // Equivalent to U+200B ZWSP per Unicode Line Breaking Algorithm.
+    if (elmt->tag() == HTM_TAG_WBR) {
+        ViewSpan* wbr_span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
+        wbr_span->x = 0;
+        wbr_span->y = 0;
+        wbr_span->width = 0;
+        wbr_span->height = 0;
+        // Record a soft wrap opportunity at the current inline position,
+        // mirroring the U+200B ZWSP handling in layout_text.cpp.
+        // Use the element address as a non-null sentinel for last_space — it will
+        // never fall within a text buffer range, so the wrap logic correctly
+        // breaks at the element boundary (the "outside text" path in layout_text).
+        lycon->line.last_space = (unsigned char*)elmt;
+        lycon->line.last_space_pos = lycon->line.advance_x;
+        lycon->line.last_space_is_hyphen = false;
+        lycon->line.trailing_space_width = 0;
+        lycon->line.wrap_opportunity_before_nowrap = true;
+        return;
+    }
+
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
