@@ -1,139 +1,154 @@
 diff --git a/src/loaders/svg/tvgSvgLoader.cpp b/src/loaders/svg/tvgSvgLoader.cpp
-index e3a2100e..90f3a8b7 100644
+index 90f3a8b7..cd2e3041 100644
 --- a/src/loaders/svg/tvgSvgLoader.cpp
 +++ b/src/loaders/svg/tvgSvgLoader.cpp
-@@ -1172,6 +1172,15 @@ static bool _attrParseGNode(void* data, const char* key, const char* value)
-         _handleMaskAttr(loader, node, value);
-     } else if (STR_AS(key, "filter")) {
-         _handleFilterAttr(loader, node, value);
-+    } else if (STR_AS(key, "font-size")) {
-+        // store font-size on g node for text children to inherit
-+        if (value) node->node.g.fontSize = _toFloat(loader->svgParse, value, SvgParserLengthType::Vertical);
-+    } else if (STR_AS(key, "font-family")) {
-+        // store font-family on g node for text children to inherit
+@@ -1181,6 +1181,14 @@ static bool _attrParseGNode(void* data, const char* key, const char* value)
+             tvg::free(node->node.g.fontFamily);
+             node->node.g.fontFamily = duplicate(value);
+         }
++    } else if (STR_AS(key, "text-anchor")) {
++        // store text-anchor on g node for text children to inherit
 +        if (value) {
-+            tvg::free(node->node.g.fontFamily);
-+            node->node.g.fontFamily = duplicate(value);
++            if (!strcmp(value, "middle")) node->node.g.textAnchor = 0.5f;
++            else if (!strcmp(value, "end")) node->node.g.textAnchor = 1.0f;
++            else node->node.g.textAnchor = 0.0f; // "start"
++            node->node.g.textAnchorSet = true;
 +        }
      } else {
          return _parseStyleAttr(loader, key, value, false);
      }
-@@ -2187,6 +2196,8 @@ static bool _attrParseTextNode(void* data, const char* key, const char* value)
-     for (unsigned int i = 0; i < sizeof(textTags) / sizeof(textTags[0]); i++) {
-         if (textTags[i].sz - 1 == sz && !strncmp(textTags[i].tag, key, sz)) {
-             *((float*)(array + textTags[i].offset)) = _toFloat(loader->svgParse, value, textTags[i].type);
-+            // mark font-size as explicitly set so we don't override with parent <g> inheritance
-+            if (STR_AS(key, "font-size")) text->fontSizeSet = true;
-             return true;
-         }
-     }
-@@ -2195,6 +2206,7 @@ static bool _attrParseTextNode(void* data, const char* key, const char* value)
-         if (value) {
-             tvg::free(text->fontFamily);
+@@ -2208,6 +2216,13 @@ static bool _attrParseTextNode(void* data, const char* key, const char* value)
              text->fontFamily = duplicate(value);
-+            text->fontFamilySet = true;
+             text->fontFamilySet = true;
          }
++    } else if (STR_AS(key, "text-anchor")) {
++        if (value) {
++            if (!strcmp(value, "middle")) text->textAnchor = 0.5f;
++            else if (!strcmp(value, "end")) text->textAnchor = 1.0f;
++            else text->textAnchor = 0.0f; // "start"
++            text->textAnchorSet = true;
++        }
      } else if (STR_AS(key, "style")) {
          return xmlParseW3CAttribute(value, strlen(value), _parseStyleAttr, loader);
-@@ -3250,6 +3262,8 @@ static void _copyAttr(SvgNode* to, const SvgNode* from)
+     } else if (STR_AS(key, "clip-path")) {
+@@ -3262,8 +3277,10 @@ static void _copyAttr(SvgNode* to, const SvgNode* from)
              to->node.text.x = from->node.text.x;
              to->node.text.y = from->node.text.y;
              to->node.text.fontSize = from->node.text.fontSize;
-+            to->node.text.fontSizeSet = from->node.text.fontSizeSet;
-+            to->node.text.fontFamilySet = from->node.text.fontFamilySet;
++            to->node.text.textAnchor = from->node.text.textAnchor;
+             to->node.text.fontSizeSet = from->node.text.fontSizeSet;
+             to->node.text.fontFamilySet = from->node.text.fontFamilySet;
++            to->node.text.textAnchorSet = from->node.text.textAnchorSet;
              if (from->node.text.text) {
                  tvg::free(to->node.text.text);
                  to->node.text.text = duplicate(from->node.text.text);
-@@ -3260,6 +3274,14 @@ static void _copyAttr(SvgNode* to, const SvgNode* from)
-             }
-             break;
+@@ -3276,6 +3293,8 @@ static void _copyAttr(SvgNode* to, const SvgNode* from)
          }
-+        case SvgNodeType::G: {
-+            to->node.g.fontSize = from->node.g.fontSize;
-+            if (from->node.g.fontFamily) {
-+                tvg::free(to->node.g.fontFamily);
-+                to->node.g.fontFamily = duplicate(from->node.g.fontFamily);
-+            }
-+            break;
-+        }
-         default: {
-             break;
-         }
-@@ -3579,6 +3601,10 @@ static void _free(SvgNode* node)
-              tvg::free(node->node.text.fontFamily);
-              break;
-          }
-+         case SvgNodeType::G: {
-+             tvg::free(node->node.g.fontFamily);
-+             break;
-+         }
-          default: {
-              break;
-          }
+         case SvgNodeType::G: {
+             to->node.g.fontSize = from->node.g.fontSize;
++            to->node.g.textAnchor = from->node.g.textAnchor;
++            to->node.g.textAnchorSet = from->node.g.textAnchorSet;
+             if (from->node.g.fontFamily) {
+                 tvg::free(to->node.g.fontFamily);
+                 to->node.g.fontFamily = duplicate(from->node.g.fontFamily);
 diff --git a/src/loaders/svg/tvgSvgLoaderCommon.h b/src/loaders/svg/tvgSvgLoaderCommon.h
-index 31dd0989..ebe2377c 100644
+index ebe2377c..1d67282b 100644
 --- a/src/loaders/svg/tvgSvgLoaderCommon.h
 +++ b/src/loaders/svg/tvgSvgLoaderCommon.h
-@@ -323,6 +323,8 @@ struct SvgDocNode
- 
+@@ -324,7 +324,9 @@ struct SvgDocNode
  struct SvgGNode
  {
-+    float fontSize;     // inherited font-size for child text elements (0 = not set)
-+    char* fontFamily;   // inherited font-family for child text elements (nullptr = not set)
+     float fontSize;     // inherited font-size for child text elements (0 = not set)
++    float textAnchor;   // inherited text-anchor: 0=start, 0.5=middle, 1=end
+     char* fontFamily;   // inherited font-family for child text elements (nullptr = not set)
++    bool textAnchorSet; // true if text-anchor was explicitly set on this g element
  };
  
  struct SvgDefsNode
-@@ -408,6 +410,8 @@ struct SvgTextNode
+@@ -410,8 +412,10 @@ struct SvgTextNode
      char* fontFamily;
      float x, y;
      float fontSize;
-+    bool fontSizeSet;   // true if font-size was explicitly set on this text element
-+    bool fontFamilySet; // true if font-family was explicitly set on this text element
++    float textAnchor;   // 0=start (default), 0.5=middle, 1=end
+     bool fontSizeSet;   // true if font-size was explicitly set on this text element
+     bool fontFamilySet; // true if font-family was explicitly set on this text element
++    bool textAnchorSet; // true if text-anchor was explicitly set on this text element
  };
  
  struct SvgGaussianBlurNode
 diff --git a/src/loaders/svg/tvgSvgSceneBuilder.cpp b/src/loaders/svg/tvgSvgSceneBuilder.cpp
-index cb86eff5..60bcc7a0 100644
+index 60bcc7a0..b0c731e9 100644
 --- a/src/loaders/svg/tvgSvgSceneBuilder.cpp
 +++ b/src/loaders/svg/tvgSvgSceneBuilder.cpp
-@@ -897,16 +897,37 @@ static Paint* _textBuildHelper(SvgLoaderData& loaderData, const SvgNode* node, c
+@@ -897,10 +897,11 @@ static Paint* _textBuildHelper(SvgLoaderData& loaderData, const SvgNode* node, c
  
      auto text = Text::gen();
  
-+    // Resolve font-size and font-family: use text node's own values, or inherit from parent <g> elements.
-+    float fontSize = textNode->fontSize;
-+    const char* fontFamily = textNode->fontFamily;
-+    if (!textNode->fontSizeSet || !textNode->fontFamilySet) {
-+        // walk up the parent chain looking for inherited font attributes on <g> nodes
-+        auto parent = node->parent;
-+        while (parent) {
-+            if (parent->type == SvgNodeType::G) {
-+                if (!textNode->fontSizeSet && parent->node.g.fontSize > 0.0f) {
-+                    fontSize = parent->node.g.fontSize;
+-    // Resolve font-size and font-family: use text node's own values, or inherit from parent <g> elements.
++    // Resolve font-size, font-family, and text-anchor: use text node's own values, or inherit from parent <g> elements.
+     float fontSize = textNode->fontSize;
+     const char* fontFamily = textNode->fontFamily;
+-    if (!textNode->fontSizeSet || !textNode->fontFamilySet) {
++    float textAnchor = textNode->textAnchorSet ? textNode->textAnchor : -1.0f;
++    if (!textNode->fontSizeSet || !textNode->fontFamilySet || !textNode->textAnchorSet) {
+         // walk up the parent chain looking for inherited font attributes on <g> nodes
+         auto parent = node->parent;
+         while (parent) {
+@@ -911,12 +912,17 @@ static Paint* _textBuildHelper(SvgLoaderData& loaderData, const SvgNode* node, c
+                 if (!textNode->fontFamilySet && parent->node.g.fontFamily) {
+                     fontFamily = parent->node.g.fontFamily;
+                 }
++                if (textAnchor < 0.0f && parent->node.g.textAnchorSet) {
++                    textAnchor = parent->node.g.textAnchor;
 +                }
-+                if (!textNode->fontFamilySet && parent->node.g.fontFamily) {
-+                    fontFamily = parent->node.g.fontFamily;
-+                }
-+            }
-+            if ((textNode->fontSizeSet || fontSize != textNode->fontSize) &&
-+                (textNode->fontFamilySet || fontFamily != textNode->fontFamily)) break;
-+            parent = parent->parent;
-+        }
-+    }
-+
+             }
+             if ((textNode->fontSizeSet || fontSize != textNode->fontSize) &&
+-                (textNode->fontFamilySet || fontFamily != textNode->fontFamily)) break;
++                (textNode->fontFamilySet || fontFamily != textNode->fontFamily) &&
++                textAnchor >= 0.0f) break;
+             parent = parent->parent;
+         }
+     }
++    if (textAnchor < 0.0f) textAnchor = 0.0f; // default: start
+ 
      Matrix textTransform;
      if (node->transform) textTransform = *node->transform;
-     else textTransform = tvg::identity();
- 
--    translateR(&textTransform, {node->node.text.x, node->node.text.y - textNode->fontSize});
-+    translateR(&textTransform, {node->node.text.x, node->node.text.y - fontSize});
-     text->transform(textTransform);
+@@ -927,10 +933,36 @@ static Paint* _textBuildHelper(SvgLoaderData& loaderData, const SvgNode* node, c
  
      //TODO: handle def values of font and size as used in a system?
--    auto size = textNode->fontSize * 0.75f; //1 pt = 1/72; 1 in = 96 px; -> 72/96 = 0.75
--    if (text->font(textNode->fontFamily) != Result::Success) {
-+    auto size = fontSize * 0.75f; //1 pt = 1/72; 1 in = 96 px; -> 72/96 = 0.75
-+    if (text->font(fontFamily) != Result::Success) {
-         text->font(nullptr);         //fallback to any available font
+     auto size = fontSize * 0.75f; //1 pt = 1/72; 1 in = 96 px; -> 72/96 = 0.75
+-    if (text->font(fontFamily) != Result::Success) {
+-        text->font(nullptr);         //fallback to any available font
++
++    // Try each font in the comma-separated font-family list (SVG CSS-style list)
++    bool fontSet = false;
++    if (fontFamily) {
++        // make a mutable copy to tokenize by ','
++        auto families = duplicate(fontFamily);
++        auto p = families;
++        while (p && *p) {
++            // skip leading whitespace
++            while (*p == ' ' || *p == '\t') p++;
++            auto start = p;
++            // find end of this family name
++            while (*p && *p != ',') p++;
++            auto next = *p ? p + 1 : p;
++            // trim trailing whitespace
++            while (p > start && (*(p-1) == ' ' || *(p-1) == '\t')) p--;
++            *p = '\0';
++            if (*start) {
++                auto r = text->font(start);
++                if (r == Result::Success) { fontSet = true; break; }
++            }
++            p = next;
++        }
++        tvg::free(families);
++    }
++    if (!fontSet) {
++        text->font(nullptr);  // fallback to any available font
      }
      text->size(size);
++    if (textAnchor != 0.0f) text->align(textAnchor, 0.0f);
+ 
+     // Handle xml:space
+     auto xmlSpace = node->xmlSpace;
