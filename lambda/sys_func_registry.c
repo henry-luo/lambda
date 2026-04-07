@@ -774,6 +774,10 @@ extern Item js_reflect_prevent_extensions(Item obj);
 extern Item js_reflect_apply(Item target, Item this_arg, Item args_array);
 extern Item js_get_reflect_object_value();
 
+// v23: Performance facade functions (js_runtime.cpp)
+extern int64_t js_typeof_is(Item value, const char* type_str);
+extern Item js_property_get_str(Item object, const char* key, int key_len);
+
 JitImport jit_runtime_imports[] = {
     // C library functions
     {"memset", FPTR(memset)},
@@ -1141,10 +1145,12 @@ JitImport jit_runtime_imports[] = {
     {"js_unary_plus", FPTR(js_unary_plus)},
     {"js_unary_minus", FPTR(js_unary_minus)},
     {"js_typeof", FPTR(js_typeof)},
+    {"js_typeof_is", FPTR(js_typeof_is)},
     {"js_new_object", FPTR(js_new_object)},
     {"js_property_get", FPTR(js_property_get)},
     {"js_property_set", FPTR(js_property_set)},
     {"js_property_access", FPTR(js_property_access)},
+    {"js_property_get_str", FPTR(js_property_get_str)},
     {"js_array_new", FPTR(js_array_new)},
     {"js_array_new_from_item", FPTR(js_array_new_from_item)},
     {"js_build_arguments_object", FPTR(js_build_arguments_object)},

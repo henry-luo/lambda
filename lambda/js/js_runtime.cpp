@@ -942,6 +942,60 @@ extern "C" int64_t js_is_nullish(Item value) {
 }
 
 // =============================================================================
+// v23 Performance Facades — compound operations returning raw int64_t
+// =============================================================================
+
+// js_typeof_is: returns 1 if typeof(value) matches type_str, 0 otherwise.
+// Avoids heap string allocation that js_typeof() performs.
+extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
+    TypeId type = get_type_id(value);
+    switch (type_str[0]) {
+    case 'n':
+        if (type_str[1] == 'u') {
+            // "number"
+            if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) {
+                return js_key_is_symbol(value) ? 0 : 1;
+            }
+            return 0;
+        }
+        return 0;
+    case 's':
+        if (type_str[1] == 't') return (type == LMD_TYPE_STRING) ? 1 : 0;  // "string"
+        if (type_str[1] == 'y') return (type == LMD_TYPE_SYMBOL ||         // "symbol"
+            ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && js_key_is_symbol(value))) ? 1 : 0;
+        return 0;
+    case 'b': return (type == LMD_TYPE_BOOL) ? 1 : 0;      // "boolean"
+    case 'u': return (type == LMD_TYPE_UNDEFINED) ? 1 : 0;  // "undefined"
+    case 'o':
+        // "object": null, map (non-class), array, element, or other non-function
+        if (type == LMD_TYPE_NULL) return 1;
+        if (type == LMD_TYPE_MAP) {
+            bool own_ip = false;
+            js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
+            return own_ip ? 0 : 1;  // class objects are "function"
+        }
+        if (type == LMD_TYPE_FUNC || type == LMD_TYPE_UNDEFINED ||
+            type == LMD_TYPE_BOOL || type == LMD_TYPE_STRING ||
+            type == LMD_TYPE_SYMBOL) return 0;
+        if ((type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) && !js_key_is_symbol(value)) return 0;
+        return 1;  // arrays, elements, etc. are "object"
+    case 'f':
+        // "function"
+        if (type == LMD_TYPE_FUNC) return 1;
+        if (type == LMD_TYPE_MAP) {
+            bool own_ip = false;
+            js_map_get_fast_ext(value.map, "__instance_proto__", 18, &own_ip);
+            return own_ip ? 1 : 0;
+        }
+        return 0;
+    default: return 0;
+    }
+}
+
+// js_property_get_str: property access with C string key (avoids string boxing)
+extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
+
+// =============================================================================
 // Helper: Get numeric value as double
 // =============================================================================
 
@@ -3106,6 +3160,27 @@ extern "C" Item js_property_access(Item object, Item key) {
         return make_js_undefined();
     }
     return js_property_get(object, key);
+}
+
+// v23: Property access with raw C-string key — avoids heap string allocation.
+// Used by transpiler when property name is a compile-time constant.
+extern "C" Item js_property_get_str(Item object, const char* key, int key_len) {
+    // null/undefined checks
+    TypeId type = get_type_id(object);
+    if (type == LMD_TYPE_NULL || type == LMD_TYPE_UNDEFINED) {
+        const char* type_str = (type == LMD_TYPE_NULL) ? "null" : "undefined";
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Cannot read properties of %s (reading '%.*s')",
+                 type_str, key_len, key);
+        Item err_name = (Item){.item = s2it(heap_create_name("TypeError"))};
+        Item err_msg = (Item){.item = s2it(heap_create_name(msg))};
+        Item error = js_new_error_with_name(err_name, err_msg);
+        js_throw_value(error);
+        return make_js_undefined();
+    }
+    // create string key and delegate to js_property_get
+    Item str_key = (Item){.item = s2it(heap_create_name(key, key_len))};
+    return js_property_get(object, str_key);
 }
 
 // Convert a UTF-16 unit index to the corresponding byte offset in a UTF-8 string.
