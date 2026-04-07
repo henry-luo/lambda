@@ -2589,6 +2589,11 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_END %d\n", result);
             fflush(stdout);
 
+            // Reset heap/nursery/name_pool so the next test starts clean.
+            // Must happen BEFORE pool_destroy: name_pool was allocated from
+            // the script pool, so pool_destroy would unmap its memory.
+            runtime_reset_heap(&runtime);
+
             // Clean up accumulated scripts to prevent state corruption across runs.
             // Keep the parser (expensive to recreate) but free all script data.
             if (runtime.scripts) {
@@ -2604,8 +2609,6 @@ int main(int argc, char *argv[]) {
                 }
                 runtime.scripts->length = 0;
             }
-            // Reset heap/nursery/name_pool so the next test starts clean
-            runtime_reset_heap(&runtime);
         }
 
         runtime_cleanup(&runtime);

@@ -139,6 +139,9 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
 struct JsModuleConstEntry;  // forward declaration
 struct JsPreambleState {
     void* mir_ctx;              // MIR_context_t kept alive for harness function objects
+    void* tp_ast_pool;          // transpiler's ast_pool — kept alive because compiled MIR code
+                                // and map shape entries reference strings from name_pool
+    void* tp_name_pool;         // transpiler's name_pool (allocated from ast_pool)
     int module_var_count;       // number of harness module vars
     JsModuleConstEntry* entries;// snapshot of harness module_consts
     int entry_count;

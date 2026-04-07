@@ -19682,6 +19682,13 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     if (g_jm_preamble_out) {
         // Preamble mode: keep MIR context alive — harness function objects reference compiled code
         g_jm_preamble_out->mir_ctx = ctx;
+        // Keep transpiler pools alive — compiled MIR code and map shape entries
+        // hold StrView pointers to strings in the transpiler's name_pool.
+        // Destroying the pool would leave dangling pointers (SIGSEGV on property lookup).
+        g_jm_preamble_out->tp_ast_pool = tp->ast_pool;
+        g_jm_preamble_out->tp_name_pool = tp->name_pool;
+        tp->ast_pool = NULL;  // prevent js_transpiler_destroy from freeing these
+        tp->name_pool = NULL;
     } else {
         MIR_finish(ctx);
     }
@@ -19733,6 +19740,16 @@ void preamble_state_destroy(JsPreambleState* state) {
     if (state->mir_ctx) {
         MIR_finish((MIR_context_t)state->mir_ctx);
         state->mir_ctx = NULL;
+    }
+    // Release transpiler pools that were kept alive for string references.
+    // name_pool must be released before ast_pool (it was allocated from ast_pool).
+    if (state->tp_name_pool) {
+        name_pool_release((NamePool*)state->tp_name_pool);
+        state->tp_name_pool = NULL;
+    }
+    if (state->tp_ast_pool) {
+        pool_destroy((Pool*)state->tp_ast_pool);
+        state->tp_ast_pool = NULL;
     }
     free(state->entries);
     state->entries = NULL;
