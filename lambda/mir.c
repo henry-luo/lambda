@@ -18,6 +18,10 @@
 // This ensures imported modules share the same runtime context as the main module
 Context* _lambda_rt = NULL;
 
+// POC: MIR interpreter mode (skip JIT compilation, use MIR interpreter instead)
+// Set via JS_MIR_INTERP=1 environment variable
+int g_mir_interp_mode = 0;
+
 typedef struct jit_item {
     const char *code;
     size_t code_size;
@@ -136,14 +140,18 @@ MIR_context_t jit_init(unsigned int optimize_level) {
 #ifdef LAMBDA_C2MIR
     c2mir_init(ctx);
 #endif
-    MIR_gen_init(ctx); // init the JIT generator
-    // Level 0: Only register allocator and machine code generator (no inlining)
-    // Level 1: Adds code selection (more compact/faster code)
-    // Level 2: Adds CSE/GVN and constant propagation (default)
-    // Level 3: Adds register renaming and loop invariant code motion
-    // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
-    log_info("MIR JIT optimization level: %u", optimize_level);
-    MIR_gen_set_optimize_level(ctx, optimize_level);
+    if (g_mir_interp_mode) {
+        log_info("MIR INTERPRETER mode (JIT compilation skipped)");
+    } else {
+        MIR_gen_init(ctx); // init the JIT generator
+        // Level 0: Only register allocator and machine code generator (no inlining)
+        // Level 1: Adds code selection (more compact/faster code)
+        // Level 2: Adds CSE/GVN and constant propagation (default)
+        // Level 3: Adds register renaming and loop invariant code motion
+        // Note: MIR inlines CALL instructions for functions under 50 instructions at levels > 0
+        log_info("MIR JIT optimization level: %u", optimize_level);
+        MIR_gen_set_optimize_level(ctx, optimize_level);
+    }
     return ctx;
 }
 
@@ -330,7 +338,7 @@ void* find_data(MIR_context_t ctx, const char *data_name) {
 
 void jit_cleanup(MIR_context_t ctx) {
     // Cleanup
-    MIR_gen_finish(ctx);
+    if (!g_mir_interp_mode) MIR_gen_finish(ctx);
 #ifdef LAMBDA_C2MIR
     c2mir_finish(ctx);
 #endif

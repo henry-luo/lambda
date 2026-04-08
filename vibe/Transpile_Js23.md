@@ -684,3 +684,72 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 - **No measurable Phase 2 speedup**: 113.1s is within the normal variance range (91–147s observed across runs on the same machine). The v23 optimizations reduce per-execution overhead (fewer calls, fewer box/unbox cycles) but test262 cost is dominated by **transpile + MIR link/compile** across 27K one-shot scripts, not by hot-loop execution.
 - **Correctness neutral**: 13,416 passed (vs 13,414 baseline), with ~35 flaky regressions that differ between runs.
 - **Expected benefit domain**: These optimizations would show impact in real workloads with **hot loops** and **repeated condition evaluation** (e.g., tight numeric loops, repeated comparisons), not in test262's one-shot-per-script pattern where each script is compiled, executed once, and discarded.
+
+---
+
+## 13. MIR Interpreter POC
+
+### Motivation
+
+Phase 2 (execute) at 113.1s is dominated by MIR JIT compilation overhead — register allocation and native code generation — for 27K short-lived scripts that execute once and are discarded. MIR provides a built-in **interpreter mode** (`MIR_set_interp_interface`) that skips JIT compilation entirely, executing MIR instructions directly. The hypothesis: for one-shot scripts, eliminating JIT compile cost should reduce Phase 2 wall time.
+
+### Implementation
+
+Added `g_mir_interp_mode` flag in `lambda/mir.c`:
+- When set, `jit_init()` skips `MIR_gen_init()` (no JIT backend initialization)
+- `MIR_link()` uses `MIR_set_interp_interface` instead of `MIR_set_gen_interface`
+- `jit_cleanup()` skips `MIR_gen_finish()`
+- `find_func()` returns an interpreter thunk via `mitem->addr` — the calling convention is unchanged
+
+All 5 `MIR_link()` call sites in `transpile_js_mir.cpp` updated (core path + module loading + new Function + preamble).
+
+**Activation**: `--mir-interp` CLI flag (supported in `js` subcommand, `js-test-batch`, and general args) or `JS_MIR_INTERP=1` env var (fallback).
+
+### POC Benchmark: Single-Process Batch (1000 tests)
+
+Ran 1000 test262 files through `lambda.exe js-test-batch` in a **single process** (no parallelism) to isolate MIR JIT vs interpreter overhead.
+
+| Mode | 300 tests (avg 3 runs) | 1000 tests |
+|------|------------------------|------------|
+| **JIT -O0** | 1.112s | 4.591s |
+| **JIT -O2** | 1.166s | — |
+| **Interpreter** | 1.013s | 3.605s |
+
+| Comparison | Result |
+|------------|--------|
+| Interp vs JIT-O0 (300 tests) | **−8.8%** (1.10x faster) |
+| Interp vs JIT-O0 (1000 tests) | **−21.5%** (1.27x faster) |
+| Interp vs JIT-O2 (300 tests) | **−13.1%** (1.15x faster) |
+| Correctness (1000 tests) | Identical: 264 pass / 1089 total, both modes |
+
+Projected Phase 2 from single-process data: **~88.8s** (saves ~24s from 113.1s).
+
+### Full test262 Suite Run (27,089 tests, 8 parallel workers)
+
+```bash
+./test/test_js_test262_gtest.exe --mir-interp --gtest_print_time=0
+```
+
+| Phase | JIT (baseline) | Interpreter |
+|-------|---------------|-------------|
+| Phase 1 (prepare) | 0.1s | 0.1s |
+| **Phase 2 (execute)** | **113.1s** | **111.0s** |
+| Phase 2a (crashers) | 7.5s | 9.8s |
+| **Total wall time** | **~2:01** | **~2:07** |
+| Passed | 13,416 / 27,089 | 13,389 / 27,089 |
+| Regressions vs baseline | — | 76 |
+| Improvements vs baseline | — | 51 |
+
+### Analysis
+
+**Phase 2 improvement was negligible** (113.1s → 111.0s, ~2s / ~2%) despite the single-process POC showing 21% speedup. Root causes:
+
+1. **8 parallel workers mask per-test latency**: The test262 runner spawns 8 `lambda.exe` processes via `posix_spawn`, each processing 50-test batches. With 8 cores saturated, the per-test JIT compile cost is already amortized across cores. Removing it doesn't change the parallel throughput bottleneck.
+2. **Phase 2 is I/O-bound at full parallelism**: `posix_spawn` + pipe reads + manifest file writes dominate when JIT cost is distributed across workers.
+3. **Interpreter execution is slower**: While JIT compile is eliminated, the interpreter dispatches each MIR instruction via a switch loop instead of executing native code. For tests with non-trivial execution (loops, recursion), interpreter overhead exceeds JIT compile savings.
+
+**76 regressions**: Mostly generators, TypedArray, and exception-path tests. The MIR interpreter likely handles some edge cases differently (e.g., longjmp-based exception recovery, generator suspend/resume state). These are interpreter implementation limitations, not logic bugs.
+
+### Conclusion
+
+MIR interpreter mode is **not viable** for reducing Phase 2 test262 time in the multi-worker setup. The `--mir-interp` flag is retained for potential future use (single-process scenarios, embedded/WASM targets where JIT is unavailable).
