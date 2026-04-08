@@ -141,7 +141,13 @@ static void cache_loaded_glyph(FontContext* ctx, FontHandle* caller_handle,
 // ============================================================================
 
 uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint) {
-    if (!handle || !handle->ft_face) return 0;
+    if (!handle) return 0;
+    // use FontTables cmap when available
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        if (cmap) return (uint32_t)cmap_lookup(cmap, codepoint);
+    }
+    if (!handle->ft_face) return 0;
     return (uint32_t)FT_Get_Char_Index(handle->ft_face, codepoint);
 }
 
@@ -169,7 +175,15 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
         }
     }
 
-    FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    // resolve codepoint → glyph index using FontTables cmap when available
+    FT_UInt char_index = 0;
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        if (cmap) char_index = (FT_UInt)cmap_lookup(cmap, codepoint);
+    }
+    if (char_index == 0) {
+        char_index = FT_Get_Char_Index(face, codepoint);
+    }
     if (char_index == 0) {
         return info; // glyph not in this font
     }
@@ -292,7 +306,31 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
 
     FT_Face face = handle->ft_face;
 
-    // try FreeType kern table first — if font has kern, use it exclusively
+    // try FontTables kern table first
+    if (handle->tables) {
+        KernTable* kern = font_tables_get_kern(handle->tables);
+        if (kern) {
+            CmapTable* cmap = font_tables_get_cmap(handle->tables);
+            if (cmap) {
+                uint16_t li = cmap_lookup(cmap, left);
+                uint16_t ri = cmap_lookup(cmap, right);
+                if (li != 0 && ri != 0) {
+                    int16_t val = kern_get_pair(kern, li, ri);
+                    if (val != 0) {
+                        HeadTable* head = font_tables_get_head(handle->tables);
+                        if (head && head->units_per_em > 0) {
+                            float size_px = face->size->metrics.y_ppem;
+                            float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
+                                                    ? handle->ctx->config.pixel_ratio : 1.0f;
+                            return (val * size_px / head->units_per_em) / pixel_ratio;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // try FreeType kern table — if font has kern, use it exclusively
     if (FT_HAS_KERNING(face)) {
         float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                                 ? handle->ctx->config.pixel_ratio : 1.0f;
@@ -325,6 +363,24 @@ float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_
     if (!handle || !handle->ft_face) return 0;
 
     FT_Face face = handle->ft_face;
+
+    // try FontTables kern table first
+    if (handle->tables) {
+        KernTable* kern = font_tables_get_kern(handle->tables);
+        if (kern) {
+            int16_t val = kern_get_pair(kern, (uint16_t)left_index, (uint16_t)right_index);
+            if (val != 0) {
+                HeadTable* head = font_tables_get_head(handle->tables);
+                if (head && head->units_per_em > 0) {
+                    float size_px = face->size->metrics.y_ppem;
+                    float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
+                                            ? handle->ctx->config.pixel_ratio : 1.0f;
+                    return (val * size_px / head->units_per_em) / pixel_ratio;
+                }
+            }
+        }
+    }
+
     if (!FT_HAS_KERNING(face)) return 0;
     if (left_index == 0 || right_index == 0) return 0;
 
@@ -341,7 +397,13 @@ float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_
 // ============================================================================
 
 bool font_has_codepoint(FontHandle* handle, uint32_t codepoint) {
-    if (!handle || !handle->ft_face) return false;
+    if (!handle) return false;
+    // use FontTables cmap when available
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        if (cmap) return cmap_lookup(cmap, codepoint) != 0;
+    }
+    if (!handle->ft_face) return false;
     return FT_Get_Char_Index(handle->ft_face, codepoint) != 0;
 }
 
@@ -367,7 +429,14 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
     }
 
     FT_Face face = handle->ft_face;
-    FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    FT_UInt char_index = 0;
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        if (cmap) char_index = (FT_UInt)cmap_lookup(cmap, codepoint);
+    }
+    if (char_index == 0) {
+        char_index = FT_Get_Char_Index(face, codepoint);
+    }
     if (char_index == 0) return NULL;
 
     // map GlyphRenderMode → FreeType load flags
@@ -476,7 +545,15 @@ static LoadedGlyph* fill_loaded_glyph_from_slot(FT_GlyphSlot slot, float bitmap_
 static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_Int32 load_flags) {
     if (!h || !h->ft_face) return NULL;
     FT_Face face = h->ft_face;
-    FT_UInt idx = FT_Get_Char_Index(face, codepoint);
+    // use FontTables cmap when available
+    FT_UInt idx = 0;
+    if (h->tables) {
+        CmapTable* cmap = font_tables_get_cmap(h->tables);
+        if (cmap) idx = (FT_UInt)cmap_lookup(cmap, codepoint);
+    }
+    if (idx == 0) {
+        idx = FT_Get_Char_Index(face, codepoint);
+    }
     if (idx == 0) return NULL;
     FT_Error err = FT_Load_Glyph(face, idx, load_flags);
     if (err) return NULL;

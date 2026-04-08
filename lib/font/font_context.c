@@ -367,6 +367,11 @@ void font_handle_release(FontHandle* handle) {
             FT_Done_Face(handle->ft_face);
             handle->ft_face = NULL;
         }
+        // destroy FontTables
+        if (handle->tables && handle->ctx) {
+            font_tables_close(handle->tables, handle->ctx->pool);
+            handle->tables = NULL;
+        }
         // free advance cache
         if (handle->advance_cache) {
             hashmap_free(handle->advance_cache);

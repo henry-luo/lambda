@@ -72,6 +72,7 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     }
 
     handle->ft_face = face;
+    handle->tables = NULL;
     handle->ref_count = 1;
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
@@ -81,6 +82,14 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     handle->weight = weight;
     handle->slant = slant;
     handle->metrics_ready = false;
+
+    // create FontTables from raw font data for direct table access
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->tables = font_tables_open(memory_buffer, memory_buffer_size, ctx->pool);
+        if (!handle->tables) {
+            log_debug("font_loader: font_tables_open failed (non-fatal, FreeType fallback)");
+        }
+    }
 
     // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
     // these fonts have a fixed ppem (e.g. 109) that may differ from target size
@@ -254,18 +263,45 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
                                           size_px, physical_size, weight, slant);
     }
 
-    // TTF/OTF/TTC: load directly from file
+    // TTF/OTF/TTC: read file into arena and load from memory
+    // This ensures we have raw bytes for FontTables parsing.
+    fp = fopen(path, "rb");
+    if (!fp) {
+        log_error("font_loader: cannot reopen '%s'", path);
+        return NULL;
+    }
+    fseek(fp, 0, SEEK_END);
+    long ttf_size_long = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (ttf_size_long <= 0) { fclose(fp); return NULL; }
+    size_t ttf_size = (size_t)ttf_size_long;
+    uint8_t* ttf_buf = (uint8_t*)arena_alloc(ctx->arena, ttf_size);
+    if (!ttf_buf) { fclose(fp); return NULL; }
+    size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
+    fclose(fp);
+    if (ttf_read != ttf_size) {
+        log_error("font_loader: failed to read '%s'", path);
+        return NULL;
+    }
+
+    // For TTC collections, compute the offset for the requested face_index
+    const uint8_t* face_data = ttf_buf;
+    size_t face_data_len = ttf_size;
+    // (FreeType handles TTC internally via face_index; our tables parser
+    //  needs the sub-font offset. We'll handle this when wiring up tables.)
+
     FT_Face face = NULL;
-    FT_Error err = FT_New_Face(ctx->ft_library, path, face_index, &face);
+    FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
+                                       face_index, &face);
     if (err) {
-        log_error("font_loader: FT_New_Face failed for '%s' (error %d)", path, err);
+        log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
         return NULL;
     }
 
     apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
     set_face_size(face, physical_size);
 
-    FontHandle* handle = create_handle(ctx, face, NULL, 0,
+    FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
                                         size_px, physical_size, weight, slant);
     if (handle) {
         log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",

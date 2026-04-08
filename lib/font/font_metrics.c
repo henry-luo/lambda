@@ -56,13 +56,23 @@ static float units_to_css_px(FT_Face face, float pixel_ratio) {
  *   2. 'x' glyph bbox  (good fallback)
  *   3. 0.5 * ascender   (last resort)
  */
-static float measure_x_height(FT_Face face, float scale, float ascender) {
-    // source 1: OS/2 sxHeight
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
-        float val = os2->sxHeight * scale;
-        log_debug("font_metrics: x-height from OS/2: %.2f (sxHeight=%d)", val, os2->sxHeight);
-        return val;
+static float measure_x_height(FT_Face face, FontTables* ft, float scale, float ascender) {
+    // source 1: OS/2 sxHeight — try FontTables first, then FreeType
+    if (ft) {
+        Os2Table* os2t = font_tables_get_os2(ft);
+        if (os2t && os2t->sx_height > 0) {
+            float val = os2t->sx_height * scale;
+            log_debug("font_metrics: x-height from FontTables OS/2: %.2f (sxHeight=%d)", val, os2t->sx_height);
+            return val;
+        }
+    }
+    if (!ft) {
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
+            float val = os2->sxHeight * scale;
+            log_debug("font_metrics: x-height from OS/2: %.2f (sxHeight=%d)", val, os2->sxHeight);
+            return val;
+        }
     }
 
     // source 2: measure 'x' glyph in design units
@@ -87,12 +97,23 @@ static float measure_x_height(FT_Face face, float scale, float ascender) {
  *   2. 'H' glyph bbox
  *   3. 0.7 * ascender
  */
-static float measure_cap_height(FT_Face face, float scale, float ascender) {
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2 && os2->sCapHeight > 0 && face->units_per_EM > 0) {
-        float val = os2->sCapHeight * scale;
-        log_debug("font_metrics: cap-height from OS/2: %.2f (sCapHeight=%d)", val, os2->sCapHeight);
-        return val;
+static float measure_cap_height(FT_Face face, FontTables* ft, float scale, float ascender) {
+    // try FontTables first
+    if (ft) {
+        Os2Table* os2t = font_tables_get_os2(ft);
+        if (os2t && os2t->s_cap_height > 0) {
+            float val = os2t->s_cap_height * scale;
+            log_debug("font_metrics: cap-height from FontTables OS/2: %.2f (sCapHeight=%d)", val, os2t->s_cap_height);
+            return val;
+        }
+    }
+    if (!ft) {
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        if (os2 && os2->sCapHeight > 0 && face->units_per_EM > 0) {
+            float val = os2->sCapHeight * scale;
+            log_debug("font_metrics: cap-height from OS/2: %.2f (sCapHeight=%d)", val, os2->sCapHeight);
+            return val;
+        }
     }
 
     FT_UInt h_index = FT_Get_Char_Index(face, 'H');
@@ -167,8 +188,25 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     // ---- OS/2 table metrics ----
     float scale = units_to_css_px(face, pixel_ratio) * bscale;
 
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2) {
+    // Use FontTables for OS/2 when available, fall back to FreeType
+    FontTables* ft = handle->tables;
+    Os2Table* os2t = ft ? font_tables_get_os2(ft) : NULL;
+    TT_OS2* os2 = os2t ? NULL : (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+
+    if (os2t) {
+        m->typo_ascender  =  os2t->s_typo_ascender  * scale;
+        m->typo_descender = -os2t->s_typo_descender  * scale; // make positive
+        m->typo_line_gap  = (os2t->s_typo_line_gap > 0) ? (os2t->s_typo_line_gap * scale) : 0.0f;
+        m->win_ascent     =  os2t->us_win_ascent  * scale;
+        m->win_descent    =  os2t->us_win_descent * scale;
+
+        uint16_t USE_TYPO_METRICS = 0x0080;
+        if (os2t->fs_selection & USE_TYPO_METRICS) {
+            m->ascender  =  m->typo_ascender;
+            m->descender = -m->typo_descender;
+            m->use_typo_metrics = true;
+        }
+    } else if (os2) {
         m->typo_ascender  =  os2->sTypoAscender  * scale;
         m->typo_descender = -os2->sTypoDescender  * scale; // make positive
         m->typo_line_gap  = (os2->sTypoLineGap > 0) ? (os2->sTypoLineGap * scale) : 0.0f;
@@ -197,13 +235,23 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->line_height = m->ascender - m->descender + m->line_gap;
 
     // ---- underline metrics ----
-    m->underline_position  = (face->underline_position  / 64.0f) * bscale;
-    m->underline_thickness = (face->underline_thickness / 64.0f) * bscale;
+    // Use FontTables post table when available
+    PostTable* postt = ft ? font_tables_get_post(ft) : NULL;
+    if (postt && ft) {
+        HeadTable* headt = font_tables_get_head(ft);
+        float upem = headt ? (float)headt->units_per_em : m->em_size;
+        float uscale = (upem > 0) ? (handle->size_px / upem * bscale) : 0;
+        m->underline_position  = postt->underline_position * uscale;
+        m->underline_thickness = postt->underline_thickness * uscale;
+    } else {
+        m->underline_position  = (face->underline_position  / 64.0f) * bscale;
+        m->underline_thickness = (face->underline_thickness / 64.0f) * bscale;
+    }
     if (m->underline_thickness < 1.0f) m->underline_thickness = 1.0f;
 
     // ---- typographic measures ----
-    m->x_height    = measure_x_height(face, scale, m->ascender);
-    m->cap_height  = measure_cap_height(face, scale, m->ascender);
+    m->x_height    = measure_x_height(face, ft, scale, m->ascender);
+    m->cap_height  = measure_cap_height(face, ft, scale, m->ascender);
     m->space_width = measure_space_width(face, pixel_ratio) * bscale;
     m->em_size     = (float)face->units_per_EM;
     m->has_kerning = FT_HAS_KERNING(face);
@@ -282,11 +330,19 @@ float font_calc_normal_line_height(FontHandle* handle) {
     const FontMetrics* m = font_get_metrics(handle);
     if (!m) return 0;
 
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    bool use_typo = os2 && (os2->fsSelection & 0x0080);
+    // use FontTables when available, else FreeType
+    FontTables* ft = handle->tables;
+    bool use_typo = false;
+    if (ft) {
+        Os2Table* os2t = font_tables_get_os2(ft);
+        use_typo = os2t && (os2t->fs_selection & 0x0080);
+    } else {
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        use_typo = os2 && (os2->fsSelection & 0x0080);
+    }
 
     float leading;
-    if (use_typo && os2) {
+    if (use_typo) {
         ascent  = m->typo_ascender;
         descent = m->typo_descender;  // positive value
         leading = m->typo_line_gap;
@@ -353,8 +409,15 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 
     // 1. OS/2 USE_TYPO_METRICS fonts: Chrome uses sTypo metrics regardless of platform
     const FontMetrics* m = font_get_metrics(handle);
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    bool use_typo = os2 && (os2->fsSelection & 0x0080);
+    FontTables* ft = handle->tables;
+    bool use_typo = false;
+    if (ft) {
+        Os2Table* os2t = font_tables_get_os2(ft);
+        use_typo = os2t && (os2t->fs_selection & 0x0080);
+    } else {
+        TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
+        use_typo = os2 && (os2->fsSelection & 0x0080);
+    }
 
     if (use_typo && m) {
         float ra = roundf(m->typo_ascender);
