@@ -94,7 +94,7 @@ FontTables* font_tables_open(const uint8_t* data, size_t data_len, void* pool_pt
                          scaler_type == FONT_TAG('t','r','u','e') ||
                          scaler_type == FONT_TAG('t','y','p','1'));
     if (!valid_scaler) {
-        log_error("font_tables_open: invalid scaler type 0x%08X", scaler_type);
+        log_debug("font_tables_open: unsupported scaler type 0x%08X", scaler_type);
         return NULL;
     }
 

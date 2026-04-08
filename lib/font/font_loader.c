@@ -112,6 +112,15 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     }
 
 #ifdef __APPLE__
+    // create CoreText font for rasterization from raw font data
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
+                                                          size_px, 0);
+        if (!handle->ct_raster_ref) {
+            log_debug("font_loader: ct_raster_ref creation failed (non-fatal, FreeType fallback)");
+        }
+    }
+
     // create CoreText font for GPOS kerning fallback
     // only when font has NO kern table at all (e.g., SFNS.ttf with GPOS only).
     // Skip fonts that have a kern table in Apple AAT format — FreeType can't read
