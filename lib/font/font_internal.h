@@ -15,6 +15,7 @@
 #define LAMBDA_FONT_INTERNAL_H
 
 #include "font.h"
+#include "font_tables.h"
 #include "../mempool.h"
 #include "../arena.h"
 #include "../hashmap.h"
@@ -66,6 +67,7 @@ FontFormat font_detect_format_ext(const char* path);
 
 struct FontHandle {
     FT_Face     ft_face;                // FreeType face object
+    FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
     bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
 
