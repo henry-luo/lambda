@@ -17,6 +17,8 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_dom.h"
+#include "../lambda/transpiler.hpp"
+#include "../lib/gc/gc_heap.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/mark_reader.hpp"
@@ -29,6 +31,24 @@
 
 #include <cstring>
 #include <cctype>
+
+// reusable pool from the most recent JS execution.
+// Uses delayed-destroy pattern: the most recent pool is kept alive
+// because stale JS globals may still reference its data; the PREVIOUS
+// pool is fully destroyed (stale refs from 2 files ago are gone).
+static Pool* s_js_reuse_pool = nullptr;
+static Pool* s_js_prev_pool = nullptr;
+
+extern "C" void script_runner_cleanup_heap() {
+    // Use pool_drain which replaces mmap'd pages at the same virtual address.
+    // Physical memory is released; stale pointers from unreset JS globals
+    // read zeros instead of crashing.  MmapChunk metadata is kept alive
+    // (negligible: ~24 bytes per chunk × ~4 chunks per file).
+    if (s_js_reuse_pool) {
+        pool_drain(s_js_reuse_pool);
+        s_js_reuse_pool = nullptr;
+    }
+}
 
 // forward declaration from dom_element.cpp / cmd_layout.cpp
 extern const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
@@ -337,6 +357,8 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
     // set up Runtime for JS transpiler
     Runtime runtime = {};
     runtime.dom_doc = (void*)dom_doc;
+    // create fresh mmap pool for this JS execution
+    runtime.reuse_pool = pool_create_mmap();
 
     // execute the combined JS source via JIT transpiler
     Item result = transpile_js_to_mir(&runtime, script_buf->str, "<document-scripts>");
@@ -346,6 +368,21 @@ extern "C" void execute_document_scripts(Element* html_root, DomDocument* dom_do
         log_error("execute_document_scripts: JS execution failed");
     } else {
         log_info("execute_document_scripts: JS execution completed successfully");
+    }
+
+    // properly destroy gc_heap metadata + nursery + Heap to avoid stale refs.
+    // pool stays alive for now (data still needed? drain in per-file cleanup).
+    if (runtime.heap && runtime.heap->gc) {
+        Pool* pool = runtime.heap->gc->pool;
+        runtime.heap->gc->pool = NULL;  // prevent gc_heap_destroy from destroying pool
+        gc_heap_destroy(runtime.heap->gc);
+        free(runtime.heap);
+        s_js_reuse_pool = pool;
+    } else if (runtime.heap) {
+        free(runtime.heap);
+    }
+    if (runtime.nursery) {
+        gc_nursery_destroy(runtime.nursery);
     }
 
     strbuf_free(script_buf);

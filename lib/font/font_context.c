@@ -235,6 +235,12 @@ void font_context_destroy(FontContext* ctx) {
         ctx->loaded_glyph_cache = NULL;
     }
 
+    // free font file data cache (data is arena-allocated, no per-item free needed)
+    if (ctx->file_data_cache) {
+        hashmap_free(ctx->file_data_cache);
+        ctx->file_data_cache = NULL;
+    }
+
     // destroy font database
     if (ctx->database) {
         font_database_destroy_internal(ctx->database);
@@ -267,22 +273,97 @@ void font_context_destroy(FontContext* ctx) {
     if (owns_pool  && pool)  pool_destroy(pool);
 }
 
+// ============================================================================
+// Batch reset: remove document-specific entries from face_cache
+// ============================================================================
+
+// Scan callback to collect document-font cache keys for removal
+typedef struct {
+    const char** keys;
+    int count;
+    int capacity;
+} DocFontScanState;
+
+static bool collect_doc_font_keys(const void* item, void* udata) {
+    const FontCacheKey* entry = (const FontCacheKey*)item;
+    DocFontScanState* state = (DocFontScanState*)udata;
+    if (entry->handle && entry->handle->is_document_font) {
+        if (state->count < state->capacity) {
+            state->keys[state->count++] = entry->key_str;
+        }
+    }
+    return true; // continue scanning
+}
+
 void font_context_reset_document_fonts(FontContext* ctx) {
     if (!ctx) return;
 
     // clear @font-face descriptors from the previous document
     font_face_clear(ctx);
 
-    // clear codepoint fallback cache — entries may reference handles
-    // loaded at a different size for a previous document's @font-face
+    // selectively clear codepoint fallback cache — only remove entries
+    // referencing document-specific (@font-face) handles. System font
+    // fallback entries survive across documents to avoid re-loading.
     if (ctx->codepoint_fallback_cache) {
-        hashmap_clear(ctx->codepoint_fallback_cache, false);
+        // scan for document-font entries
+        size_t count = hashmap_count(ctx->codepoint_fallback_cache);
+        if (count > 0) {
+            uint32_t stack_keys[128];
+            uint32_t* keys = stack_keys;
+            int capacity = 128;
+            if (count > 128) {
+                keys = (uint32_t*)malloc(count * sizeof(uint32_t));
+                capacity = (int)count;
+            }
+            int nremove = 0;
+
+            // iterate and collect codepoints with document-font handles
+            size_t iter = 0;
+            void* item;
+            while (hashmap_iter(ctx->codepoint_fallback_cache, &iter, &item)) {
+                CodepointFallbackEntry* e = (CodepointFallbackEntry*)item;
+                if (e->handle && e->handle->is_document_font && nremove < capacity) {
+                    keys[nremove++] = e->codepoint;
+                }
+            }
+
+            for (int i = 0; i < nremove; i++) {
+                CodepointFallbackEntry search = {.codepoint = keys[i], .handle = NULL};
+                hashmap_delete(ctx->codepoint_fallback_cache, &search);
+            }
+
+            if (keys != stack_keys) free(keys);
+        }
     }
 
-    // clear face cache — entries may reference @font-face loaded fonts
-    // that are no longer valid for the next document
+    // selectively remove @font-face entries from face_cache;
+    // system font entries survive across documents to avoid re-loading
     if (ctx->face_cache) {
-        hashmap_clear(ctx->face_cache, false);
+        size_t count = hashmap_count(ctx->face_cache);
+        if (count > 0) {
+            // collect keys of document-font entries
+            const char* stack_keys[64];
+            const char** keys = stack_keys;
+            int capacity = 64;
+            if (count > 64) {
+                keys = (const char**)malloc(count * sizeof(const char*));
+                capacity = (int)count;
+            }
+
+            DocFontScanState state = {keys, 0, capacity};
+            hashmap_scan(ctx->face_cache, collect_doc_font_keys, &state);
+
+            // remove collected entries (triggers face_cache_free → font_handle_release)
+            for (int i = 0; i < state.count; i++) {
+                FontCacheKey search = {.key_str = (char*)state.keys[i], .handle = NULL};
+                hashmap_delete(ctx->face_cache, &search);
+            }
+
+            if (keys != stack_keys) free(keys);
+
+            log_info("font_context_reset_document_fonts: removed %d document font entries, kept %zu system entries",
+                     state.count, hashmap_count(ctx->face_cache));
+        }
     }
 
     log_info("font_context_reset_document_fonts: cleared per-document font state");
@@ -544,21 +625,29 @@ bool font_cache_save(FontContext* ctx) {
 // ============================================================================
 
 float font_get_x_height_ratio(FontHandle* handle) {
-    if (!handle || !handle->ft_face) return 0.5f; // CSS default
-    FT_Face face = handle->ft_face;
+    if (!handle) return 0.5f; // CSS default
 
-    // try OS/2 sxHeight (most accurate, matches old get_font_x_height_ratio)
-    TT_OS2* os2 = (TT_OS2*)FT_Get_Sfnt_Table(face, FT_SFNT_OS2);
-    if (os2 && os2->sxHeight > 0 && face->units_per_EM > 0) {
-        return (float)os2->sxHeight / face->units_per_EM;
+    // primary: FontTables OS/2 sxHeight
+    if (handle->tables) {
+        Os2Table* os2t = font_tables_get_os2(handle->tables);
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (os2t && os2t->sx_height > 0 && head && head->units_per_em > 0) {
+            return (float)os2t->sx_height / head->units_per_em;
+        }
     }
 
-    // fallback: measure 'x' glyph in design units
-    FT_UInt x_index = FT_Get_Char_Index(face, 'x');
-    if (x_index > 0) {
-        FT_Error err = FT_Load_Glyph(face, x_index, FT_LOAD_NO_SCALE);
-        if (!err && face->units_per_EM > 0) {
-            return (float)face->glyph->metrics.height / face->units_per_EM;
+    // secondary: 'x' glyph bbox via FontTables glyf table
+    if (handle->tables) {
+        CmapTable* cmap = font_tables_get_cmap(handle->tables);
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (cmap && head && head->units_per_em > 0) {
+            uint16_t x_gid = cmap_lookup(cmap, 'x');
+            if (x_gid > 0) {
+                int16_t y_min, y_max;
+                if (font_tables_get_glyph_bbox(handle->tables, x_gid, NULL, &y_min, NULL, &y_max)) {
+                    return (float)(y_max - y_min) / head->units_per_em;
+                }
+            }
         }
     }
 

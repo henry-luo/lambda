@@ -74,7 +74,10 @@ void font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle) {
     // arena-dup the key so it outlives the caller
     char* dup_key = arena_strdup(ctx->arena, key);
     FontCacheKey entry = {.key_str = dup_key, .handle = handle};
-    hashmap_set(ctx->face_cache, &entry);
+    const FontCacheKey* old = (const FontCacheKey*)hashmap_set(ctx->face_cache, &entry);
+    if (old && old->handle) {
+        font_handle_release(old->handle); // release replaced entry's handle
+    }
 
     log_debug("font_cache: inserted '%s' (count=%zu)", key, count + 1);
 }

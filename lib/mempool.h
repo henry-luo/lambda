@@ -23,10 +23,35 @@ typedef struct Pool Pool;
 Pool* pool_create(void);
 
 /**
+ * Create an mmap-backed memory pool (bump allocator, no rpmalloc).
+ * Allocations use mmap'd chunks. Individual frees are no-ops.
+ * Use pool_reset to release all data while keeping the pool alive.
+ * @return Pointer to new pool, or NULL on failure
+ */
+Pool* pool_create_mmap(void);
+
+/**
  * Destroy a memory pool and free all associated memory
  * @param pool Pool to destroy
  */
 void pool_destroy(Pool* pool);
+
+/**
+ * Drain a pool: release all allocated data but keep the Pool struct alive.
+ * The pool is invalidated (further allocations return NULL).
+ * Use this when the Pool struct must outlive its data (e.g., leaked gc_heaps
+ * still hold a pointer to the Pool).
+ * @param pool Pool to drain
+ */
+void pool_drain(Pool* pool);
+
+/**
+ * Reset a memory pool: free all allocated data but keep the pool alive.
+ * The underlying rpmalloc heap remains acquired so future allocations
+ * reuse it without acquire/release cycling.
+ * @param pool Pool to reset
+ */
+void pool_reset(Pool* pool);
 
 /**
  * Allocate memory from a specific pool

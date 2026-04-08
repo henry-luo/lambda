@@ -1372,7 +1372,6 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
-    void* ft_library;  // opaque FT_Library handle (cast to FT_Library where needed)
     struct FontContext* font_ctx; // unified font context
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5

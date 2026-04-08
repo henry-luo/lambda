@@ -64,6 +64,22 @@ void heap_init() {
     }
 }
 
+void heap_init_with_pool(Pool* pool) {
+    log_debug("heap init with pool: %p (pool=%p)", context, pool);
+    context->heap = (Heap*)calloc(1, sizeof(Heap));
+    context->heap->gc = gc_heap_create_with_pool(pool);
+    context->heap->pool = context->heap->gc->pool;
+
+    gc_register_root(context->heap->gc, &context->result.item);
+    gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+    context->heap->gc->vmap_trace = vmap_gc_trace;
+    context->heap->gc->vmap_destroy = vmap_gc_destroy;
+
+    if (!ascii_char_table_initialized) {
+        init_ascii_char_table();
+    }
+}
+
 // trigger a GC collection from the runtime.
 // gathers roots (registered slots + stack scan) and runs the collector.
 // Uses setjmp to flush registers onto the stack so the conservative

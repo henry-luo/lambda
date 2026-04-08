@@ -273,10 +273,22 @@ extern "C" void js_batch_reset() {
     js_array_method_real_this = (Item){0};
     // clear Input context
     js_input = NULL;
-    // reset cached global objects (Math, JSON, console) so they're recreated fresh
+    // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
     // — tests may modify them (delete/overwrite properties)
     extern void js_reset_math_object();
     js_reset_math_object();
+    extern void js_reset_json_object();
+    js_reset_json_object();
+    extern void js_reset_console_object();
+    js_reset_console_object();
+    extern void js_reset_reflect_object();
+    js_reset_reflect_object();
+    // reset interned __proto__ key (allocated in old pool)
+    extern void js_reset_proto_key();
+    js_reset_proto_key();
+    // reset function pointer → JsFunction cache (JsFunction* in old pool)
+    extern void js_func_cache_reset();
+    js_func_cache_reset();
     // reset builtin function cache (defined later in file, called via forward decl)
     extern void js_builtin_cache_reset();
     js_builtin_cache_reset();
@@ -2381,6 +2393,7 @@ Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_fou
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
 // Initialized lazily on first use.
 static Item js_proto_key_item = {0};
+void js_reset_proto_key() { js_proto_key_item = (Item){0}; }
 static Item js_get_proto_key() {
     if (js_proto_key_item.item == 0) {
         js_proto_key_item.item = s2it(heap_create_name("__proto__", 9));
@@ -3700,6 +3713,10 @@ static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
         js_func_cache_vals[js_func_cache_count] = fn;
         js_func_cache_count++;
     }
+}
+
+void js_func_cache_reset() {
+    js_func_cache_count = 0;
 }
 
 // Built-in method function cache — keyed by builtin_id
@@ -8038,6 +8055,7 @@ extern "C" Item js_get_math_object_value() {
 
 // v18n: JSON and console as global objects for bare identifier resolution
 static Item js_json_object = {.item = ITEM_NULL};
+void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
     if (js_json_object.item == ITEM_NULL) {
@@ -8050,6 +8068,7 @@ extern "C" Item js_get_json_object_value() {
 }
 
 static Item js_console_object = {.item = ITEM_NULL};
+void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
     if (js_console_object.item == ITEM_NULL) {
@@ -8061,6 +8080,7 @@ extern "C" Item js_get_console_object_value() {
 
 // v25: Reflect global object for bare identifier resolution
 static Item js_reflect_object = {.item = ITEM_NULL};
+void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
     if (js_reflect_object.item == ITEM_NULL) {

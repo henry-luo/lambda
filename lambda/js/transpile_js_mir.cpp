@@ -19568,7 +19568,12 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     } else {
         js_context.nursery = gc_nursery_create(0);
         context = &js_context;
-        heap_init();
+        if (runtime->reuse_pool) {
+            heap_init_with_pool(runtime->reuse_pool);
+            runtime->reuse_pool = NULL;
+        } else {
+            heap_init();
+        }
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -19727,6 +19732,13 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
     free(mt);
     MIR_finish(ctx);
+
+    // stash ephemeral GC heap on Runtime for caller cleanup
+    if (!reusing_context) {
+        runtime->heap = js_context.heap;
+        runtime->nursery = js_context.nursery;
+    }
+
     jm_cleanup_deferred_mir();
 
     log_debug("js-mir-ast: transpilation completed");
@@ -19816,7 +19828,12 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         js_context.nursery = gc_nursery_create(0);
         context = &js_context;
-        heap_init();
+        if (runtime->reuse_pool) {
+            heap_init_with_pool(runtime->reuse_pool);
+            runtime->reuse_pool = NULL;
+        } else {
+            heap_init();
+        }
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -20057,6 +20074,16 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         MIR_finish(ctx);
     }
+
+    // stash ephemeral GC heap on Runtime for caller cleanup.
+    // each heap allocates ~12MB (data zone + tenured zone + bump block), so
+    // leaking one per document causes massive RSS growth in batch mode.
+    // caller must call runtime_reset_heap() after inspecting the result.
+    if (!reusing_context && !g_jm_preamble_out) {
+        runtime->heap = js_context.heap;
+        runtime->nursery = js_context.nursery;
+    }
+
     jm_cleanup_deferred_mir();
     js_transpiler_destroy(tp);
 

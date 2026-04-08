@@ -192,6 +192,58 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
 }
 
 // ============================================================================
+// Font file data cache — avoids re-reading the same file into the arena
+// ============================================================================
+
+static uint64_t file_data_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const FontFileDataEntry* e = (const FontFileDataEntry*)item;
+    if (!e || !e->path) return 0;
+    return hashmap_xxhash3(e->path, strlen(e->path), seed0, seed1);
+}
+
+static int file_data_compare(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const FontFileDataEntry* ea = (const FontFileDataEntry*)a;
+    const FontFileDataEntry* eb = (const FontFileDataEntry*)b;
+    if (!ea || !eb || !ea->path || !eb->path) return -1;
+    return strcmp(ea->path, eb->path);
+}
+
+static struct hashmap* ensure_file_data_cache(FontContext* ctx) {
+    if (!ctx->file_data_cache) {
+        ctx->file_data_cache = hashmap_new(sizeof(FontFileDataEntry), 32, 0, 0,
+                                            file_data_hash, file_data_compare,
+                                            NULL, NULL);
+    }
+    return ctx->file_data_cache;
+}
+
+// look up cached font file data; returns true if found
+static bool file_data_cache_lookup(FontContext* ctx, const char* path,
+                                    const uint8_t** out_data, size_t* out_len) {
+    struct hashmap* cache = ensure_file_data_cache(ctx);
+    if (!cache) return false;
+    FontFileDataEntry search = {.path = (char*)path, .data = NULL, .data_len = 0};
+    FontFileDataEntry* found = (FontFileDataEntry*)hashmap_get(cache, &search);
+    if (found) {
+        *out_data = found->data;
+        *out_len = found->data_len;
+        return true;
+    }
+    return false;
+}
+
+// store font file data in cache (path and data are arena-allocated)
+static void file_data_cache_insert(FontContext* ctx, const char* path,
+                                    uint8_t* data, size_t len) {
+    struct hashmap* cache = ensure_file_data_cache(ctx);
+    if (!cache) return;
+    char* dup_path = arena_strdup(ctx->arena, path);
+    FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len};
+    hashmap_set(cache, &entry);
+}
+
+// ============================================================================
 // Load face from file path
 // ============================================================================
 
@@ -235,6 +287,14 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
 
     // WOFF/WOFF2: read entire file → decompress → load from memory
     if (format == FONT_FORMAT_WOFF || format == FONT_FORMAT_WOFF2) {
+        // check file data cache for previously decompressed SFNT data
+        const uint8_t* cached_data = NULL;
+        size_t cached_len = 0;
+        if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
+            return font_load_memory_internal(ctx, cached_data, cached_len, face_index,
+                                              size_px, physical_size, weight, slant);
+        }
+
         // read entire file into memory
         fp = fopen(path, "rb");
         if (!fp) {
@@ -267,56 +327,79 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             return NULL;
         }
 
+        // cache decompressed SFNT data for reuse at different sizes
+        file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len);
+
         // sfnt_data is arena-allocated, load from memory
         return font_load_memory_internal(ctx, sfnt_data, sfnt_len, face_index,
                                           size_px, physical_size, weight, slant);
     }
 
-    // TTF/OTF/TTC: read file into arena and load from memory
-    // This ensures we have raw bytes for FontTables parsing.
-    fp = fopen(path, "rb");
-    if (!fp) {
-        log_error("font_loader: cannot reopen '%s'", path);
-        return NULL;
-    }
-    fseek(fp, 0, SEEK_END);
-    long ttf_size_long = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    if (ttf_size_long <= 0) { fclose(fp); return NULL; }
-    size_t ttf_size = (size_t)ttf_size_long;
-    uint8_t* ttf_buf = (uint8_t*)arena_alloc(ctx->arena, ttf_size);
-    if (!ttf_buf) { fclose(fp); return NULL; }
-    size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
-    fclose(fp);
-    if (ttf_read != ttf_size) {
-        log_error("font_loader: failed to read '%s'", path);
-        return NULL;
-    }
+    // TTF/OTF/TTC: check file data cache first, then read from disk
+    {
+        const uint8_t* cached_data = NULL;
+        size_t cached_len = 0;
+        if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
+            // reuse cached file data — avoid re-reading and arena-allocating
+            FT_Face face = NULL;
+            FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
+                                               face_index, &face);
+            if (err) {
+                log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+                return NULL;
+            }
+            apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+            set_face_size(face, physical_size);
+            FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
+                                                size_px, physical_size, weight, slant);
+            if (handle) {
+                log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
+                         path, face->family_name ? face->family_name : "?", physical_size);
+            }
+            return handle;
+        }
 
-    // For TTC collections, compute the offset for the requested face_index
-    const uint8_t* face_data = ttf_buf;
-    size_t face_data_len = ttf_size;
-    // (FreeType handles TTC internally via face_index; our tables parser
-    //  needs the sub-font offset. We'll handle this when wiring up tables.)
+        fp = fopen(path, "rb");
+        if (!fp) {
+            log_error("font_loader: cannot reopen '%s'", path);
+            return NULL;
+        }
+        fseek(fp, 0, SEEK_END);
+        long ttf_size_long = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        if (ttf_size_long <= 0) { fclose(fp); return NULL; }
+        size_t ttf_size = (size_t)ttf_size_long;
+        uint8_t* ttf_buf = (uint8_t*)arena_alloc(ctx->arena, ttf_size);
+        if (!ttf_buf) { fclose(fp); return NULL; }
+        size_t ttf_read = fread(ttf_buf, 1, ttf_size, fp);
+        fclose(fp);
+        if (ttf_read != ttf_size) {
+            log_error("font_loader: failed to read '%s'", path);
+            return NULL;
+        }
 
-    FT_Face face = NULL;
-    FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
-                                       face_index, &face);
-    if (err) {
-        log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
-        return NULL;
+        // cache the raw file data for reuse at different sizes
+        file_data_cache_insert(ctx, path, ttf_buf, ttf_size);
+
+        FT_Face face = NULL;
+        FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
+                                           face_index, &face);
+        if (err) {
+            log_error("font_loader: FT_New_Memory_Face failed for '%s' (error %d)", path, err);
+            return NULL;
+        }
+
+        apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
+        set_face_size(face, physical_size);
+
+        FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
+                                            size_px, physical_size, weight, slant);
+        if (handle) {
+            log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
+                     path, face->family_name ? face->family_name : "?", physical_size);
+        }
+        return handle;
     }
-
-    apply_variable_font_axes(face, ctx->ft_library, size_px, weight);
-    set_face_size(face, physical_size);
-
-    FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
-                                        size_px, physical_size, weight, slant);
-    if (handle) {
-        log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
-                 path, face->family_name ? face->family_name : "?", physical_size);
-    }
-    return handle;
 }
 
 // ============================================================================

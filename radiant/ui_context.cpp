@@ -1,11 +1,6 @@
 #include "view.hpp"
 #include <locale.h>
 
-// FreeType for library initialization/cleanup
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
-
 #include "../lib/log.h"
 #include "../lib/font/font.h"
 #include "../lib/mempool.h"
@@ -32,22 +27,6 @@ char *fallback_fonts[] = {
     NULL
 };
 
-// Configure FreeType for optimal sub-pixel rendering
-void configure_freetype_subpixel(FT_Library library) {
-    if (!library) {
-        log_error("Invalid FreeType library handle");
-        return;
-    }
-    // Enable LCD filtering for sub-pixel rendering
-    FT_Error error = FT_Library_SetLcdFilter(library, FT_LCD_FILTER_DEFAULT);
-    if (error) {
-        log_info("Failed to set LCD filter: %d", error);
-    } else {
-        log_debug("LCD filter enabled for sub-pixel rendering");
-    }
-    log_info("FreeType configured for sub-pixel rendering (basic mode)");
-}
-
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
     if (uicon->surface) image_surface_destroy(uicon->surface);
@@ -64,24 +43,6 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
-    // init FreeType with sub-pixel rendering configuration
-    FT_Library ft_lib;
-    if (FT_Init_FreeType(&ft_lib)) {
-        fprintf(stderr, "Could not initialize FreeType library\n");
-        return EXIT_FAILURE;
-    }
-    uicon->ft_library = ft_lib;
-
-    // Configure sub-pixel rendering for better text quality
-    configure_freetype_subpixel(ft_lib);
-
-    // Configure FreeType for better sub-pixel rendering
-    FT_Error lcd_error = FT_Library_SetLcdFilter(ft_lib, FT_LCD_FILTER_DEFAULT);
-    if (lcd_error) {
-        log_debug("Could not set LCD filter (FreeType version may not support it)");
-    } else {
-        log_debug("LCD filter enabled for sub-pixel rendering");
-    }
     if (headless) {
         // Headless mode: no window creation
         log_info("Running in headless mode (no window)");
@@ -213,7 +174,6 @@ void ui_context_cleanup(UiContext* uicon) {
         font_context_destroy(uicon->font_ctx);
         uicon->font_ctx = NULL;
     }
-    FT_Done_FreeType((FT_Library)uicon->ft_library);
 
     log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache

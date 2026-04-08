@@ -166,11 +166,7 @@ FontHandle* font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style) 
 // Codepoint-specific fallback — find a font that has a given codepoint
 // ============================================================================
 
-// Internal cache: codepoint → FontHandle* (or NULL for negative cache)
-typedef struct CodepointFallbackEntry {
-    uint32_t    codepoint;
-    FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
-} CodepointFallbackEntry;
+// CodepointFallbackEntry is defined in font_internal.h
 
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
@@ -184,13 +180,20 @@ static int cp_fallback_compare(const void* a, const void* b, void* udata) {
     return (ea->codepoint == eb->codepoint) ? 0 : (ea->codepoint < eb->codepoint ? -1 : 1);
 }
 
+static void cp_fallback_free(void* item) {
+    CodepointFallbackEntry* entry = (CodepointFallbackEntry*)item;
+    if (entry && entry->handle) {
+        font_handle_release(entry->handle);
+    }
+}
+
 static struct hashmap* ensure_codepoint_cache(FontContext* ctx) {
     if (!ctx->codepoint_fallback_cache) {
         ctx->codepoint_fallback_cache = hashmap_new(sizeof(CodepointFallbackEntry),
                                                      256, 0, 0,
                                                      cp_fallback_hash,
                                                      cp_fallback_compare,
-                                                     NULL, NULL);
+                                                     cp_fallback_free, NULL);
     }
     return ctx->codepoint_fallback_cache;
 }

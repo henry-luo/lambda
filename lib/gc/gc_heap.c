@@ -122,23 +122,33 @@ static gc_bump_block_t* gc_alloc_bump_block(gc_heap_t* gc, size_t block_size) {
 // ============================================================================
 
 gc_heap_t* gc_heap_create(void) {
+    Pool* pool = pool_create();
+    if (!pool) {
+        log_error("gc_heap_create: failed to create pool");
+        return NULL;
+    }
+    gc_heap_t* gc = gc_heap_create_with_pool(pool);
+    if (!gc) {
+        pool_destroy(pool);
+    }
+    return gc;
+}
+
+gc_heap_t* gc_heap_create_with_pool(Pool* pool) {
+    if (!pool) return NULL;
+
     gc_heap_t* gc = (gc_heap_t*)calloc(1, sizeof(gc_heap_t));
     if (!gc) {
         log_error("gc_heap_create: failed to allocate gc_heap");
         return NULL;
     }
-    gc->pool = pool_create();
-    if (!gc->pool) {
-        log_error("gc_heap_create: failed to create pool");
-        free(gc);
-        return NULL;
-    }
+    gc->pool = pool;
 
     // create object zone (size-class free-list allocator)
     gc->object_zone = gc_object_zone_create(gc->pool);
     if (!gc->object_zone) {
         log_error("gc_heap_create: failed to create object zone");
-        pool_destroy(gc->pool);
+        gc->pool = NULL;  // caller owns the pool
         free(gc);
         return NULL;
     }
@@ -148,7 +158,7 @@ gc_heap_t* gc_heap_create(void) {
     if (!gc->data_zone) {
         log_error("gc_heap_create: failed to create data zone");
         gc_object_zone_destroy(gc->object_zone);
-        pool_destroy(gc->pool);
+        gc->pool = NULL;  // caller owns the pool
         free(gc);
         return NULL;
     }
@@ -159,7 +169,7 @@ gc_heap_t* gc_heap_create(void) {
         log_error("gc_heap_create: failed to create tenured data zone");
         gc_data_zone_destroy(gc->data_zone);
         gc_object_zone_destroy(gc->object_zone);
-        pool_destroy(gc->pool);
+        gc->pool = NULL;  // caller owns the pool
         free(gc);
         return NULL;
     }

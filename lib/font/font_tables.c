@@ -938,3 +938,52 @@ NameTable* font_tables_get_name(FontTables* tables) {
     tables->name = n;
     return n;
 }
+
+// ============================================================================
+// Glyph bounding box from glyf table (via loca)
+// ============================================================================
+
+bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
+                                int16_t* out_x_min, int16_t* out_y_min,
+                                int16_t* out_x_max, int16_t* out_y_max) {
+    if (!tables) return false;
+
+    HeadTable* head = font_tables_get_head(tables);
+    MaxpTable* maxp = font_tables_get_maxp(tables);
+    if (!head || !maxp) return false;
+    if (glyph_id >= maxp->num_glyphs) return false;
+
+    uint32_t loca_len = 0, glyf_len = 0;
+    const uint8_t* loca = font_tables_find(tables, FONT_TAG('l','o','c','a'), &loca_len);
+    const uint8_t* glyf = font_tables_find(tables, FONT_TAG('g','l','y','f'), &glyf_len);
+    if (!loca || !glyf) return false; // CFF fonts have no glyf table
+
+    // read glyph offset from loca table
+    uint32_t offset, next_offset;
+    if (head->index_to_loc_format == 0) {
+        // short format: uint16 values, actual byte offset = value * 2
+        uint32_t idx = (uint32_t)glyph_id * 2;
+        if (idx + 4 > loca_len) return false;
+        offset      = (uint32_t)rd16(loca + idx) * 2;
+        next_offset = (uint32_t)rd16(loca + idx + 2) * 2;
+    } else {
+        // long format: uint32 byte offsets
+        uint32_t idx = (uint32_t)glyph_id * 4;
+        if (idx + 8 > loca_len) return false;
+        offset      = rd32(loca + idx);
+        next_offset = rd32(loca + idx + 4);
+    }
+
+    // empty glyph (e.g. space): offset == next_offset
+    if (offset == next_offset) return false;
+
+    // glyph header: numberOfContours(2) + xMin(2) + yMin(2) + xMax(2) + yMax(2) = 10 bytes
+    if (offset + 10 > glyf_len) return false;
+
+    const uint8_t* g = glyf + offset;
+    if (out_x_min) *out_x_min = rd16s(g + 2);
+    if (out_y_min) *out_y_min = rd16s(g + 4);
+    if (out_x_max) *out_x_max = rd16s(g + 6);
+    if (out_y_max) *out_y_max = rd16s(g + 8);
+    return true;
+}

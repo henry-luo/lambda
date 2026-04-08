@@ -1113,6 +1113,11 @@ static void process_pdf_stream(Input* input, Pool* view_pool, ViewBlock* parent,
         process_pdf_operator(input, view_pool, parent, parser, op);
     }
 
+    // Clean up font cache (releases FT faces, FontTables, FT_Library)
+    if (parser->font_cache) {
+        pdf_font_cache_destroy(parser->font_cache);
+    }
+
     pdf_stream_parser_destroy(parser);
 
     // Free decompressed data if allocated

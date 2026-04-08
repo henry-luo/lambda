@@ -25,6 +25,7 @@
 #include <signal.h>
 #include <execinfo.h>
 #include <unistd.h>
+#include <sys/resource.h>  // getrusage for memory diagnostics
 
 extern "C" {
 #include "../lib/mempool.h"
@@ -71,6 +72,7 @@ void layout_html_doc(UiContext* uicon, DomDocument* doc, bool is_reflow);
 extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
+extern "C" void script_runner_cleanup_heap(void);
 // print_view_tree is declared in layout.hpp
 // print_item is declared in lambda/ast.hpp
 
@@ -1811,6 +1813,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         html_content = read_text_file(html_filepath);
         if (!html_content) {
             log_error("Failed to read HTML file: %s", html_filepath);
+            free(html_filepath);
             return nullptr;
         }
         html_content_owned = true;
@@ -1838,6 +1841,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     } else {
         input = input_from_source(html_content, html_url, type_str, nullptr);
     }
+    mem_free(type_str);
     if (html_content_owned) free(html_content);  // only free what we allocated
 
     auto t_parse = high_resolution_clock::now();
@@ -1845,9 +1849,11 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
 
     if (!input) {
         log_error("Failed to create input for file: %s", html_filepath);
-        mem_free(type_str);
+        free(html_filepath);
         return nullptr;
     }
+    free(html_filepath);
+    html_filepath = nullptr;
 
     // [debug] write html tree to 'html_tree.txt' — disabled; enable locally for inspection
     // if (log_default_category && log_default_category->output &&
@@ -2059,6 +2065,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     StrBuf* str_buf = strbuf_new();
     dom_root->print(str_buf, 0);
     log_debug("Built DomElement tree with styles::\n%s", str_buf->str);
+    strbuf_free(str_buf);
 
     // Step 8: Create DomDocument structure (already created by dom_document_create)
     // Just populate the additional fields
@@ -4831,6 +4838,7 @@ static bool layout_single_file(
     // DomDocument and ViewTree are malloc-allocated with their own internal pools.
     // Failing to free them leaks pools/arenas across batch files, which can cause
     // rpmalloc heap corruption that manifests as SIGTRAP in system malloc.
+
     if (doc) {
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);
@@ -4839,19 +4847,50 @@ static bool layout_single_file(
         }
         dom_document_destroy(doc);
     }
+
+    // Free the input URL (dom_document_destroy doesn't own it)
+    if (input_url) {
+        url_destroy(input_url);
+        input_url = nullptr;
+    }
+
     pool_destroy(pool);
 
     // Reset JS runtime state to avoid cross-document leakage in batch mode.
-    // JS singletons (globalThis, document proxy) and module state persist across files
-    // unless explicitly reset, causing tests with <script> tags to fail in batch.
+    // Must happen BEFORE script_runner_cleanup_heap: js_batch_reset clears
+    // global Items (js_input, js_exception_value, etc.) that reference the
+    // JS heap. Freeing the heap first would leave dangling pointers.
     js_batch_reset();
     js_dom_batch_reset();
     js_globals_batch_reset();
 
+    // Drain the mmap pool from JS execution (after js_batch_reset cleared globals).
+    script_runner_cleanup_heap();
+
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
-    // Clears @font-face descriptors, face cache, and codepoint fallback cache.
     font_context_reset_document_fonts(ui_context->font_ctx);
     ui_context->font_face_count = 0;
+
+    // [DIAG] Track memory usage per file for leak detection
+    {
+        struct rusage ru;
+        getrusage(RUSAGE_SELF, &ru);
+        long rss_kb = ru.ru_maxrss / 1024; // macOS: bytes → KB
+        FontCacheStats stats = font_get_cache_stats(ui_context->font_ctx);
+        static int file_num = 0;
+        file_num++;
+        if (file_num <= 10 || file_num % 50 == 0) {
+            fprintf(stderr, "[MEMDIAG] file=%d rss=%ldMB font_arena=%zuKB faces=%d\n",
+                    file_num, rss_kb / 1024, stats.memory_usage_bytes / 1024, stats.face_count);
+        }
+    }
+
+    // Release decoded image cache to prevent batch accumulation.
+    extern void image_cache_cleanup(UiContext* uicon);
+    image_cache_cleanup(ui_context);
+
+    // Release the InputManager's global pool which accumulates all Input parse trees.
+    InputManager::destroy_global();
 
     // Reset ui_context document pointer to avoid dangling pointer in batch mode
     ui_context->document = nullptr;

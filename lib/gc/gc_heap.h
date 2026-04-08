@@ -164,6 +164,15 @@ typedef struct gc_heap {
 gc_heap_t* gc_heap_create(void);
 
 /**
+ * Create a new GC heap reusing an existing memory pool.
+ * The pool should have been reset (pool_reset) before reuse.
+ * Ownership of the pool transfers to the gc_heap.
+ * @param pool existing pool to reuse (must not be NULL)
+ * @return new GCHeap, or NULL on failure
+ */
+gc_heap_t* gc_heap_create_with_pool(Pool* pool);
+
+/**
  * Destroy the GC heap and all its allocations.
  * Calls pool_destroy to bulk-free all pool-allocated memory.
  * @param gc heap to destroy
