@@ -6939,9 +6939,14 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     if (method->len == 6 && strncmp(method->chars, "repeat", 6) == 0) {
         if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
+        double n = js_get_number(args[0]);
+        // spec: throw RangeError if count is infinity, NaN, or negative
+        if (n != n || n < 0 || n == (1.0/0.0)) {  // NaN, negative, or +Infinity
+            return js_throw_range_error("Invalid count value");
+        }
+        int count = (int)n;
         String* s = it2s(str);
-        int count = (int)js_get_number(args[0]);
-        if (count <= 0 || !s) return (Item){.item = s2it(heap_create_name(""))};
+        if (count == 0 || !s || s->len == 0) return (Item){.item = s2it(heap_create_name(""))};
         // build repeated string
         StrBuf* buf = strbuf_new();
         for (int i = 0; i < count; i++) {
@@ -7414,11 +7419,12 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
         Array* src = arr.array;
+        int len = src->length;  // spec: capture len before loop
         JsFunction* fn = (JsFunction*)callback.function;
         // v20: thisArg support
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
-        for (int i = 0; i < src->length; i++) {
+        for (int i = 0; i < len; i++) {
             Item elem = js_array_element(arr, i);
             Item cb_args[3] = { elem, (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
@@ -7433,11 +7439,12 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         if (argc < 1 || get_type_id(args[0]) != LMD_TYPE_FUNC) return js_throw_not_callable("callback");
         Item callback = args[0];
         Array* src = arr.array;
+        int len = src->length;  // spec: capture len before loop
         JsFunction* fn = (JsFunction*)callback.function;
         // v20: thisArg support
         Item prev_this = js_current_this;
         if (argc >= 2 && get_type_id(args[1]) != LMD_TYPE_UNDEFINED) js_current_this = args[1];
-        for (int i = 0; i < src->length; i++) {
+        for (int i = 0; i < len; i++) {
             Item cb_args[3] = { js_array_element(arr, i), (Item){.item = i2it(i)}, cb_this };
             Item pred = js_invoke_fn(fn, cb_args, fn->param_count >= 3 ? 3 : (fn->param_count >= 2 ? 2 : 1));
             if (js_is_truthy(pred)) { js_current_this = prev_this; return (Item){.item = i2it(i)}; }

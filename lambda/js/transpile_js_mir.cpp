@@ -12740,6 +12740,12 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         } else {
             jm_transpile_box_item(mt, for_node->update);
         }
+        // v23c: check for pending exceptions after update expression
+        // Only when inside try/catch so thrown exceptions reach the catch handler.
+        // Outside try/catch, stale exceptions would cause spurious loop exits.
+        if (mt->try_ctx_depth > 0 && !jm_is_native_type(jm_get_effective_type(mt, for_node->update))) {
+            jm_emit_exc_propagate_check(mt);
+        }
     }
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
