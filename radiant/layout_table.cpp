@@ -445,6 +445,16 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             // Use the actual rendered border-box height (block->height), not the CSS content height
             // which excludes child's border/padding. Children are already laid out at this point.
             float child_height = block->height;
+
+            // CSS 2.1 §10.6.1: For inline-level children (RDT_VIEW_INLINE), the line box
+            // height is determined by line-height, not just the element's content height.
+            // The inline element's view height may only reflect text metrics (ascender +
+            // descender), but the line box it participates in has a minimum height of
+            // cell_line_height. Apply the same max() as we do for text nodes.
+            if (child->view_type == RDT_VIEW_INLINE && cell_line_height > child_height) {
+                child_height = cell_line_height;
+            }
+
             // Track the min y and max bottom of block content for stacked blocks
             // CSS 2.1 §9.4.1: Table cells establish a BFC. Child margins don't collapse
             // through the cell boundary, so they must be included in the content extent.
@@ -2317,6 +2327,62 @@ static void resolve_table_properties(LayoutContext* lycon, DomNode* element, Vie
                         log_debug("Table table-layout: auto (from CSS)");
                     }
                 }
+            }
+        } else {
+            // CSS 2.1 §17.6: border-collapse is an inherited property.
+            // Anonymous table elements (e.g., ::anon-table created when <table> has display:block)
+            // have no specified_style, so we must inherit from ancestors.
+            // Also inherit border-spacing (CSS 2.1 §17.6.1: inherited property).
+            DomNode* ancestor = element->parent;
+            while (ancestor) {
+                if (ancestor->is_element()) {
+                    DomElement* anc_elem = ancestor->as_element();
+                    if (anc_elem->specified_style) {
+                        CssDeclaration* anc_decl = style_tree_get_declaration(
+                            anc_elem->specified_style,
+                            CSS_PROPERTY_BORDER_COLLAPSE);
+                        if (anc_decl && anc_decl->value) {
+                            CssValue* anc_val = (CssValue*)anc_decl->value;
+                            if (anc_val->type == CSS_VALUE_TYPE_KEYWORD) {
+                                CssEnum anc_kw = anc_val->data.keyword;
+                                if (anc_kw == CSS_VALUE_COLLAPSE || anc_kw == CSS_VALUE_COLLAPSE_TABLE) {
+                                    table->tb->border_collapse = true;
+                                    log_debug("Table border-collapse: inherited collapse (anonymous table from <%s>)",
+                                              anc_elem->tag_name ? anc_elem->tag_name : "unknown");
+                                } else if (anc_kw == CSS_VALUE_SEPARATE) {
+                                    table->tb->border_collapse = false;
+                                    log_debug("Table border-collapse: inherited separate (anonymous table from <%s>)",
+                                              anc_elem->tag_name ? anc_elem->tag_name : "unknown");
+                                }
+                                // If ancestor says inherit, keep walking
+                                if (anc_kw != CSS_VALUE_INHERIT) break;
+                            }
+                        }
+
+                        // Also inherit border-spacing
+                        CssDeclaration* spacing_decl = style_tree_get_declaration(
+                            anc_elem->specified_style,
+                            CSS_PROPERTY_BORDER_SPACING);
+                        if (spacing_decl && spacing_decl->value) {
+                            CssValue* sv = (CssValue*)spacing_decl->value;
+                            if (sv->type == CSS_VALUE_TYPE_LENGTH) {
+                                float resolved = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, sv);
+                                table->tb->border_spacing_h = resolved;
+                                table->tb->border_spacing_v = resolved;
+                            } else if (sv->type == CSS_VALUE_TYPE_LIST && sv->data.list.count >= 2) {
+                                if (sv->data.list.values[0])
+                                    table->tb->border_spacing_h = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, sv->data.list.values[0]);
+                                if (sv->data.list.values[1])
+                                    table->tb->border_spacing_v = resolve_length_value(lycon, CSS_PROPERTY_BORDER_SPACING, sv->data.list.values[1]);
+                            } else if (sv->type == CSS_VALUE_TYPE_NUMBER) {
+                                table->tb->border_spacing_h = (float)sv->data.number.value;
+                                table->tb->border_spacing_v = (float)sv->data.number.value;
+                            }
+                        }
+                        break;  // found ancestor with specified_style, stop
+                    }
+                }
+                ancestor = ancestor->parent;
             }
         }
     }

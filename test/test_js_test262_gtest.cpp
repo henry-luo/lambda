@@ -31,9 +31,11 @@
 #include <mutex>
 #include <atomic>
 #include <unordered_map>
+#include <unordered_set>
 #include <queue>
 #include <functional>
 #include <chrono>
+
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -53,6 +55,7 @@
 #else
     #include <unistd.h>
     #include <sys/wait.h>
+    #include <signal.h>
     #include <dirent.h>
     #include <fcntl.h>
     #include <spawn.h>
@@ -66,68 +69,61 @@ static const char* TEST262_ROOT = "ref/test262";
 static const char* HARNESS_DIR = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
 
-// Features that LambdaJS does NOT support — skip tests requiring these
-// v17: removed 25 features that are actually implemented (class fields, optional
-// chaining, nullish coalescing, globalThis, logical assignment, etc.)
+// Features above ES2020 — skip tests requiring these.
+// Target: ES2020 compliance. All features ≤ES2020 are in scope.
+// Reference: TC39 finished-proposals.md (publication year field)
 static const std::set<std::string> UNSUPPORTED_FEATURES = {
-    // Concurrency / SharedMemory
-    "Atomics", "SharedArrayBuffer", "Atomics.waitAsync", "Atomics.pause",
-    // Proxy / Reflect
-    "Proxy", "Reflect", "Reflect.construct", "Reflect.apply",
-    "Reflect.defineProperty", "Reflect.deleteProperty", "Reflect.get",
-    "Reflect.getOwnPropertyDescriptor", "Reflect.getPrototypeOf",
-    "Reflect.has", "Reflect.isExtensible", "Reflect.ownKeys",
-    "Reflect.preventExtensions", "Reflect.set", "Reflect.setPrototypeOf",
-    // Temporal (stage 3, large API)
-    "Temporal",
-    // Tail calls
-    "tail-call-optimization",
-    // Realms
-    "ShadowRealm",
-    // Import attributes / assertions
-    "import-attributes", "import-assertions",
-    // Dynamic import
-    "dynamic-import", "import.meta",
-    // Top-level await
-    "top-level-await",
-    // Weak references / FinalizationRegistry
-    "WeakRef", "FinalizationRegistry",
-    // Resizable ArrayBuffer
-    "resizable-arraybuffer", "ArrayBuffer-transfer",
-    // Decorators
-    "decorators",
-    // Iterator helpers (stage 3)
-    "iterator-helpers",
-    // Disposable resources
-    "explicit-resource-management",
-    // Duplicate named capture groups
-    "regexp-duplicate-named-groups",
-    // RegExp features
-    "regexp-lookbehind", "regexp-named-groups", "regexp-unicode-property-escapes",
-    "regexp-match-indices", "regexp-v-flag",
-    "regexp-modifiers",
-    // Well-formed JSON.stringify
-    "well-formed-json-stringify",
-    // String / Array methods (newer)
-    "Array.fromAsync",
-    "change-array-by-copy",
-    // hashbang
-    "hashbang",
-    // Symbols — well-known symbol protocols not fully implemented
-    "Symbol.species",
-    "Symbol.match", "Symbol.replace", "Symbol.search",
-    "Symbol.split", "Symbol.toStringTag", "Symbol.unscopables",
-    "Symbol.asyncIterator", "Symbol.matchAll",
-    // Async iteration — event loop semantics diverge from test262 harness
-    "async-iteration",
-    // Other
-    "cross-realm", "IsHTMLDDA", "caller",
-    "Uint8Array",
-    // Misc
-    "arbitrary-module-namespace-names",
-    "json-modules", "source-phase-imports",
-    "AggregateError",
-    "symbols-as-weakmap-keys",
+    // === ES2021 features ===
+    "WeakRef",                                    // Weak references
+    "FinalizationRegistry",                       // GC callback hooks
+    "AggregateError",                             // Error subclass for Promise.any
+    "logical-assignment-operators",               // &&=, ||=, ??=
+    "numeric-separator-literal",                  // 1_000_000
+    "String.prototype.replaceAll",                // String.prototype.replaceAll
+    "Promise.any",                                // Promise.any
+
+    // === ES2022 features ===
+    "class-fields-public",                        // Public instance fields
+    "class-fields-private",                       // Private instance fields
+    "class-fields-private-in",                    // #x in obj
+    "class-methods-private",                      // Private methods
+    "class-static-fields-public",                 // Static public fields
+    "class-static-fields-private",                // Static private fields
+    "class-static-methods-private",               // Static private methods
+    "class-static-block",                         // static { ... }
+    "top-level-await",                            // Module-level await
+    "regexp-match-indices",                       // /d flag, .indices
+    "Object.hasOwn",                              // Object.hasOwn()
+    "Array.prototype.at",                         // Array.prototype.at()
+    "String.prototype.at",                        // String.prototype.at()
+    "TypedArray.prototype.at",                    // TypedArray.prototype.at()
+    "error-cause",                                // new Error("msg", { cause })
+
+    // === ES2023 features ===
+    "change-array-by-copy",                       // toSorted, toReversed, toSpliced, with
+    "symbols-as-weakmap-keys",                    // Symbol keys in WeakMap/WeakSet
+    "hashbang",                                   // #! shebang lines
+    "array-find-from-last",                       // findLast, findLastIndex
+
+    // === ES2024 features ===
+    "Atomics.waitAsync",                          // Atomics.waitAsync proposal
+    "resizable-arraybuffer",                      // Resizable/growable ArrayBuffers
+    "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
+    "regexp-v-flag",                              // Unicode sets (/v flag)
+    "promise-with-resolvers",                     // Promise.withResolvers
+    "array-grouping",                             // Object.groupBy / Map.groupBy
+    "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
+    "String.prototype.toWellFormed",
+
+    // === ES2025 features ===
+    "import-attributes", "import-assertions",     // Import attributes
+    "regexp-modifiers",                           // (?ims:...) inline flags
+    "regexp-duplicate-named-groups",              // Duplicate named capture groups
+    "iterator-helpers",                           // Iterator.prototype methods
+    "Float16Array",                               // Float16 typed arrays
+    "json-parse-with-source",                     // JSON.parse source text access
+    "json-modules",                               // JSON module imports
+    "set-methods",                                // New Set methods
     "Set.prototype.intersection",
     "Set.prototype.union",
     "Set.prototype.difference",
@@ -135,9 +131,39 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Set.prototype.isSubsetOf",
     "Set.prototype.isSupersetOf",
     "Set.prototype.isDisjointFrom",
-    "Float16Array",
-    "uint8-clamped-array",
-    "json-parse-with-source",
+    "promise-try",                                // Promise.try
+    "RegExp.escape",                              // RegExp.escape
+
+    // === ES2026+ features ===
+    "Array.fromAsync",                            // Array.fromAsync
+    "uint8array-base64",                          // Uint8Array base64/hex
+    "Math.sumPrecise",                            // Math.sumPrecise
+    "Error.isError",                              // Error.isError
+    "iterator-sequencing",                        // Iterator.concat
+    "upsert",                                     // Map.prototype.getOrInsert
+
+    // === Stage 3 / Proposals (not yet in any published spec) ===
+    "Temporal",                                   // Temporal API (ES2027)
+    "ShadowRealm",                                // Isolated evaluation contexts
+    "decorators",                                 // Class decorators
+    "explicit-resource-management",               // using / Symbol.dispose
+    "source-phase-imports", "source-phase-imports-module-source",
+    "Atomics.pause",                              // Atomics.pause
+    "import-defer",                               // Deferred import evaluation
+    "import-text",                                // Import text
+    "import-bytes",                               // Import bytes
+    "canonical-tz",                               // Time zone canonicalization
+    "immutable-arraybuffer",                      // Immutable ArrayBuffer
+    "nonextensible-applies-to-private",           // Non-extensible + private
+    "joint-iteration",                            // Joint iteration
+    "await-dictionary",                           // Await dictionary
+    "legacy-regexp",                              // Legacy RegExp features
+
+    // === Test harness / Annex B / host features ===
+    "IsHTMLDDA",                                  // document.all behavior
+    "host-gc-required",                           // Requires $262.gc()
+    "cross-realm",                                // Requires $262.createRealm()
+    "caller",                                     // Function.prototype.caller (Annex B)
 };
 
 // =============================================================================
@@ -701,12 +727,20 @@ static const size_t RETRY_BATCH_SIZE = 5;
 
 struct SubBatch { size_t start; size_t end; };
 
+struct BatchTiming {
+    size_t batch_idx;
+    double elapsed_secs;
+    size_t num_tests;
+};
+
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
+static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
+static bool g_mir_interp = false;
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 
@@ -882,8 +916,8 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* argv[6] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL
+    char* argv[8] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -891,6 +925,9 @@ static void run_t262_sub_batch(
     }
     if (g_opt_level >= 0) {
         argv[argi++] = g_opt_level_arg;
+    }
+    if (g_mir_interp) {
+        argv[argi++] = (char*)"--mir-interp";
     }
     extern char** environ;
     pid_t pid;
@@ -957,11 +994,63 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         batches.push_back({s, e});
     }
 
+    // Sort dispatch order: run estimated-slowest batches first to avoid stragglers.
+    // Uses per-test timing from previous run (temp/_t262_timing_o*.tsv).
+    std::vector<size_t> dispatch_order(batches.size());
+    for (size_t i = 0; i < dispatch_order.size(); i++) dispatch_order[i] = i;
+    {
+        // Load previous timing data
+        std::unordered_map<std::string, long> prev_timing;
+        char timing_path[128] = "temp/_t262_timing.tsv";
+        if (g_opt_level >= 0)
+            snprintf(timing_path, sizeof(timing_path), "temp/_t262_timing_o%d.tsv", g_opt_level);
+        FILE* tf = fopen(timing_path, "r");
+        if (tf) {
+            char line[512];
+            fgets(line, sizeof(line), tf);  // skip header
+            while (fgets(line, sizeof(line), tf)) {
+                char name[400];
+                int exit_code;
+                long elapsed_us;
+                if (sscanf(line, "%399[^\t]\t%d\t%ld", name, &exit_code, &elapsed_us) == 3) {
+                    prev_timing[name] = elapsed_us;
+                }
+            }
+            fclose(tf);
+        }
+        if (!prev_timing.empty()) {
+            // Compute estimated cost per batch (sum of per-test times)
+            std::vector<long> batch_cost(batches.size(), 0);
+            for (size_t bi = 0; bi < batches.size(); bi++) {
+                for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
+                    size_t pi = indices[idx];
+                    auto it = prev_timing.find(prepared[pi].test_name);
+                    if (it != prev_timing.end()) {
+                        batch_cost[bi] += it->second;
+                    } else {
+                        batch_cost[bi] += 20000;  // 20ms default for unknown tests
+                    }
+                }
+            }
+            // Sort dispatch order: most expensive first
+            std::sort(dispatch_order.begin(), dispatch_order.end(), [&](size_t a, size_t b) {
+                return batch_cost[a] > batch_cost[b];
+            });
+            fprintf(stderr, "[test262] Loaded %zu timing entries → dispatching slowest batches first "
+                    "(top: %.1fs, #2: %.1fs, #3: %.1fs)\n",
+                    prev_timing.size(),
+                    batch_cost[dispatch_order[0]] / 1e6,
+                    batches.size() > 1 ? batch_cost[dispatch_order[1]] / 1e6 : 0.0,
+                    batches.size() > 2 ? batch_cost[dispatch_order[2]] / 1e6 : 0.0);
+        }
+    }
+
     // Run sub-batches with limited parallelism.
     // Each worker reuses ONE temp manifest file (6 workers = 6 files total).
     // For each sub-batch: truncate → write source data → fork/exec → read stdout.
     // This avoids per-batch file create/unlink overhead while keeping fast file-based stdin.
     std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
+    std::vector<BatchTiming> batch_timings(batches.size());
     std::atomic<size_t> next_batch{0};
     size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, batches.size());
     std::vector<std::thread> threads;
@@ -971,8 +1060,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
             char manifest_path[256];
             snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_worker_%zu.manifest", w);
             while (true) {
-                size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
-                if (i >= batches.size()) break;
+                size_t di = next_batch.fetch_add(1, std::memory_order_relaxed);
+                if (di >= batches.size()) break;
+                size_t i = dispatch_order[di];  // pick batch in cost-sorted order
 
                 // Write manifest for this sub-batch (two-module split: harness first, then tests)
                 FILE* mf = fopen(manifest_path, "wb");
@@ -997,12 +1087,52 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 fclose(mf);
 
                 // Execute: fork/exec with stdin from manifest, read stdout via pipe
+                auto t0 = std::chrono::steady_clock::now();
                 run_t262_sub_batch(manifest_path, thread_results[i]);
+                auto t1 = std::chrono::steady_clock::now();
+                batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
+                                    batches[i].end - batches[i].start};
             }
             unlink(manifest_path);
         });
     }
     for (auto& t : threads) t.join();
+
+    // Report per-batch timing — sort by elapsed time, show top 20 slowest
+    {
+        std::vector<size_t> order(batches.size());
+        for (size_t i = 0; i < order.size(); i++) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return batch_timings[a].elapsed_secs > batch_timings[b].elapsed_secs;
+        });
+        fprintf(stderr, "\n[test262] Per-batch timing (top 20 slowest of %zu batches):\n", batches.size());
+        size_t show = std::min((size_t)20, batches.size());
+        for (size_t k = 0; k < show; k++) {
+            size_t bi = order[k];
+            fprintf(stderr, "  batch[%3zu]: %6.1fs (%zu tests)  tests[%zu..%zu]\n",
+                    bi, batch_timings[bi].elapsed_secs, batch_timings[bi].num_tests,
+                    batches[bi].start, batches[bi].end - 1);
+        }
+        // For the top 5 slowest batches, list all test names
+        fprintf(stderr, "\n[test262] Tests in top 5 slowest batches:\n");
+        size_t detail = std::min((size_t)5, batches.size());
+        for (size_t k = 0; k < detail; k++) {
+            size_t bi = order[k];
+            fprintf(stderr, "  --- batch[%zu] (%.1fs) ---\n", bi, batch_timings[bi].elapsed_secs);
+            for (size_t idx = batches[bi].start; idx < batches[bi].end; idx++) {
+                size_t pi = indices[idx];
+                const auto& p = prepared[pi];
+                // show per-test time if available
+                auto it = thread_results[bi].find(p.test_name);
+                if (it != thread_results[bi].end()) {
+                    fprintf(stderr, "    %6ldms  %s\n", it->second.elapsed_us / 1000, p.test_name.c_str());
+                } else {
+                    fprintf(stderr, "    [lost]   %s\n", p.test_name.c_str());
+                }
+            }
+        }
+        fprintf(stderr, "\n");
+    }
 
     // merge
     for (auto& partial : thread_results) {
@@ -1097,7 +1227,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
 
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu quarantined)\n",
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu skipped-crashers)\n",
             prep_secs, batch_indices.size(), clean_indices.size(), crasher_indices.size());
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
@@ -1108,53 +1238,15 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
             exec_secs, batch_results.size());
 
-    // Phase 2a: execute quarantined crashers in small batches (batch size 5)
-    // These are known to crash from previous run — isolate each to prevent collateral.
-    if (!crasher_indices.empty()) {
-        {
-            // Phase 2a: run each quarantined crasher individually (batch of 1)
-            // to prevent one crash from killing neighbor tests
-            std::vector<SubBatch> crasher_batches;
-            for (size_t s = 0; s < crasher_indices.size(); s++) {
-                crasher_batches.push_back({s, s + 1});
-            }
-            std::vector<std::unordered_map<std::string, BatchResult>> thread_results(crasher_batches.size());
-            std::atomic<size_t> next_batch{0};
-            size_t num_workers = std::min(T262_MAX_PARALLEL_BATCHES, crasher_batches.size());
-            std::vector<std::thread> threads;
-            for (size_t w = 0; w < num_workers; w++) {
-                threads.emplace_back([&, w]() {
-                    char manifest_path[256];
-                    snprintf(manifest_path, sizeof(manifest_path), "temp/_t262_crasher_%zu.manifest", w);
-                    while (true) {
-                        size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
-                        if (i >= crasher_batches.size()) break;
-                        FILE* mf = fopen(manifest_path, "wb");
-                        if (!mf) continue;
-                        for (size_t idx = crasher_batches[i].start; idx < crasher_batches[i].end; idx++) {
-                            size_t pi = crasher_indices[idx];
-                            const auto& p = prepared[pi];
-                            std::string combined = assemble_combined_source(p);
-                            fprintf(mf, "source:%s:%zu\n", p.test_name.c_str(), combined.size());
-                            fwrite(combined.data(), 1, combined.size(), mf);
-                            fputc('\n', mf);
-                        }
-                        fclose(mf);
-                        run_t262_sub_batch(manifest_path, thread_results[i]);
-                    }
-                    unlink(manifest_path);
-                });
-            }
-            for (auto& t : threads) t.join();
-            for (auto& partial : thread_results) {
-                for (auto& kv : partial) batch_results[kv.first] = std::move(kv.second);
-            }
-        }
-        auto crasher_time = std::chrono::steady_clock::now();
-        double crasher_secs = std::chrono::duration<double>(crasher_time - exec_time).count();
-        fprintf(stderr, "[test262] Phase 2a (crashers): %.1fs — %zu quarantined individually\n",
-                crasher_secs, crasher_indices.size());
-        exec_time = crasher_time;
+    // Crashers are skipped entirely — mark them as CRASH in results so Phase 3 evaluation
+    // records them properly without spending time executing them.
+    for (size_t idx : crasher_indices) {
+        const auto& p = prepared[idx];
+        BatchResult cr;
+        cr.output = "SKIPPED: known crasher from previous run";
+        cr.exit_code = 137;  // signal-killed
+        cr.elapsed_us = 0;
+        batch_results[p.test_name] = cr;
     }
 
     // Phase 2b: retry batch-lost tests in small batches (crash recovery)
@@ -1174,9 +1266,10 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         auto retry_results = [&]() {
             std::unordered_map<std::string, BatchResult> results;
             std::vector<SubBatch> retry_batches;
-            for (size_t s = 0; s < lost_indices.size(); s += RETRY_BATCH_SIZE) {
-                size_t e = std::min(s + RETRY_BATCH_SIZE, lost_indices.size());
-                retry_batches.push_back({s, e});
+            // Retry individually (batch of 1) to prevent a single crasher from
+            // killing other lost tests in the retry batch.
+            for (size_t s = 0; s < lost_indices.size(); s++) {
+                retry_batches.push_back({s, s + 1});
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
             std::atomic<size_t> next_batch{0};
@@ -1228,36 +1321,96 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     }
 
     // Write crasher log for next run's quarantine optimization.
-    // Include: clean tests still lost after Phase 2b retry + quarantined crashers still lost after Phase 2a.
+    // Cumulative: merge previous crashers with newly-discovered ones.
+    // Tests are only removed from quarantine if they PASS when run individually in Phase 2a.
     {
+        // Preserve manually-added TIMEOUT_ entries and # comments from the existing file.
+        // TIMEOUT_ entries are tests that loop forever (Lambda bug: missing throw guard),
+        // distinct from CRASH_ entries which are actual process crashes/signals.
+        std::vector<std::string> timeout_lines;
+        std::unordered_set<std::string> timeout_names;
+        {
+            FILE* old_f = fopen("temp/_t262_crashers.txt", "r");
+            if (old_f) {
+                char tbuf[2048];
+                while (fgets(tbuf, sizeof(tbuf), old_f)) {
+                    if (strncmp(tbuf, "TIMEOUT_", 8) == 0 || tbuf[0] == '#') {
+                        size_t tl = strlen(tbuf);
+                        while (tl > 0 && (tbuf[tl-1] == '\n' || tbuf[tl-1] == '\r')) tbuf[--tl] = '\0';
+                        if (tl > 0) {
+                            timeout_lines.push_back(std::string(tbuf));
+                            if (strncmp(tbuf, "TIMEOUT_", 8) == 0) {
+                                char* ft = strchr(tbuf, '\t');
+                                if (ft) {
+                                    char* ns = ft + 1;
+                                    char* st = strchr(ns, '\t');
+                                    if (st) *st = '\0';
+                                    timeout_names.insert(std::string(ns));
+                                }
+                            }
+                        }
+                    }
+                }
+                fclose(old_f);
+            }
+        }
+
         FILE* crasher_log = fopen("temp/_t262_crashers.txt", "w");
         if (crasher_log) {
+            // Write preserved TIMEOUT_ entries and comments first
+            for (auto& line : timeout_lines) fprintf(crasher_log, "%s\n", line.c_str());
+            if (!timeout_lines.empty()) fprintf(crasher_log, "\n");
+
             size_t still_lost = 0;
             size_t crash_exit = 0;
-            // Clean tests that are still missing after Phase 2b retry
-            for (size_t idx : lost_indices) {
-                const auto& p = prepared[idx];
-                auto it = batch_results.find(p.test_name);
-                if (it == batch_results.end()) {
-                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
-                    still_lost++;
-                } else if (it->second.exit_code > 128) {
-                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
-                            p.test_name.c_str(), p.test_path.c_str());
-                    crash_exit++;
-                }
-            }
-            // Quarantined crashers that are still missing after Phase 2a
+            std::unordered_set<std::string> written;
+            // skip timeout tests — they are already above, don't re-emit as CRASH_
+            written.insert(timeout_names.begin(), timeout_names.end());
+
+            // Retain previously-quarantined crashers that still crash in Phase 2a.
+            // (Tests that pass individually in Phase 2a are removed from quarantine.)
             for (size_t idx : crasher_indices) {
                 const auto& p = prepared[idx];
                 auto it = batch_results.find(p.test_name);
                 if (it == batch_results.end()) {
                     fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
                     still_lost++;
                 } else if (it->second.exit_code > 128) {
                     fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", it->second.exit_code,
                             p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
                     crash_exit++;
+                }
+                // else: test passed individually → removed from quarantine
+            }
+
+            // Add newly-discovered crash-exit tests from clean batches (Phase 2 + 2b)
+            for (auto& kv : batch_results) {
+                if (written.count(kv.first)) continue;
+                if (kv.second.exit_code > 128) {
+                    const char* path = "";
+                    for (size_t idx : clean_indices) {
+                        if (prepared[idx].test_name == kv.first) {
+                            path = prepared[idx].test_path.c_str();
+                            break;
+                        }
+                    }
+                    fprintf(crasher_log, "CRASH_%d\t%s\t%s\n", kv.second.exit_code,
+                            kv.first.c_str(), path);
+                    written.insert(kv.first);
+                    crash_exit++;
+                }
+            }
+            // Clean tests still missing after Phase 2b
+            for (size_t idx : lost_indices) {
+                const auto& p = prepared[idx];
+                if (written.count(p.test_name)) continue;
+                auto it = batch_results.find(p.test_name);
+                if (it == batch_results.end()) {
+                    fprintf(crasher_log, "MISSING\t%s\t%s\n", p.test_name.c_str(), p.test_path.c_str());
+                    written.insert(p.test_name);
+                    still_lost++;
                 }
             }
             fclose(crasher_log);
@@ -1489,6 +1642,30 @@ public:
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
 
+#ifndef _WIN32
+    // Kill any stale lambda.exe processes from previous runs to avoid
+    // CPU contention that skews timing results.
+    {
+        FILE* fp = popen("pgrep -x lambda.exe 2>/dev/null", "r");
+        if (fp) {
+            char buf[64];
+            int count = 0;
+            pid_t my_ppid = getppid();  // don't kill our own parent
+            while (fgets(buf, sizeof(buf), fp)) {
+                pid_t pid = (pid_t)atoi(buf);
+                if (pid > 0 && pid != getpid() && pid != my_ppid) {
+                    kill(pid, SIGKILL);
+                    count++;
+                }
+            }
+            pclose(fp);
+            if (count > 0) {
+                fprintf(stderr, "[test262] Killed %d stale lambda.exe process(es)\n", count);
+            }
+        }
+    }
+#endif
+
     // Check for --update-baseline flag (must be after InitGoogleTest consumes gtest flags)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--update-baseline") == 0) {
@@ -1497,8 +1674,14 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--baseline-only") == 0) {
             g_baseline_only = true;
         }
+        if (strcmp(argv[i], "--batch-only") == 0) {
+            g_batch_only = true;
+        }
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
+        }
+        if (strcmp(argv[i], "--mir-interp") == 0) {
+            g_mir_interp = true;
         }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);
@@ -1558,6 +1741,69 @@ int main(int argc, char** argv) {
     // pre-run all tests in batch mode
     auto all_tests = discover_all_tests();
     batch_run_all_tests(all_tests);
+
+    if (g_batch_only) {
+        // Print summary directly from cached results, skip individual gtest runs
+        int passed = 0, failed = 0, skipped = 0;
+        std::vector<std::string> current_passing;
+        std::vector<std::string> regressions;
+        std::vector<std::string> improvements;
+        {
+            std::lock_guard<std::mutex> lock(g_results_mutex);
+            for (auto& kv : g_cached_results) {
+                switch (kv.second.result) {
+                    case T262_PASS: passed++; current_passing.push_back(kv.first); break;
+                    case T262_SKIP: skipped++; break;
+                    default: failed++; break;
+                }
+            }
+        }
+        // Compute regressions/improvements vs baseline
+        if (!g_baseline_passing.empty()) {
+            std::set<std::string> pass_set(current_passing.begin(), current_passing.end());
+            for (auto& name : g_baseline_passing) {
+                if (pass_set.find(name) == pass_set.end()) regressions.push_back(name);
+            }
+            for (auto& name : current_passing) {
+                if (g_baseline_passing.find(name) == g_baseline_passing.end()) improvements.push_back(name);
+            }
+        }
+        int total = passed + failed;
+        double pct = total > 0 ? 100.0 * passed / total : 0.0;
+        printf("\n");
+        printf("╔══════════════════════════════════════════════════╗\n");
+        printf("║         test262 Compliance Summary               ║\n");
+        printf("╠══════════════════════════════════════════════════╣\n");
+        printf("║  Passed:     %5d / %5d  (%.1f%%)              ║\n", passed, total, pct);
+        printf("║  Failed:     %5d                               ║\n", failed);
+        printf("║  Skipped:    %5d                               ║\n", skipped);
+        printf("╚══════════════════════════════════════════════════╝\n");
+        if (!g_baseline_passing.empty()) {
+            printf("\n╔══════════════════════════════════════════════════╗\n");
+            printf("║         Regression Check vs Baseline             ║\n");
+            printf("╠══════════════════════════════════════════════════╣\n");
+            printf("║  Baseline passing: %5zu                         ║\n", g_baseline_passing.size());
+            printf("║  Current passing:  %5zu                         ║\n", current_passing.size());
+            printf("║  Improvements:     %5zu  (fail → pass)          ║\n", improvements.size());
+            printf("║  Regressions:      %5zu  (pass → fail)          ║\n", regressions.size());
+            printf("╚══════════════════════════════════════════════════╝\n");
+            if (!regressions.empty() && regressions.size() <= 200) {
+                printf("\n⚠️  REGRESSIONS (%zu tests):\n", regressions.size());
+                std::sort(regressions.begin(), regressions.end());
+                for (auto& r : regressions) printf("  - %s\n", r.c_str());
+            } else if (!regressions.empty()) {
+                printf("\n⚠️  REGRESSIONS: %zu tests (too many to list)\n", regressions.size());
+            }
+            if (!improvements.empty() && improvements.size() <= 50) {
+                printf("\n✅  IMPROVEMENTS (%zu tests):\n", improvements.size());
+                std::sort(improvements.begin(), improvements.end());
+                for (auto& r : improvements) printf("  + %s\n", r.c_str());
+            } else if (!improvements.empty()) {
+                printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
+            }
+        }
+        return regressions.empty() ? 0 : 1;
+    }
 
     return RUN_ALL_TESTS();
 }

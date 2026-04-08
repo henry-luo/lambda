@@ -158,6 +158,8 @@ int ui_context_init(UiContext* uicon, bool headless) {
         "Times New Roman", "Times",  // default serif
         "Arial",                      // common sans-serif used in graph SVG
         "Helvetica",                  // fallback sans-serif
+        "Verdana",                    // common in shields.io badge SVGs
+        "Geneva",                     // macOS fallback for Verdana
         nullptr
     };
     for (int i = 0; tvg_fonts[i]; i++) {

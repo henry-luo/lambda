@@ -15,6 +15,7 @@
 #define LAMBDA_FONT_INTERNAL_H
 
 #include "font.h"
+#include "font_tables.h"
 #include "../mempool.h"
 #include "../arena.h"
 #include "../hashmap.h"
@@ -66,6 +67,7 @@ FontFormat font_detect_format_ext(const char* path);
 
 struct FontHandle {
     FT_Face     ft_face;                // FreeType face object
+    FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
     bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
 
@@ -87,6 +89,10 @@ struct FontHandle {
 #ifdef __APPLE__
     // CoreText font reference for GPOS kerning (when FreeType lacks kern table)
     void* ct_font_ref;  // actually CTFontRef, void* to avoid CoreText headers
+
+    // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
+    // Created from raw font data for all fonts on macOS.
+    void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
 #endif
 
     // back-pointer to owning context (for pool access)
@@ -344,10 +350,21 @@ char*               font_platform_find_codepoint_font(uint32_t codepoint, int* o
 #ifdef __APPLE__
 void*               font_platform_create_ct_font(const char* postscript_name,
                                                   const char* family_name,
-                                                  float size_px);
+                                                  float size_px,
+                                                  int css_weight);  // css_weight: 100–900
 void                font_platform_destroy_ct_font(void* ct_font_ref);
+float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
+
+// font_rasterize_ct.c — CoreText rasterization (macOS)
+void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
+                                              float size_px, int face_index);
+bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
+                                               float bitmap_scale, GlyphInfo* out);
+GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
+                                              GlyphRenderMode mode, float bitmap_scale,
+                                              float pixel_ratio, Arena* arena);
 #endif
 
 // font_loader.c

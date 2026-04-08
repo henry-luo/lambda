@@ -1147,6 +1147,70 @@ void line_break(LayoutContext* lycon) {
     line_reset(lycon);
 }
 
+// CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
+// Used to check whether to wrap before placing text when the remaining space
+// on a line is too narrow for the first word. Leading spaces are skipped.
+// Returns 0 if the text is empty or starts at a break opportunity (CJK, ZWSP).
+static float measure_first_word_width(LayoutContext* lycon, const unsigned char* str,
+                                      const unsigned char* text_end, CssEnum text_transform) {
+    float width = 0.0f;
+    bool word_start = true;
+
+    // Skip leading spaces — they are break opportunities, not part of the word
+    while (*str && is_space(*str)) str++;
+    if (!*str) return 0.0f;
+
+    while (str < text_end && *str && !is_space(*str)) {
+        uint32_t codepoint = *str;
+        int char_bytes = 1;
+        if (codepoint >= 128) {
+            int bytes = str_utf8_decode((const char*)str, (size_t)(text_end - str), &codepoint);
+            if (bytes > 0) char_bytes = bytes;
+        }
+
+        // CJK characters are individual break opportunities — first "word" is one character
+        if (is_cjk_character(codepoint)) {
+            if (width == 0.0f) {
+                // The first char is CJK — measure just this one character
+                codepoint = apply_text_transform(codepoint, text_transform, word_start);
+                GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
+                width += (ginfo.id != 0) ? ginfo.advance_x : lycon->font.current_font_size;
+            }
+            break;
+        }
+        // U+200B ZWSP is a break opportunity
+        if (codepoint == 0x200B) break;
+        // U+00AD soft hyphen is a break opportunity
+        if (codepoint == 0x00AD) break;
+
+        codepoint = apply_text_transform(codepoint, text_transform, word_start);
+        bool is_small_caps_lower = false;
+        if (has_small_caps(lycon)) {
+            uint32_t original = codepoint;
+            codepoint = apply_small_caps(codepoint);
+            is_small_caps_lower = (codepoint != original);
+        }
+        word_start = false;
+
+        float char_width;
+        float unicode_space_em = get_unicode_space_width_em(codepoint);
+        if (unicode_space_em < 0.0f) {
+            char_width = 0.0f;  // zero-width character
+        } else if (unicode_space_em > 0.0f) {
+            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            char_width = unicode_space_em * lycon->font.current_font_size * sc_scale;
+        } else {
+            GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
+            float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
+            char_width = (ginfo.id != 0) ? ginfo.advance_x * sc_scale
+                                         : lycon->font.current_font_size * sc_scale;
+        }
+        width += char_width + lycon->font.style->letter_spacing;
+        str += char_bytes;
+    }
+    return width;
+}
+
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     // Get text data using helper function
     const char* text = (const char*)text_node->text_data();
@@ -1157,6 +1221,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
     float text_width = 0.0f;
     CssEnum text_transform = get_text_transform(lycon);
     bool is_word_start = true;  // First character is always word start
+    bool has_break_opportunity = false;  // track if hyphen/break found before overflow
 
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
@@ -1183,6 +1248,13 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             is_small_caps_lower = (codepoint != original);
         }
         is_word_start = false;  // Only first char is word start in this context
+
+        // Track break opportunities: hyphens and soft hyphens.
+        // If a break opportunity exists before the overflow point, the text can
+        // be split there during actual layout — no need for premature wrapping.
+        if (*str == '-' || codepoint == 0x00AD) {
+            has_break_opportunity = true;
+        }
 
         // Check for Unicode space characters with defined widths
         float unicode_space_em = get_unicode_space_width_em(codepoint);
@@ -1214,6 +1286,11 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         if (lycon->line.advance_x + text_width > line_right) { // line filled up
+            // CSS Text 3 §5.2: If a break opportunity (hyphen, soft hyphen, ZWSP,
+            // CJK) existed before the overflow, the text can be split during actual
+            // layout at that break point.  Don't signal LINE_FILLED — let the text
+            // start on the current line and wrap naturally at the break.
+            if (has_break_opportunity) return RDT_NOT_SURE;
             return RDT_LINE_FILLED;
         }
     } while (*str);  // end of text
@@ -1465,6 +1542,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
               white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
 
+    // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
+    // A leading space constitutes a soft wrap opportunity, enabling the first-word-fit
+    // check at LAYOUT_TEXT to wrap to the next line if the first word doesn't fit.
+    bool had_leading_space = is_space(*str);
+
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
         // When collapsing spaces, skip all whitespace (including newlines if collapse_newlines)
@@ -1504,6 +1586,28 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
                       lycon->line.advance_x, line_right);
             line_break(lycon);
+        }
+    }
+    // CSS Text 3 §5.2: Before placing any characters, check whether the first
+    // word fits in the remaining space on the current line.  If not, wrap to
+    // the next line.  This prevents partial words from being placed at the end
+    // of a line when they should have started on the next line.
+    // Only check when the text had a leading space (soft wrap opportunity).
+    // Without a space, no break opportunity exists before this text and the
+    // content must continue on the current line (subject to overflow handling).
+    // Skip when word-break: break-all is active, since every character is a
+    // break opportunity and the remaining space can always be utilized.
+    if (wrap_lines && !lycon->line.is_line_start && !break_all && had_leading_space) {
+        float line_right = lycon->line.has_float_intrusion ?
+                           lycon->line.effective_right : lycon->line.right;
+        float remaining = line_right - lycon->line.advance_x;
+        if (remaining > 0) {
+            float first_word_w = measure_first_word_width(lycon, str, text_end, text_transform);
+            if (first_word_w > 0 && first_word_w > remaining) {
+                log_debug("First word (%.1f) exceeds remaining space (%.1f), wrapping to next line",
+                          first_word_w, remaining);
+                line_break(lycon);
+            }
         }
     }
     if (!text_view) {
@@ -1893,7 +1997,33 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
-                else { // last_space outside the text, break at start of text
+                else { // last_space outside the text
+                    // CSS Text 3 §5.2: When overflow-wrap: break-word is active and
+                    // the last soft-wrap opportunity (space) is in a previous text node,
+                    // perform an emergency mid-word break at the overflow point rather
+                    // than moving the entire text to a new line.  This creates a
+                    // multi-line inline box (e.g. <code>) matching browser behavior,
+                    // where characters that fit on the current line stay there and the
+                    // remainder continues on the next line.
+                    if (break_word && !lycon->line.is_line_start) {
+                        log_debug("break-word: mid-word break (last_space outside text)");
+                        rect->width -= wd;  // undo the char that overflowed
+                        int text_len = str - text_start - rect->start_index;
+                        if (text_len > 0) {
+                            output_text(lycon, text_view, rect, text_len, rect->width);
+                        } else {
+                            // first char already overflows: unlink the empty rect
+                            if (text_view->rect == rect) {
+                                text_view->rect = nullptr;
+                            } else {
+                                TextRect* prev = text_view->rect;
+                                while (prev && prev->next != rect) prev = prev->next;
+                                if (prev) prev->next = nullptr;
+                            }
+                        }
+                        line_break(lycon);
+                        goto LAYOUT_TEXT;
+                    }
                     float advance_x = lycon->line.advance_x;  // save current advance_x
                     line_break(lycon);
                     rect->y = lycon->block.advance_y;

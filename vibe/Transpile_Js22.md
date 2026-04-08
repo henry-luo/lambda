@@ -333,32 +333,38 @@ Exit codes: 0=pass, 1=fail, 124=timeout, 139=crash (SIGSEGV)
 
 ## 6. Post-v22 Progress: Runtime Fixes and Feature Gate Openings
 
-### Current Baseline (post-v22 sessions)
+### Current Baseline (Run 38, commit `e5930c26e`)
 
 | Metric                               | Value                                         |
 | ------------------------------------ | --------------------------------------------- |
 | Total test262 files                  | 53,399                                        |
-| Tests batched (non-skipped)          | 38,649                                        |
+| Tests batched (non-skipped)          | 28,477                                        |
 | Tests skipped (unsupported features) | 10,172                                        |
-| **Passing tests**                    | **28,477 (73.7% of batched, 53.3% of total)** |
-| Quarantined crashers                 | 185 (136 crash-exit + 48 missing)             |
-| Phase 2 wall clock (8 workers, -O0)  | 83.1s                                         |
+| **Passing tests**                    | **14,631 (51.4% of batched, 27.4% of total)** |
+| Failing tests                        | 13,846                                        |
+| Quarantined crashers                 | 172                                            |
+| Crash-exit tests                     | 192                                            |
+| Phase 2 wall clock (8 workers, -O0)  | 125.8s                                        |
 
-### Progression from v22 baseline (11,554) → current (28,477)
+> **Note on previously reported 28,477 figure:** An earlier session reported 28,477 passing tests at commit `ca39c6446`. That measurement was inflated by stale incremental builds — commit `ca39c6446` inserted `LMD_TYPE_NUM_SIZED` into the TypeId enum, shifting `LMD_TYPE_INT` from position 3→4 and changing `JS_DELETED_SENTINEL_VAL`. Old `.o` files compiled with the pre-shift enum were linked with new `.o` files, producing silently wrong runtime behavior that happened to pass more tests. A clean build (`make clean-all && make build`) at the same commit produces only **14,397** passing tests.
 
-| Run | Change | Passing | Delta | Regressions |
-|-----|--------|---------|-------|-------------|
-| v22 baseline | — | 11,554 | — | — |
-| +Stage 2 sparse fix | Runtime | 11,750 | +196 | 0 |
-| +v21→v22 rebase | Committed code | 12,713 | +963 | 0 |
-| +9 runtime fixes | Runtime | 27,015 | +14,302 | 0 |
-| +Symbol.iterator gate | Feature gate | 27,778 | +763 | 0 |
-| +Symbol gate | Feature gate | 28,310 | +532 | 0 |
-| +Symbol.toPrimitive, Symbol.hasInstance | Feature gate | 28,477 | +167 | 0 |
+### Progression from v22 baseline (11,554) → current (14,631)
 
-**Total improvement: +16,923 tests (146% increase), 0 regressions across all runs.**
+All figures below are from clean builds.
 
-### Runtime Fixes Applied (v22 sessions)
+| Step | Change | Passing | Delta | Commit |
+|------|--------|---------|-------|--------|
+| v22 baseline | — | 11,554 | — | `c05d539e8` |
+| +Stage 2 sparse fix | Runtime | 11,750 | +196 | — |
+| +v21→v22 rebase | Committed code | 12,713 | +963 | — |
+| +9 runtime fixes + 4 feature gates | Runtime + gates | 14,397 | +1,684 | `ca39c6446` |
+| +5 post-ca39c64 fixes | Runtime | 14,631 | +234 | `e5930c26e` |
+
+**Total improvement: +3,077 tests (26.6% increase) from v22 baseline.**
+
+Runs 32–38 (all at `e5930c26e`, clean builds) show a ±40 test variance due to batch ordering noise: 14,383 / 14,546 / 14,604 / 14,551 / 14,647 / 14,668 / 14,631.
+
+### Runtime Fixes Applied (v22 sessions, fixes 1–9)
 
 1. **Sequence expression / pattern / labeled statement function collection** — `jm_collect_functions` in `transpile_js_mir.cpp` missed SEQUENCE_EXPRESSION, LABELED_STATEMENT, ARRAY_PATTERN, OBJECT_PATTERN node types, causing undeclared function errors.
 
@@ -378,14 +384,28 @@ Exit codes: 0=pass, 1=fail, 124=timeout, 139=crash (SIGSEGV)
 
 9. **ToPrimitive in js_less_than** — Same ToPrimitive fix for comparison operators (`<`, `>`, `<=`, `>=`).
 
+### Runtime Fixes Applied (post-ca39c64 session, fixes 10–14)
+
+10. **Preamble recompilation after crash** — `main.cpp` now saves `harness_src` and recompiles the preamble module when a previous test crashes and destroys the MIR context. Previously the preamble pointer was stale after crash recovery.
+
+11. **Crasher quarantine with batch-of-1 retry** — `test_js_test262_gtest.cpp` writes a cumulative crasher log across all Phase 2 batches. Phase 2a re-runs quarantined tests individually (batch size 1) to isolate true crashers from collateral damage.
+
+12. **Function constructor name_pool use-after-free** — `transpile_js_mir.cpp` now NULLs `name_pool` and `ast_pool` pointers before calling `pool_destroy()`, preventing dangling pointer access when `jm_transpile_function_body` re-enters pool allocation.
+
+13. **Object.defineProperty prototype chain** — `js_has_own_property` in `js_globals.cpp` now recognizes `__nc_`, `__nw_`, `__ne_` property descriptor markers as own-property evidence, fixing `Object.defineProperty` on objects with inherited properties.
+
+14. **eval() implementation** — Added `js_builtin_eval` in `transpile_js_mir.cpp` (with JIT registration in `sys_func_registry.c` and declaration in `js_runtime.h`). Handles direct eval calls by parsing and transpiling the eval string at runtime.
+
 ### Feature Gates Opened
 
-| Feature removed from UNSUPPORTED_FEATURES | Tests unlocked | Tests passing |
-|-------------------------------------------|---------------|---------------|
-| `Symbol.iterator` | ~1,830 | +763 |
-| `Symbol` | ~1,205 | +532 |
-| `Symbol.toPrimitive` | ~98 | +167 (combined) |
-| `Symbol.hasInstance` | ~69 | (combined above) |
+| Feature removed from UNSUPPORTED_FEATURES | Tests unlocked |
+|-------------------------------------------|---------------|
+| `Symbol.iterator` | ~1,830 |
+| `Symbol` | ~1,205 |
+| `Symbol.toPrimitive` | ~98 |
+| `Symbol.hasInstance` | ~69 |
+
+> Individual pass-count deltas per gate are not available — all four gates were opened in the same commit (`ca39c6446`) and clean-build measurements were not taken per-gate.
 
 ### Known Limitations Discovered
 

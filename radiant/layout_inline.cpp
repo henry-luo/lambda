@@ -72,7 +72,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 font_content_h = font_get_cell_height(fh);
             }
             span->width = (int)inline_sum;
-            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             // No inline-axis decorations — the inline box is invisible, collapse to zero
             span->width = 0;
@@ -117,7 +117,7 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
                 font_content_h = font_get_cell_height(fh);
             }
             span->width = (int)inline_sum;
-            span->height = (int)(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
+            span->height = (int)roundf(font_content_h + border_top + pad_top + pad_bottom + border_bottom);
         } else {
             span->width = 0;
             span->height = 0;
@@ -278,8 +278,10 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
     // content area. Compute the parent's border extent from content_min/max_y
     // (the text/inline-block positions), then take the union with the visual extent
     // (which includes child inline span borders that may extend further).
-    int parent_border_top_y = content_min_y - (int)border_top - (int)pad_top;
-    int parent_border_bottom_y = content_max_y + (int)border_bottom + (int)pad_bottom;
+    // Use roundf to avoid truncation for fractional em-based padding (e.g. 0.2em = 2.72px).
+    // Truncating 2.72 → 2 loses 0.7px per side, making inline code elements too short.
+    int parent_border_top_y = content_min_y - (int)roundf(border_top) - (int)roundf(pad_top);
+    int parent_border_bottom_y = content_max_y + (int)roundf(border_bottom) + (int)roundf(pad_bottom);
     int final_min_y = min(visual_min_y, parent_border_top_y);
     int final_max_y = max(visual_max_y, parent_border_bottom_y);
 
@@ -536,6 +538,29 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->source_loc());
+
+    // HTML5 §4.5.27: <wbr> represents a line break opportunity.
+    // It doesn't generate a box — browsers report (0,0,0,0) via getBoundingClientRect.
+    // Equivalent to U+200B ZWSP per Unicode Line Breaking Algorithm.
+    if (elmt->tag() == HTM_TAG_WBR) {
+        ViewSpan* wbr_span = (ViewSpan*)set_view(lycon, RDT_VIEW_INLINE, elmt);
+        wbr_span->x = 0;
+        wbr_span->y = 0;
+        wbr_span->width = 0;
+        wbr_span->height = 0;
+        // Record a soft wrap opportunity at the current inline position,
+        // mirroring the U+200B ZWSP handling in layout_text.cpp.
+        // Use the element address as a non-null sentinel for last_space — it will
+        // never fall within a text buffer range, so the wrap logic correctly
+        // breaks at the element boundary (the "outside text" path in layout_text).
+        lycon->line.last_space = (unsigned char*)elmt;
+        lycon->line.last_space_pos = lycon->line.advance_x;
+        lycon->line.last_space_is_hyphen = false;
+        lycon->line.trailing_space_width = 0;
+        lycon->line.wrap_opportunity_before_nowrap = true;
+        return;
+    }
+
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);

@@ -129,6 +129,7 @@ Item js_apply_function(Item func_item, Item this_val, Item args_array);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_func_bind(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 Item js_new_function_from_string(Item* args, int argc);
+Item js_builtin_eval(Item code_item);
 Item js_create_regex(const char* pattern, int pattern_len, const char* flags, int flags_len);
 Item js_regexp_construct(Item pattern_item, Item flags_item);
 Item js_regex_test(Item regex, Item str);

@@ -141,6 +141,9 @@ extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* en
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
 
+// MIR interpreter mode (from mir.c)
+extern "C" int g_mir_interp_mode;
+
 // External function declarations
 extern "C" {
     #include "../lib/url.h"
@@ -1047,14 +1050,19 @@ int main(int argc, char *argv[]) {
         bool js_had_error = false;
 
         if (argc >= 3) {
-            // Parse arguments: js file.js [--document page.html]
-            const char* js_file = argv[2];
+            // Parse arguments: js [options] file.js [--document page.html]
+            const char* js_file = NULL;
             const char* html_file = NULL;
-            for (int i = 3; i < argc; i++) {
+            for (int i = 2; i < argc; i++) {
                 if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) {
                     html_file = argv[++i];
+                } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                    g_mir_interp_mode = 1;
+                } else if (argv[i][0] != '-') {
+                    if (!js_file) js_file = argv[i];
                 }
             }
+            if (!js_file) js_file = argv[2];  // fallback
 
             char* js_source = read_text_file(js_file);
             if (!js_source) {
@@ -2639,6 +2647,8 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                 int level = atoi(argv[i] + 12);
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
+            } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                g_mir_interp_mode = 1;
             }
         }
 
@@ -2665,6 +2675,7 @@ int main(int argc, char *argv[]) {
         memset(&preamble, 0, sizeof(preamble));
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
+        char* saved_harness_src = NULL;  // kept for recompilation after crash recovery
 
         char line[4096];
         while (fgets(line, sizeof(line), stdin)) {
@@ -2700,7 +2711,10 @@ int main(int argc, char *argv[]) {
                 // Compile and execute harness as preamble
                 memset(&preamble, 0, sizeof(preamble));
                 Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
-                free(harness_src);
+
+                // Save harness source for recompilation after crash recovery
+                if (saved_harness_src) free(saved_harness_src);
+                saved_harness_src = harness_src;  // take ownership instead of freeing
 
                 if (pres.item != ITEM_ERROR) {
                     has_preamble = true;
@@ -2885,10 +2899,18 @@ int main(int argc, char *argv[]) {
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
                     // Crash destroyed heap — preamble function objects are gone.
-                    // Invalidate preamble so it gets re-sent by the next harness: line.
+                    // Recompile preamble from saved source so subsequent tests still have harness.
                     if (has_preamble) {
                         preamble_state_destroy(&preamble);
                         has_preamble = false;
+                    }
+                    if (saved_harness_src) {
+                        memset(&preamble, 0, sizeof(preamble));
+                        Item pres = transpile_js_to_mir_preamble(&runtime, saved_harness_src, "<harness>", &preamble);
+                        if (pres.item != ITEM_ERROR) {
+                            has_preamble = true;
+                            preamble_var_checkpoint = preamble.module_var_count;
+                        }
                     }
                 } else if (has_preamble) {
                     // Partial reset: preserve harness module vars, clear test state
@@ -2909,6 +2931,7 @@ int main(int argc, char *argv[]) {
             preamble_state_destroy(&preamble);
             has_preamble = false;
         }
+        if (saved_harness_src) { free(saved_harness_src); saved_harness_src = NULL; }
 
         // tear down persistent heap (hot reload mode only)
         if (hot_reload) {
@@ -2973,6 +2996,8 @@ int main(int argc, char *argv[]) {
 #endif
             if (strcmp(argv[i], "--mir") == 0) {
                 use_mir = true;  // backward compat (already default)
+            } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                g_mir_interp_mode = 1;
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
@@ -3049,6 +3074,9 @@ int main(int argc, char *argv[]) {
 #endif
         if (strcmp(argv[i], "--mir") == 0) {
             use_mir = true;  // backward compat (already default)
+        }
+        else if (strcmp(argv[i], "--mir-interp") == 0) {
+            g_mir_interp_mode = 1;
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;

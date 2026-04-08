@@ -454,6 +454,18 @@ build_thorvg_v1_0_pre34_for_mac() {
         return 1
     }
 
+    # Apply Lambda patches
+    PATCH_FILE="$SCRIPT_DIR/patches/thorvg-svg-font-inheritance.patch"
+    if [ -f "$PATCH_FILE" ]; then
+        echo "Applying ThorVG patches..."
+        git apply "$PATCH_FILE" 2>/dev/null || {
+            # Check if already applied
+            git apply --check "$PATCH_FILE" 2>/dev/null && true || {
+                echo "  (patch already applied or skipped)"
+            }
+        }
+    fi
+
     # Check for meson build system
     if [ -f "meson.build" ]; then
         # Check if meson is available
