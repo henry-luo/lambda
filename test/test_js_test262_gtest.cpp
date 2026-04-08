@@ -54,6 +54,7 @@
 #else
     #include <unistd.h>
     #include <sys/wait.h>
+    #include <signal.h>
     #include <dirent.h>
     #include <fcntl.h>
     #include <spawn.h>
@@ -731,6 +732,7 @@ static std::set<std::string> g_known_crashers;
 static bool g_update_baseline = false;
 static bool g_baseline_only = false;
 static bool g_no_hot_reload = false;
+static bool g_mir_interp = false;
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 
@@ -906,8 +908,8 @@ static void run_t262_sub_batch(
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[0]);
     posix_spawn_file_actions_addclose(&file_actions, stdout_pipe[1]);
 
-    char* argv[6] = {
-        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL
+    char* argv[8] = {
+        (char*)"lambda.exe", (char*)"js-test-batch", (char*)"--timeout=10", NULL, NULL, NULL, NULL, NULL
     };
     int argi = 3;
     if (g_no_hot_reload) {
@@ -915,6 +917,9 @@ static void run_t262_sub_batch(
     }
     if (g_opt_level >= 0) {
         argv[argi++] = g_opt_level_arg;
+    }
+    if (g_mir_interp) {
+        argv[argi++] = (char*)"--mir-interp";
     }
     extern char** environ;
     pid_t pid;
@@ -1537,6 +1542,30 @@ public:
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
 
+#ifndef _WIN32
+    // Kill any stale lambda.exe processes from previous runs to avoid
+    // CPU contention that skews timing results.
+    {
+        FILE* fp = popen("pgrep -x lambda.exe 2>/dev/null", "r");
+        if (fp) {
+            char buf[64];
+            int count = 0;
+            pid_t my_ppid = getppid();  // don't kill our own parent
+            while (fgets(buf, sizeof(buf), fp)) {
+                pid_t pid = (pid_t)atoi(buf);
+                if (pid > 0 && pid != getpid() && pid != my_ppid) {
+                    kill(pid, SIGKILL);
+                    count++;
+                }
+            }
+            pclose(fp);
+            if (count > 0) {
+                fprintf(stderr, "[test262] Killed %d stale lambda.exe process(es)\n", count);
+            }
+        }
+    }
+#endif
+
     // Check for --update-baseline flag (must be after InitGoogleTest consumes gtest flags)
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--update-baseline") == 0) {
@@ -1547,6 +1576,9 @@ int main(int argc, char** argv) {
         }
         if (strcmp(argv[i], "--no-hot-reload") == 0) {
             g_no_hot_reload = true;
+        }
+        if (strcmp(argv[i], "--mir-interp") == 0) {
+            g_mir_interp = true;
         }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);

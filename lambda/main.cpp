@@ -141,6 +141,9 @@ extern CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* en
 // MIR JIT optimization level for JS (from transpile_js_mir.cpp)
 extern unsigned int g_js_mir_optimize_level;
 
+// MIR interpreter mode (from mir.c)
+extern "C" int g_mir_interp_mode;
+
 // External function declarations
 extern "C" {
     #include "../lib/url.h"
@@ -1047,14 +1050,19 @@ int main(int argc, char *argv[]) {
         bool js_had_error = false;
 
         if (argc >= 3) {
-            // Parse arguments: js file.js [--document page.html]
-            const char* js_file = argv[2];
+            // Parse arguments: js [options] file.js [--document page.html]
+            const char* js_file = NULL;
             const char* html_file = NULL;
-            for (int i = 3; i < argc; i++) {
+            for (int i = 2; i < argc; i++) {
                 if (strcmp(argv[i], "--document") == 0 && i + 1 < argc) {
                     html_file = argv[++i];
+                } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                    g_mir_interp_mode = 1;
+                } else if (argv[i][0] != '-') {
+                    if (!js_file) js_file = argv[i];
                 }
             }
+            if (!js_file) js_file = argv[2];  // fallback
 
             char* js_source = read_text_file(js_file);
             if (!js_source) {
@@ -2639,6 +2647,8 @@ int main(int argc, char *argv[]) {
             } else if (strncmp(argv[i], "--opt-level=", 12) == 0) {
                 int level = atoi(argv[i] + 12);
                 if (level >= 0 && level <= 3) g_js_mir_optimize_level = (unsigned int)level;
+            } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                g_mir_interp_mode = 1;
             }
         }
 
@@ -2986,6 +2996,8 @@ int main(int argc, char *argv[]) {
 #endif
             if (strcmp(argv[i], "--mir") == 0) {
                 use_mir = true;  // backward compat (already default)
+            } else if (strcmp(argv[i], "--mir-interp") == 0) {
+                g_mir_interp_mode = 1;
             } else if (strcmp(argv[i], "--no-log") == 0) {
                 // already handled early in main()
             } else if (argv[i][0] != '-') {
@@ -3062,6 +3074,9 @@ int main(int argc, char *argv[]) {
 #endif
         if (strcmp(argv[i], "--mir") == 0) {
             use_mir = true;  // backward compat (already default)
+        }
+        else if (strcmp(argv[i], "--mir-interp") == 0) {
+            g_mir_interp_mode = 1;
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;

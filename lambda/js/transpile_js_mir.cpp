@@ -56,6 +56,9 @@ MIR_error_func_t g_batch_mir_error_handler = NULL;
 // Set from CLI (e.g., --opt-level=0). Preamble always uses its own level.
 unsigned int g_js_mir_optimize_level = 2;
 
+// POC: MIR interpreter mode — set from mir.c
+extern "C" int g_mir_interp_mode;
+
 // External declarations for parallel module compilation
 extern "C" {
     const TSLanguage* tree_sitter_typescript(void);
@@ -18926,7 +18929,7 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         return false;
     }
 
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -19185,7 +19188,7 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
         return (Item){.item = ITEM_ERROR};
     }
 
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -19438,7 +19441,7 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
         return ItemNull;
     }
 
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main_fn = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -19665,7 +19668,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         return (Item){.item = ITEM_ERROR};
     }
 
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
     typedef Item (*js_main_func_t)(Context*);
     js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
@@ -19746,6 +19749,21 @@ static const JsPreambleState* g_jm_preamble_in = NULL;  // input: pre-seed from 
 
 static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename) {
     log_debug("js-mir: starting direct MIR transpilation for '%s'", filename ? filename : "<string>");
+
+    // Check env var for interpreter mode (once, as fallback for CLI --mir-interp)
+    static bool interp_checked = false;
+    if (!interp_checked) {
+        if (!g_mir_interp_mode) {
+            const char* env = getenv("JS_MIR_INTERP");
+            if (env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0)) {
+                g_mir_interp_mode = 1;
+            }
+        }
+        if (g_mir_interp_mode) {
+            log_info("js-mir: INTERPRETER MODE enabled");
+        }
+        interp_checked = true;
+    }
 
     // Save runtime for dynamic function compilation (new Function(...)) support
     js_source_runtime = runtime;
@@ -19932,7 +19950,7 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     }
 
     // Link and generate
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
 
     // Find js_main
     typedef Item (*js_main_func_t)(Context*);
