@@ -722,7 +722,7 @@ struct BatchResult {
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
-static const size_t T262_MAX_PARALLEL_BATCHES = 8;
+static const size_t T262_MAX_PARALLEL_BATCHES = 12;
 static const size_t RETRY_BATCH_SIZE = 5;
 
 struct SubBatch { size_t start; size_t end; };

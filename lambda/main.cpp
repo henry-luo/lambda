@@ -2708,7 +2708,6 @@ int main(int argc, char *argv[]) {
                     has_preamble = false;
                 }
 
-                // Compile and execute harness as preamble
                 memset(&preamble, 0, sizeof(preamble));
                 Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
 
@@ -2716,7 +2715,7 @@ int main(int argc, char *argv[]) {
                 if (saved_harness_src) free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
 
-                if (pres.item != ITEM_ERROR) {
+                if (preamble.mir_ctx) {
                     has_preamble = true;
                     preamble_var_checkpoint = preamble.module_var_count;
                 }

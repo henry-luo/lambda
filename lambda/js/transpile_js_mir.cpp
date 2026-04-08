@@ -367,7 +367,7 @@ static uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t se
         strlen(((JsLocalFuncEntry*)item)->name), seed0, seed1);
 }
 
-// Module-level constant entry (top-level const with literal value)
+// Module-scope constants: variables, functions, classes declared at top level
 enum JsModuleConstType {
     MCONST_INT,
     MCONST_FLOAT,
@@ -386,8 +386,7 @@ struct JsModuleConstEntry {
     double float_val;   // for MCONST_FLOAT
     bool is_int;        // legacy compat: true for int, false for float
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
-    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
-                        //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
+    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
 };
