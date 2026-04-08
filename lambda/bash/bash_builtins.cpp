@@ -718,16 +718,26 @@ extern "C" Item bash_builtin_test(Item* args, int argc) {
     }
 
     if (argc == 2) {
-        // unary operators: -z, -n
+        // unary operators: -z, -n, -f, -d, -e, -r, -w, -x, -s, -L, -p, -t
         String* op = it2s(args[0]);
         if (op && op->len == 2 && op->chars[0] == '-') {
-            if (op->chars[1] == 'z') {
-                Item r = bash_test_z(args[1]);
-                int code = it2b(r) ? 0 : 1;
-                bash_set_exit_code(code);
-                return (Item){.item = i2it(code)};
-            } else if (op->chars[1] == 'n') {
-                Item r = bash_test_n(args[1]);
+            char c = op->chars[1];
+            Item r;
+            bool handled = true;
+            switch (c) {
+                case 'z': r = bash_test_z(args[1]); break;
+                case 'n': r = bash_test_n(args[1]); break;
+                case 'f': r = bash_test_f(args[1]); break;
+                case 'd': r = bash_test_d(args[1]); break;
+                case 'e': r = bash_test_e(args[1]); break;
+                case 'r': r = bash_test_r(args[1]); break;
+                case 'w': r = bash_test_w(args[1]); break;
+                case 'x': r = bash_test_x(args[1]); break;
+                case 's': r = bash_test_s(args[1]); break;
+                case 'L': case 'h': r = bash_test_l(args[1]); break;
+                default: handled = false; break;
+            }
+            if (handled) {
                 int code = it2b(r) ? 0 : 1;
                 bash_set_exit_code(code);
                 return (Item){.item = i2it(code)};
@@ -840,11 +850,14 @@ extern "C" Item bash_builtin_return(Item code) {
 // ============================================================================
 
 extern "C" Item bash_builtin_read(Item* args, int argc) {
-    // read [-r] [-p prompt] [-d delim] [-n nchars] [-t timeout] var1 [var2 ...]
+    // read [-r] [-p prompt] [-d delim] [-n nchars] [-t timeout] [-a array] var1 [var2 ...]
     // Reads a line from stdin_item (herestring/pipe) or real stdin, then
     // splits by IFS and assigns to named variables.
     bool raw_mode = false;  // -r: no backslash escaping
     int var_start = 0;      // index of first variable name in args
+    Item array_name = {.item = ITEM_NULL};  // -a: array variable name
+    char delim_char = '\n';  // -d: delimiter (default newline)
+    bool has_delim = false;
 
     // parse flags
     for (int i = 0; i < argc; i++) {
@@ -853,9 +866,25 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
         if (arg->len == 2 && arg->chars[1] == 'r') {
             raw_mode = true;
             var_start = i + 1;
-        } else if (arg->len == 2 && (arg->chars[1] == 'p' || arg->chars[1] == 'd' ||
+        } else if (arg->len == 2 && arg->chars[1] == 'a' && i + 1 < argc) {
+            // -a array_name
+            array_name = args[i + 1];
+            var_start = i + 2;
+            i++; // skip array name
+        } else if (arg->len == 2 && arg->chars[1] == 'd' && i + 1 < argc) {
+            // -d delim
+            String* d = it2s(bash_to_string(args[i + 1]));
+            if (d && d->len > 0) {
+                delim_char = d->chars[0];
+            } else {
+                delim_char = '\0'; // NUL delimiter
+            }
+            has_delim = true;
+            var_start = i + 2;
+            i++;
+        } else if (arg->len == 2 && (arg->chars[1] == 'p' ||
                                       arg->chars[1] == 'n' || arg->chars[1] == 't' ||
-                                      arg->chars[1] == 'u' || arg->chars[1] == 'a')) {
+                                      arg->chars[1] == 'u')) {
             // flags that take an argument: skip the next arg too
             var_start = i + 2;
             i++; // skip the argument to this flag
@@ -878,17 +907,49 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
 
     Item stdin_item = bash_get_stdin_item();
     String* stdin_str = it2s(bash_to_string(stdin_item));
-    if (stdin_str && stdin_str->len > 0) {
-        // read first line from stdin_item
+    bool using_stdin_item = (stdin_str && stdin_str->len > 0);
+    if (using_stdin_item) {
+        // read from stdin_item up to delimiter
         line = stdin_str->chars;
         line_len = stdin_str->len;
-        // find end of first line
-        for (int i = 0; i < line_len; i++) {
-            if (line[i] == '\n') {
-                line_len = i;
-                break;
+        int consumed = line_len; // default: consume entire string
+        if (delim_char == '\0') {
+            // NUL delimiter: read entire input (NUL won't appear in string)
+            // do NOT strip trailing newline - bash preserves it with -d
+        } else {
+            // find delimiter character
+            for (int i = 0; i < line_len; i++) {
+                if (line[i] == delim_char) {
+                    line_len = i;
+                    consumed = i + 1; // consume through the delimiter
+                    break;
+                }
             }
         }
+        // advance stdin_item past consumed portion
+        if (consumed >= stdin_str->len) {
+            // set to empty string but keep the "set" flag so EOF is detected
+            Item empty_item = (Item){.item = s2it(heap_create_name("", 0))};
+            bash_set_stdin_item(empty_item);
+        } else {
+            const char* rest = stdin_str->chars + consumed;
+            int rest_len = stdin_str->len - consumed;
+            Item rest_item = (Item){.item = s2it(heap_create_name(rest, rest_len))};
+            bash_set_stdin_item(rest_item);
+        }
+    } else if (bash_stdin_item_is_set()) {
+        // stdin_item was set but is now empty — EOF on pipe
+        Item empty = (Item){.item = s2it(heap_create_name("", 0))};
+        if (num_vars == 0) {
+            Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
+            bash_set_var(reply_name, empty);
+        } else {
+            for (int i = var_start; i < argc; i++) {
+                bash_set_var(args[i], empty);
+            }
+        }
+        bash_set_exit_code(1);
+        return (Item){.item = i2it(1)};
     } else {
         // read from real stdin
         if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -931,8 +992,8 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
         line_len = out;
     }
 
-    // if no variable names specified, assign whole line to REPLY
-    if (num_vars <= 0) {
+    // if no variable names specified and no -a flag, assign whole line to REPLY
+    if (num_vars <= 0 && array_name.item == ITEM_NULL) {
         // REPLY preserves the full line without any whitespace stripping
         Item reply_name = (Item){.item = s2it(heap_create_name("REPLY", 5))};
         String* val = heap_create_name(line, line_len);
@@ -1020,7 +1081,16 @@ extern "C" Item bash_builtin_read(Item* args, int argc) {
     }
 
     // assign variables
-    if (num_fields <= num_vars) {
+    if (array_name.item != ITEM_NULL) {
+        // -a mode: assign all fields to an indexed array
+        // create array with all fields
+        Item arr = bash_array_new();
+        for (int fi = 0; fi < num_fields; fi++) {
+            String* val = heap_create_name(line + fields[fi].start, fields[fi].end - fields[fi].start);
+            bash_array_append(arr, (Item){.item = s2it(val)});
+        }
+        bash_set_var(array_name, arr);
+    } else if (num_fields <= num_vars) {
         // fewer or equal fields: assign each field value, empty for vars beyond fields
         for (int vi = 0; vi < num_vars; vi++) {
             int arg_idx = var_start + vi;
@@ -1244,16 +1314,72 @@ extern "C" Item bash_builtin_caller(Item* args, int argc) {
 
 // cat: read stdin item and write to stdout (identity pipe stage)
 extern "C" Item bash_builtin_cat(Item* args, int argc) {
+    // parse flags
+    bool flag_v = false;  // -v: display non-printing characters
+    int file_start = 0;
+    for (int i = 0; i < argc; i++) {
+        String* arg = it2s(bash_to_string(args[i]));
+        if (!arg || arg->len == 0 || arg->chars[0] != '-' || arg->len == 1) break;
+        // check if it's a flag (starts with - and has letters)
+        bool is_flag = true;
+        for (int j = 1; j < arg->len; j++) {
+            char c = arg->chars[j];
+            if (c == 'v') flag_v = true;
+            else if (c == 'e') flag_v = true; // -e implies -v
+            else if (c == 't') flag_v = true; // -t implies -v
+            else if (c == 'A') flag_v = true; // -A implies -v
+            else { is_flag = false; break; }
+        }
+        if (!is_flag) break;
+        file_start = i + 1;
+    }
+
+    // helper lambda-style: output with -v transform
+    auto cat_output = [&](const char* data, int len) {
+        if (!flag_v) {
+            bash_raw_write(data, len);
+            return;
+        }
+        // -v mode: replace non-printing chars with ^X notation
+        for (int i = 0; i < len; i++) {
+            unsigned char c = (unsigned char)data[i];
+            if (c == '\n' || c == '\t') {
+                // pass through tabs and newlines
+                bash_raw_write((const char*)&c, 1);
+            } else if (c < 0x20) {
+                // control chars 0x00-0x1F: ^@ through ^_
+                char buf[2] = {'^', (char)('@' + c)};
+                bash_raw_write(buf, 2);
+            } else if (c == 0x7F) {
+                bash_raw_write("^?", 2);
+            } else if (c >= 0x80) {
+                // high bytes: M-^X or M-X
+                bash_raw_write("M-", 2);
+                unsigned char lo = c & 0x7F;
+                if (lo < 0x20) {
+                    char buf[2] = {'^', (char)('@' + lo)};
+                    bash_raw_write(buf, 2);
+                } else if (lo == 0x7F) {
+                    bash_raw_write("^?", 2);
+                } else {
+                    bash_raw_write((const char*)&lo, 1);
+                }
+            } else {
+                bash_raw_write((const char*)&c, 1);
+            }
+        }
+    };
+
     // if file arguments provided, read and output each file
     bool had_files = false;
-    for (int i = 0; i < argc; i++) {
+    for (int i = file_start; i < argc; i++) {
         String* arg = it2s(bash_to_string(args[i]));
         if (!arg || arg->len == 0) continue;
         if (arg->chars[0] == '-' && arg->len == 1) {
             // cat - : read stdin
             Item input = bash_get_stdin_item();
             String* s = it2s(bash_to_string(input));
-            if (s && s->len > 0) bash_raw_write(s->chars, s->len);
+            if (s && s->len > 0) cat_output(s->chars, s->len);
             had_files = true;
             continue;
         }
@@ -1267,7 +1393,7 @@ extern "C" Item bash_builtin_cat(Item* args, int argc) {
         char buf[4096];
         size_t n;
         while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-            bash_raw_write(buf, (int)n);
+            cat_output(buf, (int)n);
         }
         fclose(f);
         had_files = true;
@@ -1277,7 +1403,7 @@ extern "C" Item bash_builtin_cat(Item* args, int argc) {
         Item input = bash_get_stdin_item();
         String* s = it2s(bash_to_string(input));
         if (s && s->len > 0) {
-            bash_raw_write(s->chars, s->len);
+            cat_output(s->chars, s->len);
         }
     }
     bash_set_exit_code(0);
@@ -2236,7 +2362,12 @@ extern "C" Item bash_builtin_type(Item* args, int argc) {
                 } else if (!flag_p) {
                     n = snprintf(buf, sizeof(buf), "%.*s is a function\n", len, name);
                     bash_raw_write(buf, n);
-                    // TODO: print function body
+                    int src_len = 0;
+                    const char* src = bash_get_func_source(name, &src_len);
+                    if (src && src_len > 0) {
+                        bash_raw_write(src, src_len);
+                        bash_raw_write("\n", 1);
+                    }
                 }
                 if (!flag_a) continue;
             }

@@ -91,6 +91,7 @@ Item bash_test_l(Item value);               // -L (symlink)
 // regex match: =~
 Item bash_test_regex(Item string, Item pattern);
 Item bash_test_glob(Item string, Item pattern);
+Item bash_glob_quote_str(Item str);
 
 // ========================================================================
 // String operations
@@ -123,12 +124,13 @@ Item bash_expand_trim_suffix_long(Item val, Item pat);      // ${var%%pat}
 Item bash_expand_replace(Item val, Item pat, Item repl);    // ${var/pat/str}
 Item bash_expand_replace_all(Item val, Item pat, Item repl);// ${var//pat/str}
 Item bash_expand_substring(Item val, Item offset, Item len);// ${var:off:len}
-Item bash_expand_upper_first(Item val);                     // ${var^}
-Item bash_expand_upper_all(Item val);                       // ${var^^}
-Item bash_expand_lower_first(Item val);                     // ${var,}
-Item bash_expand_lower_all(Item val);                       // ${var,,}
-Item bash_expand_toggle_first(Item val);                    // ${var~}
-Item bash_expand_toggle_all(Item val);                      // ${var~~}
+Item bash_expand_upper_first(Item val, Item pat);           // ${var^pat}
+Item bash_expand_upper_all(Item val, Item pat);             // ${var^^pat}
+Item bash_expand_lower_first(Item val, Item pat);           // ${var,pat}
+Item bash_expand_lower_all(Item val, Item pat);             // ${var,,pat}
+Item bash_expand_toggle_first(Item val, Item pat);          // ${var~pat}
+Item bash_expand_toggle_all(Item val, Item pat);            // ${var~~pat}
+Item bash_array_casemod(Item arr, Item pat, int64_t mode);  // per-element case mod
 Item bash_expand_indirect(Item var_name);                   // ${!var}
 Item bash_expand_prefix_names(Item prefix);                 // ${!prefix@}
 
@@ -147,9 +149,12 @@ Item bash_array_set(Item arr, Item index, Item value);
 Item bash_array_get(Item arr, Item index);
 Item bash_array_append(Item arr, Item value);       // arr+=(value)
 Item bash_array_concat(Item dest, Item src);        // append all elements of src to dest
+Item bash_array_concat_positional(Item arr);        // append $@ to array
 void bash_array_elem_append(Item arr, Item index, Item append_val, Item var_name); // arr[idx]+=val
 Item bash_words_split_into(Item arr, Item words_str); // append IFS-split words from str into arr
 Item bash_ifs_split_into(Item arr, Item val);          // split val by current IFS and append into arr
+Item bash_ifs_split_default_at(Item arr, Item var_val);   // ${undef-"$@"}: if unset push each $@, else IFS-split
+Item bash_ifs_split_default_star(Item arr, Item var_val); // ${undef-"$*"}: if unset push joined $*, else IFS-split
 void bash_set_positional_from_array(Item arr);         // set positional params from array (IFS-aware set)
 Item bash_array_length(Item arr);                   // ${#arr[@]}
 int64_t bash_array_count(Item arr);                 // raw count for iteration
@@ -163,6 +168,8 @@ Item bash_array_slice(Item arr, Item offset, Item length); // ${arr[@]:off:len}
 Item bash_assoc_new(void);                          // create empty associative array
 Item bash_ensure_assoc(Item name);                  // ensure var is assoc array, create if needed
 Item bash_assoc_set(Item map, Item key, Item value);// map[key]=value
+void bash_assoc_init_word(Item map, Item word);      // parse [key]=val word into assoc
+void bash_array_init_word(Item arr, Item var_name, Item word); // parse [idx]=val word for indexed arr
 Item bash_assoc_get(Item map, Item key);            // ${map[key]}
 Item bash_assoc_keys(Item map);                     // ${!map[@]} — return keys as array
 Item bash_assoc_values(Item map);                   // ${map[@]} — return values as array
@@ -174,6 +181,10 @@ int64_t bash_assoc_count(Item map);                 // raw count for iteration
 // Variable scope management
 // ========================================================================
 void bash_set_var(Item name, Item value);           // assign variable
+void bash_restore_var_if_not_posix(Item name, Item old_val); // restore unless POSIXLY_CORRECT
+void bash_builtin_set_dump(void);                   // set (no args) — dump all variables
+void bash_set_cmd_env_var(Item name, Item value);   // assign var + setenv for prefix assignments
+void bash_restore_cmd_env_var(Item name, Item old); // restore var + environ after prefix assignment
 Item bash_get_var(Item name);                       // read variable
 void bash_set_local_var(Item name, Item value);     // local var=value
 void bash_export_var(Item name);                    // export var
@@ -198,6 +209,8 @@ void bash_declare_local_nameref(Item name, Item target);  // local -n name=targe
 // Positional parameters ($1, $2, ...)
 void bash_set_positional(Item* args, int count);
 void bash_set_pending_args(const char** argv, int argc, bool skip_arg0);  // store raw argv for deferred init
+void bash_set_pending_option(char flag, bool enable);   // store CLI option for deferred init
+void bash_apply_pending_options(void);                   // apply CLI options after bash_runtime_init
 void bash_apply_pending_args(void);                  // apply pending args after heap init
 void bash_push_positional(Item* args, int count);   // save + set positional params
 void bash_pop_positional(void);                      // restore positional params
@@ -205,12 +218,18 @@ Item bash_get_positional(int index);                // $1 = index 1
 Item bash_get_arg_count(void);                      // $#
 Item bash_get_all_args(void);                       // $@ (as array)
 Item bash_get_all_args_string(void);                // $@ / $* (as space-joined string)
+Item bash_get_positional_array(void);               // $@ as array for per-element ops
+Item bash_positional_slice(Item offset, Item length); // ${*:offset:length} array slicing
+Item bash_positional_slice_array(Item offset, Item length); // same but returns array for splatting
 Item bash_shift_args(int n);                        // shift [n]
 
 // argument builder for dynamic $@ expansion in function calls
 void bash_arg_builder_start(void);
 void bash_arg_builder_push(Item arg);
 void bash_arg_builder_push_at(void);
+void bash_arg_builder_push_default_at(Item var_val);   // ${var-"$@"}
+void bash_arg_builder_push_default_star(Item var_val);  // ${var-"$*"}
+void bash_arg_builder_push_array(Item arr);  // push all array elements
 Item bash_arg_builder_get_ptr(void);
 Item bash_arg_builder_get_count(void);
 
@@ -221,6 +240,17 @@ Item bash_save_exit_code(void);                     // save exit code as Item fo
 void bash_restore_exit_code(Item saved);            // restore exit code from saved Item
 void bash_negate_exit_code(void);                   // flip exit code (0↔1)
 Item bash_return_with_code(Item val);               // set exit code from value
+
+// PIPESTATUS array — per-stage exit codes of last pipeline
+void bash_pipestatus_reset(int count);              // init PIPESTATUS for N stages
+void bash_pipestatus_set(int index, int code);      // set exit code for stage i
+int  bash_pipestatus_get_count(void);               // number of stages
+int  bash_pipestatus_get(int index);                // get exit code for stage i
+void bash_pipestatus_apply_simple(void);            // set PIPESTATUS for simple (non-pipeline) command
+void bash_pipestatus_apply_pipefail(void);          // set $? from PIPESTATUS (pipefail mode)
+Item bash_get_pipestatus(Item index);               // ${PIPESTATUS[n]}
+Item bash_get_pipestatus_all(void);                 // ${PIPESTATUS[@]}
+Item bash_get_pipestatus_count_item(void);          // ${#PIPESTATUS[@]}
 Item bash_get_script_name(void);                    // $0
 void bash_set_script_name(Item name);              // update $0 / BASH_ARGV0
 Item bash_get_pid(void);                           // $$
@@ -259,6 +289,8 @@ void bash_scope_push(void);                         // enter new local scope
 void bash_scope_pop(void);                          // leave scope
 void bash_scope_push_subshell(void);                // snapshot for subshell
 void bash_scope_pop_subshell(void);                 // restore after subshell
+void bash_reset_errexit(void);                      // reset -e flag (for cmd substitution)
+void bash_comsub_reset_errexit(void);               // reset -e unless posix mode
 void bash_getopts_push_state(void);                 // save getopts charind state
 void bash_getopts_pop_state(void);                  // restore getopts charind state
 
@@ -318,6 +350,7 @@ Item bash_pipe(Item left_output, Item* right_cmd, int right_argc);
 void bash_set_stdin_item(Item input);   // set pending stdin content for next pipe stage
 Item bash_get_stdin_item(void);         // read pending stdin (for cat, wc, grep, etc.)
 void bash_clear_stdin_item(void);       // clear after consumption
+int bash_stdin_item_is_set(void);       // check if stdin item was set (for EOF detection)
 
 // ========================================================================
 // File redirections
@@ -345,6 +378,7 @@ Item bash_exec_cmd_with_array(Item cmd_name, Item arr);  // dispatch command wit
 // Output
 // ========================================================================
 void bash_write_heredoc(Item content, int is_herestring); // write heredoc/herestring
+Item bash_append_newline(Item value); // append '\n' to a string value
 void bash_write_stdout(Item value);                 // write string to stdout
 void bash_write_stderr(Item value);                 // write string to stderr
 void bash_raw_write(const char* data, int len);     // write raw bytes (capture-aware)
@@ -372,6 +406,11 @@ Item bash_source_file(Item filename);               // source/. — parse & exec
 // ========================================================================
 typedef Item (*BashRtFuncPtr)(Item* args, int argc);
 void bash_register_rt_func(const char* name, BashRtFuncPtr ptr);  // register at JIT-link time
+void bash_register_rt_func_with_source(const char* name, BashRtFuncPtr ptr,
+                                        const char* source, int source_len);
+const char* bash_get_func_source(const char* name, int* out_len);
+void bash_print_all_functions(void);
+void bash_declare_print_func(Item name_item);
 Item bash_call_rt_func(Item name, Item* args, int argc);           // runtime dispatch by name
 BashRtFuncPtr bash_lookup_rt_func(const char* name);               // lookup (returns NULL if not found)
 
@@ -391,6 +430,7 @@ bool bash_get_option_extglob(void);                  // shopt -s extglob
 // errexit suppression
 void bash_errexit_push(void);                        // enter errexit-suppressed context
 void bash_errexit_pop(void);                         // leave errexit-suppressed context
+void bash_set_errexit_suppressed(void);              // suppress next errexit check (! negation)
 int bash_check_errexit(void);                        // check if set -e should trigger (returns 1 if should exit)
 
 // ========================================================================

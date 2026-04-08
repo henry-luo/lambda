@@ -384,6 +384,18 @@ extern "C" Item bash_builtin_hash(Item* args, int argc) {
 }
 
 // ============================================================================
+// compgen — generate completions (minimal stub)
+// ============================================================================
+
+extern "C" Item bash_builtin_compgen(Item* args, int argc) {
+    // stub: silently return success without output
+    // TODO: implement -A function, -A variable, etc.
+    (void)args; (void)argc;
+    bash_set_exit_code(0);
+    return (Item){.item = i2it(0)};
+}
+
+// ============================================================================
 // enable
 // ============================================================================
 

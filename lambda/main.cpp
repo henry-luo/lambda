@@ -1329,10 +1329,10 @@ int main(int argc, char *argv[]) {
                 bool enable = (argv[i][0] == '-');
                 i++;
                 if (strcmp(argv[i], "posix") == 0) bash_posix = enable;
-                else if (strcmp(argv[i], "errexit") == 0) bash_set_option_flag('e', enable);
-                else if (strcmp(argv[i], "nounset") == 0) bash_set_option_flag('u', enable);
-                else if (strcmp(argv[i], "xtrace") == 0) bash_set_option_flag('x', enable);
-                else if (strcmp(argv[i], "pipefail") == 0) { /* bash_set_option_flag('p', enable); */ }
+                else if (strcmp(argv[i], "errexit") == 0) bash_set_pending_option('e', enable);
+                else if (strcmp(argv[i], "nounset") == 0) bash_set_pending_option('u', enable);
+                else if (strcmp(argv[i], "xtrace") == 0) bash_set_pending_option('x', enable);
+                else if (strcmp(argv[i], "pipefail") == 0) { /* bash_set_pending_option('p', enable); */ }
             } else if ((strcmp(argv[i], "-O") == 0 || strcmp(argv[i], "+O") == 0) && i + 1 < argc) {
                 // -O shopt_option / +O shopt_option: set/unset shopt option (ignore for now)
                 i++; // skip option name
@@ -1347,9 +1347,9 @@ int main(int argc, char *argv[]) {
                 // combined flags like -ce, -xc, -ec: extract non-c flags and set them
                 const char* flags = argv[i] + 1; // skip leading -
                 for (const char* f = flags; *f; f++) {
-                    if (*f == 'e') bash_set_option_flag('e', true);
-                    else if (*f == 'x') bash_set_option_flag('x', true);
-                    else if (*f == 'u') bash_set_option_flag('u', true);
+                    if (*f == 'e') bash_set_pending_option('e', true);
+                    else if (*f == 'x') bash_set_pending_option('x', true);
+                    else if (*f == 'u') bash_set_pending_option('u', true);
                     // 'c' is handled by taking the next arg as inline cmd
                 }
                 bash_inline_cmd = argv[++i];
@@ -1359,9 +1359,9 @@ int main(int argc, char *argv[]) {
                 // single-char flag(s) without 'c': -e, -x, -u, etc.
                 const char* flags = argv[i] + 1;
                 for (const char* f = flags; *f; f++) {
-                    if (*f == 'e') bash_set_option_flag('e', true);
-                    else if (*f == 'x') bash_set_option_flag('x', true);
-                    else if (*f == 'u') bash_set_option_flag('u', true);
+                    if (*f == 'e') bash_set_pending_option('e', true);
+                    else if (*f == 'x') bash_set_pending_option('x', true);
+                    else if (*f == 'u') bash_set_pending_option('u', true);
                 }
             } else if (bash_inline_cmd == NULL && bash_file == NULL) {
                 bash_file = argv[i];

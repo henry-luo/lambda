@@ -1226,6 +1226,14 @@
           {
             "type": "u",
             "named": false
+          },
+          {
+            "type": "~",
+            "named": false
+          },
+          {
+            "type": "~~",
+            "named": false
           }
         ]
       }
@@ -1613,6 +1621,10 @@
       "types": [
         {
           "type": "command",
+          "named": true
+        },
+        {
+          "type": "compound_statement",
           "named": true
         },
         {
@@ -2888,6 +2900,10 @@
   },
   {
     "type": "~",
+    "named": false
+  },
+  {
+    "type": "~~",
     "named": false
   }
 ]

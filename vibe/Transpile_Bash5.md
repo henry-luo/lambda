@@ -4,13 +4,13 @@
 
 Phase 4 built four new C modules (Exec Engine, Extended Builtins, Conditional Engine, Heredoc Engine) and raised passing GNU tests from 7 to 12. Phase 5 continues the proven methodology — **modular C APIs first, then wire the transpiler** — targeting the root causes that block the highest number of remaining tests.
 
-**Current status:**
+**Current status (updated 2026-04-08):**
 - Integration tests: 37/37 passing
-- GNU official: 12/82 passing (dbg_support, dbg_support2, dstack2, dynvar, extglob3, getopts, ifs, invert, nquote4, strip, tilde, tilde2)
-- GNU official: 9 tests have missing `.tests`/`.right` files (not real failures)
-- Real failing tests: 61 out of 73 valid tests
+- GNU official: **17/82 passing** (appendop, casemod, dbg_support, dbg_support2, dstack2, dynvar, extglob3, getopts, herestr, ifs, invert, nquote4, posix2, posixpat, strip, tilde, tilde2)
+- GNU official: 0 baseline regressions
+- Real failing tests: 65 out of 82 tests
 
-**Analysis of 61 failing tests reveals 8 root cause clusters.** The top 4 clusters account for ~45 tests. Phase 5 targets these with 5 new/extended modules.
+**Analysis of failing tests reveals 12 root cause clusters.** The top 4 clusters account for ~45 tests. Phase 5 targets these with 5 new/extended modules.
 
 ---
 
@@ -72,6 +72,16 @@ Features confirmed working that were initially suspected as broken:
 - `+=` string/array append
 - `${THIS_SH} -c 'command'` (sub-script execution)
 - ANSI-C quoting `$'\n'`, `$'\x41'`
+- `${var~}` / `${var~~}` case toggle (implemented in Phase 5)
+- `declare -c` capitalize attribute (implemented in Phase 5)
+- `$@` case modification for arrays (implemented in Phase 5)
+- DJB hash for associative arrays (bash-compatible iteration order)
+- `declare -f` / `typeset -f` function body printing (implemented in Phase 5)
+- `type` builtin function body display (implemented in Phase 5)
+- `compgen` stub (silent success)
+- `eval` syntax error detection and reporting (implemented in Phase 5)
+- Heredoc `\$` / `\\` / `` \` `` backslash escaping (implemented in Phase 5)
+- Here-string trailing newline (bash spec compliance)
 
 ---
 
@@ -486,15 +496,17 @@ void bash_time_format(double real_sec, double user_sec, double sys_sec);
 
 | Phase | Before | After (Est.) | Delta | Key Tests Progressed |
 |-------|--------|--------------|-------|---------------------|
-| J: Locale & Quoting | 12/82 | 17–19/82 | +5–7 | nquote, nquote1, nquote2, nquote3, nquote5, iquote, quote |
-| K: Case Toggle & Indirect | 17/82 | 19–21/82 | +2–3 | casemod, posixpat, posix2 |
-| L: Declare Formatter | 19/82 | 23–26/82 | +4–5 | assoc, appendop, attr, quotearray, nameref |
-| M: Process Substitution | 23/82 | 25–27/82 | +2–3 | procsub, comsub2 |
-| N: Shopt/Set/Time | 25/82 | 27–29/82 | +2 | shopt, posixpipe |
-| O: Bug Fixes | 27/82 | 30–35/82 | +3–6 | braces, herestr, dstack, vredir, redir, heredoc |
+| J: Locale & Quoting | 17/82 | 22–24/82 | +5–7 | nquote, nquote1, nquote2, nquote3, nquote5, iquote, quote |
+| K: Case Toggle & Indirect | 22/82 | 24–26/82 | +2–3 | exp, varenv |
+| L: Declare Formatter | 24/82 | 28–31/82 | +4–5 | assoc, quotearray, attr, nameref, cprint |
+| M: Process Substitution | 28/82 | 30–32/82 | +2–3 | procsub, comsub2 |
+| N: Shopt/Set/Time | 30/82 | 32–34/82 | +2 | shopt, posixpipe |
+| O: Bug Fixes | 32/82 | 35–40/82 | +3–6 | braces, dstack, vredir, redir, heredoc, case |
+
+**Note:** Phase K (case toggle, indirect expansion) partially completed — toggle case and `declare -c` already done (flipped casemod). Remaining: `${!var}` indirect fix, `${!prefix@}`, `${!arr[@]}`.
 
 **Conservative target:** 30/82 (37%)
-**Optimistic target:** 35/82 (43%)
+**Optimistic target:** 40/82 (49%)
 
 ### Tests That Remain Hard (Deferred)
 
@@ -530,8 +542,8 @@ void bash_time_format(double real_sec, double user_sec, double sys_sec);
 | Metric | Before | Target |
 |--------|--------|--------|
 | Integration tests | 37/37 | 37/37 + 6 new (no regressions) |
-| GNU official tests | 12/82 | 30–35/82 |
-| `gnu_baseline.json` entries | 12 | 30+ |
+| GNU official tests | 17/82 | 30–35/82 |
+| `gnu_baseline.json` entries | 17 | 30+ |
 | New C module LOC | 0 | ~800–1200 |
 | New module files | 0 | 6 (3 headers + 3 implementations) |
 | Transpiler new LOC | 0 | ~120 (dispatch only) |
@@ -553,4 +565,68 @@ If time is limited, implement in this order for maximum impact:
 
 ## 12. Progress Log
 
-_(To be filled during implementation)_
+### Session: 2026-04-05 → 2026-04-08 (12 → 17 tests)
+
+**Tests flipped:** appendop, casemod, herestr, posix2, posixpat (5 new passes, 12→17)
+
+#### Features Implemented
+
+| Feature | Files Modified | Tests Impacted |
+|---------|---------------|----------------|
+| Toggle case operators `${var~}`, `${var~~}` | bash_runtime.cpp, transpile_bash_mir.cpp | casemod |
+| `declare -c` capitalize attribute | build_bash_ast.cpp, bash_runtime.cpp | casemod |
+| `$@` case modification for arrays | bash_runtime.cpp, transpile_bash_mir.cpp | casemod |
+| ANSI-C quoting `$'\n'`, `$'\x41'` | bash_runtime.cpp | multiple |
+| DJB hash for associative arrays (bash-compatible iteration order) | bash_runtime.cpp | assoc, casemod |
+| `declare -p` with ANSI-C quoting for special chars | bash_runtime.cpp | multiple |
+| Function body printing (`type`, `declare -f`, `typeset -f`) | transpile_bash_mir.cpp, bash_runtime.cpp | type, herestr |
+| Alphabetical function ordering for `declare -f` (no args) | bash_runtime.cpp | herestr |
+| Function source semicolon formatting + trailing semicolon strip | transpile_bash_mir.cpp | type |
+| Unquoted here-string variable expansion (`cat <<< $x`) | build_bash_ast.cpp | herestr |
+| Here-string trailing newline (`\n` appended per bash spec) | transpile_bash_mir.cpp, bash_runtime.cpp | herestr |
+| `read -d $'\0'` newline preservation | bash_builtins.cpp | herestr |
+| `compgen` builtin stub (silent success) | bash_builtins_ext.cpp | herestr |
+| Heredoc `\$` / `\\` / `` \` `` backslash escape processing | build_bash_ast.cpp | posix2 |
+| `eval` syntax error detection & reporting | transpile_bash_mir.cpp | posix2 |
+
+#### Bug Fixes
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| `cat <<< $x` produced no output (unquoted herestring) | AST builder for herestring body didn't handle `simple_expansion` nodes | Added `build_expansion()` handler for `simple_expansion`/`expansion` in both cat-path and non-cat wrapper path |
+| `read -d $'\0'` lost trailing newline from here-string | (1) Herestring redirect didn't append trailing `\n`; (2) `read -d` NUL case stripped newline | (1) Added `bash_append_newline()` call; (2) Removed newline stripping for NUL delimiter |
+| Heredoc `\$@` not unescaped to `$@` | Gap text in heredoc body used `no_backslash_escape=true`, skipping all backslash processing | Created `heredoc_escape_text()` helper that processes `\$`→`$`, `\\`→`\`, `` \` ``→`` ` ``, `\newline`→skip |
+| `eval 'case esac in esac)'` executed instead of reporting syntax error | `bash_eval_string()` didn't check for parse errors before executing | Added `ts_node_has_error()` check after parsing; reports syntax error with token and line number |
+| Function body formatting had trailing semicolons on last line | Source extraction kept original `;` on single-line function bodies | Strip trailing `;` from last line in source formatting |
+
+#### Files Modified This Session
+
+1. `lambda/bash/bash_runtime.cpp` — sorted function printing, `declare_print_func`, `bash_append_newline`
+2. `lambda/bash/bash_runtime.h` — new declarations
+3. `lambda/bash/transpile_bash_mir.cpp` — function source extraction, `declare -f` handler, herestring newline, compgen routing, eval syntax error detection, `bash_errors.h` include
+4. `lambda/bash/build_bash_ast.cpp` — `BASH_ATTR_FUNC` flag, synthetic declare -f node, herestring expansion handlers, `heredoc_escape_text()` helper
+5. `lambda/bash/bash_ast.hpp` — `BASH_ATTR_FUNC = 1 << 10`
+6. `lambda/bash/bash_builtins.cpp` — `type` function body printing, `read -d` newline fix
+7. `lambda/bash/bash_builtins_ext.cpp` — `bash_builtin_compgen` stub
+8. `lambda/bash/bash_builtins_ext.h` — `bash_builtin_compgen` declaration
+9. `lambda/sys_func_registry.c` — registered new functions
+10. `test/bash/gnu_baseline.json` — updated from 12 to 17 entries
+
+#### Diff Analysis (Remaining Failing Tests by Proximity)
+
+| Test | Diff Lines | Key Blockers |
+|------|-----------|-------------------------------|
+| iquote | 13 | Backtick `\\` processing, DEL char edge cases |
+| parser | 19 | `bash -c` error messages, `for()` syntax error detection |
+| procsub | 21 | Process substitution fd passing, `wait` for bg procs |
+| lastpipe | 22 | `shopt -s lastpipe` pipe variable propagation |
+| nquote5 | 24 | IFS word splitting on `$@` with embedded SOH chars |
+| rsh | 25 | Restricted shell mode not implemented |
+| coproc | 28 | `coproc` keyword not implemented |
+| comsub_eof | 29 | Missing here-document EOF warnings |
+| posixpipe | 38 | `!` pipeline negation, `time` keyword format |
+| posixexp2 | 40 | Brace expansion variable interaction |
+| case | 42 | `readonly` enforcement, `;&` fall-through with patterns |
+| braces | 44 | Backslash-in-braces quoting, nested variable brace expansion |
+| rhs_exp | 45 | Quoting in parameter expansion RHS |
+| attr | 49 | `readonly` across function scopes, `declare` in functions |

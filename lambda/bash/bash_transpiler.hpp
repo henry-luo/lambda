@@ -54,6 +54,7 @@ typedef struct BashTranspiler {
     int loop_depth;                 // current loop nesting depth
     bool in_function;               // currently inside a function definition
     bool in_subshell;               // currently inside a subshell
+    bool in_backtick;               // currently inside backtick command substitution
 
     // error handling
     bool has_errors;

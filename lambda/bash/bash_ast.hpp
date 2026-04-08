@@ -381,6 +381,8 @@ typedef enum BashVarAttrFlags {
     BASH_ATTR_EXPORT       = 1 << 6,   // -x
     BASH_ATTR_PRINT        = 1 << 7,   // -p
     BASH_ATTR_NAMEREF      = 1 << 8,   // -n (nameref, not fully supported)
+    BASH_ATTR_CAPITALIZE   = 1 << 9,   // -c (capitalize first letter)
+    BASH_ATTR_FUNC         = 1 << 10,  // -f (function)
 } BashVarAttrFlags;
 
 // Variable assignment: name=value
