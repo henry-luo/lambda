@@ -19848,7 +19848,6 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
     jm_load_imports(runtime, js_ast, filename);
 
-    // Initialize MIR context
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: MIR context init failed");

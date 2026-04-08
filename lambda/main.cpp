@@ -2897,6 +2897,7 @@ int main(int argc, char *argv[]) {
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
+
                     // Crash destroyed heap — preamble function objects are gone.
                     // Recompile preamble from saved source so subsequent tests still have harness.
                     if (has_preamble) {

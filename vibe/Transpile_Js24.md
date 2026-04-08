@@ -44,49 +44,48 @@ Changed `T262_MAX_PARALLEL_BATCHES` from 8 to 12.
 
 ## Stage 2: MIR Context Reuse Within a Worker
 
-**Current**: Each test gets a full `MIR_init()` → `MIR_gen_init()` → transpile → link → gen → execute → `MIR_gen_finish()` → `MIR_finish()` cycle.
+**Current**: Each test gets a full `MIR_init()` → `MIR_gen_init()` → transpile → link → gen → execute → `MIR_gen_finish()` → `MIR_finish()` cycle (~1.3ms overhead per test).
 
-MIR has no `MIR_remove_module()` API, but `MIR_change_module_ctx(old_ctx, module, graveyard_ctx)` can transfer completed modules to a throwaway context, keeping the active context lean.
+### Implementation (Attempted — 4 iterations)
 
-### Implementation
+**v1 — Graveyard pattern**: Create `reuse_ctx` at batch startup, `graveyard_ctx` for old modules. After each test, move modules via `MIR_change_module_ctx()` to graveyard.
+- **Result**: 25,535 batch-lost (massive crash)
+- **Root cause**: `MIR_change_module_ctx()` calls fatal error if `item->addr != NULL` (i.e., after `MIR_link`). Loaded/linked modules cannot be moved between contexts. (`mac-deps/mir/mir.c` line 2851)
 
-```
-Per worker process (once):
-    active_ctx = MIR_init()
-    MIR_gen_init(active_ctx)
-    graveyard_ctx = MIR_init()     // sink for dead modules
+**v2 — No graveyard, reverse find_func**: Let modules accumulate in reuse ctx. Changed `find_func()` in `mir.c` to search from DLIST_TAIL (newest module first) so the latest `js_main` is always found.
+- **Result**: 61.6s, batch-lost: 0, but 459 regressions
+- **Root cause**: After MIR error recovery via `longjmp`, the reuse ctx is left in a corrupted state. Subsequent tests compiled into the corrupted ctx produce wrong results.
 
-Per test:
-    MIR_new_module(active_ctx, "js_script")
-    transpile → MIR_finish_module → MIR_load_module
-    MIR_link(active_ctx, ...)       // links only active modules
-    find_func → execute
-    MIR_change_module_ctx(active_ctx, test_module, graveyard_ctx)  // move to graveyard
+**v3 — Dirty flag + ctx recreation**: Added `reuse_ctx_dirty` flag set on any `longjmp` (crash/timeout/MIR error). After each test, if dirty, call `jit_cleanup()` on corrupted ctx and create a fresh one.
+- **Result**: 47.8s, 1,062 batch-lost, 233 regressions
+- **Root cause**: `jit_cleanup()` crashes on corrupted ctx (MIR_gen internal state left inconsistent by `longjmp`)
 
-Periodically (every N tests):
-    MIR_finish(graveyard_ctx)       // bulk free dead modules
-    graveyard_ctx = MIR_init()      // fresh graveyard
-```
+**v4 — Leak corrupted ctx**: Instead of calling `jit_cleanup()` on corrupted ctx, simply leak it and create a new one.
+- **Result**: 59.0s, batch-lost: 0, 229 regressions — **23% SLOWER** than baseline (~48s)
 
-### Expected Savings Per Test
+### Key Technical Findings
 
-| Operation | Current (per test) | With reuse |
-|-----------|-------------------|------------|
-| `MIR_init()` | ~0.3ms | 0 (amortized) |
-| `MIR_gen_init()` | ~0.5ms | 0 (amortized) |
-| `MIR_gen_finish()` | ~0.2ms | 0 (amortized) |
-| `MIR_finish()` | ~0.3ms | 0 (periodic bulk) |
-| **Total saved** | **~1.3ms/test** | |
+- **`MIR_change_module_ctx()` FAILS on linked modules**: Once `MIR_link()` runs, `item->addr` is set. Any attempt to move the module to another context triggers `MIR_ctx_change_error` → fatal exit. The graveyard pattern is impossible.
+- **`MIR_link()` is incremental**: Only processes `modules_to_link` VARR (populated by `MIR_load_module`), not all modules in the context. Module accumulation doesn't slow down linking.
+- **`find_func()` searches linearly**: Scans all modules' items. With modules accumulating, this grows linearly. Reversing to TAIL-first search mitigates stale matches but not the scan cost.
+- **`MIR_finish()` is the ONLY way to reclaim internal state**: It calls `string_finish()`, `simplify_finish()`, `code_finish()`, `remove_all_modules()`, and destroys all hash tables/VARRs (`mac-deps/mir/mir.c` lines 888–930). Without calling it, string tables, code pages, item hash tables, and simplify state grow without bound.
+- **MIR context is not designed for long-lived reuse**: The ~1ms savings from skipping `jit_init()`/`MIR_finish()` is overwhelmed by the growing overhead of accumulating internal state (strings, code pages, hash tables).
 
-Over 27K tests: ~35s of core-time saved → with 8 workers: **~4s wall-time** (~5% improvement).
+### Results (M-series Mac, 12 workers)
 
-### Risk
+| Version | Phase 2 | batch-lost | Regressions | Notes |
+|---------|---------|------------|-------------|-------|
+| Baseline (no reuse) | 48–50s | 0 | ~200 | Normal per-test init/finish |
+| v1 (graveyard) | — | 25,535 | — | `MIR_change_module_ctx` fatal on linked modules |
+| v2 (accumulate + reverse find) | 61.6s | 0 | 459 | Corrupted ctx after longjmp |
+| v3 (dirty flag + cleanup) | 47.8s | 1,062 | 233 | `jit_cleanup` crashes on corrupted ctx |
+| v4 (leak corrupted) | 59.0s | 0 | 229 | 23% slower — unbounded state growth |
 
-Medium. Must verify:
-- `MIR_link()` doesn't re-process graveyard modules (it shouldn't — they've been moved out)
-- Generator state remains valid across module boundaries
-- Import resolution still works after module transfer
-- Memory doesn't leak (graveyard periodic flush)
+### Conclusion
+
+**❌ Abandoned.** MIR's internal data structures (string tables, code pages, hash tables, simplify state) grow without bound when `MIR_finish()` is not called between tests. There is no API to selectively clean up a module's resources or reset internal state. The ~1ms/test savings from skipping context init/teardown is completely erased by the overhead of growing internal state. Code reverted.
+
+### Status: ❌ Infeasible (MIR context not designed for long-lived reuse)
 
 ---
 
@@ -242,6 +241,30 @@ High. Complex thread coordination, parser thread-safety concerns, potential for 
 
 ---
 
+## Stage 8: Multi-Thread Instead of Multi-Process
+
+**Idea**: Replace the current multi-process worker model (`fork`/`popen` per batch) with a multi-threaded model. Threads could share a single compiled preamble (harness) in memory, eliminating redundant preamble compilation across workers.
+
+### Why It Won't Work
+
+The runtime has **42+ global/static mutable variables** that are not thread-safe:
+
+| Category | Examples | Impact |
+|----------|----------|--------|
+| **JS execution state** | `js_current_this`, `js_new_target`, `js_pending_call_args`, `js_module_vars[4096]` | Threads corrupt each other's function calls and variable state |
+| **Exception handling** | `js_exception_pending`, `js_exception_msg_buf[1024]` | One thread's exception overwrites another's |
+| **Signal-based recovery** | `batch_timeout_jmp`, `mir_error_jmp`, `batch_crash_jmp` (static `jmp_buf`) | Threads jump to wrong recovery points; `SIGALRM`/`SIGSEGV` handlers are per-process |
+| **MIR compiler state** | `g_batch_mir_error_handler`, `g_jm_preamble_mode`, `g_jm_preamble_in/out` | Concurrent compilations corrupt shared state |
+| **Caches & registries** | `js_func_cache_keys[512]`, `js_builtin_cache[]`, `ascii_char_table[128]` | Unsynchronized concurrent access causes data races |
+
+Even with a shared preamble, the compiled native functions call back into global JS runtime state (`js_module_vars`, `js_current_this`), so threads would corrupt each other during execution.
+
+**Estimated refactoring effort**: 3–5 days to move all JS runtime state into per-thread `EvalContext`, replace signal-based recovery with thread-local mechanisms, and add synchronization to shared caches. High risk of subtle concurrency bugs.
+
+### Status: ⏭️ Skipped (architecture incompatible, effort/risk too high)
+
+---
+
 ## Implementation Priority
 
 | Stage | Description | Impact | Risk | Effort | Priority |
@@ -253,3 +276,4 @@ High. Complex thread coordination, parser thread-safety concerns, potential for 
 | **6** | Skip stable tests (dev mode) | ~80% for dev iteration | Low | Medium | Quality-of-life |
 | **3** | Preamble binary cache | <1% | Low | Low | Skip unless persistent workers added |
 | **7** | Parallel parse pipeline | 20-30% | High | High | Only if profiling shows parse is significant |
+| **8** | Multi-thread workers | Shared preamble | High | High | Skipped — 42+ globals not thread-safe |
