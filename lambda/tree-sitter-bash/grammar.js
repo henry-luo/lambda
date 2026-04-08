@@ -433,6 +433,7 @@ module.exports = grammar({
         prec(1, $.variable_assignment),
         $.test_command,
         $.subshell,
+        $.compound_statement,
       ),
     ),
 
@@ -986,7 +987,7 @@ module.exports = grammar({
     ),
 
     _expansion_regex_removal: $ => seq(
-      field('operator', choice(',', ',,', '^', '^^')),
+      field('operator', choice(',', ',,', '^', '^^', '~', '~~')),
       optional($.regex),
     ),
 

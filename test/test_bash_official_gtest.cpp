@@ -21,6 +21,7 @@
 #include <vector>
 #include <set>
 #include <algorithm>
+#include <sstream>
 
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
@@ -112,6 +113,71 @@ static void trim_trailing_whitespace(char* str) {
                        str[len - 1] == ' '  || str[len - 1] == '\t')) {
         str[--len] = '\0';
     }
+}
+
+// Normalize `declare -A name=([k1]="v1" [k2]="v2" )` lines by sorting
+// the key-value pairs alphabetically. Bash's hash table iteration order is
+// implementation-defined, so we canonicalize for comparison.
+static std::string normalize_assoc_arrays(const std::string& text) {
+    std::string result;
+    std::istringstream iss(text);
+    std::string line;
+    while (std::getline(iss, line)) {
+        // match: declare -<flags> name=(<pairs> )
+        // where flags contain 'A'
+        auto eq_pos = line.find("=(");
+        if (eq_pos != std::string::npos && line.size() > 2 &&
+            line.substr(0, 8) == "declare " && line.back() == ')') {
+            // check that flags contain 'A'
+            auto space2 = line.find(' ', 8);
+            std::string flags_part = line.substr(8, space2 - 8);
+            if (flags_part.find('A') != std::string::npos) {
+                std::string prefix = line.substr(0, eq_pos + 2); // "declare -A name=("
+                std::string pairs_str = line.substr(eq_pos + 2, line.size() - eq_pos - 3); // without trailing " )"
+                // parse [key]="value" pairs
+                std::vector<std::string> pairs;
+                size_t pos = 0;
+                while (pos < pairs_str.size()) {
+                    if (pairs_str[pos] == ' ') { pos++; continue; }
+                    if (pairs_str[pos] == '[') {
+                        size_t start = pos;
+                        // find matching ]="..."
+                        auto bracket_end = pairs_str.find("]=", pos);
+                        if (bracket_end == std::string::npos) break;
+                        size_t val_start = bracket_end + 2;
+                        if (val_start < pairs_str.size() && pairs_str[val_start] == '"') {
+                            size_t val_end = val_start + 1;
+                            while (val_end < pairs_str.size()) {
+                                if (pairs_str[val_end] == '\\' && val_end + 1 < pairs_str.size()) {
+                                    val_end += 2; continue;
+                                }
+                                if (pairs_str[val_end] == '"') { val_end++; break; }
+                                val_end++;
+                            }
+                            pairs.push_back(pairs_str.substr(start, val_end - start));
+                            pos = val_end;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                std::sort(pairs.begin(), pairs.end());
+                result += prefix;
+                for (size_t i = 0; i < pairs.size(); i++) {
+                    result += pairs[i];
+                    result += " ";
+                }
+                result += ")\n";
+                continue;
+            }
+        }
+        result += line + "\n";
+    }
+    // remove trailing newline added by last iteration
+    if (!result.empty() && result.back() == '\n') result.pop_back();
+    return result;
 }
 
 // Filter out Lambda's internal log/banner lines from captured output.
@@ -465,11 +531,15 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
     trim_trailing_whitespace(actual_cstr);
     trim_trailing_whitespace(expected);
 
-    bool match = (strcmp(expected, actual_cstr) == 0);
+    // Normalize associative array key order for comparison
+    std::string norm_expected = normalize_assoc_arrays(expected);
+    std::string norm_actual = normalize_assoc_arrays(actual_cstr);
+
+    bool match = (norm_expected == norm_actual);
 
     if (is_baseline) {
         // Baseline test: MUST pass — failure is a regression
-        EXPECT_STREQ(expected, actual_cstr)
+        EXPECT_EQ(norm_expected, norm_actual)
             << "REGRESSION: " << info.test_name
             << " is in gnu_baseline.json but now fails!\n"
             << "Output mismatch for: " << info.tests_path;
@@ -479,7 +549,7 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
                info.test_name.c_str());
     } else {
         // Non-baseline test that fails — report as failure
-        EXPECT_STREQ(expected, actual_cstr)
+        EXPECT_EQ(norm_expected, norm_actual)
             << "FAIL: " << info.test_name
             << " output does not match expected.\n"
             << "Output mismatch for: " << info.tests_path;

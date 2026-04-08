@@ -545,6 +545,7 @@
             "output": "lambda-jube.exe",
             "source_dirs": [
                 "lib",
+                "lib/gc",
                 "lib/font",
                 "lib/font/woff2",
                 "lambda",
