@@ -235,7 +235,7 @@ void font_context_destroy(FontContext* ctx) {
         ctx->loaded_glyph_cache = NULL;
     }
 
-    // free font file data cache (data is arena-allocated, no per-item free needed)
+    // free font file data cache (entries are malloc-allocated, freed via hashmap free callback)
     if (ctx->file_data_cache) {
         hashmap_free(ctx->file_data_cache);
         ctx->file_data_cache = NULL;
@@ -353,10 +353,14 @@ void font_context_reset_document_fonts(FontContext* ctx) {
             DocFontScanState state = {keys, 0, capacity};
             hashmap_scan(ctx->face_cache, collect_doc_font_keys, &state);
 
-            // remove collected entries (triggers face_cache_free → font_handle_release)
+            // remove collected entries and release their handles
+            // (hashmap_delete does NOT call the free callback, so we must release manually)
             for (int i = 0; i < state.count; i++) {
                 FontCacheKey search = {.key_str = (char*)state.keys[i], .handle = NULL};
-                hashmap_delete(ctx->face_cache, &search);
+                const FontCacheKey* removed = (const FontCacheKey*)hashmap_delete(ctx->face_cache, &search);
+                if (removed && removed->handle) {
+                    font_handle_release(removed->handle);
+                }
             }
 
             if (keys != stack_keys) free(keys);
@@ -474,8 +478,35 @@ void font_handle_release(FontHandle* handle) {
             handle->ct_raster_ref = NULL;
         }
 #endif
-        // memory_buffer is arena-allocated, no individual free needed
-        // family_name is arena-allocated, no individual free needed
+        // free font file data: decrement ref in file_data_cache, or free directly
+        if (handle->file_data_path && handle->ctx->file_data_cache) {
+            FontFileDataEntry search = {.path = handle->file_data_path, .data = NULL, .data_len = 0};
+            FontFileDataEntry* cached = (FontFileDataEntry*)hashmap_get(
+                handle->ctx->file_data_cache, &search);
+            if (cached) {
+                cached->ref_count--;
+                if (cached->ref_count <= 0) {
+                    // remove from cache — hashmap_delete returns copy in spare,
+                    // does NOT call free callback. We must free manually.
+                    const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(
+                        handle->ctx->file_data_cache, &search);
+                    if (removed) {
+                        free(removed->data);
+                        free(removed->path);
+                    }
+                }
+            }
+            free(handle->file_data_path);
+            handle->file_data_path = NULL;
+            // memory_buffer points into cached file_data — don't free separately
+        } else {
+            // no file_data_path means memory_buffer was malloc'd independently
+            // (e.g. from data URI or font_load_memory)
+            if (handle->memory_buffer) {
+                free(handle->memory_buffer);
+                handle->memory_buffer = NULL;
+            }
+        }
 
         // free the handle struct via pool
         if (handle->ctx) {
@@ -594,13 +625,14 @@ FontCacheStats font_get_cache_stats(FontContext* ctx) {
 
     stats.face_count = ctx->face_cache ? (int)hashmap_count(ctx->face_cache) : 0;
     stats.glyph_cache_count = ctx->bitmap_cache ? (int)hashmap_count(ctx->bitmap_cache) : 0;
+    stats.loaded_glyph_count = ctx->loaded_glyph_cache ? (int)hashmap_count(ctx->loaded_glyph_cache) : 0;
     stats.database_font_count = font_get_font_count(ctx);
     stats.database_family_count = font_get_family_count(ctx);
 
-    // approximate memory usage
-    stats.memory_usage_bytes = 0;
-    if (ctx->arena)       stats.memory_usage_bytes += arena_total_allocated(ctx->arena);
-    if (ctx->glyph_arena) stats.memory_usage_bytes += arena_total_allocated(ctx->glyph_arena);
+    // approximate memory usage (split by arena)
+    stats.main_arena_bytes = ctx->arena ? arena_total_allocated(ctx->arena) : 0;
+    stats.glyph_arena_bytes = ctx->glyph_arena ? arena_total_allocated(ctx->glyph_arena) : 0;
+    stats.memory_usage_bytes = stats.main_arena_bytes + stats.glyph_arena_bytes;
 
     return stats;
 }

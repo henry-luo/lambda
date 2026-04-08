@@ -76,9 +76,10 @@ struct FontHandle {
     bool        metrics_ready;
 
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
-    // FreeType requires the buffer to outlive the face, so arena-allocated.
+    // FreeType requires the buffer to outlive the face.
     uint8_t*    memory_buffer;
     size_t      memory_buffer_size;
+    char*       file_data_path;         // key into file_data_cache for ref-count management (malloc'd)
 
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
@@ -284,9 +285,10 @@ typedef struct FontCacheKey {
 // ============================================================================
 
 typedef struct FontFileDataEntry {
-    char*       path;           // arena-allocated canonical path
-    uint8_t*    data;           // arena-allocated raw font data (TTF/SFNT)
+    char*       path;           // malloc-allocated canonical path
+    uint8_t*    data;           // malloc-allocated raw font data (TTF/SFNT)
     size_t      data_len;
+    int         ref_count;      // number of active FT_Faces using this data
 } FontFileDataEntry;
 
 // ============================================================================
