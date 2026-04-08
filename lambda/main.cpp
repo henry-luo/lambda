@@ -2937,7 +2937,6 @@ int main(int argc, char *argv[]) {
                         }
                     }
                 } else if (has_preamble) {
-                    // Partial reset: preserve harness module vars, clear test state
                     js_batch_reset_to(preamble_var_checkpoint);
                 } else {
                     js_batch_reset();

@@ -2071,6 +2071,10 @@
             },
             {
               "type": "SYMBOL",
+              "name": "negated_command"
+            },
+            {
+              "type": "SYMBOL",
               "name": "test_command"
             },
             {

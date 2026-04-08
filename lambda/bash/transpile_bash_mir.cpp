@@ -1589,6 +1589,8 @@ static MIR_op_t bm_transpile_node(BashMirTranspiler* mt, BashAstNode* node) {
         case BASH_TEST_STR_GT: func = "bash_test_str_gt"; break;
         case BASH_TEST_STR_MATCH: func = "bash_cond_regex"; break;
         case BASH_TEST_STR_GLOB: func = "bash_cond_pattern"; break;
+        case BASH_TEST_STR_EQ_LIT: func = "bash_test_str_eq_literal"; break;
+        case BASH_TEST_STR_NE_LIT: func = "bash_test_str_ne_literal"; break;
         case BASH_TEST_NT:     func = "bash_test_nt"; break;
         case BASH_TEST_OT:     func = "bash_test_ot"; break;
         case BASH_TEST_EF:     func = "bash_test_ef"; break;
@@ -2091,13 +2093,20 @@ static MIR_op_t bm_transpile_expansion(BashMirTranspiler* mt, BashAstNode* node)
         return MIR_new_reg_op(mt->ctx, result);
     }
     case BASH_EXPAND_REPLACE:
-    case BASH_EXPAND_REPLACE_ALL: {
+    case BASH_EXPAND_REPLACE_ALL:
+    case BASH_EXPAND_REPLACE_PREFIX:
+    case BASH_EXPAND_REPLACE_SUFFIX: {
         MIR_op_t pat = exp->argument ? bm_transpile_node(mt, exp->argument)
                                      : bm_emit_string_literal(mt, "", 0);
         MIR_op_t repl = exp->replacement ? bm_transpile_node(mt, exp->replacement)
                                          : bm_emit_string_literal(mt, "", 0);
-        const char* func = (exp->expand_type == BASH_EXPAND_REPLACE_ALL)
-                           ? "bash_expand_replace_all" : "bash_expand_replace";
+        const char* func;
+        switch (exp->expand_type) {
+            case BASH_EXPAND_REPLACE_ALL:    func = "bash_expand_replace_all"; break;
+            case BASH_EXPAND_REPLACE_PREFIX: func = "bash_expand_replace_prefix"; break;
+            case BASH_EXPAND_REPLACE_SUFFIX: func = "bash_expand_replace_suffix"; break;
+            default:                         func = "bash_expand_replace"; break;
+        }
         MIR_reg_t result = bm_emit_call_3(mt, func, var_val, pat, repl);
         return MIR_new_reg_op(mt->ctx, result);
     }
@@ -4911,7 +4920,9 @@ static Runtime* bash_source_runtime = NULL;
 
 // forward declarations for preprocessor passes
 static const char* preprocess_dollar_dollar(const char* src, size_t src_len, StrBuf** out_buf);
+static const char* preprocess_ansi_c_string(const char* src, size_t src_len, StrBuf** out_buf);
 static const char* preprocess_bash_source(const char* src, size_t src_len, StrBuf** out_buf);
+static const char* preprocess_case_keyword(const char* src, size_t src_len, StrBuf** out_buf);
 
 // list of MIR contexts from sourced files — kept alive for function pointer validity
 #define BASH_SOURCE_CTX_MAX 32
@@ -4961,11 +4972,23 @@ extern "C" Item bash_source_file(Item filename) {
         tp->source = dd_src;
         tp->source_length = strlen(dd_src);
     }
+    StrBuf* ansi_buf1 = NULL;
+    const char* ansi_src1 = preprocess_ansi_c_string(tp->source, tp->source_length, &ansi_buf1);
+    if (ansi_src1 != tp->source) {
+        tp->source = ansi_src1;
+        tp->source_length = strlen(ansi_src1);
+    }
     StrBuf* preproc_buf = NULL;
     const char* pp_src = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
     if (pp_src != tp->source) {
         tp->source = pp_src;
         tp->source_length = strlen(pp_src);
+    }
+    StrBuf* case_kw_buf1 = NULL;
+    const char* ck_src1 = preprocess_case_keyword(tp->source, tp->source_length, &case_kw_buf1);
+    if (ck_src1 != tp->source) {
+        tp->source = ck_src1;
+        tp->source_length = strlen(ck_src1);
     }
 
     TSParser* parser = ts_parser_new();
@@ -5164,11 +5187,23 @@ extern "C" Item bash_eval_string(Item code) {
         tp->source = dd_src;
         tp->source_length = strlen(dd_src);
     }
+    StrBuf* ansi_buf2 = NULL;
+    const char* ansi_src2 = preprocess_ansi_c_string(tp->source, tp->source_length, &ansi_buf2);
+    if (ansi_src2 != tp->source) {
+        tp->source = ansi_src2;
+        tp->source_length = strlen(ansi_src2);
+    }
     StrBuf* preproc_buf = NULL;
     const char* pp_src = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
     if (pp_src != tp->source) {
         tp->source = pp_src;
         tp->source_length = strlen(pp_src);
+    }
+    StrBuf* case_kw_buf2 = NULL;
+    const char* ck_src2 = preprocess_case_keyword(tp->source, tp->source_length, &case_kw_buf2);
+    if (ck_src2 != tp->source) {
+        tp->source = ck_src2;
+        tp->source_length = strlen(ck_src2);
     }
 
     TSParser* parser = ts_parser_new();
@@ -5436,7 +5471,579 @@ static const char* preprocess_dollar_dollar(const char* src, size_t src_len, Str
     return buf->str;
 }
 
+// Pass 1b: Convert ANSI-C strings $'...' to double-quoted strings "..."
+// tree-sitter-bash only recognizes $'...' as ansi_c_string in certain parse
+// states. In many contexts (e.g., echo $'hello'), the $ is parsed as a separate
+// token and the single-quoted part as a raw_string. This preprocessor expands
+// all $'...' escape sequences and emits a double-quoted string with the result.
+static const char* preprocess_ansi_c_string(const char* src, size_t src_len, StrBuf** out_buf) {
+    // quick check: does source contain $' ?
+    bool found = false;
+    for (size_t i = 0; i + 1 < src_len; i++) {
+        if (src[i] == '$' && src[i+1] == '\'') { found = true; break; }
+    }
+    if (!found) return src;
+
+    StrBuf* buf = strbuf_new_cap(src_len + 64);
+    *out_buf = buf;
+    size_t i = 0;
+    // Track pending here-doc delimiters for the current line.
+    // After emitting a line that contains <<WORD, we skip subsequent lines
+    // that form the here-doc body until we see the delimiter.
+    #define MAX_HEREDOCS 8
+    char heredoc_delims[MAX_HEREDOCS][256];
+    int heredoc_count = 0;
+    bool in_heredoc_body = false;
+    int heredoc_body_idx = 0;  // which delimiter we're looking for
+    bool heredoc_strip_tabs = false;
+
+    while (i < src_len) {
+        // if we're inside a here-doc body, copy lines verbatim until delimiter
+        if (in_heredoc_body) {
+            // extract current line
+            size_t line_start = i;
+            while (i < src_len && src[i] != '\n') i++;
+            size_t line_end = i;
+            if (i < src_len) i++; // skip '\n'
+
+            // check if this line is the delimiter
+            const char* line = src + line_start;
+            size_t line_len = line_end - line_start;
+            size_t cmp_start = 0;
+            if (heredoc_strip_tabs) {
+                while (cmp_start < line_len && line[cmp_start] == '\t') cmp_start++;
+            }
+            const char* delim = heredoc_delims[heredoc_body_idx];
+            size_t delim_len = strlen(delim);
+            if (line_len - cmp_start == delim_len &&
+                memcmp(line + cmp_start, delim, delim_len) == 0) {
+                // delimiter found — emit it and move to next heredoc or exit
+                for (size_t k = line_start; k < line_end; k++)
+                    strbuf_append_char(buf, src[k]);
+                if (line_end < src_len) strbuf_append_char(buf, '\n');
+                heredoc_body_idx++;
+                if (heredoc_body_idx >= heredoc_count) {
+                    in_heredoc_body = false;
+                    heredoc_count = 0;
+                    heredoc_body_idx = 0;
+                }
+            } else {
+                // body line — copy verbatim
+                for (size_t k = line_start; k < line_end; k++)
+                    strbuf_append_char(buf, src[k]);
+                if (line_end < src_len) strbuf_append_char(buf, '\n');
+            }
+            continue;
+        }
+
+        // detect here-doc operators on the current line
+        // we scan forward to collect any << operators and their delimiters
+        if (src[i] == '<' && i + 1 < src_len && src[i+1] == '<' &&
+            !(i + 2 < src_len && src[i+2] == '<')) {
+            // potential here-doc: <<[-] WORD
+            // continue copying everything on this line normally, but record the delimiter
+            size_t hd_start = i;
+            strbuf_append_char(buf, src[i]); i++; // first <
+            strbuf_append_char(buf, src[i]); i++; // second <
+            heredoc_strip_tabs = false;
+            if (i < src_len && src[i] == '-') {
+                heredoc_strip_tabs = true;
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            // skip whitespace
+            while (i < src_len && (src[i] == ' ' || src[i] == '\t')) {
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            // extract delimiter word (handle quoting: 'WORD', "WORD", \WORD)
+            char delim_buf[256];
+            int dlen = 0;
+            if (i < src_len && (src[i] == '\'' || src[i] == '"')) {
+                char q = src[i];
+                strbuf_append_char(buf, src[i]); i++; // opening quote
+                while (i < src_len && src[i] != q && dlen < 254) {
+                    delim_buf[dlen++] = src[i];
+                    strbuf_append_char(buf, src[i]); i++;
+                }
+                if (i < src_len) { strbuf_append_char(buf, src[i]); i++; } // closing quote
+            } else if (i < src_len && src[i] == '\\') {
+                strbuf_append_char(buf, src[i]); i++; // backslash
+                while (i < src_len && src[i] != '\n' && src[i] != ' ' && src[i] != '\t'
+                       && src[i] != ';' && src[i] != '&' && src[i] != '|' && src[i] != ')'
+                       && dlen < 254) {
+                    delim_buf[dlen++] = src[i];
+                    strbuf_append_char(buf, src[i]); i++;
+                }
+            } else {
+                // unquoted word
+                while (i < src_len && src[i] != '\n' && src[i] != ' ' && src[i] != '\t'
+                       && src[i] != ';' && src[i] != '&' && src[i] != '|' && src[i] != ')'
+                       && src[i] != '<' && src[i] != '>'
+                       && dlen < 254) {
+                    delim_buf[dlen++] = src[i];
+                    strbuf_append_char(buf, src[i]); i++;
+                }
+            }
+            delim_buf[dlen] = '\0';
+            if (dlen > 0 && heredoc_count < MAX_HEREDOCS) {
+                memcpy(heredoc_delims[heredoc_count], delim_buf, dlen + 1);
+                heredoc_count++;
+            }
+            continue;
+        }
+
+        // if we hit a newline and have pending heredoc delimiters, enter heredoc body mode
+        if (src[i] == '\n' && heredoc_count > 0 && !in_heredoc_body) {
+            strbuf_append_char(buf, src[i]); i++;
+            in_heredoc_body = true;
+            heredoc_body_idx = 0;
+            continue;
+        }
+
+        // skip comments (# to end of line)
+        if (src[i] == '#' && (i == 0 || src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n'
+                              || src[i-1] == ';' || src[i-1] == '{' || src[i-1] == '(')) {
+            while (i < src_len && src[i] != '\n') {
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            continue;
+        }
+        // skip single-quoted strings
+        if (src[i] == '\'' && !(i > 0 && src[i-1] == '$')) {
+            strbuf_append_char(buf, src[i]); i++;
+            while (i < src_len && src[i] != '\'') {
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            continue;
+        }
+        // skip double-quoted strings
+        if (src[i] == '"') {
+            strbuf_append_char(buf, src[i]); i++;
+            while (i < src_len && src[i] != '"') {
+                if (src[i] == '\\' && i + 1 < src_len) {
+                    strbuf_append_char(buf, src[i]); i++;
+                }
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            continue;
+        }
+        // skip backtick strings
+        if (src[i] == '`') {
+            strbuf_append_char(buf, src[i]); i++;
+            while (i < src_len && src[i] != '`') {
+                if (src[i] == '\\' && i + 1 < src_len) {
+                    strbuf_append_char(buf, src[i]); i++;
+                }
+                strbuf_append_char(buf, src[i]); i++;
+            }
+            if (i < src_len) { strbuf_append_char(buf, src[i]); i++; }
+            continue;
+        }
+        // match $'...'
+        if (src[i] == '$' && i + 1 < src_len && src[i+1] == '\'') {
+            i += 2; // skip $'
+            // find end of ANSI-C string (handling \' inside)
+            size_t content_start = i;
+            while (i < src_len) {
+                if (src[i] == '\\' && i + 1 < src_len) { i += 2; continue; }
+                if (src[i] == '\'') break;
+                i++;
+            }
+            size_t content_end = i;
+            if (i < src_len) i++; // skip closing '
+
+            // process escape sequences in content
+            StrBuf* processed = strbuf_new_cap(content_end - content_start + 1);
+            size_t p = content_start;
+            while (p < content_end) {
+                char c = src[p++];
+                if (c != '\\' || p >= content_end) {
+                    strbuf_append_char(processed, c);
+                    continue;
+                }
+                char esc = src[p++];
+                switch (esc) {
+                case 'a': strbuf_append_char(processed, '\a'); break;
+                case 'b': strbuf_append_char(processed, '\b'); break;
+                case 'e': case 'E': strbuf_append_char(processed, 27); break;
+                case 'f': strbuf_append_char(processed, '\f'); break;
+                case 'n': strbuf_append_char(processed, '\n'); break;
+                case 'r': strbuf_append_char(processed, '\r'); break;
+                case 't': strbuf_append_char(processed, '\t'); break;
+                case 'v': strbuf_append_char(processed, '\v'); break;
+                case '\\': strbuf_append_char(processed, '\\'); break;
+                case '\'': strbuf_append_char(processed, '\''); break;
+                case '"': strbuf_append_char(processed, '"'); break;
+                case 'c': {
+                    if (p < content_end) {
+                        unsigned char ctrl = (unsigned char)src[p++];
+                        strbuf_append_char(processed, (char)(ctrl ^ 0x40));
+                    }
+                    break;
+                }
+                case 'x': {
+                    int value = 0;
+                    bool have_digits = false;
+                    if (p < content_end && src[p] == '{') {
+                        p++;
+                        while (p < content_end && src[p] != '}') {
+                            char h = src[p]; int digit = -1;
+                            if (h >= '0' && h <= '9') digit = h - '0';
+                            else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                            else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                            else break;
+                            value = value * 16 + digit; have_digits = true; p++;
+                        }
+                        if (p < content_end && src[p] == '}') p++;
+                        if (!have_digits) {
+                            // \x{} with no digits: truncate rest of string (bash 5.x behavior)
+                            p = content_end;
+                            break;
+                        }
+                    } else {
+                        for (int j = 0; j < 2 && p < content_end; j++) {
+                            char h = src[p]; int digit = -1;
+                            if (h >= '0' && h <= '9') digit = h - '0';
+                            else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                            else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                            else break;
+                            value = value * 16 + digit; have_digits = true; p++;
+                        }
+                    }
+                    if (have_digits) strbuf_append_char(processed, (char)value);
+                    break;
+                }
+                case 'u': case 'U': {
+                    int max_digits = (esc == 'u') ? 4 : 8;
+                    int value = 0;
+                    bool have_digits = false;
+                    for (int j = 0; j < max_digits && p < content_end; j++) {
+                        char h = src[p]; int digit = -1;
+                        if (h >= '0' && h <= '9') digit = h - '0';
+                        else if (h >= 'a' && h <= 'f') digit = h - 'a' + 10;
+                        else if (h >= 'A' && h <= 'F') digit = h - 'A' + 10;
+                        else break;
+                        value = value * 16 + digit; have_digits = true; p++;
+                    }
+                    if (have_digits) {
+                        if (value <= 0x7f) strbuf_append_char(processed, (char)value);
+                        else if (value <= 0x7ff) {
+                            strbuf_append_char(processed, (char)(0xc0 | ((value >> 6) & 0x1f)));
+                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
+                        } else if (value <= 0xffff) {
+                            strbuf_append_char(processed, (char)(0xe0 | ((value >> 12) & 0x0f)));
+                            strbuf_append_char(processed, (char)(0x80 | ((value >> 6) & 0x3f)));
+                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
+                        } else {
+                            strbuf_append_char(processed, (char)(0xf0 | ((value >> 18) & 0x07)));
+                            strbuf_append_char(processed, (char)(0x80 | ((value >> 12) & 0x3f)));
+                            strbuf_append_char(processed, (char)(0x80 | ((value >> 6) & 0x3f)));
+                            strbuf_append_char(processed, (char)(0x80 | (value & 0x3f)));
+                        }
+                    }
+                    break;
+                }
+                case '0': case '1': case '2': case '3':
+                case '4': case '5': case '6': case '7': {
+                    int value = esc - '0';
+                    for (int j = 0; j < 2 && p < content_end && src[p] >= '0' && src[p] <= '7'; j++) {
+                        value = value * 8 + (src[p++] - '0');
+                    }
+                    strbuf_append_char(processed, (char)value);
+                    break;
+                }
+                default:
+                    // unknown escape: preserve backslash
+                    strbuf_append_char(processed, '\\');
+                    strbuf_append_char(processed, esc);
+                    break;
+                }
+            }
+
+            // check if processed content contains NUL byte — if so, keep original
+            // $'...' syntax since NUL in a C string would truncate downstream
+            bool has_nul = false;
+            for (size_t k = 0; k < processed->length; k++) {
+                if (processed->str[k] == '\0') { has_nul = true; break; }
+            }
+            if (has_nul) {
+                // emit original $'...' unchanged
+                strbuf_append_str(buf, "$'");
+                for (size_t k = content_start; k < content_end; k++) {
+                    strbuf_append_char(buf, src[k]);
+                }
+                strbuf_append_char(buf, '\'');
+                strbuf_free(processed);
+                continue;
+            }
+
+            // emit as double-quoted string, escaping special chars
+            strbuf_append_char(buf, '"');
+            for (size_t k = 0; k < processed->length; k++) {
+                char ch = processed->str[k];
+                if (ch == '"' || ch == '$' || ch == '`' || ch == '\\') {
+                    strbuf_append_char(buf, '\\');
+                }
+                strbuf_append_char(buf, ch);
+            }
+            strbuf_append_char(buf, '"');
+            strbuf_free(processed);
+            continue;
+        }
+        strbuf_append_char(buf, src[i]); i++;
+    }
+    return buf->str;
+}
+
 // Pass 2: Fix multi-assignment lines for tree-sitter.
+// preprocess_case_keyword: quote reserved words used as the value AND as
+// patterns in `case` statements.  Tree-sitter's keyword extraction promotes
+// words like "esac", "done", "fi" etc. to keyword tokens, which prevents them
+// from being recognised as a literal value or pattern.  Quoting the word (e.g.
+// `case 'esac' in ('esac')`) is semantically identical in bash but avoids the
+// tree-sitter ambiguity.
+//
+// Handles:
+//   case <keyword> in  →  case '<keyword>' in
+//   <keyword>)         →  '<keyword>')       (in case item patterns)
+//   ...|<keyword>)     →  ...|'<keyword>')   (alternation patterns)
+static bool is_bash_reserved_word(const char* s, size_t len) {
+    // bash reserved words that tree-sitter promotes to keyword tokens
+    static const char* keywords[] = {
+        "esac", "done", "fi", "elif", "else", "then", "do", "in",
+        "for", "while", "until", "if", "case", "select", "time",
+        "function", "coproc", NULL
+    };
+    for (const char** kw = keywords; *kw; kw++) {
+        if (strlen(*kw) == len && memcmp(s, *kw, len) == 0) return true;
+    }
+    return false;
+}
+
+// helper: check if position i is at a case statement boundary
+// returns position after 'in' keyword + whitespace, or 0 if not a case...in
+static size_t detect_case_in(const char* src, size_t src_len, size_t i) {
+    if (i + 8 >= src_len) return 0;
+    if (memcmp(src + i, "case", 4) != 0) return 0;
+    if (src[i + 4] != ' ' && src[i + 4] != '\t') return 0;
+    if (i > 0 && src[i-1] != '\n' && src[i-1] != ';' && src[i-1] != ' ' && src[i-1] != '\t') return 0;
+    // skip to the value word
+    size_t j = i + 5;
+    while (j < src_len && (src[j] == ' ' || src[j] == '\t')) j++;
+    // skip the value (may be quoted, contain $, etc.)
+    if (j < src_len && (src[j] == '\'' || src[j] == '"')) {
+        char q = src[j]; j++;
+        while (j < src_len && src[j] != q) { if (src[j] == '\\' && j+1 < src_len) j++; j++; }
+        if (j < src_len) j++; // skip closing quote
+    } else {
+        while (j < src_len && src[j] != ' ' && src[j] != '\t' && src[j] != '\n' && src[j] != ';') j++;
+    }
+    // skip whitespace before 'in'
+    while (j < src_len && (src[j] == ' ' || src[j] == '\t')) j++;
+    if (j + 2 > src_len || memcmp(src + j, "in", 2) != 0) return 0;
+    if (j + 2 < src_len && src[j+2] != ' ' && src[j+2] != '\t' &&
+        src[j+2] != '\n' && src[j+2] != '\r' && src[j+2] != ';') return 0;
+    return j + 2; // position right after 'in'
+}
+
+static const char* preprocess_case_keyword(const char* src, size_t src_len, StrBuf** out_buf) {
+    // quick scan: does the source contain 'case' at all?
+    bool has_case = false;
+    for (size_t i = 0; i + 4 < src_len; i++) {
+        if (memcmp(src + i, "case", 4) == 0) { has_case = true; break; }
+    }
+    if (!has_case) return src;
+
+    // full scan: check if any case statement needs keyword quoting
+    bool needs_fix = false;
+    for (size_t i = 0; i < src_len && !needs_fix; i++) {
+        size_t after_in = detect_case_in(src, src_len, i);
+        if (after_in == 0) continue;
+        // check if the value is a keyword
+        size_t j = i + 4;
+        while (j < src_len && (src[j] == ' ' || src[j] == '\t')) j++;
+        size_t val_start = j;
+        while (j < src_len && src[j] != ' ' && src[j] != '\t' && src[j] != '\n' && src[j] != ';') j++;
+        if (j > val_start && is_bash_reserved_word(src + val_start, j - val_start)) {
+            needs_fix = true; break;
+        }
+        // scan patterns in the case body for reserved words before ) or |
+        size_t p = after_in;
+        int depth = 1; // nesting depth for nested case statements
+        while (p < src_len && depth > 0) {
+            // skip whitespace/newlines
+            if (src[p] == ' ' || src[p] == '\t' || src[p] == '\n' || src[p] == '\r') { p++; continue; }
+            // check for nested case
+            if (p + 4 < src_len && memcmp(src + p, "case", 4) == 0 &&
+                (src[p+4] == ' ' || src[p+4] == '\t') &&
+                (p == 0 || src[p-1] == '\n' || src[p-1] == ';' || src[p-1] == ' ' || src[p-1] == '\t')) {
+                size_t nested = detect_case_in(src, src_len, p);
+                if (nested > 0) { depth++; p = nested; continue; }
+            }
+            // check for esac ending current level
+            if (p + 4 <= src_len && memcmp(src + p, "esac", 4) == 0 &&
+                (p == 0 || src[p-1] == '\n' || src[p-1] == ';' || src[p-1] == ' ' || src[p-1] == '\t') &&
+                (p + 4 >= src_len || src[p+4] == '\n' || src[p+4] == ';' || src[p+4] == ' ' || src[p+4] == '\t' || src[p+4] == '\r')) {
+                depth--; p += 4; continue;
+            }
+            // look for a word that is a keyword followed by ) or |) in pattern context
+            // a word in pattern position: after (|;;&|;&|;;|in|newline, optionally after (
+            if (src[p] == '(' ) { p++; continue; } // optional ( before pattern
+            size_t word_start = p;
+            while (p < src_len && src[p] != ' ' && src[p] != '\t' && src[p] != '\n' &&
+                   src[p] != ')' && src[p] != '|' && src[p] != ';' && src[p] != '(') p++;
+            size_t word_len = p - word_start;
+            if (word_len > 0 && (p < src_len && (src[p] == ')' || src[p] == '|')) &&
+                is_bash_reserved_word(src + word_start, word_len)) {
+                needs_fix = true; break;
+            }
+            if (p < src_len && src[p] != '\n') p++;
+            else p++;
+        }
+    }
+    if (!needs_fix) return src;
+
+    log_debug("bash-preprocess: case keyword quoting triggered");
+    StrBuf* buf = strbuf_new_cap(src_len + 64);
+    *out_buf = buf;
+
+    size_t i = 0;
+    int case_depth = 0; // track nesting of case...in...esac
+
+    while (i < src_len) {
+        // detect case...in at statement boundary
+        size_t after_in = detect_case_in(src, src_len, i);
+        if (after_in > 0) {
+            // emit 'case ', then possibly quote the value, then emit through 'in'
+            strbuf_append_str_n(buf, src + i, 4); // "case"
+            size_t j = i + 4;
+            while (j < src_len && (src[j] == ' ' || src[j] == '\t')) {
+                strbuf_append_char(buf, src[j]); j++;
+            }
+            size_t val_start = j;
+            if (j < src_len && (src[j] == '\'' || src[j] == '"')) {
+                char q = src[j]; j++;
+                while (j < src_len && src[j] != q) { if (src[j] == '\\' && j+1 < src_len) j++; j++; }
+                if (j < src_len) j++;
+            } else {
+                while (j < src_len && src[j] != ' ' && src[j] != '\t' && src[j] != '\n' && src[j] != ';') j++;
+            }
+            size_t val_len = j - val_start;
+            if (val_len > 0 && is_bash_reserved_word(src + val_start, val_len)) {
+                strbuf_append_char(buf, '\'');
+                strbuf_append_str_n(buf, src + val_start, val_len);
+                strbuf_append_char(buf, '\'');
+            } else {
+                strbuf_append_str_n(buf, src + val_start, val_len);
+            }
+            strbuf_append_str_n(buf, src + j, after_in - j);
+            i = after_in;
+            case_depth++;
+            continue;
+        }
+
+        // inside a case body — look for 'esac'
+        if (case_depth > 0 && i + 4 <= src_len && memcmp(src + i, "esac", 4) == 0) {
+            // check that this is a word boundary (not part of a larger word)
+            bool word_left = (i == 0 || src[i-1] == '\n' || src[i-1] == ';' ||
+                              src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '|' ||
+                              src[i-1] == '(' || src[i-1] == '\r');
+            bool word_right = (i + 4 >= src_len || src[i+4] == '\n' || src[i+4] == ';' ||
+                               src[i+4] == ' ' || src[i+4] == '\t' || src[i+4] == ')' ||
+                               src[i+4] == '|' || src[i+4] == '\r');
+            if (word_left && word_right) {
+                // is this the closing esac or a usage of 'esac' as a word?
+                // closing esac: at a statement boundary AND followed by end-of-case
+                // (not followed by ) or |)
+                size_t la = i + 4;
+                while (la < src_len && (src[la] == ' ' || src[la] == '\t')) la++;
+                bool is_closing = (la >= src_len || src[la] == '\n' || src[la] == ';' ||
+                                   src[la] == '\r' || src[la] == '#');
+                // also check: closing esac must be at a "statement start" —
+                // preceded by newline, ;;, ;&, ;;&, compound terminators, or after 'in'
+                bool at_stmt_start = (i == 0 || src[i-1] == '\n' || src[i-1] == '\r');
+                if (!at_stmt_start) {
+                    // check for ;; or ;& or ;;& or compound terminators before
+                    size_t back = i - 1;
+                    while (back > 0 && (src[back] == ' ' || src[back] == '\t')) back--;
+                    if (src[back] == ';' || src[back] == '&' || src[back] == '}' || src[back] == ')') {
+                        at_stmt_start = true;
+                    }
+                    // check for 'done' or 'fi' before (compound command terminators)
+                    if (!at_stmt_start && back >= 3) {
+                        if (memcmp(src + back - 3, "done", 4) == 0 &&
+                            (back - 3 == 0 || src[back-4] == ' ' || src[back-4] == '\t' ||
+                             src[back-4] == '\n' || src[back-4] == ';'))
+                            at_stmt_start = true;
+                    }
+                    if (!at_stmt_start && back >= 1) {
+                        if (memcmp(src + back - 1, "fi", 2) == 0 &&
+                            (back - 1 == 0 || src[back-2] == ' ' || src[back-2] == '\t' ||
+                             src[back-2] == '\n' || src[back-2] == ';'))
+                            at_stmt_start = true;
+                    }
+                }
+                if (is_closing && at_stmt_start) {
+                    // real closing esac
+                    strbuf_append_str_n(buf, src + i, 4);
+                    i += 4;
+                    case_depth--;
+                    continue;
+                } else {
+                    // esac used as a word — but only quote if in a valid pattern context
+                    // bare 'esac)' without preceding ( or | is a POSIX syntax error — don't quote
+                    bool should_quote = true;
+                    if (la < src_len && src[la] == ')') {
+                        // check if preceded by ( or | (valid pattern context)
+                        size_t back = i;
+                        while (back > 0 && (src[back-1] == ' ' || src[back-1] == '\t')) back--;
+                        if (back == 0 || (src[back-1] != '(' && src[back-1] != '|')) {
+                            should_quote = false; // bare esac) — intentional syntax error
+                        }
+                    }
+                    if (should_quote) {
+                        strbuf_append_char(buf, '\'');
+                        strbuf_append_str_n(buf, src + i, 4);
+                        strbuf_append_char(buf, '\'');
+                    } else {
+                        strbuf_append_str_n(buf, src + i, 4);
+                    }
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+
+        // also quote other keywords used in case patterns (e.g. else|done|time before ) or |)
+        if (case_depth > 0 && (src[i] >= 'a' && src[i] <= 'z')) {
+            // read a bareword
+            size_t word_start = i;
+            while (i < src_len && ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z') || src[i] == '_'))
+                i++;
+            size_t word_len = i - word_start;
+            if (word_len > 0 && i < src_len && (src[i] == ')' || src[i] == '|') &&
+                is_bash_reserved_word(src + word_start, word_len) &&
+                (word_start == 0 || src[word_start-1] == '\n' || src[word_start-1] == ';' ||
+                 src[word_start-1] == ' ' || src[word_start-1] == '\t' || src[word_start-1] == '|' ||
+                 src[word_start-1] == '(')) {
+                // keyword in pattern position — quote it
+                strbuf_append_char(buf, '\'');
+                strbuf_append_str_n(buf, src + word_start, word_len);
+                strbuf_append_char(buf, '\'');
+            } else {
+                strbuf_append_str_n(buf, src + word_start, word_len);
+            }
+            continue;
+        }
+
+        strbuf_append_char(buf, src[i]);
+        i++;
+    }
+    strbuf_append_char(buf, '\0');
+    return buf->str;
+}
+
 // tree-sitter-bash fails to parse "a=1 b=2\nfor ..." inside compound statements:
 // it drops the "for" line entirely as a parse error. This preprocessor converts
 // lines that are purely multiple space-separated assignments (e.g. "a=1 b=2 c=3")
@@ -5684,6 +6291,14 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         tp->source_length = strlen(dd_source);
     }
 
+    // preprocess pass 1b: convert $'...' ANSI-C strings to double-quoted strings
+    StrBuf* ansi_buf3 = NULL;
+    const char* ansi_src3 = preprocess_ansi_c_string(tp->source, tp->source_length, &ansi_buf3);
+    if (ansi_src3 != tp->source) {
+        tp->source = ansi_src3;
+        tp->source_length = strlen(ansi_src3);
+    }
+
     // preprocess pass 2: split multi-assignment lines (fixes tree-sitter error recovery)
     StrBuf* preproc_buf = NULL;
     const char* actual_source = preprocess_bash_source(tp->source, tp->source_length, &preproc_buf);
@@ -5691,6 +6306,14 @@ Item transpile_bash_to_mir(Runtime* runtime, const char* bash_source, const char
         tp->source = actual_source;
         tp->source_length = strlen(actual_source);
         log_debug("bash-mir: preprocessed source (%zu -> %zu bytes)", strlen(bash_source), tp->source_length);
+    }
+
+    // preprocess pass 3: quote keywords in 'case <keyword> in' (tree-sitter limitation)
+    StrBuf* case_kw_buf3 = NULL;
+    const char* ck_src3 = preprocess_case_keyword(tp->source, tp->source_length, &case_kw_buf3);
+    if (ck_src3 != tp->source) {
+        tp->source = ck_src3;
+        tp->source_length = strlen(ck_src3);
     }
 
     // parse source with tree-sitter-bash

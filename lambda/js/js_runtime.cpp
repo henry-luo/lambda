@@ -311,6 +311,10 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         js_module_vars[i] = (Item){0};
     }
     js_module_var_count = checkpoint_var_count;
+    // clear module registry (frees strdup/calloc per registered module)
+    module_registry_cleanup();
+    // clear JS module cache counter
+    js_module_cache_reset();
     // clear pending exception
     js_exception_pending = false;
     js_exception_value = (Item){0};
@@ -322,11 +326,26 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_array_method_real_this = (Item){0};
     // clear Input context (recreated per script by transpile_js_to_mir)
     js_input = NULL;
-    // Reset cached globals — tests may modify Math/JSON/console properties
+    // reset cached global objects — tests may modify them
     extern void js_reset_math_object();
     js_reset_math_object();
+    extern void js_reset_json_object();
+    js_reset_json_object();
+    extern void js_reset_console_object();
+    js_reset_console_object();
+    extern void js_reset_reflect_object();
+    js_reset_reflect_object();
+    // reset interned __proto__ key
+    extern void js_reset_proto_key();
+    js_reset_proto_key();
+    // reset function pointer → JsFunction cache
+    extern void js_func_cache_reset();
+    js_func_cache_reset();
     extern void js_builtin_cache_reset();
     js_builtin_cache_reset();
+    // deep reset: generators, promises, async contexts, pending calls
+    extern void js_deep_batch_reset();
+    js_deep_batch_reset();
 }
 
 extern "C" Item js_new_error(Item message) {

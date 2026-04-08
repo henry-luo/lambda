@@ -431,6 +431,7 @@ module.exports = grammar({
       choice(
         prec(2, $.command),
         prec(1, $.variable_assignment),
+        $.negated_command,
         $.test_command,
         $.subshell,
         $.compound_statement,

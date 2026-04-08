@@ -160,12 +160,14 @@ typedef enum BashTestOp {
     BASH_TEST_LE,           // -le
 
     // string comparisons ([[ ]])
-    BASH_TEST_STR_EQ,       // == or =
+    BASH_TEST_STR_EQ,       // == or = (pattern match when unquoted/variable RHS)
     BASH_TEST_STR_NE,       // !=
     BASH_TEST_STR_LT,       // <
     BASH_TEST_STR_GT,       // >
     BASH_TEST_STR_MATCH,    // =~ (regex)
     BASH_TEST_STR_GLOB,     // == with glob pattern
+    BASH_TEST_STR_EQ_LIT,   // == or = with quoted literal RHS (no pattern matching)
+    BASH_TEST_STR_NE_LIT,   // != with quoted literal RHS
 
     // unary tests
     BASH_TEST_Z,            // -z (empty string)
@@ -205,6 +207,8 @@ typedef enum BashExpansionType {
     BASH_EXPAND_TRIM_SUFFIX_LONG,   // ${var%%pat}
     BASH_EXPAND_REPLACE,            // ${var/pat/str}
     BASH_EXPAND_REPLACE_ALL,        // ${var//pat/str}
+    BASH_EXPAND_REPLACE_PREFIX,     // ${var/#pat/str}
+    BASH_EXPAND_REPLACE_SUFFIX,     // ${var/%pat/str}
     BASH_EXPAND_UPPER_FIRST,        // ${var^}
     BASH_EXPAND_UPPER_ALL,          // ${var^^}
     BASH_EXPAND_LOWER_FIRST,        // ${var,}
