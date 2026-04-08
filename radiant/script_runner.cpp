@@ -32,20 +32,13 @@
 #include <cstring>
 #include <cctype>
 
-// reusable pool from the most recent JS execution.
-// Uses delayed-destroy pattern: the most recent pool is kept alive
-// because stale JS globals may still reference its data; the PREVIOUS
-// pool is fully destroyed (stale refs from 2 files ago are gone).
+// Pool from the most recent JS execution.
+// Destroyed by script_runner_cleanup_heap() in per-file cleanup (after layout).
 static Pool* s_js_reuse_pool = nullptr;
-static Pool* s_js_prev_pool = nullptr;
 
 extern "C" void script_runner_cleanup_heap() {
-    // Use pool_drain which replaces mmap'd pages at the same virtual address.
-    // Physical memory is released; stale pointers from unreset JS globals
-    // read zeros instead of crashing.  MmapChunk metadata is kept alive
-    // (negligible: ~24 bytes per chunk × ~4 chunks per file).
     if (s_js_reuse_pool) {
-        pool_drain(s_js_reuse_pool);
+        pool_destroy(s_js_reuse_pool);
         s_js_reuse_pool = nullptr;
     }
 }

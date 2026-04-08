@@ -166,22 +166,10 @@ void pool_drain(Pool* pool) {
         rpmalloc_heap_release(pool->heap);
         pool->heap = NULL;
     } else {
-        // mmap mode: replace each chunk's mapping with fresh zeroed pages at the
-        // same virtual address.  Physical pages are released, but stale pointers
-        // from unreset JS globals still point to valid (zeroed) memory.
-        MmapChunk* chunk = pool->chunks;
-        while (chunk) {
-            mmap(chunk->base, chunk->size, PROT_READ | PROT_WRITE,
-                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-            chunk = chunk->next;
-        }
-        // Reset bump pointer to start of first chunk
-        if (pool->chunks) {
-            pool->cursor = pool->chunks->base;
-            pool->limit = pool->chunks->base + pool->chunks->size;
-        }
+        mmap_pool_free_chunks(pool);
     }
     pool->drained = 1;
+    pool->valid = 0;
 }
 
 void pool_reset(Pool* pool) {
