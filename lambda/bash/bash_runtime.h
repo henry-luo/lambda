@@ -70,6 +70,8 @@ Item bash_test_le(Item left, Item right);
 Item bash_str_eq(Item left, Item right);     // literal strcmp (no glob)
 Item bash_test_str_eq(Item left, Item right);
 Item bash_test_str_eq_noescape(Item left, Item right);  // FNM_NOESCAPE for word patterns
+Item bash_test_str_eq_literal(Item left, Item right);    // literal strcmp for quoted RHS
+Item bash_test_str_ne_literal(Item left, Item right);    // literal strcmp for quoted RHS (!= case)
 Item bash_test_str_ne(Item left, Item right);
 Item bash_test_str_lt(Item left, Item right);
 Item bash_test_str_gt(Item left, Item right);
@@ -123,6 +125,8 @@ Item bash_expand_trim_suffix(Item val, Item pat);           // ${var%pat}
 Item bash_expand_trim_suffix_long(Item val, Item pat);      // ${var%%pat}
 Item bash_expand_replace(Item val, Item pat, Item repl);    // ${var/pat/str}
 Item bash_expand_replace_all(Item val, Item pat, Item repl);// ${var//pat/str}
+Item bash_expand_replace_prefix(Item val, Item pat, Item repl); // ${var/#pat/str}
+Item bash_expand_replace_suffix(Item val, Item pat, Item repl); // ${var/%pat/str}
 Item bash_expand_substring(Item val, Item offset, Item len);// ${var:off:len}
 Item bash_expand_upper_first(Item val, Item pat);           // ${var^pat}
 Item bash_expand_upper_all(Item val, Item pat);             // ${var^^pat}

@@ -55,6 +55,7 @@ struct BashOfficialTestInfo {
     std::string tests_path;     // e.g. "ref/bash/tests/arith.tests"
     std::string right_path;     // e.g. "ref/bash/tests/arith.right"
     std::string test_name;      // e.g. "arith"
+    bool filter_expect;         // true if run-script uses grep -v '^expect'
 
     friend std::ostream& operator<<(std::ostream& os, const BashOfficialTestInfo& info) {
         return os << info.test_name;
@@ -180,6 +181,25 @@ static std::string normalize_assoc_arrays(const std::string& text) {
     return result;
 }
 
+// Filter lines starting with 'expect' — matches the bash test suite's
+// `grep -v '^expect'` used by certain run-* scripts.
+static std::string filter_expect_lines(const std::string& output) {
+    std::string result;
+    result.reserve(output.size());
+    size_t pos = 0;
+    while (pos < output.size()) {
+        size_t eol = output.find('\n', pos);
+        if (eol == std::string::npos) eol = output.size();
+        bool skip = (eol - pos >= 6 && output.compare(pos, 6, "expect") == 0);
+        if (!skip) {
+            result.append(output, pos, eol - pos);
+            if (eol < output.size()) result += '\n';
+        }
+        pos = (eol < output.size()) ? eol + 1 : output.size();
+    }
+    return result;
+}
+
 // Filter out Lambda's internal log/banner lines from captured output.
 // These are stderr lines like "23:02:23 [NOTE]  ..." that Lambda emits
 // in debug builds but are not part of the bash script's output.
@@ -281,6 +301,16 @@ static std::string make_test_name(const std::string& filename) {
 // Test Discovery
 //==============================================================================
 
+// Check if the official run-* script for a test uses `grep -v '^expect'`
+static bool run_script_filters_expect(const std::string& tests_dir, const std::string& base) {
+    std::string run_path = tests_dir + "/run-" + base;
+    char* contents = read_file_contents(run_path.c_str());
+    if (!contents) return false;
+    bool found = (strstr(contents, "grep -v") != nullptr && strstr(contents, "expect") != nullptr);
+    free(contents);
+    return found;
+}
+
 static std::vector<BashOfficialTestInfo> discover_bash_tests() {
     std::vector<BashOfficialTestInfo> tests;
 
@@ -305,6 +335,7 @@ static std::vector<BashOfficialTestInfo> discover_bash_tests() {
             info.tests_path = tests_path;
             info.right_path = right_path;
             info.test_name = make_test_name(fname);
+            info.filter_expect = run_script_filters_expect(tests_dir, base);
             tests.push_back(info);
         }
     } while (FindNextFileA(hFind, &fd));
@@ -332,6 +363,7 @@ static std::vector<BashOfficialTestInfo> discover_bash_tests() {
             info.tests_path = tests_path;
             info.right_path = right_path;
             info.test_name = make_test_name(fname);
+            info.filter_expect = run_script_filters_expect(tests_dir, base);
             tests.push_back(info);
         }
     }
@@ -520,6 +552,11 @@ TEST_P(BashOfficialTest, ExecuteAndCompare) {
 
     // Filter out Lambda's internal log/banner lines
     std::string actual = filter_lambda_noise(raw_output);
+
+    // Filter 'expect' annotation lines if the official run-script does so
+    if (info.filter_expect) {
+        actual = filter_expect_lines(actual);
+    }
 
     // Read expected output
     char* expected = read_file_contents(info.right_path.c_str());

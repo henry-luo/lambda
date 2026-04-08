@@ -1628,6 +1628,10 @@
           "named": true
         },
         {
+          "type": "negated_command",
+          "named": true
+        },
+        {
           "type": "subshell",
           "named": true
         },

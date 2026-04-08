@@ -279,8 +279,8 @@ static BashAstNode* build_statement(BashTranspiler* tp, TSNode node) {
             TSNode child = ts_node_named_child(node, 0);
             BashAstNode* inner = build_statement(tp, child);
             if (inner && inner->node_type == BASH_AST_NODE_PIPELINE) {
-                // inner is already a pipeline — just set its negated flag
-                ((BashPipelineNode*)inner)->negated = true;
+                // inner is already a pipeline — toggle its negated flag
+                ((BashPipelineNode*)inner)->negated = !((BashPipelineNode*)inner)->negated;
                 return inner;
             }
             // wrap non-pipeline in a pipeline with negated flag
@@ -1083,7 +1083,7 @@ static String* process_ansi_c_content(NamePool* np, const char* s, int len) {
         case 'c': {
             if (i < len) {
                 unsigned char ctrl = (unsigned char)s[i++];
-                strbuf_append_char(sb, (char)(ctrl & 0x1f));
+                strbuf_append_char(sb, (char)(ctrl ^ 0x40));
             }
             break;
         }
@@ -1169,6 +1169,7 @@ static String* process_ansi_c_content(NamePool* np, const char* s, int len) {
             break;
         }
         default:
+            strbuf_append_char(sb, '\\');
             strbuf_append_char(sb, esc);
             break;
         }
@@ -1592,6 +1593,10 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                 sub_exp->expand_type = BASH_EXPAND_TRIM_SUFFIX_LONG;
             } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '/') {
                 sub_exp->expand_type = BASH_EXPAND_REPLACE_ALL;
+            } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '#') {
+                sub_exp->expand_type = BASH_EXPAND_REPLACE_PREFIX;
+            } else if (op_len == 2 && op_chars[0] == '/' && op_chars[1] == '%') {
+                sub_exp->expand_type = BASH_EXPAND_REPLACE_SUFFIX;
             } else if (op_len == 1) {
                 sub_exp->has_colon = false;
                 if      (op_chars[0] == '-') sub_exp->expand_type = BASH_EXPAND_DEFAULT;
@@ -1674,6 +1679,10 @@ static BashAstNode* build_expansion(BashTranspiler* tp, TSNode node) {
                     expansion->expand_type = BASH_EXPAND_TRIM_SUFFIX;
                 else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '/')
                     expansion->expand_type = BASH_EXPAND_REPLACE_ALL;
+                else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '#')
+                    expansion->expand_type = BASH_EXPAND_REPLACE_PREFIX;
+                else if (ch_src.length == 2 && ch_src.str[0] == '/' && ch_src.str[1] == '%')
+                    expansion->expand_type = BASH_EXPAND_REPLACE_SUFFIX;
                 else if (ch_src.length == 1 && ch_src.str[0] == '/')
                     expansion->expand_type = BASH_EXPAND_REPLACE;
                 else if (ch_src.length == 1 && ch_src.str[0] == ':')
@@ -3166,6 +3175,66 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
                     word->text = name_pool_create_len(tp->name_pool, raw, (int)raw_len);
                     bin->right = (BashAstNode*)word;
                     bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_GLOB : BASH_TEST_STR_NE;
+                } else if (raw_len > 0 && !memchr(raw, '$', raw_len) &&
+                           strcmp(ts_node_type(bin_right), "regex") == 0) {
+                    // regex node (from [[ ]] RHS): tree-sitter's scanner swallows
+                    // quotes into the regex token text. Process quoting to determine
+                    // whether this is a literal comparison or glob pattern.
+                    // in bash, quoted portions are literal; unquoted glob chars
+                    // (* ? [) trigger pattern matching.
+                    char* processed = (char*)alloca(raw_len + 1);
+                    size_t out = 0;
+                    bool has_unquoted_glob = false;
+                    for (size_t i = 0; i < raw_len; i++) {
+                        if (raw[i] == '\'' ) {
+                            // single-quoted segment: everything literal until closing quote
+                            i++;
+                            while (i < raw_len && raw[i] != '\'') {
+                                processed[out++] = raw[i++];
+                            }
+                            // skip closing quote (loop increment handles it if at end)
+                        } else if (raw[i] == '"') {
+                            // double-quoted segment: literal until closing quote
+                            // in double quotes, \ only escapes $, `, ", \, and newline
+                            i++;
+                            while (i < raw_len && raw[i] != '"') {
+                                if (raw[i] == '\\' && i + 1 < raw_len) {
+                                    char next = raw[i + 1];
+                                    if (next == '$' || next == '`' || next == '"' ||
+                                        next == '\\' || next == '\n') {
+                                        i++; // skip backslash
+                                        processed[out++] = raw[i++];
+                                    } else {
+                                        // backslash is literal
+                                        processed[out++] = raw[i++];
+                                    }
+                                    continue;
+                                }
+                                processed[out++] = raw[i++];
+                            }
+                        } else if (raw[i] == '\\' && i + 1 < raw_len) {
+                            // backslash escape: next char is literal
+                            i++;
+                            processed[out++] = raw[i];
+                        } else {
+                            if (raw[i] == '*' || raw[i] == '?' || raw[i] == '[') {
+                                has_unquoted_glob = true;
+                            }
+                            processed[out++] = raw[i];
+                        }
+                    }
+                    processed[out] = '\0';
+                    BashWordNode* word = (BashWordNode*)alloc_bash_ast_node(
+                        tp, BASH_AST_NODE_WORD, bin_right, sizeof(BashWordNode));
+                    word->text = name_pool_create_len(tp->name_pool, processed, (int)out);
+                    word->no_backslash_escape = true; // already processed
+                    bin->right = (BashAstNode*)word;
+                    if (has_unquoted_glob) {
+                        bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_GLOB : BASH_TEST_STR_NE;
+                    } else {
+                        // fully quoted or plain literal — use literal comparison
+                        bin->op = (bin->op == BASH_TEST_STR_EQ) ? BASH_TEST_STR_EQ_LIT : BASH_TEST_STR_NE_LIT;
+                    }
                 } else {
                     bin->right = build_test_expression(tp, bin_right);
                 }
@@ -3193,6 +3262,14 @@ static BashAstNode* build_test_expression(BashTranspiler* tp, TSNode node) {
             }
         }
         return (BashAstNode*)unary;
+    } else if (strcmp(type, "parenthesized_expression") == 0) {
+        // [[ ( expr ) ]] — unwrap and recurse into the inner expression
+        log_debug("bash-ast: unwrapping parenthesized_expression in test");
+        uint32_t ch_count = ts_node_named_child_count(node);
+        if (ch_count > 0) {
+            return build_test_expression(tp, ts_node_named_child(node, 0));
+        }
+        return build_expr_node(tp, node);
     } else {
         return build_expr_node(tp, node);
     }

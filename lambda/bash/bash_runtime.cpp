@@ -674,6 +674,27 @@ extern "C" Item bash_test_str_eq_noescape(Item left, Item right) {
     return (Item){.item = b2it(result)};
 }
 
+// literal string comparison: for quoted RHS in [[ $x = 'literal' ]]
+// quotes have been stripped at AST build time so this is a pure strcmp
+extern "C" Item bash_test_str_eq_literal(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (strcmp(l, r) == 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
+// literal string not-equal: for quoted RHS in [[ $x != 'literal' ]]
+extern "C" Item bash_test_str_ne_literal(Item left, Item right) {
+    char buf_l[64], buf_r[64];
+    const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
+    const char* r = bash_item_cstr(right, buf_r, sizeof(buf_r));
+    bool result = (strcmp(l, r) != 0);
+    bash_last_exit_code = result ? 0 : 1;
+    return (Item){.item = b2it(result)};
+}
+
 extern "C" Item bash_test_str_ne(Item left, Item right) {
     char buf_l[64], buf_r[64];
     const char* l = bash_item_cstr(left, buf_l, sizeof(buf_l));
@@ -1006,53 +1027,219 @@ extern "C" Item bash_expand_trim_suffix_long(Item val, Item pat) {
     return val;
 }
 
-// ${var/pattern/replacement} — replace first occurrence
+// forward declaration for glob matching used by replace
+static bool bash_glob_match(const char* str, const char* pat);
+
+// check if a pattern contains glob metacharacters
+static bool has_glob_chars(const char* pat) {
+    for (; *pat; pat++) {
+        if (*pat == '*' || *pat == '?' || *pat == '[') return true;
+        if (*pat == '\\' && pat[1]) pat++; // skip escaped chars
+    }
+    return false;
+}
+
+// ${var/pattern/replacement} — replace first occurrence (supports glob patterns)
 extern "C" Item bash_expand_replace(Item val, Item pat, Item repl) {
     char buf_v[512], buf_p[256], buf_r[256];
     const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
     const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
     const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
-    // simple substring match for non-glob patterns
-    const char* found = strstr(str, pattern);
-    if (!found) return val;
-    size_t plen = strlen(pattern);
-    size_t rlen = strlen(replacement);
     size_t slen = strlen(str);
-    size_t new_len = slen - plen + rlen;
-    StrBuf* sb = strbuf_new_cap(new_len + 1);
-    size_t prefix = found - str;
-    strbuf_append_str_n(sb, str, prefix);
-    strbuf_append_str_n(sb, replacement, rlen);
-    strbuf_append_str_n(sb, found + plen, slen - prefix - plen);
-    Item result = bash_make_string(sb->str, sb->length);
-    strbuf_free(sb);
-    return result;
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // fast path: literal substring match
+        const char* found = strstr(str, pattern);
+        if (!found) return val;
+        size_t plen = strlen(pattern);
+        size_t new_len = slen - plen + rlen;
+        StrBuf* sb = strbuf_new_cap(new_len + 1);
+        size_t prefix = found - str;
+        strbuf_append_str_n(sb, str, prefix);
+        strbuf_append_str_n(sb, replacement, rlen);
+        strbuf_append_str_n(sb, found + plen, slen - prefix - plen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match at each position
+    char* tmp = (char*)malloc(slen + 1);
+    memcpy(tmp, str, slen + 1);
+    for (size_t i = 0; i <= slen; i++) {
+        // try longest match first at position i
+        for (size_t end = slen; end >= i; end--) {
+            char saved = tmp[end];
+            tmp[end] = '\0';
+            if (bash_glob_match(tmp + i, pattern)) {
+                tmp[end] = saved;
+                StrBuf* sb = strbuf_new_cap(slen + rlen + 1);
+                strbuf_append_str_n(sb, str, i);
+                strbuf_append_str_n(sb, replacement, rlen);
+                strbuf_append_str_n(sb, str + end, slen - end);
+                Item result = bash_make_string(sb->str, sb->length);
+                strbuf_free(sb);
+                free(tmp);
+                return result;
+            }
+            tmp[end] = saved;
+            if (end == i) break; // avoid underflow
+        }
+    }
+    free(tmp);
+    return val;
 }
 
-// ${var//pattern/replacement} — replace all occurrences
+// ${var//pattern/replacement} — replace all occurrences (supports glob patterns)
 extern "C" Item bash_expand_replace_all(Item val, Item pat, Item repl) {
     char buf_v[512], buf_p[256], buf_r[256];
     const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
     const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
     const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
-    size_t plen = strlen(pattern);
-    if (plen == 0) return val;
+    size_t slen = strlen(str);
     size_t rlen = strlen(replacement);
-    StrBuf* sb = strbuf_new_cap(strlen(str) + 64);
-    const char* p = str;
-    while (*p) {
-        const char* found = strstr(p, pattern);
-        if (!found) {
-            strbuf_append_str(sb, p);
-            break;
+
+    if (!has_glob_chars(pattern)) {
+        // fast path: literal substring match
+        size_t plen = strlen(pattern);
+        if (plen == 0) return val;
+        StrBuf* sb = strbuf_new_cap(slen + 64);
+        const char* p = str;
+        while (*p) {
+            const char* found = strstr(p, pattern);
+            if (!found) {
+                strbuf_append_str(sb, p);
+                break;
+            }
+            strbuf_append_str_n(sb, p, found - p);
+            strbuf_append_str_n(sb, replacement, rlen);
+            p = found + plen;
         }
-        strbuf_append_str_n(sb, p, found - p);
-        strbuf_append_str_n(sb, replacement, rlen);
-        p = found + plen;
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match at each position
+    char* tmp = (char*)malloc(slen + 1);
+    memcpy(tmp, str, slen + 1);
+    StrBuf* sb = strbuf_new_cap(slen + 64);
+    size_t i = 0;
+    while (i <= slen) {
+        bool matched = false;
+        // try longest match first at position i
+        for (size_t end = slen; end >= i; end--) {
+            char saved = tmp[end];
+            tmp[end] = '\0';
+            if (bash_glob_match(tmp + i, pattern)) {
+                tmp[end] = saved;
+                strbuf_append_str_n(sb, replacement, rlen);
+                if (end == i) {
+                    i++; // avoid infinite loop on zero-length match
+                } else {
+                    i = end;
+                }
+                matched = true;
+                break;
+            }
+            tmp[end] = saved;
+            if (end == i) break;
+        }
+        if (!matched) {
+            if (i < slen) {
+                strbuf_append_str_n(sb, str + i, 1);
+            }
+            i++;
+        }
     }
     Item result = bash_make_string(sb->str, sb->length);
     strbuf_free(sb);
+    free(tmp);
     return result;
+}
+
+// ${var/#pattern/replacement} — replace prefix match only
+extern "C" Item bash_expand_replace_prefix(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    size_t slen = strlen(str);
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // literal prefix match
+        size_t plen = strlen(pattern);
+        if (plen > slen || memcmp(str, pattern, plen) != 0) return val;
+        StrBuf* sb = strbuf_new_cap(rlen + slen - plen + 1);
+        strbuf_append_str_n(sb, replacement, rlen);
+        strbuf_append_str_n(sb, str + plen, slen - plen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match first at position 0
+    char* tmp = (char*)malloc(slen + 1);
+    memcpy(tmp, str, slen + 1);
+    for (size_t end = slen; ; end--) {
+        char saved = tmp[end];
+        tmp[end] = '\0';
+        if (bash_glob_match(tmp, pattern)) {
+            tmp[end] = saved;
+            StrBuf* sb = strbuf_new_cap(rlen + slen - end + 1);
+            strbuf_append_str_n(sb, replacement, rlen);
+            strbuf_append_str_n(sb, str + end, slen - end);
+            Item result = bash_make_string(sb->str, sb->length);
+            strbuf_free(sb);
+            free(tmp);
+            return result;
+        }
+        tmp[end] = saved;
+        if (end == 0) break;
+    }
+    free(tmp);
+    return val;
+}
+
+// ${var/%pattern/replacement} — replace suffix match only
+extern "C" Item bash_expand_replace_suffix(Item val, Item pat, Item repl) {
+    char buf_v[512], buf_p[256], buf_r[256];
+    const char* str = bash_item_cstr(val, buf_v, sizeof(buf_v));
+    const char* pattern = bash_item_cstr(pat, buf_p, sizeof(buf_p));
+    const char* replacement = bash_item_cstr(repl, buf_r, sizeof(buf_r));
+    size_t slen = strlen(str);
+    size_t rlen = strlen(replacement);
+
+    if (!has_glob_chars(pattern)) {
+        // literal suffix match
+        size_t plen = strlen(pattern);
+        if (plen > slen || memcmp(str + slen - plen, pattern, plen) != 0) return val;
+        StrBuf* sb = strbuf_new_cap(slen - plen + rlen + 1);
+        strbuf_append_str_n(sb, str, slen - plen);
+        strbuf_append_str_n(sb, replacement, rlen);
+        Item result = bash_make_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+
+    // glob pattern: try longest match first starting from position 0
+    char* tmp = (char*)malloc(slen + 1);
+    memcpy(tmp, str, slen + 1);
+    for (size_t start = 0; start <= slen; start++) {
+        if (bash_glob_match(tmp + start, pattern)) {
+            StrBuf* sb = strbuf_new_cap(start + rlen + 1);
+            strbuf_append_str_n(sb, str, start);
+            strbuf_append_str_n(sb, replacement, rlen);
+            Item result = bash_make_string(sb->str, sb->length);
+            strbuf_free(sb);
+            free(tmp);
+            return result;
+        }
+    }
+    free(tmp);
+    return val;
 }
 
 // ${var:offset:length} — substring extraction
