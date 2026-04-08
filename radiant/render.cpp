@@ -757,8 +757,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     x += scaled_space_width;
                 }
                 else {
-                    // draw the glyph to the image buffer — use hhea ascender (CSS px) * scale for physical px
-                    float ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    // draw the glyph to the image buffer — use content-area ascender (CSS px) * scale for physical px
+                    // On macOS, use CoreText ascent to match the CT rasterizer's baseline coordinate system.
+                    float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {

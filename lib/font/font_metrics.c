@@ -478,3 +478,27 @@ float font_get_cell_height(FontHandle* handle) {
 
     return 0;
 }
+
+/**
+ * Get the raw content-area ascender for rendering glyph baseline positioning.
+ *
+ * On macOS, glyphs are rasterized by CoreText, so the baseline reference
+ * must match CoreText's ascent metric. Uses the platform callback to get
+ * the raw CT ascent (without half-leading adjustment).
+ *
+ * Fallback: hhea_ascender (same as FontMetrics.hhea_ascender).
+ *
+ * Returns ascender in CSS pixels (positive value).
+ */
+float font_get_rendering_ascender(FontHandle* handle) {
+    if (!handle) return 0;
+
+    const char* family = handle->family_name ? handle->family_name : NULL;
+    float ascent, descent, lh;
+    if (get_font_metrics_platform(family, handle->size_px, &ascent, &descent, &lh)) {
+        return ascent;
+    }
+
+    const FontMetrics* m = font_get_metrics(handle);
+    return m ? m->hhea_ascender : 0;
+}
