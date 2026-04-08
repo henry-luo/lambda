@@ -540,7 +540,11 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         // CTFont is at CSS_size so its advance is in CSS pixels; multiply by pixel_ratio
         // to store as physical pixels matching the convention the caller expects.
         // Bitmap data from FreeType is unchanged and used only during rendering.
-        if (!for_rendering && handle->ct_font_ref) {
+        // Apply CT advances for BOTH layout and rendering passes — the rendering loop
+        // uses advance_x to position glyphs sequentially, so it must match the layout
+        // advances. Without this, FreeType's wider advances cause rendered text to
+        // overflow past its measured width, creating overlap at inline boundaries.
+        if (handle->ct_font_ref) {
             float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
                                     ? ctx->config.pixel_ratio : 1.0f;
             float ft_adv_before = s_loaded_glyph.advance_x;
