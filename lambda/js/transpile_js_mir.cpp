@@ -367,7 +367,7 @@ static uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t se
         strlen(((JsLocalFuncEntry*)item)->name), seed0, seed1);
 }
 
-// Module-level constant entry (top-level const with literal value)
+// Module-scope constants: variables, functions, classes declared at top level
 enum JsModuleConstType {
     MCONST_INT,
     MCONST_FLOAT,
@@ -386,8 +386,7 @@ struct JsModuleConstEntry {
     double float_val;   // for MCONST_FLOAT
     bool is_int;        // legacy compat: true for int, false for float
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
-    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
-                        //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
+    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
 };
@@ -12740,6 +12739,12 @@ static void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
         } else {
             jm_transpile_box_item(mt, for_node->update);
         }
+        // v23c: check for pending exceptions after update expression
+        // Only when inside try/catch so thrown exceptions reach the catch handler.
+        // Outside try/catch, stale exceptions would cause spurious loop exits.
+        if (mt->try_ctx_depth > 0 && !jm_is_native_type(jm_get_effective_type(mt, for_node->update))) {
+            jm_emit_exc_propagate_check(mt);
+        }
     }
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
@@ -19860,7 +19865,6 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
     jm_load_imports(runtime, js_ast, filename);
 
-    // Initialize MIR context
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: MIR context init failed");

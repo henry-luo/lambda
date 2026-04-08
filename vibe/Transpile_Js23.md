@@ -558,11 +558,11 @@ This requires classifying runtime functions as "definitely-no-throw" (e.g., `js_
 |-------|-------------|--------|------|--------|--------|
 | **1** | C Runtime Facade Functions | High (−20-40% MIR items) | Low | Medium | ✅ Done |
 | **2** | Inline MIR Micro-Operations | Medium (−5-10% call overhead) | Low | Low | ✅ Done |
-| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low | 🟡 Partial |
+| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low | ✅ Closed (remainder negative ROI) |
 | **4** | Loop Variable Type Speculation | High (tight loops much faster) | Medium (correctness) | Medium | ✅ Done (pre-v23) |
-| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low | ⏭ Skipped (already covered) |
+| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low | ✅ Closed (already covered by name_pool) |
 | **6** | Direct Method Dispatch | High (bypass 2-level indirection) | Medium (must match semantics) | High | ✅ Done (pre-v23) |
-| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium | 🟡 Partial |
+| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium | ✅ Closed (remainder negative ROI) |
 
 **Recommended order**: Stage 2 → Stage 1 → Stage 5 → Stage 3 → Stage 7 → Stage 4 → Stage 6
 
@@ -614,11 +614,11 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 |-------|-------------|--------|-------|
 | **1** | C Runtime Facade Functions | ✅ Done | 8 comparison `_raw` facades + `js_typeof_is`. `js_property_get_str` defined but intentionally not wired. Method call facades (`js_method_call_0/1/2`) skipped. |
 | **2** | Inline MIR Micro-Operations | ✅ Done | `jm_emit_is_truthy` (bool fast-path), `jm_transpile_condition` (unified condition → raw 0/1), constant strength reduction for null/undefined/true/false. |
-| **3** | Import Pre-population | 🟡 Partial | `jit_runtime_imports[]` bulk hashmap init exists. Cross-module shared import proto pool not done. |
+| **3** | Import Pre-population | ✅ Closed | Bulk init via `jit_runtime_imports[]` done. Cross-module proto pool analyzed and rejected — negative ROI (see below). |
 | **4** | Loop Variable Type Speculation | ✅ Done | Semi-native for-loop tier with cached bounds (pre-v23 work). |
-| **5** | String Interning for Properties | 🟡 Skipped | `jm_box_string_literal` already interns at transpile time via `name_pool_create_len()`. `js_property_get_str` defined but not wired — no benefit over pre-interned path. |
+| **5** | String Interning for Properties | ✅ Closed | `jm_box_string_literal` already interns at transpile time via `name_pool_create_len()`. `js_property_get_str` defined but not wired — no benefit over pre-interned path. |
 | **6** | Direct Method Dispatch | ✅ Done | `js_array_push`, `js_object_keys`, `js_object_values` direct-called (pre-v23 work). |
-| **7** | MIR Code Size Reduction | 🟡 Partial | Constant strength reduction done. Module variable caching and exception check batching not done. |
+| **7** | MIR Code Size Reduction | ✅ Closed | Constant strength reduction done. Module var caching and exception check batching analyzed and rejected — negative ROI (see below). |
 
 ### What Was Implemented in v23
 
@@ -642,12 +642,12 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 - **Wired into all 5 condition sites**: `if`, `while`, `for`, `do-while`, `ternary (?:)`
 - **Switch-case comparison** inlined as direct `MIR_AND eq, 1` for BOOL result
 
-#### What Was Intentionally Skipped
+#### What Was Intentionally Skipped (with Code-Level Analysis)
 - **`js_property_get_str`**: Not wired because `jm_box_string_literal` already pre-interns string keys at transpile time. Adding a separate C-string path would add a new import without eliminating any existing one.
 - **`js_method_call_0/1/2`**: General method call facades — high implementation complexity, moderate benefit. Would need to handle prototype chain, getter interception, etc.
-- **Stage 3 cross-module dedup**: MIR modules are created per-test and discarded. Sharing protos across modules would require architectural changes to MIR context lifecycle.
-- **Stage 7 module variable caching**: Requires invalidation after any function call that might modify globals. Conservative invalidation would negate most benefit.
-- **Stage 7 exception check batching**: Requires classifying all runtime functions as throw/no-throw. Medium risk for correctness.
+- **Stage 3 cross-module import proto pool**: `jit_runtime_imports[]` already pre-populates the MIR linker with all needed runtime symbols. The per-module `import_cache` hashmap in `transpile_js_mir.cpp` is a separate concern (deduplicates imports *within* a single module). Pre-populating all ~50 imports upfront would waste time for short test262 scripts that only use 10–15 of them. MIR modules are created per-test and discarded, so cross-module sharing would require architectural changes to MIR context lifecycle with no measurable benefit.
+- **Stage 7A module variable caching**: `MCONST_MODVAR` (transpile_js_mir.cpp ~line 4826) calls `js_get_module_var()` on every variable reference. Caching the result requires invalidation after *any* function call that might modify module-level state. In test262's dominant pattern (`assert.sameValue(x, y)`), the cache would be invalidated by the `assert.sameValue` call immediately before the next variable read — negating any benefit.
+- **Stage 7B exception check batching**: `jm_emit_exc_propagate_check` is emitted at only 8 specific sites in transpile_js_mir.cpp (TDZ checks, try/catch entry, for-in/of iteration, etc.). These are already minimal and targeted — there are no sequences of adjacent checks that could be collapsed. The proposal assumed exception checks were emitted after every runtime call, which is not the case.
 
 ### Timing Results
 
@@ -753,3 +753,90 @@ Projected Phase 2 from single-process data: **~88.8s** (saves ~24s from 113.1s).
 ### Conclusion
 
 MIR interpreter mode is **not viable** for reducing Phase 2 test262 time in the multi-worker setup. The `--mir-interp` flag is retained for potential future use (single-process scenarios, embedded/WASM targets where JIT is unavailable).
+
+---
+
+## 14. Test Runner Optimizations (April 2026)
+
+### 14.1 Problem: Straggler Batches from Infinite-Loop Tests
+
+Profiling per-batch wall time revealed extreme load imbalance:
+
+| Batch | Time | Root cause |
+|-------|------|-----------|
+| batch[88] | **60.3s** | 5+ tests hitting 10s timeout |
+| batch[277] | 41.4s | 3 timeout tests |
+| batch[159] | 31.1s | class TDZ + generator timeouts |
+
+58% of Phase 2 wall time was consumed by a single batch. The 8 workers would finish the other 528 batches, then wait idle while one worker ran the straggler.
+
+### 14.2 Root Cause: Timeout Tests (Lambda Bugs Not Hard Crashes)
+
+22 tests hit the 10s subprocess timeout every run because Lambda is missing spec-required guards — they should throw but loop forever instead:
+
+| Category | Example test | Root issue |
+|----------|-------------|-----------|
+| `String.prototype.repeat` | `repeat(Infinity)`, `repeat(-1)` | No `RangeError` guard for n < 0 or n === Infinity |
+| `class name in extends` | `class x extends x {}` | No TDZ check for class name in `extends` expression |
+| `Array.find/findIndex` | `array-altered-during-loop` | `len` re-read each iteration instead of captured at start |
+| `for` loop completion | `head-init-*-completion` | `eval()` completion value + `break` handling issues |
+| `for` scope / block | `scope-body-lex-open`, `labeled-continue` | Infinite iteration in Lambda's for-scope evaluation |
+
+These are distinct from crashes (non-zero exit from signal) — they exit with code 124 (timeout) every time.
+
+### 14.3 Fix 1: Slowest-First Batch Dispatch
+
+Load per-test timing data from `temp/_t262_timing_o0.tsv`, compute estimated cost per batch (sum of per-test elapsed_us), sort the dispatch queue descending. Workers pick the most expensive batches first instead of sequentially.
+
+**Result**: The 60s batch starts on worker 0 at t=0 while other workers process fast batches concurrently, reducing idle wait.
+
+| Run | Phase 2 | Slowest batch est. |
+|-----|---------|-------------------|
+| Sequential (before) | 98–160s (high variance) | 59.4s |
+| Slowest-first | 99.4s | 59.4s |
+
+**Improvement**: Eliminated worst-case 160s variance but average was similar — the 60s batch still defines the minimum Phase 2 floor.
+
+### 14.4 Fix 2: Timeout Test Quarantine
+
+Added timeout tests to `temp/_t262_crashers.txt` with `TIMEOUT_124` prefix and `#` comment block explaining the distinction from crashes. The crasher writer now preserves `TIMEOUT_` and `#` lines across rewrites (so they survive the auto-update at the end of each run).
+
+**Effect**: 17 tests quarantined, removing ~170s of wasted timeout-wait compute from clean batches. The slowest estimated batch dropped from 59.4s to 9.3s.
+
+| Run | Phase 2 | Quarantined | Slowest batch est. |
+|-----|---------|------------|-------------------|
+| Before timeout quarantine | 99.4s | 690 crash + 0 timeout | 59.4s |
+| After timeout quarantine | **73.9s** | 690 crash + 17 timeout | **9.3s** |
+
+**−25.5s / −34% improvement.**
+
+### 14.5 Batch Size Trial: 75 Tests per Batch
+
+Hypothesis: larger batches reduce `posix_spawn` overhead (352 batches vs 529), potentially saving ~3.5s of spawn+process-lifecycle cost.
+
+| Metric | batch=50 | batch=75 | Delta |
+|--------|----------|----------|-------|
+| Phase 2 time | **73.9s** | 79.6s | **+5.7s slower** |
+| Total time | 74.2s | 79.9s | +5.7s |
+| Number of batches | 529 | 352 | −177 |
+| Slowest batch (est.) | 9.3s | 14.0s | +4.7s |
+| Slowest batch (actual) | 9.3s | 20.1s | +10.8s |
+| Crash list entries | 690 | **718** | **+28 new crashes** |
+| Regressions | 221 | 233 | +12 |
+
+**Conclusion**: batch=75 is **slower and worse**. Two compounding effects:
+1. **Worse load distribution**: Merging two 50-test batches into one 75-test batch combines their slow tests, doubling the straggler weight. Slowest batch jumped from 9.3s estimated to 20.1s actual.
+2. **More crash contamination**: A single crashing test kills more co-batched tests in a 75-batch (up to 74 collateral) vs a 50-batch (up to 49 collateral). This produced 28 additional entries in the crasher list.
+
+The `posix_spawn` savings (~1.5s for 177 fewer spawns) are far outweighed by both penalties. **Reverted to batch=50.**
+
+### 14.6 Summary of Phase 2 Optimization History
+
+| Milestone | Phase 2 time | Notes |
+|-----------|-------------|-------|
+| v23b baseline (before runner work) | 113.1s | Old Phase 2a crasher rerun, no quarantine |
+| Clean batch + crasher quarantine (v24 start) | 98–160s | High variance from straggler batches |
+| + Slowest-first dispatch | ~99s | Variance reduced, avg similar |
+| + Timeout test quarantine (17 tests) | **73.9s** | −34% from pre-quarantine best |
+| Batch=75 trial | 79.6s | +5.7s vs batch=50, reverted |
+| **Current (batch=50 + all optimizations)** | **~74s** | Stable, low variance |
