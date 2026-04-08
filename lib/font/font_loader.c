@@ -122,21 +122,14 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
         }
     }
 
-    // create CoreText font for GPOS kerning fallback
-    // only when font has NO kern table at all (e.g., SFNS.ttf with GPOS only).
-    // Skip fonts that have a kern table in Apple AAT format — FreeType can't read
-    // those (FT_HAS_KERNING=false), but enabling CoreText for them would change
-    // existing baseline behaviour.
-    if (!FT_HAS_KERNING(face)) {
-        FT_ULong kern_len = 0;
-        FT_Error kern_err = FT_Load_Sfnt_Table(face, FT_MAKE_TAG('k','e','r','n'),
-                                                0, NULL, &kern_len);
-        bool has_any_kern_table = (kern_err == 0 && kern_len > 0);
-        if (!has_any_kern_table) {
-            const char* ps_name = FT_Get_Postscript_Name(face);
-            handle->ct_font_ref = font_platform_create_ct_font(
-                ps_name, face->family_name, size_px, (int)weight);  // CSS size+weight
-        }
+    // create CoreText font for glyph advance overrides and GPOS kerning.
+    // Use CoreText advances for ALL fonts so that text widths match Chrome/Skia.
+    // For fonts with a kern table, FontTables kern is still applied on top
+    // (font_get_kerning checks FontTables first before ct_font_ref path).
+    {
+        const char* ps_name = FT_Get_Postscript_Name(face);
+        handle->ct_font_ref = font_platform_create_ct_font(
+            ps_name, face->family_name, size_px, (int)weight);  // CSS size+weight
     }
 #endif
 

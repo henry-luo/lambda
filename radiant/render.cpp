@@ -653,7 +653,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         continue;
                     }
 
-                    float s_ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    float s_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
                     Color saved_color = rdcon->color;
                     TextShadow* ts = text_shadow;
                     while (ts) {
@@ -757,9 +757,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     x += scaled_space_width;
                 }
                 else {
-                    // draw the glyph to the image buffer — use content-area ascender (CSS px) * scale for physical px
-                    // On macOS, use CoreText ascent to match the CT rasterizer's baseline coordinate system.
+                    // draw the glyph to the image buffer — use rendering ascender for glyph bitmap placement.
+                    // font_get_rendering_ascender() returns the raw platform ascent (e.g. CoreText ascent on
+                    // macOS) WITHOUT half-leading.  The glyph bitmap's bearing_y is measured from this
+                    // platform baseline, so we must use the same value here.  Layout uses
+                    // fprop->ascender (= init_ascender, which INCLUDES half-leading) for CSS vertical-
+                    // align math, but text_rect.y already incorporates lead_y so the absolute baseline
+                    // y = text_rect.y + rendering_ascender == init_ascender + lead_y  is correct.
                     float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {
