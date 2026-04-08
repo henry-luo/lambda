@@ -89,6 +89,10 @@ struct FontHandle {
 #ifdef __APPLE__
     // CoreText font reference for GPOS kerning (when FreeType lacks kern table)
     void* ct_font_ref;  // actually CTFontRef, void* to avoid CoreText headers
+
+    // CoreText font for rasterization (replaces FT_Load_Glyph+FT_LOAD_RENDER)
+    // Created from raw font data for all fonts on macOS.
+    void* ct_raster_ref;  // CTFontRef, void* to avoid CoreText headers
 #endif
 
     // back-pointer to owning context (for pool access)
@@ -352,6 +356,15 @@ void                font_platform_destroy_ct_font(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
                                                     uint32_t left_cp, uint32_t right_cp);
+
+// font_rasterize_ct.c — CoreText rasterization (macOS)
+void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
+                                              float size_px, int face_index);
+bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
+                                               float bitmap_scale, GlyphInfo* out);
+GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
+                                              GlyphRenderMode mode, float bitmap_scale,
+                                              float pixel_ratio, Arena* arena);
 #endif
 
 // font_loader.c

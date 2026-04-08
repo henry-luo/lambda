@@ -428,6 +428,34 @@ const GlyphBitmap* font_render_glyph(FontHandle* handle, uint32_t codepoint,
         }
     }
 
+#ifdef __APPLE__
+    // try CoreText rasterization first (replaces FT_LOAD_RENDER on macOS)
+    if (handle->ct_raster_ref) {
+        float pixel_ratio = (ctx->config.pixel_ratio > 0) ? ctx->config.pixel_ratio : 1.0f;
+        GlyphBitmap* bmp = font_rasterize_ct_render(handle->ct_raster_ref, codepoint,
+                                                      mode, handle->bitmap_scale,
+                                                      pixel_ratio, ctx->glyph_arena);
+        if (bmp) {
+            // insert into bitmap cache
+            if (bmp_cache) {
+                int max_glyphs = ctx->config.max_cached_glyphs > 0 ? ctx->config.max_cached_glyphs : 4096;
+                if ((int)hashmap_count(bmp_cache) >= max_glyphs) {
+                    hashmap_clear(bmp_cache, false);
+                }
+                BitmapCacheEntry entry = {
+                    .codepoint = codepoint,
+                    .mode      = mode,
+                    .handle    = handle,
+                    .bitmap    = *bmp,
+                };
+                hashmap_set(bmp_cache, &entry);
+            }
+            return bmp;
+        }
+        // CT render failed — fall through to FreeType
+    }
+#endif
+
     FT_Face face = handle->ft_face;
     FT_UInt char_index = 0;
     if (handle->tables) {
@@ -560,6 +588,43 @@ static LoadedGlyph* try_load_from_handle(FontHandle* h, uint32_t codepoint, FT_I
     return fill_loaded_glyph_from_slot(face->glyph, h->bitmap_scale);
 }
 
+#ifdef __APPLE__
+// try loading a glyph via CoreText rasterization (macOS).
+// Used for rendering passes — returns bitmap + metrics in physical pixels.
+// Returns LoadedGlyph* on success, NULL on failure (falls back to FreeType).
+static LoadedGlyph* try_load_from_handle_ct(FontHandle* h, uint32_t codepoint) {
+    if (!h || !h->ct_raster_ref || !h->ctx) return NULL;
+
+    float pixel_ratio = (h->ctx->config.pixel_ratio > 0)
+                            ? h->ctx->config.pixel_ratio : 1.0f;
+
+    // get metrics (advance in CSS pixels since CTFont is at CSS size)
+    GlyphInfo info = {0};
+    if (!font_rasterize_ct_metrics(h->ct_raster_ref, codepoint, h->bitmap_scale, &info))
+        return NULL;
+
+    // render bitmap at physical resolution
+    GlyphBitmap* bmp = font_rasterize_ct_render(h->ct_raster_ref, codepoint,
+                                                  GLYPH_RENDER_NORMAL, h->bitmap_scale,
+                                                  pixel_ratio, h->ctx->glyph_arena);
+
+    memset(&s_loaded_glyph, 0, sizeof(s_loaded_glyph));
+
+    if (bmp) {
+        s_loaded_glyph.bitmap = *bmp;
+    } else {
+        // zero-size glyph (space etc) — no bitmap
+        s_loaded_glyph.bitmap.bitmap_scale = h->bitmap_scale;
+    }
+
+    // advance: CT returns CSS pixels, font_load_glyph expects physical pixels
+    s_loaded_glyph.advance_x = info.advance_x * pixel_ratio;
+    s_loaded_glyph.advance_y = 0;
+
+    return &s_loaded_glyph;
+}
+#endif
+
 // fill font metrics fields on the loaded glyph from the given handle
 static void fill_loaded_glyph_font_metrics(FontHandle* h) {
     if (!h) return;
@@ -607,8 +672,31 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
         ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL | FT_LOAD_COLOR)
         : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR);
 
+    LoadedGlyph* result = NULL;
+
     // step 1: try the primary font
-    LoadedGlyph* result = try_load_from_handle(handle, codepoint, load_flags);
+#ifdef __APPLE__
+    // for rendering passes, try CoreText rasterization first (replaces FT_LOAD_RENDER)
+    if (for_rendering && handle->ct_raster_ref) {
+        result = try_load_from_handle_ct(handle, codepoint);
+        if (result) {
+            fill_loaded_glyph_font_metrics(handle);
+            // for kern-less fonts, override advance with ct_font_ref advance
+            // (ct_raster_ref advance may differ from system ct_font_ref advance)
+            if (handle->ct_font_ref) {
+                float pixel_ratio = (ctx && ctx->config.pixel_ratio > 0)
+                                        ? ctx->config.pixel_ratio : 1.0f;
+                float ct_adv = font_platform_get_glyph_advance(handle->ct_font_ref, codepoint);
+                if (ct_adv >= 0.0f) {
+                    s_loaded_glyph.advance_x = ct_adv * pixel_ratio;
+                }
+            }
+            if (ctx) cache_loaded_glyph(ctx, handle, codepoint, for_rendering);
+            return result;
+        }
+    }
+#endif
+    result = try_load_from_handle(handle, codepoint, load_flags);
     if (result) {
         fill_loaded_glyph_font_metrics(handle);
 #ifdef __APPLE__
@@ -652,6 +740,12 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
 
     FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
     if (fallback) {
+#ifdef __APPLE__
+        if (for_rendering && fallback->ct_raster_ref) {
+            result = try_load_from_handle_ct(fallback, codepoint);
+        }
+        if (!result)
+#endif
         result = try_load_from_handle(fallback, codepoint, load_flags);
         if (result) {
             // populate metrics from the fallback font, not the primary
