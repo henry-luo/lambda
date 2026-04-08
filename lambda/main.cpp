@@ -19,6 +19,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/time.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #endif
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
@@ -855,6 +858,25 @@ static void batch_alarm_handler(int sig) {
         batch_timeout_active = 0;
         longjmp(batch_timeout_jmp, 1);
     }
+}
+
+// get current resident set size in bytes (for memory profiling)
+static size_t get_rss_bytes() {
+#ifdef __APPLE__
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        return info.resident_size;
+#elif defined(__linux__)
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        unsigned long pages = 0;
+        fscanf(f, "%*u %lu", &pages); // second field = resident pages
+        fclose(f);
+        return pages * 4096;
+    }
+#endif
+    return 0;
 }
 #endif
 
@@ -2756,6 +2778,7 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
+            size_t rss_before = get_rss_bytes();
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
 
@@ -2878,7 +2901,8 @@ int main(int argc, char *argv[]) {
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
-            printf("\x01" "BATCH_END %d %ld\n", result, elapsed_us);
+            size_t rss_after = get_rss_bytes();
+            printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
             fflush(stdout);
 
             if (hot_reload) {

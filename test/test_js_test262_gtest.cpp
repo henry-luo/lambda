@@ -719,6 +719,8 @@ struct BatchResult {
     std::string output;
     int exit_code;
     long elapsed_us;  // per-test execution time in microseconds
+    size_t rss_before; // RSS bytes before test
+    size_t rss_after;  // RSS bytes after test
 };
 
 static const size_t T262_BATCH_CHUNK_SIZE = 50;
@@ -961,9 +963,18 @@ static void run_t262_sub_batch(
                 } else if (strncmp(buffer + 1, "BATCH_END ", 10) == 0) {
                     int status = atoi(buffer + 11);
                     long elapsed_us = 0;
+                    size_t rss_before = 0, rss_after = 0;
                     const char* space2 = strchr(buffer + 11, ' ');
-                    if (space2) elapsed_us = atol(space2 + 1);
-                    results[current_script] = {current_output, status, elapsed_us};
+                    if (space2) {
+                        elapsed_us = atol(space2 + 1);
+                        const char* space3 = strchr(space2 + 1, ' ');
+                        if (space3) {
+                            rss_before = (size_t)atol(space3 + 1);
+                            const char* space4 = strchr(space3 + 1, ' ');
+                            if (space4) rss_after = (size_t)atol(space4 + 1);
+                        }
+                    }
+                    results[current_script] = {current_output, status, elapsed_us, rss_before, rss_after};
                     in_script = false;
                 }
             } else if (in_script) {
@@ -1436,6 +1447,105 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             fclose(timing_log);
             fprintf(stderr, "[test262] Timing data: %zu entries → %s\n",
                     batch_results.size(), timing_path);
+        }
+    }
+
+    // Write per-test memory profiling data and summary
+    {
+        char mem_path[128] = "temp/_t262_memory.tsv";
+        if (g_opt_level >= 0)
+            snprintf(mem_path, sizeof(mem_path), "temp/_t262_memory_o%d.tsv", g_opt_level);
+        FILE* mem_log = fopen(mem_path, "w");
+        if (mem_log) {
+            fprintf(mem_log, "test_name\texit_code\trss_before_kb\trss_after_kb\trss_delta_kb\n");
+            for (auto& kv : batch_results) {
+                long delta_kb = (long)(kv.second.rss_after / 1024) - (long)(kv.second.rss_before / 1024);
+                fprintf(mem_log, "%s\t%d\t%zu\t%zu\t%ld\n",
+                        kv.first.c_str(), kv.second.exit_code,
+                        kv.second.rss_before / 1024, kv.second.rss_after / 1024, delta_kb);
+            }
+            fclose(mem_log);
+        }
+
+        // Compute memory summary stats
+        size_t total_tests = 0, tests_with_mem = 0;
+        size_t peak_rss = 0, max_delta = 0;
+        long total_delta = 0;
+        std::string peak_rss_test, max_delta_test;
+        size_t large_alloc_count = 0; // tests with > 10 MB delta
+        size_t leak_suspect_count = 0; // tests with > 1 MB positive delta
+
+        // Per-batch tracking: group by rss_before to detect cross-test growth
+        // First test in a batch has smallest rss_before, last has largest rss_after
+        size_t min_rss_seen = (size_t)-1, max_rss_seen = 0;
+
+        for (auto& kv : batch_results) {
+            total_tests++;
+            if (kv.second.rss_after == 0) continue; // no memory data
+            tests_with_mem++;
+            long delta = (long)(kv.second.rss_after) - (long)(kv.second.rss_before);
+            total_delta += delta;
+            if (kv.second.rss_after > peak_rss) {
+                peak_rss = kv.second.rss_after;
+                peak_rss_test = kv.first;
+            }
+            if (delta > 0 && (size_t)delta > max_delta) {
+                max_delta = (size_t)delta;
+                max_delta_test = kv.first;
+            }
+            if (delta > 10 * 1024 * 1024) large_alloc_count++;
+            if (delta > 1 * 1024 * 1024) leak_suspect_count++;
+            if (kv.second.rss_before > 0 && kv.second.rss_before < min_rss_seen)
+                min_rss_seen = kv.second.rss_before;
+            if (kv.second.rss_after > max_rss_seen)
+                max_rss_seen = kv.second.rss_after;
+        }
+
+        if (tests_with_mem > 0) {
+            fprintf(stderr, "\n[test262] ╔══════════════════════════════════════════════════╗\n");
+            fprintf(stderr, "[test262] ║         Memory Profiling Summary                 ║\n");
+            fprintf(stderr, "[test262] ╠══════════════════════════════════════════════════╣\n");
+            fprintf(stderr, "[test262] ║  Tests with memory data: %5zu / %5zu           ║\n",
+                    tests_with_mem, total_tests);
+            fprintf(stderr, "[test262] ║  Peak RSS across all tests: %7.1f MB            ║\n",
+                    peak_rss / (1024.0 * 1024.0));
+            fprintf(stderr, "[test262] ║  Min RSS seen (batch start): %6.1f MB            ║\n",
+                    min_rss_seen / (1024.0 * 1024.0));
+            fprintf(stderr, "[test262] ║  Max RSS seen (batch end):   %6.1f MB            ║\n",
+                    max_rss_seen / (1024.0 * 1024.0));
+            fprintf(stderr, "[test262] ║  Avg RSS delta/test: %+.1f KB                    ║\n",
+                    (total_delta / (double)tests_with_mem) / 1024.0);
+            fprintf(stderr, "[test262] ║  Largest single-test growth: %7.1f MB           ║\n",
+                    max_delta / (1024.0 * 1024.0));
+            fprintf(stderr, "[test262] ║  Tests > 1 MB growth (leak suspects): %4zu       ║\n",
+                    leak_suspect_count);
+            fprintf(stderr, "[test262] ║  Tests > 10 MB growth (large alloc):  %4zu       ║\n",
+                    large_alloc_count);
+            fprintf(stderr, "[test262] ╚══════════════════════════════════════════════════╝\n");
+
+            if (!max_delta_test.empty()) {
+                fprintf(stderr, "[test262]   Largest growth test: %s\n", max_delta_test.c_str());
+            }
+            if (!peak_rss_test.empty()) {
+                fprintf(stderr, "[test262]   Peak RSS test: %s\n", peak_rss_test.c_str());
+            }
+
+            // Print top 20 tests by RSS delta (descending)
+            std::vector<std::pair<long, std::string>> by_delta;
+            for (auto& kv : batch_results) {
+                if (kv.second.rss_after == 0) continue;
+                long delta = (long)(kv.second.rss_after) - (long)(kv.second.rss_before);
+                by_delta.push_back({delta, kv.first});
+            }
+            std::sort(by_delta.begin(), by_delta.end(),
+                      [](const auto& a, const auto& b) { return a.first > b.first; });
+
+            fprintf(stderr, "[test262]   Top 20 tests by memory growth:\n");
+            for (size_t i = 0; i < 20 && i < by_delta.size(); i++) {
+                fprintf(stderr, "[test262]     %+8.1f KB  %s\n",
+                        by_delta[i].first / 1024.0, by_delta[i].second.c_str());
+            }
+            fprintf(stderr, "[test262]   Memory data → %s\n", mem_path);
         }
     }
 
