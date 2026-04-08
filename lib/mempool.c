@@ -24,7 +24,6 @@ struct Pool {
     rpmalloc_heap_t* heap;  // rpmalloc heap handle (NULL for mmap mode)
     unsigned pool_id;       // unique pool identifier
     unsigned valid;         // validity marker (POOL_VALID_MARKER when valid)
-    unsigned drained;       // debug: set to 1 after drain, for tracking stale allocs
     // mmap mode fields (used when heap == NULL)
     MmapChunk* chunks;     // linked list of mmap'd regions
     uint8_t* cursor;       // bump pointer within current chunk
@@ -81,7 +80,6 @@ Pool* pool_create(void) {
 
     pool->pool_id = next_pool_id++;
     pool->valid = POOL_VALID_MARKER;
-    pool->drained = 0;
     pool->chunks = NULL;
     pool->cursor = NULL;
     pool->limit = NULL;
@@ -117,7 +115,6 @@ Pool* pool_create_mmap(void) {
     pool->heap = NULL;  // signals mmap mode
     pool->pool_id = next_pool_id++;
     pool->valid = POOL_VALID_MARKER;
-    pool->drained = 0;
     pool->chunks = NULL;
     pool->cursor = NULL;
     pool->limit = NULL;
@@ -168,7 +165,6 @@ void pool_drain(Pool* pool) {
     } else {
         mmap_pool_free_chunks(pool);
     }
-    pool->drained = 1;
     pool->valid = 0;
 }
 
@@ -209,9 +205,6 @@ void* pool_alloc(Pool* pool, size_t size) {
         return result;
     }
     // mmap mode: bump allocate (16-byte aligned)
-    if (pool->drained) {
-        log_error("pool_alloc: STALE ALLOC on drained pool %u, size=%zu", pool->pool_id, size);
-    }
     size = (size + 15) & ~15;
     if (pool->cursor + size > pool->limit) {
         mmap_pool_grow(pool, size);
@@ -237,9 +230,6 @@ void* pool_calloc(Pool* pool, size_t size) {
         return rpmalloc_heap_calloc(pool->heap, 1, size);
     }
     // mmap mode: bump allocate (pages are pre-zeroed by mmap)
-    if (pool->drained) {
-        log_error("pool_calloc: STALE ALLOC on drained pool %u, size=%zu", pool->pool_id, size);
-    }
     size = (size + 15) & ~15;
     if (pool->cursor + size > pool->limit) {
         mmap_pool_grow(pool, size);
