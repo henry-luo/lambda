@@ -554,15 +554,15 @@ This requires classifying runtime functions as "definitely-no-throw" (e.g., `js_
 
 ## 10. Implementation Priority
 
-| Stage | Description | Impact | Risk | Effort |
-|-------|-------------|--------|------|--------|
-| **1** | C Runtime Facade Functions | High (−20-40% MIR items) | Low | Medium |
-| **2** | Inline MIR Micro-Operations | Medium (−5-10% call overhead) | Low | Low |
-| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low |
-| **4** | Loop Variable Type Speculation | High (tight loops much faster) | Medium (correctness) | Medium |
-| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low |
-| **6** | Direct Method Dispatch | High (bypass 2-level indirection) | Medium (must match semantics) | High |
-| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium |
+| Stage | Description | Impact | Risk | Effort | Status |
+|-------|-------------|--------|------|--------|--------|
+| **1** | C Runtime Facade Functions | High (−20-40% MIR items) | Low | Medium | ✅ Done |
+| **2** | Inline MIR Micro-Operations | Medium (−5-10% call overhead) | Low | Low | ✅ Done |
+| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low | 🟡 Partial |
+| **4** | Loop Variable Type Speculation | High (tight loops much faster) | Medium (correctness) | Medium | ✅ Done (pre-v23) |
+| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low | ⏭ Skipped (already covered) |
+| **6** | Direct Method Dispatch | High (bypass 2-level indirection) | Medium (must match semantics) | High | ✅ Done (pre-v23) |
+| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium | 🟡 Partial |
 
 **Recommended order**: Stage 2 → Stage 1 → Stage 5 → Stage 3 → Stage 7 → Stage 4 → Stage 6
 
@@ -603,3 +603,84 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 - Per-test timing TSV for distribution analysis
 - `MIR_output(ctx, stderr)` with item counting for MIR size metrics
 - `log.txt` with `MIR-TIMING:` prefixed lines for transpile/link/exec phase breakdown
+
+---
+
+## 12. Implementation Progress
+
+### Stage Status Summary
+
+| Stage | Description | Status | Notes |
+|-------|-------------|--------|-------|
+| **1** | C Runtime Facade Functions | ✅ Done | 8 comparison `_raw` facades + `js_typeof_is`. `js_property_get_str` defined but intentionally not wired. Method call facades (`js_method_call_0/1/2`) skipped. |
+| **2** | Inline MIR Micro-Operations | ✅ Done | `jm_emit_is_truthy` (bool fast-path), `jm_transpile_condition` (unified condition → raw 0/1), constant strength reduction for null/undefined/true/false. |
+| **3** | Import Pre-population | 🟡 Partial | `jit_runtime_imports[]` bulk hashmap init exists. Cross-module shared import proto pool not done. |
+| **4** | Loop Variable Type Speculation | ✅ Done | Semi-native for-loop tier with cached bounds (pre-v23 work). |
+| **5** | String Interning for Properties | 🟡 Skipped | `jm_box_string_literal` already interns at transpile time via `name_pool_create_len()`. `js_property_get_str` defined but not wired — no benefit over pre-interned path. |
+| **6** | Direct Method Dispatch | ✅ Done | `js_array_push`, `js_object_keys`, `js_object_values` direct-called (pre-v23 work). |
+| **7** | MIR Code Size Reduction | 🟡 Partial | Constant strength reduction done. Module variable caching and exception check batching not done. |
+
+### What Was Implemented in v23
+
+#### Stage 1: Comparison Facades (`js_runtime.cpp`, `sys_func_registry.c`)
+- **8 raw comparison functions** returning `int64_t` (0/1) instead of boxed `Item`:
+  - `js_lt_raw`, `js_gt_raw`, `js_le_raw`, `js_ge_raw` — relational comparisons
+  - `js_eq_raw`, `js_ne_raw` — strict equality
+  - `js_loose_eq_raw`, `js_loose_ne_raw` — abstract equality
+- `js_lt_raw` inlines fast numeric path (both INT/FLOAT → compare as doubles), falls back to full `js_less_than` for non-numeric
+- All 8 registered in `jit_runtime_imports[]` via `sys_func_registry.c`
+- **`js_typeof_is(Item, const char*)`** — returns 1/0 directly, avoids string creation + strcmp
+
+#### Stage 2: Inline Micro-Ops (`transpile_js_mir.cpp`)
+- **`jm_emit_is_truthy(mt, reg, expr)`** — bool fast-path: for known-BOOL expressions, emits `MIR_AND reg, 1` instead of calling `js_is_truthy()`
+- **`jm_transpile_condition(mt, expr)`** — unified condition evaluator returning raw int64 0/1:
+  - Case 1: Binary comparison with both operands typed numeric → `jm_transpile_expression` (native path, already 0/1)
+  - Case 2: Untyped binary comparison → calls `_raw` facade directly (saves box+unbox+is_truthy)
+  - Case 3: Logical NOT (`!expr`) → recursive + XOR with 1
+  - Case 4: Fallback → `jm_transpile_box_item` + `jm_emit_is_truthy`
+  - NULL expr → constant 1 (for `for(;;)`)
+- **Wired into all 5 condition sites**: `if`, `while`, `for`, `do-while`, `ternary (?:)`
+- **Switch-case comparison** inlined as direct `MIR_AND eq, 1` for BOOL result
+
+#### What Was Intentionally Skipped
+- **`js_property_get_str`**: Not wired because `jm_box_string_literal` already pre-interns string keys at transpile time. Adding a separate C-string path would add a new import without eliminating any existing one.
+- **`js_method_call_0/1/2`**: General method call facades — high implementation complexity, moderate benefit. Would need to handle prototype chain, getter interception, etc.
+- **Stage 3 cross-module dedup**: MIR modules are created per-test and discarded. Sharing protos across modules would require architectural changes to MIR context lifecycle.
+- **Stage 7 module variable caching**: Requires invalidation after any function call that might modify globals. Conservative invalidation would negate most benefit.
+- **Stage 7 exception check batching**: Requires classifying all runtime functions as throw/no-throw. Medium risk for correctness.
+
+### Timing Results
+
+#### Baseline (v22 — Run 48, commit 7c93ba85a)
+
+| Phase | Time |
+|-------|------|
+| Phase 1 (prepare) | 0.1s |
+| Phase 2 (execute) | ~71s (historical) |
+| Passing tests | 13,414 / 27,089 |
+
+#### Latest Run (v23b — April 2026)
+
+| Phase | Time |
+|-------|------|
+| Phase 1 (prepare) | 0.1s — 27,089 scripts (26,854 clean, 235 quarantined) |
+| Phase 2 (execute) | 113.1s — 26,834 results collected |
+| Phase 2a (crashers) | 7.5s — 235 quarantined individually |
+| Phase 2b (retry) | 0.4s — recovered 19 of 20 lost tests |
+| **Total** | **~121s** |
+| Passing tests | **13,416** / 27,089 (net +2 vs baseline) |
+| Regressions | 35 (flaky, different set each run) |
+| Improvements | 37 |
+
+#### JS Unit Tests
+
+| Run | Passed | Failed | Total |
+|-----|--------|--------|-------|
+| Baseline (v22) | 68 | 10 | 78 |
+| v23b | 69 | 9 | 78 |
+
+#### Observations
+
+- **No measurable Phase 2 speedup**: 113.1s is within the normal variance range (91–147s observed across runs on the same machine). The v23 optimizations reduce per-execution overhead (fewer calls, fewer box/unbox cycles) but test262 cost is dominated by **transpile + MIR link/compile** across 27K one-shot scripts, not by hot-loop execution.
+- **Correctness neutral**: 13,416 passed (vs 13,414 baseline), with ~35 flaky regressions that differ between runs.
+- **Expected benefit domain**: These optimizations would show impact in real workloads with **hot loops** and **repeated condition evaluation** (e.g., tight numeric loops, repeated comparisons), not in test262's one-shot-per-script pattern where each script is compiled, executed once, and discarded.

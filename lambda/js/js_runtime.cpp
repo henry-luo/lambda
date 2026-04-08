@@ -992,6 +992,50 @@ extern "C" int64_t js_typeof_is(Item value, const char* type_str) {
     }
 }
 
+// v23b: Comparison facades returning raw int64_t 0/1 for direct use in MIR_BF/BT.
+// Eliminates box→unbox→branch cycle when comparison is used in if/for/while condition.
+// These inline the fast int-vs-int path and fall back to the full boxed comparison.
+extern "C" int64_t js_lt_raw(Item left, Item right) {
+    TypeId lt = get_type_id(left), rt = get_type_id(right);
+    bool l_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);
+    bool r_num = (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
+    if (l_num && r_num) {
+        double l = (lt == LMD_TYPE_INT) ? (double)it2i(left) : it2d(left);
+        double r = (rt == LMD_TYPE_INT) ? (double)it2i(right) : it2d(right);
+        if (isnan(l) || isnan(r)) return 0;
+        return l < r ? 1 : 0;
+    }
+    return (int64_t)it2b(js_less_than(left, right));
+}
+
+extern "C" int64_t js_gt_raw(Item left, Item right) {
+    return js_lt_raw(right, left);
+}
+
+extern "C" int64_t js_le_raw(Item left, Item right) {
+    return js_gt_raw(left, right) ? 0 : 1;
+}
+
+extern "C" int64_t js_ge_raw(Item left, Item right) {
+    return js_lt_raw(left, right) ? 0 : 1;
+}
+
+extern "C" int64_t js_eq_raw(Item left, Item right) {
+    return (int64_t)it2b(js_strict_equal(left, right));
+}
+
+extern "C" int64_t js_ne_raw(Item left, Item right) {
+    return js_eq_raw(left, right) ? 0 : 1;
+}
+
+extern "C" int64_t js_loose_eq_raw(Item left, Item right) {
+    return (int64_t)it2b(js_equal(left, right));
+}
+
+extern "C" int64_t js_loose_ne_raw(Item left, Item right) {
+    return js_loose_eq_raw(left, right) ? 0 : 1;
+}
+
 // js_property_get_str: property access with C string key (avoids string boxing)
 extern "C" Item js_property_get_str(Item object, const char* key, int key_len);
 
