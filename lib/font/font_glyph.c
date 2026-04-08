@@ -157,7 +157,7 @@ uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint) {
 
 GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
     GlyphInfo info = {0};
-    if (!handle || !handle->ft_face) return info;
+    if (!handle) return info;
 
     FT_Face face = handle->ft_face;
     float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
@@ -181,32 +181,59 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint) {
         CmapTable* cmap = font_tables_get_cmap(handle->tables);
         if (cmap) char_index = (FT_UInt)cmap_lookup(cmap, codepoint);
     }
-    if (char_index == 0) {
+    if (char_index == 0 && face) {
         char_index = FT_Get_Char_Index(face, codepoint);
     }
     if (char_index == 0) {
         return info; // glyph not in this font
     }
 
-    // FT_LOAD_NO_HINTING matches browser behavior most closely
-    // FT_LOAD_COLOR for color emoji
-    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR;
-    FT_Error err = FT_Load_Glyph(face, char_index, load_flags);
-    if (err) {
+    // primary: FreeType — full glyph metrics
+    if (face) {
+        FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING | FT_LOAD_COLOR;
+        FT_Error err = FT_Load_Glyph(face, char_index, load_flags);
+        if (!err) {
+            FT_GlyphSlot slot = face->glyph;
+            float bscale = handle->bitmap_scale;
+            info.id        = char_index;
+            info.advance_x = (slot->advance.x / 64.0f) * bscale / pixel_ratio;
+            info.advance_y = (slot->advance.y / 64.0f) * bscale / pixel_ratio;
+            info.bearing_x = (slot->metrics.horiBearingX / 64.0f) * bscale / pixel_ratio;
+            info.bearing_y = (slot->metrics.horiBearingY / 64.0f) * bscale / pixel_ratio;
+            info.width     = (int)(slot->metrics.width  / 64.0f * bscale);
+            info.height    = (int)(slot->metrics.height / 64.0f * bscale);
+            info.is_color  = (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
+            goto apply_overrides;
+        }
         log_debug("font_glyph: FT_Load_Glyph failed for U+%04X (error %d)", codepoint, err);
-        return info;
     }
 
-    FT_GlyphSlot slot = face->glyph;
-    float bscale = handle->bitmap_scale;  // 1.0 for scalable fonts, <1 for fixed-size bitmap fonts
-    info.id        = char_index;
-    info.advance_x = (slot->advance.x / 64.0f) * bscale / pixel_ratio;
-    info.advance_y = (slot->advance.y / 64.0f) * bscale / pixel_ratio;
-    info.bearing_x = (slot->metrics.horiBearingX / 64.0f) * bscale / pixel_ratio;
-    info.bearing_y = (slot->metrics.horiBearingY / 64.0f) * bscale / pixel_ratio;
-    info.width     = (int)(slot->metrics.width  / 64.0f * bscale);
-    info.height    = (int)(slot->metrics.height / 64.0f * bscale);
-    info.is_color  = (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
+#ifdef __APPLE__
+    // secondary (macOS): CoreText ct_raster_ref for full glyph metrics
+    if (handle->ct_raster_ref) {
+        GlyphInfo ct_info = {0};
+        if (font_rasterize_ct_metrics(handle->ct_raster_ref, codepoint,
+                                       handle->bitmap_scale, &ct_info)) {
+            ct_info.id = char_index;
+            info = ct_info;
+            goto apply_overrides;
+        }
+    }
+#endif
+
+    // tertiary: FontTables hmtx — advance only (for layout)
+    if (handle->tables) {
+        HmtxTable* hmtx = font_tables_get_hmtx(handle->tables);
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (hmtx && head && head->units_per_em > 0) {
+            uint16_t adv = hmtx_get_advance(hmtx, (uint16_t)char_index);
+            float uscale = handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
+            info.id = char_index;
+            info.advance_x = adv * uscale;
+        }
+    }
+
+apply_overrides:
 
 #ifdef __APPLE__
     // For fonts with a CoreText reference (e.g., SFNS.ttf / -apple-system), use
@@ -302,7 +329,7 @@ static float font_get_kerning_coretext(FontHandle* handle, uint32_t left, uint32
 #endif
 
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
-    if (!handle || !handle->ft_face) return 0;
+    if (!handle) return 0;
 
     FT_Face face = handle->ft_face;
 
@@ -319,10 +346,14 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
                     if (val != 0) {
                         HeadTable* head = font_tables_get_head(handle->tables);
                         if (head && head->units_per_em > 0) {
-                            float size_px = face->size->metrics.y_ppem;
+                            float ppem = (face && face->size) ? (float)face->size->metrics.y_ppem : 0;
                             float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                                                     ? handle->ctx->config.pixel_ratio : 1.0f;
-                            return (val * size_px / head->units_per_em) / pixel_ratio;
+                            if (ppem > 0) {
+                                return (val * ppem / head->units_per_em) / pixel_ratio;
+                            }
+                            // fallback: use handle->size_px (CSS pixels)
+                            return val * handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
                         }
                     }
                 }
@@ -331,7 +362,7 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
     }
 
     // try FreeType kern table — if font has kern, use it exclusively
-    if (FT_HAS_KERNING(face)) {
+    if (face && FT_HAS_KERNING(face)) {
         float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                                 ? handle->ctx->config.pixel_ratio : 1.0f;
 
@@ -360,7 +391,7 @@ float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right) {
 }
 
 float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_t right_index) {
-    if (!handle || !handle->ft_face) return 0;
+    if (!handle) return 0;
 
     FT_Face face = handle->ft_face;
 
@@ -372,16 +403,19 @@ float font_get_kerning_by_index(FontHandle* handle, uint32_t left_index, uint32_
             if (val != 0) {
                 HeadTable* head = font_tables_get_head(handle->tables);
                 if (head && head->units_per_em > 0) {
-                    float size_px = face->size->metrics.y_ppem;
+                    float ppem = (face && face->size) ? (float)face->size->metrics.y_ppem : 0;
                     float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
                                             ? handle->ctx->config.pixel_ratio : 1.0f;
-                    return (val * size_px / head->units_per_em) / pixel_ratio;
+                    if (ppem > 0) {
+                        return (val * ppem / head->units_per_em) / pixel_ratio;
+                    }
+                    return val * handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
                 }
             }
         }
     }
 
-    if (!FT_HAS_KERNING(face)) return 0;
+    if (!face || !FT_HAS_KERNING(face)) return 0;
     if (left_index == 0 || right_index == 0) return 0;
 
     float pixel_ratio = (handle->ctx && handle->ctx->config.pixel_ratio > 0)
