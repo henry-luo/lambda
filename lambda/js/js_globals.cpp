@@ -4784,6 +4784,11 @@ static Item js_global_this_obj = {0};
  */
 extern "C" void js_globals_batch_reset() {
     js_global_this_obj = (Item){0};
+    // reset constructor cache (function objects from old pool)
+    extern void js_ctor_cache_reset();
+    js_ctor_cache_reset();
+    // reset process.argv cache
+    js_process_argv_items = (Item){.item = ITEM_NULL};
 }
 
 extern "C" Item js_get_global_this() {
@@ -4857,6 +4862,11 @@ enum JsConstructorId {
 
 static Item js_constructor_cache[JS_CTOR_MAX];
 static bool js_ctor_cache_init = false;
+
+void js_ctor_cache_reset() {
+    memset(js_constructor_cache, 0, sizeof(js_constructor_cache));
+    js_ctor_cache_init = false;
+}
 
 // Dummy func_ptr for constructors (makes typeof return "function")
 static Item js_ctor_placeholder() { return ItemNull; }

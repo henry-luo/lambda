@@ -367,7 +367,7 @@ static uint64_t js_local_func_hash(const void *item, uint64_t seed0, uint64_t se
         strlen(((JsLocalFuncEntry*)item)->name), seed0, seed1);
 }
 
-// Module-level constant entry (top-level const with literal value)
+// Module-scope constants: variables, functions, classes declared at top level
 enum JsModuleConstType {
     MCONST_INT,
     MCONST_FLOAT,
@@ -386,8 +386,7 @@ struct JsModuleConstEntry {
     double float_val;   // for MCONST_FLOAT
     bool is_int;        // legacy compat: true for int, false for float
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
-    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type (LMD_TYPE_INT/FLOAT)
-                        //     or 0 (LMD_TYPE_RAW_POINTER) if not tracked
+    TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
     JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
 };
@@ -19574,7 +19573,12 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     } else {
         js_context.nursery = gc_nursery_create(0);
         context = &js_context;
-        heap_init();
+        if (runtime->reuse_pool) {
+            heap_init_with_pool(runtime->reuse_pool);
+            runtime->reuse_pool = NULL;
+        } else {
+            heap_init();
+        }
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -19733,6 +19737,13 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     }
     free(mt);
     MIR_finish(ctx);
+
+    // stash ephemeral GC heap on Runtime for caller cleanup
+    if (!reusing_context) {
+        runtime->heap = js_context.heap;
+        runtime->nursery = js_context.nursery;
+    }
+
     jm_cleanup_deferred_mir();
 
     log_debug("js-mir-ast: transpilation completed");
@@ -19822,7 +19833,12 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         js_context.nursery = gc_nursery_create(0);
         context = &js_context;
-        heap_init();
+        if (runtime->reuse_pool) {
+            heap_init_with_pool(runtime->reuse_pool);
+            runtime->reuse_pool = NULL;
+        } else {
+            heap_init();
+        }
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create(context->pool, nullptr);
         context->type_list = arraylist_new(64);
@@ -19849,7 +19865,6 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     // the fallback case (0-1 imports, Windows, or any modules missed by precompile).
     jm_load_imports(runtime, js_ast, filename);
 
-    // Initialize MIR context
     MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (!ctx) {
         log_error("js-mir: MIR context init failed");
@@ -20063,6 +20078,16 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
     } else {
         MIR_finish(ctx);
     }
+
+    // stash ephemeral GC heap on Runtime for caller cleanup.
+    // each heap allocates ~12MB (data zone + tenured zone + bump block), so
+    // leaking one per document causes massive RSS growth in batch mode.
+    // caller must call runtime_reset_heap() after inspecting the result.
+    if (!reusing_context && !g_jm_preamble_out) {
+        runtime->heap = js_context.heap;
+        runtime->nursery = js_context.nursery;
+    }
+
     jm_cleanup_deferred_mir();
     js_transpiler_destroy(tp);
 

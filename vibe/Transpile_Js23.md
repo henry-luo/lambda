@@ -558,11 +558,11 @@ This requires classifying runtime functions as "definitely-no-throw" (e.g., `js_
 |-------|-------------|--------|------|--------|--------|
 | **1** | C Runtime Facade Functions | High (−20-40% MIR items) | Low | Medium | ✅ Done |
 | **2** | Inline MIR Micro-Operations | Medium (−5-10% call overhead) | Low | Low | ✅ Done |
-| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low | 🟡 Partial |
+| **3** | Import Deduplication/Caching | Low-Medium (−5-10% link time) | Low | Low | ✅ Closed (remainder negative ROI) |
 | **4** | Loop Variable Type Speculation | High (tight loops much faster) | Medium (correctness) | Medium | ✅ Done (pre-v23) |
-| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low | ⏭ Skipped (already covered) |
+| **5** | String Interning for Properties | Medium (−1 call per prop access) | Low | Low | ✅ Closed (already covered by name_pool) |
 | **6** | Direct Method Dispatch | High (bypass 2-level indirection) | Medium (must match semantics) | High | ✅ Done (pre-v23) |
-| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium | 🟡 Partial |
+| **7** | MIR Code Size Reduction | Medium (faster regalloc) | Medium | Medium | ✅ Closed (remainder negative ROI) |
 
 **Recommended order**: Stage 2 → Stage 1 → Stage 5 → Stage 3 → Stage 7 → Stage 4 → Stage 6
 
@@ -614,11 +614,11 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 |-------|-------------|--------|-------|
 | **1** | C Runtime Facade Functions | ✅ Done | 8 comparison `_raw` facades + `js_typeof_is`. `js_property_get_str` defined but intentionally not wired. Method call facades (`js_method_call_0/1/2`) skipped. |
 | **2** | Inline MIR Micro-Operations | ✅ Done | `jm_emit_is_truthy` (bool fast-path), `jm_transpile_condition` (unified condition → raw 0/1), constant strength reduction for null/undefined/true/false. |
-| **3** | Import Pre-population | 🟡 Partial | `jit_runtime_imports[]` bulk hashmap init exists. Cross-module shared import proto pool not done. |
+| **3** | Import Pre-population | ✅ Closed | Bulk init via `jit_runtime_imports[]` done. Cross-module proto pool analyzed and rejected — negative ROI (see below). |
 | **4** | Loop Variable Type Speculation | ✅ Done | Semi-native for-loop tier with cached bounds (pre-v23 work). |
-| **5** | String Interning for Properties | 🟡 Skipped | `jm_box_string_literal` already interns at transpile time via `name_pool_create_len()`. `js_property_get_str` defined but not wired — no benefit over pre-interned path. |
+| **5** | String Interning for Properties | ✅ Closed | `jm_box_string_literal` already interns at transpile time via `name_pool_create_len()`. `js_property_get_str` defined but not wired — no benefit over pre-interned path. |
 | **6** | Direct Method Dispatch | ✅ Done | `js_array_push`, `js_object_keys`, `js_object_values` direct-called (pre-v23 work). |
-| **7** | MIR Code Size Reduction | 🟡 Partial | Constant strength reduction done. Module variable caching and exception check batching not done. |
+| **7** | MIR Code Size Reduction | ✅ Closed | Constant strength reduction done. Module var caching and exception check batching analyzed and rejected — negative ROI (see below). |
 
 ### What Was Implemented in v23
 
@@ -642,12 +642,12 @@ Extract per-test microsecond data from `BATCH_END` protocol and compare distribu
 - **Wired into all 5 condition sites**: `if`, `while`, `for`, `do-while`, `ternary (?:)`
 - **Switch-case comparison** inlined as direct `MIR_AND eq, 1` for BOOL result
 
-#### What Was Intentionally Skipped
+#### What Was Intentionally Skipped (with Code-Level Analysis)
 - **`js_property_get_str`**: Not wired because `jm_box_string_literal` already pre-interns string keys at transpile time. Adding a separate C-string path would add a new import without eliminating any existing one.
 - **`js_method_call_0/1/2`**: General method call facades — high implementation complexity, moderate benefit. Would need to handle prototype chain, getter interception, etc.
-- **Stage 3 cross-module dedup**: MIR modules are created per-test and discarded. Sharing protos across modules would require architectural changes to MIR context lifecycle.
-- **Stage 7 module variable caching**: Requires invalidation after any function call that might modify globals. Conservative invalidation would negate most benefit.
-- **Stage 7 exception check batching**: Requires classifying all runtime functions as throw/no-throw. Medium risk for correctness.
+- **Stage 3 cross-module import proto pool**: `jit_runtime_imports[]` already pre-populates the MIR linker with all needed runtime symbols. The per-module `import_cache` hashmap in `transpile_js_mir.cpp` is a separate concern (deduplicates imports *within* a single module). Pre-populating all ~50 imports upfront would waste time for short test262 scripts that only use 10–15 of them. MIR modules are created per-test and discarded, so cross-module sharing would require architectural changes to MIR context lifecycle with no measurable benefit.
+- **Stage 7A module variable caching**: `MCONST_MODVAR` (transpile_js_mir.cpp ~line 4826) calls `js_get_module_var()` on every variable reference. Caching the result requires invalidation after *any* function call that might modify module-level state. In test262's dominant pattern (`assert.sameValue(x, y)`), the cache would be invalidated by the `assert.sameValue` call immediately before the next variable read — negating any benefit.
+- **Stage 7B exception check batching**: `jm_emit_exc_propagate_check` is emitted at only 8 specific sites in transpile_js_mir.cpp (TDZ checks, try/catch entry, for-in/of iteration, etc.). These are already minimal and targeted — there are no sequences of adjacent checks that could be collapsed. The proposal assumed exception checks were emitted after every runtime call, which is not the case.
 
 ### Timing Results
 

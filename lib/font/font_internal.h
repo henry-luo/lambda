@@ -76,9 +76,10 @@ struct FontHandle {
     bool        metrics_ready;
 
     // memory buffer for in-memory loaded fonts (WOFF decompressed, data URI, etc.)
-    // FreeType requires the buffer to outlive the face, so arena-allocated.
+    // FreeType requires the buffer to outlive the face.
     uint8_t*    memory_buffer;
     size_t      memory_buffer_size;
+    char*       file_data_path;         // key into file_data_cache for ref-count management (malloc'd)
 
     // per-face glyph advance cache: codepoint → advance_x
     struct hashmap* advance_cache;
@@ -108,6 +109,7 @@ struct FontHandle {
     FontWeight  weight;
     FontSlant   slant;
     char*       family_name;            // arena-allocated
+    bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
 };
 
 // ============================================================================
@@ -245,6 +247,9 @@ struct FontContext {
     struct hashmap*  face_cache;
     uint32_t         lru_counter;       // monotonically increasing for LRU
 
+    // font file data cache: file_path → (data, len) — avoids re-reading the same file
+    struct hashmap*  file_data_cache;
+
     // glyph bitmap cache
     struct hashmap*  bitmap_cache;
 
@@ -276,6 +281,17 @@ typedef struct FontCacheKey {
 } FontCacheKey;
 
 // ============================================================================
+// Internal helper: font file data cache entry (avoids re-reading same file)
+// ============================================================================
+
+typedef struct FontFileDataEntry {
+    char*       path;           // malloc-allocated canonical path
+    uint8_t*    data;           // malloc-allocated raw font data (TTF/SFNT)
+    size_t      data_len;
+    int         ref_count;      // number of active FT_Faces using this data
+} FontFileDataEntry;
+
+// ============================================================================
 // Internal helper: glyph advance cache entry
 // ============================================================================
 
@@ -294,6 +310,15 @@ typedef struct KernPairEntry {
     uint32_t right_cp;
     float    kerning;       // kerning value in CSS pixels
 } KernPairEntry;
+
+// ============================================================================
+// Internal helper: codepoint fallback cache entry
+// ============================================================================
+
+typedef struct CodepointFallbackEntry {
+    uint32_t    codepoint;
+    FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
+} CodepointFallbackEntry;
 
 // ============================================================================
 // Internal helper: glyph bitmap cache entry

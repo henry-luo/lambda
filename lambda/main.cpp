@@ -19,6 +19,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/time.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #endif
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
@@ -855,6 +858,25 @@ static void batch_alarm_handler(int sig) {
         batch_timeout_active = 0;
         longjmp(batch_timeout_jmp, 1);
     }
+}
+
+// get current resident set size in bytes (for memory profiling)
+static size_t get_rss_bytes() {
+#ifdef __APPLE__
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS)
+        return info.resident_size;
+#elif defined(__linux__)
+    FILE* f = fopen("/proc/self/statm", "r");
+    if (f) {
+        unsigned long pages = 0;
+        fscanf(f, "%*u %lu", &pages); // second field = resident pages
+        fclose(f);
+        return pages * 4096;
+    }
+#endif
+    return 0;
 }
 #endif
 
@@ -2708,7 +2730,6 @@ int main(int argc, char *argv[]) {
                     has_preamble = false;
                 }
 
-                // Compile and execute harness as preamble
                 memset(&preamble, 0, sizeof(preamble));
                 Item pres = transpile_js_to_mir_preamble(&runtime, harness_src, "<harness>", &preamble);
 
@@ -2716,7 +2737,7 @@ int main(int argc, char *argv[]) {
                 if (saved_harness_src) free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
 
-                if (pres.item != ITEM_ERROR) {
+                if (preamble.mir_ctx) {
                     has_preamble = true;
                     preamble_var_checkpoint = preamble.module_var_count;
                 }
@@ -2757,6 +2778,7 @@ int main(int argc, char *argv[]) {
             printf("\x01" "BATCH_START %s\n", script_path);
             fflush(stdout);
 
+            size_t rss_before = get_rss_bytes();
             struct timeval tv_start, tv_end;
             gettimeofday(&tv_start, NULL);
 
@@ -2879,7 +2901,8 @@ int main(int argc, char *argv[]) {
 
             gettimeofday(&tv_end, NULL);
             long elapsed_us = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
-            printf("\x01" "BATCH_END %d %ld\n", result, elapsed_us);
+            size_t rss_after = get_rss_bytes();
+            printf("\x01" "BATCH_END %d %ld %zu %zu\n", result, elapsed_us, rss_before, rss_after);
             fflush(stdout);
 
             if (hot_reload) {
@@ -2898,6 +2921,7 @@ int main(int argc, char *argv[]) {
                     batch_context.pool = batch_context.heap->pool;
                     batch_context.name_pool = name_pool_create(batch_context.pool, nullptr);
                     batch_context.type_list = arraylist_new(64);
+
                     // Crash destroyed heap — preamble function objects are gone.
                     // Recompile preamble from saved source so subsequent tests still have harness.
                     if (has_preamble) {
@@ -2913,7 +2937,6 @@ int main(int argc, char *argv[]) {
                         }
                     }
                 } else if (has_preamble) {
-                    // Partial reset: preserve harness module vars, clear test state
                     js_batch_reset_to(preamble_var_checkpoint);
                 } else {
                     js_batch_reset();

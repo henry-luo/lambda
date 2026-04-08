@@ -273,13 +273,28 @@ extern "C" void js_batch_reset() {
     js_array_method_real_this = (Item){0};
     // clear Input context
     js_input = NULL;
-    // reset cached global objects (Math, JSON, console) so they're recreated fresh
+    // reset cached global objects (Math, JSON, console, Reflect) so they're recreated fresh
     // — tests may modify them (delete/overwrite properties)
     extern void js_reset_math_object();
     js_reset_math_object();
+    extern void js_reset_json_object();
+    js_reset_json_object();
+    extern void js_reset_console_object();
+    js_reset_console_object();
+    extern void js_reset_reflect_object();
+    js_reset_reflect_object();
+    // reset interned __proto__ key (allocated in old pool)
+    extern void js_reset_proto_key();
+    js_reset_proto_key();
+    // reset function pointer → JsFunction cache (JsFunction* in old pool)
+    extern void js_func_cache_reset();
+    js_func_cache_reset();
     // reset builtin function cache (defined later in file, called via forward decl)
     extern void js_builtin_cache_reset();
     js_builtin_cache_reset();
+    // deep reset: generators, promises, async contexts, pending calls
+    extern void js_deep_batch_reset();
+    js_deep_batch_reset();
 }
 
 // Get current module var count (for checkpointing)
@@ -296,6 +311,10 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         js_module_vars[i] = (Item){0};
     }
     js_module_var_count = checkpoint_var_count;
+    // clear module registry (frees strdup/calloc per registered module)
+    module_registry_cleanup();
+    // clear JS module cache counter
+    js_module_cache_reset();
     // clear pending exception
     js_exception_pending = false;
     js_exception_value = (Item){0};
@@ -307,11 +326,26 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     js_array_method_real_this = (Item){0};
     // clear Input context (recreated per script by transpile_js_to_mir)
     js_input = NULL;
-    // Reset cached globals — tests may modify Math/JSON/console properties
+    // reset cached global objects — tests may modify them
     extern void js_reset_math_object();
     js_reset_math_object();
+    extern void js_reset_json_object();
+    js_reset_json_object();
+    extern void js_reset_console_object();
+    js_reset_console_object();
+    extern void js_reset_reflect_object();
+    js_reset_reflect_object();
+    // reset interned __proto__ key
+    extern void js_reset_proto_key();
+    js_reset_proto_key();
+    // reset function pointer → JsFunction cache
+    extern void js_func_cache_reset();
+    js_func_cache_reset();
     extern void js_builtin_cache_reset();
     js_builtin_cache_reset();
+    // deep reset: generators, promises, async contexts, pending calls
+    extern void js_deep_batch_reset();
+    js_deep_batch_reset();
 }
 
 extern "C" Item js_new_error(Item message) {
@@ -442,16 +476,12 @@ extern "C" Item js_error_set_cause(Item error, Item options) {
 
 extern "C" void js_runtime_set_input(void* input) {
     js_input = (Input*)input;
-    // Register static Item variables as GC roots so their referenced objects
-    // are not collected. These are BSS/static memory invisible to the GC scanner.
-    static bool statics_rooted = false;
-    if (!statics_rooted) {
-        heap_register_gc_root(&js_current_this.item);
-        heap_register_gc_root(&js_new_target.item);
-        heap_register_gc_root(&js_pending_new_target.item);
-        heap_register_gc_root(&js_exception_value.item);
-        statics_rooted = true;
-    }
+    // Register static Item variables as GC roots on the CURRENT heap so their
+    // referenced objects are not collected.  Must re-register on each new heap.
+    heap_register_gc_root(&js_current_this.item);
+    heap_register_gc_root(&js_new_target.item);
+    heap_register_gc_root(&js_pending_new_target.item);
+    heap_register_gc_root(&js_exception_value.item);
 }
 
 extern "C" Item js_get_this() {
@@ -2381,6 +2411,7 @@ Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_fou
 // P10d: Interned __proto__ key — avoid heap_create_name on every prototype lookup.
 // Initialized lazily on first use.
 static Item js_proto_key_item = {0};
+void js_reset_proto_key() { js_proto_key_item = (Item){0}; }
 static Item js_get_proto_key() {
     if (js_proto_key_item.item == 0) {
         js_proto_key_item.item = s2it(heap_create_name("__proto__", 9));
@@ -3700,6 +3731,10 @@ static void js_func_cache_insert(void* func_ptr, JsFunction* fn) {
         js_func_cache_vals[js_func_cache_count] = fn;
         js_func_cache_count++;
     }
+}
+
+void js_func_cache_reset() {
+    js_func_cache_count = 0;
 }
 
 // Built-in method function cache — keyed by builtin_id
@@ -8045,6 +8080,7 @@ extern "C" Item js_get_math_object_value() {
 
 // v18n: JSON and console as global objects for bare identifier resolution
 static Item js_json_object = {.item = ITEM_NULL};
+void js_reset_json_object() { js_json_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_json_object_value() {
     if (js_json_object.item == ITEM_NULL) {
@@ -8057,6 +8093,7 @@ extern "C" Item js_get_json_object_value() {
 }
 
 static Item js_console_object = {.item = ITEM_NULL};
+void js_reset_console_object() { js_console_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_console_object_value() {
     if (js_console_object.item == ITEM_NULL) {
@@ -8068,6 +8105,7 @@ extern "C" Item js_get_console_object_value() {
 
 // v25: Reflect global object for bare identifier resolution
 static Item js_reflect_object = {.item = ITEM_NULL};
+void js_reset_reflect_object() { js_reflect_object = (Item){.item = ITEM_NULL}; }
 
 extern "C" Item js_get_reflect_object_value() {
     if (js_reflect_object.item == ITEM_NULL) {
@@ -10095,4 +10133,24 @@ extern "C" bool js_is_map_instance(Item obj) {
 extern "C" bool js_is_set_instance(Item obj) {
     JsCollectionData* cd = js_get_collection_data(obj);
     return cd && cd->type == JS_COLLECTION_SET;
+}
+
+// =============================================================================
+// Deep batch reset: clear ALL stale state that references pool-allocated data.
+// Called by js_batch_reset() to prevent dangling pointers after pool destruction.
+// =============================================================================
+void js_deep_batch_reset() {
+    // generators, promises, async contexts — contain Items from old pool
+    memset(js_generators, 0, sizeof(js_generators));
+    js_generator_count = 0;
+    memset(js_promises, 0, sizeof(js_promises));
+    js_promise_count = 0;
+    memset(js_async_contexts, 0, sizeof(js_async_contexts));
+    js_async_context_count = 0;
+    js_async_resolved_value = (Item){0};
+    // pending call args
+    js_pending_call_args = NULL;
+    js_pending_call_argc = 0;
+    // call counter
+    js_call_count = 0;
 }

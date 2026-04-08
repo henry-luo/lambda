@@ -232,6 +232,13 @@ int16_t hmtx_get_lsb(HmtxTable* hmtx, uint16_t glyph_id);
 // returns 0 if no kerning pair found.
 int16_t kern_get_pair(KernTable* kern, uint16_t left, uint16_t right);
 
+// get glyph bounding box from glyf table via loca table.
+// returns true on success, false if tables missing or glyph not found.
+// values are in font design units. Any out pointer may be NULL.
+bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
+                                int16_t* out_x_min, int16_t* out_y_min,
+                                int16_t* out_x_max, int16_t* out_y_max);
+
 // ============================================================================
 // Utility: make a 4-byte tag from characters
 // ============================================================================
