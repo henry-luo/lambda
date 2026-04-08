@@ -26,6 +26,9 @@
 #include <execinfo.h>
 #include <unistd.h>
 #include <sys/resource.h>  // getrusage for memory diagnostics
+#ifdef __APPLE__
+#include <mach/mach.h>     // mach_task_basic_info for current RSS
+#endif
 
 extern "C" {
 #include "../lib/mempool.h"
@@ -4873,15 +4876,25 @@ static bool layout_single_file(
 
     // [DIAG] Track memory usage per file for leak detection
     {
+#ifdef __APPLE__
+        // use mach_task_basic_info for CURRENT RSS (not peak)
+        struct mach_task_basic_info info;
+        mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+        task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count);
+        long rss_kb = (long)(info.resident_size / 1024);
+#else
         struct rusage ru;
         getrusage(RUSAGE_SELF, &ru);
-        long rss_kb = ru.ru_maxrss / 1024; // macOS: bytes → KB
+        long rss_kb = ru.ru_maxrss; // Linux: already in KB
+#endif
         FontCacheStats stats = font_get_cache_stats(ui_context->font_ctx);
         static int file_num = 0;
         file_num++;
         if (file_num <= 10 || file_num % 50 == 0) {
-            fprintf(stderr, "[MEMDIAG] file=%d rss=%ldMB font_arena=%zuKB faces=%d\n",
-                    file_num, rss_kb / 1024, stats.memory_usage_bytes / 1024, stats.face_count);
+            fprintf(stderr, "[MEMDIAG] file=%d rss=%ldMB main_arena=%zuKB glyph_arena=%zuKB faces=%d glyphs=%d loaded=%d\n",
+                    file_num, rss_kb / 1024, stats.main_arena_bytes / 1024,
+                    stats.glyph_arena_bytes / 1024, stats.face_count,
+                    stats.glyph_cache_count, stats.loaded_glyph_count);
         }
     }
 

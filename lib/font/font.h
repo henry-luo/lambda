@@ -417,8 +417,11 @@ void font_cache_trim(FontContext* ctx);
 typedef struct FontCacheStats {
     int    face_count;             // currently loaded faces
     int    glyph_cache_count;      // cached glyph entries
+    int    loaded_glyph_count;     // cached loaded-glyph entries
     int    glyph_cache_hit_rate;   // percentage (0-100)
-    size_t memory_usage_bytes;     // approximate memory footprint
+    size_t memory_usage_bytes;     // approximate memory footprint (both arenas)
+    size_t glyph_arena_bytes;      // glyph arena allocated bytes
+    size_t main_arena_bytes;       // main arena allocated bytes
     int    database_font_count;    // fonts in database
     int    database_family_count;  // font families
 } FontCacheStats;
