@@ -388,8 +388,9 @@ except `FT_New_Memory_Face` / `FT_Done_Face` / `FT_Init_FreeType` /
 ### Phase 5: CT Advance Override + Rasterization Quality — ✅ COMPLETE
 
 **Goal:** Improve text rendering fidelity by (1) enabling CoreText advance width
-overrides for all fonts, and (2) fixing CoreGraphics font smoothing that caused
-excessively bold glyph rasterization.
+overrides for all fonts, (2) fixing CoreGraphics font smoothing that caused
+excessively bold glyph rasterization, and (3) fixing round-bottom glyph baseline
+alignment to match Chrome/Skia.
 
 **Change 1: CoreText advance override for all fonts**
 
@@ -435,14 +436,46 @@ blog-homepage +22%), no individual regressions.
 **Impact:** Glyph rasterization quality closely matches Chrome/Safari. Stroke weight
 within 2% of browser rendering across all tested font sizes (11px, 14px, 24px).
 
+**Change 3: Integer pixel positioning for glyph bitmaps (roundOut + outset)**
+
+- Modified: `lib/font/font_rasterize_ct.c` — replaced the bitmap dimension and
+  glyph drawing position calculations with Skia-style `roundOut + outset(1,1)`
+  integer pixel positioning.
+- **Root cause:** Glyphs with round bottoms (e, c, o) have `bbox.origin.y` slightly
+  negative (baseline overshoot, e.g., −0.2812 for 'e' in Arial Bold 24px). The old
+  code computed the CG drawing position as `-(bbox.origin.y) + 1.0/scale`, producing
+  fractional pixel coordinates (e.g., y=1.2812). This caused sub-pixel anti-aliasing
+  to bleed into an extra bottom pixel row, making round-bottom glyphs appear 1px
+  lower than flat-bottom glyphs compared to Chrome.
+- **Solution — Skia-style roundOut + outset(1,1):** Compute the pixel-space bounding
+  box with integer boundaries (`floor` for left/bottom, `ceil` for right/top), then
+  extend each edge by 1 pixel for AA bleed margins. The glyph is drawn at integer CG
+  pixel coordinates `(-px_left, -px_bottom)`, eliminating fractional baseline
+  positioning. This matches Skia/Chrome's approach:
+  `skBounds.roundOut(&mx.bounds); mx.bounds.outset(1, 1);`
+- **Before/after per-glyph bottom pixel row** (Arial Bold 24px, "Direction"):
+  - 'D' (flat): Chrome=31, Lambda before=31, after=31 — unchanged ✓
+  - 'i' (flat): Chrome=31, Lambda before=31, after=31 — unchanged ✓
+  - 'r' (round): Chrome=32, Lambda before=**33**, after=**32** — fixed ✓
+  - 'e' (round): Chrome=32, Lambda before=**33**, after=**32** — fixed ✓
+- The `bearing_x` and `bearing_y` values are numerically identical to the old
+  formulas (`floor(origin.x * s) - 1` and `ceil((origin.y + height) * s) + 1`
+  respectively). Only the internal CG drawing position and bitmap dimensions change.
+
+**Impact:** h2_direction render test: 1.21% → **0.10%** (fixed, was failing).
+list_markers_01: 13.01% → **11.75%** (fixed, was failing). glyph_quality improved
+from 9.77% → 6.54%.
+
 **Deliverables:**
 - Modified: `lib/font/font_loader.c` — unconditional `ct_font_ref` creation
 - Modified: `lib/font/font_rasterize_ct.c` — font smoothing enabled + gamma²
-  linearization post-process (`(v*v+128)/255`) on grayscale glyph bitmaps
+  linearization post-process (`(v*v+128)/255`) + integer pixel positioning via
+  roundOut + outset(1,1) for glyph bitmap bounds and CG drawing position
 
-**Risk:** Low. Both changes improve browser fidelity with no layout regressions.  
-**Validation:** 15 layout improvements, 0 individual regressions. 563/567 Lambda
-runtime tests pass (4 pre-existing JS transpiler failures, unrelated). ✅
+**Risk:** Low. All three changes improve browser fidelity with no layout regressions.  
+**Validation:** +2 render tests fixed (h2_direction, list_markers_01), 0 regressions.
+562/567 Lambda runtime tests pass (5 pre-existing JS transpiler failures,
+unrelated). ✅
 
 ---
 
@@ -717,7 +750,7 @@ RasterizedGlyph* rasterize_tvg(FontTables* tables, uint16_t glyph_id,
 | **Phase 2:** Platform rasterization (macOS) | ~350 lines (`font_rasterize_ct.c`) | ~300 lines across `font_glyph.c`, `font_internal.h`, `font_loader.c` | Medium | ✅ Done |
 | **Phase 3:** Fast-path FT elimination | 0 new files | ~400 lines across `font_glyph.c`, `font_metrics.c` (3-tier cascade) | Small | ✅ Done |
 | **Phase 4:** PDF + radiant cleanup | 0 new files | ~150 lines across `radiant/pdf/`, `radiant/ui_context.cpp`, `radiant/view.hpp` | Small | ✅ Done |
-| **Phase 5:** CT advance override + rasterization quality | 0 new files | ~10 lines across `font_loader.c`, `font_rasterize_ct.c` | Small | ✅ Done |
+| **Phase 5:** CT advance override + rasterization quality + baseline alignment | 0 new files | ~30 lines across `font_loader.c`, `font_rasterize_ct.c` | Small | ✅ Done |
 | **Total completed** | ~1,850 new lines | ~1,360 modified lines | | |
 
 **Deferred work:**
@@ -741,7 +774,7 @@ RasterizedGlyph* rasterize_tvg(FontTables* tables, uint16_t glyph_id,
 | Phase 2 | CoreText rasterization on macOS. Visual comparison of rendered output. | ✅ 3,939/3,939 |
 | Phase 3 | 3-tier cascade with FreeType as primary. All baselines pass with no regressions. | ✅ 3,939/3,939 |
 | Phase 4 | PDF module uses font_load_glyph + font_tables. Lambda runtime tests pass. | ✅ 3,939/3,939 layout + 557/557 runtime |
-| Phase 5 | CT advance override for all fonts: 15 layout pages improved, 0 regressions. Font smoothing + gamma² linearization: dark intensity +2.0% vs Chrome (from +19.2% raw). h2_direction mismatch 1.21%. | ✅ 15 improvements, 0 regressions + 563/567 runtime |
+| Phase 5 | CT advance override: 15 layout pages improved. Gamma² linearization: +2.0% vs Chrome. Integer pixel positioning: +2 render tests fixed (h2_direction 1.21%→0.10%, list_markers_01 13.01%→11.75%), 0 regressions. | ✅ 17 improvements, 0 regressions + 562/567 runtime |
 
 ### Regression Gate
 

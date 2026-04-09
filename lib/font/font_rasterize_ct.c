@@ -154,8 +154,21 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
 
     // apply pixel_ratio for physical pixel rendering
     float render_scale = pixel_ratio;
-    int bmp_width  = (int)ceilf((float)bbox.size.width * render_scale) + 2;  // +2 AA bleed
-    int bmp_height = (int)ceilf((float)bbox.size.height * render_scale) + 2;
+
+    // Compute pixel-space bounding box using roundOut + outset(1,1), matching
+    // Skia/Chrome: skBounds.roundOut(&mx.bounds); mx.bounds.outset(1, 1);
+    // roundOut: floor for left/bottom, ceil for right/top → integer boundaries
+    // outset(1,1): extend each edge by 1 pixel for AA bleed margins
+    // This ensures the glyph baseline lands at an integer CG pixel position,
+    // preventing sub-pixel AA bleed that causes round-bottom glyphs (e, c, o)
+    // to appear 1px lower than flat-bottom glyphs.
+    int px_left   = (int)floorf((float)bbox.origin.x * render_scale) - 1;
+    int px_bottom = (int)floorf((float)bbox.origin.y * render_scale) - 1;
+    int px_right  = (int)ceilf((float)(bbox.origin.x + bbox.size.width) * render_scale) + 1;
+    int px_top    = (int)ceilf((float)(bbox.origin.y + bbox.size.height) * render_scale) + 1;
+
+    int bmp_width  = px_right - px_left;
+    int bmp_height = px_top - px_bottom;
 
     if (bmp_width <= 0 || bmp_height <= 0) {
         // zero-width glyph (e.g. space) — return empty bitmap
@@ -226,10 +239,11 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     // scale and position: CoreGraphics origin is bottom-left
     CGContextScaleCTM(cg_ctx, (CGFloat)render_scale, (CGFloat)render_scale);
 
-    // position glyph so that its bounding box starts at (1, 1) with a pixel of margin
+    // position glyph origin at integer pixel coordinates (-px_left, -px_bottom)
+    // to align the baseline to the pixel grid (matches Skia's roundOut approach)
     CGPoint position;
-    position.x = -(CGFloat)bbox.origin.x + 1.0 / render_scale;
-    position.y = -(CGFloat)bbox.origin.y + 1.0 / render_scale;
+    position.x = (CGFloat)(-px_left) / render_scale;
+    position.y = (CGFloat)(-px_bottom) / render_scale;
 
     CTFontDrawGlyphs(font, &glyph_id, &position, 1, cg_ctx);
 
@@ -259,8 +273,8 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     bmp->width     = (uint32_t)bmp_width;
     bmp->height    = (uint32_t)bmp_height;
     bmp->pitch     = pitch;
-    bmp->bearing_x = (int)floorf((float)bbox.origin.x * render_scale) - 1;
-    bmp->bearing_y = (int)ceilf((float)(bbox.origin.y + bbox.size.height) * render_scale) + 1;
+    bmp->bearing_x = px_left;   // = floor(origin.x * s) - 1
+    bmp->bearing_y = px_top;    // = ceil((origin.y + height) * s) + 1
     bmp->bitmap_scale = bitmap_scale;
     bmp->mode      = mode;
 
