@@ -6039,7 +6039,7 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return (Item){.item = s2it(heap_create_name(buf, 2 + src_len + flg_len))};
     }
 
-    // v55: Set/Map iterator protocol
+    // v55: Set/Map keys/values/entries — return arrays for backward compat
     case JS_BUILTIN_SET_VALUES:   // Set.prototype.values() / Set.prototype[@@iterator]()
     case JS_BUILTIN_SET_KEYS:     // Set.prototype.keys() — same as values for Set
     case JS_BUILTIN_SET_ENTRIES:  // Set.prototype.entries()
@@ -6060,23 +6060,27 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         else if (builtin_id == JS_BUILTIN_MAP_KEYS) mode = 1;
         else if (builtin_id == JS_BUILTIN_MAP_VALUES) mode = 0;
         else if (builtin_id == JS_BUILTIN_SET_VALUES || builtin_id == JS_BUILTIN_SET_KEYS) mode = 0;
-        // create iterator object
-        Item iter = js_new_object();
-        // store current node pointer as int64
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
-                        (Item){.item = i2it((int64_t)(uintptr_t)cd->order_head)});
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__iter_mode__", 13))},
-                        (Item){.item = i2it(mode)});
-        // set the collection type for Set entries (which yields [value, value])
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__coll_type__", 13))},
-                        (Item){.item = i2it(cd->type)});
-        Item next_fn = js_get_or_create_builtin(JS_BUILTIN_COLL_ITER_NEXT, "next", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
-        // Symbol.toStringTag
-        const char* tag = (cd->type == JS_COLLECTION_SET) ? "Set Iterator" : "Map Iterator";
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__sym_4", 7))},
-                         (Item){.item = s2it(heap_create_name(tag, strlen(tag)))});
-        return iter;
+        // build array from insertion-order linked list
+        Item arr = js_array_new(0);
+        for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
+            if (mode == 2) {
+                // entries: [key, value] for Map; [value, value] for Set
+                Item pair = js_array_new(0);
+                if (cd->type == JS_COLLECTION_SET) {
+                    js_array_push(pair, node->key);
+                    js_array_push(pair, node->key);
+                } else {
+                    js_array_push(pair, node->key);
+                    js_array_push(pair, node->value);
+                }
+                js_array_push(arr, pair);
+            } else if (mode == 1) {
+                js_array_push(arr, node->key);
+            } else {
+                js_array_push(arr, (cd->type == JS_COLLECTION_SET) ? node->key : node->value);
+            }
+        }
+        return arr;
     }
     case JS_BUILTIN_COLL_ITER_NEXT: {
         // Collection iterator .next()
