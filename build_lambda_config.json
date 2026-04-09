@@ -2902,6 +2902,18 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🖱️"
+                    },
+                    {
+                        "source": "test/test_page_load_gtest.cpp",
+                        "name": "Page Load Tests",
+                        "dependencies": [],
+                        "binary": "test_page_load_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📄"
                     }
                 ],
                 "type": "extended",

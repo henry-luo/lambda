@@ -3720,7 +3720,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    float font_height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 0;
+    const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+    float font_height = fm ? fm->hhea_line_height : 0;
     log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, font_height,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }

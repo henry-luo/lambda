@@ -395,7 +395,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar debug release rebuild test test-all test-all-baseline test-lambda-baseline test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-tex test-tex-baseline test-tex-dvi test-tex-dvi-baseline test-tex-dvi-extended test-tex-reference test-extended test-input run help install uninstall \
 	    lambda lambda-cli build-cli lambda-jube build-jube release-jube format lint check docs intellisense analyze-binary \
 	    build-debug build-release clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs \
@@ -986,7 +986,7 @@ test-input-baseline: build-test
 	fi; \
 	echo "=============================================================="
 
-test-radiant-baseline: test-layout-baseline test-ui-automation
+test-radiant-baseline: test-layout-baseline test-ui-automation test-page-load
 
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
@@ -1007,6 +1007,16 @@ test-ui-automation: build-test
 		./test/test_ui_automation_gtest.exe; \
 	else \
 		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
+		exit 1; \
+	fi
+
+test-page-load: build-test
+	@echo "Running Page Load (Headless) test suite..."
+	@echo "=============================================================="
+	@if [ -f "test/test_page_load_gtest.exe" ]; then \
+		./test/test_page_load_gtest.exe -j 4; \
+	else \
+		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
 	fi
 
