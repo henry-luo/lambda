@@ -1259,7 +1259,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         // dom_wrapper.type = LEXBOR_NODE;
         // dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
         // text.node = &dom_wrapper;
-        // float font_size = ((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem / 64.0;
+        // float font_size = rdcon->font.current_font_size;
         // text.x = list_item->x - 20 * ratio;
         // text.y = list_item->y;  // align at top the list item
         // text.width = text_rect.length * font_size;  text.height = font_size;

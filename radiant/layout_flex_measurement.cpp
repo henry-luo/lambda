@@ -425,7 +425,7 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
         }
 
         // Calculate actual line height using the font's metrics (Chrome-compatible)
-        // This requires setting up the font first to get accurate FT_Face metrics
+        // This requires setting up the font first to get accurate font metrics
         int text_line_height = elem_font_size;  // fallback
         if (lycon->ui_context && view_elem && view_elem->font) {
             // Set up font at the element's font size

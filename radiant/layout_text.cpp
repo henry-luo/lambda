@@ -1267,7 +1267,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
             text_width += unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
-            // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
+            // get glyph advance via font module (returns CSS pixels)
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
             if (ginfo.id == 0) {
                 // glyph not in primary font — estimate width as 1em for lookahead

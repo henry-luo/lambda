@@ -55,13 +55,13 @@ functions across ~79 production call sites, performing 4 core operations:
 | Set size + variable axes | `FT_Set_Pixel_Sizes`, `FT_Select_Size`, `FT_Get/Set_Var_*` | 7 | `head.unitsPerEm` scaling | In lib/font/ only |
 | Get glyph metrics | `FT_Get_Char_Index`, `FT_Load_Glyph`, `FT_Get_Kerning`, `FT_Get_Sfnt_Table` | ~53 | `cmap` + `hmtx` + `kern` parsing | 3-tier cascade (FT primary → CT → FontTables) |
 | Rasterize glyph bitmap | `FT_Load_Glyph(RENDER)` | 6 | Platform API or ThorVG | CoreText added on macOS |
-| Library lifecycle | `FT_New_Library`, `FT_Done_Library`, `FT_Init_FreeType` | 5 | Removed from radiant/ | Remains in lib/font/ + pdf/fonts.cpp |
-| PDF embedded fonts | `FT_New_Memory_Face` (PDF streams) | 3 | Keep (CFF/Type1 needs FT) | Isolated in pdf/fonts.cpp |
+| Library lifecycle | `FT_New_Library`, `FT_Done_Library`, `FT_Init_FreeType` | 5 | Removed from radiant/ | Remains in lib/font/ only |
+| PDF embedded fonts | `FT_New_Memory_Face` (PDF streams) | 3 | FontTables (name, OS/2, head) | Replaced by FontTables in pdf/fonts.cpp |
 
-FreeType has been **fully eliminated from all `radiant/` files** except
-`radiant/pdf/fonts.cpp` (embedded font loading). The `lib/font/` module retains
-FreeType as the primary backend with CoreText and FontTables as fallbacks
-(Phase 3 cascade architecture).
+FreeType has been **fully eliminated from all `radiant/` files** including
+`radiant/pdf/fonts.cpp` (now uses FontTables for embedded font metadata).
+The `lib/font/` module retains FreeType as the primary backend with CoreText
+and FontTables as fallbacks (Phase 3 cascade architecture).
 
 We use none of: autohinter, Type 1/CID/BDF/PCF/PFR support (except PDF embedded),
 caching subsystem, stroker, glyph management, bitmap conversion, LCD filtering,

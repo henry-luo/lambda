@@ -11,10 +11,6 @@
 extern "C" {
 #endif
 
-// FreeType forward declarations - using void* to avoid FreeType header dependency
-typedef struct FT_FaceRec_* FT_Face;
-typedef struct FT_LibraryRec_* FT_Library;
-
 // Forward declaration for FontProp
 struct FontProp;
 struct FontTables;
@@ -74,8 +70,7 @@ typedef struct PDFFontEntry {
     // Embedded font data (if present)
     unsigned char* font_data;    // Raw font file data
     size_t font_data_len;
-    FT_Face ft_face;             // FreeType face (if loaded)
-    struct FontTables* tables;   // parsed TTF/OTF tables (cmap, hmtx, head)
+    struct FontTables* tables;   // parsed TTF/OTF tables (cmap, hmtx, head, name, OS/2)
     
     // ToUnicode mapping
     uint32_t* to_unicode;        // Character code to Unicode mapping
@@ -99,7 +94,6 @@ typedef struct PDFFontCache {
     PDFFontEntry* fonts;
     int count;
     Pool* pool;
-    FT_Library ft_library;
 } PDFFontCache;
 
 /**
@@ -108,7 +102,7 @@ typedef struct PDFFontCache {
 PDFFontCache* pdf_font_cache_create(Pool* pool);
 
 /**
- * Destroy font cache — releases FT faces, FontTables, and FT_Library
+ * Destroy font cache — releases FontTables resources
  */
 void pdf_font_cache_destroy(PDFFontCache* cache);
 
@@ -133,12 +127,6 @@ PDFFontEntry* pdf_font_cache_get(PDFFontCache* cache, const char* ref_name);
  * Detect font type from PDF font dictionary
  */
 PDFFontType pdf_font_detect_type(Map* font_dict, Input* input);
-
-/**
- * Load embedded font into FreeType
- */
-FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data, 
-                                size_t font_data_len, PDFFontType font_type);
 
 /**
  * Create FontProp from cached font entry

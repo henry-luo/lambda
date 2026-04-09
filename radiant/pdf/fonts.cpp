@@ -15,13 +15,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-// FreeType for embedded font loading
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_SFNT_NAMES_H
-#include FT_TRUETYPE_IDS_H
-
-// FontTables for glyph metrics without FreeType
+// FontTables for parsing embedded font data (name, OS/2, cmap, hmtx, head)
 #include "../../lib/font/font_tables.h"
 
 /**
@@ -796,36 +790,20 @@ PDFFontCache* pdf_font_cache_create(Pool* pool) {
     cache->fonts = nullptr;
     cache->count = 0;
 
-    // each cache owns its own FT_Library for loading embedded fonts
-    FT_Error error = FT_Init_FreeType(&cache->ft_library);
-    if (error) {
-        log_error("Failed to initialize FreeType for PDF font cache: error %d", error);
-        cache->ft_library = nullptr;
-    }
-
     return cache;
 }
 
 /**
- * Destroy font cache — releases FT faces, FontTables, and FT_Library
+ * Destroy font cache — releases FontTables resources
  */
 void pdf_font_cache_destroy(PDFFontCache* cache) {
     if (!cache) return;
 
     for (PDFFontEntry* entry = cache->fonts; entry; entry = entry->next) {
-        if (entry->ft_face) {
-            FT_Done_Face(entry->ft_face);
-            entry->ft_face = nullptr;
-        }
         if (entry->tables) {
             font_tables_close(entry->tables, cache->pool);
             entry->tables = nullptr;
         }
-    }
-
-    if (cache->ft_library) {
-        FT_Done_FreeType(cache->ft_library);
-        cache->ft_library = nullptr;
     }
 }
 
@@ -955,48 +933,6 @@ static unsigned char* extract_embedded_font_data(Map* font_dict, Input* input,
 }
 
 /**
- * Load embedded font into FreeType
- */
-FT_Face pdf_font_load_embedded(PDFFontCache* cache, unsigned char* font_data,
-                                size_t font_data_len, PDFFontType font_type) {
-    if (!cache || !font_data || font_data_len == 0) return nullptr;
-    if (!cache->ft_library) {
-        log_error("PDF font cache has no FT_Library");
-        return nullptr;
-    }
-
-    FT_Face face = nullptr;
-    FT_Error error;
-
-    // All supported types use the same FT_New_Memory_Face call
-    switch (font_type) {
-        case PDF_FONT_TRUETYPE:
-        case PDF_FONT_OPENTYPE:
-        case PDF_FONT_CID_TYPE2:
-        case PDF_FONT_TYPE1C:
-        case PDF_FONT_CID_TYPE0C:
-        case PDF_FONT_TYPE1:
-            error = FT_New_Memory_Face(cache->ft_library, font_data, font_data_len, 0, &face);
-            break;
-
-        default:
-            log_warn("Unsupported font type for embedded loading: %d", font_type);
-            return nullptr;
-    }
-
-    if (error) {
-        log_error("FreeType failed to load embedded font: error %d", error);
-        return nullptr;
-    }
-
-    log_info("Loaded embedded font: %s (%s)",
-             face->family_name ? face->family_name : "unknown",
-             face->style_name ? face->style_name : "");
-
-    return face;
-}
-
-/**
  * Add font to cache from PDF Resources
  */
 PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
@@ -1096,15 +1032,13 @@ PDFFontEntry* pdf_font_cache_add(PDFFontCache* cache, const char* ref_name,
         entry->font_data = font_data;
         entry->font_data_len = font_data_len;
 
-        // Load into FreeType (for family_name, style detection, CFF outlines)
-        entry->ft_face = pdf_font_load_embedded(cache, font_data, font_data_len, embed_type);
-        if (entry->ft_face) {
-            log_info("Cached embedded font '%s' -> '%s'", ref_name,
-                    entry->ft_face->family_name ? entry->ft_face->family_name : "unknown");
-        }
-
-        // Parse TTF/OTF tables for glyph metrics (cmap, hmtx, head)
+        // Parse font tables for glyph metrics and metadata (name, OS/2, cmap, hmtx, head)
         entry->tables = font_tables_open(font_data, font_data_len, cache->pool);
+        if (entry->tables) {
+            NameTable* name = font_tables_get_name(entry->tables);
+            log_info("Cached embedded font '%s' -> '%s'", ref_name,
+                    (name && name->family_name) ? name->family_name : "unknown");
+        }
     } else {
         entry->is_embedded = false;
         log_debug("Font '%s' (%s) is not embedded, using system fallback",
@@ -1189,7 +1123,7 @@ PDFFontEntry* pdf_font_cache_get(PDFFontCache* cache, const char* ref_name) {
 
 /**
  * Create FontProp from cached font entry
- * Uses embedded FreeType face if available, otherwise falls back to system fonts
+ * Uses FontTables metadata if available, otherwise falls back to system fonts
  */
 FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double font_size) {
     if (!pool || !entry) return nullptr;
@@ -1199,25 +1133,30 @@ FontProp* create_font_from_cache_entry(Pool* pool, PDFFontEntry* entry, double f
 
     font->font_size = (float)font_size;
 
-    if (entry->ft_face) {
-        // Use embedded font - get family name from FreeType
-        if (entry->ft_face->family_name) {
-            font->family = entry->ft_face->family_name;
+    if (entry->tables) {
+        // Use embedded font — get family name from FontTables name table
+        NameTable* name = font_tables_get_name(entry->tables);
+        if (name && name->family_name) {
+            font->family = (char*)name->family_name;
         } else {
             font->family = (char*)"Arial";
         }
 
-        // Get style from FreeType
-        if (entry->ft_face->style_flags & FT_STYLE_FLAG_BOLD) {
-            font->font_weight = CSS_VALUE_BOLD;
+        // Get style from OS/2 fsSelection (bit 5 = bold, bit 0 = italic)
+        Os2Table* os2 = font_tables_get_os2(entry->tables);
+        if (os2) {
+            font->font_weight = (os2->fs_selection & 0x20) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+            font->font_style = (os2->fs_selection & 0x01) ? CSS_VALUE_ITALIC : CSS_VALUE_NORMAL;
         } else {
-            font->font_weight = CSS_VALUE_NORMAL;
-        }
-
-        if (entry->ft_face->style_flags & FT_STYLE_FLAG_ITALIC) {
-            font->font_style = CSS_VALUE_ITALIC;
-        } else {
-            font->font_style = CSS_VALUE_NORMAL;
+            // Fallback to head.macStyle (bit 0 = bold, bit 1 = italic)
+            HeadTable* head = font_tables_get_head(entry->tables);
+            if (head) {
+                font->font_weight = (head->mac_style & 0x01) ? CSS_VALUE_BOLD : CSS_VALUE_NORMAL;
+                font->font_style = (head->mac_style & 0x02) ? CSS_VALUE_ITALIC : CSS_VALUE_NORMAL;
+            } else {
+                font->font_weight = CSS_VALUE_NORMAL;
+                font->font_style = CSS_VALUE_NORMAL;
+            }
         }
 
         log_debug("Using embedded font: %s, size: %.2f", font->family, font->font_size);
