@@ -1,9 +1,9 @@
 # Design Proposal: Migrate Font & Text Pipeline Away from FreeType
 
-**Status:** In Progress (Phase 4 complete)  
+**Status:** In Progress (Phase 5 complete)  
 **Author:** Lambda Team  
 **Date:** April 2026  
-**Last Updated:** April 8, 2026
+**Last Updated:** April 9, 2026
 
 ---
 
@@ -385,9 +385,68 @@ except `FT_New_Memory_Face` / `FT_Done_Face` / `FT_Init_FreeType` /
 **Risk:** Low. PDF module has its own test suite.  
 **Validation:** 3,939/3,939 layout baseline, 557/557 Lambda runtime tests. ✅
 
+### Phase 5: CT Advance Override + Rasterization Quality — ✅ COMPLETE
+
+**Goal:** Improve text rendering fidelity by (1) enabling CoreText advance width
+overrides for all fonts, and (2) fixing CoreGraphics font smoothing that caused
+excessively bold glyph rasterization.
+
+**Change 1: CoreText advance override for all fonts**
+
+- Modified: `lib/font/font_loader.c` — removed the `!FT_HAS_KERNING(face)` and
+  `!has_any_kern_table` guards around `ct_font_ref` creation. Previously,
+  `ct_font_ref` (which overrides FreeType glyph advances with CoreText advances to
+  match browser rendering) was only created for fonts WITHOUT a kern table. Fonts
+  like Arial that have a kern table used FreeType advances, which diverge slightly
+  from Chrome/Skia.
+- Now `ct_font_ref` is created unconditionally for all fonts. Kerning is unaffected:
+  `font_get_kerning()` checks the FontTables kern table first, so fonts with kern
+  tables still get proper kerning regardless of `ct_font_ref`.
+- **Finding:** For Arial, CT and FT advances are nearly identical (e.g., 't': 7.992
+  vs 8.000). The ~7px total width difference on "Direction" vs Chrome is inherent to
+  CoreText's character-by-character advances vs Skia/HarfBuzz shaping — not fixable
+  by switching between FT and CT on macOS.
+
+**Impact:** 15 layout test pages improved (e.g., error-page +62%, npr +32.9%,
+blog-homepage +22%), no individual regressions.
+
+**Change 2: Gamma-corrected CoreGraphics font smoothing**
+
+- Modified: `lib/font/font_rasterize_ct.c` — kept font smoothing enabled
+  (`CGContextSetShouldSmoothFonts(true)`) for stroke thickening, then added a
+  gamma² linearization post-process on the resulting grayscale bitmap.
+- **Root cause:** CoreGraphics font smoothing adds stroke thickening that matches
+  browser rendering weight. However, CG also applies a gamma ~2.0 encoding to
+  coverage values in offscreen grayscale contexts, making raw output appear
+  excessively bold (+19.2% dark intensity vs Chrome).
+- **Solution — Skia-style gamma² linearization:** After `CTFontDrawGlyphs`, apply
+  `new_pixel = (pixel * pixel + 128) / 255` to each grayscale byte. This is the
+  same formula Chrome/Skia uses in `gLinearCoverageFromCGLCDValue`
+  (`SkScalerContext_mac_ct.cpp`, line ~377). It undoes CG's gamma encoding while
+  preserving the thickened stroke geometry.
+- **Quantitative results** (glyph_quality test, multi-size text vs Chrome reference):
+  - Smoothing ON (raw):  dark intensity **+19.2%** vs Chrome — too heavy/bold
+  - Smoothing OFF:       dark intensity **−9.3%** vs Chrome — too light
+  - Smoothing ON + γ²:   dark intensity **+2.0%** vs Chrome — near-perfect match
+  - h2_direction render mismatch: 1.77% (OFF) → **1.21%** (ON + γ²)
+- The remaining ~2% gap is inherent to CoreText vs Skia/HarfBuzz differences in
+  text shaping, not glyph weight.
+
+**Impact:** Glyph rasterization quality closely matches Chrome/Safari. Stroke weight
+within 2% of browser rendering across all tested font sizes (11px, 14px, 24px).
+
+**Deliverables:**
+- Modified: `lib/font/font_loader.c` — unconditional `ct_font_ref` creation
+- Modified: `lib/font/font_rasterize_ct.c` — font smoothing enabled + gamma²
+  linearization post-process (`(v*v+128)/255`) on grayscale glyph bitmaps
+
+**Risk:** Low. Both changes improve browser fidelity with no layout regressions.  
+**Validation:** 15 layout improvements, 0 individual regressions. 563/567 Lambda
+runtime tests pass (4 pre-existing JS transpiler failures, unrelated). ✅
+
 ---
 
-### Remaining FreeType Usage After Phase 4
+### Remaining FreeType Usage After Phase 5
 
 FreeType has been eliminated from all **radiant/** files except `radiant/pdf/fonts.cpp`
 (embedded font loading — requires `FT_New_Memory_Face` for CFF/Type1/TrueType from
@@ -658,7 +717,8 @@ RasterizedGlyph* rasterize_tvg(FontTables* tables, uint16_t glyph_id,
 | **Phase 2:** Platform rasterization (macOS) | ~350 lines (`font_rasterize_ct.c`) | ~300 lines across `font_glyph.c`, `font_internal.h`, `font_loader.c` | Medium | ✅ Done |
 | **Phase 3:** Fast-path FT elimination | 0 new files | ~400 lines across `font_glyph.c`, `font_metrics.c` (3-tier cascade) | Small | ✅ Done |
 | **Phase 4:** PDF + radiant cleanup | 0 new files | ~150 lines across `radiant/pdf/`, `radiant/ui_context.cpp`, `radiant/view.hpp` | Small | ✅ Done |
-| **Total completed** | ~1,850 new lines | ~1,350 modified lines | | |
+| **Phase 5:** CT advance override + rasterization quality | 0 new files | ~10 lines across `font_loader.c`, `font_rasterize_ct.c` | Small | ✅ Done |
+| **Total completed** | ~1,850 new lines | ~1,360 modified lines | | |
 
 **Deferred work:**
 | Item | Est. Code | Notes |
@@ -681,6 +741,7 @@ RasterizedGlyph* rasterize_tvg(FontTables* tables, uint16_t glyph_id,
 | Phase 2 | CoreText rasterization on macOS. Visual comparison of rendered output. | ✅ 3,939/3,939 |
 | Phase 3 | 3-tier cascade with FreeType as primary. All baselines pass with no regressions. | ✅ 3,939/3,939 |
 | Phase 4 | PDF module uses font_load_glyph + font_tables. Lambda runtime tests pass. | ✅ 3,939/3,939 layout + 557/557 runtime |
+| Phase 5 | CT advance override for all fonts: 15 layout pages improved, 0 regressions. Font smoothing + gamma² linearization: dark intensity +2.0% vs Chrome (from +19.2% raw). h2_direction mismatch 1.21%. | ✅ 15 improvements, 0 regressions + 563/567 runtime |
 
 ### Regression Gate
 
