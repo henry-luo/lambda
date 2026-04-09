@@ -194,6 +194,7 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
+    bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;

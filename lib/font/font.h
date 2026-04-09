@@ -275,6 +275,11 @@ float font_get_x_height_ratio(FontHandle* handle);
 // Returns the line-height in CSS pixels.
 float font_calc_normal_line_height(FontHandle* handle);
 
+// Get the system CJK font's normal line-height at a given font size.
+// Chrome blends CJK system font metrics for lines containing CJK characters.
+// Returns the CJK line-height, or 0 if not available (non-macOS or no CJK font).
+float get_cjk_system_line_height(float font_size);
+
 // Get the normal line-height split into ascender and descender components.
 // Chrome/Blink splits the normal line-height as:
 //   ascender = asc + desc (content height above baseline)
