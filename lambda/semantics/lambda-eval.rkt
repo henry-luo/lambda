@@ -1144,4 +1144,5 @@
          is-error? closure? numeric-val?
          array-val? list-val? map-val? range-val?
          array-items list-items map-pairs
-         collection->list apply-closure)
+         collection->list apply-closure
+         bind-params env-ref env-set)

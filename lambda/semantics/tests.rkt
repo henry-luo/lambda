@@ -924,6 +924,344 @@
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
+;; PART 6: PROCEDURAL EXTENSION TESTS
+;; ════════════════════════════════════════════════════════════════════════════
+
+(require "lambda-proc.rkt")
+
+;; Helper: run a pn body (list of statements) and return (values val output-string)
+(define (pn-run . stmts)
+  (run-pn-body stmts))
+
+;; ── Mutable Variables ──
+
+(test-case "Proc: var declaration and read"
+  (define-values (v out) (pn-run '(var x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: var assignment"
+  (define-values (v out) (pn-run '(var x 10) '(assign x 99) 'x))
+  (check-equal? v 99))
+
+(test-case "Proc: var null then reassign"
+  (define-values (v out) (pn-run '(var x null) '(assign x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: multiple var declarations"
+  (define-values (v out) (pn-run '(var a 1) '(var b 2) '(var c 3) '(add (add a b) c)))
+  (check-equal? v 6))
+
+(test-case "Proc: var type widening (int → float → string)"
+  (define-values (v out)
+    (pn-run '(var x 42)
+            '(assign x 3.14)
+            '(print x)
+            '(assign x "hello")
+            'x))
+  (check-equal? v "hello")
+  (check-equal? out "3.14"))
+
+;; ── Print Side Effects ──
+
+(test-case "Proc: print output"
+  (define-values (v out) (pn-run '(print "hello") '(print " world")))
+  (check-equal? out "hello world"))
+
+(test-case "Proc: print numbers"
+  (define-values (v out) (pn-run '(print 42) '(print " ") '(print 3.14)))
+  (check-equal? out "42 3.14"))
+
+(test-case "Proc: print null"
+  (define-values (v out) (pn-run '(print null)))
+  (check-equal? out "null"))
+
+;; ── While Loop ──
+
+(test-case "Proc: simple while loop"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 5) (seq (assign x (add x 1))))
+            'x))
+  (check-equal? v 5))
+
+(test-case "Proc: while with accumulator"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 1)
+            '(while (le i 10) (seq
+              (assign sum (add sum i))
+              (assign i (add i 1))))
+            'sum))
+  (check-equal? v 55))
+
+(test-case "Proc: nested while loops"
+  (define-values (v out)
+    (pn-run '(var total 0)
+            '(var i 0)
+            '(while (lt i 3) (seq
+              (var j 0)
+              (while (lt j 3) (seq
+                (assign total (add total 1))
+                (assign j (add j 1))))
+              (assign i (add i 1))))
+            'total))
+  (check-equal? v 9))
+
+;; ── Break and Continue ──
+
+(test-case "Proc: while with break"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while #t (seq
+              (if-proc (ge x 3) (break))
+              (assign x (add x 1))))
+            'x))
+  (check-equal? v 3))
+
+(test-case "Proc: while with continue (skip even)"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 0)
+            '(while (lt i 10) (seq
+              (assign i (add i 1))
+              (if-proc (eq (mod i 2) 0) (continue))
+              (assign sum (add sum i))))
+            'sum))
+  (check-equal? v 25))  ; 1+3+5+7+9
+
+;; ── Return ──
+
+(test-case "Proc: early return"
+  (define-values (v out)
+    (pn-run '(return 42)
+            '(print "unreachable")))
+  (check-equal? v 42)
+  (check-equal? out ""))
+
+(test-case "Proc: return from while"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 100) (seq
+              (assign x (add x 1))
+              (if-proc (eq x 5) (return x))))
+            'x))
+  (check-equal? v 5))
+
+;; ── Procedural Functions (pn) ──
+
+(test-case "Proc: def-pn and call"
+  (define-values (v out)
+    (pn-run '(def-pn double (x) (seq (return (mul x 2))))
+            '(app-proc double 21)))
+  (check-equal? v 42))
+
+(test-case "Proc: pn with while loop"
+  (define-values (v out)
+    (pn-run '(def-pn factorial (n) (seq
+              (var result 1)
+              (var i 1)
+              (while (le i n) (seq
+                (assign result (mul result i))
+                (assign i (add i 1))))
+              result))
+            '(app-proc factorial 5)))
+  (check-equal? v 120))
+
+(test-case "Proc: pn param mutation"
+  (define-values (v out)
+    (pn-run '(def-pn countdown (n) (seq
+              (while (gt n 0) (seq
+                (print n)
+                (print " ")
+                (assign n (sub n 1))))
+              (print "done")))
+            '(app-proc countdown 3)))
+  (check-equal? out "3 2 1 done"))
+
+(test-case "Proc: pn with early return"
+  (define-values (v out)
+    (pn-run '(def-pn find-first-gt (arr threshold) (seq
+              (var i 0)
+              (while (lt i (len-expr arr)) (seq
+                (if-proc (gt (index arr i) threshold)
+                  (return (index arr i)))
+                (assign i (add i 1))))
+              null))
+            '(app-proc find-first-gt (array 1 5 3 8 2) 4)))
+  (check-equal? v 5))
+
+;; ── Array Mutation ──
+
+(test-case "Proc: array element assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 10 20 30 40 50))
+            '(assign-index arr 0 100)
+            '(assign-index arr 2 300)
+            'arr))
+  (check-equal? v '(array-val 100 20 300 40 50)))
+
+(test-case "Proc: array negative index assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 1 2 3 4 5))
+            '(assign-index arr -1 99)
+            'arr))
+  (check-equal? v '(array-val 1 2 3 4 99)))
+
+(test-case "Proc: array assignment in while loop"
+  (define-values (v out)
+    (pn-run '(var arr (array 0 0 0 0 0))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-index arr i (mul i i))
+              (assign i (add i 1))))
+            'arr))
+  (check-equal? v '(array-val 0 1 4 9 16)))
+
+;; ── Map Mutation ──
+
+(test-case "Proc: map field assignment"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 10) (y 20)))
+            '(assign-member obj x 42)
+            'obj))
+  (check-equal? v '(map-val (x 42) (y 20))))
+
+(test-case "Proc: map field in while loop (counter)"
+  (define-values (v out)
+    (pn-run '(var counter (map-expr (value 0)))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-member counter value (add (member counter value) 1))
+              (assign i (add i 1))))
+            '(member counter value)))
+  (check-equal? v 5))
+
+(test-case "Proc: map add new field"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 1)))
+            '(assign-member obj y 2)
+            'obj))
+  (check-equal? v '(map-val (x 1) (y 2))))
+
+;; ── Closure Mutation (shared store) ──
+
+(test-case "Proc: closure counter pattern"
+  (define-values (v out)
+    (pn-run '(var count 0)
+            '(def-pn inc () (seq
+              (assign count (add count 1))
+              count))
+            '(var a (app-proc inc))
+            '(var b (app-proc inc))
+            '(var c (app-proc inc))
+            '(add (add a b) c)))
+  (check-equal? v 6))  ; 1+2+3
+
+;; ── If-else (procedural) ──
+
+(test-case "Proc: if-else with assignment"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var result 0)
+            '(if-proc (gt x 5)
+              (assign result (mul x 2))
+              (assign result (mul x 3)))
+            'result))
+  (check-equal? v 20))
+
+(test-case "Proc: if without else"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var msg "default")
+            '(if-proc (gt x 5) (assign msg "big"))
+            'msg))
+  (check-equal? v "big"))
+
+;; ── Fibonacci (classic proc test) ──
+
+(test-case "Proc: fibonacci via while"
+  (define-values (v out)
+    (pn-run '(def-pn fib (n) (seq
+              (var a 0)
+              (var b 1)
+              (var i 2)
+              (while (le i n) (seq
+                (var temp (add a b))
+                (assign a b)
+                (assign b temp)
+                (assign i (add i 1))))
+              b))
+            '(app-proc fib 10)))
+  (check-equal? v 55))
+
+;; ── Bubble sort pattern ──
+
+(test-case "Proc: swap via temp variable"
+  (define-values (v out)
+    (pn-run '(var a 5)
+            '(var b 3)
+            '(var temp a)
+            '(assign a b)
+            '(assign b temp)
+            '(add (mul a 10) b)))
+  ;; a=3, b=5 → 35
+  (check-equal? v 35))
+
+;; ── Combination: print + while + function ──
+
+(test-case "Proc: print inside while"
+  (define-values (v out)
+    (pn-run '(var i 1)
+            '(while (le i 5) (seq
+              (print i)
+              (if-proc (lt i 5) (print ","))
+              (assign i (add i 1))))))
+  (check-equal? out "1,2,3,4,5"))
+
+;; ── Error handling in proc ──
+
+(test-case "Proc: error propagation"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 0)))
+  (check-pred is-error? v))
+
+(test-case "Proc: error-free path"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 2)))
+  (check-equal? v 5.0))
+
+;; ── Property: pn return always unwraps at call boundary ──
+
+(test-case "Property: return unwraps at call boundary"
+  (define-values (v out)
+    (pn-run '(def-pn inner () (seq (return 42)))
+            '(def-pn outer () (seq
+              (var x (app-proc inner))
+              (return (add x 1))))
+            '(app-proc outer)))
+  (check-equal? v 43))
+
+;; ── Property: break does not escape function ──
+
+(test-case "Property: break contained in while"
+  (define-values (v out)
+    (pn-run '(def-pn f () (seq
+              (var x 0)
+              (while #t (seq
+                (assign x (add x 1))
+                (if-proc (eq x 3) (break))))
+              x))
+            '(app-proc f)))
+  (check-equal? v 3))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
 ;; RUN ALL TESTS
 ;; ════════════════════════════════════════════════════════════════════════════
 

@@ -57,6 +57,9 @@
          (closure ρ (p ...) e) ; closure: env, params, body
          (error-val string integer) ; error: message, code
          (type-val τ)          ; first-class type value
+         ;; procedural closure (carries store reference)
+         ;; Note: pn-closure is a Racket-level value, not matched by Redex grammar,
+         ;; because it carries a mutable hash (σ). Handled by lambda-proc.rkt.
          )
 
   ;; ── Parameters ──
@@ -173,6 +176,23 @@
          (unique-expr e)
          (take-expr e e)
          (drop-expr e e)
+
+         ;; ── Procedural forms (evaluated by lambda-proc.rkt) ──
+         ;; These extend the functional core with mutable state and control flow.
+         (var x e)                    ; mutable variable declaration
+         (assign x e)                 ; x = expr (variable assignment)
+         (assign-index x e e)         ; arr[i] = expr (array element assignment)
+         (assign-member x x e)        ; obj.field = expr (map field assignment)
+         (seq e ...)                  ; statement sequence (block)
+         (while e e)                  ; while (cond) body
+         (break)                      ; break (exits innermost while)
+         (continue)                   ; continue (next iteration)
+         (return e)                   ; return expr (early exit)
+         (def-pn x (p ...) e)        ; pn name(params) { body }
+         (app-proc e e ...)           ; procedural function call
+         (print e)                    ; print(expr) → side effect
+         (if-proc e e e)              ; if-else (procedural, with side effects)
+         (if-proc e e)                ; if without else (procedural)
          )
 
   ;; ── Match clauses ──
