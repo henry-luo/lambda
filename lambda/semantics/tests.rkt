@@ -307,6 +307,41 @@
   (check-equal? (eval-lambda ε '(to-string #t)) "true")
   (check-equal? (eval-lambda ε '(to-string null)) "null"))
 
+(test-case "Type conversion: to-symbol"
+  (check-equal? (eval-lambda ε '(to-symbol "hello")) '(sym "hello"))
+  (check-equal? (eval-lambda ε '(to-symbol "foo_bar")) '(sym "foo_bar")))
+
+(test-case "Type cast: as-type"
+  ;; Compatible cast succeeds (int is number)
+  (check-equal? (eval-lambda ε '(as-type 42 number-type)) 42)
+  (check-equal? (eval-lambda ε '(as-type 42 int-type)) 42)
+  ;; Incompatible cast → error
+  (check-pred is-error? (eval-lambda ε '(as-type 42 string-type))))
+
+(test-case "Slice expression"
+  ;; Array slicing
+  (define arr-env (list (cons 'a '(array-val 10 20 30 40 50))))
+  (check-equal? (eval-lambda arr-env '(slice a 1 3))
+                '(array-val 20 30))
+  ;; Negative index
+  (check-equal? (eval-lambda arr-env '(slice a 0 -1))
+                '(array-val 10 20 30 40))
+  ;; String slicing
+  (check-equal? (eval-lambda ε '(slice "hello" 1 3)) "el"))
+
+(test-case "Named function definition (def-fn)"
+  ;; def-fn creates a named recursive binding
+  (check-equal?
+   (eval-lambda ε '(def-fn fact (n)
+                     (if (le n 1) 1 (mul n (app fact (sub n 1))))
+                     (app fact 5)))
+   120)
+  ;; Simple non-recursive
+  (check-equal?
+   (eval-lambda ε '(def-fn double (x) (mul x 2)
+                     (app double 7)))
+   14))
+
 (test-case "Vector arithmetic (element-wise)"
   ;; [1,2,3] + [4,5,6] → [5,7,9]
   (check-equal? (eval-lambda ε '(add (array 1 2 3) (array 4 5 6)))
@@ -519,6 +554,11 @@
   (check-equal? (lambda-type->c-type 'decimal-type)  'Decimal*)
   (check-equal? (lambda-type->c-type 'datetime-type) 'DateTime)
   (check-equal? (lambda-type->c-type 'binary-type)   'String*)
+  ;; New types added in Phase 1
+  (check-equal? (lambda-type->c-type 'object-type)      'Object*)
+  (check-equal? (lambda-type->c-type 'num-sized-type)   'uint64_t)
+  (check-equal? (lambda-type->c-type 'uint64-type)      'uint64_t)
+  (check-equal? (lambda-type->c-type 'array-num-type)   'ArrayNum*)
   ;; Specialized arrays
   (check-equal? (lambda-type->c-type 'array-int-type)   'ArrayInt*)
   (check-equal? (lambda-type->c-type 'array-int64-type) 'ArrayInt64*)
@@ -580,15 +620,26 @@
   (check-equal? (unboxing-function 'double)   'it2d)
   (check-equal? (unboxing-function 'bool)     'it2b)
   (check-equal? (unboxing-function 'String*)  'it2s)
-  (check-equal? (unboxing-function 'Symbol*)  'it2sym)
-  (check-equal? (unboxing-function 'DateTime) 'it2dt)
-  (check-equal? (unboxing-function 'Decimal*) 'it2dec))
+  (check-equal? (unboxing-function 'Symbol*)  'it2s)      ; symbol uses it2s per type_box_table
+  (check-equal? (unboxing-function 'DateTime) 'it2k)      ; it2k per type_box_table
+  (check-equal? (unboxing-function 'Decimal*) 'it2c))     ; it2c per type_box_table
 
-(test-case "Unboxing: container types use cast-from-Item"
-  (for ([ct '(Array* List* Map* Element* Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
-    (check-equal? (unboxing-function ct) 'cast-from-Item
-                  (format "~a should unbox via cast-from-Item" ct))))
+(test-case "Unboxing: container types"
+  ;; Containers with specific unboxing functions (per type_box_table)
+  (check-equal? (unboxing-function 'Array*)    'it2arr)
+  (check-equal? (unboxing-function 'Map*)      'it2map)
+  (check-equal? (unboxing-function 'Element*)  'it2elmt)
+  (check-equal? (unboxing-function 'Object*)   'it2obj)
+  (check-equal? (unboxing-function 'Range*)    'it2range)
+  (check-equal? (unboxing-function 'Path*)     'it2path)
+  (check-equal? (unboxing-function 'Function*) 'it2p)
+  ;; Containers that still use generic cast-from-Item
+  (check-equal? (unboxing-function 'List*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'Type*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt*)    'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt64*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayFloat*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayNum*) 'it2arr))
 
 (test-case "Conversion: scalar promotions"
   ;; Only int64 ↔ double conversions remain (no int32_t in Lambda)
@@ -777,8 +828,8 @@
 (test-case "Property: every pointer C-type has unboxing"
   ;; All pointer types must be recoverable from Item
   (for ([ct '(String* Symbol* Array* List* Map* Element* Decimal*
-              Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
+              Object* Range* Path* Function* Type*
+              ArrayNum* ArrayInt* ArrayInt64* ArrayFloat*)])
     (check-not-false (unboxing-function ct)
                      (format "~a must have unboxing fn" ct))))
 
@@ -794,8 +845,8 @@
 
 (test-case "Property: same-type conversion is always #f"
   ;; ∀ C-type ct: required-conversion(ct, ct) == #f
-  (for ([ct '(Item int64_t double bool String* Symbol*
-              Array* List* Map* Element* Decimal* DateTime
+  (for ([ct '(Item int64_t uint64_t double bool String* Symbol*
+              Array* ArrayNum* List* Map* Element* Object* Decimal* DateTime
               Range* Path* Function* Type*)])
     (check-false (required-conversion ct ct)
                  (format "~a → ~a should need no conversion" ct ct))))
@@ -825,7 +876,7 @@
                                 name)))))
 
 (test-case "Property: all container types map to pointer C-types"
-  (for ([τ '(array-type list-type map-type element-type)])
+  (for ([τ '(array-type list-type map-type element-type object-type)])
     (define ct (lambda-type->c-type τ))
     (check-true (pointer-c-type? ct)
                 (format "~a should map to pointer type, got ~a" τ ct))))
@@ -852,7 +903,11 @@
   (check-equal? (semantic-unboxing-function 'int64-type) 'it2l)
   (check-equal? (semantic-unboxing-function 'float-type) 'it2d)
   (check-equal? (semantic-unboxing-function 'bool-type)  'it2b)
-  (check-equal? (semantic-unboxing-function 'string-type) 'it2s))
+  (check-equal? (semantic-unboxing-function 'string-type) 'it2s)
+  ;; symbol/datetime/decimal use the names from type_box_table
+  (check-equal? (semantic-unboxing-function 'symbol-type) 'it2s)
+  (check-equal? (semantic-unboxing-function 'datetime-type) 'it2k)
+  (check-equal? (semantic-unboxing-function 'decimal-type) 'it2c))
 
 (test-case "int and int64 share C-type but differ semantically"
   ;; Both map to int64_t
