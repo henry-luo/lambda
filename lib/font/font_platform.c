@@ -512,16 +512,19 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
     if (!str) return NULL;
 
-    // create a base font (Times New Roman at 12pt) and ask CoreText for a fallback
-    CTFontRef base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
-    if (!base_font) {
-        CFRelease(str);
-        return NULL;
+    // cache the base font for repeated fallback lookups (creating a CTFont
+    // per call is expensive — CoreText does font catalog lookups each time)
+    static CTFontRef s_base_font = NULL;
+    if (!s_base_font) {
+        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+        if (!s_base_font) {
+            CFRelease(str);
+            return NULL;
+        }
     }
 
-    CTFontRef fallback = CTFontCreateForString(base_font, str, CFRangeMake(0, utf16_len));
+    CTFontRef fallback = CTFontCreateForString(s_base_font, str, CFRangeMake(0, utf16_len));
     CFRelease(str);
-    CFRelease(base_font);
 
     if (!fallback) return NULL;
 

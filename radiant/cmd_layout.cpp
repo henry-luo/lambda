@@ -4872,6 +4872,7 @@ static bool layout_single_file(
 
     // Reset per-document font state to avoid cross-document cache pollution in batch mode.
     font_context_reset_document_fonts(ui_context->font_ctx);
+    font_context_reset_glyph_caches(ui_context->font_ctx);
     ui_context->font_face_count = 0;
 
     // [DIAG] Track memory usage per file for leak detection

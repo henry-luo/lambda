@@ -381,6 +381,27 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     log_info("font_context_reset_document_fonts: cleared per-document font state");
 }
 
+void font_context_reset_glyph_caches(FontContext* ctx) {
+    if (!ctx) return;
+
+    // clear loaded glyph cache (entries reference glyph_arena bitmap data)
+    if (ctx->loaded_glyph_cache) {
+        hashmap_clear(ctx->loaded_glyph_cache, false);
+    }
+
+    // clear bitmap cache (also references glyph_arena data)
+    if (ctx->bitmap_cache) {
+        hashmap_clear(ctx->bitmap_cache, false);
+    }
+
+    // reset glyph arena to reclaim bitmap memory without destroying it
+    if (ctx->glyph_arena) {
+        arena_reset(ctx->glyph_arena);
+    }
+
+    log_info("font_context_reset_glyph_caches: cleared loaded/bitmap caches and glyph arena");
+}
+
 bool font_context_scan(FontContext* ctx) {
     if (!ctx || !ctx->database) return false;
     if (ctx->database->scanned) return true;

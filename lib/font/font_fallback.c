@@ -198,6 +198,50 @@ static struct hashmap* ensure_codepoint_cache(FontContext* ctx) {
     return ctx->codepoint_fallback_cache;
 }
 
+// small path-based cache of recently-resolved platform fallback handles,
+// keyed by (file_path, face_index, size_px). Avoids expensive
+// font_load_face_internal for each codepoint when most map to the same fonts.
+#define PLATFORM_FB_CACHE_SIZE 32
+typedef struct {
+    const char* path;       // borrowed from handle->file_data_path
+    int         face_index;
+    float       size_px;
+    FontHandle* handle;
+} PlatformFbEntry;
+
+static PlatformFbEntry s_platform_fb[PLATFORM_FB_CACHE_SIZE];
+static int             s_platform_fb_count = 0;
+
+static FontHandle* platform_fb_lookup(const char* path, int face_index,
+                                       float size_px, uint32_t codepoint) {
+    for (int i = 0; i < s_platform_fb_count; i++) {
+        if (s_platform_fb[i].handle &&
+            s_platform_fb[i].face_index == face_index &&
+            s_platform_fb[i].size_px == size_px &&
+            s_platform_fb[i].path &&
+            strcmp(s_platform_fb[i].path, path) == 0 &&
+            font_has_codepoint(s_platform_fb[i].handle, codepoint)) {
+            return s_platform_fb[i].handle;
+        }
+    }
+    return NULL;
+}
+
+static void platform_fb_insert(FontHandle* handle, int face_index, float size_px) {
+    if (!handle || !handle->file_data_path) return;
+    // check for duplicate
+    for (int i = 0; i < s_platform_fb_count; i++) {
+        if (s_platform_fb[i].handle == handle) return;
+    }
+    if (s_platform_fb_count < PLATFORM_FB_CACHE_SIZE) {
+        s_platform_fb[s_platform_fb_count].path = handle->file_data_path;
+        s_platform_fb[s_platform_fb_count].face_index = face_index;
+        s_platform_fb[s_platform_fb_count].size_px = size_px;
+        s_platform_fb[s_platform_fb_count].handle = handle;
+        s_platform_fb_count++;
+    }
+}
+
 FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                           uint32_t codepoint) {
     if (!ctx || !style) return NULL;
@@ -255,10 +299,25 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     }
 
     // platform-specific codepoint lookup (macOS: CoreText CTFontCreateForString)
+    // Check the platform fallback handle cache first — most codepoints from
+    // the same Unicode block resolve to the same font file.
     {
         int face_index = 0;
         char* font_path = font_platform_find_codepoint_font(codepoint, &face_index);
         if (font_path) {
+            // fast path: reuse an existing handle for this font file
+            FontHandle* reused = platform_fb_lookup(font_path, face_index, style->size_px, codepoint);
+            if (reused) {
+                CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = reused};
+                font_handle_retain(reused);
+                hashmap_set(cache, &entry);
+                font_handle_retain(reused);
+                log_debug("font_fallback: codepoint U+%04X → reused cached handle (face %d)",
+                          codepoint, face_index);
+                mem_free(font_path);
+                return reused;
+            }
+
             FontHandle* handle = font_load_face_internal(
                 ctx, font_path, face_index,
                 style->size_px, physical_size,
@@ -268,6 +327,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
                 font_handle_retain(handle);
                 hashmap_set(cache, &entry);
+                platform_fb_insert(handle, face_index, style->size_px);
                 log_debug("font_fallback: codepoint U+%04X → platform font (face %d)", codepoint, face_index);
                 mem_free(font_path);
                 return handle;
@@ -289,6 +349,7 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                         CodepointFallbackEntry entry = {.codepoint = codepoint, .handle = handle};
                         font_handle_retain(handle);
                         hashmap_set(cache, &entry);
+                        platform_fb_insert(handle, (int)fi, style->size_px);
                         log_debug("font_fallback: codepoint U+%04X → platform font (face %ld of %ld)",
                                   codepoint, fi, num_faces);
                         mem_free(font_path);
