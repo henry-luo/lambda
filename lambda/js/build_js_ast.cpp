@@ -580,9 +580,21 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     // Function calls return ANY type by default
     call->base.type = &TYPE_ANY;
 
-    // Detect optional chaining (obj?.method())
+    // Detect optional chaining (obj?.method() or obj?.())
     TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
     call->optional = !ts_node_is_null(opt_chain);
+    // Fallback: scan children for '?.' token (tree-sitter may not assign field name)
+    if (!call->optional) {
+        uint32_t cc = ts_node_child_count(call_node);
+        for (uint32_t ci = 0; ci < cc; ci++) {
+            TSNode ch = ts_node_child(call_node, ci);
+            const char* ch_type = ts_node_type(ch);
+            if (strcmp(ch_type, "?.") == 0 || strcmp(ch_type, "optional_chain") == 0) {
+                call->optional = true;
+                break;
+            }
+        }
+    }
 
     return (JsAstNode*)call;
 }

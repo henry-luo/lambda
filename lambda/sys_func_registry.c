@@ -764,6 +764,13 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 // v24: strict mode flag setter (js_runtime.cpp)
 extern void js_set_strict_mode(int64_t strict);
 
+// Object.groupBy / Map.groupBy (ES2024)
+extern Item js_object_group_by(Item items, Item callback);
+extern Item js_map_group_by(Item items, Item callback);
+
+// Function formal length (ES spec .length)
+extern void js_set_formal_length(Item fn_item, int length);
+
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
 extern Item js_reflect_set(Item obj, Item key, Item value);
@@ -1299,6 +1306,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
+    {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
@@ -1319,6 +1327,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_entries", FPTR(js_object_entries)},
     {"js_object_from_entries", FPTR(js_object_from_entries)},
     {"js_object_is", FPTR(js_object_is)},
+    {"js_object_group_by", FPTR(js_object_group_by)},
+    {"js_map_group_by", FPTR(js_map_group_by)},
     {"js_object_assign", FPTR(js_object_assign)},
     {"js_object_spread_into", FPTR(js_object_spread_into)},
     {"js_has_own_property", FPTR(js_has_own_property)},
