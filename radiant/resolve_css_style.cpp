@@ -2449,7 +2449,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         }
     }
 
-    // Set up FreeType font face if a font-family was specified for this element
+    // Set up font face if a font-family was specified for this element
     // This ensures ex/ch units use the correct font metrics
     if (font_processed > 0) {
         ViewSpan* span = (ViewSpan*)lycon->view;

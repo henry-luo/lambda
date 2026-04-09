@@ -3720,7 +3720,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    float font_height = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle)->hhea_line_height : 0;
+    const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+    float font_height = fm ? fm->hhea_line_height : 0;
     log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, font_height,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 }
@@ -3839,87 +3840,18 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     block->x = pa_line->left;  block->y = pa_block->advance_y;
 
     // CSS 2.2 9.5.1: Float positioning relative to preceding content
-    // When a float appears after inline content, CSS rules determine its Y position:
-    // - If there's inline content AFTER the float (float is mid-line), position at current line top
-    // - If float is the last content (or followed only by block elements), position below current line
+    // When a float appears after inline content on the current line, it must be
+    // positioned below the current line. The preceding inline content has already
+    // been committed to the current line and cannot reflow around the float.
+    // Placing the float at the current line's Y would cause overlap.
     bool is_float = block->position && (block->position->float_prop == CSS_VALUE_LEFT || block->position->float_prop == CSS_VALUE_RIGHT);
 
     if (is_float && !pa_line->is_line_start) {
-        // Float appears after inline content
-        // Check if there's more inline content after this float in the parent
-        // ViewBlock extends DomElement which extends DomNode, so block can be used as DomNode*
-        DomNode* float_node = (DomNode*)block;
-        bool has_inline_after = false;
-        if (float_node) {
-            for (DomNode* sib = float_node->next_sibling; sib; sib = sib->next_sibling) {
-                if (sib->is_text()) {
-                    // Check if it's non-whitespace text
-                    const char* text = (const char*)sib->text_data();
-                    if (text) {
-                        for (const char* p = text; *p; p++) {
-                            unsigned char c = (unsigned char)*p;
-                            if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f') {
-                                has_inline_after = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (has_inline_after) break;
-                } else if (sib->is_element()) {
-                    DomElement* elem = sib->as_element();
-                    ViewBlock* view = (ViewBlock*)elem;
-
-                    // First check if this sibling is also a float - floats don't count as inline
-                    bool sib_is_float = view->position &&
-                        (view->position->float_prop == CSS_VALUE_LEFT ||
-                         view->position->float_prop == CSS_VALUE_RIGHT);
-
-                    if (sib_is_float) {
-                        // Skip other floats - they don't count as inline content after
-                        continue;
-                    }
-
-                    // Check if it's an inline element (not positioned)
-                    bool is_inline_elem = (view->display.outer == CSS_VALUE_INLINE ||
-                                          view->display.outer == CSS_VALUE_INLINE_BLOCK);
-
-                    // If display is unresolved (0), check the tag name for common inline elements
-                    if (view->display.outer == 0) {
-                        const char* tag = elem->node_name();
-                        if (tag && (strcmp(tag, "span") == 0 || strcmp(tag, "a") == 0 ||
-                                   strcmp(tag, "em") == 0 || strcmp(tag, "strong") == 0 ||
-                                   strcmp(tag, "b") == 0 || strcmp(tag, "i") == 0)) {
-                            is_inline_elem = true;
-                        }
-                    }
-
-                    if (is_inline_elem) {
-                        has_inline_after = true;
-                        break;
-                    } else if (view->display.outer == CSS_VALUE_BLOCK ||
-                               view->display.outer == CSS_VALUE_LIST_ITEM ||
-                               view->display.outer == 0) {
-                        // Block element (or unresolved block-like element like div) follows
-                        // Float should be below current line
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!has_inline_after) {
-            // Float is the last inline content or followed by block - position below current line
-            // Lambda processes text before the float sequentially (no mid-line reflow),
-            // so the float must go below the current line to avoid overlapping placed text.
-            float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
-            block->y = pa_block->advance_y + line_height;
-            log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
-                      block->y, pa_block->advance_y, line_height);
-        } else {
-            // Float has inline content after it - position at current line top
-            log_debug("%s Float positioned at current line top: y=%.1f (has inline content after)", block->source_loc(),
-                      block->y);
-        }
+        // Float appears after inline content - position below current line
+        float line_height = pa_block->line_height > 0 ? pa_block->line_height : 18.0f;
+        block->y = pa_block->advance_y + line_height;
+        log_debug("%s Float positioned below current line: y=%.1f (advance_y=%.1f + line_height=%.1f)", block->source_loc(),
+                  block->y, pa_block->advance_y, line_height);
     } else if (is_float) {
         log_debug("%s Float positioned at line start: y=%.1f", block->source_loc(), block->y);
     }

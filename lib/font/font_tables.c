@@ -987,3 +987,54 @@ bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
     if (out_y_max) *out_y_max = rd16s(g + 8);
     return true;
 }
+
+// ============================================================================
+// TTC (TrueType Collection) helpers
+// ============================================================================
+
+int font_tables_get_face_count(const uint8_t* data, size_t len) {
+    if (!data || len < 12) return 1;
+    uint32_t tag = rd32(data);
+    // TTC header: 'ttcf' tag, major_version(2), minor_version(2), numFonts(4)
+    if (tag == FONT_TAG('t','t','c','f')) {
+        uint32_t num_fonts = rd32(data + 8);
+        return (num_fonts > 0 && num_fonts < 10000) ? (int)num_fonts : 1;
+    }
+    return 1;
+}
+
+FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
+                                   int face_index, void* pool) {
+    if (!data || data_len < 12) return NULL;
+
+    uint32_t tag = rd32(data);
+    if (tag == FONT_TAG('t','t','c','f')) {
+        // TTC: header is 'ttcf' + version(4) + numFonts(4) + offsets[numFonts]
+        uint32_t num_fonts = rd32(data + 8);
+        if (face_index < 0 || (uint32_t)face_index >= num_fonts) {
+            log_error("font_tables_open_face: face_index %d out of range (num_fonts=%u)",
+                      face_index, num_fonts);
+            return NULL;
+        }
+        // offset array starts at byte 12, each offset is 4 bytes
+        size_t offset_pos = 12 + (size_t)face_index * 4;
+        if (offset_pos + 4 > data_len) return NULL;
+        uint32_t face_offset = rd32(data + offset_pos);
+        if (face_offset >= data_len) return NULL;
+        // open the font at the given offset within the TTC data.
+        // The face header (scaler type, table directory) is at data + face_offset,
+        // but table offsets in the directory are ABSOLUTE within the TTC file.
+        // So we parse the directory from the face offset, then reset data/data_len
+        // to the full TTC file so table lookups use absolute offsets correctly.
+        FontTables* tables = font_tables_open(data + face_offset,
+                                               data_len - face_offset, pool);
+        if (tables) {
+            tables->data = data;
+            tables->data_len = data_len;
+        }
+        return tables;
+    }
+
+    // non-TTC: ignore face_index, open directly
+    return font_tables_open(data, data_len, pool);
+}

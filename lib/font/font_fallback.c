@@ -275,7 +275,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             // TTC fallback: face_index=0 may not have the codepoint even though
             // the collection file does (e.g., Songti.ttc face 0 is "Black" variant
             // which lacks some CJK glyphs). Try other face indices in the collection.
-            long num_faces = (handle && handle->ft_face) ? handle->ft_face->num_faces : 0;
+            long num_faces = (handle && handle->memory_buffer)
+                ? font_tables_get_face_count(handle->memory_buffer, handle->memory_buffer_size)
+                : 0;
             if (handle) font_handle_release(handle);
             if (num_faces > 1) {
                 for (long fi = 1; fi < num_faces; fi++) {

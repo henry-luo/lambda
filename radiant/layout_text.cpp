@@ -191,7 +191,8 @@ static inline bool is_cjk_character(uint32_t codepoint) {
            (codepoint >= 0x2B820 && codepoint <= 0x2CEAF) || // CJK Extension E
            (codepoint >= 0x3040 && codepoint <= 0x309F) ||  // Hiragana
            (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
-           (codepoint >= 0xAC00 && codepoint <= 0xD7AF);    // Hangul Syllables
+           (codepoint >= 0xAC00 && codepoint <= 0xD7AF) ||  // Hangul Syllables
+           (codepoint >= 0xFF65 && codepoint <= 0xFF9F);    // Halfwidth Katakana
 }
 
 // ============================================================================
@@ -281,8 +282,31 @@ static inline bool is_line_break_cl(uint32_t cp) {
 }
 
 /**
+ * UAX #14: CJ (Conditional Japanese Starter) class characters.
+ * Resolved to NS in strict/normal mode, to ID in loose mode.
+ * CSS Text 3 §6.2: line-break: loose treats these as breakable (ID class).
+ */
+static inline bool is_line_break_cj(uint32_t cp) {
+    // Small hiragana: ぁぃぅぇぉっゃゅょゎゕゖ
+    if (cp == 0x3041 || cp == 0x3043 || cp == 0x3045 || cp == 0x3047 || cp == 0x3049) return true;
+    if (cp == 0x3063 || cp == 0x3083 || cp == 0x3085 || cp == 0x3087 || cp == 0x308E) return true;
+    if (cp == 0x3095 || cp == 0x3096) return true;
+    // Small katakana: ァィゥェォッャュョヮヵヶ
+    if (cp == 0x30A1 || cp == 0x30A3 || cp == 0x30A5 || cp == 0x30A7 || cp == 0x30A9) return true;
+    if (cp == 0x30C3 || cp == 0x30E3 || cp == 0x30E5 || cp == 0x30E7 || cp == 0x30EE) return true;
+    if (cp == 0x30F5 || cp == 0x30F6) return true;
+    // Prolonged sound mark: ー
+    if (cp == 0x30FC) return true;
+    // Halfwidth small katakana: ｧｨｩｪｫｬｭｮｯｰ
+    if (cp >= 0xFF67 && cp <= 0xFF70) return true;
+    return false;
+}
+
+/**
  * Check if a codepoint has NS (Non-Starter) line-break class.
  * CSS Text 3 §5.2: No break before NS characters when preceded by CJK.
+ * Note: CJ class characters (small kana, prolonged sound mark) are also
+ * non-starters in strict/normal mode — use is_line_break_cj() separately.
  */
 static inline bool is_line_break_ns(uint32_t cp) {
     // Thai
@@ -302,6 +326,14 @@ static inline bool is_line_break_ns(uint32_t cp) {
     // Halfwidth forms
     if (cp == 0xFF65 || cp == 0xFF9E || cp == 0xFF9F) return true;
     return false;
+}
+
+/**
+ * Check if a codepoint is a fullwidth exclamation/question mark.
+ * CSS Text 3 §6.2: line-break: loose allows breaks before these in CJK context.
+ */
+static inline bool is_fullwidth_ex(uint32_t cp) {
+    return cp == 0xFF01 || cp == 0xFF1F;  // ！ ？
 }
 
 /**
@@ -798,6 +830,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.effective_right = lycon->line.right;
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
+    lycon->line.has_cjk_text = false;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
@@ -1095,6 +1128,19 @@ void line_break(LayoutContext* lycon) {
         used_line_height = css_line_height;
     }
 
+    // Chrome blends system CJK font metrics for lines containing CJK characters.
+    // When the primary font's normal line-height is smaller than the CJK system
+    // font's line-height (e.g., Ahem@16px→16 vs PingFang SC@16px→22), Chrome uses
+    // the larger value to prevent CJK glyphs from overlapping between lines.
+    if (lycon->line.has_cjk_text && lycon->block.line_height_is_normal) {
+        float cjk_lh = get_cjk_system_line_height(lycon->line.parent_font_size);
+        if (cjk_lh > used_line_height) {
+            log_debug("CJK line-height blending: %.1f → %.1f (CJK system font)",
+                      used_line_height, cjk_lh);
+            used_line_height = cjk_lh;
+        }
+    }
+
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // Inline elements whose content all collapsed (e.g., <em> </em>) get 0×0 from
     // compute_span_bounding_box. However, when the line has visible content, the
@@ -1267,7 +1313,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
             float sc_scale = is_small_caps_lower ? 0.7f : 1.0f;
             text_width += unicode_space_em * lycon->font.current_font_size * sc_scale;
         } else {
-            // get glyph advance via font module (returns CSS pixels, no FT_Face needed)
+            // get glyph advance via font module (returns CSS pixels)
             GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
             if (ginfo.id == 0) {
                 // glyph not in primary font — estimate width as 1em for lookahead
@@ -1877,6 +1923,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                                                   glyph->font_normal_line_height);
                     }
                 }
+                // Track CJK characters for line-height blending with system CJK font metrics
+                if (is_cjk_character(codepoint)) {
+                    lycon->line.has_cjk_text = true;
+                }
             }
             // CSS 2.1 §16.4: letter-spacing is added after every character
             // Browsers include trailing letter-spacing in text node width
@@ -2217,9 +2267,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 if (next_cp == 0) next_cp = peek_next_inline_codepoint(text_node);
                 if (next_cp == 0x200D) {
                     allow_break = false;  // ZWJ follows: suppress break
-                } else if (next_cp > 0 && (is_line_break_cl(next_cp) || is_line_break_ns(next_cp) ||
-                                    is_line_break_ex_is_sy(next_cp))) {
-                    allow_break = false;
+                } else if (next_cp > 0) {
+                    bool is_loose = (line_break_val == CSS_VALUE_LOOSE);
+                    // CL class always prevents break
+                    if (is_line_break_cl(next_cp)) {
+                        allow_break = false;
+                    }
+                    // NS class prevents break; CJ chars also prevent unless loose mode
+                    else if (is_line_break_ns(next_cp) || (!is_loose && is_line_break_cj(next_cp))) {
+                        allow_break = false;
+                    }
+                    // EX/IS/SY prevents break, but loose mode allows break before fullwidth ！？
+                    else if (is_line_break_ex_is_sy(next_cp) && !(is_loose && is_fullwidth_ex(next_cp))) {
+                        allow_break = false;
+                    }
                 }
             }
             zwj_preceded = false;  // consumed

@@ -653,7 +653,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         continue;
                     }
 
-                    float s_ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    float s_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
                     Color saved_color = rdcon->color;
                     TextShadow* ts = text_shadow;
                     while (ts) {
@@ -757,8 +757,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     x += scaled_space_width;
                 }
                 else {
-                    // draw the glyph to the image buffer — use hhea ascender (CSS px) * scale for physical px
-                    float ascend = font_get_metrics(rdcon->font.font_handle)->hhea_ascender * rdcon->scale;
+                    // draw the glyph to the image buffer — use rendering ascender for glyph bitmap placement.
+                    // font_get_rendering_ascender() returns the raw platform ascent (e.g. CoreText ascent on
+                    // macOS) WITHOUT half-leading.  The glyph bitmap's bearing_y is measured from this
+                    // platform baseline, so we must use the same value here.  Layout uses
+                    // fprop->ascender (= init_ascender, which INCLUDES half-leading) for CSS vertical-
+                    // align math, but text_rect.y already incorporates lead_y so the absolute baseline
+                    // y = text_rect.y + rendering_ascender == init_ascender + lead_y  is correct.
+                    float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+
 
                     // Debug: log per-character advance for first 15 chars when selection active
                     if (has_selection && char_index <= 15) {
@@ -776,8 +783,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
-                    if (bitmap_debug_count < 50 && rdcon->font.font_handle &&
-                        strcmp(font_handle_get_family_name(rdcon->font.font_handle), "Monaco") == 0) {
+                    const char* _dbg_fname = rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : NULL;
+                    if (bitmap_debug_count < 50 && _dbg_fname &&
+                        strcmp(_dbg_fname, "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
                                   codepoint, glyph->bitmap.width, glyph->bitmap.height,
                                   glyph->bitmap.pitch, glyph->bitmap.bearing_x, glyph->bitmap.bearing_y,
@@ -1252,7 +1260,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         // dom_wrapper.type = LEXBOR_NODE;
         // dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
         // text.node = &dom_wrapper;
-        // float font_size = ((FT_Face)rdcon->font.ft_face)->size->metrics.y_ppem / 64.0;
+        // float font_size = rdcon->font.current_font_size;
         // text.x = list_item->x - 20 * ratio;
         // text.y = list_item->y;  // align at top the list item
         // text.width = text_rect.length * font_size;  text.height = font_size;

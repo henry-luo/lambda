@@ -18,14 +18,17 @@
 (define-language Lambda
 
   ;; ── Primitive type tags ──
-  ;; Matches TypeId enum in lambda.h (values 1–24)
-  (base-type ::= null-type bool-type int-type int64-type float-type
+  ;; Matches TypeId enum in lambda.h (values 0–27)
+  (base-type ::= null-type bool-type
+                 num-sized-type        ; inline sized numerics (i8..u32, f16, f32)
+                 int-type int64-type uint64-type float-type
                  decimal-type number-type
                  string-type symbol-type binary-type
                  datetime-type path-type
-                 list-type array-type map-type element-type
+                 list-type array-num-type array-type
+                 map-type vmap-type element-type object-type
                  range-type func-type type-type
-                 error-type any-type)
+                 error-type any-type undefined-type)
 
   ;; ── Composite type expressions ──
   (τ ::= base-type
@@ -49,10 +52,14 @@
          (array-val v ...)     ; array value [v1, v2, ...]
          (list-val v ...)      ; list/tuple value (v1, v2, ...)
          (map-val (x v) ...)   ; map value {k1: v1, k2: v2, ...}
+         (object-val x (x v) ...) ; object value: type-name + fields
          (range-val v v)       ; range start..end (inclusive)
          (closure ρ (p ...) e) ; closure: env, params, body
          (error-val string integer) ; error: message, code
          (type-val τ)          ; first-class type value
+         ;; procedural closure (carries store reference)
+         ;; Note: pn-closure is a Racket-level value, not matched by Redex grammar,
+         ;; because it carries a mutable hash (σ). Handled by lambda-proc.rkt.
          )
 
   ;; ── Parameters ──
@@ -78,6 +85,7 @@
 
          ;; functions
          (lam (p ...) e)                 ; anonymous function (λ)
+         (def-fn x (p ...) e e)          ; named fn definition: fn name(params) body rest
          (app e e ...)                   ; function application
 
          ;; arithmetic & logic (binary)
@@ -115,7 +123,7 @@
          (is-type e τ)    ; e is T → bool
          (is-not-type e τ)  ; e is not T → bool
          (in-coll e e)    ; e in collection → bool
-         (as-type e τ)    ; e as T (unsafe cast)
+         (as-type e τ)    ; e as T (cast, error if incompatible)
 
          ;; collection construction
          (array e ...)    ; [e1, e2, ...]
@@ -168,6 +176,23 @@
          (unique-expr e)
          (take-expr e e)
          (drop-expr e e)
+
+         ;; ── Procedural forms (evaluated by lambda-proc.rkt) ──
+         ;; These extend the functional core with mutable state and control flow.
+         (var x e)                    ; mutable variable declaration
+         (assign x e)                 ; x = expr (variable assignment)
+         (assign-index x e e)         ; arr[i] = expr (array element assignment)
+         (assign-member x x e)        ; obj.field = expr (map field assignment)
+         (seq e ...)                  ; statement sequence (block)
+         (while e e)                  ; while (cond) body
+         (break)                      ; break (exits innermost while)
+         (continue)                   ; continue (next iteration)
+         (return e)                   ; return expr (early exit)
+         (def-pn x (p ...) e)        ; pn name(params) { body }
+         (app-proc e e ...)           ; procedural function call
+         (print e)                    ; print(expr) → side effect
+         (if-proc e e e)              ; if-else (procedural, with side effects)
+         (if-proc e e)                ; if without else (procedural)
          )
 
   ;; ── Match clauses ──
@@ -235,8 +260,10 @@
 ;;   Truthy: true, ALL numbers (including 0), non-empty strings/symbols,
 ;;           all collections, all functions, types, datetimes
 ;;
-;; NOTE: Implementation (it2b in lambda-data.cpp) currently treats 0 as falsy.
-;;       This is a known discrepancy. The formal model follows the spec.
+;; Implementation (is_truthy in lambda-eval.cpp) matches this:
+;;   switch on _type_id: NULL→false, ERROR→false, BOOL→check val,
+;;   default→check item nonzero. i2it(0) has type tag bits set, so
+;;   0 IS truthy. The formal model follows both spec and implementation.
 
 (define-metafunction Lambda
   truthy? : v -> boolean
@@ -268,6 +295,7 @@
   [(type-of-val (array-val v ...))           array-type]
   [(type-of-val (list-val v ...))            list-type]
   [(type-of-val (map-val (x v) ...))         map-type]
+  [(type-of-val (object-val x_name (x v) ...)) object-type]
   [(type-of-val (range-val v_1 v_2))         range-type]
   [(type-of-val (closure ρ (p ...) e))       func-type]
   [(type-of-val (error-val string integer))  error-type]
@@ -311,6 +339,8 @@
   [(is-compatible? (array-val v ...) array-type) #t]
   [(is-compatible? (list-val v ...) list-type) #t]
   [(is-compatible? (map-val (x v) ...) map-type) #t]
+  [(is-compatible? (object-val x_name (x v) ...) object-type) #t]
+  [(is-compatible? (object-val x_name (x v) ...) map-type) #t] ; objects are map-compatible
   [(is-compatible? (range-val v_1 v_2) range-type) #t]
 
   ;; functions

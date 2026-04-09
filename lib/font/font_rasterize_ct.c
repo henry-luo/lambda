@@ -154,8 +154,21 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
 
     // apply pixel_ratio for physical pixel rendering
     float render_scale = pixel_ratio;
-    int bmp_width  = (int)ceilf((float)bbox.size.width * render_scale) + 2;  // +2 AA bleed
-    int bmp_height = (int)ceilf((float)bbox.size.height * render_scale) + 2;
+
+    // Compute pixel-space bounding box using roundOut + outset(1,1), matching
+    // Skia/Chrome: skBounds.roundOut(&mx.bounds); mx.bounds.outset(1, 1);
+    // roundOut: floor for left/bottom, ceil for right/top → integer boundaries
+    // outset(1,1): extend each edge by 1 pixel for AA bleed margins
+    // This ensures the glyph baseline lands at an integer CG pixel position,
+    // preventing sub-pixel AA bleed that causes round-bottom glyphs (e, c, o)
+    // to appear 1px lower than flat-bottom glyphs.
+    int px_left   = (int)floorf((float)bbox.origin.x * render_scale) - 1;
+    int px_bottom = (int)floorf((float)bbox.origin.y * render_scale) - 1;
+    int px_right  = (int)ceilf((float)(bbox.origin.x + bbox.size.width) * render_scale) + 1;
+    int px_top    = (int)ceilf((float)(bbox.origin.y + bbox.size.height) * render_scale) + 1;
+
+    int bmp_width  = px_right - px_left;
+    int bmp_height = px_top - px_bottom;
 
     if (bmp_width <= 0 || bmp_height <= 0) {
         // zero-width glyph (e.g. space) — return empty bitmap
@@ -205,9 +218,18 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
         return NULL;
     }
 
-    // enable anti-aliasing
+    // enable anti-aliasing and font smoothing for stroke thickening.
+    // CoreGraphics font smoothing adds stroke thickening that matches browser
+    // rendering weight.  However, CG also applies a gamma ~2.0 encoding to
+    // coverage values in the grayscale context, making raw output appear
+    // excessively bold.  We undo this gamma after drawing (see below) using
+    // the same approach as Skia/Chrome: new_pixel = (pixel² + 128) / 255.
+    // This preserves the thickened strokes while linearizing the tonal curve,
+    // producing glyph weight within ~2% of Chrome/Safari.
     CGContextSetAllowsAntialiasing(cg_ctx, true);
     CGContextSetShouldAntialias(cg_ctx, true);
+    CGContextSetAllowsFontSmoothing(cg_ctx, true);
+    CGContextSetShouldSmoothFonts(cg_ctx, true);
 
     if (!is_color) {
         // for grayscale, set white foreground on black background
@@ -217,14 +239,31 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     // scale and position: CoreGraphics origin is bottom-left
     CGContextScaleCTM(cg_ctx, (CGFloat)render_scale, (CGFloat)render_scale);
 
-    // position glyph so that its bounding box starts at (1, 1) with a pixel of margin
+    // position glyph origin at integer pixel coordinates (-px_left, -px_bottom)
+    // to align the baseline to the pixel grid (matches Skia's roundOut approach)
     CGPoint position;
-    position.x = -(CGFloat)bbox.origin.x + 1.0 / render_scale;
-    position.y = -(CGFloat)bbox.origin.y + 1.0 / render_scale;
+    position.x = (CGFloat)(-px_left) / render_scale;
+    position.y = (CGFloat)(-px_bottom) / render_scale;
 
     CTFontDrawGlyphs(font, &glyph_id, &position, 1, cg_ctx);
 
     CGContextRelease(cg_ctx);
+
+    // Linearize CG's gamma-encoded coverage (grayscale glyphs only).
+    // CoreGraphics applies gamma ~2.0 to coverage values in offscreen contexts.
+    // Undo with: new = (old * old + 128) / 255  (same formula as Skia's
+    // gLinearCoverageFromCGLCDValue in SkScalerContext_mac_ct.cpp).
+    // This preserves stroke thickening from font smoothing while removing the
+    // gamma-induced weight excess — matching Chrome/Skia's rendering pipeline.
+    if (!is_color) {
+        for (int row = 0; row < bmp_height; row++) {
+            uint8_t* p = buffer + row * pitch;
+            for (int col = 0; col < bmp_width; col++) {
+                uint8_t v = p[col];
+                p[col] = (uint8_t)((v * v + 128) / 255);
+            }
+        }
+    }
 
     // fill output bitmap
     GlyphBitmap* bmp = (GlyphBitmap*)arena_calloc(arena, sizeof(GlyphBitmap));
@@ -234,8 +273,8 @@ GlyphBitmap* font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,
     bmp->width     = (uint32_t)bmp_width;
     bmp->height    = (uint32_t)bmp_height;
     bmp->pitch     = pitch;
-    bmp->bearing_x = (int)floorf((float)bbox.origin.x * render_scale) - 1;
-    bmp->bearing_y = (int)ceilf((float)(bbox.origin.y + bbox.size.height) * render_scale) + 1;
+    bmp->bearing_x = px_left;   // = floor(origin.x * s) - 1
+    bmp->bearing_y = px_top;    // = ceil((origin.y + height) * s) + 1
     bmp->bitmap_scale = bitmap_scale;
     bmp->mode      = mode;
 

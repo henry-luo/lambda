@@ -89,6 +89,20 @@
     [`(lam (,params ...) ,body)
      `(closure ,ρ ,params ,body)]
 
+    ;; ── Named function definition ──
+    ;; (def-fn name (params ...) body rest-expr)
+    ;; Binds name as recursive closure in environment, then evaluates rest-expr.
+    ;; Uses a mutable box to tie the recursive knot (letrec-style).
+    [`(def-fn ,name (,params ...) ,body ,rest)
+     (define self-box (box #f))
+     ;; Env where name → box (env-ref auto-unboxes)
+     (define ρ* (env-set ρ name self-box))
+     ;; Create closure capturing ρ* (which has the box for self-reference)
+     (define clos `(closure ,ρ* ,params ,body))
+     ;; Tie the knot: box now holds the closure
+     (set-box! self-box clos)
+     (eval-lambda ρ* rest)]
+
     ;; ── Function application ──
     [`(app ,e-fn ,e-args ...)
      (define fn-v (eval-lambda ρ e-fn))
@@ -372,6 +386,47 @@
      (define v (eval-lambda ρ e1))
      (truthy-val? v)]
 
+    ;; ── to-symbol ──
+    [`(to-symbol ,e1)
+     (define v (eval-lambda ρ e1))
+     (cond
+       [(is-error? v) v]
+       [(and (list? v) (eq? (first v) 'sym)) v]  ; already a symbol
+       [(string? v) `(sym ,v)]
+       [else `(sym ,(value->string v))])]
+
+    ;; ── as-type (type cast) ──
+    ;; Runtime cast: if value is compatible, return as-is; otherwise error
+    [`(as-type ,e1 ,τ)
+     (define v (eval-lambda ρ e1))
+     (cond
+       [(is-error? v) v]
+       [(type-check-is v τ) v]
+       [else `(error-val ,(format "cannot cast to ~a" τ) 300)])]
+
+    ;; ── slice ──
+    ;; e[i to j] — extract sub-array or sub-string (inclusive start, exclusive end)
+    [`(slice ,e-obj ,e-start ,e-end)
+     (define obj (eval-lambda ρ e-obj))
+     (define s (eval-lambda ρ e-start))
+     (define e (eval-lambda ρ e-end))
+     (cond
+       [(is-error? obj) obj]
+       [(is-error? s) s]
+       [(is-error? e) e]
+       [(and (array-val? obj) (exact-integer? s) (exact-integer? e))
+        (define items (array-items obj))
+        (define len (length items))
+        (define i (if (< s 0) (max 0 (+ len s)) (min s len)))
+        (define j (if (< e 0) (max 0 (+ len e)) (min e len)))
+        `(array-val ,@(if (<= i j) (take (drop items i) (- j i)) '()))]
+       [(and (string? obj) (exact-integer? s) (exact-integer? e))
+        (define len (string-length obj))
+        (define i (if (< s 0) (max 0 (+ len s)) (min s len)))
+        (define j (if (< e 0) (max 0 (+ len e)) (min e len)))
+        (if (<= i j) (substring obj i j) "")]
+       [else 'null])]
+
     ;; ── Collection builtins ──
     [`(len-expr ,e1)
      (define v (eval-lambda ρ e1))
@@ -502,7 +557,10 @@
 
 (define (env-ref ρ x)
   (cond
-    [(assq x ρ) => cdr]
+    [(assq x ρ) => (λ (pair)
+                      (define v (cdr pair))
+                      ;; Support recursive bindings via mutable box
+                      (if (box? v) (unbox v) v))]
     [else 'null]))
 
 (define (env-set ρ x v)
@@ -1086,4 +1144,5 @@
          is-error? closure? numeric-val?
          array-val? list-val? map-val? range-val?
          array-items list-items map-pairs
-         collection->list apply-closure)
+         collection->list apply-closure
+         bind-params env-ref env-set)

@@ -115,7 +115,7 @@ image_cache_cleanup();             // release decoded image cache
 | RSS at 1000 files | ~970 MB | ~612 MB | — |
 | main_arena at 100 files | — | ~99 MB | **444 KB** |
 | main_arena at 2500 files | — | ~370 MB | **444 KB** (stable) |
-| RSS at 100 files | — | — | ~806 MB |
+| RSS at 100 files | — | — | ~870 MB |
 | Non-font RSS growth | — | ~661 KB/file (peak) | ~40 KB/file (steady-state, measured with current RSS) |
 | Max files before crash | ~850 (rpmalloc) | 2500+ | 2500+ (pre-existing stack overflow on specific files) |
 | Layout correctness | — | 50/50 verified | All unit tests pass |
@@ -172,6 +172,35 @@ Changed font file data from arena allocation to `malloc` with reference counting
 | `lib/font/font_decompress.cpp` | `arena=NULL` → malloc mode for woff1/woff2 decompression |
 | `lib/font/font_context.c` | ref_count logic in `font_handle_release`, handle release in `reset_document_fonts`, split arena stats |
 | `radiant/cmd_layout.cpp` | Current-RSS via `mach_task_basic_info`, split arena MEMDIAG |
+
+## RSS Breakdown (Phase 2, Debug Build)
+
+MEMDIAG trajectory over 150 batch files (from `memdiag_final.txt`):
+
+| File | RSS | main_arena | faces | loaded | Notes |
+|------|-----|------------|-------|--------|-------|
+| 1 | 52 MB | 60 KB | 11 | 290 | Initial font loading |
+| 2 | 102 MB | 60 KB | 16 | 402 | |
+| 3 | 163 MB | 124 KB | 25 | 544 | |
+| **4** | **596 MB** | 124 KB | 32 | 740 | **+433 MB** — CJK / Apple Color Emoji loaded |
+| 5 | 606 MB | 124 KB | 36 | 847 | |
+| 8 | 763 MB | 124 KB | 55 | 1168 | More system fonts loaded |
+| 10 | 780 MB | 188 KB | **64** | 1496 | Face cache full (max 64) |
+| 50 | 1015 MB | 444 KB | 64 | 1651 | Peak — JS compilation memory pressure |
+| 100 | 870 MB | 444 KB | 64 | 1714 | OS reclaimed some pages |
+| 150 | 896 MB | 444 KB | 64 | 1717 | Stable |
+
+**RSS composition at file 100 (~870 MB)**:
+- **~750–800 MB**: FreeType internal state in rpmalloc font pool — 64 cached `FT_Face` objects (CJK/emoji fonts dominate), each holding parsed font tables, glyph outlines, plus 2× `CTFontRef` on macOS, plus advance/kern caches. FreeType memory callbacks route through `pool_alloc`/`pool_free` → rpmalloc, which does not eagerly return pages to the OS.
+- **~50 MB**: lambda.exe binary + shared libraries + system frameworks
+- **~20 MB**: CoreText, JS/MIR compilation residuals
+- **444 KB**: Font file data arena (stable after Phase 2 fix)
+
+**Key observations**:
+- The massive +433 MB jump at file 4 is Apple Color Emoji — a single font face consuming hundreds of MB in FreeType.
+- RSS peaks at file 50 (~1015 MB) due to transient JS compilation allocations, then drops as OS reclaims pages.
+- After file 10 (face cache full), main_arena stabilizes at 444 KB — the Phase 2 malloc+refcount fix is working.
+- This is a stable working set, not a leak. The RSS is dominated by the 64-face LRU cache.
 
 ## Remaining Issues
 

@@ -68,8 +68,16 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
             GlyphInfo sp = font_get_glyph(handle, (uint32_t)' ');
             if (sp.advance_x > 0.0f) fprop->space_width = sp.advance_x;
         }
-            fprop->ascender    = m->hhea_ascender;
-            fprop->descender   = -(m->hhea_descender); // FontMetrics.hhea_descender is negative, FontProp expects positive
+            // Use normal line-height split (platform-based with half-leading) for
+            // ascender/descender.  This ensures font->ascender == init_ascender used
+            // by the layout engine's strut baseline, which is critical for correct
+            // vertical alignment: when the inline font matches the block font the
+            // vertical-align pass is skipped and the text baseline falls at
+            // text_rect.y + font->ascender, which must equal init_ascender + lead_y.
+            float _lh_asc, _lh_desc;
+            font_get_normal_lh_split(handle, &_lh_asc, &_lh_desc);
+            fprop->ascender    = _lh_asc;
+            fprop->descender   = _lh_desc;
             fprop->font_height = m->hhea_line_height;
             fprop->has_kerning = m->has_kerning;
         }
@@ -80,6 +88,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 }
 
 void fontface_cleanup(UiContext* uicon) {
-    // font faces are now managed by FontContext — no separate FT_Face cache to clean up
+    // font faces are now managed by FontContext — no separate cache to clean up
     (void)uicon;
 }

@@ -22,6 +22,7 @@
 #include "../arraylist.h"
 #include "../log.h"
 
+#ifndef __APPLE__
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
@@ -33,6 +34,7 @@
 #include FT_SIZES_H
 #include FT_MODULE_H
 #include FT_MULTIPLE_MASTERS_H
+#endif
 
 #include <time.h>
 #include <string.h>
@@ -66,7 +68,9 @@ FontFormat font_detect_format_ext(const char* path);
 // ============================================================================
 
 struct FontHandle {
+#ifndef __APPLE__
     FT_Face     ft_face;                // FreeType face object
+#endif
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
     int         ref_count;              // reference counting
     bool        borrowed_face;          // true if ft_face is NOT owned (don't FT_Done_Face on release)
@@ -237,8 +241,10 @@ struct FontContext {
     bool            owns_arena;         // true if we created the arena
 
     // FreeType
+#ifndef __APPLE__
     FT_Library      ft_library;
     struct FT_MemoryRec_   ft_memory;          // custom allocator routing to pool
+#endif
 
     // font database
     FontDatabase*   database;
@@ -367,6 +373,7 @@ void                scan_windows_registry_fonts(FontDatabase* db);
 int                 get_font_metrics_platform(const char* font_family, float font_size,
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);
+float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
 char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);
@@ -399,7 +406,9 @@ FontHandle*         font_load_face_internal(FontContext* ctx, const char* path,
 FontHandle*         font_load_memory_internal(FontContext* ctx, const uint8_t* data,
                                               size_t len, int face_index, float size_px,
                                               float physical_size, FontWeight weight, FontSlant slant);
+#ifndef __APPLE__
 void                font_select_best_fixed_size(FT_Face face, int target_ppem);
+#endif
 
 // font_decompress.c
 bool                font_decompress_woff1(Arena* arena, const uint8_t* data, size_t len,
@@ -438,6 +447,7 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
 // Internal utility macros
 // ============================================================================
 
+#ifndef __APPLE__
 // 26.6 fixed-point to float conversion (FreeType uses 26.6 format)
 #define FT_F26DOT6_TO_FLOAT(x) ((float)(x) / 64.0f)
 
@@ -446,6 +456,7 @@ const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* famil
 
 // 16.16 fixed-point to float (FreeType uses for some metrics)
 #define FT_F16DOT16_TO_FLOAT(x) ((float)(x) / 65536.0f)
+#endif
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

@@ -307,6 +307,41 @@
   (check-equal? (eval-lambda ε '(to-string #t)) "true")
   (check-equal? (eval-lambda ε '(to-string null)) "null"))
 
+(test-case "Type conversion: to-symbol"
+  (check-equal? (eval-lambda ε '(to-symbol "hello")) '(sym "hello"))
+  (check-equal? (eval-lambda ε '(to-symbol "foo_bar")) '(sym "foo_bar")))
+
+(test-case "Type cast: as-type"
+  ;; Compatible cast succeeds (int is number)
+  (check-equal? (eval-lambda ε '(as-type 42 number-type)) 42)
+  (check-equal? (eval-lambda ε '(as-type 42 int-type)) 42)
+  ;; Incompatible cast → error
+  (check-pred is-error? (eval-lambda ε '(as-type 42 string-type))))
+
+(test-case "Slice expression"
+  ;; Array slicing
+  (define arr-env (list (cons 'a '(array-val 10 20 30 40 50))))
+  (check-equal? (eval-lambda arr-env '(slice a 1 3))
+                '(array-val 20 30))
+  ;; Negative index
+  (check-equal? (eval-lambda arr-env '(slice a 0 -1))
+                '(array-val 10 20 30 40))
+  ;; String slicing
+  (check-equal? (eval-lambda ε '(slice "hello" 1 3)) "el"))
+
+(test-case "Named function definition (def-fn)"
+  ;; def-fn creates a named recursive binding
+  (check-equal?
+   (eval-lambda ε '(def-fn fact (n)
+                     (if (le n 1) 1 (mul n (app fact (sub n 1))))
+                     (app fact 5)))
+   120)
+  ;; Simple non-recursive
+  (check-equal?
+   (eval-lambda ε '(def-fn double (x) (mul x 2)
+                     (app double 7)))
+   14))
+
 (test-case "Vector arithmetic (element-wise)"
   ;; [1,2,3] + [4,5,6] → [5,7,9]
   (check-equal? (eval-lambda ε '(add (array 1 2 3) (array 4 5 6)))
@@ -519,6 +554,11 @@
   (check-equal? (lambda-type->c-type 'decimal-type)  'Decimal*)
   (check-equal? (lambda-type->c-type 'datetime-type) 'DateTime)
   (check-equal? (lambda-type->c-type 'binary-type)   'String*)
+  ;; New types added in Phase 1
+  (check-equal? (lambda-type->c-type 'object-type)      'Object*)
+  (check-equal? (lambda-type->c-type 'num-sized-type)   'uint64_t)
+  (check-equal? (lambda-type->c-type 'uint64-type)      'uint64_t)
+  (check-equal? (lambda-type->c-type 'array-num-type)   'ArrayNum*)
   ;; Specialized arrays
   (check-equal? (lambda-type->c-type 'array-int-type)   'ArrayInt*)
   (check-equal? (lambda-type->c-type 'array-int64-type) 'ArrayInt64*)
@@ -580,15 +620,26 @@
   (check-equal? (unboxing-function 'double)   'it2d)
   (check-equal? (unboxing-function 'bool)     'it2b)
   (check-equal? (unboxing-function 'String*)  'it2s)
-  (check-equal? (unboxing-function 'Symbol*)  'it2sym)
-  (check-equal? (unboxing-function 'DateTime) 'it2dt)
-  (check-equal? (unboxing-function 'Decimal*) 'it2dec))
+  (check-equal? (unboxing-function 'Symbol*)  'it2s)      ; symbol uses it2s per type_box_table
+  (check-equal? (unboxing-function 'DateTime) 'it2k)      ; it2k per type_box_table
+  (check-equal? (unboxing-function 'Decimal*) 'it2c))     ; it2c per type_box_table
 
-(test-case "Unboxing: container types use cast-from-Item"
-  (for ([ct '(Array* List* Map* Element* Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
-    (check-equal? (unboxing-function ct) 'cast-from-Item
-                  (format "~a should unbox via cast-from-Item" ct))))
+(test-case "Unboxing: container types"
+  ;; Containers with specific unboxing functions (per type_box_table)
+  (check-equal? (unboxing-function 'Array*)    'it2arr)
+  (check-equal? (unboxing-function 'Map*)      'it2map)
+  (check-equal? (unboxing-function 'Element*)  'it2elmt)
+  (check-equal? (unboxing-function 'Object*)   'it2obj)
+  (check-equal? (unboxing-function 'Range*)    'it2range)
+  (check-equal? (unboxing-function 'Path*)     'it2path)
+  (check-equal? (unboxing-function 'Function*) 'it2p)
+  ;; Containers that still use generic cast-from-Item
+  (check-equal? (unboxing-function 'List*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'Type*)     'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt*)    'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayInt64*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayFloat*)  'cast-from-Item)
+  (check-equal? (unboxing-function 'ArrayNum*) 'it2arr))
 
 (test-case "Conversion: scalar promotions"
   ;; Only int64 ↔ double conversions remain (no int32_t in Lambda)
@@ -777,8 +828,8 @@
 (test-case "Property: every pointer C-type has unboxing"
   ;; All pointer types must be recoverable from Item
   (for ([ct '(String* Symbol* Array* List* Map* Element* Decimal*
-              Range* Path* Function* Type*
-              ArrayInt* ArrayInt64* ArrayFloat*)])
+              Object* Range* Path* Function* Type*
+              ArrayNum* ArrayInt* ArrayInt64* ArrayFloat*)])
     (check-not-false (unboxing-function ct)
                      (format "~a must have unboxing fn" ct))))
 
@@ -794,8 +845,8 @@
 
 (test-case "Property: same-type conversion is always #f"
   ;; ∀ C-type ct: required-conversion(ct, ct) == #f
-  (for ([ct '(Item int64_t double bool String* Symbol*
-              Array* List* Map* Element* Decimal* DateTime
+  (for ([ct '(Item int64_t uint64_t double bool String* Symbol*
+              Array* ArrayNum* List* Map* Element* Object* Decimal* DateTime
               Range* Path* Function* Type*)])
     (check-false (required-conversion ct ct)
                  (format "~a → ~a should need no conversion" ct ct))))
@@ -825,7 +876,7 @@
                                 name)))))
 
 (test-case "Property: all container types map to pointer C-types"
-  (for ([τ '(array-type list-type map-type element-type)])
+  (for ([τ '(array-type list-type map-type element-type object-type)])
     (define ct (lambda-type->c-type τ))
     (check-true (pointer-c-type? ct)
                 (format "~a should map to pointer type, got ~a" τ ct))))
@@ -852,7 +903,11 @@
   (check-equal? (semantic-unboxing-function 'int64-type) 'it2l)
   (check-equal? (semantic-unboxing-function 'float-type) 'it2d)
   (check-equal? (semantic-unboxing-function 'bool-type)  'it2b)
-  (check-equal? (semantic-unboxing-function 'string-type) 'it2s))
+  (check-equal? (semantic-unboxing-function 'string-type) 'it2s)
+  ;; symbol/datetime/decimal use the names from type_box_table
+  (check-equal? (semantic-unboxing-function 'symbol-type) 'it2s)
+  (check-equal? (semantic-unboxing-function 'datetime-type) 'it2k)
+  (check-equal? (semantic-unboxing-function 'decimal-type) 'it2c))
 
 (test-case "int and int64 share C-type but differ semantically"
   ;; Both map to int64_t
@@ -866,6 +921,344 @@
   ;; If-else between int and int64 → ok (same C-type)
   (define result (verify-if-branches 'int-type 'int64-type))
   (check-equal? (car result) 'ok))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
+;; PART 6: PROCEDURAL EXTENSION TESTS
+;; ════════════════════════════════════════════════════════════════════════════
+
+(require "lambda-proc.rkt")
+
+;; Helper: run a pn body (list of statements) and return (values val output-string)
+(define (pn-run . stmts)
+  (run-pn-body stmts))
+
+;; ── Mutable Variables ──
+
+(test-case "Proc: var declaration and read"
+  (define-values (v out) (pn-run '(var x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: var assignment"
+  (define-values (v out) (pn-run '(var x 10) '(assign x 99) 'x))
+  (check-equal? v 99))
+
+(test-case "Proc: var null then reassign"
+  (define-values (v out) (pn-run '(var x null) '(assign x 42) 'x))
+  (check-equal? v 42))
+
+(test-case "Proc: multiple var declarations"
+  (define-values (v out) (pn-run '(var a 1) '(var b 2) '(var c 3) '(add (add a b) c)))
+  (check-equal? v 6))
+
+(test-case "Proc: var type widening (int → float → string)"
+  (define-values (v out)
+    (pn-run '(var x 42)
+            '(assign x 3.14)
+            '(print x)
+            '(assign x "hello")
+            'x))
+  (check-equal? v "hello")
+  (check-equal? out "3.14"))
+
+;; ── Print Side Effects ──
+
+(test-case "Proc: print output"
+  (define-values (v out) (pn-run '(print "hello") '(print " world")))
+  (check-equal? out "hello world"))
+
+(test-case "Proc: print numbers"
+  (define-values (v out) (pn-run '(print 42) '(print " ") '(print 3.14)))
+  (check-equal? out "42 3.14"))
+
+(test-case "Proc: print null"
+  (define-values (v out) (pn-run '(print null)))
+  (check-equal? out "null"))
+
+;; ── While Loop ──
+
+(test-case "Proc: simple while loop"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 5) (seq (assign x (add x 1))))
+            'x))
+  (check-equal? v 5))
+
+(test-case "Proc: while with accumulator"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 1)
+            '(while (le i 10) (seq
+              (assign sum (add sum i))
+              (assign i (add i 1))))
+            'sum))
+  (check-equal? v 55))
+
+(test-case "Proc: nested while loops"
+  (define-values (v out)
+    (pn-run '(var total 0)
+            '(var i 0)
+            '(while (lt i 3) (seq
+              (var j 0)
+              (while (lt j 3) (seq
+                (assign total (add total 1))
+                (assign j (add j 1))))
+              (assign i (add i 1))))
+            'total))
+  (check-equal? v 9))
+
+;; ── Break and Continue ──
+
+(test-case "Proc: while with break"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while #t (seq
+              (if-proc (ge x 3) (break))
+              (assign x (add x 1))))
+            'x))
+  (check-equal? v 3))
+
+(test-case "Proc: while with continue (skip even)"
+  (define-values (v out)
+    (pn-run '(var sum 0)
+            '(var i 0)
+            '(while (lt i 10) (seq
+              (assign i (add i 1))
+              (if-proc (eq (mod i 2) 0) (continue))
+              (assign sum (add sum i))))
+            'sum))
+  (check-equal? v 25))  ; 1+3+5+7+9
+
+;; ── Return ──
+
+(test-case "Proc: early return"
+  (define-values (v out)
+    (pn-run '(return 42)
+            '(print "unreachable")))
+  (check-equal? v 42)
+  (check-equal? out ""))
+
+(test-case "Proc: return from while"
+  (define-values (v out)
+    (pn-run '(var x 0)
+            '(while (lt x 100) (seq
+              (assign x (add x 1))
+              (if-proc (eq x 5) (return x))))
+            'x))
+  (check-equal? v 5))
+
+;; ── Procedural Functions (pn) ──
+
+(test-case "Proc: def-pn and call"
+  (define-values (v out)
+    (pn-run '(def-pn double (x) (seq (return (mul x 2))))
+            '(app-proc double 21)))
+  (check-equal? v 42))
+
+(test-case "Proc: pn with while loop"
+  (define-values (v out)
+    (pn-run '(def-pn factorial (n) (seq
+              (var result 1)
+              (var i 1)
+              (while (le i n) (seq
+                (assign result (mul result i))
+                (assign i (add i 1))))
+              result))
+            '(app-proc factorial 5)))
+  (check-equal? v 120))
+
+(test-case "Proc: pn param mutation"
+  (define-values (v out)
+    (pn-run '(def-pn countdown (n) (seq
+              (while (gt n 0) (seq
+                (print n)
+                (print " ")
+                (assign n (sub n 1))))
+              (print "done")))
+            '(app-proc countdown 3)))
+  (check-equal? out "3 2 1 done"))
+
+(test-case "Proc: pn with early return"
+  (define-values (v out)
+    (pn-run '(def-pn find-first-gt (arr threshold) (seq
+              (var i 0)
+              (while (lt i (len-expr arr)) (seq
+                (if-proc (gt (index arr i) threshold)
+                  (return (index arr i)))
+                (assign i (add i 1))))
+              null))
+            '(app-proc find-first-gt (array 1 5 3 8 2) 4)))
+  (check-equal? v 5))
+
+;; ── Array Mutation ──
+
+(test-case "Proc: array element assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 10 20 30 40 50))
+            '(assign-index arr 0 100)
+            '(assign-index arr 2 300)
+            'arr))
+  (check-equal? v '(array-val 100 20 300 40 50)))
+
+(test-case "Proc: array negative index assignment"
+  (define-values (v out)
+    (pn-run '(var arr (array 1 2 3 4 5))
+            '(assign-index arr -1 99)
+            'arr))
+  (check-equal? v '(array-val 1 2 3 4 99)))
+
+(test-case "Proc: array assignment in while loop"
+  (define-values (v out)
+    (pn-run '(var arr (array 0 0 0 0 0))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-index arr i (mul i i))
+              (assign i (add i 1))))
+            'arr))
+  (check-equal? v '(array-val 0 1 4 9 16)))
+
+;; ── Map Mutation ──
+
+(test-case "Proc: map field assignment"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 10) (y 20)))
+            '(assign-member obj x 42)
+            'obj))
+  (check-equal? v '(map-val (x 42) (y 20))))
+
+(test-case "Proc: map field in while loop (counter)"
+  (define-values (v out)
+    (pn-run '(var counter (map-expr (value 0)))
+            '(var i 0)
+            '(while (lt i 5) (seq
+              (assign-member counter value (add (member counter value) 1))
+              (assign i (add i 1))))
+            '(member counter value)))
+  (check-equal? v 5))
+
+(test-case "Proc: map add new field"
+  (define-values (v out)
+    (pn-run '(var obj (map-expr (x 1)))
+            '(assign-member obj y 2)
+            'obj))
+  (check-equal? v '(map-val (x 1) (y 2))))
+
+;; ── Closure Mutation (shared store) ──
+
+(test-case "Proc: closure counter pattern"
+  (define-values (v out)
+    (pn-run '(var count 0)
+            '(def-pn inc () (seq
+              (assign count (add count 1))
+              count))
+            '(var a (app-proc inc))
+            '(var b (app-proc inc))
+            '(var c (app-proc inc))
+            '(add (add a b) c)))
+  (check-equal? v 6))  ; 1+2+3
+
+;; ── If-else (procedural) ──
+
+(test-case "Proc: if-else with assignment"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var result 0)
+            '(if-proc (gt x 5)
+              (assign result (mul x 2))
+              (assign result (mul x 3)))
+            'result))
+  (check-equal? v 20))
+
+(test-case "Proc: if without else"
+  (define-values (v out)
+    (pn-run '(var x 10)
+            '(var msg "default")
+            '(if-proc (gt x 5) (assign msg "big"))
+            'msg))
+  (check-equal? v "big"))
+
+;; ── Fibonacci (classic proc test) ──
+
+(test-case "Proc: fibonacci via while"
+  (define-values (v out)
+    (pn-run '(def-pn fib (n) (seq
+              (var a 0)
+              (var b 1)
+              (var i 2)
+              (while (le i n) (seq
+                (var temp (add a b))
+                (assign a b)
+                (assign b temp)
+                (assign i (add i 1))))
+              b))
+            '(app-proc fib 10)))
+  (check-equal? v 55))
+
+;; ── Bubble sort pattern ──
+
+(test-case "Proc: swap via temp variable"
+  (define-values (v out)
+    (pn-run '(var a 5)
+            '(var b 3)
+            '(var temp a)
+            '(assign a b)
+            '(assign b temp)
+            '(add (mul a 10) b)))
+  ;; a=3, b=5 → 35
+  (check-equal? v 35))
+
+;; ── Combination: print + while + function ──
+
+(test-case "Proc: print inside while"
+  (define-values (v out)
+    (pn-run '(var i 1)
+            '(while (le i 5) (seq
+              (print i)
+              (if-proc (lt i 5) (print ","))
+              (assign i (add i 1))))))
+  (check-equal? out "1,2,3,4,5"))
+
+;; ── Error handling in proc ──
+
+(test-case "Proc: error propagation"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 0)))
+  (check-pred is-error? v))
+
+(test-case "Proc: error-free path"
+  (define-values (v out)
+    (pn-run '(def-pn safe-div (a b) (seq
+              (if-proc (eq b 0) (return (make-error "division by zero")))
+              (return (fdiv a b))))
+            '(app-proc safe-div 10 2)))
+  (check-equal? v 5.0))
+
+;; ── Property: pn return always unwraps at call boundary ──
+
+(test-case "Property: return unwraps at call boundary"
+  (define-values (v out)
+    (pn-run '(def-pn inner () (seq (return 42)))
+            '(def-pn outer () (seq
+              (var x (app-proc inner))
+              (return (add x 1))))
+            '(app-proc outer)))
+  (check-equal? v 43))
+
+;; ── Property: break does not escape function ──
+
+(test-case "Property: break contained in while"
+  (define-values (v out)
+    (pn-run '(def-pn f () (seq
+              (var x 0)
+              (while #t (seq
+                (assign x (add x 1))
+                (if-proc (eq x 3) (break))))
+              x))
+            '(app-proc f)))
+  (check-equal? v 3))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
