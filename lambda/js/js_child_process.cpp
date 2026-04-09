@@ -25,8 +25,8 @@ static inline Item make_js_undefined() {
 }
 
 static Item make_string_item(const char* str, int len) {
-    if (!str || len <= 0) return ItemNull;
-    String* s = heap_create_name(str, (size_t)len);
+    if (!str) return ItemNull;
+    String* s = heap_create_name(str, (size_t)(len > 0 ? len : 0));
     return (Item){.item = s2it(s)};
 }
 

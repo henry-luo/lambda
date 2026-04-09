@@ -193,6 +193,14 @@
          (print e)                    ; print(expr) → side effect
          (if-proc e e e)              ; if-else (procedural, with side effects)
          (if-proc e e)                ; if without else (procedural)
+
+         ;; ── Object type system forms (evaluated by lambda-eval/proc + lambda-object) ──
+         ;; Type definitions are registered in the type registry at evaluation time.
+         (def-type x e)                    ; type definition (name, rest-expr; type registered via registry API)
+         (make-object x (x e) ...)         ; <TypeName field: expr, ...> construction
+         (object-update x e (x e) ...)     ; <TypeName *:source, field: expr, ...> update/spread
+         (method-call e x e ...)           ; obj.method(args...) — fn method dispatch
+         (pn-method-call x x e ...)        ; var.method(args...) — pn method dispatch (mutates object)
          )
 
   ;; ── Match clauses ──
