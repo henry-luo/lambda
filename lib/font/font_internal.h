@@ -373,6 +373,7 @@ void                scan_windows_registry_fonts(FontDatabase* db);
 int                 get_font_metrics_platform(const char* font_family, float font_size,
                                               float* out_ascent, float* out_descent,
                                               float* out_line_height);
+float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
 char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);

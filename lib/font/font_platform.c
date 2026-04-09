@@ -447,6 +447,23 @@ int get_font_metrics_platform(const char* font_family, float font_size,
     return 1;
 }
 
+float get_cjk_system_line_height(float font_size) {
+    if (font_size <= 0) return 0;
+
+    // Chrome blends system CJK font metrics for lines containing CJK characters.
+    // On macOS, PingFang SC is the default CJK system font.
+    static const char* cjk_fonts[] = { "PingFang SC", "Hiragino Sans GB", NULL };
+    for (int i = 0; cjk_fonts[i]; i++) {
+        float ascent, descent, lh;
+        if (get_font_metrics_platform(cjk_fonts[i], font_size, &ascent, &descent, &lh)) {
+            log_debug("CJK system line-height: %s@%.1f → %.0f (asc=%.0f, desc=%.0f)",
+                      cjk_fonts[i], font_size, lh, ascent, descent);
+            return lh;
+        }
+    }
+    return 0;
+}
+
 #else
 
 /**
@@ -457,6 +474,11 @@ int get_font_metrics_platform(const char* font_family, float font_size,
                               float* out_ascent, float* out_descent, float* out_line_height) {
     (void)font_family; (void)font_size;
     (void)out_ascent; (void)out_descent; (void)out_line_height;
+    return 0;
+}
+
+float get_cjk_system_line_height(float font_size) {
+    (void)font_size;
     return 0;
 }
 
@@ -490,16 +512,19 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
     if (!str) return NULL;
 
-    // create a base font (Times New Roman at 12pt) and ask CoreText for a fallback
-    CTFontRef base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
-    if (!base_font) {
-        CFRelease(str);
-        return NULL;
+    // cache the base font for repeated fallback lookups (creating a CTFont
+    // per call is expensive — CoreText does font catalog lookups each time)
+    static CTFontRef s_base_font = NULL;
+    if (!s_base_font) {
+        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
+        if (!s_base_font) {
+            CFRelease(str);
+            return NULL;
+        }
     }
 
-    CTFontRef fallback = CTFontCreateForString(base_font, str, CFRangeMake(0, utf16_len));
+    CTFontRef fallback = CTFontCreateForString(s_base_font, str, CFRangeMake(0, utf16_len));
     CFRelease(str);
-    CFRelease(base_font);
 
     if (!fallback) return NULL;
 

@@ -83,7 +83,7 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
     // Transform text if needed
-    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 1, MEM_CAT_RENDER);  // Allocate extra for UTF-8
+    char* text_content = (char*)mem_alloc(text_rect->length * 4 + 2, MEM_CAT_RENDER);  // Extra for UTF-8 + trailing hyphen
     if (text_transform != CSS_VALUE_NONE) {
         // Apply text-transform character by character
         unsigned char* src = str + text_rect->start_index;
@@ -99,6 +99,9 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                 bytes = str_utf8_decode((const char*)src, (size_t)(src_end - src), &codepoint);
                 if (bytes <= 0) bytes = 1;
             }
+
+            // Skip soft hyphens (U+00AD) — they are invisible in rendered output
+            if (codepoint == 0x00AD) { src += bytes; continue; }
 
             // Track word boundaries
             if (is_space(codepoint)) {
@@ -133,9 +136,24 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         }
         *dst = '\0';
     } else {
-        // No transformation - direct copy
-        strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
-        text_content[text_rect->length] = '\0';
+        // No transformation — copy while stripping soft hyphens (U+00AD = 0xC2 0xAD)
+        unsigned char* src = str + text_rect->start_index;
+        unsigned char* src_end = src + text_rect->length;
+        char* dst = text_content;
+        while (src < src_end) {
+            if (src[0] == 0xC2 && src + 1 < src_end && src[1] == 0xAD) {
+                src += 2;  // skip soft hyphen
+            } else {
+                *dst++ = (char)*src++;
+            }
+        }
+        *dst = '\0';
+    }
+    // CSS Text 3 §5.2: Soft hyphen — append visible '-' when line breaks at SHY
+    if (text_rect->has_trailing_hyphen) {
+        size_t len = strlen(text_content);
+        text_content[len] = '-';
+        text_content[len + 1] = '\0';
     }
 
     // Calculate natural text width for justify rendering (excluding trailing spaces)

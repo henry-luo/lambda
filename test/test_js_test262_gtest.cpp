@@ -76,42 +76,42 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     // === ES2021 features ===
     "WeakRef",                                    // Weak references
     "FinalizationRegistry",                       // GC callback hooks
-    "AggregateError",                             // Error subclass for Promise.any
-    "logical-assignment-operators",               // &&=, ||=, ??=
-    "numeric-separator-literal",                  // 1_000_000
-    "String.prototype.replaceAll",                // String.prototype.replaceAll
-    "Promise.any",                                // Promise.any
+    // "AggregateError",                          // SUPPORTED
+    // "logical-assignment-operators",             // &&=, ||=, ??= — SUPPORTED
+    // "numeric-separator-literal",               // 1_000_000 — SUPPORTED
+    // "String.prototype.replaceAll",              // SUPPORTED
+    // "Promise.any",                             // SUPPORTED
 
     // === ES2022 features ===
-    "class-fields-public",                        // Public instance fields
+    // "class-fields-public",                      // SUPPORTED
     "class-fields-private",                       // Private instance fields
     "class-fields-private-in",                    // #x in obj
     "class-methods-private",                      // Private methods
-    "class-static-fields-public",                 // Static public fields
+    // "class-static-fields-public",               // SUPPORTED
     "class-static-fields-private",                // Static private fields
     "class-static-methods-private",               // Static private methods
-    "class-static-block",                         // static { ... }
+    // "class-static-block",                      // SUPPORTED
     "top-level-await",                            // Module-level await
     "regexp-match-indices",                       // /d flag, .indices
-    "Object.hasOwn",                              // Object.hasOwn()
-    "Array.prototype.at",                         // Array.prototype.at()
-    "String.prototype.at",                        // String.prototype.at()
-    "TypedArray.prototype.at",                    // TypedArray.prototype.at()
-    "error-cause",                                // new Error("msg", { cause })
+    // "Object.hasOwn",                            // SUPPORTED
+    // "Array.prototype.at",                       // SUPPORTED
+    // "String.prototype.at",                      // SUPPORTED
+    // "TypedArray.prototype.at",                 // SUPPORTED
+    // "error-cause",                              // SUPPORTED
 
     // === ES2023 features ===
-    "change-array-by-copy",                       // toSorted, toReversed, toSpliced, with
-    "symbols-as-weakmap-keys",                    // Symbol keys in WeakMap/WeakSet
-    "hashbang",                                   // #! shebang lines
-    "array-find-from-last",                       // findLast, findLastIndex
+    // "change-array-by-copy",                     // SUPPORTED (toSorted, toReversed, toSpliced, with)
+    // "symbols-as-weakmap-keys",                 // SUPPORTED
+    // "hashbang",                                // SUPPORTED (#! shebang lines)
+    // "array-find-from-last",                     // SUPPORTED (findLast, findLastIndex)
 
     // === ES2024 features ===
     "Atomics.waitAsync",                          // Atomics.waitAsync proposal
     "resizable-arraybuffer",                      // Resizable/growable ArrayBuffers
     "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
     "regexp-v-flag",                              // Unicode sets (/v flag)
-    "promise-with-resolvers",                     // Promise.withResolvers
-    "array-grouping",                             // Object.groupBy / Map.groupBy
+    // "promise-with-resolvers",                  // SUPPORTED
+    // "array-grouping",                          // SUPPORTED
     "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
     "String.prototype.toWellFormed",
 
@@ -123,14 +123,14 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Float16Array",                               // Float16 typed arrays
     "json-parse-with-source",                     // JSON.parse source text access
     "json-modules",                               // JSON module imports
-    "set-methods",                                // New Set methods
-    "Set.prototype.intersection",
-    "Set.prototype.union",
-    "Set.prototype.difference",
-    "Set.prototype.symmetricDifference",
-    "Set.prototype.isSubsetOf",
-    "Set.prototype.isSupersetOf",
-    "Set.prototype.isDisjointFrom",
+    // "set-methods",                             // SUPPORTED
+    // "Set.prototype.intersection",               // SUPPORTED
+    // "Set.prototype.union",                       // SUPPORTED
+    // "Set.prototype.difference",                  // SUPPORTED
+    // "Set.prototype.symmetricDifference",         // SUPPORTED
+    // "Set.prototype.isSubsetOf",                  // SUPPORTED
+    // "Set.prototype.isSupersetOf",                // SUPPORTED
+    // "Set.prototype.isDisjointFrom",              // SUPPORTED
     "promise-try",                                // Promise.try
     "RegExp.escape",                              // RegExp.escape
 
@@ -1897,12 +1897,10 @@ int main(int argc, char** argv) {
             printf("║  Improvements:     %5zu  (fail → pass)          ║\n", improvements.size());
             printf("║  Regressions:      %5zu  (pass → fail)          ║\n", regressions.size());
             printf("╚══════════════════════════════════════════════════╝\n");
-            if (!regressions.empty() && regressions.size() <= 200) {
+            if (!regressions.empty()) {
                 printf("\n⚠️  REGRESSIONS (%zu tests):\n", regressions.size());
                 std::sort(regressions.begin(), regressions.end());
                 for (auto& r : regressions) printf("  - %s\n", r.c_str());
-            } else if (!regressions.empty()) {
-                printf("\n⚠️  REGRESSIONS: %zu tests (too many to list)\n", regressions.size());
             }
             if (!improvements.empty() && improvements.size() <= 50) {
                 printf("\n✅  IMPROVEMENTS (%zu tests):\n", improvements.size());

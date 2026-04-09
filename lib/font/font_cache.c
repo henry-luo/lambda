@@ -20,14 +20,14 @@
 
 char* font_cache_make_key(Arena* arena, const char* family,
                            FontWeight weight, FontSlant slant, float size_px) {
-    // "family:weight:slant:size" — e.g. "Arial:400:0:16"
-    // Max: 128 chars for family + 4 digits weight + 1 digit slant + 5 digits size + separators
+    // "family:weight:slant:size" — e.g. "Arial:400:0:16.0"
+    // Use float precision for size to avoid cache collisions between e.g. 13.33px and 13.67px
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%d",
+    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%.1f",
                      family ? family : "",
                      (int)weight,
                      (int)slant,
-                     (int)size_px);
+                     size_px);
     if (n <= 0 || (size_t)n >= sizeof(buf)) {
         n = (int)sizeof(buf) - 1;
     }

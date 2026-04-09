@@ -191,13 +191,6 @@
             "link": "static"
         },
         {
-            "name": "freetype",
-            "version": "2.14.2",
-            "include": "/opt/homebrew/opt/freetype/include/freetype2",
-            "lib": "/opt/homebrew/opt/freetype/lib/libfreetype.a",
-            "link": "static"
-        },
-        {
             "name": "brotlidec",
             "version": "1.2.0",
             "description": "Brotli decompression (WOFF2 dependency, built from source)",
@@ -511,7 +504,6 @@
             "exclude_libraries": [
                 "glfw",
                 "ThorVG",
-                "freetype",
                 "png",
                 "turbojpeg",
                 "gif",
@@ -1191,7 +1183,6 @@
             ],
             "includes": [
                 "/opt/homebrew/include",
-                "/opt/homebrew/opt/freetype/include/freetype2",
                 "/opt/homebrew/include/libpng16",
                 "/usr/local/include"
             ],
@@ -1432,7 +1423,6 @@
                             "gtest",
                             "gtest_main",
                             "rpmalloc",
-                            "freetype",
                             "zlib",
                             "brotlidec",
                             "brotlicommon"
@@ -2913,6 +2903,18 @@
                         ],
                         "requires_lambda_exe": true,
                         "icon": "🖱️"
+                    },
+                    {
+                        "source": "test/test_page_load_gtest.cpp",
+                        "name": "Page Load Tests",
+                        "dependencies": [],
+                        "binary": "test_page_load_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "requires_lambda_exe": true,
+                        "icon": "📄"
                     }
                 ],
                 "type": "extended",

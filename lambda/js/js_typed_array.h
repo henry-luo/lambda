@@ -84,6 +84,9 @@ Item js_dataview_method(Item dv, Item method_name, Item* args, int argc);
 // Smart constructor: dispatches based on argument type (number, ArrayBuffer, TypedArray, Array)
 Item js_typed_array_construct(int type_id, Item arg, int byte_offset, int length, int argc);
 
+// Returns the JS type name (e.g. "Uint8Array"), or NULL if not a typed array
+const char* js_typed_array_type_name(Item val);
+
 #ifdef __cplusplus
 }
 #endif

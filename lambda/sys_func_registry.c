@@ -764,6 +764,13 @@ extern Item fn_call_boxed_8(void* fp, Item a, Item b, Item c, Item d, Item e, It
 // v24: strict mode flag setter (js_runtime.cpp)
 extern void js_set_strict_mode(int64_t strict);
 
+// Object.groupBy / Map.groupBy (ES2024)
+extern Item js_object_group_by(Item items, Item callback);
+extern Item js_map_group_by(Item items, Item callback);
+
+// Function formal length (ES spec .length)
+extern void js_set_formal_length(Item fn_item, int length);
+
 // v25: Reflect API wrappers (js_globals.cpp)
 extern Item js_reflect_own_keys(Item obj);
 extern Item js_reflect_set(Item obj, Item key, Item value);
@@ -948,6 +955,8 @@ JitImport jit_runtime_imports[] = {
     {"js_math_floor", FPTR(js_math_floor)},
     {"js_math_ceil", FPTR(js_math_ceil)},
     {"js_math_round_item", FPTR(js_math_round_item)},
+    {"js_math_pow", FPTR(js_math_pow)},
+    {"js_math_pow_d", FPTR(js_math_pow_d)},
     {"fn_floor_i", FPTR(fn_floor_i)},
     {"fn_ceil_i", FPTR(fn_ceil_i)},
     {"fn_round_i", FPTR(fn_round_i)},
@@ -1219,10 +1228,13 @@ JitImport jit_runtime_imports[] = {
     {"js_throw_value", FPTR(js_throw_value)},
     {"js_check_exception", FPTR(js_check_exception)},
     {"js_clear_exception", FPTR(js_clear_exception)},
+    {"js_require_object_coercible", FPTR(js_require_object_coercible)},
+    {"js_throw_syntax_error", FPTR(js_throw_syntax_error)},
     {"js_new_error", FPTR(js_new_error)},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
     {"js_new_error_with_name_stack", FPTR(js_new_error_with_name_stack)},
+    {"js_new_aggregate_error", FPTR(js_new_aggregate_error)},
     {"js_error_set_cause", FPTR(js_error_set_cause)},
     // method dispatchers
     {"js_string_method", FPTR(js_string_method)},
@@ -1294,6 +1306,7 @@ JitImport jit_runtime_imports[] = {
     {"js_set_function_name", FPTR(js_set_function_name)},
     {"js_mark_generator_func", FPTR(js_mark_generator_func)},
     {"js_mark_arrow_func", FPTR(js_mark_arrow_func)},
+    {"js_set_formal_length", FPTR(js_set_formal_length)},
     {"js_get_constructor", FPTR(js_get_constructor)},
     {"js_get_prototype_of", FPTR(js_get_prototype_of)},
     {"js_reflect_construct", FPTR(js_reflect_construct)},
@@ -1314,6 +1327,8 @@ JitImport jit_runtime_imports[] = {
     {"js_object_entries", FPTR(js_object_entries)},
     {"js_object_from_entries", FPTR(js_object_from_entries)},
     {"js_object_is", FPTR(js_object_is)},
+    {"js_object_group_by", FPTR(js_object_group_by)},
+    {"js_map_group_by", FPTR(js_map_group_by)},
     {"js_object_assign", FPTR(js_object_assign)},
     {"js_object_spread_into", FPTR(js_object_spread_into)},
     {"js_has_own_property", FPTR(js_has_own_property)},
@@ -1397,6 +1412,7 @@ JitImport jit_runtime_imports[] = {
     {"js_get_global_this", FPTR(js_get_global_this)},
     {"js_get_global_object", FPTR(js_get_global_object)},
     {"js_get_global_property", FPTR(js_get_global_property)},
+    {"js_get_global_builtin_fn", FPTR(js_get_global_builtin_fn)},
 
     {"js_symbol_create", FPTR(js_symbol_create)},
     {"js_symbol_for", FPTR(js_symbol_for)},

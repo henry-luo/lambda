@@ -27,7 +27,7 @@ Symbol* heap_create_symbol(const char* symbol, size_t len);
 Symbol* heap_create_symbol(const char* symbol);
 void heap_destroy();
 void free_item(Item item, bool clear_entry);
-void expand_list(List *list);
+void expand_list(List *list, Arena* arena = nullptr);
 
 extern "C" {
 #ifndef WASM_BUILD

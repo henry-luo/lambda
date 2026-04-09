@@ -3,15 +3,19 @@
   "html": "test/lambda/ui/todo.ls",
   "viewport": {"width": 600, "height": 800},
   "events": [
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 8},
     {"type": "log", "message": "--- DELETE: click delete button ---"},
     {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
     {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 7},
     {"type": "click", "target": {"selector": ".todo-item .delete-btn"}},
     {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 6},
 
     {"type": "log", "message": "--- Click clear completed ---"},
     {"type": "click", "target": {"selector": ".clear-done-btn"}},
     {"type": "wait", "ms": 300},
+    {"type": "assert_count", "target": {"selector": ".todo-item"}, "count": 5},
     {"type": "log", "message": "--- Done ---"}
   ]
 }
