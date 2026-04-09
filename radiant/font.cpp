@@ -88,6 +88,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
 }
 
 void fontface_cleanup(UiContext* uicon) {
-    // font faces are now managed by FontContext — no separate FT_Face cache to clean up
+    // font faces are now managed by FontContext — no separate cache to clean up
     (void)uicon;
 }
