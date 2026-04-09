@@ -368,11 +368,8 @@ extern "C" Item js_new_error(Item message) {
 
 // AggregateError(errors, message): Error subclass with .errors array
 extern "C" Item js_new_aggregate_error(Item errors, Item message) {
-    Item err = js_new_error(message);
-    js_property_set(err, (Item){.item = s2it(heap_create_name("__class_name__", 14))},
-        (Item){.item = s2it(heap_create_name("AggregateError", 14))});
-    js_property_set(err, (Item){.item = s2it(heap_create_name("name", 4))},
-        (Item){.item = s2it(heap_create_name("AggregateError", 14))});
+    Item err_name = (Item){.item = s2it(heap_create_name("AggregateError", 14))};
+    Item err = js_new_error_with_name(err_name, message);
     // Convert errors iterable to array — use js_array_from for iterable conversion
     Item errors_arr = js_array_from(errors);
     js_property_set(err, (Item){.item = s2it(heap_create_name("errors", 6))}, errors_arr);
@@ -1881,6 +1878,7 @@ enum JsBuiltinId {
     JS_BUILTIN_OBJ_TO_STRING,
     JS_BUILTIN_OBJ_VALUE_OF,
     JS_BUILTIN_OBJ_IS_PROTOTYPE_OF,
+    JS_BUILTIN_OBJ_TO_LOCALE_STRING,
     // Array.prototype
     JS_BUILTIN_ARR_PUSH,
     JS_BUILTIN_ARR_POP,
@@ -2316,12 +2314,21 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 (nl == 10 && strncmp(n, "RangeError", 10) == 0) ||
                 (nl == 14 && strncmp(n, "ReferenceError", 14) == 0) ||
                 (nl == 11 && strncmp(n, "SyntaxError", 11) == 0) ||
-                (nl == 8 && strncmp(n, "URIError", 8) == 0)) {
+                (nl == 8 && strncmp(n, "URIError", 8) == 0) ||
+                (nl == 9 && strncmp(n, "EvalError", 9) == 0)) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item tn = (Item){.item = s2it(heap_create_name(n, nl))};
                 Item msg = (argc > 0 && args) ? args[0] : (Item){.item = s2it(heap_create_name("", 0))};
                 return js_new_error_with_name(tn, msg);
+            }
+            // AggregateError(errors, message)
+            if (nl == 14 && strncmp(n, "AggregateError", 14) == 0) {
+                js_pending_new_target = ItemNull;
+                js_has_pending_new_target = false;
+                Item errors = (argc > 0 && args) ? args[0] : js_array_new(0);
+                Item msg = (argc > 1 && args) ? args[1] : make_js_undefined();
+                return js_new_aggregate_error(errors, msg);
             }
 
             // Array
@@ -3171,7 +3178,8 @@ extern "C" Item js_property_get(Item object, Item key) {
                             (nl == 11 && strncmp(nm, "SyntaxError", 11) == 0) ||
                             (nl == 14 && strncmp(nm, "ReferenceError", 14) == 0) ||
                             (nl == 8 && strncmp(nm, "URIError", 8) == 0) ||
-                            (nl == 9 && strncmp(nm, "EvalError", 9) == 0);
+                            (nl == 9 && strncmp(nm, "EvalError", 9) == 0) ||
+                            (nl == 14 && strncmp(nm, "AggregateError", 14) == 0);
                         if (is_error) {
                             Item nk = (Item){.item = s2it(heap_create_name("name", 4))};
                             Item nv = (Item){.item = s2it(heap_create_name(nm, nl))};
@@ -3264,6 +3272,96 @@ extern "C" Item js_property_get(Item object, Item key) {
                             js_property_set(fn->prototype, si_key, si_fn);
                             js_mark_non_enumerable(fn->prototype, si_key);
                         }
+                        // v82: Populate Date.prototype methods for test262 compliance
+                        if (nl == 4 && strncmp(nm, "Date", 4) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"getTime", 7, JS_BUILTIN_DATE_GET_TIME, 0},
+                                {"getFullYear", 11, JS_BUILTIN_DATE_GET_FULL_YEAR, 0},
+                                {"getMonth", 8, JS_BUILTIN_DATE_GET_MONTH, 0},
+                                {"getDate", 7, JS_BUILTIN_DATE_GET_DATE, 0},
+                                {"getHours", 8, JS_BUILTIN_DATE_GET_HOURS, 0},
+                                {"getMinutes", 10, JS_BUILTIN_DATE_GET_MINUTES, 0},
+                                {"getSeconds", 10, JS_BUILTIN_DATE_GET_SECONDS, 0},
+                                {"getMilliseconds", 15, JS_BUILTIN_DATE_GET_MILLISECONDS, 0},
+                                {"getDay", 6, JS_BUILTIN_DATE_GET_DAY, 0},
+                                {"getUTCFullYear", 14, JS_BUILTIN_DATE_GET_UTC_FULL_YEAR, 0},
+                                {"getUTCMonth", 11, JS_BUILTIN_DATE_GET_UTC_MONTH, 0},
+                                {"getUTCDate", 10, JS_BUILTIN_DATE_GET_UTC_DATE, 0},
+                                {"getUTCHours", 11, JS_BUILTIN_DATE_GET_UTC_HOURS, 0},
+                                {"getUTCMinutes", 13, JS_BUILTIN_DATE_GET_UTC_MINUTES, 0},
+                                {"getUTCSeconds", 13, JS_BUILTIN_DATE_GET_UTC_SECONDS, 0},
+                                {"getUTCMilliseconds", 18, JS_BUILTIN_DATE_GET_UTC_MILLISECONDS, 0},
+                                {"getUTCDay", 9, JS_BUILTIN_DATE_GET_UTC_DAY, 0},
+                                {"getTimezoneOffset", 17, JS_BUILTIN_DATE_GET_TIMEZONE_OFFSET, 0},
+                                {"setTime", 7, JS_BUILTIN_DATE_SET_TIME, 1},
+                                {"setFullYear", 11, JS_BUILTIN_DATE_SET_FULL_YEAR, 3},
+                                {"setMonth", 8, JS_BUILTIN_DATE_SET_MONTH, 2},
+                                {"setDate", 7, JS_BUILTIN_DATE_SET_DATE, 1},
+                                {"setHours", 8, JS_BUILTIN_DATE_SET_HOURS, 4},
+                                {"setMinutes", 10, JS_BUILTIN_DATE_SET_MINUTES, 3},
+                                {"setSeconds", 10, JS_BUILTIN_DATE_SET_SECONDS, 2},
+                                {"setMilliseconds", 15, JS_BUILTIN_DATE_SET_MILLISECONDS, 1},
+                                {"setUTCFullYear", 14, JS_BUILTIN_DATE_SET_UTC_FULL_YEAR, 3},
+                                {"setUTCMonth", 11, JS_BUILTIN_DATE_SET_UTC_MONTH, 2},
+                                {"setUTCDate", 10, JS_BUILTIN_DATE_SET_UTC_DATE, 1},
+                                {"setUTCHours", 11, JS_BUILTIN_DATE_SET_UTC_HOURS, 4},
+                                {"setUTCMinutes", 13, JS_BUILTIN_DATE_SET_UTC_MINUTES, 3},
+                                {"setUTCSeconds", 13, JS_BUILTIN_DATE_SET_UTC_SECONDS, 2},
+                                {"setUTCMilliseconds", 18, JS_BUILTIN_DATE_SET_UTC_MILLISECONDS, 1},
+                                {"toISOString", 11, JS_BUILTIN_DATE_TO_ISO_STRING, 0},
+                                {"toJSON", 6, JS_BUILTIN_DATE_TO_JSON, 1},
+                                {"toUTCString", 11, JS_BUILTIN_DATE_TO_UTC_STRING, 0},
+                                {"toDateString", 12, JS_BUILTIN_DATE_TO_DATE_STRING, 0},
+                                {"toTimeString", 12, JS_BUILTIN_DATE_TO_TIME_STRING, 0},
+                                {"toString", 8, JS_BUILTIN_DATE_TO_STRING, 0},
+                                {"toLocaleDateString", 18, JS_BUILTIN_DATE_TO_LOCALE_DATE_STRING, 0},
+                                {"valueOf", 7, JS_BUILTIN_DATE_VALUE_OF, 0},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // Symbol.toPrimitive
+                            Item tp_key = (Item){.item = s2it(heap_create_name("__sym_5", 7))};
+                            Item tp_fn = js_get_or_create_builtin(JS_BUILTIN_DATE_VALUE_OF, "[Symbol.toPrimitive]", 1);
+                            js_property_set(fn->prototype, tp_key, tp_fn);
+                            js_mark_non_enumerable(fn->prototype, tp_key);
+                        }
+                        // v82b: Populate Number.prototype methods
+                        if (nl == 6 && strncmp(nm, "Number", 6) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"toString", 8, JS_BUILTIN_NUM_TO_STRING, 1},
+                                {"valueOf", 7, JS_BUILTIN_NUM_VALUE_OF, 0},
+                                {"toFixed", 7, JS_BUILTIN_NUM_TO_FIXED, 1},
+                                {"toPrecision", 11, JS_BUILTIN_NUM_TO_PRECISION, 1},
+                                {"toExponential", 13, JS_BUILTIN_NUM_TO_EXPONENTIAL, 1},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                        }
+                        // v82c: Populate RegExp.prototype methods
+                        if (nl == 6 && strncmp(nm, "RegExp", 6) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"exec", 4, JS_BUILTIN_REGEXP_EXEC, 1},
+                                {"test", 4, JS_BUILTIN_REGEXP_TEST, 1},
+                                {"toString", 8, JS_BUILTIN_REGEXP_TO_STRING, 0},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                        }
                     }
                 }
                 // v20: Set constructor property (non-enumerable, writable, configurable)
@@ -3305,7 +3403,13 @@ extern "C" Item js_property_get(Item object, Item key) {
                 Item static_method = js_lookup_constructor_static(
                     fn->name->chars, (int)fn->name->len,
                     str_key->chars, (int)str_key->len);
-                if (static_method.item != ItemNull.item) return static_method;
+                if (static_method.item != ItemNull.item) {
+                    // Auto-store in properties_map so reflection APIs
+                    // (hasOwnProperty, getOwnPropertyDescriptor) can find it
+                    js_func_init_property(object, key, static_method);
+                    js_mark_non_enumerable(object, key);
+                    return static_method;
+                }
             }
         }
     }
@@ -4389,6 +4493,55 @@ extern "C" Item js_constructor_static_property(Item ctor_name, Item prop_name) {
     return js_lookup_constructor_static(cn->chars, (int)cn->len, pn->chars, (int)pn->len);
 }
 
+// Populate all known static methods on a constructor function as own properties.
+// This makes them visible to hasOwnProperty, getOwnPropertyDescriptor, getOwnPropertyNames.
+extern "C" void js_populate_constructor_statics(Item ctor_item, const char* ctor_name, int ctor_len) {
+    // Method tables: name, length pairs per constructor
+    struct method_entry { const char* name; int len; };
+    static const method_entry object_methods[] = {
+        {"keys",4}, {"values",6}, {"entries",7}, {"fromEntries",11}, {"create",6}, {"assign",6},
+        {"freeze",6}, {"isFrozen",8}, {"seal",4}, {"isSealed",8}, {"preventExtensions",17},
+        {"isExtensible",12}, {"is",2}, {"getPrototypeOf",14}, {"setPrototypeOf",14},
+        {"defineProperty",14}, {"defineProperties",16}, {"getOwnPropertyDescriptor",24},
+        {"getOwnPropertyDescriptors",25}, {"getOwnPropertyNames",19},
+        {"getOwnPropertySymbols",21}, {"hasOwn",6}, {NULL,0}
+    };
+    static const method_entry array_methods[] = {
+        {"isArray",7}, {"from",4}, {"of",2}, {NULL,0}
+    };
+    static const method_entry string_methods[] = {
+        {"fromCharCode",12}, {"fromCodePoint",13}, {"raw",3}, {NULL,0}
+    };
+    static const method_entry date_methods[] = {
+        {"now",3}, {"parse",5}, {"UTC",3}, {NULL,0}
+    };
+    static const method_entry promise_methods[] = {
+        {"resolve",7}, {"reject",6}, {"all",3}, {"allSettled",10}, {"any",3}, {"race",4}, {NULL,0}
+    };
+    static const method_entry number_methods[] = {
+        {"isFinite",8}, {"isNaN",5}, {"isInteger",9}, {"isSafeInteger",13},
+        {"parseInt",8}, {"parseFloat",10}, {NULL,0}
+    };
+
+    const method_entry* table = NULL;
+    if (ctor_len == 6 && strncmp(ctor_name, "Object", 6) == 0) table = object_methods;
+    else if (ctor_len == 5 && strncmp(ctor_name, "Array", 5) == 0) table = array_methods;
+    else if (ctor_len == 6 && strncmp(ctor_name, "String", 6) == 0) table = string_methods;
+    else if (ctor_len == 4 && strncmp(ctor_name, "Date", 4) == 0) table = date_methods;
+    else if (ctor_len == 7 && strncmp(ctor_name, "Promise", 7) == 0) table = promise_methods;
+    else if (ctor_len == 6 && strncmp(ctor_name, "Number", 6) == 0) table = number_methods;
+    if (!table) return;
+
+    for (int i = 0; table[i].name; i++) {
+        Item method = js_lookup_constructor_static(ctor_name, ctor_len, table[i].name, table[i].len);
+        if (method.item != ItemNull.item) {
+            Item key = (Item){.item = s2it(heap_create_name(table[i].name, table[i].len))};
+            js_func_init_property(ctor_item, key, method);
+            js_mark_non_enumerable(ctor_item, key);
+        }
+    }
+}
+
 // Lookup built-in method by name for a given receiver type
 extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len) {
     // Object.prototype methods (available on all objects and arrays)
@@ -4405,6 +4558,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_VALUE_OF, "valueOf", 0);
     if (len == 13 && strncmp(name, "isPrototypeOf", 13) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_IS_PROTOTYPE_OF, "isPrototypeOf", 1);
+    if (len == 14 && strncmp(name, "toLocaleString", 14) == 0)
+        return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_LOCALE_STRING, "toLocaleString", 0);
 
     // Function.prototype methods
     if (type == LMD_TYPE_FUNC) {
@@ -4964,6 +5119,21 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
                            (ks->len == 6 && strncmp(ks->chars, "caller", 6) == 0))) {
                     return (Item){.item = ITEM_FALSE};
                 }
+                // Check __ne_ marker in properties_map for custom properties
+                JsFunction* fn = (JsFunction*)this_val.function;
+                if (fn->properties_map.item != 0 && get_type_id(fn->properties_map) == LMD_TYPE_MAP) {
+                    // First check if property exists in properties_map
+                    bool has_key = false;
+                    js_map_get_fast_ext(fn->properties_map.map, ks->chars, (int)ks->len, &has_key);
+                    if (has_key) {
+                        char ne_buf[256];
+                        snprintf(ne_buf, sizeof(ne_buf), "__ne_%.*s", (int)ks->len, ks->chars);
+                        bool ne_found = false;
+                        Item ne_val = js_map_get_fast_ext(fn->properties_map.map, ne_buf, (int)strlen(ne_buf), &ne_found);
+                        if (ne_found && js_is_truthy(ne_val)) return (Item){.item = ITEM_FALSE};
+                        return (Item){.item = ITEM_TRUE};
+                    }
+                }
             }
         }
         Item has = js_has_own_property(this_val, arg0);
@@ -5142,6 +5312,26 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             target = proto;
         }
         return (Item){.item = ITEM_FALSE};
+    }
+    case JS_BUILTIN_OBJ_TO_LOCALE_STRING: {
+        // Object.prototype.toLocaleString() — per spec: Invoke(this, "toString")
+        // Step 1: Throw TypeError if this is null or undefined
+        TypeId tid = get_type_id(this_val);
+        if (tid == LMD_TYPE_NULL || tid == LMD_TYPE_UNDEFINED ||
+            this_val.item == ITEM_NULL || this_val.item == ITEM_JS_UNDEFINED) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError"))};
+            Item msg = (Item){.item = s2it(heap_create_name("Cannot convert undefined or null to object"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return ItemNull;
+        }
+        if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
+            Item ts_fn = js_property_get(this_val, ts_key);
+            if (get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+                return js_call_function(ts_fn, this_val, nullptr, 0);
+            }
+        }
+        return js_to_string(this_val);
     }
 
     // Array.prototype methods - delegate to js_map_method which handles arrays
@@ -8859,6 +9049,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
         return str;
     }
+    if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
+        return str;
+    }
 
     log_debug("js_string_method: unknown method '%.*s'", (int)method->len, method->chars);
     return ItemNull;
@@ -9705,7 +9898,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
         int idx = (int)js_get_number(args[0]);
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
-        return a->items[idx];
+        Item val = a->items[idx];
+        if (val.item == JS_DELETED_SENTINEL_VAL) return make_js_undefined();
+        return val;
     }
     // toString — join elements with comma
     if (method->len == 8 && strncmp(method->chars, "toString", 8) == 0) {
@@ -9763,6 +9958,27 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
 
     // Fallback: check companion map for custom properties, then prototype chain
     {
+        // Array.prototype.toLocaleString: join elements using element.toLocaleString()
+        if (method->len == 14 && strncmp(method->chars, "toLocaleString", 14) == 0) {
+            Array* a = arr.array;
+            if (!a || a->length == 0) return (Item){.item = s2it(heap_create_name("", 0))};
+            StrBuf* sb = strbuf_new();
+            for (int i = 0; i < a->length; i++) {
+                if (i > 0) strbuf_append_str_n(sb, ",", 1);
+                Item elem = a->items[i];
+                TypeId et = get_type_id(elem);
+                if (et != LMD_TYPE_NULL && et != LMD_TYPE_UNDEFINED) {
+                    Item elem_str = js_dispatch_builtin(JS_BUILTIN_OBJ_TO_LOCALE_STRING, elem, NULL, 0);
+                    if (get_type_id(elem_str) == LMD_TYPE_STRING) {
+                        String* s = it2s(elem_str);
+                        if (s && s->len > 0) strbuf_append_str_n(sb, s->chars, (int)s->len);
+                    }
+                }
+            }
+            String* result = heap_create_name(sb->str, sb->length);
+            strbuf_free(sb);
+            return (Item){.item = s2it(result)};
+        }
         Item fn = js_property_access(arr, method_name);
         if (get_type_id(fn) == LMD_TYPE_FUNC) {
             return js_call_function(fn, arr, args, argc);
