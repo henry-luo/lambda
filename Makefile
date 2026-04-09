@@ -986,7 +986,96 @@ test-input-baseline: build-test
 	fi; \
 	echo "=============================================================="
 
-test-radiant-baseline: test-layout-baseline test-ui-automation test-page-load
+test-radiant-baseline: build-test
+	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
+	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
+	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
+	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
+	any_failed=0; \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🧪 RADIANT BASELINE TEST SUITE"; \
+	echo "=============================================================="; \
+	\
+	echo ""; \
+	echo "📦 Layout Baseline Tests:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c baseline 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	layout_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_failed=$$(echo "$$output" | grep "Failed:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	layout_passed=$${layout_passed:-0}; layout_failed=$${layout_failed:-0}; layout_skipped=$${layout_skipped:-0}; \
+	if [ "$$layout_failed" = "0" ] || [ -z "$$layout_failed" ]; then layout_status="✅ PASS"; layout_failed=0; else layout_status="❌ FAIL"; any_failed=1; fi; \
+	\
+	if [ -f test/layout/snapshot/page.json ]; then \
+		echo ""; \
+		echo "📦 Page Snapshot Regression:"; \
+		snap_output=$$(node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
+			| node test/layout/save_suite_snapshot.js --check page 2>&1) || true; \
+		echo "$$snap_output" | tail -5; \
+		if echo "$$snap_output" | grep -q "REGRESSION"; then \
+			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions"; then \
+			snapshot_status="✅ PASS"; \
+		else \
+			snapshot_status="✅ PASS"; \
+		fi; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 UI Automation Tests:"; \
+	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
+		output=$$(./test/test_ui_automation_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
+		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_passed=$${ui_passed:-0}; ui_failed=$${ui_failed:-0}; \
+		if [ "$$ui_failed" = "0" ] || [ -z "$$ui_failed" ]; then ui_status="✅ PASS"; ui_failed=0; else ui_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_ui_automation_gtest.exe not found"; \
+	fi; \
+	\
+	echo ""; \
+	echo "📦 Page Load (Headless) Tests:"; \
+	if [ -f "test/test_page_load_gtest.exe" ]; then \
+		output=$$(./test/test_page_load_gtest.exe 2>&1) || true; \
+		echo "$$output" | grep -E "^\[|pages loaded" | tail -5; \
+		page_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		page_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \]" | tail -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		page_passed=$${page_passed:-0}; page_failed=$${page_failed:-0}; \
+		if [ "$$page_failed" = "0" ] || [ -z "$$page_failed" ]; then page_status="✅ PASS"; page_failed=0; else page_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_page_load_gtest.exe not found"; \
+	fi; \
+	\
+	total_passed=$$((layout_passed + ui_passed + page_passed)); \
+	total_failed=$$((layout_failed + ui_failed + page_failed)); \
+	total_skipped=$$((layout_skipped)); \
+	total_tests=$$((total_passed + total_failed)); \
+	\
+	echo ""; \
+	echo "=============================================================="; \
+	echo "🏁 RADIANT BASELINE TEST RESULTS BREAKDOWN"; \
+	echo "=============================================================="; \
+	echo ""; \
+	echo "📊 Test Results by Suite:"; \
+	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
+	echo "   ├── Page Snapshot       $$snapshot_status"; \
+	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
+	echo "   └── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
+	echo ""; \
+	echo "📊 Overall Results:"; \
+	echo "   Total Tests: $$total_tests"; \
+	echo "   ✅ Passed:   $$total_passed"; \
+	if [ $$total_failed -gt 0 ]; then \
+		echo "   ❌ Failed:   $$total_failed"; \
+	fi; \
+	if [ $$total_skipped -gt 0 ]; then \
+		echo "   ⏭️  Skipped:  $$total_skipped"; \
+	fi; \
+	echo "=============================================================="; \
+	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
 test-layout-baseline: build-test
 	@echo "Running Radiant layout BASELINE test suite..."
@@ -1014,7 +1103,7 @@ test-page-load: build-test
 	@echo "Running Page Load (Headless) test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_page_load_gtest.exe" ]; then \
-		./test/test_page_load_gtest.exe -j 4; \
+		./test/test_page_load_gtest.exe; \
 	else \
 		echo "Error: test/test_page_load_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \

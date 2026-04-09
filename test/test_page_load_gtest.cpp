@@ -368,8 +368,9 @@ INSTANTIATE_TEST_SUITE_P(
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
-    // Parse -j N for parallelism (default: 4)
-    int jobs = 4;
+    // Parse -j N for parallelism (default: hardware concurrency)
+    int jobs = (int)std::thread::hardware_concurrency();
+    if (jobs <= 0) jobs = 4;
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-j") == 0 || strcmp(argv[i], "--jobs") == 0) && i + 1 < argc) {
             jobs = atoi(argv[++i]);
