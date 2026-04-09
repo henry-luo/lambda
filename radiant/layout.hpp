@@ -141,6 +141,40 @@ typedef struct BlockContext {
     Pool* pool;                 // Memory pool for float allocations
 } BlockContext;
 
+// Semantic break kind classification (CSS Text 3 §4–5 + UAX #14)
+// Used to track the type of the last recorded break opportunity in a line box.
+typedef enum BreakKind {
+    // Content (not a break character itself)
+    BRK_TEXT = 0,               // ordinary word/grapheme content
+
+    // Whitespace kinds (CSS Text 3 §4)
+    BRK_SPACE,                  // collapsible space (U+0020 in white-space: normal/nowrap/pre-line)
+    BRK_PRESERVED_SPACE,        // non-collapsible space (U+0020 in pre/pre-wrap/break-spaces)
+    BRK_TAB,                    // tab character (advance to next tab stop; CSS Text 3 §4.2)
+    BRK_HARD_BREAK,             // newline (\n in pre/pre-wrap/pre-line; CSS Text 3 §4.1)
+
+    // Non-breaking / glue (UAX #14 GL, WJ, ZWJ)
+    BRK_GLUE,                   // visible non-breaking: NBSP U+00A0, NNBSP U+202F
+    BRK_GLUE_ZW,                // zero-width non-breaking: WJ U+2060, ZWNBSP U+FEFF
+    BRK_ZWJ,                    // zero-width joiner U+200D (suppresses break, joins emoji sequences)
+
+    // Break opportunities (CSS Text 3 §5)
+    BRK_ZERO_WIDTH_BREAK,       // ZWSP U+200B (invisible, breakable)
+    BRK_SOFT_HYPHEN,            // SHY U+00AD (invisible unless broken, then visible '-')
+    BRK_HYPHEN,                 // explicit hyphen U+002D, U+2010 (break after, includes width)
+
+    // UAX #14 line break classes (CSS Text 3 §5.2)
+    BRK_CJK,                    // CJK ideograph (break after, unless word-break: keep-all)
+    BRK_OP,                     // opening punctuation — no break after (UAX #14 LB14)
+    BRK_CL,                     // closing punctuation — no break before (UAX #14 LB15/16)
+    BRK_NS,                     // non-starter — no break before when after CJK (UAX #14 LB20)
+    BRK_EX_IS_SY,               // EX/IS/SY — no break before (UAX #14 LB13)
+    BRK_CJ,                     // conditional Japanese starter (resolved to NS or ID per line-break mode)
+
+    // Ideographic space
+    BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
+} BreakKind;
+
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
     float effective_left;             // float-adjusted left bound
@@ -150,8 +184,7 @@ typedef struct Linebox {
     float max_descender;
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
-    bool last_space_is_hyphen;      // true if last_space is actually a hyphen (break after vs before)
-    bool last_space_is_soft_hyphen;  // true if last_space is a soft hyphen U+00AD (render '-' at break)
+    BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
     View* start_view;
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -199,7 +232,7 @@ typedef struct Linebox {
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
-        last_space_is_hyphen = false;  last_space_is_soft_hyphen = false;  last_space_hanging_width = 0;
+        last_space_kind = BRK_TEXT;  last_space_hanging_width = 0;
     }
 } Linebox;
 
