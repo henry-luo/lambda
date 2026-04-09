@@ -404,7 +404,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc tidy-printf benchmark bench-compile \
 	    test-pdf test-pdf-export setup-pdf-tests \
 	    test-fuzzy test-fuzzy-extended test-c2mir type-chart \
-	    test-ui-automation test-reactive-ui
+	    test-ui-automation test-reactive-ui test-redex-baseline
 
 # Help target - shows available commands
 help:
@@ -453,6 +453,7 @@ help:
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-radiant-baseline - Run RADIANT layout baseline + page snapshot regression check"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
+	@echo "  test-redex-baseline  - Run Redex formal semantics baseline verification"
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-tex      - Run all TeX typesetting unit tests"
 	@echo "  test-tex-baseline - Run TeX baseline tests (core box/AST tests)"
@@ -857,6 +858,10 @@ test-lambda-baseline: build-test
 		echo "Error: No test suite found"; \
 		exit 1; \
 	fi
+
+test-redex-baseline: build
+	@echo "Running Redex formal semantics baseline verification..."
+	@cd lambda/semantics && racket baseline-verify.rkt
 
 test-bash-baseline: build-jube-test
 	@echo "Running Bash transpiler baseline tests (requires lambda-jube)..."
