@@ -529,6 +529,14 @@ extern "C" void js_runtime_set_input(void* input) {
 }
 
 extern "C" Item js_get_this() {
+    // Sloppy mode coercion: when this is null-like, return globalThis.
+    // Three null representations: {0} (initial/RAW_POINTER), ITEM_NULL (LMD_TYPE_NULL<<56)
+    // Both mean "no explicit this set" and should map to globalThis in sloppy mode.
+    // Strict mode bare calls use ITEM_JS_UNDEFINED which is NOT coerced.
+    if (js_current_this.item == 0 || js_current_this.item == ITEM_NULL) {
+        extern Item js_get_global_this();
+        return js_get_global_this();
+    }
     return js_current_this;
 }
 
@@ -1857,6 +1865,7 @@ struct JsCollectionOrderNode {
 struct JsCollectionData {
     HashMap* hmap;
     int type; // JS_COLLECTION_MAP or JS_COLLECTION_SET
+    bool is_weak; // true for WeakMap/WeakSet
     JsCollectionOrderNode* order_head;
     JsCollectionOrderNode* order_tail;
 };
@@ -2103,6 +2112,26 @@ enum JsBuiltinId {
     JS_BUILTIN_MAP_VALUES,       // Map.prototype.values
     JS_BUILTIN_SET_ENTRIES,      // Set.prototype.entries
     JS_BUILTIN_COLL_ITER_NEXT,   // CollectionIterator.next()
+    // Collection prototype methods (v76: expose on prototype for test262 compliance)
+    JS_BUILTIN_MAP_SET,          // Map.prototype.set(key, value)
+    JS_BUILTIN_MAP_GET,          // Map.prototype.get(key)
+    JS_BUILTIN_MAP_HAS,          // Map.prototype.has(key)
+    JS_BUILTIN_MAP_DELETE,       // Map.prototype.delete(key)
+    JS_BUILTIN_MAP_CLEAR,        // Map.prototype.clear()
+    JS_BUILTIN_MAP_FOREACH,      // Map.prototype.forEach(cb, thisArg)
+    JS_BUILTIN_SET_ADD,          // Set.prototype.add(value)
+    JS_BUILTIN_SET_HAS,          // Set.prototype.has(value)
+    JS_BUILTIN_SET_DELETE,       // Set.prototype.delete(value)
+    JS_BUILTIN_SET_CLEAR,        // Set.prototype.clear()
+    JS_BUILTIN_SET_FOREACH,      // Set.prototype.forEach(cb, thisArg)
+    JS_BUILTIN_SET_INTERSECTION, // Set.prototype.intersection(other)
+    JS_BUILTIN_SET_UNION,        // Set.prototype.union(other)
+    JS_BUILTIN_SET_DIFFERENCE,   // Set.prototype.difference(other)
+    JS_BUILTIN_SET_SYM_DIFF,     // Set.prototype.symmetricDifference(other)
+    JS_BUILTIN_SET_IS_SUBSET,    // Set.prototype.isSubsetOf(other)
+    JS_BUILTIN_SET_IS_SUPERSET,  // Set.prototype.isSupersetOf(other)
+    JS_BUILTIN_SET_IS_DISJOINT,  // Set.prototype.isDisjointFrom(other)
+    JS_BUILTIN_COLL_SIZE_GETTER, // Map/Set.prototype size getter
     JS_BUILTIN_MAX
 };
 
@@ -2760,6 +2789,35 @@ extern "C" Item js_property_get(Item object, Item key) {
             if (js_is_deleted_sentinel(result)) { /* deleted — check getter first */ }
             else return result;
         }
+        // String wrapper indexed character access: new String("abc")[0] → "a"
+        if (!own_found && key._type_id == LMD_TYPE_STRING) {
+            String* sk = it2s(key);
+            if (sk && sk->len > 0 && sk->chars[0] >= '0' && sk->chars[0] <= '9') {
+                bool is_num = true;
+                for (int ni = 0; ni < sk->len; ni++) {
+                    if (sk->chars[ni] < '0' || sk->chars[ni] > '9') { is_num = false; break; }
+                }
+                if (is_num) {
+                    bool cn_found = false;
+                    Item cn = js_map_get_fast(m, "__class_name__", 14, &cn_found);
+                    if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                        String* cn_str = it2s(cn);
+                        if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                            bool pv_found = false;
+                            Item pv = js_map_get_fast(m, "__primitiveValue__", 18, &pv_found);
+                            if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
+                                String* pv_str = it2s(pv);
+                                int idx = atoi(sk->chars);
+                                if (pv_str && idx >= 0 && idx < (int)pv_str->len) {
+                                    char ch[2] = {pv_str->chars[idx], 0};
+                                    return (Item){.item = s2it(heap_create_name(ch, 1))};
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Own getter check: check for __get_<propName> on THIS object BEFORE prototype chain.
         // This ensures own accessors take priority over inherited data properties (ES spec §9.1.8).
         // Skip getter check only for __get_/__set_ keys (to prevent infinite recursion).
@@ -3148,6 +3206,63 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
                             Item tag_val = (Item){.item = s2it(heap_create_name(nm, nl))};
                             js_property_set(fn->prototype, tag_key, tag_val);
+                        }
+                        // v76: Populate Map/Set prototype methods for test262 compliance
+                        if (nl == 3 && strncmp(nm, "Map", 3) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"set", 3, JS_BUILTIN_MAP_SET, 2},
+                                {"get", 3, JS_BUILTIN_MAP_GET, 1},
+                                {"has", 3, JS_BUILTIN_MAP_HAS, 1},
+                                {"delete", 6, JS_BUILTIN_MAP_DELETE, 1},
+                                {"clear", 5, JS_BUILTIN_MAP_CLEAR, 0},
+                                {"forEach", 7, JS_BUILTIN_MAP_FOREACH, 1},
+                                {"keys", 4, JS_BUILTIN_MAP_KEYS, 0},
+                                {"values", 6, JS_BUILTIN_MAP_VALUES, 0},
+                                {"entries", 7, JS_BUILTIN_MAP_ENTRIES, 0},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // Symbol.iterator = entries
+                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_fn = js_get_or_create_builtin(JS_BUILTIN_MAP_ENTRIES, "[Symbol.iterator]", 0);
+                            js_property_set(fn->prototype, si_key, si_fn);
+                            js_mark_non_enumerable(fn->prototype, si_key);
+                        }
+                        if (nl == 3 && strncmp(nm, "Set", 3) == 0) {
+                            struct { const char* name; int len; int bid; int pc; } methods[] = {
+                                {"add", 3, JS_BUILTIN_SET_ADD, 1},
+                                {"has", 3, JS_BUILTIN_SET_HAS, 1},
+                                {"delete", 6, JS_BUILTIN_SET_DELETE, 1},
+                                {"clear", 5, JS_BUILTIN_SET_CLEAR, 0},
+                                {"forEach", 7, JS_BUILTIN_SET_FOREACH, 1},
+                                {"keys", 4, JS_BUILTIN_SET_KEYS, 0},
+                                {"values", 6, JS_BUILTIN_SET_VALUES, 0},
+                                {"entries", 7, JS_BUILTIN_SET_ENTRIES, 0},
+                                {"intersection", 12, JS_BUILTIN_SET_INTERSECTION, 1},
+                                {"union", 5, JS_BUILTIN_SET_UNION, 1},
+                                {"difference", 10, JS_BUILTIN_SET_DIFFERENCE, 1},
+                                {"symmetricDifference", 19, JS_BUILTIN_SET_SYM_DIFF, 1},
+                                {"isSubsetOf", 10, JS_BUILTIN_SET_IS_SUBSET, 1},
+                                {"isSupersetOf", 12, JS_BUILTIN_SET_IS_SUPERSET, 1},
+                                {"isDisjointFrom", 14, JS_BUILTIN_SET_IS_DISJOINT, 1},
+                                {NULL, 0, 0, 0}
+                            };
+                            for (int mi = 0; methods[mi].name; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
+                                Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // Symbol.iterator = values
+                            Item si_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+                            Item si_fn = js_get_or_create_builtin(JS_BUILTIN_SET_VALUES, "[Symbol.iterator]", 0);
+                            js_property_set(fn->prototype, si_key, si_fn);
+                            js_mark_non_enumerable(fn->prototype, si_key);
                         }
                     }
                 }
@@ -5145,10 +5260,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             js_array_method_real_this = (Item){0};
             return result;
         }
-        // String, Number, Boolean, etc. — convert to array-like
+        // String, Number, Boolean, etc. — ToObject then convert to array-like
+        // Strings: wrap to String object but use raw string for array-like conversion
+        // (wrapper objects don't support indexed character access yet)
         {
-            js_array_method_real_this = this_val;
-            Item temp_arr = js_array_like_to_array(this_val);
+            Item wrapped = js_to_object(this_val);
+            js_array_method_real_this = wrapped;
+            // For strings, use the raw primitive for array-like conversion
+            // since js_property_get on strings supports indexed char access
+            Item source = (this_type == LMD_TYPE_STRING) ? this_val : wrapped;
+            Item temp_arr = js_array_like_to_array(source);
             Item result = js_array_method(temp_arr, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
@@ -5927,7 +6048,12 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
     case JS_BUILTIN_MAP_VALUES:  // Map.prototype.values()
     {
         JsCollectionData* cd = js_get_collection_data(this_val);
-        if (!cd) return undef;
+        if (!cd) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item msg = (Item){.item = s2it(heap_create_name("Method called on incompatible receiver"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return ItemNull;
+        }
         // determine iteration mode: 0=values, 1=keys, 2=entries
         int mode = 0;
         if (builtin_id == JS_BUILTIN_SET_ENTRIES || builtin_id == JS_BUILTIN_MAP_ENTRIES) mode = 2;
@@ -6001,6 +6127,86 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         js_property_set(this_val, (Item){.item = s2it(heap_create_name("__node_ptr__", 12))},
                         (Item){.item = i2it((int64_t)(uintptr_t)node->next)});
         return result;
+    }
+
+    // v76: Collection prototype methods (exposed on Map/Set.prototype)
+    // Map methods — throw TypeError if this is not a Map with [[MapData]]
+    case JS_BUILTIN_MAP_SET:
+    case JS_BUILTIN_MAP_GET:
+    case JS_BUILTIN_MAP_HAS:
+    case JS_BUILTIN_MAP_DELETE:
+    case JS_BUILTIN_MAP_CLEAR:
+    case JS_BUILTIN_MAP_FOREACH: {
+        JsCollectionData* cd = js_get_collection_data(this_val);
+        if (!cd || cd->type != JS_COLLECTION_MAP || cd->is_weak) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item msg = (Item){.item = s2it(heap_create_name("Method Map.prototype.* called on incompatible receiver"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return ItemNull;
+        }
+        int mid = 0;
+        switch (builtin_id) {
+            case JS_BUILTIN_MAP_SET: mid = 0; break;
+            case JS_BUILTIN_MAP_GET: mid = 1; break;
+            case JS_BUILTIN_MAP_HAS: mid = 2; break;
+            case JS_BUILTIN_MAP_DELETE: mid = 3; break;
+            case JS_BUILTIN_MAP_CLEAR: mid = 4; break;
+            case JS_BUILTIN_MAP_FOREACH: mid = 5; break;
+        }
+        Item a1 = (mid == 4) ? ItemNull : arg0;
+        Item a2 = (mid == 0 || mid == 5) ? arg1 : ItemNull;
+        return js_collection_method(this_val, mid, a1, a2);
+    }
+    // Set methods — throw TypeError if this is not a Set with [[SetData]]
+    case JS_BUILTIN_SET_ADD:
+    case JS_BUILTIN_SET_HAS:
+    case JS_BUILTIN_SET_DELETE:
+    case JS_BUILTIN_SET_CLEAR:
+    case JS_BUILTIN_SET_FOREACH: {
+        JsCollectionData* cd = js_get_collection_data(this_val);
+        if (!cd || cd->type != JS_COLLECTION_SET || cd->is_weak) {
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item msg = (Item){.item = s2it(heap_create_name("Method Set.prototype.* called on incompatible receiver"))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return ItemNull;
+        }
+        int mid = 0;
+        switch (builtin_id) {
+            case JS_BUILTIN_SET_ADD: mid = 0; break;
+            case JS_BUILTIN_SET_HAS: mid = 2; break;
+            case JS_BUILTIN_SET_DELETE: mid = 3; break;
+            case JS_BUILTIN_SET_CLEAR: mid = 4; break;
+            case JS_BUILTIN_SET_FOREACH: mid = 5; break;
+        }
+        Item a1 = (mid == 4) ? ItemNull : arg0;
+        Item a2 = (mid == 5) ? arg1 : ItemNull;
+        return js_collection_method(this_val, mid, a1, a2);
+    }
+    case JS_BUILTIN_COLL_SIZE_GETTER: {
+        JsCollectionData* cd = js_get_collection_data(this_val);
+        if (!cd) return undef;
+        return (Item){.item = i2it((int64_t)hashmap_count(cd->hmap))};
+    }
+    case JS_BUILTIN_SET_INTERSECTION:
+    case JS_BUILTIN_SET_UNION:
+    case JS_BUILTIN_SET_DIFFERENCE:
+    case JS_BUILTIN_SET_SYM_DIFF:
+    case JS_BUILTIN_SET_IS_SUBSET:
+    case JS_BUILTIN_SET_IS_SUPERSET:
+    case JS_BUILTIN_SET_IS_DISJOINT: {
+        // Delegate to js_map_method which has the Set operation logic
+        const char* method_name_str = NULL;
+        switch (builtin_id) {
+            case JS_BUILTIN_SET_INTERSECTION: method_name_str = "intersection"; break;
+            case JS_BUILTIN_SET_UNION: method_name_str = "union"; break;
+            case JS_BUILTIN_SET_DIFFERENCE: method_name_str = "difference"; break;
+            case JS_BUILTIN_SET_SYM_DIFF: method_name_str = "symmetricDifference"; break;
+            case JS_BUILTIN_SET_IS_SUBSET: method_name_str = "isSubsetOf"; break;
+            case JS_BUILTIN_SET_IS_SUPERSET: method_name_str = "isSupersetOf"; break;
+            case JS_BUILTIN_SET_IS_DISJOINT: method_name_str = "isDisjointFrom"; break;
+        }
+        Item mn = (Item){.item = s2it(heap_create_name(method_name_str, strlen(method_name_str)))};
+        return js_map_method(this_val, mn, &arg0, arg_count);
     }
 
     default:
@@ -10154,6 +10360,19 @@ extern "C" void js_set_prototype(Item object, Item prototype) {
     js_property_set(object, key, prototype);
 }
 
+// helper: set __proto__ on a wrapper object to the constructor's prototype
+static void js_wrapper_set_proto(Item obj, const char* ctor_name, int ctor_len) {
+    Item cn = (Item){.item = s2it(heap_create_name(ctor_name, ctor_len))};
+    Item ctor = js_get_constructor(cn);
+    if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+        Item pk = (Item){.item = s2it(heap_create_name("prototype", 9))};
+        Item proto = js_property_get(ctor, pk);
+        if (get_type_id(proto) == LMD_TYPE_MAP) {
+            js_set_prototype(obj, proto);
+        }
+    }
+}
+
 // Create a Number wrapper object: new Number(42) → {__class_name__: "Number", __primitiveValue__: 42}
 extern "C" Item js_new_number_wrapper(Item arg) {
     Item obj = js_new_object();
@@ -10162,6 +10381,7 @@ extern "C" Item js_new_number_wrapper(Item arg) {
     js_property_set(obj, cn_key, cn_val);
     Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
     js_property_set(obj, pv_key, js_to_number(arg));
+    js_wrapper_set_proto(obj, "Number", 6);
     return obj;
 }
 
@@ -10173,6 +10393,7 @@ extern "C" Item js_new_boolean_wrapper(Item arg) {
     js_property_set(obj, cn_key, cn_val);
     Item pv_key = (Item){.item = s2it(heap_create_name("__primitiveValue__", 18))};
     js_property_set(obj, pv_key, js_to_boolean(arg));
+    js_wrapper_set_proto(obj, "Boolean", 7);
     return obj;
 }
 
@@ -10191,6 +10412,7 @@ extern "C" Item js_new_string_wrapper(Item arg) {
     Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
     Item len_val = (Item){.item = i2it(len)};
     js_property_set(obj, len_key, len_val);
+    js_wrapper_set_proto(obj, "String", 6);
     return obj;
 }
 
@@ -11746,6 +11968,9 @@ extern "C" Item js_weakmap_new(void) {
     Item obj = js_map_collection_new();
     // Override prototype to WeakMap.prototype (js_map_collection_new sets Map.prototype)
     js_collection_link_prototype(obj, "WeakMap", 7);
+    // Mark as weak collection
+    JsCollectionData* cd = js_get_collection_data(obj);
+    if (cd) cd->is_weak = true;
     return obj;
 }
 
@@ -11753,6 +11978,9 @@ extern "C" Item js_weakset_new(void) {
     Item obj = js_set_collection_new();
     // Override prototype to WeakSet.prototype (js_set_collection_new sets Set.prototype)
     js_collection_link_prototype(obj, "WeakSet", 7);
+    // Mark as weak collection
+    JsCollectionData* cd = js_get_collection_data(obj);
+    if (cd) cd->is_weak = true;
     return obj;
 }
 

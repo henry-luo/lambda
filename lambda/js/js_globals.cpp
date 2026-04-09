@@ -3970,6 +3970,30 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
         }
         // v26: check if this is a prototype Map with builtin methods
         if (js_map_has_builtin_method(m, ks->chars, (int)ks->len)) return (Item){.item = b2it(true)};
+        // String wrapper indexed access: new String("abc").hasOwnProperty("0") → true
+        if (ks->len > 0 && ks->chars[0] >= '0' && ks->chars[0] <= '9') {
+            bool cn_found = false;
+            Item cn = js_map_get_fast_ext(m, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cn_str = it2s(cn);
+                if (cn_str && cn_str->len == 6 && strncmp(cn_str->chars, "String", 6) == 0) {
+                    bool pv_found = false;
+                    Item pv = js_map_get_fast_ext(m, "__primitiveValue__", 18, &pv_found);
+                    if (pv_found && get_type_id(pv) == LMD_TYPE_STRING) {
+                        String* pv_str = it2s(pv);
+                        bool is_idx = true;
+                        int64_t idx = 0;
+                        for (int ni = 0; ni < (int)ks->len; ni++) {
+                            if (ks->chars[ni] < '0' || ks->chars[ni] > '9') { is_idx = false; break; }
+                            idx = idx * 10 + (ks->chars[ni] - '0');
+                        }
+                        if (is_idx && idx >= 0 && idx < (int64_t)(pv_str ? pv_str->len : 0)) {
+                            return (Item){.item = b2it(true)};
+                        }
+                    }
+                }
+            }
+        }
         return (Item){.item = b2it(false)};
     }
     if (val.item == JS_DELETED_SENTINEL_VAL) return (Item){.item = b2it(false)};
@@ -5261,17 +5285,46 @@ extern "C" void js_globals_batch_reset() {
     js_process_argv_items = (Item){.item = ITEM_NULL};
 }
 
+// forward declaration for populating globalThis with constructors
+extern "C" Item js_get_constructor(Item name_item);
+
 extern "C" Item js_get_global_this() {
     if (js_global_this_obj.item == 0) {
         js_global_this_obj = js_new_object();
         // populate standard globals
-        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, ItemNull);
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("undefined", 9))}, make_js_undefined());
         double* nan_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *nan_p = NAN;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("NaN", 3))}, (Item){.item = d2it(nan_p)});
         double* inf_p = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
         *inf_p = INFINITY;
         js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("Infinity", 8))}, (Item){.item = d2it(inf_p)});
+
+        // populate constructor functions on globalThis
+        static const struct { const char* name; int len; } ctor_names[] = {
+            {"Object", 6}, {"Array", 5}, {"Function", 8},
+            {"String", 6}, {"Number", 6}, {"Boolean", 7}, {"Symbol", 6},
+            {"Error", 5}, {"TypeError", 9}, {"RangeError", 10},
+            {"ReferenceError", 14}, {"SyntaxError", 11},
+            {"URIError", 8}, {"EvalError", 9},
+            {"RegExp", 6}, {"Date", 4}, {"Promise", 7},
+            {"Map", 3}, {"Set", 3}, {"WeakMap", 7}, {"WeakSet", 7},
+            {"ArrayBuffer", 11}, {"DataView", 8},
+            {"Int8Array", 9}, {"Uint8Array", 10}, {"Uint8ClampedArray", 17},
+            {"Int16Array", 10}, {"Uint16Array", 11},
+            {"Int32Array", 10}, {"Uint32Array", 11},
+            {"Float32Array", 12}, {"Float64Array", 12},
+            {NULL, 0}
+        };
+        for (int i = 0; ctor_names[i].name; i++) {
+            Item name_item = (Item){.item = s2it(heap_create_name(ctor_names[i].name, ctor_names[i].len))};
+            Item ctor = js_get_constructor(name_item);
+            if (get_type_id(ctor) == LMD_TYPE_FUNC) {
+                js_property_set(js_global_this_obj, name_item, ctor);
+            }
+        }
+        // globalThis self-reference
+        js_property_set(js_global_this_obj, (Item){.item = s2it(heap_create_name("globalThis", 10))}, js_global_this_obj);
     }
     return js_global_this_obj;
 }

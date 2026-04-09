@@ -4745,6 +4745,8 @@ static MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* 
     if (id->name->len == 4 && strncmp(id->name->chars, "this", 4) == 0) {
         JsMirVarEntry* var = jm_find_var(mt, "_js_this");
         if (var) return var->reg;  // arrow function captured 'this'
+        // At top level (js_main) in sloppy mode, 'this' is the global object
+        if (mt->in_main && !mt->is_global_strict) return jm_call_0(mt, "js_get_global_this", MIR_T_I64);
         return jm_call_0(mt, "js_get_this", MIR_T_I64);
     }
 
