@@ -27,6 +27,7 @@
 #include "validator/validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
+#include "emit_sexpr.h"  // For --emit-sexpr command
 
 // Error handling with stack traces
 #include "lambda-error.h"
@@ -2966,6 +2967,15 @@ int main(int argc, char *argv[]) {
 
         runtime_cleanup(&runtime);
         return 0;
+    }
+
+    // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
+    if (argc >= 3 && strcmp(argv[1], "--emit-sexpr") == 0) {
+        const char* sexpr_path = argv[2];
+        log_debug("Emitting s-expressions for '%s'", sexpr_path);
+        int result = emit_sexpr_file(sexpr_path);
+        log_finish();
+        return result;
     }
 
     // Handle run command

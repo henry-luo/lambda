@@ -34,6 +34,7 @@
 (require redex)
 (require "lambda-core.rkt")
 (require "lambda-eval.rkt")
+(require "lambda-object.rkt")
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
@@ -133,6 +134,24 @@
     [`(seq ,stmts ...)
      (eval-block σ ρ stmts)]
 
+    ;; ── Immutable let binding in proc context — thread env like var ──
+    ;; (let ((x init) ...) null) — bind immutably and extend env
+    [`(let ((,xs ,es) ...) null)
+     #:when (andmap symbol? xs)
+     (let loop ([names xs] [inits es] [ρ* ρ] [out '()])
+       (cond
+         [(null? names)
+          (result 'normal `(multi-env-extend ,@(map cons xs 
+                    (map (λ (x) (proc-env-ref σ ρ* x)) xs))) out)]
+         [else
+          (define r (eval-proc σ ρ* (car inits)))
+          (cond
+            [(not (result-normal? r)) r]
+            [else
+             (define new-ρ (proc-env-set ρ* (car names) (result-value r)))
+             (loop (cdr names) (cdr inits) new-ρ
+                   (append out (result-output r)))])]))]
+
     ;; ── Mutable variable declaration ──
     ;; (var x e) — allocate store location, bind x to location
     [`(var ,x ,init-e)
@@ -187,9 +206,8 @@
                (let ([new-arr `(array-val ,@(list-set items real-idx new-val))])
                  (cond
                    [loc (store-write! σ loc new-arr) (normal-result new-val out)]
-                   ;; if it's a let binding with a map/array, Lambda allows mutation
-                   ;; on let containers (they're reference types)
-                   [else (normal-result `(error-val "cannot index-assign immutable" 211) out)]))
+                   ;; let-bound containers are reference types in Lambda — allow mutation
+                   [else (normal-result `(env-extend ,arr-x ,new-arr) out)]))
                (normal-result 'null out))]
           [_ (normal-result `(error-val "not an array" 300) out)])])]
 
@@ -215,11 +233,8 @@
            (cond
              [loc (store-write! σ loc new-map) (normal-result new-val out)]
              [else
-              ;; Let-bound containers can be mutated in Lambda
-              ;; (they are reference types under the hood)
-              ;; We simulate by updating the store through the container's own loc
-              ;; For now, we allow it by env shadowing handled externally
-              (normal-result `(error-val "cannot member-assign immutable" 211) out)])]
+              ;; Let-bound container: return env-extend to rebind with mutated map
+              (result 'normal `(env-extend ,obj-x ,new-map) out)])]
           [`(object-val ,type-name ,pairs ...)
            (define new-pairs
              (cond
@@ -229,30 +244,40 @@
            (define new-obj `(object-val ,type-name ,@new-pairs))
            (cond
              [loc (store-write! σ loc new-obj) (normal-result new-val out)]
-             [else (normal-result `(error-val "cannot member-assign immutable" 211) out)])]
+             [else
+              ;; Let-bound container: return env-extend to rebind with mutated object
+              (result 'normal `(env-extend ,obj-x ,new-obj) out)])]
           [_ (normal-result `(error-val "not a map/object" 300) out)])])]
 
     ;; ── While loop ──
     ;; (while cond-e body-e)
     [`(while ,cond-e ,body-e)
-     (let loop ([out '()])
-       (define cond-r (eval-proc σ ρ cond-e))
+     ;; Extract block stmts from body for eval-block+env tracking
+     (define body-stmts
+       (match body-e
+         [`(seq ,stmts ...) stmts]
+         [`(block ,stmts ...) stmts]
+         [_ (list body-e)]))
+     (let loop ([out '()] [ρ-loop ρ])
+       (define cond-r (eval-proc σ ρ-loop cond-e))
        (cond
          [(not (result-normal? cond-r))
           (result (result-tag cond-r) (result-value cond-r)
                   (append out (result-output cond-r)))]
          [(not (truthy-val? (result-value cond-r)))
-          ;; condition is falsy → exit loop, return null
-          (normal-result 'null (append out (result-output cond-r)))]
+          ;; condition is falsy → exit loop, propagate let-bound container changes
+          (normal-result (env-diff ρ ρ-loop) (append out (result-output cond-r)))]
          [else
-          (define body-r (eval-proc σ ρ body-e))
+          ;; Evaluate body via eval-block+env to track env changes
+          (define-values (body-r body-env) (eval-block+env σ ρ-loop body-stmts))
           (define new-out (append out (result-output cond-r) (result-output body-r)))
+          (define new-ρ body-env)
           (cond
-            [(result-break? body-r)    (normal-result 'null new-out)]
-            [(result-continue? body-r) (loop new-out)]
+            [(result-break? body-r)    (normal-result (env-diff ρ new-ρ) new-out)]
+            [(result-continue? body-r) (loop new-out new-ρ)]
             [(result-return? body-r)   (result 'return (result-value body-r) new-out)]
             ;; normal → continue looping
-            [else (loop new-out)])]))]
+            [else (loop new-out new-ρ)])]))]
 
     ;; ── Break ──
     [`(break) (break-result '())]
@@ -270,17 +295,35 @@
 
     ;; ── Print (side effect) ──
     ;; (print e) — evaluate e, convert to string, append to output
+    ;; Lambda's print: strings/symbols output raw content; other types use value->string
     [`(print ,e)
      (define r (eval-proc σ ρ e))
      (cond
        [(not (result-normal? r)) r]
        [else
-        (define s (value->string (result-value r)))
+        (define v (result-value r))
+        (define s (match v
+                    [(? string?) v]              ;; print("hello") → hello
+                    [`(sym ,name) name]           ;; print('sym') → sym
+                    [_ (value->string v)]))
         (normal-result 'null (append (result-output r) (list s)))])]
 
     ;; ── If-else (procedural, with side effects) ──
-    ;; (if-proc cond then else)
+    ;; (if-proc cond then else) OR (if cond then else) — both forms
     [`(if-proc ,cond-e ,then-e ,else-e)
+     (define cond-r (eval-proc σ ρ cond-e))
+     (cond
+       [(not (result-normal? cond-r)) cond-r]
+       [else
+        (define branch-r
+          (if (truthy-val? (result-value cond-r))
+              (eval-proc σ ρ then-e)
+              (eval-proc σ ρ else-e)))
+        (result (result-tag branch-r) (result-value branch-r)
+                (append (result-output cond-r) (result-output branch-r)))])]
+
+    ;; Functional if in proc context
+    [`(if ,cond-e ,then-e ,else-e)
      (define cond-r (eval-proc σ ρ cond-e))
      (cond
        [(not (result-normal? cond-r)) cond-r]
@@ -295,6 +338,57 @@
     ;; ── If without else (procedural) ──
     [`(if-proc ,cond-e ,then-e)
      (eval-proc σ ρ `(if-proc ,cond-e ,then-e (seq)))]
+
+    ;; Functional if-stam in proc context
+    [`(if-stam ,cond-e ,then-e)
+     (eval-proc σ ρ `(if-proc ,cond-e ,then-e (seq)))]
+
+    ;; ── Match statement (procedural) ──
+    ;; (match scrut-e clause ...) where clause is (case-type τ body) | (case-val v body) | (default-case body)
+    [`(match ,scrut-e ,clauses ...)
+     (define scrut-r (eval-proc σ ρ scrut-e))
+     (cond
+       [(not (result-normal? scrut-r)) scrut-r]
+       [else
+        (define scrut (result-value scrut-r))
+        (define ρ* (proc-env-set (proc-env-set ρ '~ scrut) '_pipe_item scrut))
+        (let loop ([cs clauses] [out (result-output scrut-r)])
+          (cond
+            [(null? cs) (normal-result 'null out)]
+            [else
+             (define c (car cs))
+             (match c
+               [`(case-type ,τ ,body)
+                (if (type-check-is scrut τ)
+                    (let ([r (eval-proc σ ρ* body)])
+                      (result (result-tag r) (result-value r)
+                              (append out (result-output r))))
+                    (loop (cdr cs) out))]
+               [`(case-val ,v-expr ,body)
+                (define v-r (eval-proc σ ρ v-expr))
+                (cond
+                  [(not (result-normal? v-r)) v-r]
+                  [(val-eq-racket? scrut (result-value v-r))
+                   (let ([r (eval-proc σ ρ* body)])
+                     (result (result-tag r) (result-value r)
+                             (append out (result-output v-r) (result-output r))))]
+                  [else (loop (cdr cs) (append out (result-output v-r)))])]
+               [`(case-range ,lo-expr ,hi-expr ,body)
+                (define lo-r (eval-proc σ ρ lo-expr))
+                (define hi-r (eval-proc σ ρ hi-expr))
+                (if (and (result-normal? lo-r) (result-normal? hi-r)
+                         (numeric-val? scrut)
+                         (>= (to-number scrut) (to-number (result-value lo-r)))
+                         (<= (to-number scrut) (to-number (result-value hi-r))))
+                    (let ([r (eval-proc σ ρ* body)])
+                      (result (result-tag r) (result-value r)
+                              (append out (result-output lo-r) (result-output hi-r) (result-output r))))
+                    (loop (cdr cs) out))]
+               [`(default-case ,body)
+                (let ([r (eval-proc σ ρ* body)])
+                  (result (result-tag r) (result-value r)
+                          (append out (result-output r))))]
+               [_ (loop (cdr cs) out)])]))])]
 
     ;; ── Define procedural function ──
     ;; (def-pn name (params ...) body) — like def-fn but creates pn-closure
@@ -325,6 +419,40 @@
            (define all-out (append (result-output f-r) arg-out))
            (define fn-val (result-value f-r))
            (apply-proc-closure σ ρ fn-val args all-out)])])]
+
+    ;; ── pn method call: var.method(args...) — mutates object in-place ──
+    [`(pn-method-call ,obj-name ,method-name ,arg-exprs ...)
+     (eval-pn-method-call σ ρ obj-name method-name arg-exprs)]
+
+    ;; ── fn method call in proc context: pure, no mutation ──
+    [`(method-call ,obj-expr ,method-name ,arg-exprs ...)
+     (define fn-env (make-functional-env σ ρ))
+     (norm (eval-method-call fn-env obj-expr method-name arg-exprs))]
+
+    ;; ── Functional app in proc context — handle pn-closures ──
+    [`(app ,f-e ,arg-es ...)
+     (define f-r (eval-proc σ ρ f-e))
+     (cond
+       [(not (result-normal? f-r)) f-r]
+       [else
+        (define arg-results
+          (for/list ([ae arg-es])
+            (eval-proc σ ρ ae)))
+        (define first-non-normal
+          (for/first ([r arg-results] #:when (not (result-normal? r))) r))
+        (cond
+          [first-non-normal first-non-normal]
+          [else
+           (define args (map result-value arg-results))
+           (define arg-out (apply append (map result-output arg-results)))
+           (define all-out (append (result-output f-r) arg-out))
+           (define fn-val (result-value f-r))
+           (apply-proc-closure σ ρ fn-val args all-out)])])]
+
+    ;; ── Object construction in proc context ──
+    [`(make-object ,type-name (,field-names ,field-exprs) ...)
+     (define fn-env (make-functional-env σ ρ))
+     (norm (eval-make-object fn-env type-name field-names field-exprs))]
 
     ;; ── Delegate to functional evaluator for pure expressions ──
     [_
@@ -432,21 +560,28 @@
 ;; from var declarations.
 
 (define (eval-block σ ρ stmts)
+  (define-values (r _env) (eval-block+env σ ρ stmts))
+  r)
+
+;; eval-block+env: like eval-block but also returns the final environment
+;; Used by while to track let-bound container changes across iterations.
+(define (eval-block+env σ ρ stmts)
   (cond
-    [(null? stmts) (norm 'null)]
+    [(null? stmts) (values (norm 'null) ρ)]
     [(null? (cdr stmts))
-     ;; last statement — its result is the block's result
-     (eval-block-stmt σ ρ (car stmts))]
+     (define r (eval-block-stmt σ ρ (car stmts)))
+     (define new-ρ (apply-env-change ρ (result-value r)))
+     (values r new-ρ)]
     [else
      (define r (eval-block-stmt σ ρ (car stmts)))
      (cond
-       [(not (result-normal? r)) r]  ; propagate control flow
+       [(not (result-normal? r)) (values r ρ)]
        [else
-        ;; Check if the result is an env-extend
         (define new-ρ (apply-env-change ρ (result-value r)))
-        (define rest-r (eval-block σ new-ρ (cdr stmts)))
-        (result (result-tag rest-r) (result-value rest-r)
-                (append (result-output r) (result-output rest-r)))])]))
+        (define-values (rest-r final-ρ) (eval-block+env σ new-ρ (cdr stmts)))
+        (values (result (result-tag rest-r) (result-value rest-r)
+                        (append (result-output r) (result-output rest-r)))
+                final-ρ)])]))
 
 (define (eval-block-stmt σ ρ stmt)
   ;; Evaluate a single statement, handling var + def-pn env extensions
@@ -455,9 +590,34 @@
 
 (define (apply-env-change ρ v)
   ;; If v is (env-extend name val), apply it to ρ
+  ;; If v is (multi-env-extend (name . val) ...), apply all to ρ
   (match v
     [`(env-extend ,name ,val) (proc-env-set ρ name val)]
+    [`(multi-env-extend ,pairs ...)
+     (foldl (λ (p ρ) (proc-env-set ρ (car p) (cdr p))) ρ pairs)]
     [_ ρ]))
+
+;; Compute env diff: returns a multi-env-extend form for let-bound containers
+;; that changed between ρ-old and ρ-new. Only tracks map-val/array-val/object-val.
+;; Returns only the most recent binding per name.
+(define (env-diff ρ-old ρ-new)
+  (define (container-val? v)
+    (and (pair? v) (memq (car v) '(map-val array-val object-val))))
+  (define seen (make-hasheq))
+  (define pairs '())
+  (for ([binding (in-list ρ-new)])
+    (when (pair? binding)
+      (define name (car binding))
+      (define v (cdr binding))
+      (when (and (list? v) (container-val? v)
+                 (not (hash-has-key? seen name)))
+        (hash-set! seen name #t)
+        (define old (assq name ρ-old))
+        (when (and old (not (equal? (cdr old) v)))
+          (set! pairs (cons (cons name v) pairs))))))
+  (if (null? pairs)
+      'null
+      `(multi-env-extend ,@(reverse pairs))))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
@@ -501,10 +661,89 @@
 
 
 ;; ════════════════════════════════════════════════════════════════════════════
+;; 9. PN METHOD DISPATCH (object mutation)
+;; ════════════════════════════════════════════════════════════════════════════
+
+;; eval-pn-method-call : σ × ρ × obj-name × method-name × arg-exprs → Result
+;; Dispatches a pn method on an object stored at a mutable location.
+;; 1. Reads the object from store via obj-name
+;; 2. Looks up the pn method in the type registry
+;; 3. Binds fields as mutable store locations
+;; 4. Evaluates method body with eval-proc
+;; 5. Reads back modified fields
+;; 6. Writes updated object back to the store
+
+(define (eval-pn-method-call σ ρ obj-name method-name arg-exprs)
+  ;; evaluate arguments
+  (define arg-results
+    (for/list ([ae arg-exprs])
+      (eval-proc σ ρ ae)))
+  (define first-non-normal
+    (for/first ([r arg-results] #:when (not (result-normal? r))) r))
+  (cond
+    [first-non-normal first-non-normal]
+    [else
+     (define args (map result-value arg-results))
+     (define arg-out (apply append (map result-output arg-results)))
+     ;; read the object from store
+     (define obj-loc (proc-env-find-loc ρ obj-name))
+     (define obj-v
+       (cond
+         [obj-loc (store-read σ obj-loc)]
+         [else (proc-env-ref σ ρ obj-name)]))
+     (cond
+       [(not (object-val? obj-v))
+        (normal-result `(error-val "pn method call on non-object" 300) arg-out)]
+       [else
+        (define tname (object-type-name obj-v))
+        (define mspec (resolve-method tname method-name))
+        (cond
+          [(not mspec)
+           (normal-result
+            `(error-val ,(format "unknown method ~a on ~a" method-name tname) 300)
+            arg-out)]
+          [(not (eq? (method-spec-kind mspec) 'pn))
+           ;; fn method: evaluate purely, no mutation
+           (define fn-env (make-functional-env σ ρ))
+           (define result (eval-method-call fn-env obj-v method-name
+                                            (map (λ (a) `',a) args)))
+           (normal-result result arg-out)]
+          [else
+           ;; pn method: create mutable bindings for fields
+           (define field-pairs (object-fields obj-v))
+           ;; allocate store locations for each field
+           (define field-locs
+             (for/list ([pair field-pairs])
+               (define loc (store-alloc! σ (cadr pair)))
+               (list (car pair) loc)))
+           ;; build method environment with field locs
+           (define ρ-method
+             (for/fold ([env '()]) ([fl field-locs])
+               (proc-env-set env (car fl) `(loc ,(cadr fl)))))
+           ;; bind ~ to self
+           (define ρ-self (proc-env-set ρ-method '_pipe_item obj-v))
+           ;; bind method params as mutable
+           (define ρ-final (bind-pn-params σ ρ-self (method-spec-params mspec) args))
+           ;; execute method body
+           (define r (eval-proc σ ρ-final (method-spec-body mspec)))
+           (define out (append arg-out (result-output r)))
+           ;; read back modified field values
+           (define new-fields
+             (for/list ([fl field-locs])
+               (list (car fl) (store-read σ (cadr fl)))))
+           ;; construct updated object
+           (define new-obj `(object-val ,tname ,@new-fields))
+           ;; write back to original location
+           (when obj-loc
+             (store-write! σ obj-loc new-obj))
+           (normal-result 'null out)])])]))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
 ;; EXPORTS
 ;; ════════════════════════════════════════════════════════════════════════════
 
-(provide eval-proc eval-block
+(provide eval-proc eval-block eval-block+env
          run-proc run-pn-call run-pn-body
          make-store store-alloc! store-read store-write!
          proc-env-ref proc-env-set proc-env-find-loc

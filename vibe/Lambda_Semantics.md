@@ -2,27 +2,62 @@
 
 ## Summary
 
-Enhance the PLT Redex formal semantics model (`lambda/semantics/`) to:
-1. Sync with the current Lambda language design and C implementation
-2. Expand coverage to the full language including procedural features
-3. Generate expected output that can be verified against the `test/lambda/*.txt` baseline files
+Build a **formal specification** of the Lambda language using PLT Redex (`lambda/semantics/`). The Redex model is the **authoritative definition** of Lambda's semantics — it defines what the language *should* do.
+
+Goals:
+1. Capture Lambda's formal semantics as executable reduction rules in PLT Redex
+2. Expand coverage to the full language including procedural features and object types
+3. Validate the Redex model against `test/lambda/*.txt` baseline files to confirm agreement between the formal specification and the implementation
+
+### Methodology
+
+There is currently **no single oracle** for Lambda semantics. The reference documentation is incomplete and may be outdated; the C implementation may contain bugs. The Redex model is being built to fill this gap.
+
+**Sources of truth** (in priority order):
+1. **Language designer** (Henry) — the final authority on any ambiguous or disputed semantics
+2. **Reference documentation** (`doc/Lambda_*.md`) — primary written specification, but incomplete
+3. **C implementation** (`lambda/`) — de facto behavior, but may have bugs
+
+**Verification approach**:
+1. Build Redex evaluation rules from language design intent (docs + designer clarification)
+2. Parse each `.ls` test file → emit Redex-compatible AST (s-expression) via `lambda.exe --emit-sexpr`
+3. Evaluate the AST using the Redex evaluator
+4. Compare Redex output against the corresponding `.txt` expected output file
+5. When they **agree**: the formal model confirms the implementation behavior
+6. When they **disagree**: investigate — could be a Redex model gap, an implementation/`.txt` bug, or unclear semantics requiring designer input
+
+The `.txt` files are **not** treated as ground truth. They are what we are validating. A passing test means "the formal specification agrees with the current implementation output." A failing test is a signal to investigate, not an automatic reason to change the Redex model.
+
+## Progress
+
+| Phase | Status | Completed |
+|-------|--------|-----------|
+| 1 — Sync Model to Current Implementation | **Done** | Fixed c-repr drift, added missing eval rules (as-type, slice, to-symbol), named fn definitions, resolved 0-truthiness |
+| 2 — Procedural Extension | **Done** | Store model, var/assign/while/break/continue/return, pn closures, print output accumulator (`lambda-proc.rkt`) |
+| 3 — Object Type System | **Done** | Nominal typing, construction, single inheritance, defaults, constraints, fn/pn methods, object update/spread, pattern matching (`lambda-object.rkt`) |
+| 4 — Test Baseline Verification Bridge | **In Progress** | `--emit-sexpr` AST bridge, Redex evaluator extended, `make test-redex-baseline`, **87/194 pass** (82 fail, 15 import errors, 9 no .txt, 1 unsupported) |
+| 5 — Extended For-Clauses and Match | Not started | Extended for-clauses, advanced match patterns, string interpolation |
+
+**All 184 tests pass** (149 functional/procedural + 35 object type system).
 
 ## Current State
 
-The Redex model (6 files, ~4200 lines) covers Lambda's **functional core**:
+The Redex model (8+ files, ~8000+ lines) covers Lambda's **functional core**, **procedural extension**, and **object type system**:
 
 | File | Lines | Scope |
 |------|-------|-------|
-| `lambda-core.rkt` | 479 | Grammar, values, environments, 16 helper metafunctions |
-| `lambda-eval.rkt` | 1089 | Big-step evaluator — all functional expressions |
+| `lambda-core.rkt` | ~500 | Grammar, values, environments, helpers (extended with object/proc forms) |
+| `lambda-eval.rkt` | ~1350 | Big-step evaluator — functional expressions + object construction/methods |
+| `lambda-proc.rkt` | ~600 | Procedural extension — mutable state, while/break/continue/return, pn closures |
+| `lambda-object.rkt` | ~140 | Object type system — type registry, nominal typing, inheritance, constraints |
 | `lambda-types.rkt` | 513 | Type inference, subtyping, type join |
-| `c-repr.rkt` | 641 | C type mapping, boxing/unboxing, 90+ sys-func catalog |
+| `c-repr.rkt` | ~650 | C type mapping, boxing/unboxing, 100+ sys-func catalog (synced) |
 | `boxing-rules.rkt` | 597 | 10 deterministic + 4 random property checks |
-| `tests.rkt` | 875 | ~100 test cases across all modules |
+| `tests.rkt` | ~1800 | 184 test cases across all modules (Parts 1–7) |
 
-**Covered**: primitives, arithmetic, comparison, logical, string concat, collections (array, list, map, range), member/index, for (5 variants), pipe, where, match, closures, HOF, error handling, spread, type conversions, collection builtins.
+**Covered**: primitives, arithmetic, comparison, logical, string concat, collections (array, list, map, range), member/index, for (5 variants), pipe, where, match, closures, HOF, error handling, spread, type conversions, collection builtins, named functions, as-type casts, slice, mutable variables, assignment, while/break/continue/return, pn closures, print, nominal object types, object construction, single inheritance, default fields, field/object constraints, fn/pn methods, object update/spread, pattern matching on types.
 
-**Not covered**: procedural features, object types, named functions, string interpolation, module system, type constraints, destructuring, extended for-clauses, I/O, and ~50% of the test/lambda baseline.
+**Not covered**: string interpolation, module system, destructuring, extended for-clauses, I/O, and ~50% of the test/lambda baseline (external deps).
 
 ## Test Suite Landscape
 
@@ -37,12 +72,12 @@ The `test/lambda/` directory contains **~431 `.ls` test scripts** with **~252 `.
 | For expressions | ~6 | Covered today |
 | Pipes | ~4 | Covered today |
 | Match expressions | ~3 | Covered today |
-| Types, type patterns | ~8 | Partially covered (no object types) |
+| Types, type patterns | ~8 | Covered (including object types) |
 | Error handling | ~3 | Covered today |
-| Objects, mutation | ~8 | **Not covered — needs object model** |
+| Objects, mutation | ~8 | **Covered (Phase 3)** |
 | Numeric specializations (int64, decimal, vectors) | ~12 | **Not covered — needs numeric tower** |
 | Transpiler-specific (box/unbox, bitwise) | ~6 | **Not covered — needs c-repr bridge** |
-| Procedural (proc/) | ~33 | **Not covered — needs Phase 2** |
+| Procedural (proc/) | ~33 | **Covered (Phase 2)** |
 | Import/modules | ~4 | **Not covered — needs module model** |
 | I/O, SQLite, file system | ~10 | **Out of scope** (external deps) |
 | Input parsers (JSON, XML, CSS, ...) | ~55 | **Out of scope** (infrastructure) |
@@ -50,13 +85,13 @@ The `test/lambda/` directory contains **~431 `.ls` test scripts** with **~252 `.
 | Math/LaTeX | ~28 | **Out of scope** (domain-specific) |
 | Validator/schema | ~43 | Potentially feasible, lower priority |
 
-**Feasible target**: ~120–130 of the ~252 tests with `.txt` files can be verified by an enhanced Redex evaluator (functional + procedural + objects). The remaining ~120 depend on external I/O, parser infrastructure, or domain-specific engines.
+**Feasible target**: ~120–130 of the ~252 tests with `.txt` files can be evaluated by the Redex model (functional + procedural + objects). The remaining ~120 depend on external I/O, parser infrastructure, or domain-specific engines and are skipped. Agreement between Redex and `.txt` validates the formal specification; disagreement surfaces semantic questions for the language designer.
 
 ---
 
-## Phase 1: Sync Model to Current Implementation
+## Phase 1: Sync Model to Current Implementation — DONE
 
-**Goal**: Fix drift between Redex model and actual C code. All existing `tests.rkt` pass with corrected definitions.
+**Goal**: Establish the Redex model as the formal specification by syncing it with the current language design. All existing `tests.rkt` pass with corrected definitions.
 
 ### 1.1 Fix Known Discrepancies in c-repr.rkt
 
@@ -100,7 +135,7 @@ Resolve the documented discrepancy: implementation treats 0 as falsy. Either:
 
 ---
 
-## Phase 2: Procedural Extension
+## Phase 2: Procedural Extension — DONE
 
 **Goal**: Model `pn`, `var`, `while`, `break`, `continue`, `return`, mutable assignment. Cover the `test/lambda/proc/` test suite (~33 tests).
 
@@ -174,7 +209,7 @@ Key semantic rules:
 
 ---
 
-## Phase 3: Object Type System
+## Phase 3: Object Type System — DONE
 
 **Goal**: Model nominal object types, methods, mutation methods, constraints, inheritance.
 
@@ -230,51 +265,58 @@ Constraint predicate is evaluated at construction time. `~` binds to the value b
 
 Inherits all fields and methods from parent. Object is instance of both child and parent types.
 
-**Deliverable**: Extended `lambda-types.rkt` with nominal subtyping. Extended evaluator handles object construction, member access, method dispatch, mutation. Tests cover `test/lambda/object*.ls` (~8 files).
+**Deliverable**: New `lambda-object.rkt` type registry. Extended `lambda-eval.rkt` handles object construction, member access, fn method dispatch. Extended `lambda-proc.rkt` handles pn mutation methods. 35 new test cases in `tests.rkt` Part 7 cover all 8 `test/lambda/object*.ls` files.
 
 ---
 
 ## Phase 4: Test Baseline Verification Bridge
 
-**Goal**: Run the Redex evaluator on `test/lambda/*.ls` scripts and compare output against `*.txt` files.
+**Goal**: Validate the Redex formal specification against the Lambda implementation by evaluating `test/lambda/*.ls` scripts through the Redex evaluator and comparing output against the implementation's `*.txt` expected files.
+
+This is a **two-way validation**:
+- Tests where Redex agrees with `.txt` → formal model confirms the implementation
+- Tests where Redex disagrees with `.txt` → signals for investigation (Redex gap, implementation bug, or ambiguous semantics)
+- Ambiguous cases → escalated to the language designer for resolution
 
 ### 4.1 Lambda Source → Redex AST
 
-Build a parser that converts Lambda concrete syntax to Redex s-expressions.
+Uses **Option C — `--emit-sexpr` flag** on `lambda.exe`:
+1. `lambda.exe --emit-sexpr script.ls` parses the `.ls` file using the production Tree-sitter parser and emits the AST as Redex-compatible s-expressions
+2. Racket reads the s-expressions and feeds them to the Redex evaluator
+3. No grammar duplication — reuses the same parser and AST the C evaluator sees
 
-**Option A — Tree-sitter bridge** (recommended):
-1. Use the existing Tree-sitter Lambda grammar (`lambda/tree-sitter-lambda/grammar.js`)
-2. Write a Racket FFI binding or a Node.js script that parses `.ls` files and emits Redex s-expressions as JSON/S-expr
-3. Racket reads the s-expressions and feeds them to `eval-prog`
-
-**Option B — Racket parser**:
-1. Write a PEG or recursive-descent parser in Racket for Lambda syntax
-2. More self-contained but duplicates the grammar definition
-
-**Option C — Lambda `--ast-json` flag** (simplest):
-1. Add a CLI flag `./lambda.exe --emit-ast script.ls` that outputs the AST as JSON
-2. Racket reads the JSON and converts to Redex terms
-3. Reuses the production parser; no grammar duplication
-
-Option C avoids maintaining two parsers. The AST JSON can be verified against `ast.hpp`'s `AstNodeType` enum, ensuring the Redex model uses the same AST the C evaluator sees.
+Implementation: `emit_sexpr.cpp` (~1750+ lines) maps `AstNodeType` enum to Redex s-expression forms, covering 90+ system functions.
 
 ### 4.2 Output Comparison Harness
 
 ```racket
-;; verify-test : path → (pass | fail diff)
+;; verify-test : path → (pass | fail | error | skip)
 (define (verify-test ls-path)
-  (define ast (parse-lambda-file ls-path))
-  (define-values (σ v output) (eval-prog empty-store empty-env ast))
-  (define expected (file->lines (path-replace-extension ls-path ".txt")))
-  (define actual output)  ; list of stdout lines
-  (if (equal? expected actual)
-      'pass
-      (list 'fail expected actual)))
+  (define sexpr (read-sexpr-from-exe ls-path))    ; call lambda.exe --emit-sexpr
+  (define actual (eval-sexpr sexpr))               ; evaluate via Redex
+  (define expected (file->string (txt-path ls-path)))  ; read .txt file
+  (cond
+    [(string=? actual expected) 'pass]             ; formal model agrees with implementation
+    [else (list 'fail actual expected)]))          ; disagreement — needs investigation
 ```
 
-### 4.3 Test Classification
+### 4.3 Disagreement Resolution Protocol
 
-Not all tests are feasible. Classify automatically:
+When the Redex evaluator and `.txt` file disagree:
+
+| Scenario | Action |
+|----------|--------|
+| Redex model is missing a language feature | Extend the Redex evaluator |
+| Redex model has incorrect semantics | Fix the Redex model (consult designer if unclear) |
+| `.txt` file reflects an implementation bug | Flag the `.txt` as suspect; confirm with designer; fix implementation |
+| Semantics are ambiguous or undocumented | Ask the language designer for a ruling; update Redex model accordingly |
+| Test depends on I/O, imports, or external infra | Skip (out of scope for pure semantic model) |
+
+The Redex model is never blindly adjusted to match `.txt` files. Each disagreement is a semantic question.
+
+### 4.4 Test Classification
+
+Not all tests are feasible for a pure semantic model. Tests are auto-classified:
 
 ```racket
 (define (test-feasible? ast)
@@ -297,24 +339,62 @@ Expected coverage matrix:
 | I/O/parser/chart/math | ~115 | 0 | Out of scope |
 | **Total** | **~252** | **~128** | |
 
-### 4.4 Make Targets
+### 4.5 Make Targets
 
 ```makefile
 make test-redex              # Run all Redex verification
 make test-redex-unit         # tests.rkt — Redex internal unit tests
 make test-redex-properties   # boxing-rules.rkt — property checks
-make test-redex-baseline     # Phase 4 — verify against test/lambda/*.txt
+make test-redex-baseline     # Phase 4 — validate Redex model against test/lambda/*.txt
 ```
 
 `make test-redex-baseline` reports:
 ```
 Redex baseline: 128 feasible, 124 pass, 4 fail, 124 skip (I/O/parser)
-FAIL: test/lambda/decimal.ls — line 3: expected "3.14159" got "3.1416"
-FAIL: test/lambda/object_constraint.ls — line 7: expected "error" got "null"
+FAIL: test/lambda/decimal.ls — line 3: Redex says "3.1416", .txt says "3.14159"
+  → Investigate: is the Redex rounding rule wrong, or the implementation?
 ...
 ```
 
-**Deliverable**: Parser bridge (Option C recommended), test harness, `make test-redex-baseline` integrated with CI.
+**Deliverable**: `--emit-sexpr` AST emitter (`emit_sexpr.cpp`), Racket bridge (`ast-bridge.rkt`), test harness (`baseline-verify.rkt`), `make test-redex-baseline`. Each disagreement between Redex and `.txt` is investigated as a semantic question, not automatically resolved by adjusting the model.
+
+### 4.6 Current Baseline Status
+
+**87 / 194 pass** (87 agree, 82 disagree, 15 emit errors from import tests, 9 no `.txt`, 1 unsupported).
+
+Out-of-scope tests (not feasible for a pure semantic model):
+- 15 import/namespace tests (require module resolution infrastructure)
+- ~8 I/O tests: `io_sqlite_*.ls`, `test_io_module.ls`, `proc_cmd.ls`, `proc_dir_listing.ls`, `input_csv.ls`, `input_dir.ls`, `input_jsonld.ls`
+- ~5 parse-dependent: `parse.ls`, `csv_test.ls`, `test_pipe_file.ls`, `edit_bridge.ls`, `complex_iot_report_html.ls`
+- ~3 view/render: `view_state.ls`, `view_template.ls`, `render_map.ls`
+
+### 4.7 Semantic Disagreements — Awaiting Designer Ruling
+
+These are cases where the Redex model's output differs from the C implementation's `.txt` file, and the correct semantics is unclear. Each needs a ruling from the language designer before the Redex model or the implementation can be updated.
+
+| # | Test File | Issue | Redex Says | C/.txt Says | Question |
+|---|-----------|-------|-----------|-------------|----------|
+| 1 | `len({a:1, b:2})` (transpile_len_typed.ls, vmap.ls) | `len()` on map literal vs VMap | `len({a:1}) = 0`, `len(map([...])) = 2` | Same | **Confirm**: Regular map `{}` len=0 (counts content children), VMap `map()` len=pair count? |
+| 2 | `proc_fill.ls` | `fill(5, true)` into `int[]` | `true` kept as bool in array | `1` (coerced to int) | Should typed array assignment coerce `true`→`1` for `int[]`? |
+| 3 | `match_expr.ls` (test 14, 17) | `list` vs `array` type distinction | `[1,2,3]` matches `array` but not `list` | `[1,2,3]` matches both | Are `list` and `array` the same type for `is` checks, or distinct? |
+| 4 | `simple_expr.ls` | Content-level expression display | All 59 values output + trailing `null` | Same values, no `null` | Should content-level evaluation suppress trailing `null`? |
+| 5 | `type.ls` | `type(error_value)` | `"type.null"` | `"error"` | Should `type()` propagate errors or return `"error"` as a type name? |
+| 6 | `float_conversion.ls` | Decimal type support | `error` for `float(decimal_val)` | Correct decimal→float conversion | Decimal type is not modeled — should it be? (affects ~5 tests) |
+| 7 | `string_pattern.ls`, `match_string_pattern.ls` | String pattern matching | Not implemented | Working regex/glob patterns | Should string patterns be modeled in Redex? |
+| 8 | `for_decompose.ls` | Destructuring in for-loops | Not implemented | `for ((a,b) in pairs)` works | Priority for modeling destructuring in Redex? |
+| 9 | `object_mutation.ls` | pn method mutation of object fields | Not fully working through bridge | Object pn methods mutate store | Is the store-based pn mutation model correct for object methods? |
+
+**Convention**: Items are added here as they're discovered. Once the designer rules, the item is either:
+- Moved to "Resolved" with the decision noted, or
+- Converted into a Redex model fix or implementation bug report
+
+### 4.8 Resolved Disagreements
+
+| # | Issue | Decision | Action Taken |
+|---|-------|----------|-------------|
+| — | Truthiness of 0 | 0 is truthy (both spec and impl agree) | Model updated in Phase 1 |
+| — | Error display format | Plain `error` (not `error(message)`) | Redex model updated |
+| — | Element tag key | `_tag` (not `id`) to avoid collision with HTML id | Emitter + evaluator updated |
 
 ---
 
@@ -358,7 +438,7 @@ FAIL: test/lambda/object_constraint.ls — line 7: expected "error" got "null"
 ## Phasing and Dependencies
 
 ```
-Phase 1: Sync                    Phase 2: Procedural
+Phase 1: Sync ✅               Phase 2: Procedural ✅
   Fix c-repr drift                 Store model
   Add missing eval rules           var/assign/while/break/return
   Named fn definitions             pn closures
@@ -366,18 +446,18 @@ Phase 1: Sync                    Phase 2: Procedural
            │                                │
            └──────────┬─────────────────────┘
                       │
-              Phase 3: Object Types
+              Phase 3: Object Types ✅
                 Nominal typing
                 Methods (fn + pn)
                 Constraints (that)
                 Inheritance
                       │
-              Phase 4: Test Bridge
+              Phase 4: Test Bridge ⭕
                 .ls parser (via --emit-ast)
                 Output comparison harness
                 make test-redex-baseline
                       │
-              Phase 5: Extended Syntax
+              Phase 5: Extended Syntax ⭕
                 For-clause extensions
                 Advanced match
                 String interpolation
@@ -385,18 +465,32 @@ Phase 1: Sync                    Phase 2: Procedural
 
 ## Line-of-Effort Estimates
 
-| Phase | New/Modified Racket Lines | New Test Cases | Baseline Tests Unlocked |
-|-------|--------------------------|----------------|------------------------|
-| 1 — Sync | ~200 modified | ~15 | 0 (internal only) |
-| 2 — Procedural | ~600 new (`lambda-proc.rkt`) | ~40 | ~30 (`proc/`) |
-| 3 — Objects | ~400 new | ~20 | ~8 (`object*.ls`) |
-| 4 — Test Bridge | ~300 new (parser + harness) | — | ~128 total |
-| 5 — Extended Syntax | ~200 new | ~10 | ~10 additional |
+| Phase | New/Modified Racket Lines | New Test Cases | Baseline Tests Unlocked | Status |
+|-------|--------------------------|----------------|------------------------|--------|
+| 1 — Sync | ~200 modified | ~15 | 0 (internal only) | **Done** |
+| 2 — Procedural | ~600 new (`lambda-proc.rkt`) | ~40 | ~30 (`proc/`) | **Done** |
+| 3 — Objects | ~400 new | ~35 | ~8 (`object*.ls`) | **Done** |
+| 4 — Test Bridge | ~2500 new (emitter + bridge + eval extensions) | — | ~128 total | **In Progress** |
+| 5 — Extended Syntax | ~200 new | ~10 | ~10 additional | Not started |
 
 ## Open Questions
 
-1. **Truthiness of 0**: Follow spec (truthy) or implementation (falsy)? This affects test output comparison. Recommend: match implementation, update spec later.
-2. **AST bridge format**: JSON vs S-expression? JSON from `--emit-ast` is simplest; S-expr is native to Racket.
+1. ~~**Truthiness of 0**: Follow spec (truthy) or implementation (falsy)?~~ **Resolved**: Both spec and implementation treat 0 as truthy. `i2it(0)` produces a tagged value with non-zero bits.
+2. ~~**AST bridge format**: JSON vs S-expression?~~ **Resolved**: S-expression via `--emit-sexpr`. Native to Racket; avoids JSON→s-expr conversion layer.
 3. **Scope of numeric tower**: Model int64 and decimal arithmetic fully, or treat as opaque values that pass through? Decimal affects ~5 test files.
 4. **Validator/schema tests**: 43 `.ls` files without `.txt` — add expected outputs and include in feasible set?
-5. **Parallel or serial phases**: Phases 2 and 3 are independent; could be developed in parallel by different contributors.
+5. **Disagreement resolution**: When Redex and `.txt` disagree, each case needs investigation. The Redex model is built from language design intent, not by reverse-engineering implementation output. When the intent is ambiguous, the language designer decides.
+
+---
+
+## Semantic Disagreements Log
+
+When the Redex model and `.txt` expected output disagree, or when the C implementation behavior is unclear, items are logged here for the language designer to resolve. Each entry includes the test file, what Redex produces, what `.txt` says, and the semantic question.
+
+**Status key**: 🔴 Needs designer input · 🟡 Under investigation · 🟢 Resolved
+
+| # | Test File | Redex Says | .txt Says | Semantic Question | Status |
+|---|-----------|-----------|-----------|-------------------|--------|
+| | | | | | |
+
+*(Entries will be added as disagreements are discovered during Phase 4 validation.)*

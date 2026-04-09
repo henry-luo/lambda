@@ -13,6 +13,7 @@
 (require "lambda-eval.rkt")
 (require "lambda-types.rkt")
 (require "c-repr.rkt")
+(require "lambda-object.rkt")
 
 (define ε '())  ; empty environment
 
@@ -1259,6 +1260,532 @@
               x))
             '(app-proc f)))
   (check-equal? v 3))
+
+
+;; ════════════════════════════════════════════════════════════════════════════
+;; PART 7: OBJECT TYPE SYSTEM TESTS
+;; ════════════════════════════════════════════════════════════════════════════
+
+;; Helper: register types, then run procedural statements
+(define (pn-obj-run . args)
+  ;; All thunks come first (procedures that register types), rest are statements
+  (clear-type-registry!)
+  (define thunks (takef args procedure?))
+  (define stmts (dropf args procedure?))
+  (for ([thunk thunks]) (thunk))
+  (run-pn-body stmts))
+
+;; ── Type registration helpers ──
+(define (reg-point!)
+  (register-type! 'Point #f
+    (list (field-spec 'x 'int-type 'no-default 'no-constraint)
+          (field-spec 'y 'int-type 'no-default 'no-constraint))
+    '() '()))
+
+(define (reg-counter!)
+  (register-type! 'Counter #f
+    (list (field-spec 'value 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'double 'fn '() '(mul value 2))
+          (method-spec 'add 'fn '(n) '(add value n)))
+    '()))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.1 Basic object: construction, field access, type checking
+;; Corresponds to: test/lambda/object.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: basic construction and field access"
+  ;; type Point { x: int, y: int }
+  ;; let p = <Point x: 3, y: 4>
+  (clear-type-registry!) (reg-point!)
+  (define p (eval-lambda ε '(make-object Point (x 3) (y 4))))
+  (check-equal? p '(object-val Point (x 3) (y 4))))
+
+(test-case "Object: field access via member"
+  ;; p.x → 3, p.y → 4
+  (clear-type-registry!) (reg-point!)
+  (define p '(object-val Point (x 3) (y 4)))
+  (check-equal? (eval-lambda `((p . ,p)) '(member p x)) 3)
+  (check-equal? (eval-lambda `((p . ,p)) '(member p y)) 4))
+
+(test-case "Object: fn method — zero args"
+  ;; type Counter { value: int; fn double() => value * 2 }
+  ;; let c = <Counter value: 5>; c.double() → 10
+  (clear-type-registry!) (reg-counter!)
+  (define c '(object-val Counter (value 5)))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c double)) 10))
+
+(test-case "Object: fn method — one arg"
+  ;; c.add(3) → 8
+  (clear-type-registry!) (reg-counter!)
+  (define c '(object-val Counter (value 5)))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c add 3)) 8))
+
+(test-case "Object: is-type with nominal type"
+  ;; p is Point → true; p is object → true; 5 is Point → false
+  (clear-type-registry!) (reg-point!)
+  (define p '(object-val Point (x 3) (y 4)))
+  (check-equal? (eval-lambda `((p . ,p)) '(is-type p Point)) #t)
+  (check-equal? (eval-lambda `((p . ,p)) '(is-type p object-type)) #t)
+  (check-equal? (eval-lambda ε '(is-type 5 Point)) #f))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.2 Default field values
+;; Corresponds to: test/lambda/object_default.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-config!)
+  (register-type! 'Config #f
+    (list (field-spec 'host 'string-type "localhost" 'no-constraint)
+          (field-spec 'port 'int-type 8080 'no-constraint)
+          (field-spec 'debug 'bool-type #f 'no-constraint))  ; default=#f (false)
+    '() '()))
+
+(test-case "Object: partial override with defaults"
+  ;; let c1 = <Config host: "example.com">
+  ;; c1.host → "example.com", c1.port → 8080, c1.debug → false
+  (clear-type-registry!) (reg-config!)
+  (define c1 (eval-lambda ε '(make-object Config (host "example.com"))))
+  (check-equal? (object-field-ref c1 'host) "example.com")
+  (check-equal? (object-field-ref c1 'port) 8080)
+  (check-equal? (object-field-ref c1 'debug) #f))
+
+(test-case "Object: full override"
+  ;; let c2 = <Config host: "api.io", port: 443, debug: true>
+  (clear-type-registry!) (reg-config!)
+  (define c2 (eval-lambda ε '(make-object Config (host "api.io") (port 443) (debug #t))))
+  (check-equal? (object-field-ref c2 'host) "api.io")
+  (check-equal? (object-field-ref c2 'port) 443)
+  (check-equal? (object-field-ref c2 'debug) #t))
+
+(test-case "Object: inherited defaults"
+  ;; type Shape { color: string = "black" }
+  ;; type Circle : Shape { radius: int = 10 }
+  ;; let c3 = <Circle color: "red">; c3.color → "red", c3.radius → 10
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 10 'no-constraint))
+    '() '())
+  (define c3 (eval-lambda ε '(make-object Circle (color "red"))))
+  (check-equal? (object-field-ref c3 'color) "red")
+  (check-equal? (object-field-ref c3 'radius) 10))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.3 Inheritance: fields, methods, type checking, overrides
+;; Corresponds to: test/lambda/object_inherit.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-shape-hierarchy!)
+  ;; type Shape { color: string; fn describe() => "Shape: " ++ color }
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'describe 'fn '() '(concat "Shape: " color)))
+    '())
+  ;; type Circle : Shape { radius: int; fn area() => radius * radius * 3 }
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'area 'fn '() '(mul (mul radius radius) 3)))
+    '()))
+
+(test-case "Object: inherited field access"
+  ;; let c = <Circle color: "red", radius: 5>
+  ;; c.color → "red", c.radius → 5
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define ρ `((c . ,c)))
+  (check-equal? (eval-lambda ρ '(member c color)) "red")
+  (check-equal? (eval-lambda ρ '(member c radius)) 5))
+
+(test-case "Object: inherited method call"
+  ;; c.describe() → "Shape: red"
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c describe)) "Shape: red"))
+
+(test-case "Object: own method call"
+  ;; c.area() → 75
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (check-equal? (eval-lambda `((c . ,c)) '(method-call c area)) 75))
+
+(test-case "Object: type checking with inheritance"
+  ;; c is Circle → true; c is Shape → true; c is object → true; 5 is Circle → false
+  (clear-type-registry!) (reg-shape-hierarchy!)
+  (define c (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define ρ `((c . ,c)))
+  (check-equal? (eval-lambda ρ '(is-type c Circle)) #t)
+  (check-equal? (eval-lambda ρ '(is-type c Shape)) #t)
+  (check-equal? (eval-lambda ρ '(is-type c object-type)) #t)
+  (check-equal? (eval-lambda ε '(is-type 5 Circle)) #f))
+
+(test-case "Object: method override"
+  ;; type Animal { name: string; fn speak() => name ++ " says ..." }
+  ;; type Dog : Animal { breed: string; fn speak() => name ++ " says woof!" }
+  ;; d.speak() → "Rex says woof!"
+  (clear-type-registry!)
+  (register-type! 'Animal #f
+    (list (field-spec 'name 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'speak 'fn '() '(concat name " says ...")))
+    '())
+  (register-type! 'Dog 'Animal
+    (list (field-spec 'breed 'string-type 'no-default 'no-constraint))
+    (list (method-spec 'speak 'fn '() '(concat name " says woof!")))
+    '())
+  (define d (eval-lambda ε '(make-object Dog (name "Rex") (breed "Lab"))))
+  (define ρ `((d . ,d)))
+  (check-equal? (eval-lambda ρ '(method-call d speak)) "Rex says woof!")
+  (check-equal? (eval-lambda ρ '(member d name)) "Rex")
+  (check-equal? (eval-lambda ρ '(member d breed)) "Lab")
+  (check-equal? (eval-lambda ρ '(is-type d Dog)) #t)
+  (check-equal? (eval-lambda ρ '(is-type d Animal)) #t))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.4 Object update/spread
+;; Corresponds to: test/lambda/object_update.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-fpoint!)
+  (register-type! 'FPoint #f
+    (list (field-spec 'x 'float-type 'no-default 'no-constraint)
+          (field-spec 'y 'float-type 'no-default 'no-constraint))
+    '() '()))
+
+(test-case "Object: update — override one field"
+  ;; let p = <FPoint x: 1.0, y: 2.0>
+  ;; let q = <FPoint *:p, x: 10.0>; q.x → 10.0, q.y → 2.0
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define q (eval-lambda `((p . ,p)) '(object-update FPoint p (x 10.0))))
+  (check-equal? (object-field-ref q 'x) 10.0)
+  (check-equal? (object-field-ref q 'y) 2.0))
+
+(test-case "Object: update — override all fields"
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define r (eval-lambda `((p . ,p)) '(object-update FPoint p (x 100.0) (y 200.0))))
+  (check-equal? (object-field-ref r 'x) 100.0)
+  (check-equal? (object-field-ref r 'y) 200.0))
+
+(test-case "Object: update — copy all (no overrides)"
+  (clear-type-registry!) (reg-fpoint!)
+  (define p (eval-lambda ε '(make-object FPoint (x 1.0) (y 2.0))))
+  (define s (eval-lambda `((p . ,p)) '(object-update FPoint p)))
+  (check-equal? (object-field-ref s 'x) 1.0)
+  (check-equal? (object-field-ref s 'y) 2.0))
+
+(test-case "Object: update with inheritance"
+  ;; type Shape { color: string = "black" }
+  ;; type Circle : Shape { radius: int }
+  ;; let c2 = <Circle *:c1, radius: 10>
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'int-type 'no-default 'no-constraint))
+    '() '())
+  (define c1 (eval-lambda ε '(make-object Circle (color "red") (radius 5))))
+  (define c2 (eval-lambda `((c1 . ,c1)) '(object-update Circle c1 (radius 10))))
+  (check-equal? (object-field-ref c2 'color) "red")
+  (check-equal? (object-field-ref c2 'radius) 10))
+
+(test-case "Object: update with ~ self-reference in method"
+  ;; type Vec { x: float, y: float;
+  ;;   fn translate(dx, dy) => <Vec *:~, x: x + dx, y: y + dy> }
+  (clear-type-registry!)
+  (register-type! 'Vec #f
+    (list (field-spec 'x 'float-type 'no-default 'no-constraint)
+          (field-spec 'y 'float-type 'no-default 'no-constraint))
+    (list (method-spec 'translate 'fn '(dx dy)
+            '(object-update Vec ~ (x (add x dx)) (y (add y dy))))
+          (method-spec 'scale 'fn '(factor)
+            '(object-update Vec ~ (x (mul x factor)) (y (mul y factor)))))
+    '())
+  (define v (eval-lambda ε '(make-object Vec (x 3.0) (y 4.0))))
+  (define ρ `((v . ,v)))
+  ;; v.translate(1.0, -1.0) → Vec(x: 4.0, y: 3.0)
+  (define v2 (eval-lambda ρ '(method-call v translate 1.0 -1.0)))
+  (check-equal? (object-field-ref v2 'x) 4.0)
+  (check-equal? (object-field-ref v2 'y) 3.0)
+  ;; v.scale(2.0) → Vec(x: 6.0, y: 8.0)
+  (define v3 (eval-lambda ρ '(method-call v scale 2.0)))
+  (check-equal? (object-field-ref v3 'x) 6.0)
+  (check-equal? (object-field-ref v3 'y) 8.0))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.5 Constraints: field-level and object-level
+;; Corresponds to: test/lambda/object_constraint.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-user!)
+  ;; type User { name: string that (len(~) > 0), age: int that (0 <= ~ and ~ <= 150), email: string }
+  (register-type! 'User #f
+    (list (field-spec 'name 'string-type 'no-default '(gt (len-expr ~) 0))
+          (field-spec 'age 'int-type 'no-default '(l-and (le 0 ~) (le ~ 150)))
+          (field-spec 'email 'string-type 'no-default 'no-constraint))
+    '() '()))
+
+(test-case "Object: field constraint — valid"
+  ;; let alice = <User name: "Alice", age: 30, email: "a@x.com">; alice is User → true
+  (clear-type-registry!) (reg-user!)
+  (define alice (eval-lambda ε '(make-object User (name "Alice") (age 30) (email "a@x.com"))))
+  (check-pred object-val? alice))
+
+(test-case "Object: field constraint — empty name fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "") (age 30) (email "b@x.com"))))
+  (check-pred is-error? bad))
+
+(test-case "Object: field constraint — negative age fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "Bob") (age -5) (email "b@x.com"))))
+  (check-pred is-error? bad))
+
+(test-case "Object: field constraint — age > 150 fails"
+  (clear-type-registry!) (reg-user!)
+  (define bad (eval-lambda ε '(make-object User (name "Carol") (age 200) (email "c@x.com"))))
+  (check-pred is-error? bad))
+
+(define (reg-daterange!)
+  ;; type DateRange { start: int, end: int; that (~.end > ~.start) }
+  (register-type! 'DateRange #f
+    (list (field-spec 'start 'int-type 'no-default 'no-constraint)
+          (field-spec 'end 'int-type 'no-default 'no-constraint))
+    '()
+    (list '(gt (member ~ end) (member ~ start)))))
+
+(test-case "Object: object constraint — valid"
+  (clear-type-registry!) (reg-daterange!)
+  (define dr (eval-lambda ε '(make-object DateRange (start 1) (end 10))))
+  (check-pred object-val? dr))
+
+(test-case "Object: object constraint — invalid (end < start)"
+  (clear-type-registry!) (reg-daterange!)
+  (define bad (eval-lambda ε '(make-object DateRange (start 10) (end 1))))
+  (check-pred is-error? bad))
+
+(test-case "Object: combined field + object constraints"
+  ;; type Config { min: int that (~ >= 0), max: int that (~ >= 0); that (~.max > ~.min) }
+  (clear-type-registry!)
+  (register-type! 'CConfig #f
+    (list (field-spec 'min 'int-type 'no-default '(ge ~ 0))
+          (field-spec 'max 'int-type 'no-default '(ge ~ 0)))
+    '()
+    (list '(gt (member ~ max) (member ~ min))))
+  ;; valid
+  (define good (eval-lambda ε '(make-object CConfig (min 1) (max 10))))
+  (check-pred object-val? good)
+  ;; field constraint fails (negative min)
+  (define bad1 (eval-lambda ε '(make-object CConfig (min -1) (max 10))))
+  (check-pred is-error? bad1)
+  ;; object constraint fails (max <= min)
+  (define bad2 (eval-lambda ε '(make-object CConfig (min 5) (max 3))))
+  (check-pred is-error? bad2))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.6 Pattern matching with object types
+;; Corresponds to: test/lambda/object_pattern.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: match on nominal type"
+  ;; match c { case Circle: "circle" case Rect: "rect" case Shape: "shape" default: "unknown" }
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'float-type 'no-default 'no-constraint))
+    '() '())
+  (register-type! 'Rect 'Shape
+    (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+          (field-spec 'height 'float-type 'no-default 'no-constraint))
+    '() '())
+  (define circle-obj (eval-lambda ε '(make-object Circle (color "red") (radius 5.0))))
+  (define rect-obj (eval-lambda ε '(make-object Rect (color "blue") (width 3.0) (height 4.0))))
+  ;; describe function via match
+  (define describe-match
+    '(match s (case-type Circle "circle")
+              (case-type Rect "rect")
+              (case-type Shape "shape")
+              (default-case "unknown")))
+  ;; circle matches Circle first
+  (check-equal? (eval-lambda `((s . ,circle-obj)) describe-match) "circle")
+  ;; rect matches Rect
+  (check-equal? (eval-lambda `((s . ,rect-obj)) describe-match) "rect")
+  ;; non-object → "unknown"
+  (check-equal? (eval-lambda `((s . 42)) describe-match) "unknown"))
+
+(test-case "Object: match with inheritance (Circle is also Shape)"
+  (clear-type-registry!)
+  (register-type! 'Shape #f
+    (list (field-spec 'color 'string-type "black" 'no-constraint))
+    '() '())
+  (register-type! 'Circle 'Shape
+    (list (field-spec 'radius 'float-type 'no-default 'no-constraint))
+    '() '())
+  (register-type! 'Rect 'Shape
+    (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+          (field-spec 'height 'float-type 'no-default 'no-constraint))
+    '() '())
+  (define circle-obj (eval-lambda ε '(make-object Circle (color "red") (radius 5.0))))
+  (define rect-obj (eval-lambda ε '(make-object Rect (color "blue") (width 3.0) (height 4.0))))
+  ;; is_shape: match s { case Shape: true default: false }
+  (define is-shape-match
+    '(match s (case-type Shape #t) (default-case #f)))
+  (check-equal? (eval-lambda `((s . ,circle-obj)) is-shape-match) #t)
+  (check-equal? (eval-lambda `((s . ,rect-obj)) is-shape-match) #t)
+  (check-equal? (eval-lambda `((s . "hello")) is-shape-match) #f))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.7 pn mutation methods
+;; Corresponds to: test/lambda/object_mutation.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(define (reg-mut-counter!)
+  ;; type Counter { count: int = 0;
+  ;;   pn increment() { count = count + 1 }
+  ;;   pn add(n) { count = count + n }
+  ;;   pn reset() { count = 0 } }
+  (register-type! 'MCounter #f
+    (list (field-spec 'count 'int-type 0 'no-constraint))
+    (list (method-spec 'increment 'pn '()
+            '(seq (assign count (add count 1))))
+          (method-spec 'add-n 'pn '(n)
+            '(seq (assign count (add count n))))
+          (method-spec 'reset 'pn '()
+            '(seq (assign count 0))))
+    '()))
+
+(test-case "Object: pn method — basic increment"
+  ;; let c = <MCounter count: 0>
+  ;; c.count → 0; c.increment(); c.count → 1; c.increment(); c.count → 2
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 0)))
+      '(print (member c count))          ;; 0
+      '(pn-method-call c increment)
+      '(print (member c count))          ;; 1
+      '(pn-method-call c increment)
+      '(print (member c count))))        ;; 2
+  (check-equal? out "012"))
+
+(test-case "Object: pn method — with parameter"
+  ;; c.add(10); c.count → 12
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 2)))
+      '(pn-method-call c add-n 10)
+      '(print (member c count))))
+  (check-equal? out "12"))
+
+(test-case "Object: pn method — reset"
+  (define-values (v out)
+    (pn-obj-run reg-mut-counter!
+      '(var c (make-object MCounter (count 5)))
+      '(pn-method-call c reset)
+      '(print (member c count))))
+  (check-equal? out "0"))
+
+(test-case "Object: pn method — multiple fields"
+  ;; type Rect { width: float, height: float;
+  ;;   pn scale(factor) { width = width * factor; height = height * factor }
+  ;;   fn area() => width * height }
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'MRect #f
+              (list (field-spec 'width 'float-type 'no-default 'no-constraint)
+                    (field-spec 'height 'float-type 'no-default 'no-constraint))
+              (list (method-spec 'scale 'pn '(factor)
+                      '(seq (assign width (mul width factor))
+                            (assign height (mul height factor))))
+                    (method-spec 'area 'fn '() '(mul width height)))
+              '()))
+      '(var r (make-object MRect (width 3.0) (height 4.0)))
+      '(print (method-call r area))       ;; 12.0
+      '(pn-method-call r scale 2.0)
+      '(print (method-call r area))       ;; 48.0
+      '(print (member r width))))         ;; 6.0
+  (check-equal? out "12486"))
+
+
+;; ──────────────────────────────────────────────────────────────────────────
+;; 7.8 Additional: object_direct_access patterns
+;; Corresponds to: test/lambda/object_direct_access.ls
+;; ──────────────────────────────────────────────────────────────────────────
+
+(test-case "Object: fn method with param combining fields and args"
+  ;; type Adder { base: int; fn add(n) => base + n; fn mul(n) => base * n }
+  (clear-type-registry!)
+  (register-type! 'Adder #f
+    (list (field-spec 'base 'int-type 'no-default 'no-constraint))
+    (list (method-spec 'add 'fn '(n) '(add base n))
+          (method-spec 'mul 'fn '(n) '(mul base n)))
+    '())
+  (define a (eval-lambda ε '(make-object Adder (base 10))))
+  (check-equal? (eval-lambda `((a . ,a)) '(method-call a add 5)) 15)
+  (check-equal? (eval-lambda `((a . ,a)) '(method-call a mul 3)) 30))
+
+(test-case "Object: fn method with bool field"
+  ;; type Gate { open: bool; fn status() => if (open) "open" else "closed" }
+  (clear-type-registry!)
+  (register-type! 'Gate #f
+    (list (field-spec 'open 'bool-type 'no-default 'no-constraint))
+    (list (method-spec 'status 'fn '() '(if open "open" "closed")))
+    '())
+  (define g1 (eval-lambda ε '(make-object Gate (open #t))))
+  (define g2 (eval-lambda ε '(make-object Gate (open #f))))
+  (check-equal? (eval-lambda `((g1 . ,g1)) '(method-call g1 status)) "open")
+  (check-equal? (eval-lambda `((g2 . ,g2)) '(method-call g2 status)) "closed"))
+
+(test-case "Object: pn write-back then fn read"
+  ;; type Toggle { on: bool = false; pn enable() { on = true } fn state() => on }
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'Toggle #f
+              (list (field-spec 'on 'bool-type 'no-default 'no-constraint))
+              (list (method-spec 'enable 'pn '()
+                      '(seq (assign on #t)))
+                    (method-spec 'disable 'pn '()
+                      '(seq (assign on #f)))
+                    (method-spec 'state 'fn '() 'on))
+              '()))
+      '(var tog (make-object Toggle (on #f)))
+      '(print (method-call tog state))     ;; "false"
+      '(pn-method-call tog enable)
+      '(print (method-call tog state))     ;; "true"
+      '(pn-method-call tog disable)
+      '(print (method-call tog state))))   ;; "false"
+  (check-equal? out "falsetruefalse"))
+
+(test-case "Object: pn deposit/withdraw pattern"
+  (define-values (v out)
+    (pn-obj-run
+      (λ () (register-type! 'Wallet #f
+              (list (field-spec 'balance 'int-type 0 'no-constraint))
+              (list (method-spec 'deposit 'pn '(amt)
+                      '(seq (assign balance (add balance amt))))
+                    (method-spec 'withdraw 'pn '(amt)
+                      '(seq (assign balance (sub balance amt))))
+                    (method-spec 'check 'fn '() 'balance))
+              '()))
+      '(var w (make-object Wallet (balance 0)))
+      '(pn-method-call w deposit 100)
+      '(print (method-call w check))       ;; 100
+      '(pn-method-call w withdraw 30)
+      '(print (method-call w check))       ;; 70
+      '(pn-method-call w deposit 50)
+      '(print (method-call w check))))     ;; 120
+  (check-equal? out "10070120"))
 
 
 ;; ════════════════════════════════════════════════════════════════════════════

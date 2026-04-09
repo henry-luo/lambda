@@ -355,6 +355,10 @@ void font_face_clear(FontContext* ctx);
 // Call between documents in batch mode.
 void font_context_reset_document_fonts(FontContext* ctx);
 
+// reset glyph caches (loaded_glyph_cache, bitmap_cache, glyph_arena).
+// Call between documents in batch mode to reclaim memory.
+void font_context_reset_glyph_caches(FontContext* ctx);
+
 // ============================================================================
 // Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)
 // ============================================================================

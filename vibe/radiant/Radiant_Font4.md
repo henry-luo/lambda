@@ -1,6 +1,6 @@
 # Proposal: Semantic Break Kinds & Corpus-Sweep Text Tests
 
-**Status:** Implemented (Part 1 complete, Part 2 baseline established)  
+**Status:** Implemented (Part 1 complete, Part 2 baseline enforced — 86/122 passing)  
 **Author:** Lambda Team  
 **Date:** April 2026  
 **Prerequisite:** Soft hyphen support (completed), Radiant_Font3.md
@@ -9,14 +9,22 @@
 
 **Part 1 — BreakKind enum:** Complete. 18-value `BreakKind` enum added to `layout.hpp`, boolean flags replaced with `last_space_kind` across 3 files (10 code sites). `classify_break()` function added. Zero regressions (4017/4017 baseline tests pass). Switch-dispatch refactor deferred per proposal.
 
-**Part 2 — Corpus-sweep tests:** Baseline established. 122 HTML tests generated (2 corpora × 61 widths), Chrome references captured. Results:
+**Part 2 — Corpus-sweep tests:** Baseline enforced. 122 HTML tests generated (2 corpora × 61 widths), Chrome references captured. Initial results (37/122, 30%) improved to **86/122 (70.5%)** after three targeted fixes:
 
-| Corpus | Exact match | Failing widths | Mismatches | Dominant category |
-|--------|-------------|----------------|------------|-------------------|
-| en-gatsby-opening | 10/61 (16%) | 51 | 161 (all over-wrap) | edge-fit |
-| mixed-app-text | 27/61 (44%) | 34 | 48 (45 over, 3 under) | boundary-discovery |
+| Fix | Description | Impact |
+|-----|-------------|--------|
+| Codepoint-based dash check | Replaced byte-level `*str == '-'` with codepoint check covering U+002D, U+2010, U+2013, U+2014 | En-dash and em-dash now treated as break opportunities |
+| Em-dash break-before (UAX #14 B2) | Added break opportunity *before* U+2014 em-dash (was break-after only) | Matches browser behavior for `word—word` patterns |
+| `?` URL query break | Added break-after for `?` (U+003F) guarded to only trigger before alphanumeric chars | Fixes over-wrapping in URL-heavy mixed-app content |
 
-See `test/layout/data/pretext/status.json` for per-width failure details.
+Current results:
+
+| Corpus | Exact match | Failing widths | Failure category | Notes |
+|--------|-------------|----------------|------------------|-------|
+| en-gatsby-opening | 55/61 (90%) | 6 | edge-fit (sub-pixel) | All 6 are ±1 line at boundary widths |
+| mixed-app-text | 31/61 (51%) | 28 | complex-text-shaping (31 mismatches) | Thai p3: 21, Arabic p2: 8, CJK p1: 2 |
+
+86/122 passing tests are enforced via `test/layout/data/pretext/baseline.txt`. Integrated into `make test-radiant-baseline` (4103 total: 3931 layout + 47 UI + 39 page load + 86 pretext). See `test/layout/data/pretext/status.json` for per-width failure details.
 
 ---
 
@@ -465,7 +473,7 @@ Track in a machine-readable `test/layout/data/pretext/status.json`:
 
 ### Notes
 
-1. **Keep outside baseline.** Corpus sweep tests live in the `pretext` suite (`make layout suite=pretext`), separate from `make test-radiant-baseline`. Promote to baseline once accuracy stabilizes above 95%.
+1. **Baseline enforced.** 86/122 passing tests are recorded in `test/layout/data/pretext/baseline.txt` and enforced by `make test-radiant-baseline`. The test runner reads the baseline file and exits non-zero if any listed test regresses. Remaining 36 failures (6 edge-fit + 30 complex-text-shaping) are excluded from baseline until fixed. Promote additional tests as accuracy improves.
 
 2. **HTML file count.** Phase 1 is 122 files + 122 reference JSONs. Full rollout (7 corpora) is ~427 files. This fits the existing batch-mode infrastructure (batch size 100, 5 concurrent). **Keep generated files in git** for deterministic CI, but add a `make regenerate-pretext-corpus` target for updates.
 
@@ -487,6 +495,6 @@ Track in a machine-readable `test/layout/data/pretext/status.json`:
 | Enhancement | Scope | Files changed | Test impact |
 |---|---|---|---|
 | Semantic break kinds | `layout.hpp`, `layout_text.cpp` | ~300 lines | Zero behavioral change; refactor only |
-| Corpus sweep tests | New test infrastructure | Generator script + 122–427 HTML/JSON files | `make layout suite=pretext`, outside baseline |
+| Corpus sweep tests | New test infrastructure | Generator script + 122–427 HTML/JSON files | `make layout suite=pretext`, 86/122 in baseline |
 
 The two enhancements are independent and can be implemented in any order. The break kind enum is a prerequisite for *reasoning* about break correctness but not for *running* the corpus tests.
