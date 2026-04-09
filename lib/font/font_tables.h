@@ -240,6 +240,20 @@ bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
                                 int16_t* out_x_max, int16_t* out_y_max);
 
 // ============================================================================
+// TTC (TrueType Collection) helpers
+// ============================================================================
+
+// get number of faces in a TTC collection. Returns 1 for non-TTC fonts.
+// operates on raw font file data (before font_tables_open).
+int font_tables_get_face_count(const uint8_t* data, size_t len);
+
+// open a specific face from raw font data. For TTC collections, navigates
+// to the correct face offset. For non-TTC, face_index is ignored.
+// equivalent to font_tables_open but with TTC face selection.
+FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
+                                   int face_index, void* pool);
+
+// ============================================================================
 // Utility: make a 4-byte tag from characters
 // ============================================================================
 
