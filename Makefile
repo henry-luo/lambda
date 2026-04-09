@@ -991,6 +991,7 @@ test-radiant-baseline: build-test
 	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
+	pretext_passed=0; pretext_failed=0; pretext_skipped=0; pretext_status="⏭️  SKIP"; \
 	any_failed=0; \
 	\
 	echo ""; \
@@ -1049,9 +1050,21 @@ test-radiant-baseline: build-test
 		echo "   ⚠️  test/test_page_load_gtest.exe not found"; \
 	fi; \
 	\
-	total_passed=$$((layout_passed + ui_passed + page_passed)); \
-	total_failed=$$((layout_failed + ui_failed + page_failed)); \
-	total_skipped=$$((layout_skipped)); \
+	echo ""; \
+	echo "📦 Pretext Corpus Baseline:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c pretext 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	pretext_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	pretext_passed=$${pretext_passed:-0}; pretext_failed=$${pretext_failed:-0}; pretext_skipped=$${pretext_skipped:-0}; \
+	if echo "$$output" | grep -q "Baseline Regressions"; then pretext_status="❌ FAIL"; any_failed=1; \
+	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
+	else pretext_status="✅ PASS"; fi; \
+	\
+	total_passed=$$((layout_passed + ui_passed + page_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + ui_failed + page_failed + pretext_failed)); \
+	total_skipped=$$((layout_skipped + pretext_skipped)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
 	echo ""; \
@@ -1063,7 +1076,8 @@ test-radiant-baseline: build-test
 	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
 	echo "   ├── Page Snapshot       $$snapshot_status"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
-	echo "   └── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
+	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \
+	echo "   └── Pretext Corpus      $$pretext_status  ($$pretext_passed passed, $$pretext_skipped skipped)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
