@@ -286,8 +286,18 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
                                 temp_str[out++] = src[i];
                             }
                         } else {
-                            temp_str[out++] = js_decode_escape_char(next);
-                            i++; // skip the escaped char
+                            // Line continuation: \<newline> removes both the backslash and line break
+                            if (next == '\n') {
+                                i++; // skip over \<LF>
+                            } else if (next == '\r') {
+                                i++; // skip over \<CR>
+                                if (i + 1 < content_len && src[i + 1] == '\n') {
+                                    i++; // also skip <LF> in \<CR><LF>
+                                }
+                            } else {
+                                temp_str[out++] = js_decode_escape_char(next);
+                                i++; // skip the escaped char
+                            }
                         }
                     } else {
                         temp_str[out++] = src[i];
@@ -349,7 +359,62 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     memcpy(temp_str, source.str, source.length);
     temp_str[source.length] = '\0';
 
-    identifier->name = name_pool_create_len(tp->name_pool, temp_str, source.length);
+    // Decode Unicode escapes (\uXXXX and \u{XXXX}) in identifier names
+    // Per ES spec, IdentifierName can contain UnicodeEscapeSequence
+    char* name_str = temp_str;
+    int name_len = (int)source.length;
+    char decoded_buf[512];
+    if (memchr(temp_str, '\\', source.length) != NULL) {
+        int oi = 0;
+        for (int i = 0; i < (int)source.length && oi < (int)sizeof(decoded_buf) - 4; ) {
+            if (temp_str[i] == '\\' && i + 1 < (int)source.length && temp_str[i+1] == 'u') {
+                i += 2; // skip \u
+                unsigned int cp = 0;
+                if (i < (int)source.length && temp_str[i] == '{') {
+                    i++; // skip {
+                    while (i < (int)source.length && temp_str[i] != '}') {
+                        char c = temp_str[i++];
+                        cp <<= 4;
+                        if (c >= '0' && c <= '9') cp |= (c - '0');
+                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                    }
+                    if (i < (int)source.length && temp_str[i] == '}') i++;
+                } else {
+                    for (int j = 0; j < 4 && i < (int)source.length; j++, i++) {
+                        char c = temp_str[i];
+                        cp <<= 4;
+                        if (c >= '0' && c <= '9') cp |= (c - '0');
+                        else if (c >= 'a' && c <= 'f') cp |= (c - 'a' + 10);
+                        else if (c >= 'A' && c <= 'F') cp |= (c - 'A' + 10);
+                    }
+                }
+                // encode as UTF-8
+                if (cp < 0x80) {
+                    decoded_buf[oi++] = (char)cp;
+                } else if (cp < 0x800) {
+                    decoded_buf[oi++] = (char)(0xC0 | (cp >> 6));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    decoded_buf[oi++] = (char)(0xE0 | (cp >> 12));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    decoded_buf[oi++] = (char)(0xF0 | (cp >> 18));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    decoded_buf[oi++] = (char)(0x80 | (cp & 0x3F));
+                }
+            } else {
+                decoded_buf[oi++] = temp_str[i++];
+            }
+        }
+        decoded_buf[oi] = '\0';
+        name_str = decoded_buf;
+        name_len = oi;
+    }
+
+    identifier->name = name_pool_create_len(tp->name_pool, name_str, name_len);
     free(temp_str);
 
     if (!identifier->name) {
@@ -694,14 +759,46 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
             if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
-                // Getter/Setter: store as __get_<name> or __set_<name> key with a function expression value
-                StrView accessor_name = js_node_source(tp, name_node);
-                char acc_key[256];
-                snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
-                         (int)accessor_name.length, accessor_name.str);
-                JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
-                property->key = (JsAstNode*)key_id;
+                const char* name_type = ts_node_type(name_node);
+                if (strcmp(name_type, "computed_property_name") == 0) {
+                    // Computed getter/setter: { get [expr]() { }, set [expr](v) { } }
+                    property->computed = true;
+                    property->is_getter = is_getter;
+                    property->is_setter = is_setter;
+                    property->key = build_js_expression(tp, name_node);
+                } else {
+                    // Static getter/setter: store as __get_<name> or __set_<name> key
+                    StrView accessor_name = js_node_source(tp, name_node);
+                    char acc_key[256];
+                    // Decode Unicode escapes in accessor names
+                    char dec_acc[256];
+                    const char* acc_str = accessor_name.str;
+                    int acc_len = (int)accessor_name.length;
+                    if (memchr(accessor_name.str, '\\', accessor_name.length) != NULL) {
+                        int oi = 0;
+                        for (int ii = 0; ii < (int)accessor_name.length && oi < (int)sizeof(dec_acc) - 4; ) {
+                            if (accessor_name.str[ii] == '\\' && ii + 1 < (int)accessor_name.length && accessor_name.str[ii+1] == 'u') {
+                                ii += 2; unsigned int cp = 0;
+                                if (ii < (int)accessor_name.length && accessor_name.str[ii] == '{') {
+                                    ii++;
+                                    while (ii < (int)accessor_name.length && accessor_name.str[ii] != '}') { char c = accessor_name.str[ii++]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                    if (ii < (int)accessor_name.length && accessor_name.str[ii] == '}') ii++;
+                                } else {
+                                    for (int j = 0; j < 4 && ii < (int)accessor_name.length; j++, ii++) { char c = accessor_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                }
+                                if (cp < 0x80) { dec_acc[oi++] = (char)cp; } else if (cp < 0x800) { dec_acc[oi++] = (char)(0xC0|(cp>>6)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec_acc[oi++] = (char)(0xE0|(cp>>12)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); } else { dec_acc[oi++] = (char)(0xF0|(cp>>18)); dec_acc[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec_acc[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec_acc[oi++] = (char)(0x80|(cp&0x3F)); }
+                            } else { dec_acc[oi++] = accessor_name.str[ii++]; }
+                        }
+                        dec_acc[oi] = '\0';
+                        acc_str = dec_acc;
+                        acc_len = oi;
+                    }
+                    snprintf(acc_key, sizeof(acc_key), "%s%.*s", is_getter ? "__get_" : "__set_",
+                             acc_len, acc_str);
+                    JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
+                    key_id->name = name_pool_create_len(tp->name_pool, acc_key, strlen(acc_key));
+                    property->key = (JsAstNode*)key_id;
+                }
 
                 // Build as function expression using build_js_function (handles params for setters)
                 property->value = build_js_function(tp, property_node);
@@ -715,7 +812,27 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
                     // Regular method: method_definition without get/set prefix
                     StrView method_name = js_node_source(tp, name_node);
                     JsIdentifierNode* key_id = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, name_node, sizeof(JsIdentifierNode));
-                    key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                    // Decode Unicode escapes in method names
+                    if (memchr(method_name.str, '\\', method_name.length) != NULL) {
+                        char dec[512]; int oi = 0;
+                        for (int ii = 0; ii < (int)method_name.length && oi < (int)sizeof(dec) - 4; ) {
+                            if (method_name.str[ii] == '\\' && ii + 1 < (int)method_name.length && method_name.str[ii+1] == 'u') {
+                                ii += 2; unsigned int cp = 0;
+                                if (ii < (int)method_name.length && method_name.str[ii] == '{') {
+                                    ii++;
+                                    while (ii < (int)method_name.length && method_name.str[ii] != '}') { char c = method_name.str[ii++]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                    if (ii < (int)method_name.length && method_name.str[ii] == '}') ii++;
+                                } else {
+                                    for (int j = 0; j < 4 && ii < (int)method_name.length; j++, ii++) { char c = method_name.str[ii]; cp <<= 4; if (c >= '0' && c <= '9') cp |= (c-'0'); else if (c >= 'a' && c <= 'f') cp |= (c-'a'+10); else if (c >= 'A' && c <= 'F') cp |= (c-'A'+10); }
+                                }
+                                if (cp < 0x80) { dec[oi++] = (char)cp; } else if (cp < 0x800) { dec[oi++] = (char)(0xC0|(cp>>6)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else if (cp < 0x10000) { dec[oi++] = (char)(0xE0|(cp>>12)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); } else { dec[oi++] = (char)(0xF0|(cp>>18)); dec[oi++] = (char)(0x80|((cp>>12)&0x3F)); dec[oi++] = (char)(0x80|((cp>>6)&0x3F)); dec[oi++] = (char)(0x80|(cp&0x3F)); }
+                            } else { dec[oi++] = method_name.str[ii++]; }
+                        }
+                        dec[oi] = '\0';
+                        key_id->name = name_pool_create_len(tp->name_pool, dec, oi);
+                    } else {
+                        key_id->name = name_pool_create_strview(tp->name_pool, method_name);
+                    }
                     property->key = (JsAstNode*)key_id;
                 }
                 // Build the full method as a function expression
