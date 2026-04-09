@@ -111,6 +111,9 @@ Item js_array_get_int(Item array, int64_t index);
 Item js_array_set_int(Item array, int64_t index, Item value);
 int64_t js_array_length(Item array);
 Item js_array_push(Item array, Item value);
+void js_array_push_item_direct(Array* arr, Item value);
+Item js_math_pow(Item base, Item exp);
+double js_math_pow_d(double base, double exp);
 int64_t js_get_length(Item object);
 Item js_get_length_item(Item object);
 
@@ -258,6 +261,7 @@ Item js_object_define_properties(Item obj, Item props);
 Item js_object_get_own_property_descriptor(Item obj, Item name);
 Item js_object_get_own_property_descriptors(Item obj);
 Item js_lookup_builtin_method(TypeId type, const char* name, int len);
+void js_append_builtin_method_names(TypeId type, Item result);
 Item js_array_is_array(Item value);
 Item js_performance_now(void);
 Item js_date_now(void);
@@ -287,7 +291,7 @@ Item js_new_string_wrapper(Item arg);
 void js_link_base_prototype(Item proto_marker, Item base_ctor);
 Item js_get_prototype(Item object);
 Item js_get_prototype_of(Item object);
-Item js_reflect_construct(Item target, Item args_array);
+Item js_reflect_construct(Item target, Item args_array, Item new_target);
 Item js_prototype_lookup(Item object, Item property);
 Item js_map_get_fast_ext(Map* m, const char* key_str, int key_len, bool* out_found);
 
@@ -351,6 +355,10 @@ void js_throw_value(Item value);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
+void js_throw_syntax_error(Item message);
+
+/** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
+void js_require_object_coercible(Item value);
 
 /**
  * Check if an exception is currently pending.
@@ -384,6 +392,11 @@ Item js_new_error_with_stack(Item message, Item stack_str);
  */
 Item js_new_error_with_name(Item error_name, Item message);
 Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str);
+
+/**
+ * ES2021: Create AggregateError with errors array and message.
+ */
+Item js_new_aggregate_error(Item errors, Item message);
 
 /**
  * ES2022: Extract cause from options object and set on error.
@@ -459,6 +472,7 @@ Item js_btoa(Item str_item);
 Item js_get_global_this(void);
 Item js_get_global_object(void);
 Item js_get_global_property(Item key);
+Item js_get_global_builtin_fn(Item name, Item param_count);
 
 // URL constructor
 Item js_url_construct(Item input);
