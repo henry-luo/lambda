@@ -644,6 +644,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     if (s_bytes <= 0) { sp++; continue; }
                     sp += s_bytes;
 
+                    // skip soft hyphen (U+00AD) — invisible unless line breaks there
+                    if (s_cp == 0x00AD) continue;
+
                     s_cp = apply_text_transform(s_cp, text_transform, s_word_start);
                     s_word_start = false;
 
@@ -724,6 +727,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
                 if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
                 else { p += bytes;  char_index++; }
+
+                // skip soft hyphen (U+00AD) — invisible unless line breaks there
+                if (codepoint == 0x00AD) continue;
 
                 // Apply text-transform before loading glyph
                 codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
@@ -817,6 +823,16 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     // advance to the next position
                     x += glyph->advance_x;
                 }
+            }
+        }
+        // render trailing hyphen for soft-hyphen line break
+        if (text_rect->has_trailing_hyphen) {
+            FontStyleDesc _sd_h = font_style_desc_from_prop(rdcon->font.style);
+            LoadedGlyph* h_glyph = font_load_glyph(rdcon->font.font_handle, &_sd_h, '-', true);
+            if (h_glyph) {
+                float ascend = font_get_rendering_ascender(rdcon->font.font_handle) * rdcon->scale;
+                draw_glyph(rdcon, &h_glyph->bitmap, x + h_glyph->bitmap.bearing_x, y + ascend - h_glyph->bitmap.bearing_y);
+                x += h_glyph->advance_x;
             }
         }
         // render text deco (positions in physical pixels)

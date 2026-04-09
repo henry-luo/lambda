@@ -1007,6 +1007,7 @@ typedef struct TextRect {
     float x, y, width, height;
     float hanging_trim;  // hanging space width to subtract from text node JSON output (not from span bounds)
     int start_index, length;  // start and length of the text in the style node
+    bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
     TextRect* next;
 } TextRect;
 

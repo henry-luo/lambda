@@ -555,7 +555,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // breaks at the element boundary (the "outside text" path in layout_text).
         lycon->line.last_space = (unsigned char*)elmt;
         lycon->line.last_space_pos = lycon->line.advance_x;
-        lycon->line.last_space_is_hyphen = false;
+        lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
         lycon->line.trailing_space_width = 0;
         lycon->line.wrap_opportunity_before_nowrap = true;
         return;

@@ -12,26 +12,26 @@ Pretext (`@chenglou/pretext`) is a **pure JavaScript/TypeScript library for mult
 
 ## 1. Feature Comparison
 
-| Capability | Pretext | Radiant |
-|---|---|---|
-| Block/Flex/Grid/Table layout | ❌ | ✅ |
-| CSS cascade & specificity | ❌ | ✅ |
-| Box model (margin/padding/border) | ❌ | ✅ |
-| Transforms, filters, blend modes | ❌ | ✅ |
-| Multi-column | ❌ | ✅ |
-| Positioning (abs/rel/sticky) | ❌ | ✅ |
-| Text line-breaking | ✅ | ✅ |
-| `white-space: pre-wrap` | ✅ | ✅ |
-| `word-break: keep-all` | ✅ | ✅ |
-| `overflow-wrap: break-word` | ✅ | ✅ |
-| Soft hyphen handling | ✅ | ⚠️ Not confirmed |
-| Tab stops in `pre-wrap` | ✅ | ✅ |
-| CJK kinsoku (line-break classes) | ✅ | ✅ |
-| Bidi metadata | ✅ (metadata only) | ✅ (`direction` property) |
-| Variable-width per-line layout | ✅ (core API) | ❌ Not exposed |
-| Shrinkwrap/tight-fit measurement | ✅ (binary search) | ✅ (intrinsic sizing) |
-| Text wrapping around arbitrary shapes | ✅ (user-land via API) | ❌ |
-| Rich inline (mentions/pills) | ✅ | N/A (different scope) |
+| Capability                            | Pretext               | Radiant                  |
+| ------------------------------------- | --------------------- | ------------------------ |
+| Block/Flex/Grid/Table layout          | ❌                     | ✅                        |
+| CSS cascade & specificity             | ❌                     | ✅                        |
+| Box model (margin/padding/border)     | ❌                     | ✅                        |
+| Transforms, filters, blend modes      | ❌                     | ✅                        |
+| Multi-column                          | ❌                     | ✅                        |
+| Positioning (abs/rel/sticky)          | ❌                     | ✅                        |
+| Text line-breaking                    | ✅                     | ✅                        |
+| `white-space: pre-wrap`               | ✅                     | ✅                        |
+| `word-break: keep-all`                | ✅                     | ✅                        |
+| `overflow-wrap: break-word`           | ✅                     | ✅                        |
+| Soft hyphen handling                  | ✅                     | ✅                        |
+| Tab stops in `pre-wrap`               | ✅                     | ✅                        |
+| CJK kinsoku (line-break classes)      | ✅                     | ✅                        |
+| Bidi metadata                         | ✅ (metadata only)     | ✅ (`direction` property) |
+| Variable-width per-line layout        | ✅ (core API)          | ❌ Not exposed            |
+| Shrinkwrap/tight-fit measurement      | ✅ (binary search)     | ✅ (intrinsic sizing)     |
+| Text wrapping around arbitrary shapes | ✅ (user-land via API) | ❌                        |
+| Rich inline (mentions/pills)          | ✅                     | N/A (different scope)    |
 
 **Bottom line**: Radiant is a far more complete CSS engine. Pretext excels at one thing Radiant doesn't expose: **variable-width-per-line text layout** for flowing text around irregular shapes.
 
@@ -140,3 +140,93 @@ If Radiant ever wants to support `shape-outside` or CSS Exclusions, Pretext's `l
 ### F. Shrinkwrap via binary search
 
 Pretext's bubble demo finds the tightest width that keeps the same line count via binary search on `layout()`. Simple, elegant, and potentially useful for Radiant's intrinsic sizing edge cases.
+
+---
+
+## Appendix: CSS `shape-outside` vs CSS Exclusions
+
+These are two distinct CSS specifications for flowing text around non-rectangular shapes. They are often confused but differ fundamentally in scope and status.
+
+### CSS `shape-outside`
+
+- **Spec**: [CSS Shapes Module Level 1](https://www.w3.org/TR/css-shapes-1/) — W3C Candidate Recommendation (CR)
+- **Browser support**: ~96.7% global (Chrome 37+, Firefox 62+, Safari 10.1+, Edge 79+)
+- **Scope**: Controls **how inline content wraps around floated elements only**
+- **Applies to**: Floats (`float: left` or `float: right`)
+- **Direction**: Inline content flows along the **outside** of the defined shape
+
+#### How it works
+
+```css
+.floated-image {
+  float: left;
+  width: 200px;
+  height: 200px;
+  shape-outside: circle(50%);   /* text wraps around a circular boundary */
+  shape-margin: 10px;           /* adds clearance between shape and text */
+}
+```
+
+The float's rectangular box is replaced by a shape for the purpose of inline layout. Text flows along the shape boundary instead of the float's bounding box. The shape can be:
+
+- **Basic shapes**: `circle()`, `ellipse()`, `inset()`, `polygon()`
+- **Image-based**: `url(image.png)` — derives shape from the alpha channel
+- **Box values**: `margin-box`, `border-box`, `padding-box`, `content-box`
+
+#### Limitations
+
+- **Only works with floats** — cannot shape-wrap around positioned, grid, or flex items
+- **Only affects one side** — text wraps on the opposite side of the float direction
+- **No `shape-inside`** — Level 1 does not allow shaping the container's inner boundary (deferred to Level 2, which is stalled)
+
+### CSS Exclusions
+
+- **Spec**: [CSS Exclusions Module Level 1](https://www.w3.org/TR/css3-exclusions/) — W3C Working Draft (stalled since 2015)
+- **Browser support**: ~0.29% global (only IE 10–11 with `-ms-` prefix; no modern browser)
+- **Scope**: A **general mechanism** for any element to define an exclusion area that inline content flows around
+- **Applies to**: Any positioned element (not limited to floats)
+- **Direction**: Content flows around **both sides** of the exclusion
+
+#### How it would work (if implemented)
+
+```css
+.obstacle {
+  position: absolute;
+  top: 100px;
+  left: 150px;
+  width: 200px;
+  height: 200px;
+  wrap-flow: both;        /* inline content wraps on both sides */
+  wrap-through: wrap;     /* this element participates in exclusion */
+}
+```
+
+Key properties:
+- `wrap-flow`: `auto | both | start | end | minimum | maximum | clear` — controls which sides text wraps around
+- `wrap-through`: `wrap | none` — whether an element's content respects exclusions
+- Works with **any positioning scheme**, not just floats
+
+#### Why it died
+
+- Microsoft was the sole implementer (IE 10) and dropped it from Edge
+- Complexity: requires a general "exclusion context" that interacts with all layout modes
+- `shape-outside` solved the 80% use case (magazine-style float wrapping) with far less complexity
+- No other browser vendor expressed intent to implement
+
+### Comparison
+
+| Aspect | `shape-outside` | CSS Exclusions |
+|---|---|---|
+| Spec status | CR (stable) | WD (stalled/dead) |
+| Browser support | 96.7% | 0.29% (IE only, prefixed) |
+| Applies to | Floats only | Any positioned element |
+| Wrap direction | One side (opposite float) | Both sides, configurable |
+| Shape definition | On the float itself | On the exclusion element |
+| Complexity | Low (extends existing float model) | High (new layout primitive) |
+| `shape-inside` | Deferred to Level 2 | Included via `wrap-flow` |
+
+### Relevance to Radiant
+
+For Radiant, **`shape-outside` is the practical target** — it has universal browser support, stable spec, and extends the existing float layout path. CSS Exclusions are effectively dead and not worth implementing.
+
+Pretext's variable-width line approach (calling `layoutNextLine` with different `maxWidth` per line) maps naturally to `shape-outside` implementation: for each line band, compute the available width after subtracting the float's shape boundary, then lay out text at that width.
