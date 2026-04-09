@@ -71,12 +71,15 @@ Lambda Source Semantics (lambda-core.rkt + lambda-eval.rkt)
         verify-call-args, verify-if-branches
 ```
 
-## Semantic Discrepancies Found
+## Semantic Status
 
-| Area | Docs Say | Implementation Does | Model Follows |
-|------|----------|-------------------|---------------|
-| Truthiness of `0` | Truthy | Falsy (`it2b` returns false) | Docs (spec) |
-| `and`/`or` return type | Docs unclear | Returns operand value (not bool) | Implementation |
+| Area | Status | Notes |
+|------|--------|-------|
+| Truthiness of `0` | **Aligned** | Both spec and implementation treat 0 as truthy. `i2it(0)` produces a tagged value with non-zero bits. |
+| `and`/`or` return type | **Aligned** | Returns operand value (short-circuit), model follows implementation |
+| Boxing/unboxing | **Aligned** | Model matches `type_box_table[]` in `transpile.cpp` (Phase 1 sync) |
+| Container unboxing | **Aligned** | Specific functions per container type (it2arr, it2map, it2elmt, etc.) |
+| New types (object, uint64, etc.) | **Modeled** | object-type, num-sized-type, uint64-type, array-num-type added |
 
 ## Scope
 

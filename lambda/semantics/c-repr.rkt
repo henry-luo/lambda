@@ -35,14 +35,17 @@
 ;; C-type is one of:
 ;; - 'Item         : 64-bit tagged union (universal type, uint64_t)
 ;; - 'int64_t      : unboxed 64-bit signed integer (used for BOTH int and int64)
+;; - 'uint64_t     : unboxed 64-bit unsigned integer (LMD_TYPE_NUM_SIZED, LMD_TYPE_UINT64)
 ;; - 'double       : unboxed 64-bit IEEE 754
 ;; - 'bool         : unboxed boolean (C++ bool / uint8_t)
 ;; - 'String*      : pointer to String struct (refcounted)
 ;; - 'Symbol*      : pointer to Symbol struct (interned)
 ;; - 'Array*       : pointer to Array struct (Container)
+;; - 'ArrayNum*    : pointer to ArrayNum struct (unified numeric array)
 ;; - 'List*        : pointer to List struct (Container)
 ;; - 'Map*         : pointer to Map struct (Container)
 ;; - 'Element*     : pointer to Element struct (Container)
+;; - 'Object*      : pointer to Object struct (nominally-typed map + methods)
 ;; - 'DateTime     : inline DateTime struct
 ;; - 'Decimal*     : pointer to Decimal struct
 ;; - 'void         : no return value (procedures)
@@ -74,6 +77,7 @@
     ['list-type     'List*]
     ['map-type      'Map*]
     ['element-type  'Element*]
+    ['object-type   'Object*]     ; write_type → "Object*" (nominally-typed)
     ['func-type     'Function*]   ; write_type → "Function*"
     ['type-type     'Type*]       ; write_type → "Type*"
     ['null-type     'Item]        ; null is represented as Item
@@ -83,6 +87,9 @@
     ['range-type    'Range*]      ; write_type → "Range*"
     ['path-type     'Path*]       ; write_type → "Path*"
     ['vmap-type     'Item]        ; vmap is always Item
+    ['num-sized-type 'uint64_t]   ; write_type → "uint64_t" (inline sized numerics)
+    ['uint64-type   'uint64_t]    ; write_type → "uint64_t"
+    ['array-num-type 'ArrayNum*]  ; unified numeric array
     ['array-int-type   'ArrayInt*]   ; specialized int array
     ['array-int64-type 'ArrayInt64*] ; specialized int64 array
     ['array-float-type 'ArrayFloat*] ; specialized float array
@@ -115,13 +122,14 @@
 
 ;; Is this a pointer type? (vs inline/scalar)
 (define (pointer-c-type? ct)
-  (and (member ct '(String* Symbol* Array* List* Map* Element* Decimal*
+  (and (member ct '(String* Symbol* Array* ArrayNum* List* Map* Element*
+                    Object* Decimal*
                     Range* Path* Function* Type*
                     ArrayInt* ArrayInt64* ArrayFloat*)) #t))
 
 ;; Is this an inline scalar type? (packed in registers, not pointers)
 (define (scalar-c-type? ct)
-  (and (member ct '(int64_t double bool)) #t))
+  (and (member ct '(int64_t uint64_t double bool)) #t))
 
 ;; Is this the universal Item type?
 (define (item-c-type? ct)
@@ -140,6 +148,9 @@
 ;; b2it(bool)       → Item   (inline: BoolTrue or BoolFalse constant)
 ;; s2it(String*)    → Item   (tag pointer with STRING type_id)
 ;; y2it(Symbol*)    → Item   (tag pointer with SYMBOL type_id)
+;; x2it(String*)    → Item   (tag pointer with BINARY type_id)
+;; push_k(DateTime) → Item   (store DateTime in num_stack)
+;; c2it(Decimal*)   → Item   (tag pointer with DECIMAL type_id)
 ;;
 ;; NOTE: i2it and push_l both take int64_t. The difference:
 ;;   i2it: packs inline (int56 range check, overflow → ITEM_ERROR)
@@ -159,9 +170,11 @@
     ['String*   's2it]
     ['Symbol*   'y2it]
     ['Array*    'cast-to-Item]   ; (Item)(ptr) — pointer cast
+    ['ArrayNum* 'cast-to-Item]
     ['List*     #f]              ; list_end() already returns Item
     ['Map*      'cast-to-Item]
     ['Element*  'cast-to-Item]
+    ['Object*   'cast-to-Item]
     ['Range*    'cast-to-Item]
     ['Path*     'cast-to-Item]
     ['Function* 'cast-to-Item]
@@ -186,7 +199,7 @@
     ['float-type  'push_d]
     ['bool-type   'b2it]
     ['string-type 's2it]
-    ['binary-type 's2it]
+    ['binary-type 'x2it]     ; binary uses x2it (tags LMD_TYPE_BINARY, not STRING)
     ['symbol-type 'y2it]
     ['datetime-type 'push_k]
     ['decimal-type 'c2it]
@@ -202,9 +215,9 @@
     ['float-type  'it2d]
     ['bool-type   'it2b]
     ['string-type 'it2s]
-    ['symbol-type 'it2sym]
-    ['datetime-type 'it2dt]
-    ['decimal-type 'it2dec]
+    ['symbol-type 'it2s]     ; symbol unboxing uses it2s (same as string, per lambda.h)
+    ['datetime-type 'it2k]    ; it2k in type_box_table (not it2dt)
+    ['decimal-type 'it2c]     ; it2c in type_box_table (not it2dec)
     [_ (unboxing-function (lambda-type->c-type λ-type))]))
 
 
@@ -218,7 +231,16 @@
 ;; it2l(Item) → int64_t   (dereference num_stack pointer for int64 values)
 ;; it2d(Item) → double    (dereference num_stack pointer)
 ;; it2b(Item) → bool      (extract boolean)
-;; it2s(Item) → String*   (untag pointer)
+;; it2s(Item) → String*   (untag pointer — used for STRING, SYMBOL, and BINARY)
+;; it2k(Item) → DateTime  (dereference num_stack pointer for DateTime)
+;; it2c(Item) → Decimal*  (untag pointer)
+;; it2map(Item) → Map*    (untag container pointer)
+;; it2elmt(Item) → Element*  (untag container pointer)
+;; it2obj(Item) → Object*    (untag container pointer)
+;; it2arr(Item) → Array*     (untag container pointer)
+;; it2range(Item) → Range*   (untag container pointer)
+;; it2path(Item) → Path*     (untag container pointer)
+;; it2p(Item) → Function*    (untag container pointer)
 ;;
 ;; NOTE: it2i and it2l both return int64_t. The difference:
 ;;   it2i: extracts int56 from inline-packed Item (fast, no pointer deref)
@@ -236,18 +258,20 @@
     ['double    'it2d]
     ['bool      'it2b]
     ['String*   'it2s]
-    ['Symbol*   'it2sym]
-    ['DateTime  'it2dt]
-    ['Decimal*  'it2dec]
+    ['Symbol*   'it2s]      ; symbol uses it2s (same fn as string, per type_box_table)
+    ['DateTime  'it2k]      ; it2k in type_box_table
+    ['Decimal*  'it2c]      ; it2c in type_box_table
     ;; Container pointers: cast from Item (uint64_t → ptr)
-    ['Array*    'cast-from-Item]
+    ['Array*    'it2arr]       ; specific container unbox fns per type_box_table
+    ['ArrayNum* 'it2arr]
     ['List*     'cast-from-Item]
-    ['Map*      'cast-from-Item]
-    ['Element*  'cast-from-Item]
-    ['Range*    'cast-from-Item]
-    ['Path*     'cast-from-Item]
-    ['Function* 'cast-from-Item]
-    ['Type*     'cast-from-Item]
+    ['Map*      'it2map]
+    ['Element*  'it2elmt]
+    ['Object*   'it2obj]
+    ['Range*    'it2range]
+    ['Path*     'it2path]
+    ['Function* 'it2p]
+    ['Type*     'cast-from-Item]  ; Type* has no unbox_fn in type_box_table
     ['ArrayInt*    'cast-from-Item]
     ['ArrayInt64*  'cast-from-Item]
     ['ArrayFloat*  'cast-from-Item]
