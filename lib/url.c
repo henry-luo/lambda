@@ -838,27 +838,58 @@ char* url_decode_uri(const char* str, size_t len, size_t* out_len) {
     static const char reserved[] = "#$&+,/:;=?@";
     size_t i = 0, j = 0;
     while (i < len) {
-        if (str[i] == '%' && i + 2 < len) {
+        if (str[i] == '%') {
+            if (i + 2 >= len) { free(decoded); return NULL; }
             int high = url_hex_to_int(str[i + 1]);
             int low  = url_hex_to_int(str[i + 2]);
-            if (high >= 0 && low >= 0) {
-                char ch = (char)((high << 4) | low);
-                // check if this is a reserved char — if so, keep encoded
-                int is_reserved = 0;
-                for (const char* r = reserved; *r; r++) {
-                    if (ch == *r) { is_reserved = 1; break; }
-                }
-                if (is_reserved) {
-                    decoded[j++] = str[i];
-                    decoded[j++] = str[i + 1];
-                    decoded[j++] = str[i + 2];
-                    i += 3;
-                } else {
-                    decoded[j++] = ch;
-                    i += 3;
-                }
+            if (high < 0 || low < 0) { free(decoded); return NULL; }
+            unsigned char lead = (unsigned char)((high << 4) | low);
+            // check if this is a reserved char — if so, keep encoded
+            int is_reserved = 0;
+            for (const char* r = reserved; *r; r++) {
+                if ((char)lead == *r) { is_reserved = 1; break; }
+            }
+            if (is_reserved) {
+                decoded[j++] = str[i];
+                decoded[j++] = str[i + 1];
+                decoded[j++] = str[i + 2];
+                i += 3;
                 continue;
             }
+            decoded[j++] = (char)lead;
+            i += 3;
+            // validate UTF-8 multi-byte sequences
+            if (lead >= 0x80) {
+                int expected = 0;
+                if ((lead & 0xE0) == 0xC0) expected = 1;
+                else if ((lead & 0xF0) == 0xE0) expected = 2;
+                else if ((lead & 0xF8) == 0xF0) expected = 3;
+                else { free(decoded); return NULL; }
+                for (int k = 0; k < expected; k++) {
+                    if (i >= len || str[i] != '%') { free(decoded); return NULL; }
+                    if (i + 2 >= len) { free(decoded); return NULL; }
+                    int h2 = url_hex_to_int(str[i + 1]);
+                    int l2 = url_hex_to_int(str[i + 2]);
+                    if (h2 < 0 || l2 < 0) { free(decoded); return NULL; }
+                    unsigned char cont = (unsigned char)((h2 << 4) | l2);
+                    if ((cont & 0xC0) != 0x80) { free(decoded); return NULL; }
+                    decoded[j++] = (char)cont;
+                    i += 3;
+                }
+                // check for overlong encodings and invalid code points
+                unsigned int cp = 0;
+                if (expected == 1) {
+                    cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x80) { free(decoded); return NULL; }
+                } else if (expected == 2) {
+                    cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { free(decoded); return NULL; }
+                } else if (expected == 3) {
+                    cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x10000 || cp > 0x10FFFF) { free(decoded); return NULL; }
+                }
+            }
+            continue;
         }
         decoded[j++] = str[i++];
     }
@@ -874,14 +905,46 @@ char* url_decode_component(const char* str, size_t len, size_t* out_len) {
     if (!decoded) return NULL;
     size_t i = 0, j = 0;
     while (i < len) {
-        if (str[i] == '%' && i + 2 < len) {
+        if (str[i] == '%') {
+            if (i + 2 >= len) { free(decoded); return NULL; }
             int high = url_hex_to_int(str[i + 1]);
             int low  = url_hex_to_int(str[i + 2]);
-            if (high >= 0 && low >= 0) {
-                decoded[j++] = (char)((high << 4) | low);
-                i += 3;
-                continue;
+            if (high < 0 || low < 0) { free(decoded); return NULL; }
+            unsigned char lead = (unsigned char)((high << 4) | low);
+            decoded[j++] = (char)lead;
+            i += 3;
+            // validate UTF-8 multi-byte sequences
+            if (lead >= 0x80) {
+                int expected = 0;
+                if ((lead & 0xE0) == 0xC0) expected = 1;
+                else if ((lead & 0xF0) == 0xE0) expected = 2;
+                else if ((lead & 0xF8) == 0xF0) expected = 3;
+                else { free(decoded); return NULL; }
+                for (int k = 0; k < expected; k++) {
+                    if (i >= len || str[i] != '%') { free(decoded); return NULL; }
+                    if (i + 2 >= len) { free(decoded); return NULL; }
+                    int h2 = url_hex_to_int(str[i + 1]);
+                    int l2 = url_hex_to_int(str[i + 2]);
+                    if (h2 < 0 || l2 < 0) { free(decoded); return NULL; }
+                    unsigned char cont = (unsigned char)((h2 << 4) | l2);
+                    if ((cont & 0xC0) != 0x80) { free(decoded); return NULL; }
+                    decoded[j++] = (char)cont;
+                    i += 3;
+                }
+                // check for overlong encodings and invalid code points
+                unsigned int cp = 0;
+                if (expected == 1) {
+                    cp = ((lead & 0x1F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x80) { free(decoded); return NULL; }
+                } else if (expected == 2) {
+                    cp = ((lead & 0x0F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x800 || (cp >= 0xD800 && cp <= 0xDFFF)) { free(decoded); return NULL; }
+                } else if (expected == 3) {
+                    cp = ((lead & 0x07) << 18) | ((decoded[j - 3] & 0x3F) << 12) | ((decoded[j - 2] & 0x3F) << 6) | (decoded[j - 1] & 0x3F);
+                    if (cp < 0x10000 || cp > 0x10FFFF) { free(decoded); return NULL; }
+                }
             }
+            continue;
         }
         decoded[j++] = str[i++];
     }

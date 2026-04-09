@@ -33,6 +33,27 @@ static int typed_array_element_size(JsTypedArrayType type) {
     }
 }
 
+// Returns the JS type name for a typed array element type (e.g. "Uint8Array")
+extern "C" const char* js_typed_array_type_name(Item val) {
+    if (get_type_id(val) != LMD_TYPE_MAP) return NULL;
+    Map* m = val.map;
+    if (!m || m->type != (void*)&js_typed_array_type_marker) return NULL;
+    JsTypedArray* ta = (JsTypedArray*)m->data;
+    if (!ta) return NULL;
+    switch (ta->element_type) {
+    case JS_TYPED_INT8:          return "Int8Array";
+    case JS_TYPED_UINT8:         return "Uint8Array";
+    case JS_TYPED_UINT8_CLAMPED: return "Uint8ClampedArray";
+    case JS_TYPED_INT16:         return "Int16Array";
+    case JS_TYPED_UINT16:        return "Uint16Array";
+    case JS_TYPED_INT32:         return "Int32Array";
+    case JS_TYPED_UINT32:        return "Uint32Array";
+    case JS_TYPED_FLOAT32:       return "Float32Array";
+    case JS_TYPED_FLOAT64:       return "Float64Array";
+    default:                     return NULL;
+    }
+}
+
 // ============================================================================
 // ArrayBuffer
 // ============================================================================

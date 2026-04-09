@@ -111,7 +111,7 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "ArrayBuffer-transfer", "arraybuffer-transfer", // ArrayBuffer.prototype.transfer
     "regexp-v-flag",                              // Unicode sets (/v flag)
     // "promise-with-resolvers",                  // SUPPORTED
-    "array-grouping",                             // Object.groupBy / Map.groupBy
+    // "array-grouping",                          // SUPPORTED
     "String.prototype.isWellFormed",              // Well-Formed Unicode Strings
     "String.prototype.toWellFormed",
 
@@ -123,14 +123,14 @@ static const std::set<std::string> UNSUPPORTED_FEATURES = {
     "Float16Array",                               // Float16 typed arrays
     "json-parse-with-source",                     // JSON.parse source text access
     "json-modules",                               // JSON module imports
-    "set-methods",                                // New Set methods
-    "Set.prototype.intersection",
-    "Set.prototype.union",
-    "Set.prototype.difference",
-    "Set.prototype.symmetricDifference",
-    "Set.prototype.isSubsetOf",
-    "Set.prototype.isSupersetOf",
-    "Set.prototype.isDisjointFrom",
+    // "set-methods",                             // SUPPORTED
+    // "Set.prototype.intersection",               // SUPPORTED
+    // "Set.prototype.union",                       // SUPPORTED
+    // "Set.prototype.difference",                  // SUPPORTED
+    // "Set.prototype.symmetricDifference",         // SUPPORTED
+    // "Set.prototype.isSubsetOf",                  // SUPPORTED
+    // "Set.prototype.isSupersetOf",                // SUPPORTED
+    // "Set.prototype.isDisjointFrom",              // SUPPORTED
     "promise-try",                                // Promise.try
     "RegExp.escape",                              // RegExp.escape
 

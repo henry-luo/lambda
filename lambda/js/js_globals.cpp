@@ -1835,6 +1835,7 @@ struct JsFunctionLayout {
     int builtin_id;
     Item properties_map;
     uint8_t flags;
+    int16_t formal_length;
 };
 
 static bool js_func_is_constructor(Item func_item) {
@@ -3665,6 +3666,70 @@ extern "C" Item js_object_from_entries(Item iterable) {
 }
 
 // =============================================================================
+// Object.groupBy(items, callbackFn) — groups items into plain object by key
+// =============================================================================
+
+extern "C" Item js_iterable_to_array(Item iterable);
+
+extern "C" Item js_object_group_by(Item items, Item callback) {
+    // Convert iterable to array first
+    Item arr = js_iterable_to_array(items);
+    // Create null-prototype object per spec
+    Item result = js_object_create(ItemNull);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = {.item = i2it(i)};
+        Item fn_args[2] = {elem, idx_item};
+        Item key = js_call_function(callback, make_js_undefined(), fn_args, 2);
+        Item key_str = js_to_string(key);
+        // get or create array for this group
+        String* ks = it2s(key_str);
+        bool found = false;
+        Item group = js_map_get_fast_ext(result.map, ks->chars, (int)ks->len, &found);
+        if (!found) {
+            group = js_array_new(0);
+            js_property_set(result, key_str, group);
+        }
+        js_array_push(group, elem);
+    }
+    return result;
+}
+
+// =============================================================================
+// Map.groupBy(items, callbackFn) — groups items into a Map by key
+// =============================================================================
+
+extern "C" Item js_map_collection_new(void);
+
+extern "C" Item js_map_group_by(Item items, Item callback) {
+    extern Item js_collection_method(Item obj, int method_id, Item arg1, Item arg2);
+    Item result = js_map_collection_new();
+    // Convert iterable to array first
+    Item arr = js_iterable_to_array(items);
+    int64_t len = js_array_length(arr);
+    for (int64_t i = 0; i < len; i++) {
+        Item elem = js_array_get(arr, (Item){.item = i2it(i)});
+        Item idx_item = {.item = i2it(i)};
+        Item fn_args[2] = {elem, idx_item};
+        Item key = js_call_function(callback, make_js_undefined(), fn_args, 2);
+        // has(key) -> method_id=2
+        Item has = js_collection_method(result, 2, key, ItemNull);
+        if (it2b(has)) {
+            // get(key) -> method_id=1, then push elem
+            Item group = js_collection_method(result, 1, key, ItemNull);
+            js_array_push(group, elem);
+        } else {
+            Item group = js_array_new(0);
+            js_array_push(group, elem);
+            // set(key, group) -> method_id=0
+            js_collection_method(result, 0, key, group);
+        }
+    }
+    return result;
+}
+
+// =============================================================================
 // Object.is(value1, value2) — SameValue comparison (handles NaN, +0/-0)
 // =============================================================================
 
@@ -4976,7 +5041,13 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
-    if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!decoded) {
+        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+        extern Item js_new_error_with_name(Item type_name, Item message);
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
     String* result = heap_create_name(decoded, decoded_len);
     free(decoded);
     return (Item){.item = s2it(result)};
@@ -5000,7 +5071,13 @@ extern "C" Item js_decodeURI(Item str_item) {
     if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name("", 0))};
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
-    if (!decoded) return (Item){.item = s2it(heap_create_name("", 0))};
+    if (!decoded) {
+        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+        extern Item js_new_error_with_name(Item type_name, Item message);
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
     String* result = heap_create_name(decoded, decoded_len);
     free(decoded);
     return (Item){.item = s2it(result)};
@@ -5247,6 +5324,7 @@ extern "C" Item js_get_global_builtin_fn(Item name_item, Item param_count_item) 
     fn->type_id = LMD_TYPE_FUNC;
     fn->func_ptr = NULL;
     fn->param_count = pc;
+    fn->formal_length = -1; // -1 = use param_count for .length
     fn->builtin_id = -2; // marker: global builtin wrapper
     fn->name = heap_create_name(name->chars, name->len);
     // prototype and properties_map left as zero (pool_calloc)
@@ -5276,6 +5354,7 @@ enum JsConstructorId {
     JS_CTOR_REFERENCE_ERROR,
     JS_CTOR_SYNTAX_ERROR,
     JS_CTOR_URI_ERROR,
+    JS_CTOR_EVAL_ERROR,
     JS_CTOR_REGEXP,
     JS_CTOR_DATE,
     JS_CTOR_PROMISE,
@@ -5328,6 +5407,7 @@ struct JsCtor {
     int builtin_id;
     Item properties_map; // v18: must match JsFunction layout
     uint8_t flags;       // must match JsFunction layout (generator, arrow flags)
+    int16_t formal_length; // must match JsFunction layout
 };
 
 static Item js_create_constructor(int ctor_id, const char* name, int param_count) {
@@ -5348,6 +5428,7 @@ static Item js_create_constructor(int ctor_id, const char* name, int param_count
     else if (ctor_id == JS_CTOR_STRING) fn->func_ptr = (void*)js_ctor_string_fn;
     else fn->func_ptr = (void*)js_ctor_placeholder;
     fn->param_count = param_count;
+    fn->formal_length = -1; // -1 = use param_count for .length
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
@@ -5381,6 +5462,7 @@ extern "C" Item js_get_constructor(Item name_item) {
         {"ReferenceError", 14, JS_CTOR_REFERENCE_ERROR, 1},
         {"SyntaxError", 11, JS_CTOR_SYNTAX_ERROR, 1},
         {"URIError", 8, JS_CTOR_URI_ERROR, 1},
+        {"EvalError", 9, JS_CTOR_EVAL_ERROR, 1},
         {"RegExp", 6, JS_CTOR_REGEXP, 2},
         {"Date", 4, JS_CTOR_DATE, 1},
         {"Promise", 7, JS_CTOR_PROMISE, 1},
