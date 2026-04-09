@@ -783,8 +783,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
                     // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                     static int bitmap_debug_count = 0;
-                    if (bitmap_debug_count < 50 && rdcon->font.font_handle &&
-                        strcmp(font_handle_get_family_name(rdcon->font.font_handle), "Monaco") == 0) {
+                    const char* _dbg_fname = rdcon->font.font_handle ? font_handle_get_family_name(rdcon->font.font_handle) : NULL;
+                    if (bitmap_debug_count < 50 && _dbg_fname &&
+                        strcmp(_dbg_fname, "Monaco") == 0) {
                         log_debug("[BITMAP DEBUG] Monaco glyph U+%04X: bitmap=%dx%d pitch=%d left=%d top=%d advance=%.1f pixel_mode=%d",
                                   codepoint, glyph->bitmap.width, glyph->bitmap.height,
                                   glyph->bitmap.pitch, glyph->bitmap.bearing_x, glyph->bitmap.bearing_y,

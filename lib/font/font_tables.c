@@ -1021,8 +1021,18 @@ FontTables* font_tables_open_face(const uint8_t* data, size_t data_len,
         if (offset_pos + 4 > data_len) return NULL;
         uint32_t face_offset = rd32(data + offset_pos);
         if (face_offset >= data_len) return NULL;
-        // open the font at the given offset within the TTC data
-        return font_tables_open(data + face_offset, data_len - face_offset, pool);
+        // open the font at the given offset within the TTC data.
+        // The face header (scaler type, table directory) is at data + face_offset,
+        // but table offsets in the directory are ABSOLUTE within the TTC file.
+        // So we parse the directory from the face offset, then reset data/data_len
+        // to the full TTC file so table lookups use absolute offsets correctly.
+        FontTables* tables = font_tables_open(data + face_offset,
+                                               data_len - face_offset, pool);
+        if (tables) {
+            tables->data = data;
+            tables->data_len = data_len;
+        }
+        return tables;
     }
 
     // non-TTC: ignore face_index, open directly
