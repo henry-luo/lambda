@@ -16,6 +16,7 @@
 // FreeType Custom Memory Allocator — routes through Lambda Pool
 // ============================================================================
 
+#ifndef __APPLE__
 static void* ft_pool_alloc(FT_Memory memory, long size) {
     Pool* pool = (Pool*)memory->user;
     return pool_alloc(pool, (size_t)size);
@@ -31,6 +32,7 @@ static void* ft_pool_realloc(FT_Memory memory, long cur_size, long new_size, voi
     Pool* pool = (Pool*)memory->user;
     return pool_realloc(pool, block, (size_t)new_size);
 }
+#endif
 
 // ============================================================================
 // Face cache hashmap callbacks
@@ -145,6 +147,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (ctx->config.pixel_ratio <= 0.0f) ctx->config.pixel_ratio = 1.0f;
 
     // set up FreeType custom memory allocator routing through our pool
+#ifndef __APPLE__
     ctx->ft_memory.user    = pool;
     ctx->ft_memory.alloc   = ft_pool_alloc;
     ctx->ft_memory.free    = ft_pool_free;
@@ -167,12 +170,15 @@ FontContext* font_context_create(FontContextConfig* config) {
     if (ctx->config.enable_lcd_rendering) {
         FT_Library_SetLcdFilter(ctx->ft_library, FT_LCD_FILTER_DEFAULT);
     }
+#endif
 
     // create font database
     ctx->database = font_database_create_internal(pool, arena);
     if (!ctx->database) {
         log_error("font_context_create: failed to create font database");
+#ifndef __APPLE__
         FT_Done_Library(ctx->ft_library);
+#endif
         arena_destroy(ctx->glyph_arena);
         if (owns_arena) arena_destroy(arena);
         if (owns_pool)  pool_destroy(pool);
@@ -248,10 +254,12 @@ void font_context_destroy(FontContext* ctx) {
     }
 
     // shut down FreeType
+#ifndef __APPLE__
     if (ctx->ft_library) {
         FT_Done_Library(ctx->ft_library);
         ctx->ft_library = NULL;
     }
+#endif
 
     // destroy glyph arena
     if (ctx->glyph_arena) {
@@ -404,11 +412,21 @@ bool font_context_scan(FontContext* ctx) {
 // ============================================================================
 
 void* font_context_get_ft_library(FontContext* ctx) {
+#ifdef __APPLE__
+    (void)ctx;
+    return NULL;
+#else
     return ctx ? ctx->ft_library : NULL;
+#endif
 }
 
 void* font_handle_get_ft_face(FontHandle* handle) {
+#ifdef __APPLE__
+    (void)handle;
+    return NULL;
+#else
     return handle ? handle->ft_face : NULL;
+#endif
 }
 
 struct FontDatabase* font_context_get_database(FontContext* ctx) {
@@ -420,8 +438,8 @@ struct FontDatabase* font_context_get_database(FontContext* ctx) {
 // ============================================================================
 
 const char* font_handle_get_family_name(FontHandle* handle) {
-    if (!handle || !handle->ft_face) return NULL;
-    return handle->ft_face->family_name;
+    if (!handle) return NULL;
+    return handle->family_name;
 }
 
 float font_handle_get_size_px(FontHandle* handle) {
@@ -448,10 +466,12 @@ void font_handle_release(FontHandle* handle) {
     handle->ref_count--;
     if (handle->ref_count <= 0) {
         // destroy the FreeType face (only if we own it)
+#ifndef __APPLE__
         if (handle->ft_face && !handle->borrowed_face) {
             FT_Done_Face(handle->ft_face);
             handle->ft_face = NULL;
         }
+#endif
         // destroy FontTables
         if (handle->tables && handle->ctx) {
             font_tables_close(handle->tables, handle->ctx->pool);
@@ -690,6 +710,7 @@ float font_get_x_height_ratio(FontHandle* handle) {
 // Font handle wrapping — borrow an existing FT_Face
 // ============================================================================
 
+#ifndef __APPLE__
 FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
     if (!ctx || !ft_face_ptr) return NULL;
 
@@ -719,3 +740,9 @@ FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px)
     log_debug("font_handle_wrap: borrowed %s @%.0fpx", face->family_name, size_px);
     return handle;
 }
+#else
+FontHandle* font_handle_wrap(FontContext* ctx, void* ft_face_ptr, float size_px) {
+    (void)ctx; (void)ft_face_ptr; (void)size_px;
+    return NULL; // FreeType not available on macOS
+}
+#endif

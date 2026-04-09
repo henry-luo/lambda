@@ -21,6 +21,7 @@
 // Fixed size selection (for bitmap/emoji fonts) — unified from 4 duplicates
 // ============================================================================
 
+#ifndef __APPLE__
 void font_select_best_fixed_size(FT_Face face, int target_ppem) {
     if (!face || face->num_fixed_sizes <= 0) return;
 
@@ -57,11 +58,76 @@ static void set_face_size(FT_Face face, float physical_size_px) {
         FT_Set_Pixel_Sizes(face, 0, (FT_UInt)physical_size_px);
     }
 }
+#endif
 
 // ============================================================================
-// Wrap an FT_Face into a FontHandle
+// Wrap font data into a FontHandle
 // ============================================================================
 
+#ifdef __APPLE__
+// macOS: create FontHandle using CoreText + FontTables (no FreeType)
+static FontHandle* create_handle(FontContext* ctx,
+                                  uint8_t* memory_buffer, size_t memory_buffer_size,
+                                  int face_index, float size_px, float physical_size,
+                                  FontWeight weight, FontSlant slant) {
+    FontHandle* handle = (FontHandle*)pool_calloc(ctx->pool, sizeof(FontHandle));
+    if (!handle) return NULL;
+
+    handle->tables = NULL;
+    handle->ref_count = 1;
+    handle->ctx = ctx;
+    handle->memory_buffer = memory_buffer;
+    handle->memory_buffer_size = memory_buffer_size;
+    handle->size_px = size_px;
+    handle->physical_size_px = physical_size;
+    handle->weight = weight;
+    handle->slant = slant;
+    handle->metrics_ready = false;
+    handle->bitmap_scale = 1.0f;
+
+    // create FontTables from raw font data (handles TTC via face_index)
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->tables = font_tables_open_face(memory_buffer, memory_buffer_size,
+                                                face_index, ctx->pool);
+        if (!handle->tables) {
+            log_debug("font_loader: font_tables_open_face failed (non-fatal)");
+        }
+    }
+
+    // get family name and PostScript name from FontTables name table
+    if (handle->tables) {
+        NameTable* name = font_tables_get_name(handle->tables);
+        if (name && name->family_name) {
+            handle->family_name = arena_strdup(ctx->arena, name->family_name);
+        }
+    }
+
+    // create CoreText rasterizer from raw font data
+    if (memory_buffer && memory_buffer_size > 0) {
+        handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
+                                                          size_px, face_index);
+        if (!handle->ct_raster_ref) {
+            log_debug("font_loader: ct_raster_ref creation failed (non-fatal)");
+        }
+    }
+
+    // create CoreText font for glyph advance overrides and GPOS kerning.
+    // Use FontTables name table for PostScript and family names.
+    {
+        const char* ps_name = NULL;
+        const char* family = handle->family_name;
+        if (handle->tables) {
+            NameTable* name = font_tables_get_name(handle->tables);
+            if (name) ps_name = name->postscript_name;
+        }
+        handle->ct_font_ref = font_platform_create_ct_font(
+            ps_name, family, size_px, (int)weight);
+    }
+
+    return handle;
+}
+#else
+// Non-macOS: create FontHandle using FreeType
 static FontHandle* create_handle(FontContext* ctx, FT_Face face,
                                   uint8_t* memory_buffer, size_t memory_buffer_size,
                                   float size_px, float physical_size,
@@ -93,7 +159,6 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
     }
 
     // compute bitmap scale for fixed-size bitmap fonts (e.g. color emoji)
-    // these fonts have a fixed ppem (e.g. 109) that may differ from target size
     handle->bitmap_scale = 1.0f;
     if ((face->face_flags & FT_FACE_FLAG_FIXED_SIZES) &&
         (face->face_flags & FT_FACE_FLAG_COLOR) &&
@@ -112,34 +177,15 @@ static FontHandle* create_handle(FontContext* ctx, FT_Face face,
         handle->family_name = arena_strdup(ctx->arena, face->family_name);
     }
 
-#ifdef __APPLE__
-    // create CoreText font for rasterization from raw font data
-    if (memory_buffer && memory_buffer_size > 0) {
-        handle->ct_raster_ref = font_rasterize_ct_create(memory_buffer, memory_buffer_size,
-                                                          size_px, 0);
-        if (!handle->ct_raster_ref) {
-            log_debug("font_loader: ct_raster_ref creation failed (non-fatal, FreeType fallback)");
-        }
-    }
-
-    // create CoreText font for glyph advance overrides and GPOS kerning.
-    // Use CoreText advances for ALL fonts so that text widths match Chrome/Skia.
-    // For fonts with a kern table, FontTables kern is still applied on top
-    // (font_get_kerning checks FontTables first before ct_font_ref path).
-    {
-        const char* ps_name = FT_Get_Postscript_Name(face);
-        handle->ct_font_ref = font_platform_create_ct_font(
-            ps_name, face->family_name, size_px, (int)weight);  // CSS size+weight
-    }
-#endif
-
     return handle;
 }
+#endif
 
 // ============================================================================
 // Variable font axis selection (opsz, wght)
 // ============================================================================
 
+#ifndef __APPLE__
 static void apply_variable_font_axes(FT_Face face, FT_Library library,
                                      float size_px, FontWeight weight) {
     if (!face || !(face->face_flags & FT_FACE_FLAG_MULTIPLE_MASTERS)) return;
@@ -184,6 +230,7 @@ static void apply_variable_font_axes(FT_Face face, FT_Library library,
     free(coords);
     FT_Done_MM_Var(library, mm);
 }
+#endif // !__APPLE__
 
 // ============================================================================
 // Font file data cache — avoids re-reading the same file into the arena
@@ -301,6 +348,10 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         size_t cached_len = 0;
         if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
             // reuse cached decompressed SFNT data
+#ifdef __APPLE__
+            FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
+                                                face_index, size_px, physical_size, weight, slant);
+#else
             FT_Face face = NULL;
             FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
                                                face_index, &face);
@@ -312,10 +363,11 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             set_face_size(face, physical_size);
             FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
                                                 size_px, physical_size, weight, slant);
+#endif
             if (handle) {
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
                 log_info("font_loader: loaded WOFF '%s' from file cache (family=%s, size=%.0f)",
-                         path, face->family_name ? face->family_name : "?", physical_size);
+                         path, handle->family_name ? handle->family_name : "?", physical_size);
             }
             return handle;
         }
@@ -356,6 +408,10 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         file_data_cache_insert(ctx, path, (uint8_t*)sfnt_data, sfnt_len);
 
         // use cached data directly — avoid a second copy
+#ifdef __APPLE__
+        FontHandle* handle = create_handle(ctx, (uint8_t*)sfnt_data, sfnt_len,
+                                            face_index, size_px, physical_size, weight, slant);
+#else
         FT_Face face = NULL;
         FT_Error err = FT_New_Memory_Face(ctx->ft_library, sfnt_data, (FT_Long)sfnt_len,
                                            face_index, &face);
@@ -367,10 +423,11 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         set_face_size(face, physical_size);
         FontHandle* handle = create_handle(ctx, face, (uint8_t*)sfnt_data, sfnt_len,
                                             size_px, physical_size, weight, slant);
+#endif
         if (handle) {
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
             log_info("font_loader: loaded WOFF '%s' (family=%s, size=%.0f)",
-                     path, face->family_name ? face->family_name : "?", physical_size);
+                     path, handle->family_name ? handle->family_name : "?", physical_size);
         }
         return handle;
     }
@@ -381,6 +438,10 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         size_t cached_len = 0;
         if (file_data_cache_lookup(ctx, path, &cached_data, &cached_len)) {
             // reuse cached file data — avoid re-reading and arena-allocating
+#ifdef __APPLE__
+            FontHandle* handle = create_handle(ctx, (uint8_t*)cached_data, cached_len,
+                                                face_index, size_px, physical_size, weight, slant);
+#else
             FT_Face face = NULL;
             FT_Error err = FT_New_Memory_Face(ctx->ft_library, cached_data, (FT_Long)cached_len,
                                                face_index, &face);
@@ -392,10 +453,11 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
             set_face_size(face, physical_size);
             FontHandle* handle = create_handle(ctx, face, (uint8_t*)cached_data, cached_len,
                                                 size_px, physical_size, weight, slant);
+#endif
             if (handle) {
                 handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
                 log_info("font_loader: loaded '%s' from file cache (family=%s, size=%.0f)",
-                         path, face->family_name ? face->family_name : "?", physical_size);
+                         path, handle->family_name ? handle->family_name : "?", physical_size);
             }
             return handle;
         }
@@ -422,6 +484,10 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
         // cache the raw file data for reuse at different sizes
         file_data_cache_insert(ctx, path, ttf_buf, ttf_size);
 
+#ifdef __APPLE__
+        FontHandle* handle = create_handle(ctx, ttf_buf, ttf_size,
+                                            face_index, size_px, physical_size, weight, slant);
+#else
         FT_Face face = NULL;
         FT_Error err = FT_New_Memory_Face(ctx->ft_library, ttf_buf, (FT_Long)ttf_size,
                                            face_index, &face);
@@ -435,10 +501,11 @@ FontHandle* font_load_face_internal(FontContext* ctx, const char* path,
 
         FontHandle* handle = create_handle(ctx, face, ttf_buf, ttf_size,
                                             size_px, physical_size, weight, slant);
+#endif
         if (handle) {
             handle->file_data_path = mem_strdup(path, MEM_CAT_FONT);
             log_info("font_loader: loaded '%s' (family=%s, size=%.0f)",
-                     path, face->family_name ? face->family_name : "?", physical_size);
+                     path, handle->family_name ? handle->family_name : "?", physical_size);
         }
         return handle;
     }
@@ -487,6 +554,10 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
         if (sfnt_data != data) free((void*)sfnt_data);
     }
 
+#ifdef __APPLE__
+    FontHandle* handle = create_handle(ctx, buf, sfnt_len,
+                                        face_index, size_px, physical_size, weight, slant);
+#else
     FT_Face face = NULL;
     FT_Error err = FT_New_Memory_Face(ctx->ft_library, buf, (FT_Long)sfnt_len,
                                        face_index, &face);
@@ -500,9 +571,10 @@ FontHandle* font_load_memory_internal(FontContext* ctx, const uint8_t* data,
 
     FontHandle* handle = create_handle(ctx, face, buf, sfnt_len,
                                         size_px, physical_size, weight, slant);
+#endif
     if (handle) {
         log_info("font_loader: loaded from memory (family=%s, size=%.0f, %zu bytes)",
-                 face->family_name ? face->family_name : "?", physical_size, sfnt_len);
+                 handle->family_name ? handle->family_name : "?", physical_size, sfnt_len);
     }
     return handle;
 }

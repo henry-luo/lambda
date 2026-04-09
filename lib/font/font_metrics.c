@@ -161,7 +161,11 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     }
 
     FontTables* ft = handle->tables;
+#ifdef __APPLE__
+    if (!ft) return NULL;
+#else
     if (!handle->ft_face && !ft) return NULL;
+#endif
 
     FontMetrics* m = &handle->metrics;
     float bscale = handle->bitmap_scale; // 1.0 for scalable fonts, <1 for fixed-size bitmap fonts
