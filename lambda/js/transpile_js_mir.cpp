@@ -19514,6 +19514,11 @@ static bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node) {
         if (mt->var_scopes[i]) hashmap_free(mt->var_scopes[i]);
     }
     free(mt);
+    // Detach name_pool and ast_pool from the transpiler so they survive cleanup.
+    // JIT code embeds raw String* pointers interned in the name pool.
+    // Freeing the pool would leave dangling pointers in the generated code.
+    tp->name_pool = NULL;
+    tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
 
     if (!js_main) {
@@ -19804,6 +19809,10 @@ static Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, 
     }
     free(mt);
     jm_defer_mir_cleanup(ctx);
+    // Detach name_pool and ast_pool so they survive transpiler cleanup.
+    // JIT code holds raw String* pointers into the name pool.
+    tp->name_pool = NULL;
+    tp->ast_pool = NULL;
     js_transpiler_destroy(tp);
 
     return namespace_obj;
