@@ -12,26 +12,26 @@ Pretext (`@chenglou/pretext`) is a **pure JavaScript/TypeScript library for mult
 
 ## 1. Feature Comparison
 
-| Capability | Pretext | Radiant |
-|---|---|---|
-| Block/Flex/Grid/Table layout | ❌ | ✅ |
-| CSS cascade & specificity | ❌ | ✅ |
-| Box model (margin/padding/border) | ❌ | ✅ |
-| Transforms, filters, blend modes | ❌ | ✅ |
-| Multi-column | ❌ | ✅ |
-| Positioning (abs/rel/sticky) | ❌ | ✅ |
-| Text line-breaking | ✅ | ✅ |
-| `white-space: pre-wrap` | ✅ | ✅ |
-| `word-break: keep-all` | ✅ | ✅ |
-| `overflow-wrap: break-word` | ✅ | ✅ |
-| Soft hyphen handling | ✅ | ⚠️ Not confirmed |
-| Tab stops in `pre-wrap` | ✅ | ✅ |
-| CJK kinsoku (line-break classes) | ✅ | ✅ |
-| Bidi metadata | ✅ (metadata only) | ✅ (`direction` property) |
-| Variable-width per-line layout | ✅ (core API) | ❌ Not exposed |
-| Shrinkwrap/tight-fit measurement | ✅ (binary search) | ✅ (intrinsic sizing) |
-| Text wrapping around arbitrary shapes | ✅ (user-land via API) | ❌ |
-| Rich inline (mentions/pills) | ✅ | N/A (different scope) |
+| Capability                            | Pretext               | Radiant                  |
+| ------------------------------------- | --------------------- | ------------------------ |
+| Block/Flex/Grid/Table layout          | ❌                     | ✅                        |
+| CSS cascade & specificity             | ❌                     | ✅                        |
+| Box model (margin/padding/border)     | ❌                     | ✅                        |
+| Transforms, filters, blend modes      | ❌                     | ✅                        |
+| Multi-column                          | ❌                     | ✅                        |
+| Positioning (abs/rel/sticky)          | ❌                     | ✅                        |
+| Text line-breaking                    | ✅                     | ✅                        |
+| `white-space: pre-wrap`               | ✅                     | ✅                        |
+| `word-break: keep-all`                | ✅                     | ✅                        |
+| `overflow-wrap: break-word`           | ✅                     | ✅                        |
+| Soft hyphen handling                  | ✅                     | ✅                        |
+| Tab stops in `pre-wrap`               | ✅                     | ✅                        |
+| CJK kinsoku (line-break classes)      | ✅                     | ✅                        |
+| Bidi metadata                         | ✅ (metadata only)     | ✅ (`direction` property) |
+| Variable-width per-line layout        | ✅ (core API)          | ❌ Not exposed            |
+| Shrinkwrap/tight-fit measurement      | ✅ (binary search)     | ✅ (intrinsic sizing)     |
+| Text wrapping around arbitrary shapes | ✅ (user-land via API) | ❌                        |
+| Rich inline (mentions/pills)          | ✅                     | N/A (different scope)    |
 
 **Bottom line**: Radiant is a far more complete CSS engine. Pretext excels at one thing Radiant doesn't expose: **variable-width-per-line text layout** for flowing text around irregular shapes.
 

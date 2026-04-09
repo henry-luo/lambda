@@ -151,6 +151,7 @@ typedef struct Linebox {
     unsigned char* last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     bool last_space_is_hyphen;      // true if last_space is actually a hyphen (break after vs before)
+    bool last_space_is_soft_hyphen;  // true if last_space is a soft hyphen U+00AD (render '-' at break)
     View* start_view;
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -198,7 +199,7 @@ typedef struct Linebox {
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
-        last_space_is_hyphen = false;  last_space_hanging_width = 0;
+        last_space_is_hyphen = false;  last_space_is_soft_hyphen = false;  last_space_hanging_width = 0;
     }
 } Linebox;
 

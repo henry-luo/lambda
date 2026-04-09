@@ -483,6 +483,7 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
         case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
         case 0x200C: return -1.0f;  // Zero Width Non-Joiner (ZWNJ)
         case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
+        case 0x00AD: return -1.0f;  // Soft Hyphen (SHY) - invisible unless line breaks here
         case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
         case 0xFE0E: return -1.0f;  // Variation Selector 15 (text presentation)
         case 0xFE0F: return -1.0f;  // Variation Selector 16 (emoji presentation)
@@ -817,7 +818,7 @@ void line_reset(LayoutContext* lycon) {
     log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_is_hyphen = false;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;  lycon->line.last_space_is_hyphen = false;  lycon->line.last_space_is_soft_hyphen = false;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
     lycon->line.prev_glyph_index = 0; // reset kerning state
@@ -1855,6 +1856,21 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
                     lycon->line.last_space_is_hyphen = false;
+                    lycon->line.last_space_is_soft_hyphen = false;
+                    lycon->line.is_line_start = false;
+                    lycon->line.has_space = false;
+                    lycon->line.trailing_space_width = 0;
+                    continue;
+                }
+                // CSS Text 3 §5.2: U+00AD SOFT HYPHEN is a line-break opportunity.
+                // It is invisible (zero width) unless the line breaks here, in which
+                // case a visible hyphen '-' is rendered at the end of the line.
+                if (codepoint == 0x00AD && wrap_lines) {
+                    str = next_ch;
+                    lycon->line.last_space = str - 1;
+                    lycon->line.last_space_pos = rect->width;
+                    lycon->line.last_space_is_hyphen = true;
+                    lycon->line.last_space_is_soft_hyphen = true;
                     lycon->line.is_line_start = false;
                     lycon->line.has_space = false;
                     lycon->line.trailing_space_width = 0;
@@ -2044,7 +2060,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // Output full width including hanging spaces — visual rect preserves
                     // hanging width. line_break() adjusts advance_x to exclude it.
                     float output_width = lycon->line.last_space_pos;
-                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                    int text_len = str - text_start - rect->start_index;
+                    // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes from output,
+                    // add visible hyphen width, and mark rect for hyphen rendering.
+                    if (lycon->line.last_space_is_soft_hyphen) {
+                        text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
+                        GlyphInfo hglyph = font_get_glyph(lycon->font.font_handle, '-');
+                        float hyphen_width = (hglyph.id != 0) ? hglyph.advance_x : lycon->font.current_font_size * 0.3f;
+                        output_width += hyphen_width;
+                    }
+                    output_text(lycon, text_view, rect, text_len, output_width);
+                    if (lycon->line.last_space_is_soft_hyphen) {
+                        rect->has_trailing_hyphen = true;
+                    }
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text
@@ -2176,6 +2204,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;  // this is a space, not a hyphen
+            lycon->line.last_space_is_soft_hyphen = false;
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces.
             // A preserved space (white-space: pre/pre-wrap) must NOT cause a
             // subsequent collapsible space in a different element to be collapsed.
@@ -2214,6 +2243,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;
             lycon->line.last_space_pos = rect->width;
             lycon->line.last_space_is_hyphen = false;
+            lycon->line.last_space_is_soft_hyphen = false;
             // CSS Text 3 §4.1.1: Only signal has_space for collapsible spaces
             if (collapse_spaces) {
                 lycon->line.has_space = true;
@@ -2234,6 +2264,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;  // position of the hyphen
             lycon->line.last_space_pos = rect->width;  // width including the hyphen
             lycon->line.last_space_is_hyphen = true;  // mark this as a hyphen break
+            lycon->line.last_space_is_soft_hyphen = false;
             lycon->line.is_line_start = false;
             lycon->line.has_space = false;
             lycon->line.trailing_space_width = 0;
@@ -2288,6 +2319,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 lycon->line.last_space = str - 1;  // last byte of current char
                 lycon->line.last_space_pos = rect->width;  // width including this char
                 lycon->line.last_space_is_hyphen = false;
+                lycon->line.last_space_is_soft_hyphen = false;
             }
         }
         else {
@@ -2307,6 +2339,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
                     lycon->line.last_space_is_hyphen = false;
+                    lycon->line.last_space_is_soft_hyphen = false;
                 }
             }
         }
@@ -2329,7 +2362,18 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // preserves hanging space width. line_break() adjusts advance_x
                 // to exclude hanging width from line box calculations.
                 float output_width = lycon->line.last_space_pos;
-                output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                int text_len = str - text_start - rect->start_index;
+                // CSS Text 3 §5.2: Soft hyphen — exclude SHY bytes, add visible hyphen
+                if (lycon->line.last_space_is_soft_hyphen) {
+                    text_len -= 2;  // U+00AD is 2 bytes in UTF-8 (0xC2 0xAD)
+                    GlyphInfo hglyph = font_get_glyph(lycon->font.font_handle, '-');
+                    float hyphen_width = (hglyph.id != 0) ? hglyph.advance_x : lycon->font.current_font_size * 0.3f;
+                    output_width += hyphen_width;
+                }
+                output_text(lycon, text_view, rect, text_len, output_width);
+                if (lycon->line.last_space_is_soft_hyphen) {
+                    rect->has_trailing_hyphen = true;
+                }
                 line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text
