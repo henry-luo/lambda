@@ -2061,8 +2061,13 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
             // CSS 2.1 §10.4: When max-width constrains a box, the overflow is
             // the element's own styling choice. The parent's shrink-to-fit
             // should use the constrained width, not the internal overflow.
+            // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal
+            // flow and their overflow should not propagate to the parent's
+            // shrink-to-fit width calculation.
             bool is_max_width_overflow = block->blk && block->blk->given_max_width >= 0;
-            if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && lycon->block.parent) {
+            bool is_abs_pos = block->position &&
+                (block->position->position == CSS_VALUE_ABSOLUTE || block->position->position == CSS_VALUE_FIXED);
+            if (display != CSS_VALUE_INLINE_BLOCK && !is_max_width_overflow && !is_abs_pos && lycon->block.parent) {
                 lycon->block.parent->max_width = max(lycon->block.parent->max_width, flow_width);
             }
         }

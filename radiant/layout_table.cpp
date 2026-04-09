@@ -4735,6 +4735,29 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
     // Check if we should collapse whitespace based on CSS white-space property
     bool collapse_ws = should_collapse_whitespace(cell);
 
+    // Get overflow-wrap from cell or ancestors (inherited property)
+    // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
+    CssEnum cell_overflow_wrap = CSS_VALUE_NORMAL;
+    {
+        DomNode* n = (DomNode*)cell;
+        while (n) {
+            if (n->is_element()) {
+                DomElement* el = (DomElement*)n;
+                if (el->blk) {
+                    if (el->blk->overflow_wrap != 0) {
+                        cell_overflow_wrap = el->blk->overflow_wrap;
+                        break;
+                    }
+                    if (el->blk->word_break == CSS_VALUE_BREAK_WORD) {
+                        cell_overflow_wrap = CSS_VALUE_ANYWHERE;
+                        break;
+                    }
+                }
+            }
+            n = n->parent;
+        }
+    }
+
     // CSS 2.1: For inline content, consecutive text nodes flow on the same line.
     // We track "inline run width" - the accumulated max-content width of consecutive
     // inline/text children that would flow together on one line.
@@ -4794,7 +4817,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
                 // Use unified intrinsic sizing API - measures both widths in one call
                 TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant);
+                    lycon, measure_text, measure_len, cell_text_transform, cell_font_variant,
+                    CSS_VALUE_NORMAL, cell_overflow_wrap);
 
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
@@ -4985,7 +5009,8 @@ static CellWidths measure_cell_widths(LayoutContext* lycon, ViewTableCell* cell,
 
             size_t content_len = strlen(content);
             TextIntrinsicWidths widths = measure_text_intrinsic_widths(
-                lycon, content, content_len, cell_text_transform, cell_font_variant);
+                lycon, content, content_len, cell_text_transform, cell_font_variant,
+                CSS_VALUE_NORMAL, cell_overflow_wrap);
 
             float text_max = (float)widths.max_content;
             float text_min = (float)widths.min_content;
