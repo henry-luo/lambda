@@ -1970,6 +1970,13 @@ static MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt) {
 
 // Box int64 constant -> Item
 static MIR_reg_t jm_box_int_const(JsMirTranspiler* mt, int64_t value) {
+    // If value is in the symbol collision range, promote to float
+    if (value <= -(int64_t)JS_SYMBOL_BASE) {
+        MIR_reg_t d = jm_new_reg(mt, "boxid", MIR_T_D);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_reg_op(mt->ctx, d), MIR_new_double_op(mt->ctx, (double)value)));
+        return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D, MIR_new_reg_op(mt->ctx, d));
+    }
     // Inline i2it: result = ITEM_INT_TAG | (value & MASK56)
     MIR_reg_t r = jm_new_reg(mt, "boxi", MIR_T_I64);
     uint64_t tagged = ITEM_INT_TAG | ((uint64_t)value & MASK56);
@@ -1989,23 +1996,31 @@ static void jm_arguments_writeback_param(JsMirTranspiler* mt, int param_index, M
 }
 
 // Box int64 register -> Item (runtime range check)
+// Avoids creating ints in the symbol collision range (< -JS_SYMBOL_BASE)
 static MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     int64_t INT56_MAX_VAL = 0x007FFFFFFFFFFFFFLL;
     int64_t INT56_MIN_VAL = (int64_t)0xFF80000000000000LL;
+    int64_t SYMBOL_LIMIT  = -(int64_t)JS_SYMBOL_BASE;  // values <= this are symbols
 
     MIR_reg_t result = jm_new_reg(mt, "boxi", MIR_T_I64);
     MIR_reg_t masked = jm_new_reg(mt, "mask", MIR_T_I64);
     MIR_reg_t tagged = jm_new_reg(mt, "tag", MIR_T_I64);
     MIR_reg_t le_max = jm_new_reg(mt, "le", MIR_T_I64);
     MIR_reg_t ge_min = jm_new_reg(mt, "ge", MIR_T_I64);
+    MIR_reg_t gt_sym = jm_new_reg(mt, "gs", MIR_T_I64);  // > symbol limit
     MIR_reg_t in_range = jm_new_reg(mt, "rng", MIR_T_I64);
+    MIR_reg_t in_range2 = jm_new_reg(mt, "rn2", MIR_T_I64);
 
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LE, MIR_new_reg_op(mt->ctx, le_max),
         MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MAX_VAL)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GE, MIR_new_reg_op(mt->ctx, ge_min),
         MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, INT56_MIN_VAL)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_GT, MIR_new_reg_op(mt->ctx, gt_sym),
+        MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, SYMBOL_LIMIT)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range),
         MIR_new_reg_op(mt->ctx, le_max), MIR_new_reg_op(mt->ctx, ge_min)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, in_range2),
+        MIR_new_reg_op(mt->ctx, in_range), MIR_new_reg_op(mt->ctx, gt_sym)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, masked),
         MIR_new_reg_op(mt->ctx, val), MIR_new_int_op(mt->ctx, (int64_t)MASK56)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, tagged),
@@ -2014,8 +2029,8 @@ static MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     MIR_label_t l_ok = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_ok),
-        MIR_new_reg_op(mt->ctx, in_range)));
-    // out of int56 range: promote to float instead of returning error
+        MIR_new_reg_op(mt->ctx, in_range2)));
+    // out of int56 range or in symbol range: promote to float instead of returning error
     MIR_reg_t d_ovf = jm_new_reg(mt, "i2d_ovf", MIR_T_D);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, d_ovf), MIR_new_reg_op(mt->ctx, val)));
@@ -3778,6 +3793,7 @@ struct JsParamEvidence {
     int float_evidence;
     int string_evidence;
     bool used_as_container;  // param used as object in arr[i] expression
+    bool compared_with_non_numeric;  // param compared with undefined/null/bool via ===
 };
 
 // Walk an AST subtree and accumulate type evidence for parameters.
@@ -3856,6 +3872,26 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
             if (li >= 0) evidence[li].int_evidence++;
             if (ri >= 0) evidence[ri].int_evidence++;
         }
+        // Detect param compared with undefined/null/boolean — these values cannot
+        // survive native INT unboxing, so the param must stay boxed (ANY).
+        if (is_cmp) {
+            auto is_non_numeric_literal = [](JsAstNode* n) -> bool {
+                if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
+                JsLiteralNode* l = (JsLiteralNode*)n;
+                return l->literal_type == JS_LITERAL_UNDEFINED ||
+                       l->literal_type == JS_LITERAL_NULL ||
+                       l->literal_type == JS_LITERAL_BOOLEAN;
+            };
+            if (li >= 0 && is_non_numeric_literal(bin->right))
+                evidence[li].compared_with_non_numeric = true;
+            if (ri >= 0 && is_non_numeric_literal(bin->left))
+                evidence[ri].compared_with_non_numeric = true;
+        }
+        // Detect param in nullish coalescing (param ?? default) — the ?? operator
+        // checks for null/undefined which cannot survive native INT unboxing.
+        if (bin->op == JS_OP_NULLISH_COALESCE) {
+            if (li >= 0) evidence[li].compared_with_non_numeric = true;
+        }
         jm_infer_walk(bin->left, param_names, evidence, param_count, self_name);
         jm_infer_walk(bin->right, param_names, evidence, param_count, self_name);
         break;
@@ -3870,6 +3906,11 @@ static void jm_infer_walk(JsAstNode* node, const char param_names[][128],
             case JS_OP_INCREMENT: case JS_OP_DECREMENT:
             case JS_OP_BIT_NOT:
                 evidence[oi].int_evidence++;
+                break;
+            case JS_OP_TYPEOF:
+                // typeof param — code may check if param is undefined/string/etc.
+                // Native INT unboxing loses type info, so param must stay boxed.
+                evidence[oi].compared_with_non_numeric = true;
                 break;
             default: break;
             }
@@ -4098,8 +4139,10 @@ static void jm_infer_param_types(JsFuncCollected* fc) {
     //          float_evidence > 0 → FLOAT
     //          otherwise → ANY
     for (int i = 0; i < pc; i++) {
-        if (evidence[i].used_as_container) {
+        if (evidence[i].used_as_container || evidence[i].compared_with_non_numeric) {
             // parameter used as arr[i] object — must remain boxed Item (not unboxed as int/float)
+            // OR: parameter compared with undefined/null/boolean — native unboxing would
+            // lose the type distinction (e.g., undefined → 0 looks the same as actual 0)
             fc->param_types[i] = LMD_TYPE_ANY;
         } else if (evidence[i].float_evidence > 0) {
             fc->param_types[i] = LMD_TYPE_FLOAT;
@@ -14225,14 +14268,14 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // v29: Use l_break as the break target so IteratorClose is called
     jm_push_loop_labels(mt, l_update, l_break);
 
-    // Test: call js_iterator_step(iterator) → value or NULL (done)
+    // Test: call js_iterator_step(iterator) → value or JS_ITER_DONE_SENTINEL (done)
     jm_emit_label(mt, l_test);
     MIR_reg_t step_result = jm_call_1(mt, "js_iterator_step", MIR_T_I64,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
-    // Check if done (NULL == ITEM_NULL_VAL)
+    // Check if done (JS_ITER_DONE_SENTINEL — unique sentinel that won't collide with null/undefined/false)
     MIR_reg_t is_done = jm_new_reg(mt, "forofdone", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_done),
-        MIR_new_reg_op(mt->ctx, step_result), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+        MIR_new_reg_op(mt->ctx, step_result), MIR_new_int_op(mt->ctx, (int64_t)JS_ITER_DONE_SENTINEL)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
         MIR_new_reg_op(mt->ctx, is_done)));
 
@@ -18434,7 +18477,7 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         // when transpiling earlier functions that call later-defined native functions, enabling
         // `let x = f(...)` to propagate f's return type into x's variable type.
         bool eligible = (fc->capture_count == 0 && fc->param_count > 0 &&
-                         fc->param_count <= 16 &&
+                         fc->param_count <= 16 && !fc->uses_arguments &&
                          (fc->return_type == LMD_TYPE_INT || fc->return_type == LMD_TYPE_FLOAT));
         if (eligible) {
             for (int j = 0; j < fc->param_count; j++) {

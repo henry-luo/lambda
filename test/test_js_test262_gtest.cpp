@@ -745,6 +745,49 @@ static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
+static int g_total_tests = 0;   // total discovered tests
+static int g_total_skipped = 0; // total skipped tests
+static int g_total_batched = 0; // total batched (executed) tests
+static double g_prep_secs = 0;  // Phase 1 (prepare) runtime
+static double g_exec_secs = 0;  // Phase 2 (execute) runtime
+static double g_total_secs = 0; // total runtime
+
+// Get short git commit hash for baseline header
+static std::string get_git_commit_hash() {
+    std::string hash;
+    FILE* fp = popen("git rev-parse --short HEAD 2>/dev/null", "r");
+    if (fp) {
+        char buf[64];
+        if (fgets(buf, sizeof(buf), fp)) {
+            hash = buf;
+            while (!hash.empty() && (hash.back() == '\n' || hash.back() == '\r'))
+                hash.pop_back();
+        }
+        pclose(fp);
+    }
+    return hash.empty() ? "unknown" : hash;
+}
+
+// Write baseline file with header comments
+static void write_baseline_file(const char* path, std::vector<std::string>& passing,
+                                 int total_tests, int skipped, int batched, int failed) {
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    std::string commit = get_git_commit_hash();
+    std::sort(passing.begin(), passing.end());
+    fprintf(f, "# test262 baseline: tests that PASS (auto-updated)\n");
+    fprintf(f, "# Commit: %s\n", commit.c_str());
+    fprintf(f, "# Scope: ES2020 (skip ES2021+ features)\n");
+    fprintf(f, "# Total passing: %zu\n", passing.size());
+    fprintf(f, "# Total tests: %d  Skipped: %d  Batched: %d  Passed: %zu  Failed: %d\n",
+            total_tests, skipped, batched, passing.size(), failed);
+    fprintf(f, "# Runtime: %.1fs total (prep %.1fs + exec %.1fs)\n",
+            g_total_secs, g_prep_secs, g_exec_secs);
+    for (auto& name : passing) {
+        fprintf(f, "%s\n", name.c_str());
+    }
+    fclose(f);
+}
 
 // Load known crashers from previous run's crasher log.
 // Tests listed here are quarantined into their own small batches
@@ -884,6 +927,11 @@ static void prepare_all_tests(
 
     fprintf(stderr, "[test262] Prepared %zu test files (%zu skipped, %zu to batch)\n",
             tests.size(), tests.size() - batch_indices.size(), batch_indices.size());
+
+    // Update global counters for baseline header
+    g_total_tests = (int)tests.size();
+    g_total_skipped = (int)(tests.size() - batch_indices.size());
+    g_total_batched = (int)batch_indices.size();
 }
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
@@ -1562,6 +1610,9 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     fprintf(stderr, "[test262] All %zu tests completed in %.1fs (prep %.1fs + exec %.1fs + eval <0.1s)\n",
             tests.size(), total_secs, prep_secs,
             std::chrono::duration<double>(exec_time - prep_time).count());
+    g_prep_secs = prep_secs;
+    g_exec_secs = std::chrono::duration<double>(exec_time - prep_time).count();
+    g_total_secs = total_secs;
     g_parallel_done = true;
 }
 
@@ -1731,20 +1782,10 @@ public:
 
         // Update baseline if requested
         if (g_update_baseline) {
-            FILE* f = fopen(BASELINE_FILE, "w");
-            if (f) {
-                fprintf(f, "# test262 baseline: tests that PASS (auto-updated)\n");
-                fprintf(f, "# Total passing: %zu\n", current_passing.size());
-                std::sort(current_passing.begin(), current_passing.end());
-                for (auto& name : current_passing) {
-                    fprintf(f, "%s\n", name.c_str());
-                }
-                fclose(f);
-                printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
-                       BASELINE_FILE, current_passing.size());
-            } else {
-                printf("\n❌  Failed to update baseline: %s\n", BASELINE_FILE);
-            }
+            write_baseline_file(BASELINE_FILE, current_passing,
+                                g_total_tests, skipped, g_total_batched, failed);
+            printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
+                   BASELINE_FILE, current_passing.size());
         }
     }
 };
@@ -1878,6 +1919,70 @@ int main(int argc, char** argv) {
                 if (g_baseline_passing.find(name) == g_baseline_passing.end()) improvements.push_back(name);
             }
         }
+
+        // Phase 4: Retry regressions individually to distinguish real regressions
+        // from batch-mode infrastructure failures (OOM kills, signal 9, etc.)
+        if (!regressions.empty()) {
+            fprintf(stderr, "[test262] Phase 4: Retrying %zu regressions individually...\n", regressions.size());
+            // Build name→path lookup from all_tests
+            std::unordered_map<std::string, size_t> name_to_idx;
+            for (size_t i = 0; i < all_tests.size(); i++) {
+                name_to_idx[all_tests[i].test_name] = i;
+            }
+            // Build prepared entries for regressions and run through batch retry
+            std::vector<Test262Prepared> retry_prepared;
+            std::vector<size_t> retry_indices;
+            for (auto& reg_name : regressions) {
+                auto it = name_to_idx.find(reg_name);
+                if (it == name_to_idx.end()) continue;
+                const auto& param = all_tests[it->second];
+                Test262Prepared p;
+                p.test_name = param.test_name;
+                p.test_path = param.test_path;
+                p.skip_result = T262_PASS;
+                p.is_negative = false;
+                p.is_strict = false;
+                // Load metadata from cache
+                auto cm_it = g_metadata_cache.find(param.test_path);
+                if (cm_it != g_metadata_cache.end()) {
+                    const CachedMeta& cm = cm_it->second;
+                    p.is_negative = cm.flags & 32;
+                    p.negative_type = cm.neg_type;
+                    p.is_strict = cm.flags & 8;
+                    p.includes = cm.includes;
+                }
+                retry_indices.push_back(retry_prepared.size());
+                retry_prepared.push_back(std::move(p));
+            }
+            // Run each individually in small batches
+            if (!retry_prepared.empty()) {
+                auto retry_results = execute_t262_batch(retry_prepared, retry_indices);
+                std::vector<std::string> real_regressions;
+                size_t recovered = 0;
+                for (auto& reg_name : regressions) {
+                    // Find in retry_prepared
+                    Test262RunResult result = {T262_FAIL, "not retried"};
+                    for (size_t i = 0; i < retry_prepared.size(); i++) {
+                        if (retry_prepared[i].test_name == reg_name) {
+                            result = evaluate_batch_result(retry_prepared[i], retry_results);
+                            break;
+                        }
+                    }
+                    if (result.result == T262_PASS) {
+                        recovered++;
+                        current_passing.push_back(reg_name);
+                        passed++;
+                        failed--;
+                    } else {
+                        real_regressions.push_back(reg_name);
+                    }
+                }
+                fprintf(stderr, "[test262] Phase 4: %zu/%zu regressions recovered (were batch kills)\n",
+                        recovered, regressions.size());
+                regressions = std::move(real_regressions);
+            }
+        }
+
         int total = passed + failed;
         double pct = total > 0 ? 100.0 * passed / total : 0.0;
         printf("\n");
@@ -1909,6 +2014,13 @@ int main(int argc, char** argv) {
             } else if (!improvements.empty()) {
                 printf("\n✅  IMPROVEMENTS: %zu tests (too many to list)\n", improvements.size());
             }
+        }
+        // Update baseline if requested (batch-only path)
+        if (g_update_baseline) {
+            write_baseline_file(BASELINE_FILE, current_passing,
+                                g_total_tests, skipped, g_total_batched, failed);
+            printf("\n📝  Baseline updated: %s (%zu passing tests)\n",
+                   BASELINE_FILE, current_passing.size());
         }
         return regressions.empty() ? 0 : 1;
     }

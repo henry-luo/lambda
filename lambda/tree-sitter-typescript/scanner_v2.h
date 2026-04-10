@@ -6,8 +6,8 @@
 //   LOGICAL_OR, ESCAPE_SEQUENCE, REGEX_PATTERN, JSX_TEXT,
 //   FUNCTION_SIGNATURE_AUTOMATIC_SEMICOLON, ERROR_RECOVERY
 //
-// Token types 10..12 are new for v2:
-//   TS_TYPE, TS_TYPE_ARGUMENTS, TS_TYPE_PARAMETERS
+// Token types 10..14 are new for v2:
+//   TS_TYPE, TS_TYPE_ARGUMENTS, TS_TYPE_PARAMETERS, TS_INTERFACE_BODY, TS_CLASS_MODIFIERS
 
 #include "tree_sitter/parser.h"
 #include <wctype.h>
@@ -27,6 +27,8 @@ enum TokenType {
     TS_TYPE,
     TS_TYPE_ARGUMENTS,
     TS_TYPE_PARAMETERS,
+    TS_INTERFACE_BODY,
+    TS_CLASS_MODIFIERS,
 };
 
 // ================================================================
@@ -955,6 +957,283 @@ static bool scan_ts_type_parameters(TSLexer *lexer) {
 }
 
 // ================================================================
+// v2: scan_ts_interface_body — opaque { ... } body scanner
+// ================================================================
+
+// Scan an entire interface body as a single opaque token.
+// Strategy: match opening '{' (or '{|'), then bracket-balance to closing '}' (or '|}').
+// Skip strings, template literals, and comments within.
+static bool scan_ts_interface_body(TSLexer *lexer) {
+    ts_skip_ws_and_comments(lexer);
+
+    if (lexer->lookahead != '{') return false;
+
+    lexer->result_symbol = TS_INTERFACE_BODY;
+    advance(lexer); // consume '{'
+
+    // check for exact-object '{|' syntax
+    bool is_exact = false;
+    if (lexer->lookahead == '|') {
+        advance(lexer);
+        is_exact = true;
+    }
+
+    int depth = 1;
+    while (lexer->lookahead != 0 && depth > 0) {
+        int32_t ch = lexer->lookahead;
+
+        if (ch == '\'' || ch == '"') {
+            ts_skip_string(lexer);
+            continue;
+        }
+        if (ch == '`') {
+            ts_skip_template(lexer);
+            continue;
+        }
+        if (ch == '/') {
+            advance(lexer);
+            if (lexer->lookahead == '/') {
+                // line comment
+                advance(lexer);
+                while (lexer->lookahead != 0 && lexer->lookahead != '\n') advance(lexer);
+            } else if (lexer->lookahead == '*') {
+                // block comment
+                advance(lexer);
+                while (lexer->lookahead != 0) {
+                    if (lexer->lookahead == '*') {
+                        advance(lexer);
+                        if (lexer->lookahead == '/') { advance(lexer); break; }
+                    } else {
+                        advance(lexer);
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (ch == '{') {
+            depth++;
+            advance(lexer);
+            continue;
+        }
+        if (ch == '}') {
+            depth--;
+            if (depth == 0) {
+                if (is_exact) {
+                    // for '{|' ... '|}', the '|' before '}' was already consumed as content
+                    // (exact object types have the '|' right before closing '}')
+                }
+                advance(lexer); // consume closing '}'
+                lexer->mark_end(lexer);
+                return true;
+            }
+            advance(lexer);
+            continue;
+        }
+
+        advance(lexer);
+    }
+
+    return false; // unbalanced
+}
+
+// ================================================================
+// v2: scan_ts_class_modifiers — opaque modifier prefix scanner
+// ================================================================
+//
+// Scans a sequence of class member modifier keywords as a single opaque token.
+// Modifier keywords: declare, public, private, protected, static, override,
+// readonly, abstract, accessor, async, get, set, *
+//
+// The scanner greedily consumes modifier keywords but always ensures at least
+// one property-name-starting token remains after the consumed modifiers.
+// If all scanned words are followed by non-property-name tokens (= : ? ! ( ; , < } {),
+// the last word is the property name and is not consumed.
+
+// check if a character can start a property name (identifier, string, number, [ for computed, # for private)
+static bool ts_is_property_name_start(int32_t ch) {
+    return ts_is_ident_start(ch) || ch == '\'' || ch == '"' || ch == '`' ||
+           iswdigit(ch) || ch == '[' || ch == '#';
+}
+
+// try to match a modifier keyword at current lexer position
+// returns the keyword length if matched, 0 otherwise
+// modifiers: declare(7) public(6) private(7) protected(9) static(6) override(8) readonly(8) abstract(8) accessor(8) async(5) get(3) set(3)
+static int ts_match_modifier_keyword(TSLexer *lexer) {
+    int32_t ch = lexer->lookahead;
+    // fast reject: modifiers start with d,p,s,o,r,a,g
+    if (ch != 'd' && ch != 'p' && ch != 's' && ch != 'o' &&
+        ch != 'r' && ch != 'a' && ch != 'g') return 0;
+
+    // we need to read the identifier and match against known keywords
+    // since we can't peek multiple chars, we consume into a buffer concept
+    // but tree-sitter doesn't support peek. Instead, we match char-by-char.
+    // Use a table of keywords sorted by first char.
+
+    // The approach: save lexer position (via mark_end), read the identifier,
+    // check if it matches a modifier keyword. If not, we've consumed chars
+    // we can't unconsume. To avoid this, we use a different strategy:
+    // read char-by-char matching against candidate keywords.
+
+    // Candidates by first char:
+    // a: abstract(8), accessor(8), async(5)
+    // d: declare(7)
+    // g: get(3)
+    // o: override(8)
+    // p: public(6), private(7), protected(9)
+    // r: readonly(8)
+    // s: static(6), set(3)
+
+    static const struct { const char *kw; int len; } keywords[] = {
+        {"abstract", 8}, {"accessor", 8}, {"async", 5},
+        {"declare", 7},
+        {"get", 3},
+        {"override", 8},
+        {"private", 7}, {"protected", 9}, {"public", 6},
+        {"readonly", 8},
+        {"set", 3}, {"static", 6},
+    };
+    static const int nkeywords = sizeof(keywords) / sizeof(keywords[0]);
+
+    // We can't peek ahead without consuming. Instead, we'll use a different
+    // approach: the caller will mark_end before calling us, then we advance
+    // through the identifier. If no keyword matches, the caller knows the
+    // identifier wasn't consumed (mark_end was set before).
+    // Actually — we need a different pattern. Let's consume the ident chars
+    // and then check. The caller handles backtracking via mark_end positions.
+    (void)keywords;
+    (void)nkeywords;
+    return 0; // placeholder — real implementation below uses inline matching
+}
+
+// Main class modifiers scanner
+static bool scan_ts_class_modifiers(TSLexer *lexer) {
+    lexer->result_symbol = TS_CLASS_MODIFIERS;
+
+    // positions[i] = lexer position after consuming i-th keyword
+    // We track positions by marking after each keyword
+    // Since we can't save/restore lexer positions directly, we use mark_end
+    // to record the "safe" endpoint and return to it if needed.
+
+    bool any_consumed = false;
+    int keywords_found = 0;
+
+    // Strategy: greedily consume modifier keywords.
+    // After each keyword, peek at next non-whitespace char:
+    // - If it's a property name start → keyword was definitely a modifier
+    //   → mark_end here (safe endpoint), continue scanning
+    // - If it's another modifier keyword → tentatively consume, don't update mark_end
+    // - If it's neither → keyword was the property name → stop
+    //
+    // Track "last safe position" = after the last keyword that was followed by
+    // a definite property name. At the end, mark_end to last safe position.
+
+    // mark_end at start (empty token = fail if nothing consumed)
+    // Don't mark_end at start — we only mark_end after confirmed modifiers
+    bool has_safe_mark = false;
+
+    for (;;) {
+        // skip whitespace and comments
+        ts_skip_ws_and_comments(lexer);
+
+        int32_t ch = lexer->lookahead;
+
+        // try to match * (generator marker)
+        if (ch == '*') {
+            advance(lexer);
+            ts_skip_ws_and_comments(lexer);
+            if (ts_is_property_name_start(lexer->lookahead)) {
+                // * followed by property name — it's a generator marker
+                lexer->mark_end(lexer);
+                has_safe_mark = true;
+                keywords_found++;
+                continue;
+            }
+            // * not followed by property name — stop, don't consume *
+            break;
+        }
+
+        // must start with identifier char for keyword matching
+        if (!ts_is_ident_start(ch)) break;
+
+        // read identifier into buffer (max 16 chars for our keywords, max is "protected" = 9)
+        char buf[16];
+        int len = 0;
+        // peek at identifier by advancing (we'll use mark_end to control boundary)
+        while (ts_is_ident_char(lexer->lookahead) && len < 15) {
+            buf[len++] = (char)lexer->lookahead;
+            advance(lexer);
+        }
+        buf[len] = '\0';
+
+        // check that identifier boundary is clean (next char is not ident char)
+        if (ts_is_ident_char(lexer->lookahead)) {
+            // identifier longer than 15 chars — not a modifier keyword
+            break;
+        }
+
+        // check if this identifier is a modifier keyword
+        bool is_modifier = false;
+        if (len == 3) {
+            is_modifier = (memcmp(buf, "get", 3) == 0 || memcmp(buf, "set", 3) == 0);
+        } else if (len == 5) {
+            is_modifier = (memcmp(buf, "async", 5) == 0);
+        } else if (len == 6) {
+            is_modifier = (memcmp(buf, "public", 6) == 0 || memcmp(buf, "static", 6) == 0);
+        } else if (len == 7) {
+            is_modifier = (memcmp(buf, "declare", 7) == 0 || memcmp(buf, "private", 7) == 0);
+        } else if (len == 8) {
+            is_modifier = (memcmp(buf, "abstract", 8) == 0 || memcmp(buf, "accessor", 8) == 0 ||
+                           memcmp(buf, "override", 8) == 0 || memcmp(buf, "readonly", 8) == 0);
+        } else if (len == 9) {
+            is_modifier = (memcmp(buf, "protected", 9) == 0);
+        }
+
+        if (!is_modifier) {
+            // not a modifier keyword — this identifier is the property name
+            // don't consume it (mark_end was set at last safe position)
+            break;
+        }
+
+        keywords_found++;
+
+        // peek at next non-whitespace to determine if more keywords or property name follows
+        ts_skip_ws_and_comments(lexer);
+        int32_t next_ch = lexer->lookahead;
+
+        if (ts_is_property_name_start(next_ch) && next_ch != '*') {
+            // next is a property name start (not *) — current keyword is definitely a modifier
+            // BUT: next could be another modifier keyword. We don't know yet.
+            // However, even if it's another modifier keyword, it can also be a property name.
+            // So this position IS safe — the next token can serve as property name.
+            lexer->mark_end(lexer);
+            has_safe_mark = true;
+            any_consumed = true;
+            // continue to try consuming more modifiers
+            continue;
+        }
+
+        if (next_ch == '*') {
+            // could be a generator marker — tentatively keep going
+            // the * handler at top of loop will determine if it's valid
+            lexer->mark_end(lexer);
+            has_safe_mark = true;
+            any_consumed = true;
+            continue;
+        }
+
+        // next is not a property name start (it's = : ? ! ( ; , < } { etc.)
+        // this keyword is the property name, not a modifier
+        // don't consume it — revert to last safe mark_end
+        break;
+    }
+
+    if (!has_safe_mark || !any_consumed) return false;
+
+    return true;
+}
+
+// ================================================================
 // v2: Main scanner dispatch
 // ================================================================
 
@@ -970,19 +1249,45 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
         return true;
     }
 
+    // v2: interface body — try before type tokens, but fall through on failure
+    // (after interface name, both TS_INTERFACE_BODY and TS_TYPE_PARAMETERS may be valid)
+    // Note: no AUTOMATIC_SEMICOLON guard — 'interface' is a soft keyword, so the parser
+    // may have ASI valid in a parallel expression parse path. We disambiguate by lookahead.
+    if (valid_symbols[TS_INTERFACE_BODY] &&
+        !valid_symbols[TEMPLATE_CHARS]) {
+        if (scan_ts_interface_body(lexer)) return true;
+        // fall through to try other external tokens
+    }
+
+    // v2: class member modifiers — opaque modifier prefix (declare/public/static/readonly/...)
+    // No AUTOMATIC_SEMICOLON guard: in class body, ASI may be valid in a parallel parse
+    // path (after previous member). Modifier keywords unambiguously start a new member.
+    // Fast reject: only try if lookahead is an ident start char or *.
+    if (valid_symbols[TS_CLASS_MODIFIERS] &&
+        !valid_symbols[TEMPLATE_CHARS]) {
+        if (ts_is_ident_start(lexer->lookahead) || iswspace(lexer->lookahead)) {
+            if (scan_ts_class_modifiers(lexer)) return true;
+        }
+        // fall through to try other external tokens
+    }
+
+    // v2: type parameters — unambiguous in declaration context (starts with '<')
+    // No AUTOMATIC_SEMICOLON guard: after 'interface Name' or 'class Name', ASI may be
+    // valid in a parallel parse path, but '<' unambiguously starts type parameters.
+    if (valid_symbols[TS_TYPE_PARAMETERS] &&
+        !valid_symbols[TEMPLATE_CHARS]) {
+        // check lookahead without consuming — scan_ts_type_parameters will skip ws internally
+        if (lexer->lookahead == '<' || iswspace(lexer->lookahead)) {
+            if (scan_ts_type_parameters(lexer)) return true;
+        }
+    }
+
     // v2: type tokens — check before ASI since type contexts are more specific
     // Check TS_TYPE first — it's the most common type token
     if (valid_symbols[TS_TYPE] &&
         !valid_symbols[AUTOMATIC_SEMICOLON] &&
         !valid_symbols[TEMPLATE_CHARS]) {
         return scan_ts_type(lexer);
-    }
-
-    // Type parameters — unambiguous in declaration context
-    if (valid_symbols[TS_TYPE_PARAMETERS] &&
-        !valid_symbols[AUTOMATIC_SEMICOLON] &&
-        !valid_symbols[TEMPLATE_CHARS]) {
-        return scan_ts_type_parameters(lexer);
     }
 
     // Type arguments — needs disambiguation, only when grammar says it's valid

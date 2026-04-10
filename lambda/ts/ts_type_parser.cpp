@@ -987,6 +987,188 @@ struct TsTypeParser {
             pos++;
         }
     }
+
+    // ================================================================
+    // interface body members: { member; member; ... }
+    // Enhanced version of parse_object_type_body with interface modifiers
+    // (accessibility, static, override, abstract, async, get/set, *)
+    // ================================================================
+    TsTypeNode* parse_interface_body_members() {
+        String* names[64];
+        TsTypeNode* types[64];
+        bool optional_arr[64];
+        bool readonly_arr[64];
+        int count = 0;
+
+        while (!check_char('}') && !at_end() && count < 64) {
+            // skip separators
+            while (match_char(';') || match_char(',')) {}
+            if (check_char('}')) break;
+
+            // check for closing |}
+            if (check_char('|') && peek(1) == '}') { advance_one(); break; }
+
+            // skip interface-specific modifiers
+            while (match_str("export") || match_str("public") || match_str("private") ||
+                   match_str("protected") || match_str("static") || match_str("override") ||
+                   match_str("abstract") || match_str("declare")) {}
+
+            bool is_readonly = false;
+            if (match_str("readonly")) {
+                is_readonly = true;
+            }
+
+            // skip async
+            match_str("async");
+
+            // index signature: [key: type]: type
+            if (check_char('[')) {
+                advance_one(); // consume '['
+                skip_ws();
+                const char* dummy; int dlen;
+                // check for mapped type: [K in T]: V
+                if (read_ident(&dummy, &dlen)) {
+                    skip_ws();
+                    if (is_keyword("in")) {
+                        // mapped type inside interface body (unusual but valid)
+                        pos += 2;
+                        TsTypeNode* mapped = parse_mapped_type_rest(dummy, dlen);
+                        // mapped_type_rest consumes through }, so we're done
+                        // but actually we need to add this as a member... treat as special case
+                        // for now, just return the mapped type directly
+                        return mapped;
+                    }
+                    if (match_char(':')) {
+                        parse_type(); // index type
+                    }
+                }
+                match_char(']');
+
+                // optional modifiers: +?, -?, ?
+                if (check_char('+') || check_char('-')) advance_one();
+                bool opt = match_char('?');
+
+                match_char(':');
+                types[count] = parse_type();
+                names[count] = make_string("[index]", 7);
+                optional_arr[count] = opt;
+                readonly_arr[count] = is_readonly;
+                count++;
+                continue;
+            }
+
+            // call signature: (params): returnType
+            if (check_char('(')) {
+                types[count] = parse_function_type();
+                names[count] = make_string("()", 2);
+                optional_arr[count] = false;
+                readonly_arr[count] = false;
+                count++;
+                continue;
+            }
+
+            // construct signature: new (params): returnType
+            if (is_keyword("new")) {
+                pos += 3;
+                skip_ws();
+                // skip optional type parameters
+                if (check_char('<')) skip_angle_brackets();
+                types[count] = parse_function_type();
+                names[count] = make_string("new", 3);
+                optional_arr[count] = false;
+                readonly_arr[count] = false;
+                count++;
+                continue;
+            }
+
+            // handle get/set as modifiers (not property names)
+            // if 'get'/'set' is followed by an identifier, '(' or '[' => modifier
+            // otherwise => property name
+            int save = pos;
+            bool consumed_accessor = false;
+            if (is_keyword("get") || is_keyword("set")) {
+                int klen = is_keyword("get") ? 3 : 3;
+                pos += klen;
+                skip_ws();
+                if (is_ident_start(ch()) || check_char('[') || check_char('(')) {
+                    consumed_accessor = true; // it's a modifier, continue to name
+                } else {
+                    pos = save; // it's actually the property name "get"/"set"
+                }
+            }
+
+            // handle generator *
+            match_char('*');
+
+            // property or method name
+            const char* mname; int mname_len;
+            if (!read_ident(&mname, &mname_len)) {
+                // might be a string key
+                if (ch() == '\'' || ch() == '"') {
+                    int quote = ch();
+                    advance_one();
+                    const char* sstart = text + pos;
+                    while (pos < len && text[pos] != quote) {
+                        if (text[pos] == '\\') pos++;
+                        pos++;
+                    }
+                    mname = sstart;
+                    mname_len = (int)((text + pos) - sstart);
+                    if (pos < len) advance_one(); // closing quote
+                } else if (check_char('#')) {
+                    // private field: #name
+                    advance_one();
+                    if (!read_ident(&mname, &mname_len)) {
+                        advance_one();
+                        continue;
+                    }
+                } else {
+                    // skip unknown content
+                    advance_one();
+                    continue;
+                }
+            }
+
+            bool opt = match_char('?');
+
+            // method signature: name(...): T or name<T>(...): U
+            if (check_char('(') || check_char('<')) {
+                if (check_char('<')) skip_angle_brackets();
+                types[count] = parse_function_type();
+                names[count] = make_string(mname, mname_len);
+                optional_arr[count] = opt;
+                readonly_arr[count] = is_readonly;
+                count++;
+                continue;
+            }
+
+            // property: name?: type
+            match_char(':');
+            types[count] = parse_type();
+            names[count] = make_string(mname, mname_len);
+            optional_arr[count] = opt;
+            readonly_arr[count] = is_readonly;
+            count++;
+        }
+
+        match_char('|'); // for |} closing
+        match_char('}');
+
+        TsObjectTypeNode* on = (TsObjectTypeNode*)alloc_node(
+            TS_AST_NODE_OBJECT_TYPE, sizeof(TsObjectTypeNode));
+        on->member_count = count;
+        if (count > 0) {
+            on->member_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
+            on->member_names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * count);
+            on->member_optional = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
+            on->member_readonly = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
+            memcpy(on->member_types, types, sizeof(TsTypeNode*) * count);
+            memcpy(on->member_names, names, sizeof(String*) * count);
+            memcpy(on->member_optional, optional_arr, sizeof(bool) * count);
+            memcpy(on->member_readonly, readonly_arr, sizeof(bool) * count);
+        }
+        return (TsTypeNode*)on;
+    }
 };
 
 // ============================================================================
@@ -1009,5 +1191,35 @@ TsTypeNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) {
     memset(&parser.null_node, 0, sizeof(TSNode));
 
     TsTypeNode* result = parser.parse_type();
+    return result ? result : parser.make_any();
+}
+
+// ============================================================================
+// parse opaque interface body text: "{ member; member; ... }"
+// ============================================================================
+
+TsTypeNode* ts_parse_interface_body_text(JsTranspiler* tp, const char* text, int len) {
+    if (!text || len <= 0) {
+        TsObjectTypeNode* on = (TsObjectTypeNode*)alloc_js_ast_node(tp,
+            (JsAstNodeType)TS_AST_NODE_OBJECT_TYPE, (TSNode){{0},0,0}, sizeof(TsObjectTypeNode));
+        on->member_count = 0;
+        return (TsTypeNode*)on;
+    }
+
+    TsTypeParser parser;
+    parser.tp = tp;
+    parser.text = text;
+    parser.len = len;
+    parser.pos = 0;
+    memset(&parser.null_node, 0, sizeof(TSNode));
+
+    // consume opening { (or {|)
+    parser.skip_ws();
+    if (!parser.match_char('{')) {
+        return parser.make_any();
+    }
+    parser.match_char('|'); // exact object: {|
+
+    TsTypeNode* result = parser.parse_interface_body_members();
     return result ? result : parser.make_any();
 }

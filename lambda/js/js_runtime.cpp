@@ -1252,8 +1252,11 @@ static Item js_make_number(double d) {
     // Check if it can be represented as an integer
     // Guard with isfinite to avoid UB from (int64_t)Infinity/NaN
     // v18p: Preserve -0.0 as float (don't collapse to int 0)
+    // Avoid creating ints with magnitude >= JS_SYMBOL_BASE to prevent
+    // collision with JS symbol encoding (symbols use negative ints <= -JS_SYMBOL_BASE)
     if (isfinite(d) && d == (double)(int64_t)d && d >= INT56_MIN && d <= INT56_MAX
-        && !(d == 0.0 && signbit(d))) {
+        && !(d == 0.0 && signbit(d))
+        && (int64_t)d > -(int64_t)JS_SYMBOL_BASE) {
         return (Item){.item = i2it((int64_t)d)};
     }
     double* ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
@@ -1821,7 +1824,13 @@ extern "C" Item js_unary_minus(Item operand) {
     if (get_type_id(num) == LMD_TYPE_INT && it2i(num) == 0) {
         return js_make_number(-0.0);
     }
-    return fn_neg(num);
+    Item result = fn_neg(num);
+    // After negation, check if the result is an int in the symbol collision range.
+    // If so, promote to float to avoid being misidentified as a symbol.
+    if (get_type_id(result) == LMD_TYPE_INT && it2i(result) <= -(int64_t)JS_SYMBOL_BASE) {
+        return js_make_number((double)it2i(result));
+    }
+    return result;
 }
 
 extern "C" Item js_typeof(Item value) {
@@ -3022,6 +3031,14 @@ extern "C" Item js_property_get(Item object, Item key) {
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
                         if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
+                    } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
+                        // Array.prototype methods: resolve via Array builtin table
+                        builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
+                        if (builtin.item != ItemNull.item) return builtin;
+                    } else if (cn_str && cn_str->len == 7 && strncmp(cn_str->chars, "Boolean", 7) == 0) {
+                        // Boolean wrapper: toString/valueOf resolve to boolean-specific builtins
+                        builtin = js_lookup_builtin_method(LMD_TYPE_BOOL, str_key->chars, (int)str_key->len);
+                        if (builtin.item != ItemNull.item) return builtin;
                     }
                 }
             }
@@ -4618,7 +4635,7 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_HAS_OWN_PROPERTY, "hasOwnProperty", 1);
     if (len == 20 && strncmp(name, "propertyIsEnumerable", 20) == 0)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_PROPERTY_IS_ENUMERABLE, "propertyIsEnumerable", 1);
-    if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_BOOL)
+    if (len == 8 && strncmp(name, "toString", 8) == 0 && type != LMD_TYPE_FUNC && type != LMD_TYPE_BOOL && type != LMD_TYPE_ARRAY && type != LMD_TYPE_STRING)
         return js_get_or_create_builtin(JS_BUILTIN_OBJ_TO_STRING, "toString", 0);
     // Boolean.prototype.toString → returns "true"/"false"
     if (len == 8 && strncmp(name, "toString", 8) == 0 && type == LMD_TYPE_BOOL)
@@ -5214,27 +5231,69 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return (Item){.item = ITEM_TRUE};
     }
     case JS_BUILTIN_OBJ_TO_STRING: {
-        // ES spec: Object.prototype.toString returns "[object <tag>]"
-        // v18l: For wrapper objects (Number/String/Boolean), delegate to primitive toString
+        // ES spec §20.1.3.6: Object.prototype.toString returns "[object <tag>]"
         if (get_type_id(this_val) == LMD_TYPE_MAP) {
             Map* m = this_val.map;
             if (m) {
+                // Check Symbol.toStringTag first (highest priority per spec)
+                bool tag_found = false;
+                Item tag = js_map_get_fast(m, "__sym_4", 7, &tag_found);
+                if (!tag_found) {
+                    Item tag_key = (Item){.item = s2it(heap_create_name("__sym_4", 7))};
+                    tag = js_prototype_lookup(this_val, tag_key);
+                    tag_found = (tag.item != ItemNull.item);
+                }
+                if (tag_found && get_type_id(tag) == LMD_TYPE_STRING) {
+                    String* ts = it2s(tag);
+                    if (ts) {
+                        char buf[256];
+                        int blen = snprintf(buf, sizeof(buf), "[object %.*s]", (int)ts->len, ts->chars);
+                        return (Item){.item = s2it(heap_create_name(buf, blen))};
+                    }
+                }
+                // Use __class_name__ for the tag when it matches a built-in type
+                // ES spec §20.1.3.6: only certain built-in classes define a [[Class]] tag
                 bool own_cn = false;
                 Item cn = js_map_get_fast(m, "__class_name__", 14, &own_cn);
                 if (own_cn && get_type_id(cn) == LMD_TYPE_STRING) {
                     String* cn_str = it2s(cn);
-                    bool own_pv = false;
-                    Item pv = js_map_get_fast(m, "__primitiveValue__", 18, &own_pv);
-                    if (own_pv && cn_str) {
-                        if (cn_str->len == 6 && memcmp(cn_str->chars, "Number", 6) == 0) {
-                            Item mn = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            return js_number_method(pv, mn, args, arg_count);
+                    if (cn_str && cn_str->len > 0) {
+                        const char* c = cn_str->chars;
+                        int cl = (int)cn_str->len;
+                        // Map class names to ES spec builtinTag
+                        const char* tag = NULL;
+                        int tag_len = 0;
+                        // Error and subclasses → "Error"
+                        if ((cl >= 5 && strncmp(c + cl - 5, "Error", 5) == 0) ||
+                            (cl == 14 && strncmp(c, "AggregateError", 14) == 0)) {
+                            tag = "Error"; tag_len = 5;
                         }
-                        if (cn_str->len == 6 && memcmp(cn_str->chars, "String", 6) == 0) {
-                            return js_to_string(pv);
+                        // Date → "Date" (only for actual Date instances with __date_ms__)
+                        else if (cl == 4 && strncmp(c, "Date", 4) == 0) {
+                            bool has_ms = false;
+                            js_map_get_fast(m, "__date_ms__", 11, &has_ms);
+                            if (has_ms) { tag = "Date"; tag_len = 4; }
                         }
-                        if (cn_str->len == 7 && memcmp(cn_str->chars, "Boolean", 7) == 0) {
-                            return js_to_string(pv);
+                        // RegExp → "RegExp" (only for actual RegExp instances with __rd)
+                        else if (cl == 6 && strncmp(c, "RegExp", 6) == 0) {
+                            bool has_rd = false;
+                            js_map_get_fast(m, "__rd", 4, &has_rd);
+                            if (has_rd) { tag = "RegExp"; tag_len = 6; }
+                        }
+                        // String/Number/Boolean wrappers
+                        else if (cl == 6 && strncmp(c, "String", 6) == 0) {
+                            tag = "String"; tag_len = 6;
+                        }
+                        else if (cl == 6 && strncmp(c, "Number", 6) == 0) {
+                            tag = "Number"; tag_len = 6;
+                        }
+                        else if (cl == 7 && strncmp(c, "Boolean", 7) == 0) {
+                            tag = "Boolean"; tag_len = 7;
+                        }
+                        if (tag) {
+                            char buf[256];
+                            int blen = snprintf(buf, sizeof(buf), "[object %.*s]", tag_len, tag);
+                            return (Item){.item = s2it(heap_create_name(buf, blen))};
                         }
                     }
                 }
@@ -5509,6 +5568,29 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
             Item result = js_array_method(this_val, method_name, args, arg_count);
             js_array_method_real_this = (Item){0};
             return result;
+        }
+        // ES spec §23.1.3.30: Array.prototype.toString
+        // 1. Let array be ToObject(this)  2. Let func = Get(array, "join")
+        // 3. If IsCallable(func), return Call(func, array)
+        // 4. Otherwise, return Object.prototype.toString(array)
+        if (builtin_id == JS_BUILTIN_ARR_TO_STRING) {
+            Item wrapped = js_to_object(this_val);
+            // Check for own "join" property or explicit prototype chain join
+            // (don't use js_property_get which has generic builtin fallback for all MAPs)
+            Item join_fn = ItemNull;
+            if (get_type_id(wrapped) == LMD_TYPE_MAP) {
+                bool own_join = false;
+                join_fn = js_map_get_fast(wrapped.map, "join", 4, &own_join);
+                if (!own_join || js_is_deleted_sentinel(join_fn)) {
+                    Item join_key = (Item){.item = s2it(heap_create_name("join", 4))};
+                    join_fn = js_prototype_lookup(wrapped, join_key);
+                }
+            }
+            if (join_fn.item != ItemNull.item && get_type_id(join_fn) == LMD_TYPE_FUNC) {
+                return js_call_function(join_fn, wrapped, args, arg_count);
+            }
+            // No join method — fall back to Object.prototype.toString
+            return js_dispatch_builtin(JS_BUILTIN_OBJ_TO_STRING, wrapped, args, arg_count);
         }
         // For MAP objects (typed arrays, data views), delegate to js_map_method
         // which handles them. For plain Maps, convert to array-like and delegate.
@@ -9186,14 +9268,7 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
                 }
             }
         }
-        // Return an array iterator (kind=1: values) over the matches array
-        Item iter = js_new_object();
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, matches_arr);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(1)});
-        Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
-        js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
-        return iter;
+        return matches_arr;
     }
     if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
         return str;
@@ -11241,8 +11316,9 @@ extern "C" Item js_get_iterator(Item iterable) {
 }
 
 // IteratorStep: call iterator.next(), return result {done, value}
-// Returns ItemNull on completion (done=true) or the value on success.
-// Uses a special encoding: returns the value directly, or a sentinel for "done".
+// Returns JS_ITER_DONE_SENTINEL on completion (done=true) or the value on success.
+// The sentinel is a unique bit pattern (type tag 0x7F) that cannot collide with
+// any valid JS value including null, undefined, false, 0, or empty string.
 extern "C" Item js_iterator_step(Item iterator) {
     // Synthetic array iterator
     bool has_arr = false;
@@ -11252,7 +11328,7 @@ extern "C" Item js_iterator_step(Item iterator) {
         Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
         int idx = has_idx ? (int)it2i(idx_val) : 0;
         int len = (get_type_id(arr_val) == LMD_TYPE_ARRAY) ? arr_val.array->length : 0;
-        if (idx >= len) return (Item){.item = ITEM_NULL};  // done
+        if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
         Item elem = js_property_access(arr_val, (Item){.item = i2it(idx)});
         js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
         return elem;
@@ -11266,7 +11342,7 @@ extern "C" Item js_iterator_step(Item iterator) {
         Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
         int idx = has_idx ? (int)it2i(idx_val) : 0;
         String* str = it2s(str_val);
-        if (idx >= (int)str->len) return (Item){.item = ITEM_NULL};  // done
+        if (idx >= (int)str->len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
         String* ch = heap_create_name(str->chars + idx, 1);
         js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
         return (Item){.item = s2it(ch)};
@@ -11280,7 +11356,7 @@ extern "C" Item js_iterator_step(Item iterator) {
         Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
         int idx = has_idx ? (int)it2i(idx_val) : 0;
         int len = js_typed_array_length(tarr_val);
-        if (idx >= len) return (Item){.item = ITEM_NULL};  // done
+        if (idx >= len) return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
         Item elem = js_typed_array_get(tarr_val, (Item){.item = i2it(idx)});
         js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
         return elem;
@@ -11289,10 +11365,10 @@ extern "C" Item js_iterator_step(Item iterator) {
     // Generator: call js_generator_next
     if (js_is_generator(iterator)) {
         Item result = js_generator_next(iterator, make_js_undefined());
-        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
         String* done_key = heap_create_name("done", 4);
         Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-        if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = ITEM_NULL};
+        if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
         String* val_key = heap_create_name("value", 5);
         return js_property_get(result, (Item){.item = s2it(val_key)});
     }
@@ -11303,16 +11379,16 @@ extern "C" Item js_iterator_step(Item iterator) {
         Item next_fn = js_property_get(iterator, (Item){.item = s2it(next_key)});
         if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
             Item result = js_call_function(next_fn, iterator, NULL, 0);
-            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            if (js_check_exception()) return (Item){.item = JS_ITER_DONE_SENTINEL};
             String* done_key = heap_create_name("done", 4);
             Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
-            if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = ITEM_NULL};
+            if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = JS_ITER_DONE_SENTINEL};
             String* val_key = heap_create_name("value", 5);
             return js_property_get(result, (Item){.item = s2it(val_key)});
         }
     }
 
-    return (Item){.item = ITEM_NULL};  // done
+    return (Item){.item = JS_ITER_DONE_SENTINEL};  // done
 }
 
 // IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)

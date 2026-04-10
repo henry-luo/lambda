@@ -18,6 +18,9 @@ TypeId ts_predefined_name_to_type_id(const char* name, int len);
 // parse a type expression from raw text, returning a TsTypeNode* tree
 TsTypeNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len);
 
+// parse an interface body from raw text (including { ... } braces), returning TsObjectTypeNode*
+TsTypeNode* ts_parse_interface_body_text(JsTranspiler* tp, const char* text, int len);
+
 #ifdef __cplusplus
 }
 #endif

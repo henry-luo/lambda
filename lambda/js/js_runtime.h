@@ -17,6 +17,11 @@ extern "C" {
 // This roundtrips correctly through map_field_store/map_read_field for INT fields.
 #define JS_DELETED_SENTINEL_VAL (((uint64_t)LMD_TYPE_INT << 56) | 0x00DEAD00DEAD00ULL)
 
+// Sentinel value for iterator "done" (returned by js_iterator_step when exhausted).
+// Uses type tag 0x7F (unused) so it cannot collide with any valid JS value
+// including null, undefined, false, 0, or empty string.
+#define JS_ITER_DONE_SENTINEL (0x7F00DEAD00000000ULL)
+
 // =============================================================================
 // Type Conversion Functions
 // =============================================================================
@@ -537,7 +542,7 @@ Item js_iterable_to_array(Item iterable);
 /**
  * Lazy iteration protocol for for-of loops.
  * js_get_iterator: Get an iterator object from an iterable.
- * js_iterator_step: Advance iterator, return next value or ITEM_NULL when done.
+ * js_iterator_step: Advance iterator, return next value or JS_ITER_DONE_SENTINEL when done.
  * js_iterator_close: Call iterator.return() for IteratorClose (on break/return).
  */
 Item js_get_iterator(Item iterable);
