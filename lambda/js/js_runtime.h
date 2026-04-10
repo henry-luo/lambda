@@ -355,6 +355,7 @@ void js_throw_value(Item value);
 
 /** v20: Throw a RangeError with the given message. */
 Item js_throw_range_error(const char* message);
+Item js_throw_type_error(const char* message);
 void js_throw_syntax_error(Item message);
 
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */

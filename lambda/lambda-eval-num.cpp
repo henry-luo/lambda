@@ -956,7 +956,16 @@ Item fn_min2(Item item_a, Item item_b) {
         return ItemError;
     }
 
-    double result = a_val < b_val ? a_val : b_val;
+    double result;
+    if (isnan(a_val) || isnan(b_val)) {
+        result = NAN;
+        is_float = true;
+    } else if (a_val == 0.0 && b_val == 0.0) {
+        result = (signbit(a_val) || signbit(b_val)) ? -0.0 : 0.0;
+        is_float = true;
+    } else {
+        result = a_val < b_val ? a_val : b_val;
+    }
     // Return as integer if both inputs were integers
     if (!is_float) {
         // Convert back to Item int directly to match input type
@@ -1145,7 +1154,16 @@ Item fn_max2(Item item_a, Item item_b) {
         return ItemError;
     }
 
-    double result = a_val > b_val ? a_val : b_val;
+    double result;
+    if (isnan(a_val) || isnan(b_val)) {
+        result = NAN;
+        is_float = true;
+    } else if (a_val == 0.0 && b_val == 0.0) {
+        result = (signbit(a_val) && signbit(b_val)) ? -0.0 : 0.0;
+        is_float = true;
+    } else {
+        result = a_val > b_val ? a_val : b_val;
+    }
     // Return as integer if both inputs were integers
     if (!is_float) {
         // Convert back to Item int directly to match input type
@@ -2147,10 +2165,20 @@ extern "C" double fn_pow_u(double base, double exponent) {
 
 // Min/max for two doubles
 extern "C" double fn_min2_u(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) {
+        // -0 < +0 per ES spec for Math.min
+        return (signbit(a) || signbit(b)) ? -0.0 : 0.0;
+    }
     return a < b ? a : b;
 }
 
 extern "C" double fn_max2_u(double a, double b) {
+    if (isnan(a) || isnan(b)) return NAN;
+    if (a == 0.0 && b == 0.0) {
+        // +0 > -0 per ES spec for Math.max
+        return (signbit(a) && signbit(b)) ? -0.0 : 0.0;
+    }
     return a > b ? a : b;
 }
 
