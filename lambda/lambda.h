@@ -1024,7 +1024,7 @@ typedef struct _ArrayList ArrayList;
 
 typedef struct Context {
     Pool* pool;
-    Arena* arena;  // arena allocator (for input parsing path)
+    Arena* arena;  // arena allocator (for input parsing path; also result arena in ui_mode)
     void** consts;
     void* type_list;  // type definitions list (ArrayList* at runtime, void* for JIT access)
     Url* cwd;  // current working directory
@@ -1032,6 +1032,7 @@ typedef struct Context {
     bool run_main; // whether to run main procedure on start
     bool disable_string_merging; // disable automatic string merging in list_push
     uintptr_t stack_limit; // stack overflow check limit (from lambda_stack_init)
+    bool ui_mode; // allocate fat DomElement/DomText on arena for unified DOM tree
 } Context;
 
 #ifndef LAMBDA_STATIC

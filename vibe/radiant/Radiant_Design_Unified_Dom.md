@@ -452,9 +452,366 @@ Embedded `Element elmt` field inside `DomElement`. Conversion via `element_to_do
 - `dom_comment_set_content`: in ui_mode, uses `createDomTextString()` for comment content strings.
 - All tests pass (same counts as Phase 3).
 
-**Cleanup — NOT DONE (blocked by `lambda view script.ls` path):**
-- `DomElement.native_element`: still used by MarkEditor callers and `element_dom_map` for incremental rebuild.
-- `DomText.text` / `DomText.length` / `DomText.native_string`: layout uses `text_data()` method (not direct fields), but fields still set during init for backward compat.
-- `DomDocument.element_dom_map`: used by `cmd_layout.cpp` incremental rebuild for `lambda view script.ls`. In ui_mode, could be replaced with `element_to_dom_element()`, but requires migrating the incremental rebuild path.
-- `DomDocument.html_root`: signal field distinguishing HTML (layout) from PDF (no layout). Still in use.
-- `DomNode` base class: provides `is_element()`/`is_text()`/`as_element()` helpers. No vtable. Working correctly, no benefit to removing.
+**Cleanup — ASSESSED (Phase 5 done, but none removable):**
+
+| Item | Verdict | Reason |
+|------|---------|--------|
+| `DomElement.native_element` | **Cannot remove** | MarkEditor API, event dispatch `dispatch_lambda_handler`, 50+ test usages. In ui_mode it's redundant (could derive via `dom_element_to_element`), but non-ui_mode paths still need it |
+| `DomText.text/length/native_string` | **Cannot remove** | Layout engine directly mutates `text/length` during `::first-letter` split and text-transform; JS DOM API reads them; serialization reads them |
+| `DomDocument.element_dom_map` | **Could optimize for ui_mode** but not remove | In ui_mode, the `element_dom_map_lookup` calls in `rebuild_lambda_doc_incremental` could use `element_to_dom_element()` instead. But the map is still needed for non-ui_mode HTML docs |
+| `DomDocument.html_root` | **Cannot remove** | Used for PDF vs HTML detection, script execution, initial DOM construction, incremental sync |
+| `DomNode` base class | **No action needed** | Provides `is_element()`/`is_text()`/`as_element()` helpers. No vtable. Working correctly |
+
+### Phase 5: Unified DOM for `lambda view script.ls` — NOT STARTED
+
+#### Problem Statement
+
+When `lambda view script.ls` runs, the pipeline is:
+
+1. **JIT execution** (`run_script_mir` → `execute_script_and_create_output`): The MIR-compiled Lambda script runs and produces an Element tree. Elements are allocated via `elmt()` → `heap_calloc(sizeof(Element))` on the GC heap. Strings are allocated via `heap_strcpy()` → `heap_alloc(len + 1 + sizeof(String))`. Children are built via `list_push()` → `expand_list()` using `heap_data_alloc()` for `items[]` buffers. **None of these allocations are DOM-aware.**
+
+2. **Result wrapping** (`load_lambda_script_doc`): If the result is an `<html>` element, it's used as-is. Otherwise, a `MarkBuilder` wraps it in `<html><body>result</body></html>`. This MarkBuilder operates on the `script_output` Input which has **`ui_mode = false`**, so it allocates plain Elements.
+
+3. **DOM build** (`build_dom_tree_from_element`): Runs in non-ui_mode — creates **separate** `DomElement`/`DomText` wrappers on the DomDocument arena, building a second parallel tree. The `element_dom_map` is populated to bridge the two trees.
+
+4. **Reactive rebuild** (`render_map_retransform` → `rebuild_lambda_doc`/`rebuild_lambda_doc_incremental`): When a UI event handler mutates state, the template body function is re-executed (still on the GC heap, producing plain Elements), `items[]` in the parent element is patched, and the DOM tree is rebuilt from scratch (full rebuild) or incrementally (via `element_dom_map` lookup).
+
+This means the script path currently maintains **two parallel trees**: Lambda Elements on the GC heap and DomElements on the document arena. Phase 1–4 unified the HTML parsing path but this path remains dual-tree.
+
+#### Approach: Arena-Based Fat Allocation
+
+The core idea: **pre-create a result `Input` with a persistent arena, and route all JIT allocations through it in ui_mode.** Elements allocate fat `DomElement` directly from the result arena. Strings first live on the GC heap (for intermediate computation), then are copied into the arena as fat `DomText` nodes when added to an element via `list_push()`. This completely eliminates GC involvement for the DOM tree — no new type tags, no GC scanner changes, no interior pointer issues.
+
+##### Why Arena Over GC Heap
+
+| Concern | GC heap approach | Arena approach |
+|---------|------------------|---------------|
+| New GC type tags | Requires `LMD_TYPE_DOM_ELEMENT`, `LMD_TYPE_DOM_TEXT` | None needed |
+| GC scanner changes | Must add offset-adjusted scan cases + interior pointer handling | No changes — arena objects are invisible to GC |
+| Interior pointer complexity | `gc_mark_item` must detect and back-adjust Element* → DomElement* | Not applicable — arena isn't scanned by GC |
+| Allocation speed | Large object pool (DomElement > 256 bytes, slow) | Bump allocator (fast, good cache locality) |
+| Memory contiguity | Scattered across GC pools | Contiguous within arena chunks |
+| Consistency with input parsers | Different path (GC heap) | Same pattern as HTML/XML input parsers |
+| Lifetime management | GC cycle collects unreachable nodes | Arena persists for document lifetime |
+
+##### Result Input: Pre-Created Arena Owner
+
+`load_lambda_script_doc` creates a **result `Input`** before script execution. This Input owns the arena where all DOM nodes will live:
+
+```cpp
+DomDocument* load_lambda_script_doc(Url* script_url, ...) {
+    Runtime* runtime = ...;
+    runtime_init(runtime);
+
+    // Create result Input with fresh arena — this is the DOM's memory owner
+    Pool* result_pool = pool_create();
+    Input* result_input = Input::create(result_pool, script_url);
+    result_input->ui_mode = true;
+
+    // Set up runtime context to route allocations to result arena
+    runtime->context.ui_mode = true;
+    runtime->context.arena = result_input->arena;  // JIT code uses this arena
+
+    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
+    // script_output->root contains the Lambda result tree
+    // All elements in this tree are fat DomElements on result_input->arena
+    ...
+}
+```
+
+##### Element Allocation: Fat DomElement on Arena
+
+`elmt()` in ui_mode allocates from `context->arena` instead of `heap_calloc`:
+
+```c
+Element* elmt(int64_t type_index) {
+    if (context->ui_mode) {
+        // allocate fat DomElement on the result arena
+        DomElement* dom = (DomElement*)arena_calloc(context->arena, sizeof(DomElement));
+        dom->node_type = DOM_NODE_ELEMENT;
+        Element* e = dom_element_to_element(dom);
+        e->type_id = LMD_TYPE_ELEMENT;
+        ArrayList* type_list = (ArrayList*)context->type_list;
+        e->type = (TypeElmt*)(type_list->data[type_index]);
+        return e;  // Lambda sees Element* at embedded offset
+    }
+    // non-UI: unchanged — GC heap allocation
+    Element *e = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    e->type_id = LMD_TYPE_ELEMENT;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    e->type = (TypeElmt*)(type_list->data[type_index]);
+    return e;
+}
+```
+
+This is identical to how MarkBuilder allocates elements in ui_mode (`arena_calloc(input->arena, sizeof(DomElement))`). The returned `Element*` points to the embedded `elmt` field inside the fat `DomElement`.
+
+##### String Handling: GC Heap → Arena Copy on Attachment
+
+Unlike elements, **strings are NOT pre-allocated as DomText on the arena.** The JIT runtime performs many intermediate string operations (concatenation, interpolation, formatting) that produce temporary strings. These must remain on the GC heap for normal GC lifecycle.
+
+The key insight: **a string only becomes a DOM text node when it is added to an element's children via `list_push()`.** At that point, we copy it into the result arena as a fat `[DomText][String][chars]` block:
+
+```c
+void list_push(List *list, Item item) {
+    // ... existing content-list spreading logic ...
+
+    if (context->ui_mode && list->is_content) {
+        TypeId tid = get_type_id(item);
+        if (tid == LMD_TYPE_STRING) {
+            // Copy GC-heap string into arena as fat DomText
+            String* src = it2s(item);
+            size_t total = sizeof(DomText) + sizeof(String) + src->len + 1;
+            DomText* dt = (DomText*)arena_calloc(context->arena, total);
+            dt->node_type = DOM_NODE_TEXT;
+            String* dst = dom_text_to_string(dt);
+            dst->len = src->len;
+            dst->is_ascii = src->is_ascii;
+            memcpy(dst->chars, src->chars, src->len + 1);
+            item = s2it(dst);  // replace with arena-allocated DomText string
+            // Original GC string becomes garbage, collected normally
+        }
+    }
+
+    // ... normal push logic ...
+    expand_list(list);
+    list->items[list->length++] = item;
+}
+```
+
+**String merging** in `list_push()` (adjacent string concatenation): In ui_mode, merged strings should also be allocated as DomText on the arena. The existing merge path checks `input_context->consts` to decide between `context_alloc` and `pool_calloc` — we add a third branch for ui_mode that allocates fat DomText on the arena.
+
+##### items[] Growth: Arena Alloc + Copy
+
+`expand_list()` already supports dual-mode allocation (arena vs heap). Since `context->arena` is set in ui_mode, the arena path is automatically taken:
+
+```cpp
+void expand_list(List *list, Arena* arena) {
+    list->capacity = list->capacity ? list->capacity * 2 : 8;
+    Item* old_items = list->items;
+
+    if (!arena && input_context && input_context->arena) {
+        arena = input_context->arena;
+    }
+    bool use_arena = (arena != nullptr && (old_items == nullptr || arena_owns(arena, old_items)));
+
+    if (use_arena) {
+        // arena_realloc: extends in-place if at chunk end, else copies + frees old to free-list
+        list->items = arena_realloc(arena, old_items,
+                                    list->length * sizeof(Item),
+                                    list->capacity * sizeof(Item));
+    } else {
+        // heap_data_calloc for GC-managed data buffers
+        list->items = heap_data_calloc(list->capacity * sizeof(Item));
+        if (old_items) memcpy(list->items, old_items, list->length * sizeof(Item));
+    }
+}
+```
+
+When `arena_realloc` can't extend in-place, it allocates a new buffer, copies, and puts the old buffer on the arena's free-list for potential reuse. **The old `items[]` buffer becomes garbage in the arena** — this is the expected fragmentation cost of the persistent arena model.
+
+**Same approach for attribute `data` buffers**: `elmt_fill()` and map/element attr data allocation use similar patterns. In ui_mode, these go through arena allocation. Growth (rare for attributes — typically set once) copies and leaves old buffers as arena garbage.
+
+##### Reactive Updates: Reuse the Same Arena
+
+When `render_map_retransform()` re-executes a template body function:
+
+1. The JIT code runs with `context->ui_mode = true` and `context->arena` pointing to the result Input's arena
+2. New DomElements are allocated on the **same arena** as the original DOM tree
+3. `items[]` in the parent element is patched to reference the new child Element*
+4. Old elements and their `items[]` buffers remain in the arena as **dead garbage**
+
+The arena is **not reset** between reactive updates. Garbage accumulates:
+- Old replaced DomElement structs (sizeof(DomElement) ≈ 400+ bytes each)
+- Old `items[]` buffers from expand_list (variable size)
+- Old attribute `data` buffers (variable size)
+- Old DomText blocks for replaced text content
+
+This is acceptable for typical interactive UIs where mutations are localized (one component's template re-renders). The garbage ratio stays low because most of the DOM tree is stable.
+
+##### Arena Compaction
+
+When cumulative garbage exceeds a threshold (e.g., 50% of arena usage, or absolute size > N MB), the arena is **compacted**:
+
+1. **Allocate a new arena** from the same pool
+2. **Walk the live DOM tree** (rooted at `dom_doc->root_element`):
+   - For each live DomElement: copy to new arena, update `items[]` pointers
+   - For each live DomText: copy to new arena (variable-size: `sizeof(DomText) + sizeof(String) + len + 1`)
+   - Update parent/child/sibling linked list pointers
+3. **Swap** the new arena into the result Input, destroy the old arena
+
+This is essentially a **copying collector scoped to just the DOM arena** — much simpler than a full GC because:
+- The root set is a single DOM tree (no stack scanning, no weak refs)
+- All objects have known, fixed types (DomElement or DomText)
+- The linked list structure provides a natural traversal order
+- No finalization, no cycles — pure tree structure
+
+**Trigger heuristic**: Track `arena_total_allocated` vs `arena_live_bytes` (inferred from live DOM node count × avg size). Compact when `total_allocated > 2 * estimated_live_bytes`.
+
+**Pointer fixup during compaction**: Each node's new address is known after copying. A fixup pass updates:
+- `DomNode.parent`, `first_child`, `last_child`, `next_sibling`, `prev_sibling`
+- `Element.items[]` entries (element/string items point to other arena nodes)
+- Parent element's `items[]` entry referencing this element
+- `DomDocument.root_element`, `dom_doc->body_element`, etc.
+
+Strategy: use a temporary `HashMap<void*, void*>` mapping old address → new address. Walk the tree, copy each node, record mapping. Second pass fixes up all pointers.
+
+##### GC Interaction: None
+
+Arena-allocated DomElements/DomTexts are **invisible to the GC**:
+- No `gc_header_t` — arena objects have no GC metadata
+- The GC scanner never encounters them — they're not on any GC slab/pool
+- `is_gc_object()` returns false for arena pointers
+- The GC's `gc_mark_item()` sees Items in `items[]` — for arena-allocated containers, the pointer won't be in the GC heap, so `is_gc_object()` skips them
+
+**Critical: GC must not collect the `items[]` buffer or `data` buffer** for arena-allocated elements. Since these buffers are also on the arena (via `expand_list` arena path), the GC never sees them. No risk.
+
+**Exception: intermediate strings on GC heap.** During JIT execution, temporary strings (from concatenation, formatting, etc.) live on the GC heap. If such a string is stored in a local variable or JIT register and a GC cycle runs mid-execution, the GC must keep it alive. This is already handled by the normal GC stack/register scanning for JIT code — no change needed.
+
+##### Context: Propagating ui_mode and Arena
+
+The `Context` struct gains a `ui_mode` field:
+
+```c
+typedef struct Context {
+    Pool* pool;
+    Arena* arena;          // already exists — reused for result arena in ui_mode
+    void** consts;
+    void* type_list;
+    Url* cwd;
+    void* (*context_alloc)(int size, TypeId type_id);
+    bool run_main;
+    bool disable_string_merging;
+    uintptr_t stack_limit;
+    bool ui_mode;  // NEW: allocate fat DomElement on arena, copy strings on attachment
+} Context;
+```
+
+`Context.arena` **already exists** and is used by `expand_list()` for the arena path. In ui_mode, `load_lambda_script_doc` sets it to the result Input's arena before `run_script_mir()`. The existing `expand_list` arena detection (`input_context->arena`) picks it up automatically.
+
+##### load_lambda_script_doc Changes
+
+```cpp
+DomDocument* load_lambda_script_doc(Url* script_url, ...) {
+    Runtime* runtime = ...;
+    runtime_init(runtime);
+
+    // 1. Create result Input — arena owner for all DOM nodes
+    Pool* result_pool = pool_create();
+    Input* result_input = Input::create(result_pool, script_url);
+    result_input->ui_mode = true;
+
+    // 2. Configure runtime to route element/list allocations to result arena
+    runtime->context.ui_mode = true;
+    runtime->context.arena = result_input->arena;
+
+    // 3. Execute script — elements are fat DomElements on result arena
+    Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
+
+    // 4. Result wrapping (if needed) — MarkBuilder also uses result_input arena
+    //    since result_input->ui_mode = true and we pass result_input to MarkBuilder
+    Element* root_elmt = it2elmt(script_output->root);
+    if (!is_html_element(root_elmt)) {
+        MarkBuilder mb(result_input);  // uses result_input->arena in ui_mode
+        mb.start("html"); mb.start("body");
+        mb.add_element(root_elmt);     // attaches existing DomElement
+        mb.end(); mb.end();
+        root_elmt = it2elmt(result_input->root);
+    }
+
+    // 5. build_dom_tree_from_element in ui_mode — init-only (no wrapper allocation)
+    //    Just initializes DOM linked list (parent/child/sibling) from items[]
+    DomDocument* dom_doc = ...;
+    build_dom_tree_from_element(dom_doc, root_elmt);  // ui_mode: only link nodes
+
+    // 6. No element_dom_map needed — use element_to_dom_element() directly
+    return dom_doc;
+}
+```
+
+##### Retransform / Reactive Rebuild
+
+When `render_map_retransform()` re-executes a template body function:
+
+1. Ensure `context->ui_mode = true` and `context->arena` = result Input's arena
+2. JIT code calls `elmt()` → fat DomElement on arena
+3. JIT code calls `list_push()` → strings copied to arena as DomText
+4. Parent's `items[]` is patched with new Element* (pointing into new DomElement on arena)
+5. Old DomElement/DomText remain in arena as garbage
+
+`rebuild_lambda_doc` / `rebuild_lambda_doc_incremental` changes:
+- No more `element_dom_map` — use `element_to_dom_element()` to recover DomElement from any Element in the tree
+- `build_dom_tree_from_element()` in ui_mode: re-links DOM node list from `items[]` without allocating
+- Incremental path: `element_dom_map_lookup(doc->element_dom_map, old_elem)` → `element_to_dom_element(old_elem)`
+
+##### elmt_fill and Attribute Data Buffers
+
+`elmt_fill()` (called by JIT-generated code) allocates packed attribute data via `heap_data_calloc()`. In ui_mode, this should use arena allocation instead:
+
+```c
+Element* elmt_fill(Element *elmt, ...) {
+    TypeElmt* type = (TypeElmt*)elmt->type;
+    int data_size = type->data_size;
+    if (data_size > 0) {
+        if (context->ui_mode) {
+            elmt->data = arena_calloc(context->arena, data_size);
+        } else {
+            elmt->data = heap_data_calloc(data_size);
+        }
+        elmt->data_cap = data_size;
+    }
+    // ... fill attribute values ...
+}
+```
+
+Attribute data buffers are typically set once and never grown, so no garbage concern here.
+
+##### Summary of Changes
+
+| Component | Change |
+|-----------|--------|
+| `EvalContext` (lambda.h) | Add `bool ui_mode` field |
+| `elmt()` / `elmt_with_tl()` (lambda-data-runtime.cpp) | In ui_mode: `arena_calloc(context->arena, sizeof(DomElement))`, return `dom_element_to_element(dom)` |
+| `elmt_fill()` (lambda-data-runtime.cpp) | In ui_mode: `arena_calloc` for attr data buffers instead of `heap_data_calloc` |
+| `list_push()` (lambda-data.cpp) | In ui_mode + content list: copy GC string to arena as fat DomText; merged strings also arena-allocated |
+| `expand_list()` (lambda-data.cpp) | No change — already supports arena path via `context->arena` |
+| `heap_strcpy()` (lambda-mem.cpp) | No change — strings stay on GC heap; copied to arena on attachment |
+| GC scanner (gc_heap.c) | No change — arena objects are invisible to GC |
+| `load_lambda_script_doc` (cmd_layout.cpp) | Create result Input, set `context->ui_mode = true`, set `context->arena = result_input->arena` |
+| `build_dom_tree_from_element()` | In ui_mode: init-only path (same as HTML path in Phase 2) |
+| `rebuild_lambda_doc` / `rebuild_lambda_doc_incremental` | Replace `element_dom_map` lookups with `element_to_dom_element()` |
+| `render_map_retransform()` | Ensure context ui_mode + arena are set before re-execution |
+| Arena compaction | New: walk live DOM tree, copy to fresh arena, fixup pointers |
+
+##### Implementation Order
+
+1. **Add `ui_mode` to EvalContext**, propagate through runner/context setup
+2. **Update `elmt()` / `elmt_with_tl()`** — arena-allocate fat DomElement in ui_mode
+3. **Update `elmt_fill()`** — arena-allocate attr data in ui_mode
+4. **Update `list_push()`** — copy GC strings to arena as fat DomText in ui_mode; arena-allocate merged strings
+5. **Update `load_lambda_script_doc`** — create result Input, set ui_mode + arena, switch to init-only DOM build
+6. **Update reactive rebuild** — use `element_to_dom_element()` instead of `element_dom_map`, ensure context setup before retransform
+7. **Test** with IoT dashboard script and reactive UI todo tests
+8. **Implement arena compaction** — triggered by fragmentation threshold, copies live DOM tree to fresh arena
+9. **Remove `element_dom_map`** once both paths (HTML + script) use unified tree
+
+### Phase 6: Unified DOM for `lambda view *.xml` — DONE
+
+#### Problem
+
+`load_xml_doc()` uses `input_from_source()` which creates its own Input with `ui_mode = false`. The XML parser (`parse_xml`) runs through MarkBuilder on that Input, allocating plain Elements on the pool. Then `build_dom_tree_from_element` creates separate DomElement wrappers — the same dual-tree problem Phase 5 solved for scripts.
+
+#### Approach
+
+Mirror the HTML path (`load_lambda_html_doc`):
+1. Create `Input` directly with `ui_mode = true` (bypass `input_from_source`)
+2. Call `parse_xml(input, xml_content)` — MarkBuilder sees `ui_mode` and allocates fat DomElements on the Input's arena
+3. Pass that Input to `dom_document_create()` — `build_dom_tree_from_element` uses the init-only path
+
+The `<html><body>` wrapper must also use MarkBuilder on the same Input (not `dom_element_create`) so the wrappers are fat DomElements too.
+
+#### Changes
+
+| Component | Change |
+|-----------|--------|
+| `load_xml_doc()` (cmd_layout.cpp) | Create Input directly with `ui_mode = true`, call `parse_xml()`, use MarkBuilder for html/body wrappers, pass to `dom_document_create` |
