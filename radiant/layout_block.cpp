@@ -6116,19 +6116,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_TOP) {
-                    // CSS 2.1 10.8.1: vertical-align:top aligns element's top with line box top
-                    // The line box top is at init_ascender above the baseline
-                    // Element contributes (block_flow_height - init_ascender) below the baseline
-                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
-                    // The strut always contributes its ascender to the line box
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->block.init_ascender);
+                    // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+                    // in the first-pass baseline-relative line box height calculation.
+                    // Their height is tracked separately and used in a second pass to
+                    // expand the line box if needed.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
-                    // CSS 2.1 10.8.1: vertical-align:bottom aligns element's bottom with line box bottom
-                    // Similar calculation but relative to init_descender
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
-                    // The strut always contributes its descender to the line box
-                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                    // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else {
                     // For other vertical-align values (sub, super, middle, etc.)

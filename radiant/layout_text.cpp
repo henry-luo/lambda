@@ -1013,6 +1013,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_float_intrusion = false;
     lycon->line.has_replaced_content = false;
     lycon->line.has_cjk_text = false;
+    lycon->line.max_top_bottom_height = 0;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
@@ -1359,6 +1360,13 @@ void line_break(LayoutContext* lycon) {
             if (!next || ((DomNode*)v)->parent != line_parent) break;
             v = (View*)next;
         }
+    }
+
+    // CSS 2.1 §10.8.1 second pass: expand line box for vertical-align:top/bottom elements.
+    // These elements don't participate in baseline-relative height calculation (first pass).
+    // If any top/bottom-aligned element is taller than the first-pass line box, expand it.
+    if (lycon->line.max_top_bottom_height > used_line_height) {
+        used_line_height = lycon->line.max_top_bottom_height;
     }
 
     lycon->block.advance_y += used_line_height;

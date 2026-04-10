@@ -233,6 +233,8 @@ typedef struct Linebox {
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
+    float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
+                                     // (used in second pass to expand line box if needed)
     float trailing_letter_spacing;   // CSS Text 3 §8: letter-spacing after the last character on a line;
                                      // trimmed at line breaks since letter-spacing is not applied at line ends
 
