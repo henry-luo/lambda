@@ -4,6 +4,16 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"  // for arena_owns() and arena_realloc()
 
+#ifndef LAMBDA_STATIC
+// ui_mode helper: copy GC-heap string into result arena as fat DomText node
+// (defined in lambda-data-runtime.cpp which has access to DOM headers)
+Item ui_copy_string_to_arena(Arena* arena, Item str_item);
+
+// ui_mode helper: merge two strings into a new fat DomText on the result arena
+// (defined in lambda-data-runtime.cpp which has access to DOM headers)
+Item ui_merge_strings_to_arena(Arena* arena, String* prev, String* next);
+#endif
+
 // data zone allocation helper (defined in lambda-mem.cpp)
 // weak fallback uses malloc — overridden by real GC implementation when linked
 extern "C" {
@@ -582,6 +592,16 @@ void list_push(List *list, Item item) {
 
     // 3. need to merge with previous string if any (unless disabled)
     if (type_id == LMD_TYPE_STRING) {
+#ifndef LAMBDA_STATIC
+        // ui_mode: copy GC-heap string to result arena as fat DomText when adding to element content
+        bool is_ui = input_context && input_context->ui_mode && input_context->arena;
+        if (is_ui && list->is_content) {
+            item = ui_copy_string_to_arena(input_context->arena, item);
+        }
+#else
+        bool is_ui = false;
+#endif
+
         // Only attempt string merging if input_context is available and merging is enabled
         bool should_merge = input_context != NULL &&
                            !input_context->disable_string_merging &&
@@ -593,6 +613,14 @@ void list_push(List *list, Item item) {
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
                 String *prev_str = prev_item.get_string();
                 String *new_str = item.get_string();
+#ifndef LAMBDA_STATIC
+                if (is_ui) {
+                    // ui_mode: merge into a new fat DomText on the arena
+                    list->items[list->length - 1] = ui_merge_strings_to_arena(
+                        input_context->arena, prev_str, new_str);
+                    return;
+                }
+#endif
                 // merge the two strings
                 size_t new_len = prev_str->len + new_str->len;
                 String *merged_str;
