@@ -379,18 +379,18 @@ extern "C" Item js_new_aggregate_error(Item errors, Item message) {
 // v12: Create Error with a compile-time stack trace string
 extern "C" Item js_new_error_with_stack(Item message, Item stack_str) {
     Item obj = js_new_object();
-    Item name_key = (Item){.item = s2it(heap_create_name("name"))};
     Item name_val = (Item){.item = s2it(heap_create_name("Error"))};
-    js_property_set(obj, name_key, name_val);
-    // v20: default message to "" when undefined/null (ES spec)
+    // Per spec: 'name' is inherited from Error.prototype, NOT set as own property
+    // Only set 'message' when it is explicitly provided (not undefined/null)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item == ItemNull.item || message.item == ITEM_JS_UNDEFINED) {
-        js_property_set(obj, msg_key, (Item){.item = s2it(heap_create_name("", 0))});
-    } else if (get_type_id(message) != LMD_TYPE_STRING) {
-        Item str_msg = js_to_string(message);
-        js_property_set(obj, msg_key, str_msg);
-    } else {
-        js_property_set(obj, msg_key, message);
+    if (message.item != ItemNull.item && message.item != ITEM_JS_UNDEFINED &&
+        get_type_id(message) != LMD_TYPE_NULL && get_type_id(message) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(message) != LMD_TYPE_STRING) {
+            Item str_msg = js_to_string(message);
+            js_property_set(obj, msg_key, str_msg);
+        } else {
+            js_property_set(obj, msg_key, message);
+        }
     }
     // Set stack property from compile-time stack trace
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
@@ -439,17 +439,17 @@ extern "C" Item js_new_error_with_name(Item error_name, Item message) {
 // v12: Create typed Error with compile-time stack trace
 extern "C" Item js_new_error_with_name_stack(Item error_name, Item message, Item stack_str) {
     Item obj = js_new_object();
-    Item name_key = (Item){.item = s2it(heap_create_name("name"))};
-    js_property_set(obj, name_key, error_name);
-    // v20: default message to "" when undefined/null (ES spec)
+    // Per spec: 'name' is inherited from the prototype, NOT set as own property
+    // Only set 'message' when it is explicitly provided (not undefined/null)
     Item msg_key = (Item){.item = s2it(heap_create_name("message"))};
-    if (message.item == ItemNull.item || message.item == ITEM_JS_UNDEFINED) {
-        js_property_set(obj, msg_key, (Item){.item = s2it(heap_create_name("", 0))});
-    } else if (get_type_id(message) != LMD_TYPE_STRING) {
-        Item str_msg = js_to_string(message);
-        js_property_set(obj, msg_key, str_msg);
-    } else {
-        js_property_set(obj, msg_key, message);
+    if (message.item != ItemNull.item && message.item != ITEM_JS_UNDEFINED &&
+        get_type_id(message) != LMD_TYPE_NULL && get_type_id(message) != LMD_TYPE_UNDEFINED) {
+        if (get_type_id(message) != LMD_TYPE_STRING) {
+            Item str_msg = js_to_string(message);
+            js_property_set(obj, msg_key, str_msg);
+        } else {
+            js_property_set(obj, msg_key, message);
+        }
     }
     // Set stack property
     Item stack_key = (Item){.item = s2it(heap_create_name("stack"))};
@@ -2193,9 +2193,9 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
     // Case 1: callee is a function — standard constructor call
     if (get_type_id(callee) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)callee.function;
-        // Builtin functions (Math.abs, etc.), arrow functions, and global builtins
+        // Builtin functions (Math.abs, etc.), arrow functions, generators, and global builtins
         // (parseInt, etc.) are not constructable
-        if (fn->builtin_id > 0 || fn->builtin_id == -2 || (fn->flags & JS_FUNC_FLAG_ARROW)) {
+        if (fn->builtin_id > 0 || fn->builtin_id == -2 || (fn->flags & (JS_FUNC_FLAG_ARROW | JS_FUNC_FLAG_GENERATOR))) {
             js_pending_new_target = ItemNull;
             js_has_pending_new_target = false;
             char buf[256];
@@ -2319,7 +2319,7 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
                 js_pending_new_target = ItemNull;
                 js_has_pending_new_target = false;
                 Item tn = (Item){.item = s2it(heap_create_name(n, nl))};
-                Item msg = (argc > 0 && args) ? args[0] : (Item){.item = s2it(heap_create_name("", 0))};
+                Item msg = (argc > 0 && args) ? args[0] : make_js_undefined();
                 return js_new_error_with_name(tn, msg);
             }
             // AggregateError(errors, message)
@@ -2361,12 +2361,24 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         }
         return obj;
     }
-    // Case 2: callee is a class object (MAP with __ctor__ and __instance_proto__)
+    // Case 2: callee is a class object (MAP with __ctor__ or __instance_proto__)
     if (get_type_id(callee) == LMD_TYPE_MAP) {
-        Item obj = js_new_object();
-        // Copy __class_name__ from the class object
         bool own;
         Item class_name = js_map_get_fast(callee.map, "__class_name__", 14, &own);
+        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
+        Item instance_proto = js_map_get_fast(callee.map, "__instance_proto__", 18, &own);
+        // Only treat as constructable if it has class metadata
+        if (class_name.item == ItemNull.item && ctor.item == ItemNull.item && instance_proto.item == ItemNull.item) {
+            // Plain object — not a constructor
+            js_pending_new_target = ItemNull;
+            js_has_pending_new_target = false;
+            Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+            Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
+            js_throw_value(js_new_error_with_name(tn, msg));
+            return ItemNull;
+        }
+        Item obj = js_new_object();
+        // Copy __class_name__ from the class object
         if (class_name.item != ItemNull.item) {
             Item cn_key = (Item){.item = s2it(heap_create_name("__class_name__", 14))};
             js_property_set(obj, cn_key, class_name);
@@ -2378,12 +2390,10 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         Item ne_ctor_key = (Item){.item = s2it(heap_create_name("__ne_constructor", 16))};
         js_property_set(obj, ne_ctor_key, (Item){.item = b2it(true)});
         // Set __proto__ so instance methods are accessible via prototype chain
-        Item instance_proto = js_map_get_fast(callee.map, "__instance_proto__", 18, &own);
         if (instance_proto.item != ItemNull.item && get_type_id(instance_proto) == LMD_TYPE_MAP) {
             js_set_prototype(obj, instance_proto);
         }
         // Call the constructor (__ctor__ property on the class object)
-        Item ctor = js_map_get_fast(callee.map, "__ctor__", 8, &own);
         if (ctor.item != ItemNull.item && get_type_id(ctor) == LMD_TYPE_FUNC) {
             // Set pending new.target for the constructor call
             js_pending_new_target = callee;
@@ -2398,7 +2408,15 @@ extern "C" Item js_new_from_class_object(Item callee, Item* args, int argc) {
         }
         return obj;
     }
-    return js_new_object();
+    // Not a function or class object — throw TypeError
+    {
+        js_pending_new_target = ItemNull;
+        js_has_pending_new_target = false;
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+        Item msg = (Item){.item = s2it(heap_create_name("is not a constructor", 20))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
 }
 
 // A5: Create a new object with pre-built shape for constructor optimization.
@@ -3184,13 +3202,16 @@ extern "C" Item js_property_get(Item object, Item key) {
                             Item nk = (Item){.item = s2it(heap_create_name("name", 4))};
                             Item nv = (Item){.item = s2it(heap_create_name(nm, nl))};
                             js_property_set(fn->prototype, nk, nv);
+                            js_mark_non_enumerable(fn->prototype, nk);
                             Item mk = (Item){.item = s2it(heap_create_name("message", 7))};
                             Item mv = (Item){.item = s2it(heap_create_name("", 0))};
                             js_property_set(fn->prototype, mk, mv);
+                            js_mark_non_enumerable(fn->prototype, mk);
                             // Set Error.prototype.toString to generic Error toString builtin
                             Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
                             Item ts_fn = js_get_or_create_builtin(JS_BUILTIN_ERR_TO_STRING, "toString", 0);
                             js_property_set(fn->prototype, ts_key, ts_fn);
+                            js_mark_non_enumerable(fn->prototype, ts_key);
                             // For error subclasses, set __proto__ to Error.prototype
                             if (!(nl == 5 && strncmp(nm, "Error", 5) == 0)) {
                                 Item err_name = (Item){.item = s2it(heap_create_name("Error", 5))};
@@ -4394,7 +4415,7 @@ static Item js_lookup_constructor_static(const char* ctor_name, int ctor_len,
             {"values", 6, JS_BUILTIN_OBJECT_VALUES, 1},
             {"entries", 7, JS_BUILTIN_OBJECT_ENTRIES, 1},
             {"fromEntries", 11, JS_BUILTIN_OBJECT_FROM_ENTRIES, 1},
-            {"create", 6, JS_BUILTIN_OBJECT_CREATE, 1},
+            {"create", 6, JS_BUILTIN_OBJECT_CREATE, 2},
             {"assign", 6, JS_BUILTIN_OBJECT_ASSIGN, 2},
             {"freeze", 6, JS_BUILTIN_OBJECT_FREEZE, 1},
             {"isFrozen", 8, JS_BUILTIN_OBJECT_IS_FROZEN, 1},
@@ -4655,6 +4676,8 @@ extern "C" Item js_lookup_builtin_method(TypeId type, const char* name, int len)
             {"concat", 6, JS_BUILTIN_STR_CONCAT, 1},
             {"at", 2, JS_BUILTIN_STR_AT, 1},
             {"localeCompare", 13, JS_BUILTIN_STR_LOCALE_COMPARE, 1},
+            {"trimLeft", 8, JS_BUILTIN_STR_TRIM_START, 0},
+            {"trimRight", 9, JS_BUILTIN_STR_TRIM_END, 0},
             {NULL, 0, 0, 0}
         };
         for (int i = 0; str_methods[i].name; i++) {
@@ -4699,7 +4722,9 @@ extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
         "indexOf", "lastIndexOf", "includes", "map", "filter", "reduce",
         "forEach", "find", "findIndex", "some", "every", "sort", "reverse",
         "concat", "flat", "flatMap", "fill", "copyWithin", "toString",
-        "keys", "values", "entries", "at", "reduceRight", "constructor", NULL
+        "keys", "values", "entries", "at", "reduceRight",
+        "findLast", "findLastIndex", "toSorted", "toReversed", "toSpliced",
+        "with", "toLocaleString", "constructor", NULL
     };
     // String.prototype methods
     static const char* str_methods[] = {
@@ -4709,7 +4734,7 @@ extern "C" void js_append_builtin_method_names(TypeId type, Item result) {
         "match", "matchAll", "search", "startsWith", "endsWith",
         "repeat", "padStart", "padEnd", "toString", "valueOf",
         "codePointAt", "normalize", "concat", "at", "localeCompare",
-        "constructor", NULL
+        "trimLeft", "trimRight", "constructor", NULL
     };
     // Number.prototype methods
     static const char* num_methods[] = {
@@ -5481,7 +5506,10 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         if (get_type_id(this_val) == LMD_TYPE_FUNC) {
             JsFunction* fn = (JsFunction*)this_val.function;
             StrBuf* sb = strbuf_new();
-            strbuf_append_str_n(sb, "function ", 9);
+            if (fn->flags & JS_FUNC_FLAG_GENERATOR)
+                strbuf_append_str_n(sb, "function* ", 10);
+            else
+                strbuf_append_str_n(sb, "function ", 9);
             if (fn->name && fn->name->len > 0) {
                 // NativeFunction syntax allows only a single IdentifierName (no spaces).
                 // Bound functions have names like "bound f" — use only first word.
@@ -7299,6 +7327,8 @@ extern "C" Item js_set_collection_new(void) {
     return obj;
 }
 
+extern "C" Item js_iterable_to_array(Item iterable);
+
 extern "C" Item js_set_collection_new_from(Item iterable) {
     Item set = js_collection_create(JS_COLLECTION_SET);
     js_collection_link_prototype(set, "Set", 3);
@@ -7314,6 +7344,28 @@ extern "C" Item js_set_collection_new_from(Item iterable) {
         if (cd) {
             for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                 js_collection_method(set, 0, node->key, ItemNull);
+            }
+        }
+    } else if (tid == LMD_TYPE_STRING) {
+        // Iterate string characters
+        String* s = it2s(iterable);
+        if (s && s->len > 0) {
+            size_t pos = 0;
+            while (pos < s->len) {
+                size_t clen = str_utf8_char_len((unsigned char)s->chars[pos]);
+                if (pos + clen > s->len) break;
+                Item ch = (Item){.item = s2it(heap_create_name(s->chars + pos, clen))};
+                js_collection_method(set, 0, ch, ItemNull);
+                pos += clen;
+            }
+        }
+    } else {
+        // Try iterator protocol for other iterables
+        Item arr = js_iterable_to_array(iterable);
+        if (get_type_id(arr) == LMD_TYPE_ARRAY) {
+            Array* a = arr.array;
+            for (int i = 0; i < a->length; i++) {
+                js_collection_method(set, 0, a->items[i], ItemNull);
             }
         }
     }
@@ -7338,6 +7390,18 @@ extern "C" Item js_map_collection_new_from(Item iterable) {
         if (cd && cd->type == JS_COLLECTION_MAP) {
             for (JsCollectionOrderNode* node = cd->order_head; node; node = node->next) {
                 js_collection_method(map, 0, node->key, node->value);
+            }
+        }
+    } else {
+        // Try iterator protocol for other iterables
+        Item arr = js_iterable_to_array(iterable);
+        if (get_type_id(arr) == LMD_TYPE_ARRAY) {
+            Array* a = arr.array;
+            for (int i = 0; i < a->length; i++) {
+                Item entry = a->items[i];
+                if (get_type_id(entry) == LMD_TYPE_ARRAY && entry.array->length >= 2) {
+                    js_collection_method(map, 0, entry.array->items[0], entry.array->items[1]);
+                }
             }
         }
     }
@@ -8424,6 +8488,12 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         String* sub = it2s(search_val);
         if (!s || !sub) return (Item){.item = i2it(-1)};
         if (start_pos < 0) start_pos = 0;
+        // ES spec: empty search string returns min(start_pos, string_length)
+        if (sub->len == 0) {
+            size_t str_char_len = s->is_ascii ? s->len : str_utf8_count(s->chars, s->len);
+            int64_t result = (start_pos <= (int)str_char_len) ? start_pos : (int64_t)str_char_len;
+            return (Item){.item = i2it(result)};
+        }
         size_t byte_start;
         if (s->is_ascii) {
             byte_start = (size_t)start_pos;
@@ -8431,7 +8501,6 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
             byte_start = str_utf8_char_to_byte(s->chars, s->len, (size_t)start_pos);
         }
         if (byte_start >= s->len) return (Item){.item = i2it(-1)};
-        if (sub->len == 0) return (Item){.item = i2it(start_pos)};
         if (s->len - byte_start < sub->len) return (Item){.item = i2it(-1)};
         for (size_t i = byte_start; i <= s->len - sub->len; i++) {
             if (memcmp(s->chars + i, sub->chars, sub->len) == 0) {
@@ -8473,6 +8542,15 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = i2it(-1)};
     }
     if (method->len == 8 && strncmp(method->chars, "includes", 8) == 0) {
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            bool cn_found = false;
+            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cs = it2s(cn);
+                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
+                    return js_throw_type_error("First argument to String.prototype.includes must not be a regular expression");
+            }
+        }
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));
@@ -8502,6 +8580,15 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(false)};
     }
     if (method->len == 10 && strncmp(method->chars, "startsWith", 10) == 0) {
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            bool cn_found = false;
+            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cs = it2s(cn);
+                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
+                    return js_throw_type_error("First argument to String.prototype.startsWith must not be a regular expression");
+            }
+        }
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));
@@ -8526,6 +8613,15 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return (Item){.item = b2it(memcmp(s->chars + byte_start, search_str->chars, search_str->len) == 0)};
     }
     if (method->len == 8 && strncmp(method->chars, "endsWith", 8) == 0) {
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+            bool cn_found = false;
+            Item cn = js_map_get_fast_ext(args[0].map, "__class_name__", 14, &cn_found);
+            if (cn_found && get_type_id(cn) == LMD_TYPE_STRING) {
+                String* cs = it2s(cn);
+                if (cs && cs->len == 6 && strncmp(cs->chars, "RegExp", 6) == 0)
+                    return js_throw_type_error("First argument to String.prototype.endsWith must not be a regular expression");
+            }
+        }
         if (argc < 1) return (Item){.item = b2it(false)};
         String* s = it2s(str);
         String* search_str = it2s(js_to_string(args[0]));
@@ -8571,7 +8667,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (start >= end) return (Item){.item = s2it(heap_create_name("", 0))};
         return (Item){.item = s2it(heap_create_name(s->chars + start, end - start))};
     }
-    if (method->len == 9 && strncmp(method->chars, "trimStart", 9) == 0) {
+    if ((method->len == 9 && strncmp(method->chars, "trimStart", 9) == 0) ||
+        (method->len == 8 && strncmp(method->chars, "trimLeft", 8) == 0)) {
         String* s = it2s(str);
         if (!s || s->len == 0) return str;
         size_t start = 0;
@@ -8581,7 +8678,8 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         if (start >= s->len) return (Item){.item = s2it(heap_create_name("", 0))};
         return (Item){.item = s2it(heap_create_name(s->chars + start, s->len - start))};
     }
-    if (method->len == 7 && strncmp(method->chars, "trimEnd", 7) == 0) {
+    if ((method->len == 7 && strncmp(method->chars, "trimEnd", 7) == 0) ||
+        (method->len == 9 && strncmp(method->chars, "trimRight", 9) == 0)) {
         String* s = it2s(str);
         if (!s || s->len == 0) return str;
         size_t end = s->len;
@@ -8757,20 +8855,18 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         return js_string_replace_impl(str, args, argc, false);
     }
     if (method->len == 6 && strncmp(method->chars, "charAt", 6) == 0) {
-        if (argc < 1) return (Item){.item = s2it(heap_create_name(""))};
         String* s = it2s(str);
         if (!s || s->len == 0) return (Item){.item = s2it(heap_create_name(""))};
-        int64_t idx = (int64_t)js_get_number(args[0]);
+        int64_t idx = (argc >= 1) ? (int64_t)js_get_number(args[0]) : 0;
         if (idx < 0) return (Item){.item = s2it(heap_create_name(""))};
         // charAt uses UTF-16 unit index; extract the code unit as a 1-char string
         // (for BMP chars this is the char itself; for non-BMP this returns a surrogate half-char)
         return js_str_substring_utf16(str, idx, idx + 1);
     }
     if (method->len == 10 && strncmp(method->chars, "charCodeAt", 10) == 0) {
-        if (argc < 1) return js_make_number(NAN);
         String* s = it2s(str);
         if (!s || s->len == 0) return js_make_number(NAN);
-        int target_idx = (int)js_get_number(args[0]);
+        int target_idx = (argc >= 1) ? (int)js_get_number(args[0]) : 0;
         if (target_idx < 0) return js_make_number(NAN);
         // walk UTF-8 bytes, counting UTF-16 code units
         int utf16_idx = 0;
@@ -8913,10 +9009,9 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
     }
     // at(index) — supports negative indexing
     if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
-        if (argc < 1) return make_js_undefined();
         String* s = it2s(str);
         if (!s || s->len == 0) return make_js_undefined();
-        int idx = (int)js_get_number(args[0]);
+        int idx = (argc < 1) ? 0 : (int)js_get_number(args[0]);
         if (idx < 0) idx = (int)s->len + idx;
         if (idx < 0 || idx >= (int)s->len) return make_js_undefined();
         String* ch = heap_strcpy(&s->chars[idx], 1);
@@ -8999,53 +9094,58 @@ extern "C" Item js_string_method(Item str, Item method_name, Item* args, int arg
         // If arg is a string, treat as literal pattern
         return (Item){.item = i2it(fn_index_of(str, args[0]))};
     }
-    // matchAll(regex) — returns array of all match results
+    // matchAll(regex) — returns an iterator of all match results
     if (method->len == 8 && strncmp(method->chars, "matchAll", 8) == 0) {
-        if (argc < 1) return js_array_new(0);
-        if (get_type_id(args[0]) == LMD_TYPE_MAP) {
+        Item matches_arr = js_array_new(0);
+        if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
             JsRegexData* rd = js_get_regex_data(args[0]);
             if (rd) {
                 String* s = it2s(str);
-                if (!s) return js_array_new(0);
-                Item result = js_array_new(0);
-                int offset = 0;
-                int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
-                if (num_groups > 16) num_groups = 16;
-                re2::StringPiece matches[16];
-                while (offset < (int)s->len) {
-                    bool matched = rd->re2->Match(
-                        re2::StringPiece(s->chars, s->len), offset, (int)s->len,
-                        re2::RE2::UNANCHORED, matches, num_groups);
-                    if (!matched) break;
-                    // Build match object with .index property (like regex exec)
-                    Item match_obj = js_new_object();
-                    for (int i = 0; i < num_groups; i++) {
-                        if (matches[i].data()) {
-                            Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
-                            char buf[24];
-                            snprintf(buf, sizeof(buf), "%d", i);
-                            Item key = (Item){.item = s2it(heap_create_name(buf))};
-                            js_property_set(match_obj, key, ms);
+                if (s) {
+                    int offset = 0;
+                    int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+                    if (num_groups > 16) num_groups = 16;
+                    re2::StringPiece matches[16];
+                    while (offset < (int)s->len) {
+                        bool matched = rd->re2->Match(
+                            re2::StringPiece(s->chars, s->len), offset, (int)s->len,
+                            re2::RE2::UNANCHORED, matches, num_groups);
+                        if (!matched) break;
+                        Item match_obj = js_new_object();
+                        for (int i = 0; i < num_groups; i++) {
+                            if (matches[i].data()) {
+                                Item ms = (Item){.item = s2it(heap_strcpy((char*)matches[i].data(), (int)matches[i].size()))};
+                                char buf[24];
+                                snprintf(buf, sizeof(buf), "%d", i);
+                                Item key = (Item){.item = s2it(heap_create_name(buf))};
+                                js_property_set(match_obj, key, ms);
+                            }
                         }
+                        int match_index = (int)(matches[0].data() - s->chars);
+                        Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
+                        js_property_set(match_obj, index_key, (Item){.item = i2it(match_index)});
+                        Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
+                        js_property_set(match_obj, input_key, str);
+                        Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
+                        js_property_set(match_obj, groups_key, (Item){.item = ITEM_JS_UNDEFINED});
+                        Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                        js_property_set(match_obj, length_key, (Item){.item = i2it(num_groups)});
+                        js_array_push_item_direct(matches_arr.array, match_obj);
+                        int advance = match_index + (int)matches[0].size();
+                        if (advance <= offset) advance = offset + 1;
+                        offset = advance;
                     }
-                    int match_index = (int)(matches[0].data() - s->chars);
-                    Item index_key = (Item){.item = s2it(heap_create_name("index", 5))};
-                    js_property_set(match_obj, index_key, (Item){.item = i2it(match_index)});
-                    Item input_key = (Item){.item = s2it(heap_create_name("input", 5))};
-                    js_property_set(match_obj, input_key, str);
-                    Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
-                    js_property_set(match_obj, groups_key, (Item){.item = ITEM_JS_UNDEFINED});
-                    Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                    js_property_set(match_obj, length_key, (Item){.item = i2it(num_groups)});
-                    js_array_push_item_direct(result.array, match_obj);
-                    int advance = match_index + (int)matches[0].size();
-                    if (advance <= offset) advance = offset + 1;
-                    offset = advance;
                 }
-                return result;
             }
         }
-        return js_array_new(0);
+        // Return an array iterator (kind=1: values) over the matches array
+        Item iter = js_new_object();
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__array__", 9))}, matches_arr);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__index__", 9))}, (Item){.item = i2it(0)});
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__kind__", 8))}, (Item){.item = i2it(1)});
+        Item next_fn = js_get_or_create_builtin(JS_BUILTIN_ARRAY_ITER_NEXT, "next", 0);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("next", 4))}, next_fn);
+        return iter;
     }
     if (method->len == 7 && strncmp(method->chars, "valueOf", 7) == 0) {
         return str;
@@ -9079,6 +9179,14 @@ static Item js_throw_not_callable(const char* method_name) {
 // v20: Helper: throw RangeError
 extern "C" Item js_throw_range_error(const char* message) {
     Item type_name = (Item){.item = s2it(heap_create_name("RangeError"))};
+    Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
+    Item error = js_new_error_with_name(type_name, msg_item);
+    js_throw_value(error);
+    return ItemNull;
+}
+
+extern "C" Item js_throw_type_error(const char* message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("TypeError"))};
     Item msg_item = (Item){.item = s2it(heap_create_name(message, strlen(message)))};
     Item error = js_new_error_with_name(type_name, msg_item);
     js_throw_value(error);
@@ -9271,8 +9379,12 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             if (is_concat_spreadable(args[i])) {
                 if (get_type_id(args[i]) == LMD_TYPE_ARRAY)
                     total += args[i].array->length;
-                else
-                    total += 1; // spreadable non-array objects need iteration
+                else if (get_type_id(args[i]) == LMD_TYPE_MAP) {
+                    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    Item len_val = js_property_get(args[i], len_key);
+                    total += (int)it2i(len_val);
+                } else
+                    total += 1;
             } else {
                 total++;
             }
@@ -9284,10 +9396,27 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
             dst->items[pos++] = src->items[i];
         }
         for (int i = 0; i < argc; i++) {
-            if (is_concat_spreadable(args[i]) && get_type_id(args[i]) == LMD_TYPE_ARRAY) {
-                Array* other = args[i].array;
-                for (int j = 0; j < other->length; j++) {
-                    dst->items[pos++] = other->items[j];
+            if (is_concat_spreadable(args[i])) {
+                if (get_type_id(args[i]) == LMD_TYPE_ARRAY) {
+                    Array* other = args[i].array;
+                    for (int j = 0; j < other->length; j++) {
+                        dst->items[pos++] = other->items[j];
+                    }
+                } else if (get_type_id(args[i]) == LMD_TYPE_MAP) {
+                    // Spreadable object: iterate by numeric indices using 'length' property
+                    Item len_key = (Item){.item = s2it(heap_create_name("length", 6))};
+                    Item len_val = js_property_get(args[i], len_key);
+                    int64_t len = it2i(len_val);
+                    for (int64_t j = 0; j < len; j++) {
+                        char buf[24];
+                        snprintf(buf, sizeof(buf), "%lld", (long long)j);
+                        Item idx_key = (Item){.item = s2it(heap_create_name(buf))};
+                        Item elem = js_property_get(args[i], idx_key);
+                        if (pos < total) dst->items[pos++] = elem;
+                        else { js_array_push_item_direct(dst, elem); pos++; }
+                    }
+                } else {
+                    dst->items[pos++] = args[i];
                 }
             } else {
                 dst->items[pos++] = args[i];
@@ -9897,9 +10026,9 @@ extern "C" Item js_array_method(Item arr, Item method_name, Item* args, int argc
     }
     // at(index) — supports negative indexing
     if (method->len == 2 && strncmp(method->chars, "at", 2) == 0) {
-        if (argc < 1 || arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
+        if (arr_type != LMD_TYPE_ARRAY) return make_js_undefined();
         Array* a = arr.array;
-        int idx = (int)js_get_number(args[0]);
+        int idx = (argc < 1) ? 0 : (int)js_get_number(args[0]);
         if (idx < 0) idx = a->length + idx;
         if (idx < 0 || idx >= a->length) return make_js_undefined();
         Item val = a->items[idx];
@@ -11169,12 +11298,38 @@ static JsPromise* js_alloc_promise() {
     return p;
 }
 
+// Wrapper functions for Promise.prototype.then/catch/finally
+// First arg is the bound promise (via js_bind_function), remaining are user args
+static Item js_promise_then_bound(Item promise, Item on_fulfilled, Item on_rejected) {
+    return js_promise_then(promise, on_fulfilled, on_rejected);
+}
+static Item js_promise_catch_bound(Item promise, Item on_rejected) {
+    return js_promise_catch(promise, on_rejected);
+}
+static Item js_promise_finally_bound(Item promise, Item on_finally) {
+    return js_promise_finally(promise, on_finally);
+}
+
 static Item js_promise_to_item(JsPromise* p) {
     // Create a map object that holds a reference to the promise by index
     int idx = (int)(p - js_promises);
     Item obj = js_new_object();
     String* key = heap_create_name("__promise_idx", 13);
     js_property_set(obj, (Item){.item = s2it(key)}, (Item){.item = i2it(idx)});
+    // Set __class_name__ for instanceof Promise support
+    String* cn_key = heap_create_name("__class_name__", 14);
+    js_property_set(obj, (Item){.item = s2it(cn_key)}, (Item){.item = s2it(heap_create_name("Promise", 7))});
+    // Add then, catch, finally as bound method properties
+    // bind prepends obj as first arg so wrapper receives (promise, ...userArgs)
+    Item then_fn = js_new_function((void*)js_promise_then_bound, 3);
+    Item then_bound = js_bind_function(then_fn, ItemNull, &obj, 1);
+    js_property_set(obj, (Item){.item = s2it(heap_create_name("then", 4))}, then_bound);
+    Item catch_fn = js_new_function((void*)js_promise_catch_bound, 2);
+    Item catch_bound = js_bind_function(catch_fn, ItemNull, &obj, 1);
+    js_property_set(obj, (Item){.item = s2it(heap_create_name("catch", 5))}, catch_bound);
+    Item finally_fn = js_new_function((void*)js_promise_finally_bound, 2);
+    Item finally_bound = js_bind_function(finally_fn, ItemNull, &obj, 1);
+    js_property_set(obj, (Item){.item = s2it(heap_create_name("finally", 7))}, finally_bound);
     return obj;
 }
 

@@ -10279,6 +10279,12 @@ static MIR_reg_t jm_transpile_member(JsMirTranspiler* mt, JsMemberNode* mem) {
         // These are well-known symbols — always return the same pre-defined symbol item.
         // Unlike js_symbol_create(), this DOES NOT create a new unique symbol each time.
         if (obj->name && obj->name->len == 6 && strncmp(obj->name->chars, "Symbol", 6) == 0) {
+            const char* pn = prop->name->chars;
+            int pl = (int)prop->name->len;
+            // Symbol constructor properties — not well-known symbols
+            if (pl == 6 && strncmp(pn, "length", 6) == 0) return jm_box_int_const(mt, 0);
+            if (pl == 4 && strncmp(pn, "name", 4) == 0)
+                return jm_box_string_literal(mt, "Symbol", 6);
             MIR_reg_t key = jm_box_string_literal(mt, prop->name->chars, prop->name->len);
             return jm_call_1(mt, "js_symbol_well_known", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
@@ -13195,8 +13201,15 @@ static MIR_reg_t jm_transpile_new_expr(JsMirTranspiler* mt, JsCallNode* call) {
     }
 
     if (!ctor_name) {
-        log_error("js-mir: new expression with non-identifier constructor");
-        return jm_emit_null(mt);
+        // Non-identifier callee (e.g., new (expr)(), new obj.method(), etc.)
+        // Use dynamic dispatch which handles type checking and TypeError for non-constructors
+        MIR_reg_t callee = jm_transpile_box_item(mt, call->callee);
+        int arg_count = jm_count_args(call->arguments);
+        MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
+        return jm_call_3(mt, "js_new_from_class_object", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, callee),
+            MIR_T_I64, args_ptr ? MIR_new_reg_op(mt->ctx, args_ptr) : MIR_new_int_op(mt->ctx, 0),
+            MIR_T_I64, MIR_new_int_op(mt->ctx, arg_count));
     }
 
     // Count arguments (but DON'T evaluate yet — evaluation happens in the specific path)
@@ -15045,16 +15058,31 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         jm_emit_label(mt, no_ret_label);
 
         // If exception is still pending (try/finally without catch, or re-throw),
-        // propagate by returning ItemNull
+        // propagate to outer try/catch or return from function
         if (!has_catch || has_finally) {
             MIR_reg_t still_exc = jm_call_0(mt, "js_check_exception", MIR_T_I64);
             MIR_label_t no_exc_label = jm_new_label(mt);
             jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF,
                 MIR_new_label_op(mt->ctx, no_exc_label),
                 MIR_new_reg_op(mt->ctx, still_exc)));
-            MIR_reg_t null_ret = jm_emit_null(mt);
-            jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
-                MIR_new_reg_op(mt->ctx, null_ret)));
+            // If inside an outer try block, propagate to its handler
+            if (mt->try_ctx_depth > 0) {
+                JsTryContext* outer = &mt->try_ctx_stack[mt->try_ctx_depth - 1];
+                MIR_label_t target = outer->has_catch ? outer->catch_label
+                                   : (outer->has_finally ? outer->finally_label : outer->end_label);
+                if (target) {
+                    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, target)));
+                } else {
+                    MIR_reg_t null_ret = jm_emit_null(mt);
+                    jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                        MIR_new_reg_op(mt->ctx, null_ret)));
+                }
+            } else {
+                MIR_reg_t null_ret = jm_emit_null(mt);
+                jm_emit(mt, MIR_new_ret_insn(mt->ctx, 1,
+                    MIR_new_reg_op(mt->ctx, null_ret)));
+            }
             jm_emit_label(mt, no_exc_label);
         }
         break;
