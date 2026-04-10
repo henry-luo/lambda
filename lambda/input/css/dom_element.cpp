@@ -173,7 +173,14 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->first_child = NULL;
     element->last_child = NULL;
     element->doc = doc;
-    element->native_element = native_element;
+
+    // Copy Element data into the embedded field and redirect native_element
+    if (native_element) {
+        element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+        element->native_element = &element->elmt;
+    } else {
+        element->native_element = NULL;
+    }
 
     // Explicitly initialize display to {0, 0} to ensure no garbage values
     // This is critical for table elements where display resolution depends on this field
