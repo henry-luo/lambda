@@ -108,6 +108,104 @@ static const char* get_parent_tr_valign(DomNode* elmt) {
     return nullptr;
 }
 
+// HTML5 §14.3.4 / Unicode UAX #9: Detect first strong directional character.
+// Returns 1 for RTL (R/AL), -1 for LTR (L), 0 for neutral/not found.
+static int bidi_strong_class(uint32_t cp) {
+    // L (Left-to-Right): Latin, CJK, LRM
+    if (cp == 0x200E) return -1; // LRM
+    // R (Right-to-Left): Hebrew, RLM
+    if (cp == 0x200F) return 1;  // RLM
+    // AL (Arabic Letter): ALM
+    if (cp == 0x061C) return 1;  // ALM
+    // Hebrew: U+0590-U+05FF (R)
+    if (cp >= 0x0590 && cp <= 0x05FF) return 1;
+    // Arabic: U+0600-U+07BF (AL) — Arabic, Arabic Supplement, Arabic Extended-A
+    if (cp >= 0x0600 && cp <= 0x07BF) return 1;
+    // Arabic Extended-B, Arabic Presentation Forms
+    if (cp >= 0x0860 && cp <= 0x089F) return 1;
+    if (cp >= 0xFB50 && cp <= 0xFDFF) return 1;  // Arabic Presentation Forms-A
+    if (cp >= 0xFE70 && cp <= 0xFEFF) return 1;  // Arabic Presentation Forms-B
+    // NKo: U+07C0-U+07FF (R)
+    if (cp >= 0x07C0 && cp <= 0x07FF) return 1;
+    // Syriac: U+0700-U+074F (AL)
+    if (cp >= 0x0700 && cp <= 0x074F) return 1;
+    // Thaana: U+0780-U+07BF (AL) — already covered above
+    // Samaritan, Mandaic
+    if (cp >= 0x0800 && cp <= 0x085F) return 1;
+    // Common strong LTR ranges (L class)
+    // Basic Latin A-Z, a-z
+    if ((cp >= 0x0041 && cp <= 0x005A) || (cp >= 0x0061 && cp <= 0x007A)) return -1;
+    // Latin Extended
+    if (cp >= 0x00C0 && cp <= 0x02AF) return -1;
+    // Greek
+    if (cp >= 0x0370 && cp <= 0x03FF) return -1;
+    // Cyrillic
+    if (cp >= 0x0400 && cp <= 0x052F) return -1;
+    // CJK Unified Ideographs
+    if (cp >= 0x4E00 && cp <= 0x9FFF) return -1;
+    // Hangul
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return -1;
+    // Hiragana, Katakana
+    if (cp >= 0x3040 && cp <= 0x30FF) return -1;
+    // Thai, Lao, Tibetan, Myanmar, Georgian, Ethiopic, Cherokee, etc.
+    if (cp >= 0x0E01 && cp <= 0x0E5B) return -1;  // Thai
+    if (cp >= 0x0E81 && cp <= 0x0EDF) return -1;  // Lao
+    if (cp >= 0x10A0 && cp <= 0x10FF) return -1;  // Georgian
+    if (cp >= 0x1100 && cp <= 0x11FF) return -1;  // Hangul Jamo
+    // Devanagari and other Indic scripts
+    if (cp >= 0x0900 && cp <= 0x0DFF) return -1;
+    // Latin Extended Additional, General Punctuation etc. are neutral
+    return 0;
+}
+
+// HTML5 §14.3.4: Walk the element's descendants to find the first strong character.
+// Skip <script>, <style>, and elements with their own dir attribute.
+static int find_first_strong_in_node(DomNode* node) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text->text || text->length == 0) return 0;
+        const char* p = text->text;
+        const char* end = p + text->length;
+        while (p < end) {
+            uint32_t cp;
+            int bytes = str_utf8_decode(p, (size_t)(end - p), &cp);
+            if (bytes <= 0) { p++; continue; }
+            int cls = bidi_strong_class(cp);
+            if (cls != 0) return cls;
+            p += bytes;
+        }
+        return 0;
+    }
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        // Skip <script>, <style> — they don't contribute to dir="auto" detection
+        uintptr_t tag = elem->tag_id;
+        if (tag == HTM_TAG_SCRIPT || tag == HTM_TAG_STYLE) return 0;
+        // Skip elements that have their own dir attribute — per HTML spec,
+        // they establish their own directionality and don't contribute to parent's auto
+        const char* child_dir = elem->get_attribute("dir");
+        if (child_dir) return 0;
+        // Recurse into children
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            int result = find_first_strong_in_node(child);
+            if (result != 0) return result;
+        }
+    }
+    return 0;
+}
+
+// Resolve dir="auto" by finding the first strong directional character.
+// Returns CSS_VALUE_RTL or CSS_VALUE_LTR.
+static CssEnum resolve_dir_auto(DomElement* elmt) {
+    for (DomNode* child = elmt->first_child; child; child = child->next_sibling) {
+        int result = find_first_strong_in_node(child);
+        if (result > 0) return CSS_VALUE_RTL;
+        if (result < 0) return CSS_VALUE_LTR;
+    }
+    return CSS_VALUE_LTR;  // default to LTR if no strong character found
+}
+
 void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     ViewSpan* span = (ViewSpan*)elmt;  ViewBlock* block = (ViewBlock*)elmt;
     float em_size = 0;  uintptr_t elmt_name = elmt->tag();
@@ -1432,6 +1530,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
             block->blk->direction = CSS_VALUE_LTR;
             log_debug("[HTML] dir attribute: ltr");
+        } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
+            // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
+            CssEnum resolved = resolve_dir_auto(static_cast<DomElement*>(elmt));
+            block->blk->direction = resolved;
+            log_debug("[HTML] dir attribute: auto -> %s",
+                      resolved == CSS_VALUE_RTL ? "rtl" : "ltr");
         }
     }
 }

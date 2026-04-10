@@ -9,6 +9,7 @@
 #include "css_style.hpp"
 #include "css_style_node.hpp"
 #include "dom_node.hpp"  // Provides DomNodeType enum and utility functions
+#include "../../lambda.hpp"  // Full Element definition (needed for embedded Element field)
 
 /**
  * DOM Element Extension for CSS Styling
@@ -171,8 +172,19 @@ struct CssCustomProp {
  * - Parent/child relationships for inheritance
  */
 struct DomElement : DomNode {
+    // === Embedded Lambda Element (at known offset from DomNode base) ===
+    // In UI mode, this IS the Lambda Element. In the current phase, data is copied
+    // from the original Element during dom_element_init(). MarkEditor operates on
+    // native_element which points here, so mutations happen in-place.
+    Element elmt;
+
+    // Convenience pointer into the embedded Element above.
+    // For backed elements: native_element == &elmt (set by dom_element_init)
+    // For anonymous/pseudo elements: native_element == nullptr
+    // TODO(Phase 4): Remove this field; use dom_element_to_element() instead.
+    Element* native_element;
+
     // Basic element information
-    Element* native_element;     // Pointer to native Lambda Element
     const char* tag_name;        // Element tag name (cached string)
 
     // Tree structure (only elements can have children)
@@ -265,7 +277,7 @@ struct DomElement : DomNode {
     bool measuring_intrinsic_width;  // re-entrancy guard to break measurement cycles
 
     // Constructor
-    DomElement() : DomNode(DOM_NODE_ELEMENT), first_child(nullptr), last_child(nullptr), native_element(nullptr),
+    DomElement() : DomNode(DOM_NODE_ELEMENT), elmt{}, first_child(nullptr), last_child(nullptr), native_element(nullptr),
         tag_name(nullptr), tag_id(0), id(nullptr),
         class_names(nullptr), class_count(0), specified_style(nullptr),
         before_styles(nullptr), after_styles(nullptr), first_letter_styles(nullptr),
@@ -280,6 +292,37 @@ struct DomElement : DomNode {
         cached_min_content_width(0), cached_max_content_width(0),
         has_cached_intrinsic_widths(false), measuring_intrinsic_width(false) {}
 };
+
+// ============================================================================
+// DomElement ↔ Element conversion (Phase 1: Unified DOM Tree)
+// ============================================================================
+
+// Suppress -Winvalid-offsetof for non-standard-layout types (DomNode has protected ctor).
+// __builtin_offsetof works correctly on all major compilers regardless of layout category.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+
+// DomElement* → Element*: returns pointer to the embedded Element within DomElement
+inline Element* dom_element_to_element(DomElement* de) { return &de->elmt; }
+inline const Element* dom_element_to_element(const DomElement* de) { return &de->elmt; }
+
+// Element* → DomElement*: reverse conversion (caller must ensure Element is embedded in a DomElement)
+inline DomElement* element_to_dom_element(Element* e) {
+    return (DomElement*)((char*)e - offsetof(DomElement, elmt));
+}
+inline const DomElement* element_to_dom_element(const Element* e) {
+    return (const DomElement*)((const char*)e - offsetof(DomElement, elmt));
+}
+
+// DomElement* ↔ DomNode*: same address (DomNode is at offset 0 via inheritance)
+inline DomNode* dom_element_to_node(DomElement* de) { return static_cast<DomNode*>(de); }
+inline DomElement* node_to_dom_element(DomNode* dn) { return static_cast<DomElement*>(dn); }
+
+// Ensure embedded Element is 8-byte aligned (required for pointer fields in Element)
+static_assert(offsetof(DomElement, elmt) % 8 == 0,
+              "Embedded Element must be 8-byte aligned within DomElement");
+
+#pragma GCC diagnostic pop
 
 // Pseudo-class state flags
 #define PSEUDO_STATE_HOVER          (1 << 0)

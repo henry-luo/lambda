@@ -1,4 +1,6 @@
 #include "mark_editor.hpp"
+#include "input/css/dom_node.hpp"
+#include "input/css/dom_element.hpp"
 #include "../lib/log.h"
 #include "../lib/arena.h"
 #include <string.h>
@@ -26,6 +28,7 @@ MarkEditor::MarkEditor(Input* input, EditMode mode)
     , shape_pool_(input->shape_pool)
     , type_list_(input->type_list)
     , mode_(mode)
+    , ui_mode_(input->ui_mode)
     , current_version_(nullptr)
     , version_head_(nullptr)
     , next_version_num_(0)
@@ -50,6 +53,60 @@ MarkEditor::~MarkEditor() {
     }
 
     log_debug("MarkEditor destroyed");
+}
+
+//==============================================================================
+// DOM Linked-List Sync (ui_mode only)
+//==============================================================================
+
+/**
+ * Rebuild the DOM first_child/last_child/next_sibling/prev_sibling linked list
+ * from the Element's items[] array. Called after inline child mutations in ui_mode.
+ *
+ * In ui_mode, each Element in items[] is embedded inside a DomElement (via fat pointer),
+ * and each String is embedded inside a DomText. We recover the DomNode* from each Item
+ * and link them into the sibling chain.
+ */
+void MarkEditor::dom_relink_children(Element* parent_elem) {
+    DomElement* parent = element_to_dom_element(parent_elem);
+    parent->first_child = nullptr;
+    parent->last_child = nullptr;
+
+    DomNode* prev = nullptr;
+
+    for (int64_t i = 0; i < parent_elem->length; i++) {
+        Item child = parent_elem->items[i];
+        TypeId tid = get_type_id(child);
+        DomNode* node = nullptr;
+
+        if (tid == LMD_TYPE_ELEMENT) {
+            DomElement* ce = element_to_dom_element(child.element);
+            node = static_cast<DomNode*>(ce);
+        } else if (tid == LMD_TYPE_STRING) {
+            String* s = child.get_string();
+            if (s) {
+                DomText* dt = string_to_dom_text(s);
+                // safety: verify this is a fat DomText-String allocation
+                if (dt->node_type == DOM_NODE_TEXT && dt->native_string == s) {
+                    node = static_cast<DomNode*>(dt);
+                }
+            }
+        }
+        // Symbols and other types: skip (no DOM node)
+
+        if (node) {
+            node->parent = parent;
+            node->prev_sibling = prev;
+            node->next_sibling = nullptr;
+            if (prev) {
+                prev->next_sibling = node;
+            } else {
+                parent->first_child = node;
+            }
+            parent->last_child = node;
+            prev = node;
+        }
+    }
 }
 
 //==============================================================================
@@ -1305,6 +1362,9 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
 
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
+
         return {.element = elmt};
 
     } else {
@@ -1406,6 +1466,9 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
 
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
+
         return {.element = elmt};
 
     } else {
@@ -1455,6 +1518,9 @@ Item MarkEditor::elmt_delete_child(Item element, int index) {
 
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = elmt->length;
+
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
 
         return {.element = elmt};
 
@@ -1508,6 +1574,9 @@ Item MarkEditor::elmt_delete_children(Item element, int start, int end) {
         TypeElmt* elmt_type = (TypeElmt*)elmt->type;
         elmt_type->content_length = new_length;
 
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
+
         return {.element = elmt};
 
     } else {
@@ -1547,6 +1616,8 @@ Item MarkEditor::elmt_replace_child(Item element, int index, Item new_child) {
 
     if (mode_ == EDIT_MODE_INLINE) {
         elmt->items[index] = new_child;
+        // Sync DOM linked list if ui_mode
+        if (ui_mode_) dom_relink_children(elmt);
         return {.element = elmt};
     } else {
         Item* new_items = (Item*)arena_alloc(arena_, elmt->length * sizeof(Item));

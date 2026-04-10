@@ -55,9 +55,13 @@ private:
     MarkBuilder* builder_;      // For creating new structures
     
     EditMode mode_;             // Current edit mode
+    bool ui_mode_;              // true = auto-sync DOM linked list after child mutations
     EditVersion* current_version_; // Current version (immutable mode)
     EditVersion* version_head_;    // Head of version list
     int next_version_num_;         // Next version number
+
+    // DOM linked-list sync helper (ui_mode only)
+    void dom_relink_children(Element* parent_elem);
 
 public:
     /**

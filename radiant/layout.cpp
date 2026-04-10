@@ -1030,6 +1030,8 @@ static void view_line_justify(LayoutContext* lycon, float space_per_gap, View* v
 
                 rect = rect->next;
             }
+            // Sync text view bounds to reflect expanded rects
+            adjust_text_bounds(text);
         }
         else if (view->view_type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
@@ -1241,9 +1243,12 @@ void line_align(LayoutContext* lycon) {
                 }
 
                 // Not the last line: distribute extra space across word gaps
+                // CSS Text 3 §7.3: Distribute extra space across word gaps.
+                // Fast path for single text view: only expand the LAST TextRect
+                // (the current line's rect). This correctly handles wrapped text
+                // by not touching rects from previous lines.
                 if (view->view_type == RDT_VIEW_TEXT) {
                     ViewText* text = (ViewText*)view;
-                    // Find the last TextRect (most recently created = current line)
                     TextRect* rect = text->rect;
                     TextRect* last_rect = rect;
                     while (rect) {
@@ -1253,7 +1258,6 @@ void line_align(LayoutContext* lycon) {
 
                     if (last_rect) {
                         const char* text_data = (const char*)text->text_data();
-                        // Count spaces in this specific rect
                         int num_spaces = 0;
                         if (text_data) {
                             const char* str = text_data + last_rect->start_index;
@@ -1265,20 +1269,27 @@ void line_align(LayoutContext* lycon) {
                         float extra_width = available_width - line_width;
 
                         if (num_spaces > 0 && extra_width > 0) {
-                            // Expand the width of this specific TextRect to fill the line
                             last_rect->width += extra_width;
+                            adjust_text_bounds(text);
                             return;
                         }
                     }
+                    // Fall through only if sibling views exist — the line
+                    // may span multiple views (e.g., text + <span>) where
+                    // spaces exist in sibling/nested views. For a lone wrapped
+                    // text view, falling through would corrupt previous lines'
+                    // rects via count_spaces_in_view traversing all rects.
+                    if (!view->next()) return;
                 }
-                else {
-                    // Multi-view line: distribute space across all text views
+
+                // Multi-view path: traverse all views on the line to find and
+                // distribute space across word gaps in sibling/nested views.
+                {
                     int num_spaces = count_spaces_in_view(view);
                     float extra_width = available_width - line_width;
                     if (num_spaces > 0 && extra_width > 0) {
                         float space_per_gap = extra_width / num_spaces;
                         view_line_justify(lycon, space_per_gap, view);
-                        return;
                     }
                 }
                 return;

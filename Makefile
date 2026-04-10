@@ -993,6 +993,7 @@ test-input-baseline: build-test
 
 test-radiant-baseline: build-test
 	@layout_passed=0; layout_failed=0; layout_skipped=0; layout_status="⏭️  SKIP"; \
+	wpt_passed=0; wpt_failed=0; wpt_skipped=0; wpt_status="⏭️  SKIP"; \
 	ui_passed=0; ui_failed=0; ui_status="⏭️  SKIP"; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; \
@@ -1013,6 +1014,18 @@ test-radiant-baseline: build-test
 	layout_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 	layout_passed=$${layout_passed:-0}; layout_failed=$${layout_failed:-0}; layout_skipped=$${layout_skipped:-0}; \
 	if [ "$$layout_failed" = "0" ] || [ -z "$$layout_failed" ]; then layout_status="✅ PASS"; layout_failed=0; else layout_status="❌ FAIL"; any_failed=1; fi; \
+	\
+	echo ""; \
+	echo "📦 WPT CSS Text Baseline:"; \
+	output=$$(node test/layout/test_radiant_layout.js -c wpt-css-text 2>&1) || true; \
+	echo "$$output" | tail -10; \
+	wpt_passed=$$(echo "$$output" | grep "Successful:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_failed=$$(echo "$$output" | grep "Baseline Regressions" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_skipped=$$(echo "$$output" | grep "Skipped:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+	wpt_passed=$${wpt_passed:-0}; wpt_failed=$${wpt_failed:-0}; wpt_skipped=$${wpt_skipped:-0}; \
+	if echo "$$output" | grep -q "Baseline Regressions"; then wpt_status="❌ FAIL"; any_failed=1; \
+	elif echo "$$output" | grep -q "all .* required tests passed"; then wpt_status="✅ PASS"; \
+	else wpt_status="✅ PASS"; fi; \
 	\
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
@@ -1067,9 +1080,9 @@ test-radiant-baseline: build-test
 	elif echo "$$output" | grep -q "all .* required tests passed"; then pretext_status="✅ PASS"; \
 	else pretext_status="✅ PASS"; fi; \
 	\
-	total_passed=$$((layout_passed + ui_passed + page_passed + pretext_passed)); \
-	total_failed=$$((layout_failed + ui_failed + page_failed + pretext_failed)); \
-	total_skipped=$$((layout_skipped + pretext_skipped)); \
+	total_passed=$$((layout_passed + wpt_passed + ui_passed + page_passed + pretext_passed)); \
+	total_failed=$$((layout_failed + wpt_failed + ui_failed + page_failed + pretext_failed)); \
+	total_skipped=$$((layout_skipped + wpt_skipped + pretext_skipped)); \
 	total_tests=$$((total_passed + total_failed)); \
 	\
 	echo ""; \
@@ -1079,6 +1092,7 @@ test-radiant-baseline: build-test
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
 	echo "   ├── Layout Baseline     $$layout_status  ($$layout_passed passed, $$layout_failed failed, $$layout_skipped skipped)"; \
+	echo "   ├── WPT CSS Text        $$wpt_status  ($$wpt_passed passed, $$wpt_skipped skipped)"; \
 	echo "   ├── Page Snapshot       $$snapshot_status"; \
 	echo "   ├── UI Automation       $$ui_status  ($$ui_passed passed, $$ui_failed failed)"; \
 	echo "   ├── Page Load           $$page_status  ($$page_passed passed, $$page_failed failed)"; \

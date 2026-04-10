@@ -103,7 +103,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    size_t length,
                                                    CssEnum text_transform,
                                                    CssEnum font_variant,
-                                                   CssEnum white_space) {
+                                                   CssEnum white_space,
+                                                   CssEnum overflow_wrap) {
+    // CSS Text 3 §3.4: overflow-wrap: anywhere introduces soft wrap opportunities
+    // at every typographic character unit for min-content sizing.
+    bool break_anywhere = (overflow_wrap == CSS_VALUE_ANYWHERE);
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -140,6 +144,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             } else {
                 current_word += 11.0f;  // Use 11.0 to match font fallback width
                 total_width += 11.0f;
+                if (break_anywhere) {
+                    longest_word = fmax(longest_word, current_word);
+                    current_word = 0.0f;
+                }
             }
         }
         longest_word = fmax(longest_word, current_word);
@@ -258,6 +266,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             prev_glyph = 0;
             i++;
             is_word_start = false;
+            if (break_anywhere) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
             continue;
         }
 
@@ -331,6 +343,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             }
             prev_glyph = 0;
             i += bytes;
+            if (break_anywhere) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
             continue;
         }
 
@@ -362,6 +378,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         prev_glyph = glyph_index;
         prev_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
+
+        // overflow-wrap: anywhere — every character is a break opportunity
+        if (break_anywhere) {
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+        }
     }
 
     // Don't forget the last word
@@ -1956,6 +1978,30 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum text_transform = get_element_text_transform(element);
                 CssEnum font_variant = get_element_font_variant(element);
 
+                // Get overflow-wrap from element or ancestors (inherited property)
+                // CSS Text 3 §5.2: word-break: break-word is a deprecated keyword that
+                // has the same effect as word-break: normal and overflow-wrap: anywhere.
+                CssEnum ow = CSS_VALUE_NORMAL;
+                {
+                    DomNode* n = (DomNode*)element;
+                    while (n) {
+                        if (n->is_element()) {
+                            DomElement* el = (DomElement*)n;
+                            if (el->blk) {
+                                if (el->blk->overflow_wrap != 0) {
+                                    ow = el->blk->overflow_wrap;
+                                    break;
+                                }
+                                if (el->blk->word_break == CSS_VALUE_BREAK_WORD) {
+                                    ow = CSS_VALUE_ANYWHERE;
+                                    break;
+                                }
+                            }
+                        }
+                        n = n->parent;
+                    }
+                }
+
                 TextIntrinsicWidths text_widths;
                 if (preserve_spaces) {
                     // For pre/pre-wrap/break-spaces: newlines create forced line breaks.
@@ -1972,7 +2018,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         float line_width = 0;
                         if (line_len > 0) {
                             TextIntrinsicWidths lw = measure_text_intrinsic_widths(
-                                lycon, line_start, line_len, text_transform, font_variant, ws);
+                                lycon, line_start, line_len, text_transform, font_variant, ws, ow);
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
                             if (lw.min_content > text_widths.min_content)
@@ -1995,7 +2041,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 } else {
                     text_widths = measure_text_intrinsic_widths(
-                        lycon, normalized_buffer, out_pos, text_transform, font_variant);
+                        lycon, normalized_buffer, out_pos, text_transform, font_variant,
+                        CSS_VALUE_NORMAL, ow);
                 }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;
@@ -2029,6 +2076,26 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ViewBlock* child_vb = (ViewBlock*)child_elem;
             if (child_vb->display.outer == CSS_VALUE_NONE || child_vb->display.inner == CSS_VALUE_NONE) {
                 continue;
+            }
+
+            // CSS 2.1 §9.3.1: Absolutely positioned elements are out of normal flow
+            // and do not contribute to the containing block's intrinsic size.
+            if (child_vb->position &&
+                (child_vb->position->position == CSS_VALUE_ABSOLUTE ||
+                 child_vb->position->position == CSS_VALUE_FIXED)) {
+                log_debug("  skipping absolute/fixed child %s in intrinsic sizing", child_elem->node_name());
+                continue;
+            }
+            if (!child_vb->position && child_elem->specified_style) {
+                CssDeclaration* pos_decl = style_tree_get_declaration(
+                    child_elem->specified_style, CSS_PROPERTY_POSITION);
+                if (pos_decl && pos_decl->value && pos_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum pos_val = pos_decl->value->data.keyword;
+                    if (pos_val == CSS_VALUE_ABSOLUTE || pos_val == CSS_VALUE_FIXED) {
+                        log_debug("  skipping absolute/fixed child %s in intrinsic sizing (from specified style)", child_elem->node_name());
+                        continue;
+                    }
+                }
             }
 
             child_sizes = measure_element_intrinsic_widths(lycon, child_elem);

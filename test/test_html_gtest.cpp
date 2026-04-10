@@ -4,8 +4,9 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "../lambda/input/input.hpp"
+
 extern "C" {
-    #include "../lambda/input/input.hpp"
     #include "../lib/mempool.h"
     #include "../lib/stringbuf.h"
     #include "../lib/strview.h"

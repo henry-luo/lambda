@@ -2141,6 +2141,8 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
             case CSS_PROPERTY_BORDER_LEFT_WIDTH:
             case CSS_PROPERTY_BORDER_WIDTH:
+            // tab-size cannot be negative (CSS Text 3 §4.2)
+            case CSS_PROPERTY_TAB_SIZE:
                 disallow_negative = true;
                 break;
 

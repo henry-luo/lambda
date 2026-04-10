@@ -173,7 +173,17 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->first_child = NULL;
     element->last_child = NULL;
     element->doc = doc;
-    element->native_element = native_element;
+
+    // Copy Element data into the embedded field and redirect native_element
+    if (native_element && native_element != &element->elmt) {
+        element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+        element->native_element = &element->elmt;
+    } else if (native_element) {
+        // Self-reference (ui_mode: Element is already embedded in DomElement)
+        element->native_element = &element->elmt;
+    } else {
+        element->native_element = NULL;
+    }
 
     // Explicitly initialize display to {0, 0} to ensure no garbage values
     // This is critical for table elements where display resolution depends on this field
@@ -1641,8 +1651,10 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
     parent->native_element = result.element;
     log_debug("dom_element_append_child: Lambda tree updated (length after=%lld)", parent->native_element->length);
 
-    // Update DOM sibling chain
-    dom_append_to_sibling_chain(parent, child);
+    // Update DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already linked)
+    if (!parent->doc->input->ui_mode) {
+        dom_append_to_sibling_chain(parent, child);
+    }
 
     log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
 
@@ -2098,11 +2110,18 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
 
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item new_string_item = editor.builder()->createStringItem(new_content);
-
-    if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
-        log_error("dom_text_set_content: failed to create string");
-        return false;
+    Item new_string_item;
+    if (parent->doc->input->ui_mode) {
+        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
+        String* new_s = editor.builder()->createDomTextString(new_content, strlen(new_content));
+        if (!new_s) { log_error("dom_text_set_content: failed to create DomText string"); return false; }
+        new_string_item = (Item){.item = s2it(new_s)};
+    } else {
+        new_string_item = editor.builder()->createStringItem(new_content);
+        if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
+            log_error("dom_text_set_content: failed to create string");
+            return false;
+        }
     }
 
     // Replace child in parent Element's items array
@@ -2117,7 +2136,17 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
         return false;
     }
 
-    // Update DomText to point to new String
+    if (parent->doc->input->ui_mode) {
+        // Copy DOM properties from old text_node to new embedded DomText
+        DomText* new_dt = string_to_dom_text(new_string_item.get_string());
+        new_dt->content_type = text_node->content_type;
+        new_dt->rect = text_node->rect;
+        new_dt->font = text_node->font;
+        new_dt->color = text_node->color;
+        // dom_relink_children already set parent/siblings on new_dt
+    }
+
+    // Update text_node fields to point to new String (backward compat for callers)
     text_node->native_string = new_string_item.get_string();
     text_node->text = text_node->native_string->chars;
     text_node->length = text_node->native_string->len;
@@ -2196,26 +2225,28 @@ bool dom_text_remove(DomText* text_node) {
     // Update parent
     parent->native_element = result.element;
 
-    // Remove from DOM sibling chain
-    if (text_node->prev_sibling) {
-        text_node->prev_sibling->next_sibling = text_node->next_sibling;
-    } else if (text_node->parent && text_node->parent->is_element()) {
-        DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
-        parent_elem->first_child = text_node->next_sibling;
-    }
+    // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
+    if (!parent->doc->input->ui_mode) {
+        if (text_node->prev_sibling) {
+            text_node->prev_sibling->next_sibling = text_node->next_sibling;
+        } else if (text_node->parent && text_node->parent->is_element()) {
+            DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
+            parent_elem->first_child = text_node->next_sibling;
+        }
 
-    if (text_node->next_sibling) {
-        text_node->next_sibling->prev_sibling = text_node->prev_sibling;
-    } else if (text_node->parent && text_node->parent->is_element()) {
-        // Text node was last child
-        DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
-        parent_elem->last_child = text_node->prev_sibling;
+        if (text_node->next_sibling) {
+            text_node->next_sibling->prev_sibling = text_node->prev_sibling;
+        } else if (text_node->parent && text_node->parent->is_element()) {
+            // Text node was last child
+            DomElement* parent_elem = static_cast<DomElement*>(text_node->parent);
+            parent_elem->last_child = text_node->prev_sibling;
+        }
     }
-
-    // No need to update sibling indices - they will be recalculated on demand via scanning
 
     // Clear references
     text_node->parent = nullptr;
+    text_node->prev_sibling = nullptr;
+    text_node->next_sibling = nullptr;
     text_node->native_string = nullptr;
     log_debug("dom_text_remove: removed text node at index %lld", child_idx);
     return true;
@@ -2234,10 +2265,18 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
 
     // Create String item via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item string_item = editor.builder()->createStringItem(text_content);
-    if (get_type_id(string_item) != LMD_TYPE_STRING) {
-        log_error("dom_element_append_text: failed to create string");
-        return nullptr;
+    Item string_item;
+    if (parent->doc->input->ui_mode) {
+        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
+        String* s = editor.builder()->createDomTextString(text_content, strlen(text_content));
+        if (!s) { log_error("dom_element_append_text: failed to create DomText string"); return nullptr; }
+        string_item = (Item){.item = s2it(s)};
+    } else {
+        string_item = editor.builder()->createStringItem(text_content);
+        if (get_type_id(string_item) != LMD_TYPE_STRING) {
+            log_error("dom_element_append_text: failed to create string");
+            return nullptr;
+        }
     }
 
     // Append to parent Element's children via MarkEditor
@@ -2251,16 +2290,19 @@ DomText* dom_element_append_text(DomElement* parent, const char* text_content) {
         return nullptr;
     }
 
-    // Create DomText wrapper with Lambda backing
-    DomText* text_node = dom_text_create(string_item.get_string(), parent);
-
-    if (!text_node) {
-        log_error("dom_element_append_text: failed to create DomText");
-        return nullptr;
+    DomText* text_node;
+    if (parent->doc->input->ui_mode) {
+        // DomText is already embedded before the String; dom_relink_children linked it
+        text_node = string_to_dom_text(string_item.get_string());
+    } else {
+        // Create separate DomText wrapper with Lambda backing
+        text_node = dom_text_create(string_item.get_string(), parent);
+        if (!text_node) {
+            log_error("dom_element_append_text: failed to create DomText");
+            return nullptr;
+        }
+        dom_append_to_sibling_chain(parent, text_node);
     }
-
-    // Add to DOM sibling chain
-    dom_append_to_sibling_chain(parent, text_node);
 
     // Update parent element pointer (INLINE mode: no-op, but kept for consistency)
     parent->native_element = result.element;
@@ -2460,11 +2502,18 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
 
     // Create new String via MarkBuilder
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item new_string_item = editor.builder()->createStringItem(new_content);
-
-    if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
-        log_error("dom_comment_set_content: failed to create string");
-        return false;
+    Item new_string_item;
+    if (parent->doc->input->ui_mode) {
+        // In ui_mode, create fat [DomText][String][chars] so dom_relink_children can link it
+        String* new_s = editor.builder()->createDomTextString(new_content, strlen(new_content));
+        if (!new_s) { log_error("dom_comment_set_content: failed to create DomText string"); return false; }
+        new_string_item = (Item){.item = s2it(new_s)};
+    } else {
+        new_string_item = editor.builder()->createStringItem(new_content);
+        if (get_type_id(new_string_item) != LMD_TYPE_STRING) {
+            log_error("dom_comment_set_content: failed to create string");
+            return false;
+        }
     }
 
     // Replace or append String child in comment Element
@@ -2550,8 +2599,10 @@ DomComment* dom_element_append_comment(DomElement* parent, const char* comment_c
         return nullptr;
     }
 
-    // Add to DOM sibling chain
-    dom_append_to_sibling_chain(parent, comment_node);
+    // Add to DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already linked)
+    if (!parent->doc->input->ui_mode) {
+        dom_append_to_sibling_chain(parent, comment_node);
+    }
 
     log_debug("dom_element_append_comment: appended comment '%s'", comment_content);
 
@@ -2592,26 +2643,28 @@ bool dom_comment_remove(DomComment* comment_node) {
     // Update parent
     parent->native_element = result.element;
 
-    // Remove from DOM sibling chain
-    if (comment_node->prev_sibling) {
-        comment_node->prev_sibling->next_sibling = comment_node->next_sibling;
-    } else if (comment_node->parent) {
-        DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-        elem_parent->first_child = comment_node->next_sibling;
-    }
+    // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
+    if (!parent->doc->input->ui_mode) {
+        if (comment_node->prev_sibling) {
+            comment_node->prev_sibling->next_sibling = comment_node->next_sibling;
+        } else if (comment_node->parent) {
+            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
+            elem_parent->first_child = comment_node->next_sibling;
+        }
 
-    if (comment_node->next_sibling) {
-        comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
-    } else if (comment_node->parent) {
-        // Comment node was last child
-        DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-        elem_parent->last_child = comment_node->prev_sibling;
+        if (comment_node->next_sibling) {
+            comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
+        } else if (comment_node->parent) {
+            // Comment node was last child
+            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
+            elem_parent->last_child = comment_node->prev_sibling;
+        }
     }
-
-    // No need to update sibling indices - they will be recalculated on demand via scanning
 
     // Clear references
     comment_node->parent = nullptr;
+    comment_node->prev_sibling = nullptr;
+    comment_node->next_sibling = nullptr;
     comment_node->native_element = nullptr;
     log_debug("dom_comment_remove: removed comment at index %lld", child_idx);
     return true;
@@ -2712,7 +2765,15 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
 
     // create DomElement
-    DomElement* dom_elem = dom_element_create(doc, tag_name, elem);
+    bool ui_mode = doc->input && doc->input->ui_mode;
+    DomElement* dom_elem;
+    if (ui_mode) {
+        // UI mode: DomElement already allocated by MarkBuilder's ElementBuilder
+        dom_elem = element_to_dom_element(elem);
+        if (!dom_element_init(dom_elem, doc, tag_name, elem)) return nullptr;
+    } else {
+        dom_elem = dom_element_create(doc, tag_name, elem);
+    }
     if (!dom_elem) return nullptr;
 
     // populate element-to-DOM map if available (for incremental rebuild)
@@ -2860,8 +2921,15 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             // Text node - create DomText that references Lambda String
             String* text_str = child_item.get_string();
             if (text_str && text_str->len > 0) {
-                // Create text node (preserves Lambda String reference)
-                DomText* text_node = dom_text_create(text_str, dom_elem);
+                DomText* text_node;
+                if (ui_mode) {
+                    // UI mode: DomText already allocated before String by MarkBuilder
+                    text_node = string_to_dom_text(text_str);
+                    text_node->parent = dom_elem;
+                } else {
+                    // Create text node (preserves Lambda String reference)
+                    text_node = dom_text_create(text_str, dom_elem);
+                }
                 if (text_node) {
                     // Add text node to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, text_node);
@@ -2898,7 +2966,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     } else if (arr_item_type == LMD_TYPE_STRING) {
                         String* text_str = arr_item.get_string();
                         if (text_str && text_str->len > 0) {
-                            DomText* text_node = dom_text_create(text_str, dom_elem);
+                            DomText* text_node;
+                            if (ui_mode) {
+                                text_node = string_to_dom_text(text_str);
+                                text_node->parent = dom_elem;
+                            } else {
+                                text_node = dom_text_create(text_str, dom_elem);
+                            }
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
                             }
@@ -2923,7 +2997,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                 } else if (nested_type == LMD_TYPE_STRING) {
                                     String* s = nested_item.get_string();
                                     if (s && s->len > 0) {
-                                        DomText* tn = dom_text_create(s, dom_elem);
+                                        DomText* tn;
+                                        if (ui_mode) {
+                                            tn = string_to_dom_text(s);
+                                            tn->parent = dom_elem;
+                                        } else {
+                                            tn = dom_text_create(s, dom_elem);
+                                        }
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 } else if (nested_type == LMD_TYPE_SYMBOL) {

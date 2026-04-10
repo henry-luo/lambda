@@ -82,6 +82,46 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
         } else {
             return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
         }
+    } else if (text_transform == CSS_VALUE_FULL_SIZE_KANA) {
+        // CSS Text 3 §2.1: Convert small Kana to their normal (full-size) equivalents
+        switch (codepoint) {
+        // Hiragana small → normal
+        case 0x3041: return 0x3042;  // ぁ→あ
+        case 0x3043: return 0x3044;  // ぃ→い
+        case 0x3045: return 0x3046;  // ぅ→う
+        case 0x3047: return 0x3048;  // ぇ→え
+        case 0x3049: return 0x304A;  // ぉ→お
+        case 0x3063: return 0x3064;  // っ→つ
+        case 0x3083: return 0x3084;  // ゃ→や
+        case 0x3085: return 0x3086;  // ゅ→ゆ
+        case 0x3087: return 0x3088;  // ょ→よ
+        case 0x308E: return 0x308F;  // ゎ→わ
+        case 0x3095: return 0x304B;  // ゕ→か
+        case 0x3096: return 0x3051;  // ゖ→け
+        // Katakana small → normal
+        case 0x30A1: return 0x30A2;  // ァ→ア
+        case 0x30A3: return 0x30A4;  // ィ→イ
+        case 0x30A5: return 0x30A6;  // ゥ→ウ
+        case 0x30A7: return 0x30A8;  // ェ→エ
+        case 0x30A9: return 0x30AA;  // ォ→オ
+        case 0x30C3: return 0x30C4;  // ッ→ツ
+        case 0x30E3: return 0x30E4;  // ャ→ヤ
+        case 0x30E5: return 0x30E6;  // ュ→ユ
+        case 0x30E7: return 0x30E8;  // ョ→ヨ
+        case 0x30EE: return 0x30EF;  // ヮ→ワ
+        case 0x30F5: return 0x30AB;  // ヵ→カ
+        case 0x30F6: return 0x30B1;  // ヶ→ケ
+        // Half-width Katakana small → normal
+        case 0xFF67: return 0xFF71;  // ｧ→ｱ
+        case 0xFF68: return 0xFF72;  // ｨ→ｲ
+        case 0xFF69: return 0xFF73;  // ｩ→ｳ
+        case 0xFF6A: return 0xFF74;  // ｪ→ｴ
+        case 0xFF6B: return 0xFF75;  // ｫ→ｵ
+        case 0xFF6C: return 0xFF94;  // ｬ→ﾔ
+        case 0xFF6D: return 0xFF95;  // ｭ→ﾕ
+        case 0xFF6E: return 0xFF96;  // ｮ→ﾖ
+        case 0xFF6F: return 0xFF82;  // ｯ→ﾂ
+        }
     }
     return codepoint;
 }
@@ -1616,9 +1656,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     // Get overflow-wrap property for emergency word breaking
     // line-break: anywhere also implies overflow-wrap: anywhere behavior
+    // CSS Text 3 §5.2: word-break: break-word behaves as overflow-wrap: anywhere
     CssEnum overflow_wrap = get_overflow_wrap(lycon);
     bool break_word = (overflow_wrap == CSS_VALUE_BREAK_WORD || overflow_wrap == CSS_VALUE_ANYWHERE
-                       || line_break_val == CSS_VALUE_ANYWHERE);
+                       || line_break_val == CSS_VALUE_ANYWHERE
+                       || word_break == CSS_VALUE_BREAK_WORD);
 
     // Get text-transform property
     CssEnum text_transform = get_text_transform(lycon);
@@ -1631,7 +1673,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // CSS Text 3 §5.2: Track whether the text had a leading space before collapsing.
     // A leading space constitutes a soft wrap opportunity, enabling the first-word-fit
     // check at LAYOUT_TEXT to wrap to the next line if the first word doesn't fit.
-    bool had_leading_space = is_space(*str);
+    // Preserved newlines (pre, pre-wrap) are forced breaks, not soft wrap opportunities —
+    // the newline handler in the main loop will perform the line break, so exclude them
+    // to avoid a double line break (one from the first-word check, one from the handler).
+    bool had_leading_space = is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r'));
 
     // skip space at start of line (only if collapsing spaces)
     if (collapse_spaces && (lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
@@ -1834,24 +1879,36 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // Tab characters with preserved whitespace: use tab-size * space_width
             // Only when whitespace is preserved (pre, pre-wrap, break-spaces)
             if (codepoint == '\t' && !collapse_spaces) {
-                // CSS Text 3 §4.2: tab-size <number> = multiple of space advance width
-                // including associated letter-spacing and word-spacing
+                // CSS Text 3 §4.2: tab-size <number> — tab stops occur at points
+                // that are multiples of (tab-size × space advance) from the block's
+                // starting content edge. If tab-size is 0, the tab is not rendered.
                 int ts = 8;
                 ViewElement* ancestor = lycon->view->parent_view();
                 while (ancestor) {
                     if (ancestor->is_element()) {
                         DomElement* elem = static_cast<DomElement*>(ancestor);
-                        if (elem->blk && elem->blk->tab_size > 0) {
+                        if (elem->blk && elem->blk->tab_size >= 0) {
                             ts = elem->blk->tab_size;
                             break;
                         }
                     }
                     ancestor = ancestor->parent_view();
                 }
-                float space_advance = lycon->font.style->space_width
-                    + lycon->font.style->word_spacing
-                    + lycon->font.style->letter_spacing;
-                wd = space_advance * ts;
+                if (ts == 0) {
+                    wd = 0;
+                } else {
+                    float space_advance = lycon->font.style->space_width
+                        + lycon->font.style->word_spacing
+                        + lycon->font.style->letter_spacing;
+                    float tab_period = space_advance * ts;
+                    // Current position from block's starting content edge
+                    float current_x = rect->x + rect->width;
+                    // CSS Text 3 §4.2: if the distance to the next tab stop is less
+                    // than 0.5ch, the next tab stop after that is used instead.
+                    float half_ch = lycon->font.style->space_width * 0.5f;
+                    float next_tab = tab_period * ceilf((current_x + half_ch) / tab_period);
+                    wd = next_tab - current_x;
+                }
             } else {
                 // Regular space: apply word-spacing and letter-spacing once
                 wd += lycon->font.style->word_spacing;
@@ -2048,16 +2105,41 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             else if (is_space(*str)) { // break at the current space (collapsible or break-spaces)
                 log_debug("break on space");
-                // CSS Text 3 §3: For break-spaces, "a soft wrap opportunity exists
-                // before and after every preserved white space character." When the
-                // space overflows and there's content before it, break BEFORE the
-                // space so it starts the next line with its full width preserved.
+                // CSS Text 3 §3: For break-spaces, "a line breaking opportunity exists
+                // after every preserved white space character." When a space overflows:
+                // - If a prior break opportunity exists, rewind to it.
+                // - If break-word/break-all is active, break BEFORE the space (the
+                //   overflow-wrap property adds break opportunities at character
+                //   boundaries, so the word/space boundary is a valid break point).
+                // - Otherwise (pure break-spaces), the space stays on the current
+                //   line and we break after it (may cause overflow).
                 if (white_space == CSS_VALUE_BREAK_SPACES && rect->width - wd > 0.01f) {
-                    rect->width -= wd;  // remove the space from current line
-                    output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
-                    line_break(lycon);
-                    log_debug("break-spaces: break before space");
-                    goto LAYOUT_TEXT;  // space will be first char on new line
+                    if (lycon->line.last_space
+                        && text_start <= lycon->line.last_space
+                        && lycon->line.last_space < str) {
+                        // Prior break exists — rewind to it
+                        log_debug("break-spaces: rewind to prior space break");
+                        str = lycon->line.last_space + 1;
+                        float output_width = lycon->line.last_space_pos;
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, output_width);
+                        line_break(lycon);  goto LAYOUT_TEXT;
+                    } else if (break_word || break_all) {
+                        // break-word/break-all active — break before space (old behavior)
+                        log_debug("break-spaces + break-word: break before space");
+                        rect->width -= wd;
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                        line_break(lycon);
+                        goto LAYOUT_TEXT;
+                    } else {
+                        // Pure break-spaces: space must stay on this line (CSS Text 3 §3)
+                        str++;  // advance past the space
+                        output_text(lycon, text_view, rect, str - text_start - rect->start_index, rect->width);
+                        lycon->line.trailing_space_width = 0;
+                        line_break(lycon);
+                        log_debug("break-spaces: break after overflowing space (no prior break)");
+                        if (*str) { goto LAYOUT_TEXT; }
+                        else return;
+                    }
                 }
                 // skip spaces according to white-space mode
                 if (collapse_spaces) {
@@ -2117,6 +2199,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     output_text(lycon, text_view, rect, text_len, output_width);
                     if (lycon->line.last_space_kind == BRK_SOFT_HYPHEN) {
                         rect->has_trailing_hyphen = true;
+                    }
+                    // CSS 2.1 §16.6.1: When wrapping at a collapsible space, the
+                    // trailing space must be trimmed from the line box width.
+                    // trailing_space_width was reset when subsequent non-space chars
+                    // were processed (before the overflow triggered the rewind).
+                    // Restore it so line_break() can trim the trailing space.
+                    if (lycon->line.last_space_kind == BRK_SPACE && collapse_spaces) {
+                        GlyphInfo sp_glyph = font_get_glyph(lycon->font.font_handle, ' ');
+                        lycon->line.trailing_space_width = sp_glyph.advance_x;
                     }
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
@@ -2334,7 +2425,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.hanging_space_width = 0;
             lycon->line.hanging_space_text_trim = 0;
         }
-        else if (((break_all && is_typographic_letter_unit(codepoint)) || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+        else if (((break_all && (is_typographic_letter_unit(codepoint)
+                                  // CSS Text 3 §5.2: line-break: anywhere introduces soft wrap
+                                  // opportunities around ALL typographic character units, including
+                                  // GL class characters (NBSP U+00A0, NNBSP U+202F) which are
+                                  // normally non-breaking. word-break: break-all only converts
+                                  // letters and numbers, so NBSP remains non-breaking with break-all.
+                                  || (line_break_val == CSS_VALUE_ANYWHERE && (codepoint == 0x00A0 || codepoint == 0x202F))))
+                  || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character.
             // Track as last_space so overflow handling can break at this position.
             // UAX #14 / CSS Text 3 §5.2: Apply OP/CL/NS rules:
@@ -2349,6 +2447,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             // Record break opportunity after this character, unless forbidden by line-break rules
             bool allow_break = true;
+            // CSS Text 3 §5.2: line-break: anywhere overrides standard UAX#14 prohibitions.
+            // All typographic character unit boundaries become soft wrap opportunities.
+            if (line_break_val != CSS_VALUE_ANYWHERE) {
             // UAX #14 §9.2: ZWJ (U+200D) suppresses break between adjacent characters
             if (zwj_preceded) allow_break = false;
             // CSS Text 3 §5.2: No break after OP characters (OP stays with following content)
@@ -2377,6 +2478,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                 }
             }
+            } // end if not line-break: anywhere
             zwj_preceded = false;  // consumed
             if (allow_break) {
                 lycon->line.last_space = str - 1;  // last byte of current char

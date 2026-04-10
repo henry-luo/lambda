@@ -30,21 +30,6 @@
     font-style: italic;
 }
 
-/* Computer Modern Serif Slanted */
-@font-face {
-    font-family: 'Computer Modern Serif Slanted';
-    src: url('Serif%20Slanted/cmunsl.woff2') format('woff2');
-    font-weight: normal;
-    font-style: normal;
-}
-
-@font-face {
-    font-family: 'Computer Modern Serif Slanted';
-    src: url('Serif%20Slanted/cmunbl.woff2') format('woff2');
-    font-weight: bold;
-    font-style: normal;
-}
-
 /* Computer Modern Sans */
 @font-face {
     font-family: 'Computer Modern Sans';
@@ -103,17 +88,3 @@
     font-style: italic;
 }
 
-/* Computer Modern Typewriter Slanted */
-@font-face {
-    font-family: 'Computer Modern Typewriter Slanted';
-    src: url('Typewriter%20Slanted/cmunst.woff2') format('woff2');
-    font-weight: normal;
-    font-style: normal;
-}
-
-@font-face {
-    font-family: 'Computer Modern Typewriter Slanted';
-    src: url('Typewriter%20Slanted/cmunsto.woff2') format('woff2');
-    font-weight: normal;
-    font-style: oblique;
-}
