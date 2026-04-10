@@ -70,6 +70,11 @@ struct Runtime {
     // Pool reuse for batch mode: when set, heap_init_with_pool() uses this
     // pool instead of creating a new one. Set by script_runner between files.
     Pool* reuse_pool;
+
+    // Phase 5: unified DOM — when ui_mode is true, elmt()/list_push()/elmt_fill()
+    // allocate fat DomElement/DomText on result_arena instead of the GC heap.
+    bool ui_mode;
+    Arena* result_arena;
 };
 
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)

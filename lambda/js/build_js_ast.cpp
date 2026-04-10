@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "../ts/ts_transpiler.hpp"
+#include "../ts/ts_type_parser.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
@@ -3004,6 +3005,13 @@ static TsTypeNode* build_ts_conditional_type_u(JsTranspiler* tp, TSNode node) {
 static TsTypeNode* build_ts_type_expr_u(JsTranspiler* tp, TSNode node) {
     const char* type_str = ts_node_type(node);
 
+    // v2: opaque _ts_type token — parse type text with recursive descent parser
+    if (strcmp(type_str, "type") == 0) {
+        int len;
+        const char* text = ts_node_text_util(tp, node, &len);
+        return ts_parse_type_text(tp, text, len);
+    }
+
     if (strcmp(type_str, "predefined_type") == 0)
         return build_ts_predefined_type_u(tp, node);
     if (strcmp(type_str, "type_identifier") == 0 || strcmp(type_str, "identifier") == 0)
@@ -3078,7 +3086,17 @@ static JsAstNode* build_ts_interface_decl_u(JsTranspiler* tp, TSNode node) {
             const char* text = ts_node_text_util(tp, child, &len);
             iface->name = ts_pool_string_util(tp, text, len);
         } else if (strcmp(child_type, "object_type") == 0 || strcmp(child_type, "interface_body") == 0) {
-            iface->body = (TsObjectTypeNode*)build_ts_object_type_u(tp, child);
+            // v2: interface_body is an opaque external token — parse with C++ parser
+            uint32_t named_count = ts_node_named_child_count(child);
+            if (named_count == 0) {
+                // opaque token: extract text and parse with C++ interface body parser
+                int len;
+                const char* text = ts_node_text_util(tp, child, &len);
+                iface->body = (TsObjectTypeNode*)ts_parse_interface_body_text(tp, text, len);
+            } else {
+                // fallback: non-opaque CST (e.g. legacy grammar)
+                iface->body = (TsObjectTypeNode*)build_ts_object_type_u(tp, child);
+            }
         } else if (strcmp(child_type, "extends_type_clause") == 0 ||
                    strcmp(child_type, "extends_clause") == 0) {
             uint32_t ext_count = ts_node_named_child_count(child);

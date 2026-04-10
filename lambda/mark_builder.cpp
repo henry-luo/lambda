@@ -412,6 +412,16 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
+    if (builder_->ui_mode() && get_type_id(item) == LMD_TYPE_STRING) {
+        // ui_mode: convert plain String to fat [DomText][String][chars] for unified DOM tree
+        String* s = (String*)item.item;
+        if (s && s->len > 0) {
+            String* fat_s = builder_->createDomTextString(s->chars, s->len);
+            if (fat_s) {
+                item = (Item){.item = s2it(fat_s)};
+            }
+        }
+    }
     array_append((Array*)elmt_, item, builder_->pool(), builder_->arena());
     return *this;
 }

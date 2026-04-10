@@ -51,6 +51,7 @@ extern "C" {
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/input-parsers.h"
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/transpiler.hpp"
@@ -3565,15 +3566,18 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     log_info("[TIMING] load: read XML: %.1fms",
              duration_cast<duration<double, std::milli>>(t_parse - t_read).count());
 
-    // Step 2: Parse XML into Lambda elements using input_from_source
-    String* type_str = (String*)mem_alloc(sizeof(String) + 4, MEM_CAT_LAYOUT);
-    type_str->len = 3;
-    str_copy(type_str->chars, type_str->len + 1, "xml", 3);
-
-    Input* xml_input = input_from_source(xml_content, xml_url, type_str, nullptr);
+    // Step 2: Parse XML with ui_mode for unified DOM allocation
+    Input* xml_input = Input::create(pool, xml_url);
+    if (!xml_input) {
+        log_error("[Lambda XML] Failed to create Input for XML");
+        free(xml_content);
+        return nullptr;
+    }
+    xml_input->ui_mode = true;
+    parse_xml(xml_input, xml_content);
     free(xml_content);  // from read_text_file, uses stdlib
 
-    if (!xml_input || !xml_input->root.item || xml_input->root.item == ITEM_ERROR) {
+    if (!xml_input->root.item || xml_input->root.item == ITEM_ERROR) {
         log_error("[Lambda XML] Failed to parse XML");
         return nullptr;
     }
@@ -3802,7 +3806,15 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     Runtime* runtime = (Runtime*)calloc(1, sizeof(Runtime));
     runtime_init(runtime);
 
-    log_debug("[Lambda Script] Evaluating script...");
+    // Phase 5: Create result Input with arena for unified DOM allocation.
+    // Elements from JIT execution will be fat DomElements on this arena.
+    Pool* result_pool = pool_create();
+    Input* result_input = Input::create(result_pool, script_url);
+    result_input->ui_mode = true;
+    runtime->ui_mode = true;
+    runtime->result_arena = result_input->arena;
+
+    log_debug("[Lambda Script] Evaluating script (ui_mode=true, arena allocation)...");
     // Use MIR Direct JIT to evaluate the Lambda script (functional scripts don't need a main() entry point)
     Input* script_output = run_script_mir(runtime, nullptr, script_filepath, false);
 
@@ -3810,6 +3822,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_error("[Lambda Script] Failed to evaluate script or script returned null");
         runtime_cleanup(runtime);
         free(runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -3826,6 +3839,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_error("[Lambda Script] Script evaluation returned an error");
         runtime_cleanup(runtime);
         free(runtime);
+        pool_destroy(result_pool);
         return nullptr;
     }
 
@@ -3844,6 +3858,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             svg_content);
         runtime_cleanup(runtime);
         free(runtime);
+        pool_destroy(result_pool);
         log_info("[Lambda Script] Loading SVG-in-HTML from string (%zu bytes)", html_buf->length);
         DomDocument* doc = load_html_string_doc(html_buf->str, viewport_width, viewport_height);
         strbuf_free(html_buf);
@@ -3862,6 +3877,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             log_error("[Lambda Script] Failed to format SVG element");
             runtime_cleanup(runtime);
             free(runtime);
+            pool_destroy(result_pool);
             return nullptr;
         }
     } else if (result_type == LMD_TYPE_STRING) {
@@ -3878,6 +3894,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             log_info("[Lambda Script] Script returned HTML string, loading in-memory (%zu bytes)", (size_t)result_str->len);
             runtime_cleanup(runtime);
             free(runtime);
+            pool_destroy(result_pool);
             return load_html_string_doc(result_str->chars, viewport_width, viewport_height);
         }
     }
@@ -3915,8 +3932,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
             StrBuf* result_str = strbuf_new();
             print_item(result_str, script_output->root, 0);
 
-            // Use MarkBuilder to create the div element properly
-            MarkBuilder builder(script_output);
+            // Use MarkBuilder with result_input (ui_mode) so DomText goes to result arena
+            MarkBuilder builder(result_input);
             ElementBuilder div = builder.element("div");
             div.text(result_str->str);
             Item div_item = div.final();
@@ -3929,10 +3946,10 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_info("[TIMING] Step 2 - Wrap result: %.1fms",
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
 
-        // Step 3: Create HTML wrapper structure using MarkBuilder
+        // Step 3: Create HTML wrapper structure using MarkBuilder (on result arena in ui_mode)
         log_debug("[Lambda Script] Building HTML wrapper structure");
 
-        MarkBuilder builder(script_output);
+        MarkBuilder builder(result_input);
 
         // Build: html > body > result_elem
         Item result_item = {.element = result_elem};
@@ -3951,19 +3968,24 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
         log_info("[TIMING] Step 3 - Build HTML structure: %.1fms",
             std::chrono::duration<double, std::milli>(step3_end - step2_start).count());
 
-        // Step 4: Update script_output root to point to html element
-        script_output->root = html_item;
+        // Step 4: Update root to point to html element
+        result_input->root = html_item;
     } else {
+        // In ui_mode, the html root element is already on result_input's arena
+        result_input->root = {.element = html_elem};
+
         auto step2_start = std::chrono::high_resolution_clock::now();
         log_info("[TIMING] Step 2 - HTML document detected, skipping wrap: %.1fms",
             std::chrono::duration<double, std::milli>(step2_start - step1_end).count());
     }
 
     // Step 5: Create DomDocument and build DomElement tree
+    // Use result_input so dom_doc->input->ui_mode enables fat allocation path
     auto step5_start = std::chrono::high_resolution_clock::now();
-    DomDocument* dom_doc = dom_document_create(script_output);
+    DomDocument* dom_doc = dom_document_create(result_input);
     if (!dom_doc) {
         log_error("[Lambda Script] Failed to create DomDocument");
+        pool_destroy(result_pool);
         runtime_cleanup(runtime);
         free(runtime);
         return nullptr;
@@ -3977,6 +3999,7 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     if (!dom_root) {
         log_error("[Lambda Script] Failed to build DomElement tree");
         dom_document_destroy(dom_doc);
+        pool_destroy(result_pool);
         runtime_cleanup(runtime);
         free(runtime);
         return nullptr;
@@ -4081,8 +4104,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
     // The GC heap, JIT code, and name pool remain live for the session.
     dom_doc->lambda_runtime = runtime;
 
-    // Create Input context for event object construction (used by dispatch_lambda_handler)
-    dom_doc->input = Input::create(pool, script_url);
+    // dom_doc->input already set to result_input by dom_document_create
+    // result_input has ui_mode=true and its arena holds the fat DomElement/DomText nodes
 
     // Note: Don't cleanup runtime — heap and JIT context still in use for reactive UI
 

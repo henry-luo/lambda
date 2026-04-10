@@ -1189,6 +1189,13 @@ void runner_setup_context(Runner* runner) {
 
     input_context = context = &runner->context;
 
+    // Phase 5: propagate ui_mode and result_arena from Runtime to context
+    Runtime* ui_rt = runner->runtime;
+    if (ui_rt && ui_rt->ui_mode && ui_rt->result_arena) {
+        context->ui_mode = true;
+        context->arena = ui_rt->result_arena;
+    }
+
     // Reuse or create the GC heap, nursery, and name_pool from the Runtime.
     // These persist across multiple evaluations on the same Runtime.
     Runtime* rt = runner->runtime;
