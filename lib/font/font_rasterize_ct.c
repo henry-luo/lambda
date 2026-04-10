@@ -32,33 +32,42 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
     CFDataRef cf_data = CFDataCreate(NULL, data, (CFIndex)len);
     if (!cf_data) return NULL;
 
-    CGDataProviderRef provider = CGDataProviderCreateWithCFData(cf_data);
-    CFRelease(cf_data);
-    if (!provider) return NULL;
+    CTFontRef ct_font = NULL;
 
-    CGFontRef cg_font = CGFontCreateWithDataProvider(provider);
-    CGDataProviderRelease(provider);
-    if (!cg_font) {
-        log_debug("font_rasterize_ct: CGFontCreateWithDataProvider failed");
-        return NULL;
+    // for TTC/OTC collections, CGFontCreateWithDataProvider always picks face 0.
+    // Use CTFontManagerCreateFontDescriptorsFromData to select the correct face.
+    if (face_index > 0) {
+        CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromData(cf_data);
+        if (descs && CFArrayGetCount(descs) > face_index) {
+            CTFontDescriptorRef desc = (CTFontDescriptorRef)CFArrayGetValueAtIndex(descs, face_index);
+            ct_font = CTFontCreateWithFontDescriptor(desc, (CGFloat)size_px, NULL);
+        }
+        if (descs) CFRelease(descs);
     }
 
-    // for TTC collections, CoreGraphics loads just the first face from the
-    // data provider; face_index > 0 is not supported via this path
-    // (the caller should pass the sub-font offset for TTC)
-    (void)face_index;
+    // face 0 or fallback: use CGFont path (faster, no collection lookup)
+    if (!ct_font) {
+        CGDataProviderRef provider = CGDataProviderCreateWithCFData(cf_data);
+        if (provider) {
+            CGFontRef cg_font = CGFontCreateWithDataProvider(provider);
+            CGDataProviderRelease(provider);
+            if (cg_font) {
+                ct_font = CTFontCreateWithGraphicsFont(cg_font, (CGFloat)size_px,
+                                                        NULL, NULL);
+                CGFontRelease(cg_font);
+            }
+        }
+    }
 
-    CTFontRef ct_font = CTFontCreateWithGraphicsFont(cg_font, (CGFloat)size_px,
-                                                      NULL, NULL);
-    CGFontRelease(cg_font);
+    CFRelease(cf_data);
 
     if (!ct_font) {
-        log_debug("font_rasterize_ct: CTFontCreateWithGraphicsFont failed");
+        log_debug("font_rasterize_ct: failed to create CTFont from raw data");
         return NULL;
     }
 
-    log_debug("font_rasterize_ct: created CTFont from raw data (%zu bytes, size=%.1f)",
-              len, size_px);
+    log_debug("font_rasterize_ct: created CTFont from raw data (%zu bytes, size=%.1f, face=%d)",
+              len, size_px, face_index);
     return (void*)ct_font;
 }
 

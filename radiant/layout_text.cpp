@@ -699,6 +699,11 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
     // and have zero advance in composed sequences (handled by font shaping)
     if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return -1.0f;
 
+    // Variation Selectors: VS1-VS16 (U+FE00-U+FE0F) and VS17-VS256 (U+E0100-U+E01EF)
+    // are default-ignorable characters with zero advance width
+    if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return -1.0f;
+    if (codepoint >= 0xE0100 && codepoint <= 0xE01EF) return -1.0f;
+
     switch (codepoint) {
         // Zero-width characters (return negative to distinguish from "use font width")
         case 0x200B: return -1.0f;  // Zero Width Space (ZWSP) - break opportunity
@@ -706,8 +711,6 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
         case 0x200D: return -1.0f;  // Zero Width Joiner (ZWJ)
         case 0x00AD: return -1.0f;  // Soft Hyphen (SHY) - invisible unless line breaks here
         case 0xFEFF: return -1.0f;  // Zero Width No-Break Space (ZWNBSP / BOM)
-        case 0xFE0E: return -1.0f;  // Variation Selector 15 (text presentation)
-        case 0xFE0F: return -1.0f;  // Variation Selector 16 (emoji presentation)
         case 0x20E3: return -1.0f;  // Combining Enclosing Keycap
 
         // Unicode spaces with defined widths
