@@ -218,9 +218,8 @@ static inline CssEnum get_overflow_wrap(LayoutContext* lycon) {
 // ============================================================================
 
 /**
- * Check if a codepoint is a CJK character that allows line breaks.
- * CJK text can break between any two characters.
- * Covers: Chinese (Hanzi), Japanese (Kanji/Hiragana/Katakana), Korean (Hangul)
+ * Check if a codepoint is a CJK character (Han/Kana/Hangul).
+ * Used for CJK-specific font metrics tracking (line-height blending).
  */
 static inline bool is_cjk_character(uint32_t codepoint) {
     return (codepoint >= 0x4E00 && codepoint <= 0x9FFF) ||  // CJK Unified Ideographs
@@ -233,6 +232,109 @@ static inline bool is_cjk_character(uint32_t codepoint) {
            (codepoint >= 0x30A0 && codepoint <= 0x30FF) ||  // Katakana
            (codepoint >= 0xAC00 && codepoint <= 0xD7AF) ||  // Hangul Syllables
            (codepoint >= 0xFF65 && codepoint <= 0xFF9F);    // Halfwidth Katakana
+}
+
+/**
+ * Check if a codepoint has UAX#14 line break class ID (Ideographic).
+ * Characters with ID class allow line breaks before and after them
+ * under normal wrapping (CSS Text 3 §5.2, UAX #14).
+ * Covers: CJK ideographs, Kana, Hangul, emoji, Yi, CJK symbols/radicals,
+ * CJK compatibility ideographs, and other ID-class characters.
+ */
+static inline bool has_id_line_break_class(uint32_t cp) {
+    // CJK Unified Ideographs and Extensions
+    if (cp >= 0x3400 && cp <= 0x9FFF) return true;   // Extension A + main block
+    if (cp >= 0xF900 && cp <= 0xFAFF) return true;   // CJK Compatibility Ideographs
+    if (cp >= 0x20000 && cp <= 0x2CEAF) return true;  // Extensions B/C/D/E
+    if (cp >= 0x2CEB0 && cp <= 0x2EBE0) return true;  // Extension F
+    if (cp >= 0x2EBF0 && cp <= 0x2F7FF) return true;  // Extension I + nearby
+    if (cp >= 0x2F800 && cp <= 0x2FA1F) return true;  // CJK Compat Ideographs Supplement
+    if (cp >= 0x30000 && cp <= 0x3FFFD) return true;  // Extensions G/H + Plane 3
+
+    // Kana and Hangul
+    if (cp >= 0x3040 && cp <= 0x30FF) return true;   // Hiragana + Katakana
+    if (cp >= 0x31F0 && cp <= 0x31FF) return true;   // Katakana Phonetic Extensions
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return true;   // Hangul Syllables
+    if (cp >= 0xFF65 && cp <= 0xFF9F) return true;   // Halfwidth Katakana
+    if (cp >= 0x1B000 && cp <= 0x1B2FF) return true;  // Kana Supplement + Extended-A + B
+
+    // CJK Symbols, Radicals, and related
+    if (cp >= 0x2E80 && cp <= 0x2FFF) return true;   // CJK Radicals + Kangxi + IDC
+    if (cp >= 0x3003 && cp <= 0x3007) return true;   // Ditto mark, JIS, Closing, Number Zero
+    if (cp >= 0x3012 && cp <= 0x3013) return true;   // Postal Mark, Geta Mark
+    if (cp >= 0x3020 && cp <= 0x303F) return true;   // Postal Mark Face through IDHFS
+    if (cp >= 0x3200 && cp <= 0x33FF) return true;   // Enclosed CJK + CJK Compatibility
+    if (cp >= 0x3105 && cp <= 0x312F) return true;   // Bopomofo
+    if (cp >= 0x3131 && cp <= 0x318E) return true;   // Hangul Compatibility Jamo
+    if (cp >= 0x3190 && cp <= 0x31EF) return true;   // Kanbun + Bopomofo Ext + CJK Strokes
+
+    // Yi syllables and radicals
+    if (cp >= 0xA000 && cp <= 0xA4CF) return true;   // Yi Syllables + Yi Radicals
+
+    // Halfwidth/Fullwidth forms with ID class
+    if (cp >= 0xFE30 && cp <= 0xFE6F) return true;   // CJK Compatibility Forms + Small Forms
+    if (cp >= 0xFF01 && cp <= 0xFF60) return true;   // Fullwidth ASCII variants
+    if (cp >= 0xFFA0 && cp <= 0xFFDC) return true;   // Halfwidth Hangul
+
+    // Tangut
+    if (cp >= 0x17000 && cp <= 0x18DF2) return true;  // Tangut Ideographs + Components
+
+    // Nushu
+    if (cp >= 0x1B170 && cp <= 0x1B2FB) return true;  // Nushu Characters
+
+    // Emoji and symbols with UAX#14 ID class
+    // Supplementary Symbols and Pictographs (Plane 1) — nearly all have ID class
+    if (cp >= 0x1F000 && cp <= 0x1FAFF) return true;  // Mahjong..Symbols Extended-A
+    if (cp >= 0x1FC00 && cp <= 0x1FFFD) return true;  // Reserved (default ID)
+
+    // BMP emoji with ID class (scattered in Misc Symbols / Dingbats)
+    if (cp == 0x231A || cp == 0x231B) return true;   // Watch, Hourglass
+    if (cp >= 0x23E9 && cp <= 0x23F3) return true;   // Media controls, timers
+    if (cp >= 0x23F8 && cp <= 0x23FA) return true;   // Pause, stop, record
+    if (cp == 0x2614 || cp == 0x2615) return true;   // Umbrella, Hot Beverage
+    if (cp == 0x2648) return true;                     // Aries (start of zodiac)
+    if (cp >= 0x2648 && cp <= 0x2653) return true;   // Zodiac symbols
+    if (cp == 0x267F) return true;                     // Wheelchair
+    if (cp >= 0x2693 && cp <= 0x2694) return true;   // Anchor, Swords
+    if (cp == 0x26A1) return true;                     // High Voltage
+    if (cp >= 0x26AA && cp <= 0x26AB) return true;   // Medium circles
+    if (cp >= 0x26BD && cp <= 0x26C8) return true;   // Soccer..Thunder Cloud
+    if (cp >= 0x26CE && cp <= 0x26D4) return true;   // Ophiuchus..No Entry
+    if (cp >= 0x26D5 && cp <= 0x26EA) return true;   // Various symbols..Church
+    if (cp >= 0x26F0 && cp <= 0x26F5) return true;   // Mountain..Sailboat
+    if (cp >= 0x26F7 && cp <= 0x26FA) return true;   // Skier..Tent
+    if (cp == 0x26FD) return true;                     // Fuel Pump
+    if (cp == 0x2702) return true;                     // Scissors
+    if (cp == 0x2705) return true;                     // Check Mark
+    if (cp >= 0x2708 && cp <= 0x270D) return true;   // Airplane..Writing Hand
+    if (cp == 0x270F) return true;                     // Pencil
+    if (cp == 0x2712) return true;                     // Black Nib
+    if (cp == 0x2714) return true;                     // Heavy Check Mark
+    if (cp == 0x2716) return true;                     // Heavy Multiplication X
+    if (cp == 0x271D) return true;                     // Latin Cross
+    if (cp == 0x2721) return true;                     // Star of David
+    if (cp == 0x2728) return true;                     // Sparkles
+    if (cp >= 0x2733 && cp <= 0x2734) return true;   // Asterisk, Star
+    if (cp == 0x2744) return true;                     // Snowflake
+    if (cp == 0x2747) return true;                     // Sparkle
+    if (cp == 0x274C) return true;                     // Cross Mark
+    if (cp == 0x274E) return true;                     // Cross Mark squared
+    if (cp >= 0x2753 && cp <= 0x2755) return true;   // Question marks, Exclamation
+    if (cp == 0x2757) return true;                     // Heavy Exclamation
+    if (cp >= 0x2763 && cp <= 0x2764) return true;   // Heart Exclamation, Heavy Heart
+    if (cp >= 0x2795 && cp <= 0x2797) return true;   // Plus, Minus, Division
+    if (cp == 0x27A1) return true;                     // Rightwards Arrow
+    if (cp == 0x27B0) return true;                     // Curly Loop
+    if (cp == 0x27BF) return true;                     // Double Curly Loop
+    if (cp >= 0x2934 && cp <= 0x2935) return true;   // Arrow up-right, down-right
+    if (cp >= 0x2B05 && cp <= 0x2B07) return true;   // Leftwards/Upwards/Downwards Arrow
+    if (cp >= 0x2B1B && cp <= 0x2B1C) return true;   // Black/White Large Square
+    if (cp == 0x2B50) return true;                     // White Medium Star
+    if (cp == 0x2B55) return true;                     // Heavy Large Circle
+    if (cp == 0x3297) return true;                     // Circled Ideograph Congratulation
+    if (cp == 0x3299) return true;                     // Circled Ideograph Secret
+
+    return false;
 }
 
 // ============================================================================
@@ -431,8 +533,8 @@ static BreakKind classify_break(uint32_t cp, bool collapse_spaces, bool collapse
     // ideographic space
     if (cp == 0x3000) return BRK_IDEOGRAPHIC_SPACE;
 
-    // CJK ideographs (break-after unless keep-all)
-    if (is_cjk_character(cp)) return BRK_CJK;
+    // UAX#14 ID class (CJK, emoji, Yi, etc.) — break-after unless keep-all
+    if (has_id_line_break_class(cp)) return BRK_CJK;
 
     // UAX #14 line break classes
     if (is_line_break_op(cp)) return BRK_OP;
@@ -931,6 +1033,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.committed_trailing_space = 0;
     lycon->line.hanging_space_width = 0;
     lycon->line.hanging_space_text_trim = 0;
+    lycon->line.rtl_hanging_space = 0;
     lycon->line.last_space_hanging_width = 0;
     lycon->line.last_space_hanging_text_trim = 0;
     lycon->line.wrap_opportunity_before_nowrap = false;
@@ -1065,6 +1168,12 @@ void line_break(LayoutContext* lycon) {
                 lycon->line.last_text_rect->hanging_trim = hang_trim;
             }
         }
+        // CSS Text 3 §4.1.3: In RTL, trailing whitespace hangs past the inline-end
+        // (left edge). Save the hanging width so line_align() can shift the last text
+        // rect's x position leftward after alignment.
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            lycon->line.rtl_hanging_space = lycon->line.hanging_space_width;
+        }
         lycon->line.advance_x -= lycon->line.hanging_space_width;
         lycon->line.hanging_space_width = 0;
         lycon->line.hanging_space_text_trim = 0;
@@ -1128,6 +1237,15 @@ void line_break(LayoutContext* lycon) {
 
     // horizontal text alignment
     line_align(lycon);
+
+    // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
+    // In RTL, trailing whitespace hangs past the inline-end (left edge).
+    // After alignment positions visible content, shift the last text rect's x
+    // leftward so the rect includes the hanging trailing space.
+    if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
+        lycon->line.last_text_rect->x -= lycon->line.rtl_hanging_space;
+        lycon->line.rtl_hanging_space = 0;
+    }
 
     // advance to next line
     // CSS 2.1 10.8.1: Line height controls vertical spacing between line boxes
@@ -1295,8 +1413,8 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
             if (bytes > 0) char_bytes = bytes;
         }
 
-        // CJK characters are individual break opportunities — first "word" is one character
-        if (is_cjk_character(codepoint)) {
+        // ID-class characters are individual break opportunities — first "word" is one character
+        if (has_id_line_break_class(codepoint)) {
             if (width == 0.0f) {
                 // The first char is CJK — measure just this one character
                 codepoint = apply_text_transform(codepoint, text_transform, word_start);
@@ -1890,6 +2008,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 // CSS Text 3 §4.2: tab-size <number> — tab stops occur at points
                 // that are multiples of (tab-size × space advance) from the block's
                 // starting content edge. If tab-size is 0, the tab is not rendered.
+                // The space advance is computed using the block container's font,
+                // not the inline element's font (CSS Text 3 §4.2: "the advance
+                // width of the space character as rendered by the block's font").
                 int ts = 8;
                 ViewElement* ancestor = lycon->view->parent_view();
                 while (ancestor) {
@@ -1902,18 +2023,21 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     }
                     ancestor = ancestor->parent_view();
                 }
+                // Use block container's font for space advance (set during block layout setup)
+                FontProp* block_font = lycon->block.block_container_font;
+                if (!block_font) block_font = lycon->font.style;
                 if (ts == 0) {
                     wd = 0;
                 } else {
-                    float space_advance = lycon->font.style->space_width
-                        + lycon->font.style->word_spacing
-                        + lycon->font.style->letter_spacing;
+                    float space_advance = block_font->space_width
+                        + block_font->word_spacing
+                        + block_font->letter_spacing;
                     float tab_period = space_advance * ts;
                     // Current position from block's starting content edge
                     float current_x = rect->x + rect->width;
                     // CSS Text 3 §4.2: if the distance to the next tab stop is less
                     // than 0.5ch, the next tab stop after that is used instead.
-                    float half_ch = lycon->font.style->space_width * 0.5f;
+                    float half_ch = block_font->space_width * 0.5f;
                     float next_tab = tab_period * ceilf((current_x + half_ch) / tab_period);
                     wd = next_tab - current_x;
                 }
@@ -2078,6 +2202,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space_kind = BRK_HYPHEN;
         }
         rect->width += wd;
+        // CSS Text 3 §4.1.3: Pre-wrap trailing spaces "hang" and don't count for
+        // overflow. But once a non-space character follows the spaces, they are no
+        // longer trailing — reset hanging_space_width so the overflow check below
+        // uses the full content width (space + non-space) for wrapping decisions.
+        if (!is_space(*str) && codepoint != 0x3000 && lycon->line.hanging_space_width > 0) {
+            lycon->line.hanging_space_width = 0;
+            lycon->line.hanging_space_text_trim = 0;
+        }
         // Use effective_right which accounts for float intrusions
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
@@ -2445,7 +2577,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                                   // normally non-breaking. word-break: break-all only converts
                                   // letters and numbers, so NBSP remains non-breaking with break-all.
                                   || (line_break_val == CSS_VALUE_ANYWHERE && (codepoint == 0x00A0 || codepoint == 0x202F))))
-                  || (is_cjk_character(codepoint) && !keep_all)) && wrap_lines) {
+                  || (has_id_line_break_class(codepoint) && !keep_all)) && wrap_lines) {
             // CJK or break-all: can break after this character.
             // Track as last_space so overflow handling can break at this position.
             // UAX #14 / CSS Text 3 §5.2: Apply OP/CL/NS rules:
@@ -2496,7 +2628,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             if (allow_break) {
                 lycon->line.last_space = str - 1;  // last byte of current char
                 lycon->line.last_space_pos = rect->width;  // width including this char
-                lycon->line.last_space_kind = is_cjk_character(codepoint) ? BRK_CJK : BRK_TEXT;
+                lycon->line.last_space_kind = has_id_line_break_class(codepoint) ? BRK_CJK : BRK_TEXT;
             }
         }
         else {

@@ -81,6 +81,7 @@ typedef struct BlockContext {
     CssEnum text_align;         // Text alignment
     CssEnum text_align_last;    // text-align-last (CSS Text 3 §7.2): overrides text_align on last line
     CssEnum direction;          // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
+    FontProp* block_container_font; // CSS Text 3 §4.2: block container's font for tab-size calculation
     float given_width;          // CSS specified width (-1 if auto)
     float given_height;         // CSS specified height (-1 if auto)
     float first_line_ascender;  // Baseline of first line (distance from border-box top, for flex baseline)
@@ -216,6 +217,9 @@ typedef struct Linebox {
                                     // used to trim text rects (U+3000 has visible glyph, not trimmed)
     float last_space_hanging_width;  // hanging_space_width saved at the time last_space was recorded
     float last_space_hanging_text_trim; // hanging_space_text_trim saved at the time last_space was recorded
+    float rtl_hanging_space;            // CSS Text 3 §4.1.3: hanging space width saved for RTL alignment adjust;
+                                        // in RTL, trailing space hangs past the inline-end (left edge), so
+                                        // after alignment, the last text rect's x must be shifted left by this
     bool wrap_opportunity_before_nowrap;  // CSS Text 3 §5: a wrappable break opportunity exists at the current
                                          // position (from collapsed inter-element whitespace in a wrappable
                                          // parent); allows nowrap content to break at this boundary

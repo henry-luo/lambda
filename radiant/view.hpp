@@ -957,6 +957,7 @@ typedef struct BlockProp {
     const CssValue* line_height;
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
+    const CssValue* text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
     CssEnum list_style_type;
