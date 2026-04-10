@@ -753,7 +753,15 @@ void html5_flush_pending_text(Html5Parser* parser) {
     }
 
     // Convert buffer to String and create text node
-    String* text_str = stringbuf_to_string(parser->text_buffer);
+    String* text_str;
+    if (parser->input->ui_mode) {
+        // UI mode: allocate [DomText][String][chars...] via MarkBuilder
+        MarkBuilder builder(parser->input);
+        text_str = builder.createDomTextStringFromBuf(parser->text_buffer);
+        stringbuf_reset(parser->text_buffer);
+    } else {
+        text_str = stringbuf_to_string(parser->text_buffer);
+    }
     log_debug("html5_flush_pending_text: created String with len=%zu", text_str->len);
     Item text_node = {.item = s2it(text_str)};
     array_append((Array*)parent, text_node, parser->pool, parser->arena);
@@ -818,7 +826,14 @@ void html5_flush_foster_text(Html5Parser* parser) {
             stringbuf_append_str_n(combined, existing->chars, existing->len);
             stringbuf_append_str_n(combined, parser->foster_text_buffer->str->chars,
                                    parser->foster_text_buffer->length);
-            String* new_str = stringbuf_to_string(combined);
+            String* new_str;
+            if (parser->input->ui_mode) {
+                MarkBuilder builder(parser->input);
+                new_str = builder.createDomTextStringFromBuf(combined);
+                stringbuf_reset(combined);
+            } else {
+                new_str = stringbuf_to_string(combined);
+            }
             foster_parent->items[table_pos - 1] = {.item = s2it(new_str)};
             log_debug("html5_flush_foster_text: merged foster text with existing text before table");
             stringbuf_reset(parser->foster_text_buffer);
@@ -829,7 +844,14 @@ void html5_flush_foster_text(Html5Parser* parser) {
     }
 
     // Create text node from buffer
-    String* text_str = stringbuf_to_string(parser->foster_text_buffer);
+    String* text_str;
+    if (parser->input->ui_mode) {
+        MarkBuilder builder(parser->input);
+        text_str = builder.createDomTextStringFromBuf(parser->foster_text_buffer);
+        stringbuf_reset(parser->foster_text_buffer);
+    } else {
+        text_str = stringbuf_to_string(parser->foster_text_buffer);
+    }
     Item text_node = {.item = s2it(text_str)};
 
     if (table_pos >= 0) {

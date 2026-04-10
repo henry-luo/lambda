@@ -236,6 +236,37 @@ struct DomText : public DomNode {
     bool is_symbol() const { return content_type == DOM_TEXT_SYMBOL; }
 };
 
+// ============================================================================
+// DomText ↔ String conversion (Phase 2: Unified DOM Tree)
+// ============================================================================
+
+// In UI mode, MarkBuilder allocates [DomText][String header][chars...] as one block.
+// The String part starts immediately after the DomText struct.
+
+// DomText* → String*: returns pointer to the inline String following DomText
+inline String* dom_text_to_string(DomText* dt) {
+    return (String*)((char*)dt + sizeof(DomText));
+}
+inline const String* dom_text_to_string(const DomText* dt) {
+    return (const String*)((const char*)dt + sizeof(DomText));
+}
+
+// String* → DomText*: reverse conversion (caller must ensure String is preceded by DomText)
+inline DomText* string_to_dom_text(String* s) {
+    return (DomText*)((char*)s - sizeof(DomText));
+}
+inline const DomText* string_to_dom_text(const String* s) {
+    return (const DomText*)((const char*)s - sizeof(DomText));
+}
+
+// Ensure String alignment: sizeof(DomText) must be a multiple of 4 (for String.len uint32_t)
+static_assert(sizeof(DomText) % alignof(uint32_t) == 0,
+              "DomText size must be aligned for inline String.len field");
+
+// ============================================================================
+// DomText Node Creation API
+// ============================================================================
+
 /**
  * Create a new DomText node backed by Lambda String
  * @param native_string Pointer to Lambda String (will be referenced, not copied)

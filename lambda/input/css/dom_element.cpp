@@ -175,8 +175,11 @@ bool dom_element_init(DomElement* element, DomDocument* doc, const char* tag_nam
     element->doc = doc;
 
     // Copy Element data into the embedded field and redirect native_element
-    if (native_element) {
+    if (native_element && native_element != &element->elmt) {
         element->elmt = *native_element;  // shallow copy (items[], type, data pointers are shared)
+        element->native_element = &element->elmt;
+    } else if (native_element) {
+        // Self-reference (ui_mode: Element is already embedded in DomElement)
         element->native_element = &element->elmt;
     } else {
         element->native_element = NULL;
@@ -2719,7 +2722,15 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
     }
 
     // create DomElement
-    DomElement* dom_elem = dom_element_create(doc, tag_name, elem);
+    bool ui_mode = doc->input && doc->input->ui_mode;
+    DomElement* dom_elem;
+    if (ui_mode) {
+        // UI mode: DomElement already allocated by MarkBuilder's ElementBuilder
+        dom_elem = element_to_dom_element(elem);
+        if (!dom_element_init(dom_elem, doc, tag_name, elem)) return nullptr;
+    } else {
+        dom_elem = dom_element_create(doc, tag_name, elem);
+    }
     if (!dom_elem) return nullptr;
 
     // populate element-to-DOM map if available (for incremental rebuild)
@@ -2867,8 +2878,15 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
             // Text node - create DomText that references Lambda String
             String* text_str = child_item.get_string();
             if (text_str && text_str->len > 0) {
-                // Create text node (preserves Lambda String reference)
-                DomText* text_node = dom_text_create(text_str, dom_elem);
+                DomText* text_node;
+                if (ui_mode) {
+                    // UI mode: DomText already allocated before String by MarkBuilder
+                    text_node = string_to_dom_text(text_str);
+                    text_node->parent = dom_elem;
+                } else {
+                    // Create text node (preserves Lambda String reference)
+                    text_node = dom_text_create(text_str, dom_elem);
+                }
                 if (text_node) {
                     // Add text node to DOM sibling chain
                     dom_append_to_sibling_chain(dom_elem, text_node);
@@ -2905,7 +2923,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     } else if (arr_item_type == LMD_TYPE_STRING) {
                         String* text_str = arr_item.get_string();
                         if (text_str && text_str->len > 0) {
-                            DomText* text_node = dom_text_create(text_str, dom_elem);
+                            DomText* text_node;
+                            if (ui_mode) {
+                                text_node = string_to_dom_text(text_str);
+                                text_node->parent = dom_elem;
+                            } else {
+                                text_node = dom_text_create(text_str, dom_elem);
+                            }
                             if (text_node) {
                                 dom_append_to_sibling_chain(dom_elem, text_node);
                             }
@@ -2930,7 +2954,13 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                 } else if (nested_type == LMD_TYPE_STRING) {
                                     String* s = nested_item.get_string();
                                     if (s && s->len > 0) {
-                                        DomText* tn = dom_text_create(s, dom_elem);
+                                        DomText* tn;
+                                        if (ui_mode) {
+                                            tn = string_to_dom_text(s);
+                                            tn->parent = dom_elem;
+                                        } else {
+                                            tn = dom_text_create(s, dom_elem);
+                                        }
                                         if (tn) dom_append_to_sibling_chain(dom_elem, tn);
                                     }
                                 } else if (nested_type == LMD_TYPE_SYMBOL) {
