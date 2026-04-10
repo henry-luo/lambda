@@ -609,6 +609,27 @@ uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool i
 CssEnum get_text_transform_from_block(BlockProp* blk);
 
 // ============================================================================
+// CJK Justification Utilities (CSS Text 3 §7.3)
+// ============================================================================
+
+/**
+ * Check if a codepoint has UAX#14 line break class ID (Ideographic).
+ * Characters with ID class allow line breaks before and after them.
+ * Used for CJK inter-character justification and line-breaking.
+ */
+bool has_id_line_break_class(uint32_t cp);
+
+/**
+ * Count justification opportunities in a UTF-8 text segment.
+ * Counts word spaces AND CJK inter-character boundaries per CSS Text 3 §7.3.
+ * For CJK text, gaps between adjacent ID-class characters are opportunities.
+ * @param str UTF-8 text data
+ * @param len byte length of text segment
+ * @return number of justification opportunities (spaces + CJK inter-char gaps)
+ */
+int count_justify_opportunities(const char* str, int len);
+
+// ============================================================================
 // Size Constraint Utilities (§1.1)
 // ============================================================================
 

@@ -104,10 +104,15 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum text_transform,
                                                    CssEnum font_variant,
                                                    CssEnum white_space,
-                                                   CssEnum overflow_wrap) {
+                                                   CssEnum overflow_wrap,
+                                                   CssEnum word_break) {
     // CSS Text 3 §3.4: overflow-wrap: anywhere introduces soft wrap opportunities
     // at every typographic character unit for min-content sizing.
     bool break_anywhere = (overflow_wrap == CSS_VALUE_ANYWHERE);
+    // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class) have implicit
+    // break opportunities between each pair under word-break: normal.
+    // word-break: keep-all suppresses these breaks.
+    bool cjk_breaks = (word_break != CSS_VALUE_KEEP_ALL);
     TextIntrinsicWidths result = {0, 0};
 
     if (!text || length == 0) {
@@ -347,6 +352,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 longest_word = fmax(longest_word, current_word);
                 current_word = 0.0f;
             }
+            // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class)
+            // have break opportunities before and after them.
+            else if (cjk_breaks && has_id_line_break_class(codepoint)) {
+                longest_word = fmax(longest_word, current_word);
+                current_word = 0.0f;
+            }
             continue;
         }
 
@@ -381,6 +392,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         // overflow-wrap: anywhere — every character is a break opportunity
         if (break_anywhere) {
+            longest_word = fmax(longest_word, current_word);
+            current_word = 0.0f;
+        }
+        // CSS Text 3 §5.2: CJK ideographic characters (UAX#14 ID class)
+        // have break opportunities before and after them.
+        else if (cjk_breaks && has_id_line_break_class(codepoint)) {
             longest_word = fmax(longest_word, current_word);
             current_word = 0.0f;
         }
@@ -1987,13 +2004,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 // Get overflow-wrap from element or ancestors (inherited property)
                 // CSS Text 3 §5.2: word-break: break-word is a deprecated keyword that
                 // has the same effect as word-break: normal and overflow-wrap: anywhere.
+                // Get overflow-wrap and word-break from element or ancestors (inherited properties)
                 CssEnum ow = CSS_VALUE_NORMAL;
+                CssEnum wb = CSS_VALUE_NORMAL;
                 {
                     DomNode* n = (DomNode*)element;
                     while (n) {
                         if (n->is_element()) {
                             DomElement* el = (DomElement*)n;
                             if (el->blk) {
+                                // Capture word-break from nearest block ancestor
+                                if (el->blk->word_break != 0 && wb == CSS_VALUE_NORMAL) {
+                                    wb = el->blk->word_break;
+                                }
+                                // Original overflow-wrap resolution (unchanged)
                                 if (el->blk->overflow_wrap != 0) {
                                     ow = el->blk->overflow_wrap;
                                     break;
@@ -2024,7 +2048,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         float line_width = 0;
                         if (line_len > 0) {
                             TextIntrinsicWidths lw = measure_text_intrinsic_widths(
-                                lycon, line_start, line_len, text_transform, font_variant, ws, ow);
+                                lycon, line_start, line_len, text_transform, font_variant, ws, ow, wb);
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
                             if (lw.min_content > text_widths.min_content)
@@ -2048,7 +2072,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 } else {
                     text_widths = measure_text_intrinsic_widths(
                         lycon, normalized_buffer, out_pos, text_transform, font_variant,
-                        CSS_VALUE_NORMAL, ow);
+                        CSS_VALUE_NORMAL, ow, wb);
                 }
                 child_sizes.min_content = text_widths.min_content;
                 child_sizes.max_content = text_widths.max_content;

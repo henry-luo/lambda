@@ -139,6 +139,46 @@ CssEnum get_text_transform_from_block(BlockProp* blk) {
 }
 
 /**
+ * Count justification opportunities in a UTF-8 text segment.
+ * CSS Text 3 §7.3: For auto justification, distribute extra space at:
+ *   1. Word separators (U+0020 SPACE)
+ *   2. Between adjacent CJK ID-class characters (inter-character gaps)
+ * @param str UTF-8 text data
+ * @param len byte length of text segment
+ * @return number of justification opportunities
+ */
+int count_justify_opportunities(const char* str, int len) {
+    if (!str || len <= 0) return 0;
+
+    int count = 0;
+    const char* end = str + len;
+    bool prev_was_id = false;
+
+    while (str < end) {
+        uint32_t cp;
+        int bytes = str_utf8_decode(str, (size_t)(end - str), &cp);
+        if (bytes <= 0) { str++; prev_was_id = false; continue; }
+
+        if (cp == ' ') {
+            count++;
+            prev_was_id = false;
+        } else if (has_id_line_break_class(cp)) {
+            // CJK inter-character gap: opportunity between two adjacent ID-class chars
+            if (prev_was_id) {
+                count++;
+            }
+            prev_was_id = true;
+        } else {
+            prev_was_id = false;
+        }
+
+        str += bytes;
+    }
+
+    return count;
+}
+
+/**
  * Get text-transform property from the layout context.
  * Checks block property for the current element or parent elements.
  */
@@ -241,7 +281,7 @@ static inline bool is_cjk_character(uint32_t codepoint) {
  * Covers: CJK ideographs, Kana, Hangul, emoji, Yi, CJK symbols/radicals,
  * CJK compatibility ideographs, and other ID-class characters.
  */
-static inline bool has_id_line_break_class(uint32_t cp) {
+bool has_id_line_break_class(uint32_t cp) {
     // CJK Unified Ideographs and Extensions
     if (cp >= 0x3400 && cp <= 0x9FFF) return true;   // Extension A + main block
     if (cp >= 0xF900 && cp <= 0xFAFF) return true;   // CJK Compatibility Ideographs
@@ -684,6 +724,29 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
         // so we return 0 to use the font's glyph width
         default: return 0.0f;
     }
+}
+
+/**
+ * CSS Text 3 §4.1.2: Check if a codepoint has East Asian Width Fullwidth (F) or Wide (W).
+ * Used for segment break transformation rules: segment breaks between two
+ * East Asian F/W characters (neither Hangul) are removed instead of becoming spaces.
+ * utf8proc_charwidth returns 2 for F and W characters, 1 for all others.
+ */
+static inline bool is_east_asian_fw(uint32_t cp) {
+    return utf8proc_charwidth(cp) == 2;
+}
+
+/**
+ * CSS Text 3 §4.1.2: Check if a codepoint is Hangul.
+ * Segment break removal between East Asian Wide characters does not apply
+ * when either side is Hangul.
+ */
+static inline bool is_hangul(uint32_t cp) {
+    return (cp >= 0x1100 && cp <= 0x11FF) ||   // Hangul Jamo
+           (cp >= 0x3130 && cp <= 0x318F) ||   // Hangul Compatibility Jamo
+           (cp >= 0xA960 && cp <= 0xA97F) ||   // Hangul Jamo Extended-A
+           (cp >= 0xAC00 && cp <= 0xD7AF) ||   // Hangul Syllables
+           (cp >= 0xD7B0 && cp <= 0xD7FF);     // Hangul Jamo Extended-B
 }
 
 /**
@@ -1794,6 +1857,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool is_word_start = true;  // Track word boundaries for capitalize
     int layout_text_iterations = 0;  // guard against infinite goto loops
 
+    // CSS Text 3 §4.1.2: Track last non-whitespace codepoint for segment break
+    // transformation. When a collapsible segment break occurs between two East Asian
+    // Wide characters (neither Hangul), the break is removed instead of becoming a space.
+    // Also tracks ZWSP (U+200B) which triggers removal of adjacent segment breaks.
+    uint32_t last_processed_cp = 0;
+
     log_debug("layout_text: white-space=%d, collapse_spaces=%d, collapse_newlines=%d, wrap_lines=%d, text-transform=%d",
               white_space, collapse_spaces, collapse_newlines, wrap_lines, text_transform);
 
@@ -2089,6 +2158,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // so that: (a) last_space < next_ch (H5) is TRUE when overflow is checked,
                     // and (b) str = last_space + 1 correctly resumes at the next character.
                     str = next_ch;
+                    last_processed_cp = 0x200B;  // CSS Text 3 §4.1.2: track ZWSP for segment break rules
                     lycon->line.last_space = str - 1;
                     lycon->line.last_space_pos = rect->width;
                     lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
@@ -2201,6 +2271,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
             *str == '\n' || *str == '\r' ? '^' : *str, rect->x, rect->width, wd, lycon->line.right);
         prev_is_zwj_base = is_zwj_composition_base(codepoint);
+        // CSS Text 3 §4.1.2: track last non-whitespace codepoint for segment break transformation
+        if (!is_space(codepoint)) last_processed_cp = codepoint;
         // UAX #14 B2: Em-dash (U+2014) allows break before and after.
         // Record break-before BEFORE adding width so the overflow check can use it.
         // Note: en-dash (U+2013, class BA) only allows break after, not before.
@@ -2481,8 +2553,44 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         if (is_space(*str)) {
             if (collapse_spaces) {
+                // CSS Text 3 §4.1.2: Track whether whitespace contains a segment break (newline)
+                bool has_segment_break = (codepoint == '\n' || codepoint == '\r');
                 // Collapse multiple spaces into one, respecting newline preservation
-                do { str++; } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+                do {
+                    str++;
+                    if ((*str == '\n' || *str == '\r') && collapse_newlines) has_segment_break = true;
+                } while (is_space(*str) && (collapse_newlines || (*str != '\n' && *str != '\r')));
+
+                // CSS Text 3 §4.1.2: Segment Break Transformation Rules
+                // After collapsing whitespace, if the sequence contained a segment break,
+                // check whether the break should be removed entirely:
+                //   Rule 1: If adjacent to ZWSP (U+200B), remove the segment break.
+                //   Rule 2: If both the character before and after are East Asian Width
+                //           Fullwidth/Wide (not Hangul), remove the segment break.
+                //           NOTE: Rule 2 is deferred — browser references do not implement it.
+                // Otherwise the segment break becomes a space (already added as wd).
+                if (has_segment_break && collapse_newlines) {
+                    bool remove_break = false;
+                    // check character before the segment break
+                    bool prev_is_zwsp = (last_processed_cp == 0x200B);
+                    // check character after: peek at next non-whitespace
+                    bool next_is_zwsp = false;
+                    if (*str) {
+                        if (str[0] == 0xE2 && str[1] == 0x80 && str[2] == 0x8B) {
+                            next_is_zwsp = true;
+                        }
+                    }
+                    // Rule 1: adjacent to ZWSP
+                    if (prev_is_zwsp || next_is_zwsp) {
+                        remove_break = true;
+                    }
+                    if (remove_break) {
+                        rect->width -= wd;  // undo the space width
+                        log_debug("segment break removed between U+%04X and U+%04X (CSS Text 3 §4.1.2)",
+                                  last_processed_cp, next_is_zwsp ? 0x200BU : 0U);
+                        continue;  // skip break opportunity recording
+                    }
+                }
             } else {
                 // Preserve spaces - just advance one character
                 str++;

@@ -190,7 +190,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum text_transform = CSS_VALUE_NONE,
                                                    CssEnum font_variant = CSS_VALUE_NONE,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
-                                                   CssEnum overflow_wrap = CSS_VALUE_NORMAL);
+                                                   CssEnum overflow_wrap = CSS_VALUE_NORMAL,
+                                                   CssEnum word_break = CSS_VALUE_NORMAL);
 
 /**
  * Walk up DOM tree to find inherited text-transform value from specified_style.
