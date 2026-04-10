@@ -657,6 +657,39 @@ extern "C" Item js_to_number(Item value) {
             *result = (double)val;
             return (Item){.item = d2it(result)};
         }
+        // v29: Handle hex (0x/0X) literals explicitly — ES spec does not allow
+        // a sign prefix on hex literals. strtod() on some platforms (macOS) accepts
+        // "+0x10" which violates the spec. Parse hex ourselves.
+        if (trimmed_len > 2 && buf[0] == '0' && (buf[1] == 'x' || buf[1] == 'X')) {
+            char* hp = buf + 2;
+            long long val = 0;
+            bool has_digits = false;
+            while ((*hp >= '0' && *hp <= '9') || (*hp >= 'a' && *hp <= 'f') || (*hp >= 'A' && *hp <= 'F')) {
+                int d;
+                if (*hp >= '0' && *hp <= '9') d = *hp - '0';
+                else if (*hp >= 'a' && *hp <= 'f') d = *hp - 'a' + 10;
+                else d = *hp - 'A' + 10;
+                val = val * 16 + d;
+                has_digits = true;
+                hp++;
+            }
+            if (*hp != '\0' || !has_digits) {
+                double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+                *nan_ptr = NAN;
+                return (Item){.item = d2it(nan_ptr)};
+            }
+            double* result = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *result = (double)val;
+            return (Item){.item = d2it(result)};
+        }
+        // v29: Reject signed hex/octal/binary — strtod might accept "+0x..." on some platforms
+        if (trimmed_len > 3 && (buf[0] == '+' || buf[0] == '-') && buf[1] == '0' &&
+            (buf[2] == 'x' || buf[2] == 'X' || buf[2] == 'b' || buf[2] == 'B' ||
+             buf[2] == 'o' || buf[2] == 'O')) {
+            double* nan_ptr = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+            *nan_ptr = NAN;
+            return (Item){.item = d2it(nan_ptr)};
+        }
         char* endptr;
         double num = strtod(buf, &endptr);
         // Check that ALL trimmed characters were consumed
@@ -11106,6 +11139,186 @@ extern "C" bool js_is_generator(Item obj) {
     String* gen_key = heap_create_name("__gen_idx", 9);
     Item idx_item = js_property_get(obj, (Item){.item = s2it(gen_key)});
     return get_type_id(idx_item) == LMD_TYPE_INT;
+}
+
+// =============================================================================
+// v29: Lazy iteration protocol for for-of
+// GetIterator(iterable) → returns the iterator object.
+// For arrays: returns a synthetic array iterator (lightweight wrapper).
+// For generators: returns the generator itself.
+// For objects with [Symbol.iterator]: calls it and returns the result.
+// =============================================================================
+
+// Get the iterator for an iterable (GetIterator, ES spec §7.4.1)
+extern "C" Item js_get_iterator(Item iterable) {
+    TypeId tid = get_type_id(iterable);
+
+    // Arrays: wrap in array iterator
+    if (tid == LMD_TYPE_ARRAY) {
+        Item iter = js_object_create(ItemNull);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__arr__", 7))}, iterable);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
+        return iter;
+    }
+
+    // Strings: wrap in string iterator
+    if (tid == LMD_TYPE_STRING) {
+        Item iter = js_object_create(ItemNull);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__str__", 7))}, iterable);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
+        return iter;
+    }
+
+    // Generators: return as-is (they implement iterator protocol natively)
+    if (js_is_generator(iterable)) {
+        return iterable;
+    }
+
+    // Typed arrays: wrap in typed array iterator
+    if (js_is_typed_array(iterable)) {
+        Item iter = js_object_create(ItemNull);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__tarr__", 8))}, iterable);
+        js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
+        return iter;
+    }
+
+    // Map/Set collections
+    if (tid == LMD_TYPE_MAP) {
+        JsCollectionData* cd = js_get_collection_data(iterable);
+        if (cd) {
+            // Drain to array and wrap in array iterator (collections are small enough)
+            Item arr = js_iterable_to_array(iterable);
+            Item iter = js_object_create(ItemNull);
+            js_property_set(iter, (Item){.item = s2it(heap_create_name("__arr__", 7))}, arr);
+            js_property_set(iter, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(0)});
+            return iter;
+        }
+
+        // Check for [Symbol.iterator]()
+        Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+        Item iter_factory = js_property_get(iterable, iter_factory_key);
+        if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
+            Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            return iterator;
+        }
+
+        // Check for .next() method (already an iterator)
+        String* next_key = heap_create_name("next", 4);
+        Item next_fn = js_property_get(iterable, (Item){.item = s2it(next_key)});
+        if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
+            return iterable;
+        }
+    }
+    if (tid == LMD_TYPE_ELEMENT) {
+        // Check for [Symbol.iterator]()
+        Item iter_factory_key = (Item){.item = s2it(heap_create_name("__sym_1", 7))};
+        Item iter_factory = js_property_get(iterable, iter_factory_key);
+        if (get_type_id(iter_factory) == LMD_TYPE_FUNC) {
+            Item iterator = js_call_function(iter_factory, iterable, NULL, 0);
+            if (js_check_exception()) return ItemNull;
+            return iterator;
+        }
+    }
+
+    // Fallback: return as-is
+    return iterable;
+}
+
+// IteratorStep: call iterator.next(), return result {done, value}
+// Returns ItemNull on completion (done=true) or the value on success.
+// Uses a special encoding: returns the value directly, or a sentinel for "done".
+extern "C" Item js_iterator_step(Item iterator) {
+    // Synthetic array iterator
+    bool has_arr = false;
+    Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);
+    if (has_arr) {
+        bool has_idx = false;
+        Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
+        int idx = has_idx ? (int)it2i(idx_val) : 0;
+        int len = (get_type_id(arr_val) == LMD_TYPE_ARRAY) ? arr_val.array->length : 0;
+        if (idx >= len) return (Item){.item = ITEM_NULL};  // done
+        Item elem = js_property_access(arr_val, (Item){.item = i2it(idx)});
+        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
+        return elem;
+    }
+
+    // Synthetic string iterator
+    bool has_str = false;
+    Item str_val = js_map_get_fast(iterator.map, "__str__", 7, &has_str);
+    if (has_str && get_type_id(str_val) == LMD_TYPE_STRING) {
+        bool has_idx = false;
+        Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
+        int idx = has_idx ? (int)it2i(idx_val) : 0;
+        String* str = it2s(str_val);
+        if (idx >= (int)str->len) return (Item){.item = ITEM_NULL};  // done
+        String* ch = heap_create_name(str->chars + idx, 1);
+        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
+        return (Item){.item = s2it(ch)};
+    }
+
+    // Synthetic typed array iterator
+    bool has_tarr = false;
+    Item tarr_val = js_map_get_fast(iterator.map, "__tarr__", 8, &has_tarr);
+    if (has_tarr) {
+        bool has_idx = false;
+        Item idx_val = js_map_get_fast(iterator.map, "__idx__", 7, &has_idx);
+        int idx = has_idx ? (int)it2i(idx_val) : 0;
+        int len = js_typed_array_length(tarr_val);
+        if (idx >= len) return (Item){.item = ITEM_NULL};  // done
+        Item elem = js_typed_array_get(tarr_val, (Item){.item = i2it(idx)});
+        js_property_set(iterator, (Item){.item = s2it(heap_create_name("__idx__", 7))}, (Item){.item = i2it(idx + 1)});
+        return elem;
+    }
+
+    // Generator: call js_generator_next
+    if (js_is_generator(iterator)) {
+        Item result = js_generator_next(iterator, make_js_undefined());
+        if (js_check_exception()) return (Item){.item = ITEM_NULL};
+        String* done_key = heap_create_name("done", 4);
+        Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+        if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = ITEM_NULL};
+        String* val_key = heap_create_name("value", 5);
+        return js_property_get(result, (Item){.item = s2it(val_key)});
+    }
+
+    // Generic iterator: call .next()
+    if (get_type_id(iterator) == LMD_TYPE_MAP || get_type_id(iterator) == LMD_TYPE_ELEMENT) {
+        String* next_key = heap_create_name("next", 4);
+        Item next_fn = js_property_get(iterator, (Item){.item = s2it(next_key)});
+        if (get_type_id(next_fn) == LMD_TYPE_FUNC) {
+            Item result = js_call_function(next_fn, iterator, NULL, 0);
+            if (js_check_exception()) return (Item){.item = ITEM_NULL};
+            String* done_key = heap_create_name("done", 4);
+            Item done_item = js_property_get(result, (Item){.item = s2it(done_key)});
+            if (get_type_id(done_item) == LMD_TYPE_BOOL && it2b(done_item)) return (Item){.item = ITEM_NULL};
+            String* val_key = heap_create_name("value", 5);
+            return js_property_get(result, (Item){.item = s2it(val_key)});
+        }
+    }
+
+    return (Item){.item = ITEM_NULL};  // done
+}
+
+// IteratorClose: call iterator.return() if it exists (ES spec §7.4.6)
+extern "C" Item js_iterator_close(Item iterator) {
+    // Generators: call js_generator_return
+    if (js_is_generator(iterator)) {
+        // Send a return signal to the generator
+        js_generator_return(iterator, make_js_undefined());
+        return make_js_undefined();
+    }
+
+    // Generic iterator: call .return() if available
+    TypeId tid = get_type_id(iterator);
+    if (tid == LMD_TYPE_MAP || tid == LMD_TYPE_ELEMENT) {
+        String* return_key = heap_create_name("return", 6);
+        Item return_fn = js_property_get(iterator, (Item){.item = s2it(return_key)});
+        if (get_type_id(return_fn) == LMD_TYPE_FUNC) {
+            js_call_function(return_fn, iterator, NULL, 0);
+        }
+    }
+    return make_js_undefined();
 }
 
 // v15: Convert an iterable to an array. If it's a generator, drain it.

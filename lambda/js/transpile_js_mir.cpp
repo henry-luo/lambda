@@ -14118,73 +14118,91 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     // Evaluate right-hand side (the iterable)
     MIR_reg_t iterable = jm_transpile_box_item(mt, fo->right);
 
-    // For for-in: get keys including prototype chain; for for-of: drain iterables to array
+    // For for-in: get keys as array; for for-of: get lazy iterator
     bool is_for_in = (fo->base.node_type == JS_AST_NODE_FOR_IN_STATEMENT);
-    MIR_reg_t collection = iterable;
+
     if (is_for_in) {
-        collection = jm_call_1(mt, "js_for_in_keys", MIR_T_I64,
+        // for-in: collect keys into array, iterate by index (existing behavior)
+        MIR_reg_t collection = jm_call_1(mt, "js_for_in_keys", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
-    } else {
-        // for-of: convert generators/iterables to array
-        collection = jm_call_1(mt, "js_iterable_to_array", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
+
+        MIR_reg_t len = jm_call_1(mt, "js_array_length", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, collection));
+
+        MIR_reg_t idx = jm_new_reg(mt, "foridx", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
+            MIR_new_int_op(mt->ctx, 0)));
+
+        MIR_label_t l_test = jm_new_label(mt);
+        MIR_label_t l_update = jm_new_label(mt);
+        MIR_label_t l_end = jm_new_label(mt);
+
+        jm_push_loop_labels(mt, l_update, l_end);
+
+        jm_emit_label(mt, l_test);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
+            MIR_new_reg_op(mt->ctx, jm_call_1(mt, "js_array_length", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, collection)))));
+        MIR_reg_t cmp = jm_new_reg(mt, "foricmp", MIR_T_I64);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, cmp),
+            MIR_new_reg_op(mt->ctx, idx), MIR_new_reg_op(mt->ctx, len)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
+            MIR_new_reg_op(mt->ctx, cmp)));
+
+        MIR_reg_t idx_item = jm_box_int_reg(mt, idx);
+        MIR_reg_t elem = jm_call_2(mt, "js_property_access", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, collection),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
+
+        if (destr_pattern) jm_emit_array_destructure(mt, (JsAstNode*)destr_pattern, loop_var);
+        if (obj_destr_pattern) jm_emit_object_destructure(mt, (JsAstNode*)obj_destr_pattern, loop_var);
+
+        if (fo->body) {
+            if (fo->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+                jm_push_scope(mt);
+                jm_init_block_tdz(mt, fo->body);
+                JsBlockNode* blk = (JsBlockNode*)fo->body;
+                JsAstNode* s = blk->statements;
+                while (s) { jm_transpile_statement(mt, s); s = s->next; }
+                jm_pop_scope(mt);
+            } else {
+                jm_transpile_statement(mt, fo->body);
+            }
+        }
+
+        jm_emit_label(mt, l_update);
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
+            MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
+
+        jm_emit_label(mt, l_end);
+        if (mt->loop_depth > 0) mt->loop_depth--;
+        jm_pop_scope(mt);
+        return;
     }
 
-    // Get length (as raw int, not boxed Item)
-    MIR_reg_t len = jm_call_1(mt, "js_array_length", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, collection));
+    // for-of: use lazy iterator protocol (v29)
+    // Get iterator from iterable
+    MIR_reg_t iterator = jm_call_1(mt, "js_get_iterator", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterable));
 
-    // Index counter
-    MIR_reg_t idx = jm_new_reg(mt, "foridx", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, idx),
-        MIR_new_int_op(mt->ctx, 0)));
-
-    // In generators: register for-of internals as env-stored variables so they
-    // survive across yield/resume state transitions
+    // In generators: register iterator and loop_var as env-stored variables
     if (mt->in_generator && mt->gen_env_reg) {
-        // Allocate env slots for collection, len, idx, and loop_var
-        int col_slot = mt->gen_local_slot_count++;
-        int len_slot = mt->gen_local_slot_count++;
-        int idx_slot = mt->gen_local_slot_count++;
+        int iter_slot = mt->gen_local_slot_count++;
         int lv_slot  = mt->gen_local_slot_count++;
-
-        // Register collection
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_forc_%d", mt->label_counter);
-            entry.var.reg = collection;
+            snprintf(entry.name, sizeof(entry.name), "_foriter_%d", mt->label_counter);
+            entry.var.reg = iterator;
             entry.var.from_env = true;
-            entry.var.env_slot = col_slot;
+            entry.var.env_slot = iter_slot;
             entry.var.env_reg = mt->gen_env_reg;
             entry.var.typed_array_type = -1;
             hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
         }
-        // Register len (raw int64, stored as uint64 in env — bit-compatible)
-        {
-            JsVarScopeEntry entry;
-            memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_forl_%d", mt->label_counter);
-            entry.var.reg = len;
-            entry.var.from_env = true;
-            entry.var.env_slot = len_slot;
-            entry.var.env_reg = mt->gen_env_reg;
-            entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
-        }
-        // Register idx (raw int64)
-        {
-            JsVarScopeEntry entry;
-            memset(&entry, 0, sizeof(entry));
-            snprintf(entry.name, sizeof(entry.name), "_fori_%d", mt->label_counter);
-            entry.var.reg = idx;
-            entry.var.from_env = true;
-            entry.var.env_slot = idx_slot;
-            entry.var.env_reg = mt->gen_env_reg;
-            entry.var.typed_array_type = -1;
-            hashmap_set(mt->var_scopes[mt->scope_depth], &entry);
-        }
-        // Register loop_var
         {
             JsVarScopeEntry entry;
             memset(&entry, 0, sizeof(entry));
@@ -14201,28 +14219,26 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
 
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_update = jm_new_label(mt);
+    MIR_label_t l_break = jm_new_label(mt);  // v29: break target calls iterator close
     MIR_label_t l_end = jm_new_label(mt);
 
-    jm_push_loop_labels(mt, l_update, l_end);
+    // v29: Use l_break as the break target so IteratorClose is called
+    jm_push_loop_labels(mt, l_update, l_break);
 
-    // Test: idx < len  (re-read length on each iteration so insertions during iteration are visible)
+    // Test: call js_iterator_step(iterator) → value or NULL (done)
     jm_emit_label(mt, l_test);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, len),
-        MIR_new_reg_op(mt->ctx, jm_call_1(mt, "js_array_length", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, collection)))));
-    MIR_reg_t cmp = jm_new_reg(mt, "foricmp", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_LTS, MIR_new_reg_op(mt->ctx, cmp),
-        MIR_new_reg_op(mt->ctx, idx), MIR_new_reg_op(mt->ctx, len)));
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_end),
-        MIR_new_reg_op(mt->ctx, cmp)));
+    MIR_reg_t step_result = jm_call_1(mt, "js_iterator_step", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    // Check if done (NULL == ITEM_NULL_VAL)
+    MIR_reg_t is_done = jm_new_reg(mt, "forofdone", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, is_done),
+        MIR_new_reg_op(mt->ctx, step_result), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL_VAL)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_end),
+        MIR_new_reg_op(mt->ctx, is_done)));
 
-    // Get current element: collection[idx]
-    MIR_reg_t idx_item = jm_box_int_reg(mt, idx);
-    MIR_reg_t elem = jm_call_2(mt, "js_property_access", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, collection),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_item));
+    // Assign current value to loop variable
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, elem)));
+        MIR_new_reg_op(mt->ctx, loop_var), MIR_new_reg_op(mt->ctx, step_result)));
 
     // Destructure element into individual variables if array pattern
     if (destr_pattern) {
@@ -14248,11 +14264,14 @@ static void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         }
     }
 
-    // Update: idx++
+    // Update: jump back to test (no index to increment — iterator handles state)
     jm_emit_label(mt, l_update);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, idx),
-        MIR_new_reg_op(mt->ctx, idx), MIR_new_int_op(mt->ctx, 1)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_test)));
+
+    // v29: Break target — call IteratorClose before exiting
+    jm_emit_label(mt, l_break);
+    jm_call_1(mt, "js_iterator_close", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, iterator));
+    // fall through to l_end
 
     jm_emit_label(mt, l_end);
     if (mt->loop_depth > 0) mt->loop_depth--;

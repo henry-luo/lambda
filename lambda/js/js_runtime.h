@@ -534,6 +534,16 @@ Item js_gen_yield_delegate_result(Item iterable, int64_t resume_state);
  */
 Item js_iterable_to_array(Item iterable);
 
+/**
+ * Lazy iteration protocol for for-of loops.
+ * js_get_iterator: Get an iterator object from an iterable.
+ * js_iterator_step: Advance iterator, return next value or ITEM_NULL when done.
+ * js_iterator_close: Call iterator.return() for IteratorClose (on break/return).
+ */
+Item js_get_iterator(Item iterable);
+Item js_iterator_step(Item iterator);
+Item js_iterator_close(Item iterator);
+
 // =============================================================================
 // v14: Promise Runtime
 // =============================================================================
