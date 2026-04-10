@@ -1,5 +1,6 @@
 #include "js_transpiler.hpp"
 #include "../ts/ts_transpiler.hpp"
+#include "../ts/ts_type_parser.hpp"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
@@ -3003,6 +3004,13 @@ static TsTypeNode* build_ts_conditional_type_u(JsTranspiler* tp, TSNode node) {
 // dispatch for all type expression nodes
 static TsTypeNode* build_ts_type_expr_u(JsTranspiler* tp, TSNode node) {
     const char* type_str = ts_node_type(node);
+
+    // v2: opaque _ts_type token — parse type text with recursive descent parser
+    if (strcmp(type_str, "type") == 0) {
+        int len;
+        const char* text = ts_node_text_util(tp, node, &len);
+        return ts_parse_type_text(tp, text, len);
+    }
 
     if (strcmp(type_str, "predefined_type") == 0)
         return build_ts_predefined_type_u(tp, node);
