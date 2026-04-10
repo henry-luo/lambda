@@ -67,6 +67,10 @@ void clear_persistent_last_error();
 extern __thread LambdaError* persistent_last_error;
 extern __thread EvalContext* context;
 
+// Ensure MIR inline allocation offsets stay correct if Context struct changes
+static_assert(offsetof(EvalContext, heap) == sizeof(Context),
+    "EvalContext.heap offset changed — update MIR inline bump allocation code");
+
 // Forward declare has_current_item_ref from build_ast.cpp
 bool has_current_item_ref(AstNode* node);
 
@@ -9928,7 +9932,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
     MIR_reg_t heap_reg_fn = new_reg(mt, "heap_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, heap_reg_fn),
-        MIR_new_mem_op(mt->ctx, MIR_T_I64, 64, runtime_fn, 0, 1)));  // context->heap
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_fn, 0, 1)));  // context->heap
     mt->gc_reg = new_reg(mt, "gc_ptr", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, mt->gc_reg),
         MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, heap_reg_fn, 0, 1)));  // heap->gc
@@ -11513,10 +11517,10 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
         MIR_new_mem_op(ctx, MIR_T_I64, 0, mod_tl_bss_addr, 0, 1)));
 
     // Load gc_heap_t* for inline bump allocation: context->heap->gc
-    // EvalContext.heap is at offset 64 (sizeof(Context)), Heap.gc is at offset 8
+    // EvalContext.heap is at offsetof(EvalContext, heap), Heap.gc is at offset 8
     MIR_reg_t heap_reg = new_reg(&mt, "heap_ptr", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, heap_reg),
-        MIR_new_mem_op(ctx, MIR_T_I64, 64, runtime_reg, 0, 1)));  // context->heap
+        MIR_new_mem_op(ctx, MIR_T_I64, offsetof(EvalContext, heap), runtime_reg, 0, 1)));  // context->heap
     mt.gc_reg = new_reg(&mt, "gc_ptr", MIR_T_I64);
     emit_insn(&mt, MIR_new_insn(ctx, MIR_MOV, MIR_new_reg_op(ctx, mt.gc_reg),
         MIR_new_mem_op(ctx, MIR_T_I64, 8, heap_reg, 0, 1)));  // heap->gc

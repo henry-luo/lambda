@@ -3616,7 +3616,23 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // Resolve text-indent: percentage needs containing block width (now available)
     float resolved_text_indent = 0.0f;
     if (block->blk) {
-        if (!isnan(block->blk->text_indent_percent)) {
+        if (block->blk->text_indent_calc) {
+            // calc() expression with potential percentage - resolve now with correct basis
+            // CSS Text 3: text-indent percentage resolves against the block's own content width
+            // Temporarily set parent content_width so resolve_length_value uses the right basis
+            float saved_parent_width = 0;
+            bool has_parent = lycon->block.parent != nullptr;
+            if (has_parent) {
+                saved_parent_width = lycon->block.parent->content_width;
+                lycon->block.parent->content_width = content_width;
+            }
+            resolved_text_indent = resolve_length_value(lycon, CSS_PROPERTY_TEXT_INDENT, block->blk->text_indent_calc);
+            if (has_parent) {
+                lycon->block.parent->content_width = saved_parent_width;
+            }
+            log_debug("setup_inline: resolved text-indent calc() -> %.1fpx (content_width=%.1f)",
+                     resolved_text_indent, content_width);
+        } else if (!isnan(block->blk->text_indent_percent)) {
             // Percentage text-indent: resolve against containing block width
             resolved_text_indent = content_width * block->blk->text_indent_percent / 100.0f;
             log_debug("setup_inline: resolved text-indent %.1f%% -> %.1fpx (content_width=%.1f)",
@@ -3687,6 +3703,10 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
+    // CSS Text 3 §4.2: save the block container's font for tab-size calculation.
+    // Tab stops use "the advance width of the space character as rendered by the
+    // block's font", not the inline element's font.
+    lycon->block.block_container_font = lycon->font.style;
     // CSS 2.1 §10.8.1: Update line_start_font to the block's own font, since
     // line_reset() was called before setup_font() and captured the parent's font.
     // The strut baseline detection needs the block's font, not the parent's.
@@ -6096,19 +6116,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_TOP) {
-                    // CSS 2.1 10.8.1: vertical-align:top aligns element's top with line box top
-                    // The line box top is at init_ascender above the baseline
-                    // Element contributes (block_flow_height - init_ascender) below the baseline
-                    lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
-                    // The strut always contributes its ascender to the line box
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->block.init_ascender);
+                    // CSS 2.1 §10.8.1: vertical-align:top/bottom elements don't participate
+                    // in the first-pass baseline-relative line box height calculation.
+                    // Their height is tracked separately and used in a second pass to
+                    // expand the line box if needed.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else if (block->in_line->vertical_align == CSS_VALUE_BOTTOM) {
-                    // CSS 2.1 10.8.1: vertical-align:bottom aligns element's bottom with line box bottom
-                    // Similar calculation but relative to init_descender
-                    lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
-                    // The strut always contributes its descender to the line box
-                    lycon->line.max_descender = max(lycon->line.max_descender, lycon->block.init_descender);
+                    // CSS 2.1 §10.8.1: Same second-pass treatment as vertical-align:top.
+                    lycon->line.max_top_bottom_height = max(lycon->line.max_top_bottom_height, block_flow_height);
                 }
                 else {
                     // For other vertical-align values (sub, super, middle, etc.)

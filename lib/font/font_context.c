@@ -309,39 +309,14 @@ void font_context_reset_document_fonts(FontContext* ctx) {
     // clear @font-face descriptors from the previous document
     font_face_clear(ctx);
 
-    // selectively clear codepoint fallback cache — only remove entries
-    // referencing document-specific (@font-face) handles. System font
-    // fallback entries survive across documents to avoid re-loading.
+    // clear ALL codepoint fallback cache entries between documents.
+    // The cache is keyed by codepoint only, but stores size-specific font
+    // handles. If document A uses font-size 24px for CJK and document B
+    // uses 16px, the cached 24px handle would be returned for 16px lookups,
+    // producing wrong line-height metrics. Clearing all entries is safe
+    // because glyph caches are also cleared between documents.
     if (ctx->codepoint_fallback_cache) {
-        // scan for document-font entries
-        size_t count = hashmap_count(ctx->codepoint_fallback_cache);
-        if (count > 0) {
-            uint32_t stack_keys[128];
-            uint32_t* keys = stack_keys;
-            int capacity = 128;
-            if (count > 128) {
-                keys = (uint32_t*)malloc(count * sizeof(uint32_t));
-                capacity = (int)count;
-            }
-            int nremove = 0;
-
-            // iterate and collect codepoints with document-font handles
-            size_t iter = 0;
-            void* item;
-            while (hashmap_iter(ctx->codepoint_fallback_cache, &iter, &item)) {
-                CodepointFallbackEntry* e = (CodepointFallbackEntry*)item;
-                if (e->handle && e->handle->is_document_font && nremove < capacity) {
-                    keys[nremove++] = e->codepoint;
-                }
-            }
-
-            for (int i = 0; i < nremove; i++) {
-                CodepointFallbackEntry search = {.codepoint = keys[i], .handle = NULL};
-                hashmap_delete(ctx->codepoint_fallback_cache, &search);
-            }
-
-            if (keys != stack_keys) free(keys);
-        }
+        hashmap_clear(ctx->codepoint_fallback_cache, true);
     }
 
     // selectively remove @font-face entries from face_cache;

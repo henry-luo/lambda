@@ -564,10 +564,15 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->tag() == HTM_TAG_BR) {
         // allocate a line break view
         View* br_view = set_view(lycon, RDT_VIEW_BR, elmt);
-        // CSS Text 3 §4.1.3: Trailing spaces at end of line are removed/hung before
-        // the forced break. Position <br> at the trimmed content edge, not after
-        // the trailing space that will be stripped during line_break.
-        br_view->x = lycon->line.advance_x - lycon->line.trailing_space_width;
+        // Position <br> at the trimmed content edge for LTR, or at the
+        // line box start for RTL. In RTL, bidi visual reordering places the
+        // zero-width <br> at the inline-start edge (before LTR text runs);
+        // browsers report br.x at the content area start in RTL contexts.
+        if (lycon->block.direction == CSS_VALUE_RTL) {
+            br_view->x = lycon->line.left;
+        } else {
+            br_view->x = lycon->line.advance_x - lycon->line.trailing_space_width;
+        }
         br_view->width = 0;
         // The <br> element's bounding box height is the font content area (cell height),
         // not the CSS line-height. The line-height is used by line_break() to advance

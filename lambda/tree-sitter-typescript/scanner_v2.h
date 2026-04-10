@@ -10,6 +10,7 @@
 //   TS_TYPE, TS_TYPE_ARGUMENTS, TS_TYPE_PARAMETERS, TS_INTERFACE_BODY, TS_CLASS_MODIFIERS
 
 #include "tree_sitter/parser.h"
+#include <string.h>
 #include <wctype.h>
 
 enum TokenType {

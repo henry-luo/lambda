@@ -1905,6 +1905,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 CssEnum ws = get_white_space_value(child);
                 bool preserve_spaces = (ws == CSS_VALUE_PRE || ws == CSS_VALUE_PRE_WRAP ||
                                         ws == CSS_VALUE_BREAK_SPACES);
+                bool preserve_newlines = preserve_spaces || (ws == CSS_VALUE_PRE_LINE);
 
                 char normalized_buffer[2048];
                 size_t out_pos = 0;
@@ -1916,6 +1917,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     }
                 } else {
                     // white-space: normal/nowrap/pre-line — collapse consecutive spaces
+                    // For pre-line: newlines are preserved as forced breaks; spaces collapse.
                     // Only trim leading whitespace if this is the first child or preceded only by whitespace.
                     // If there's inline content before this text node, leading whitespace should
                     // collapse to a single space (which contributes to intrinsic width).
@@ -1925,7 +1927,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     bool in_whitespace = !has_inline_before;  // Only start as in_whitespace if no inline content before
                     for (size_t i = 0; i < text_len && out_pos < sizeof(normalized_buffer) - 1; i++) {
                         unsigned char ch = (unsigned char)text[i];
-                        if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
+                        if (ch == '\n' && preserve_newlines) {
+                            // CSS Text 3 §4.1: pre-line preserves newlines as forced breaks
+                            normalized_buffer[out_pos++] = '\n';
+                            in_whitespace = true;  // spaces after newline collapse
+                        } else if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f') {
                             if (!in_whitespace) {
                                 normalized_buffer[out_pos++] = ' ';  // Collapse to single space
                                 in_whitespace = true;
@@ -2003,8 +2009,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 }
 
                 TextIntrinsicWidths text_widths;
-                if (preserve_spaces) {
-                    // For pre/pre-wrap/break-spaces: newlines create forced line breaks.
+                if (preserve_newlines) {
+                    // For pre/pre-wrap/break-spaces/pre-line: newlines create forced line breaks.
                     // Measure each line separately; max-content = widest line.
                     text_widths = {0, 0};
                     const char* line_start = normalized_buffer;
