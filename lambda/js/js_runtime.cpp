@@ -1358,19 +1358,34 @@ extern "C" Item js_add(Item left, Item right) {
             }
         }
     }
-    // Arrays: ToPrimitive converts to string (toString → join with commas)
-    if (left_type == LMD_TYPE_ARRAY) {
-        left = js_to_string(left); left_type = LMD_TYPE_STRING;
+    // Arrays/Functions: ToPrimitive — check valueOf/toString before default
+    auto toprimitive_non_map = [](Item& val, TypeId& vtype) {
+        // Check for custom valueOf (set via val.valueOf = fn)
+        Item vo_fn = js_property_get(val, (Item){.item = s2it(heap_create_name("valueOf", 7))});
+        if (vo_fn.item != ItemNull.item && get_type_id(vo_fn) == LMD_TYPE_FUNC) {
+            Item result = js_call_function(vo_fn, val, NULL, 0);
+            TypeId rt = get_type_id(result);
+            if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) {
+                val = result; vtype = rt; return;
+            }
+        }
+        // Check for custom toString
+        Item ts_fn = js_property_get(val, (Item){.item = s2it(heap_create_name("toString", 8))});
+        if (ts_fn.item != ItemNull.item && get_type_id(ts_fn) == LMD_TYPE_FUNC) {
+            Item result = js_call_function(ts_fn, val, NULL, 0);
+            TypeId rt = get_type_id(result);
+            if (rt != LMD_TYPE_MAP && rt != LMD_TYPE_ARRAY && rt != LMD_TYPE_FUNC) {
+                val = result; vtype = rt; return;
+            }
+        }
+        // Default: convert to string
+        val = js_to_string(val); vtype = LMD_TYPE_STRING;
+    };
+    if (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_FUNC) {
+        toprimitive_non_map(left, left_type);
     }
-    if (right_type == LMD_TYPE_ARRAY) {
-        right = js_to_string(right); right_type = LMD_TYPE_STRING;
-    }
-    // Functions: ToPrimitive converts to string (function source/toString)
-    if (left_type == LMD_TYPE_FUNC) {
-        left = js_to_string(left); left_type = LMD_TYPE_STRING;
-    }
-    if (right_type == LMD_TYPE_FUNC) {
-        right = js_to_string(right); right_type = LMD_TYPE_STRING;
+    if (right_type == LMD_TYPE_ARRAY || right_type == LMD_TYPE_FUNC) {
+        toprimitive_non_map(right, right_type);
     }
 
     // String concatenation if either operand is a string
