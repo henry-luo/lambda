@@ -915,6 +915,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_expanded_inline_lh = false;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
+    lycon->line.trailing_letter_spacing = 0;
     // CSS 2.1 §10.8.1: Initialize parent font metrics from block's init values.
     // These are the correct "parent" for top-level inline content.
     // span_vertical_align will override with actual parent span font when recursing.
@@ -1708,12 +1709,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     // Check if we're already past the line end before starting new text
     // This can happen after an inline-block that's wider than the container
+    // CSS Text 3 §5.2: Only wrap at allowed break points (soft wrap opportunities).
+    // Empty inline elements (e.g., <span></span>) do NOT introduce break
+    // opportunities. Require a valid wrap point: a previous space/ZWSP, a
+    // collapsed-whitespace wrap opportunity, a leading space in this text,
+    // or word-break: break-all (every character boundary is a break point).
     {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         // Only break if we're strictly past the end, not just at the end
         // Being exactly at the end is fine - whitespace might be collapsed
-        if (wrap_lines && lycon->line.advance_x > line_right && !lycon->line.is_line_start) {
+        if (wrap_lines && lycon->line.advance_x > line_right && !lycon->line.is_line_start
+            && (lycon->line.last_space || lycon->line.wrap_opportunity_before_nowrap
+                || had_leading_space || break_all)) {
             log_debug("Text starts past line end (advance_x=%.1f > line_right=%.1f), breaking line",
                       lycon->line.advance_x, line_right);
             line_break(lycon);
@@ -2205,9 +2213,14 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     // trailing_space_width was reset when subsequent non-space chars
                     // were processed (before the overflow triggered the rewind).
                     // Restore it so line_break() can trim the trailing space.
+                    // CSS Text 3 §8: Include word-spacing and letter-spacing that were
+                    // part of the space's total width, since trailing space trimming
+                    // should remove the entire space contribution (glyph + spacing).
                     if (lycon->line.last_space_kind == BRK_SPACE && collapse_spaces) {
                         GlyphInfo sp_glyph = font_get_glyph(lycon->font.font_handle, ' ');
-                        lycon->line.trailing_space_width = sp_glyph.advance_x;
+                        lycon->line.trailing_space_width = sp_glyph.advance_x
+                            + lycon->font.style->word_spacing
+                            + lycon->font.style->letter_spacing;
                     }
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }

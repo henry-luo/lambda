@@ -229,6 +229,8 @@ typedef struct Linebox {
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
+    float trailing_letter_spacing;   // CSS Text 3 §8: letter-spacing after the last character on a line;
+                                     // trimmed at line breaks since letter-spacing is not applied at line ends
 
     inline void reset_space() {
         is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;

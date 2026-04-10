@@ -1236,7 +1236,49 @@ void line_align(LayoutContext* lycon) {
                     if (is_rtl) {
                         float offset = available_width - line_width;
                         if (offset > 0) {
-                            view_line_align(lycon, offset, view);
+                            // CSS 2.1 §16.2: For wrapped text nodes, only shift rects
+                            // on the current line to avoid corrupting previously justified
+                            // lines' positions. Check if view is a wrapped text continuation.
+                            if (is_wrapped_continuation) {
+                                float line_y = lycon->block.advance_y;
+                                if (view->view_type == RDT_VIEW_TEXT) {
+                                    ViewText* text = (ViewText*)view;
+                                    TextRect* rect = text->rect;
+                                    while (rect) {
+                                        if (rect->y >= line_y - 1.0f) {
+                                            rect->x += offset;
+                                        }
+                                        rect = rect->next;
+                                    }
+                                    adjust_text_bounds(text);
+                                }
+                                // Also shift any sibling views on the current line
+                                View* next = view->next();
+                                if (next) {
+                                    view_line_align(lycon, offset, next);
+                                }
+                            } else {
+                                // CSS 2.1 §16.2: Also check preceding siblings for
+                                // text continuation rects on the current line.
+                                float line_y = lycon->block.advance_y;
+                                View* prev = (View*)((DomNode*)view)->prev_sibling;
+                                while (prev) {
+                                    if (prev->view_type == RDT_VIEW_TEXT) {
+                                        ViewText* text = (ViewText*)prev;
+                                        TextRect* rect = text->rect;
+                                        while (rect) {
+                                            if (rect->y >= line_y - 1.0f) {
+                                                rect->x += offset;
+                                            }
+                                            rect = rect->next;
+                                        }
+                                    } else if (prev->view_type == RDT_VIEW_INLINE) {
+                                        shift_span_current_line_rects(offset, line_y, (ViewSpan*)prev);
+                                    }
+                                    prev = (View*)((DomNode*)prev)->prev_sibling;
+                                }
+                                view_line_align(lycon, offset, view);
+                            }
                         }
                     }
                     return;
@@ -1528,6 +1570,18 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
             layout_block(lycon, node, display);
+            // CSS Text 3 §5.2: Atomic inlines (inline-block, inline-table, replaced
+            // elements) create soft wrap opportunities before and after them.
+            // Record this so subsequent text nodes can wrap at the boundary.
+            // Only set when the parent context allows wrapping (not in pre/nowrap).
+            if (display.outer == CSS_VALUE_INLINE_BLOCK && node->parent && node->parent->is_element()) {
+                DomElement* parent_elem = node->parent->as_element();
+                CssEnum ws = (parent_elem->blk) ? parent_elem->blk->white_space : CSS_VALUE_NORMAL;
+                if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                    ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                    lycon->line.wrap_opportunity_before_nowrap = true;
+                }
+            }
             break;
         case CSS_VALUE_INLINE:
             // CSS 2.1 Section 10.3.2: Inline replaced elements (img, video, etc.)
@@ -1536,6 +1590,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Treat inline replaced elements as inline-block for layout
                 display.outer = CSS_VALUE_INLINE_BLOCK;
                 layout_block(lycon, node, display);
+                if (node->parent && node->parent->is_element()) {
+                    DomElement* pe = node->parent->as_element();
+                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                        lycon->line.wrap_opportunity_before_nowrap = true;
+                    }
+                }
             } else if (display.inner == CSS_VALUE_TABLE) {
                 // CSS 2.1 Section 17.2: inline-table elements
                 // Outer display is inline (participates in inline flow)
@@ -1543,6 +1605,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 // Treat as inline-block for positioning, with table inner layout
                 display.outer = CSS_VALUE_INLINE_BLOCK;
                 layout_block(lycon, node, display);
+                if (node->parent && node->parent->is_element()) {
+                    DomElement* pe = node->parent->as_element();
+                    CssEnum ws = (pe->blk) ? pe->blk->white_space : CSS_VALUE_NORMAL;
+                    if (ws == CSS_VALUE_NORMAL || ws == CSS_VALUE_PRE_WRAP ||
+                        ws == CSS_VALUE_PRE_LINE || ws == CSS_VALUE_BREAK_SPACES || ws == 0) {
+                        lycon->line.wrap_opportunity_before_nowrap = true;
+                    }
+                }
             } else {
                 layout_inline(lycon, node, display);
             }
