@@ -421,34 +421,40 @@ There are two paths that invoke Radiant layout:
 
 Additionally, `input('*.html')` in non-UI scripting mode must continue to work as before — plain `Element`/`String` allocation, no DOM overhead.
 
-### Phase 1: Fat-pointer DomElement
-1. Redesign `DomElement` as a flat struct: DomNode fields at offset 0, Element fields at known offset, DomElement-specific fields after.
-2. Implement conversion macros: `dom_element_to_element()`, `element_to_dom_element()`.
-3. Update all `native_element->` accesses → `dom_element_to_element(this)->` or direct field access.
-4. Keep `first_child`/`next_sibling` linked list and existing layout iteration.
-5. Keep `build_dom_tree_from_element()` but simplify: init DOM fields on existing DomElements (no new allocation).
-6. Add `static_assert` for Element offset alignment.
-7. Validate: `make test-radiant-baseline`.
+### Phase 1: Fat-pointer DomElement — ✅ DONE
 
-### Phase 2: Fat-pointer DomText
-1. Redesign `DomText` as a flat struct: DomNode fields at offset 0, DomText-specific fields, then String inline at end.
-2. Implement conversion macros: `dom_text_to_string()`, `string_to_dom_text()`.
-3. Add `ui_mode` to MarkBuilder; allocate fat DomElement and DomText in UI mode.
-4. Update `dom_text_create()` and text iteration to use new layout.
-5. Convert symbols to DomText (DomString) at build time (UI mode only).
-6. Add `static_assert` for DomText size alignment.
-7. Validate: `make test-radiant-baseline`.
+Embedded `Element elmt` field inside `DomElement`. Conversion via `element_to_dom_element()` / `dom_element_to_element()` using `offsetof`. `dom_element_init` has self-copy guard for ui_mode path. All tests pass.
 
-### Phase 3: DOM-aware MarkEditor
-1. Add `ui_mode` to MarkEditor (or detect from DomDocument context).
-2. Child insert/delete: after `items[]` update, sync linked list via `dom_sync_child_insert()`/`dom_sync_child_remove()`/`dom_sync_children_rebuild()`.
-3. Element creation paths: allocate fat DomElement instead of plain Element in UI mode.
-4. Text insertion paths: allocate fat DomText instead of plain String in UI mode.
-5. Remove `element_dom_map` — no longer needed for incremental rebuild.
-6. Validate: `make test-radiant-baseline`.
+### Phase 2: Fat-pointer DomText + MarkBuilder ui_mode — ✅ DONE
 
-### Phase 4: Cleanup
-1. Remove `DomNode` base class — DomNode fields already inlined at offset 0 of DomElement and DomText.
-2. Remove `DomElement.native_element` field.
-3. Remove `DomDocument.html_root` — DOM root IS the Lambda root.
-4. Full test: `make test`.
+- `Input.ui_mode` flag; `MarkBuilder.ui_mode_` drives fat allocation.
+- `ElementBuilder` allocates `DomElement` in ui_mode; `createDomTextString()` allocates `[DomText][String][chars]` for text content. `createString()` left unchanged (used for attribute values).
+- HTML5 parser's `html5_flush_pending_text` / `html5_flush_foster_text` use `createDomTextStringFromBuf` in ui_mode.
+- `build_dom_tree_from_element` ui_mode path: `element_to_dom_element` / `string_to_dom_text` (no allocation, just field init + linked list).
+- `cmd_layout.cpp`: `load_lambda_html_doc` sets `input->ui_mode = true`.
+- All tests pass (567 Lambda, 4002 layout, 454 WPT CSS, 39 page load, 86 pretext).
+
+### Phase 3: DOM-aware MarkEditor — ✅ DONE
+
+- `MarkEditor.ui_mode_` (from `input->ui_mode`).
+- `dom_relink_children(Element*)`: full rebuild of `first_child`/`last_child`/`next_sibling`/`prev_sibling` from `items[]`. Recovers `DomElement*` via `element_to_dom_element()`, `DomText*` via `string_to_dom_text()` (with safety check: `node_type == DOM_NODE_TEXT && native_string == s`). Symbols skipped.
+- Hooked into all 5 inline child mutation methods: `elmt_insert_child`, `elmt_insert_children`, `elmt_delete_child`, `elmt_delete_children`, `elmt_replace_child` — each calls `if (ui_mode_) dom_relink_children(elmt)` before inline return.
+- DOM functions guarded against double-linking in ui_mode: `dom_element_append_child`, `dom_element_append_text`, `dom_element_append_comment` skip `dom_append_to_sibling_chain`; `dom_text_remove`, `dom_comment_remove` skip manual sibling unlinking.
+- All tests pass (same counts as Phase 2; UI automation `todo_*` tests fail — pre-existing, scoped to `lambda view script.ls` path).
+
+**Not yet done**: DOM API functions (`dom_element_append_text`, `dom_text_set_content`) still create non-fat strings via `createStringItem()` — should use `createDomTextString()` in ui_mode for the reactive UI path. Deferred since those callers are only used by the `lambda view script.ls` path.
+
+### Phase 4: Fat DomText in DOM API + Cleanup — PARTIAL
+
+**Fat DomText in DOM API — ✅ DONE:**
+- `dom_element_append_text`: in ui_mode, uses `createDomTextString()` and returns the embedded `DomText*` directly (no separate `dom_text_create` allocation). In non-ui_mode, unchanged.
+- `dom_text_set_content`: in ui_mode, uses `createDomTextString()`. Copies DOM properties (content_type, rect, font, color) from old to new embedded DomText. Old `text_node` pointer has updated fields but is orphaned from linked list (new DomText takes its place via `dom_relink_children`).
+- `dom_comment_set_content`: in ui_mode, uses `createDomTextString()` for comment content strings.
+- All tests pass (same counts as Phase 3).
+
+**Cleanup — NOT DONE (blocked by `lambda view script.ls` path):**
+- `DomElement.native_element`: still used by MarkEditor callers and `element_dom_map` for incremental rebuild.
+- `DomText.text` / `DomText.length` / `DomText.native_string`: layout uses `text_data()` method (not direct fields), but fields still set during init for backward compat.
+- `DomDocument.element_dom_map`: used by `cmd_layout.cpp` incremental rebuild for `lambda view script.ls`. In ui_mode, could be replaced with `element_to_dom_element()`, but requires migrating the incremental rebuild path.
+- `DomDocument.html_root`: signal field distinguishing HTML (layout) from PDF (no layout). Still in use.
+- `DomNode` base class: provides `is_element()`/`is_text()`/`as_element()` helpers. No vtable. Working correctly, no benefit to removing.
