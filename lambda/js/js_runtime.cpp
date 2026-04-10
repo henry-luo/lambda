@@ -2187,6 +2187,11 @@ enum JsBuiltinId {
     JS_BUILTIN_SET_IS_SUPERSET,  // Set.prototype.isSupersetOf(other)
     JS_BUILTIN_SET_IS_DISJOINT,  // Set.prototype.isDisjointFrom(other)
     JS_BUILTIN_COLL_SIZE_GETTER, // Map/Set.prototype size getter
+    // RegExp Symbol methods (v83: @@match, @@replace, @@search, @@split)
+    JS_BUILTIN_REGEXP_SYMBOL_MATCH,
+    JS_BUILTIN_REGEXP_SYMBOL_REPLACE,
+    JS_BUILTIN_REGEXP_SYMBOL_SEARCH,
+    JS_BUILTIN_REGEXP_SYMBOL_SPLIT,
     JS_BUILTIN_MAX
 };
 
@@ -3031,6 +3036,15 @@ extern "C" Item js_property_get(Item object, Item key) {
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TEST, "test", 1);
                         if (str_key->len == 8 && strncmp(str_key->chars, "toString", 8) == 0)
                             return js_get_or_create_builtin(JS_BUILTIN_REGEXP_TO_STRING, "toString", 0);
+                        // v83: Symbol-keyed methods
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_7", 7) == 0)
+                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_MATCH, "[Symbol.match]", 1);
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_8", 7) == 0)
+                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_REPLACE, "[Symbol.replace]", 2);
+                        if (str_key->len == 7 && strncmp(str_key->chars, "__sym_9", 7) == 0)
+                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SEARCH, "[Symbol.search]", 1);
+                        if (str_key->len == 8 && strncmp(str_key->chars, "__sym_10", 8) == 0)
+                            return js_get_or_create_builtin(JS_BUILTIN_REGEXP_SYMBOL_SPLIT, "[Symbol.split]", 2);
                     } else if (cn_str && cn_str->len == 5 && strncmp(cn_str->chars, "Array", 5) == 0) {
                         // Array.prototype methods: resolve via Array builtin table
                         builtin = js_lookup_builtin_method(LMD_TYPE_ARRAY, str_key->chars, (int)str_key->len);
@@ -3444,6 +3458,20 @@ extern "C" Item js_property_get(Item object, Item key) {
                             for (int mi = 0; methods[mi].name; mi++) {
                                 Item mk = (Item){.item = s2it(heap_create_name(methods[mi].name, methods[mi].len))};
                                 Item mf = js_get_or_create_builtin(methods[mi].bid, methods[mi].name, methods[mi].pc);
+                                js_property_set(fn->prototype, mk, mf);
+                                js_mark_non_enumerable(fn->prototype, mk);
+                            }
+                            // v83: Symbol-keyed methods (@@match, @@replace, @@search, @@split)
+                            struct { const char* sym_key; int sym_len; int bid; const char* display; int pc; } sym_methods[] = {
+                                {"__sym_7",  7, JS_BUILTIN_REGEXP_SYMBOL_MATCH,     "[Symbol.match]",    1},
+                                {"__sym_8",  7, JS_BUILTIN_REGEXP_SYMBOL_REPLACE,   "[Symbol.replace]",  2},
+                                {"__sym_9",  7, JS_BUILTIN_REGEXP_SYMBOL_SEARCH,    "[Symbol.search]",   1},
+                                {"__sym_10", 8, JS_BUILTIN_REGEXP_SYMBOL_SPLIT,     "[Symbol.split]",    2},
+                                {NULL, 0, 0, NULL, 0}
+                            };
+                            for (int mi = 0; sym_methods[mi].sym_key; mi++) {
+                                Item mk = (Item){.item = s2it(heap_create_name(sym_methods[mi].sym_key, sym_methods[mi].sym_len))};
+                                Item mf = js_get_or_create_builtin(sym_methods[mi].bid, sym_methods[mi].display, sym_methods[mi].pc);
                                 js_property_set(fn->prototype, mk, mf);
                                 js_mark_non_enumerable(fn->prototype, mk);
                             }
@@ -5055,6 +5083,12 @@ extern "C" Item js_debug_check_callee(Item callee, int64_t site_id) {
 // Forward declarations for builtin dispatch
 extern "C" Item js_string_method(Item str, Item method_name, Item* args, int argc);
 extern "C" Item js_string_raw(Item* args, int argc);
+// v83: Forward declarations for RegExp Symbol methods
+static Item js_regexp_symbol_match(Item this_val, Item arg0);
+static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement);
+static Item js_regexp_symbol_search(Item this_val, Item arg0);
+static Item js_regexp_symbol_split(Item this_val, Item str, Item limit);
+static Item js_string_replace_impl(Item str, Item* args, int argc, bool is_replace_all);
 // v18k: Forward declarations for Object/Array/Number static methods (js_globals.cpp)
 extern "C" Item js_object_define_property(Item obj, Item name, Item descriptor);
 extern "C" Item js_object_define_properties(Item obj, Item props);
@@ -6387,6 +6421,16 @@ static Item js_dispatch_builtin(int builtin_id, Item this_val, Item* args, int a
         return (Item){.item = s2it(heap_create_name(buf, 2 + src_len + flg_len))};
     }
 
+    // v83: RegExp Symbol methods
+    case JS_BUILTIN_REGEXP_SYMBOL_MATCH:
+        return js_regexp_symbol_match(this_val, arg0);
+    case JS_BUILTIN_REGEXP_SYMBOL_REPLACE:
+        return js_regexp_symbol_replace(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
+    case JS_BUILTIN_REGEXP_SYMBOL_SEARCH:
+        return js_regexp_symbol_search(this_val, arg0);
+    case JS_BUILTIN_REGEXP_SYMBOL_SPLIT:
+        return js_regexp_symbol_split(this_val, arg0, (arg_count >= 2) ? args[1] : make_js_undefined());
+
     // v55: Set/Map keys/values/entries — return arrays for backward compat
     case JS_BUILTIN_SET_VALUES:   // Set.prototype.values() / Set.prototype[@@iterator]()
     case JS_BUILTIN_SET_KEYS:     // Set.prototype.keys() — same as values for Set
@@ -7271,6 +7315,169 @@ extern "C" Item js_regex_exec(Item regex, Item str) {
     // groups property (undefined for non-named-group regexes)
     Item groups_key = (Item){.item = s2it(heap_create_name("groups", 6))};
     js_property_set(result, groups_key, make_js_undefined());
+    return result;
+}
+
+// =============================================================================
+// v83: RegExp Symbol methods (@@match, @@replace, @@search, @@split)
+// =============================================================================
+
+// RegExp.prototype[@@match](string)
+static Item js_regexp_symbol_match(Item this_val, Item arg0) {
+    // ES spec: Type(this) must be Object
+    if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@match] called on incompatible receiver"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
+    JsRegexData* rd = js_get_regex_data(this_val);
+    if (!rd) return ItemNull;
+    Item str = (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0);
+    if (!rd->global) {
+        // non-global: delegate to RegExp.prototype.exec
+        return js_regex_exec(this_val, str);
+    }
+    // global: collect all matches
+    Item li_key = (Item){.item = s2it(heap_create_name("lastIndex", 9))};
+    js_property_set(this_val, li_key, (Item){.item = i2it(0)});
+    Item results = js_array_new(0);
+    int match_count = 0;
+    for (int safety = 0; safety < 1000000; safety++) {
+        Item match = js_regex_exec(this_val, str);
+        if (match.item == ItemNull.item) break;
+        // get first element (the full match string)
+        Item match_str = js_array_get_int(match, 0);
+        js_array_push(results, match_str);
+        match_count++;
+        // if zero-length match, advance lastIndex to avoid infinite loop
+        if (get_type_id(match_str) == LMD_TYPE_STRING && it2s(match_str)->len == 0) {
+            Item li = js_property_get(this_val, li_key);
+            int64_t idx = (get_type_id(li) == LMD_TYPE_INT) ? it2i(li) : 0;
+            js_property_set(this_val, li_key, (Item){.item = i2it(idx + 1)});
+        }
+    }
+    return match_count == 0 ? ItemNull : results;
+}
+
+// RegExp.prototype[@@replace](string, replacement)
+static Item js_regexp_symbol_replace(Item this_val, Item str, Item replacement) {
+    // ES spec: Type(this) must be Object
+    if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@replace] called on incompatible receiver"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return ItemNull;
+    }
+    Item args[2] = {this_val, replacement};
+    if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
+    return js_string_replace_impl(str, args, 2, false);
+}
+
+// RegExp.prototype[@@search](string)
+static Item js_regexp_symbol_search(Item this_val, Item arg0) {
+    // ES spec: Type(this) must be Object
+    if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@search] called on incompatible receiver"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return (Item){.item = i2it(-1)};
+    }
+    JsRegexData* rd = js_get_regex_data(this_val);
+    if (!rd) return (Item){.item = i2it(-1)};
+    Item str = (get_type_id(arg0) == LMD_TYPE_STRING) ? arg0 : js_to_string(arg0);
+    const char* chars = str.get_chars();
+    int len = str.get_len();
+    re2::StringPiece match;
+    if (rd->re2->Match(re2::StringPiece(chars, len), 0, len, re2::RE2::UNANCHORED, &match, 1)) {
+        return (Item){.item = i2it((int)(match.data() - chars))};
+    }
+    return (Item){.item = i2it(-1)};
+}
+
+// RegExp.prototype[@@split](string, limit)
+static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
+    // ES spec: Type(this) must be Object
+    if (get_type_id(this_val) != LMD_TYPE_MAP && get_type_id(this_val) != LMD_TYPE_ARRAY) {
+        Item tn = (Item){.item = s2it(heap_create_name("TypeError", 9))};
+        Item msg = (Item){.item = s2it(heap_create_name("RegExp.prototype[@@split] called on incompatible receiver"))};
+        js_throw_value(js_new_error_with_name(tn, msg));
+        return js_array_new(0);
+    }
+    JsRegexData* rd = js_get_regex_data(this_val);
+    if (!rd) return js_array_new(0);
+    if (get_type_id(str) != LMD_TYPE_STRING) str = js_to_string(str);
+    const char* chars = str.get_chars();
+    int len = str.get_len();
+
+    // handle limit
+    int max_parts = 0x7FFFFFFF;
+    if (get_type_id(limit) == LMD_TYPE_INT || get_type_id(limit) == LMD_TYPE_INT64) {
+        int64_t lv = it2i(limit);
+        if (lv < 0) lv = 0;
+        max_parts = (int)lv;
+    } else if (get_type_id(limit) == LMD_TYPE_FLOAT) {
+        double d = limit.get_double();
+        if (d >= 0 && d < 0x7FFFFFFF) max_parts = (int)d;
+    }
+    if (max_parts == 0) return js_array_new(0);
+
+    Item result = js_array_new(0);
+    int num_groups = rd->re2->NumberOfCapturingGroups() + 1;
+    if (num_groups > 16) num_groups = 16;
+    re2::StringPiece matches[16];
+    int pos = 0;
+    int part_count = 0;
+
+    while (pos <= len && part_count < max_parts) {
+        bool found = rd->re2->Match(re2::StringPiece(chars, len), pos, len, re2::RE2::UNANCHORED, matches, num_groups);
+        if (!found || (int)(matches[0].data() - chars) >= len) break;
+
+        int match_start = (int)(matches[0].data() - chars);
+        int match_end = match_start + (int)matches[0].size();
+
+        // avoid infinite loop on zero-length match at same position
+        if (match_end == pos && match_start == pos) {
+            // push one char and advance
+            if (pos < len) {
+                Item seg = (Item){.item = s2it(heap_strcpy((char*)(chars + pos), 1))};
+                js_array_push(result, seg);
+                part_count++;
+            }
+            pos++;
+            continue;
+        }
+
+        // push segment before match
+        int seg_len = match_start - pos;
+        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + pos), seg_len))}
+                                 : (Item){.item = s2it(heap_create_name("", 0))};
+        js_array_push(result, seg);
+        part_count++;
+        if (part_count >= max_parts) break;
+
+        // push capturing groups
+        for (int g = 1; g < num_groups && part_count < max_parts; g++) {
+            if (matches[g].data()) {
+                Item gs = (Item){.item = s2it(heap_strcpy((char*)matches[g].data(), (int)matches[g].size()))};
+                js_array_push(result, gs);
+            } else {
+                js_array_push(result, make_js_undefined());
+            }
+            part_count++;
+        }
+
+        pos = match_end;
+    }
+
+    // push trailing segment
+    if (part_count < max_parts) {
+        int seg_len = len - pos;
+        Item seg = (seg_len > 0) ? (Item){.item = s2it(heap_strcpy((char*)(chars + pos), seg_len))}
+                                 : (Item){.item = s2it(heap_create_name("", 0))};
+        js_array_push(result, seg);
+    }
+
     return result;
 }
 

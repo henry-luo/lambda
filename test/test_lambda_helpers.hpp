@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <atomic>
 #include <unordered_map>
 
 #ifdef _WIN32
@@ -520,6 +521,9 @@ inline void run_sub_batch(
 // Max scripts per lambda.exe process to avoid state accumulation crashes
 static const size_t BATCH_CHUNK_SIZE = 50;
 
+// Max parallel sub-batch processes to avoid resource exhaustion
+static const size_t MAX_PARALLEL_LAMBDA_BATCHES = 8;
+
 // Run multiple scripts using test-batch command, splitting into sub-batches
 // to avoid memory/state accumulation in the lambda.exe process.
 // Sub-batches run in parallel threads for faster execution.
@@ -542,14 +546,20 @@ inline std::unordered_map<std::string, BatchResult> execute_lambda_batch(
         batches.push_back({start, end, batch_id++});
     }
 
-    // Run sub-batches in parallel — each thread gets its own result map
+    // Run sub-batches in parallel with limited concurrency (work-stealing pattern)
     std::vector<std::unordered_map<std::string, BatchResult>> thread_results(batches.size());
+    std::atomic<size_t> next_batch{0};
+    size_t num_workers = std::min(MAX_PARALLEL_LAMBDA_BATCHES, batches.size());
     std::vector<std::thread> threads;
-    for (size_t i = 0; i < batches.size(); i++) {
-        threads.emplace_back([&, i]() {
-            run_sub_batch(scripts, is_procedural,
-                          batches[i].start, batches[i].end,
-                          use_mir, batches[i].id, thread_results[i]);
+    for (size_t w = 0; w < num_workers; w++) {
+        threads.emplace_back([&]() {
+            while (true) {
+                size_t i = next_batch.fetch_add(1, std::memory_order_relaxed);
+                if (i >= batches.size()) break;
+                run_sub_batch(scripts, is_procedural,
+                              batches[i].start, batches[i].end,
+                              use_mir, batches[i].id, thread_results[i]);
+            }
         });
     }
     for (auto& t : threads) t.join();
