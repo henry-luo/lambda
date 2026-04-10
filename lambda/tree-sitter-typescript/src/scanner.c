@@ -1,4 +1,4 @@
-#include "../scanner_v2.h"
+#include "../scanner.h"
 
 void *tree_sitter_typescript_external_scanner_create() { return NULL; }
 
