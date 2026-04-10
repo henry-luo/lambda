@@ -878,6 +878,21 @@ test-c2mir: build-test
 		exit 1; \
 	fi
 
+# test262 baseline: run only tests in baseline, must pass 100%
+test262-baseline: build-test
+	@echo "Running test262 baseline ($(shell wc -l < test/js/test262_baseline.txt | tr -d ' ') entries)..."
+	@./test/test_js_test262_gtest.exe --baseline-only --batch-only
+
+# test262 full: run all discovered test262 tests (slow, ~5min)
+test262-full: build-test
+	@echo "Running full test262 suite..."
+	@./test/test_js_test262_gtest.exe --batch-only
+
+# test262 update baseline: run all tests and update baseline with current passing set
+test262-update-baseline: build-test
+	@echo "Running full test262 suite and updating baseline..."
+	@./test/test_js_test262_gtest.exe --batch-only --update-baseline
+
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
