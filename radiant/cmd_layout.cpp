@@ -1835,6 +1835,7 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
         // Use extended parser to record source line numbers on elements
         input = Input::create(pool, html_url);
         if (input) {
+            input->ui_mode = true;
             Html5ParseOptions parse_opts = { .track_source_lines = true };
             Element* doc = html5_parse_ex(input, html_content, &parse_opts);
             if (doc) {
@@ -1842,7 +1843,15 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
             }
         }
     } else {
-        input = input_from_source(html_content, html_url, type_str, nullptr);
+        // Create Input first so we can set ui_mode before parsing
+        input = Input::create(pool, html_url);
+        if (input) {
+            input->ui_mode = true;
+            Element* doc = html5_parse(input, html_content);
+            if (doc) {
+                input->root = (Item){.element = doc};
+            }
+        }
     }
     mem_free(type_str);
     if (html_content_owned) free(html_content);  // only free what we allocated

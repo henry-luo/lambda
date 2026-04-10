@@ -16,8 +16,8 @@
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_tokenizer.hpp"
 
-extern "C" {
 #include "../lambda/input/input.hpp"
+extern "C" {
 #include "../lib/mempool.h"
 #include "../lib/url.h"
 #include "../lib/log.h"

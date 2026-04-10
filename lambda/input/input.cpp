@@ -887,6 +887,7 @@ Input* Input::create(Pool* pool, Url* abs_url, Input* parent) {
     input->parent = parent;     // Set parent Input for hierarchical ownership
     input->root = (Item){.item = ITEM_NULL};
     input->doc_count = 0;
+    input->ui_mode = false;
     input->xml_stylesheet_href = nullptr;
     return input;
 }
