@@ -15,6 +15,7 @@ module.exports = function defineGrammar(dialect) {
       $._ts_type_arguments,   // <Type, ...> in expression context (needs <> disambiguation)
       $._ts_type_parameters,  // <T extends U, V = W> in declaration context (unambiguous)
       $._ts_interface_body,   // opaque interface body { ... } (scanned by external scanner)
+      $._ts_class_modifiers,  // opaque class member modifier prefix (declare/public/static/readonly/...)
     ]),
 
     // No type supertypes needed — types are opaque tokens
@@ -82,16 +83,7 @@ module.exports = function defineGrammar(dialect) {
 
       public_field_definition: $ => seq(
         repeat(field('decorator', $.decorator)),
-        optional(choice(
-          seq('declare', optional($.accessibility_modifier)),
-          seq($.accessibility_modifier, optional('declare')),
-        )),
-        choice(
-          seq(optional('static'), optional($.override_modifier), optional('readonly')),
-          seq(optional('abstract'), optional('readonly')),
-          seq(optional('readonly'), optional('abstract')),
-          optional('accessor'),
-        ),
+        optional($._ts_class_modifiers),
         field('name', $._property_name),
         optional(choice('?', '!')),
         field('type', optional($.type_annotation)),
@@ -533,7 +525,6 @@ module.exports = function defineGrammar(dialect) {
           $.class_static_block,
           seq(
             choice(
-              $.abstract_method_signature,
               $.index_signature,
               $.method_signature,
               $.public_field_definition,
@@ -546,12 +537,7 @@ module.exports = function defineGrammar(dialect) {
       ),
 
       method_definition: $ => prec.left(seq(
-        optional($.accessibility_modifier),
-        optional('static'),
-        optional($.override_modifier),
-        optional('readonly'),
-        optional('async'),
-        optional(choice('get', 'set', '*')),
+        optional($._ts_class_modifiers),
         field('name', $._property_name),
         optional('?'),
         $._call_signature,
@@ -559,26 +545,15 @@ module.exports = function defineGrammar(dialect) {
       )),
 
       method_signature: $ => seq(
-        optional($.accessibility_modifier),
-        optional('static'),
-        optional($.override_modifier),
-        optional('readonly'),
-        optional('async'),
-        optional(choice('get', 'set', '*')),
+        optional($._ts_class_modifiers),
         field('name', $._property_name),
         optional('?'),
         $._call_signature,
       ),
 
-      abstract_method_signature: $ => seq(
-        optional($.accessibility_modifier),
-        'abstract',
-        optional($.override_modifier),
-        optional(choice('get', 'set', '*')),
-        field('name', $._property_name),
-        optional('?'),
-        $._call_signature,
-      ),
+      // abstract_method_signature merged into method_signature
+      // (structurally identical after modifier externalization;
+      //  the 'abstract' keyword is in the opaque _ts_class_modifiers token)
 
       // ================================================================
       // DECLARATIONS (TS-specific)

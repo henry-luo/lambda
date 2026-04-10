@@ -406,90 +406,6 @@
     }
   },
   {
-    "type": "abstract_method_signature",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "computed_property_name",
-            "named": true
-          },
-          {
-            "type": "number",
-            "named": true
-          },
-          {
-            "type": "private_property_identifier",
-            "named": true
-          },
-          {
-            "type": "property_identifier",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          }
-        ]
-      },
-      "parameters": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "formal_parameters",
-            "named": true
-          }
-        ]
-      },
-      "return_type": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "asserts_annotation",
-            "named": true
-          },
-          {
-            "type": "type_annotation",
-            "named": true
-          },
-          {
-            "type": "type_predicate_annotation",
-            "named": true
-          }
-        ]
-      },
-      "type_parameters": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "type_parameters",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "accessibility_modifier",
-          "named": true
-        },
-        {
-          "type": "override_modifier",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "accessibility_modifier",
     "named": true,
     "fields": {}
@@ -1232,10 +1148,6 @@
       "multiple": true,
       "required": false,
       "types": [
-        {
-          "type": "abstract_method_signature",
-          "named": true
-        },
         {
           "type": "class_static_block",
           "named": true
@@ -2884,20 +2796,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "accessibility_modifier",
-          "named": true
-        },
-        {
-          "type": "override_modifier",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -2968,20 +2866,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "accessibility_modifier",
-          "named": true
-        },
-        {
-          "type": "override_modifier",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -3550,20 +3434,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "accessibility_modifier",
-          "named": true
-        },
-        {
-          "type": "override_modifier",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -4619,10 +4489,6 @@
     "named": false
   },
   {
-    "type": "accessor",
-    "named": false
-  },
-  {
     "type": "as",
     "named": false
   },
@@ -4912,11 +4778,11 @@
   },
   {
     "type": "type",
-    "named": false
+    "named": true
   },
   {
     "type": "type",
-    "named": true
+    "named": false
   },
   {
     "type": "type_arguments",
