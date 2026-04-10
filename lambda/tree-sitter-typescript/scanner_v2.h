@@ -6,8 +6,8 @@
 //   LOGICAL_OR, ESCAPE_SEQUENCE, REGEX_PATTERN, JSX_TEXT,
 //   FUNCTION_SIGNATURE_AUTOMATIC_SEMICOLON, ERROR_RECOVERY
 //
-// Token types 10..12 are new for v2:
-//   TS_TYPE, TS_TYPE_ARGUMENTS, TS_TYPE_PARAMETERS
+// Token types 10..13 are new for v2:
+//   TS_TYPE, TS_TYPE_ARGUMENTS, TS_TYPE_PARAMETERS, TS_INTERFACE_BODY
 
 #include "tree_sitter/parser.h"
 #include <wctype.h>
@@ -27,6 +27,7 @@ enum TokenType {
     TS_TYPE,
     TS_TYPE_ARGUMENTS,
     TS_TYPE_PARAMETERS,
+    TS_INTERFACE_BODY,
 };
 
 // ================================================================
@@ -955,6 +956,87 @@ static bool scan_ts_type_parameters(TSLexer *lexer) {
 }
 
 // ================================================================
+// v2: scan_ts_interface_body — opaque { ... } body scanner
+// ================================================================
+
+// Scan an entire interface body as a single opaque token.
+// Strategy: match opening '{' (or '{|'), then bracket-balance to closing '}' (or '|}').
+// Skip strings, template literals, and comments within.
+static bool scan_ts_interface_body(TSLexer *lexer) {
+    ts_skip_ws_and_comments(lexer);
+
+    if (lexer->lookahead != '{') return false;
+
+    lexer->result_symbol = TS_INTERFACE_BODY;
+    advance(lexer); // consume '{'
+
+    // check for exact-object '{|' syntax
+    bool is_exact = false;
+    if (lexer->lookahead == '|') {
+        advance(lexer);
+        is_exact = true;
+    }
+
+    int depth = 1;
+    while (lexer->lookahead != 0 && depth > 0) {
+        int32_t ch = lexer->lookahead;
+
+        if (ch == '\'' || ch == '"') {
+            ts_skip_string(lexer);
+            continue;
+        }
+        if (ch == '`') {
+            ts_skip_template(lexer);
+            continue;
+        }
+        if (ch == '/') {
+            advance(lexer);
+            if (lexer->lookahead == '/') {
+                // line comment
+                advance(lexer);
+                while (lexer->lookahead != 0 && lexer->lookahead != '\n') advance(lexer);
+            } else if (lexer->lookahead == '*') {
+                // block comment
+                advance(lexer);
+                while (lexer->lookahead != 0) {
+                    if (lexer->lookahead == '*') {
+                        advance(lexer);
+                        if (lexer->lookahead == '/') { advance(lexer); break; }
+                    } else {
+                        advance(lexer);
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (ch == '{') {
+            depth++;
+            advance(lexer);
+            continue;
+        }
+        if (ch == '}') {
+            depth--;
+            if (depth == 0) {
+                if (is_exact) {
+                    // for '{|' ... '|}', the '|' before '}' was already consumed as content
+                    // (exact object types have the '|' right before closing '}')
+                }
+                advance(lexer); // consume closing '}'
+                lexer->mark_end(lexer);
+                return true;
+            }
+            advance(lexer);
+            continue;
+        }
+
+        advance(lexer);
+    }
+
+    return false; // unbalanced
+}
+
+// ================================================================
 // v2: Main scanner dispatch
 // ================================================================
 
@@ -970,19 +1052,33 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
         return true;
     }
 
+    // v2: interface body — try before type tokens, but fall through on failure
+    // (after interface name, both TS_INTERFACE_BODY and TS_TYPE_PARAMETERS may be valid)
+    // Note: no AUTOMATIC_SEMICOLON guard — 'interface' is a soft keyword, so the parser
+    // may have ASI valid in a parallel expression parse path. We disambiguate by lookahead.
+    if (valid_symbols[TS_INTERFACE_BODY] &&
+        !valid_symbols[TEMPLATE_CHARS]) {
+        if (scan_ts_interface_body(lexer)) return true;
+        // fall through to try other external tokens
+    }
+
+    // v2: type parameters — unambiguous in declaration context (starts with '<')
+    // No AUTOMATIC_SEMICOLON guard: after 'interface Name' or 'class Name', ASI may be
+    // valid in a parallel parse path, but '<' unambiguously starts type parameters.
+    if (valid_symbols[TS_TYPE_PARAMETERS] &&
+        !valid_symbols[TEMPLATE_CHARS]) {
+        // check lookahead without consuming — scan_ts_type_parameters will skip ws internally
+        if (lexer->lookahead == '<' || iswspace(lexer->lookahead)) {
+            if (scan_ts_type_parameters(lexer)) return true;
+        }
+    }
+
     // v2: type tokens — check before ASI since type contexts are more specific
     // Check TS_TYPE first — it's the most common type token
     if (valid_symbols[TS_TYPE] &&
         !valid_symbols[AUTOMATIC_SEMICOLON] &&
         !valid_symbols[TEMPLATE_CHARS]) {
         return scan_ts_type(lexer);
-    }
-
-    // Type parameters — unambiguous in declaration context
-    if (valid_symbols[TS_TYPE_PARAMETERS] &&
-        !valid_symbols[AUTOMATIC_SEMICOLON] &&
-        !valid_symbols[TEMPLATE_CHARS]) {
-        return scan_ts_type_parameters(lexer);
     }
 
     // Type arguments — needs disambiguation, only when grammar says it's valid

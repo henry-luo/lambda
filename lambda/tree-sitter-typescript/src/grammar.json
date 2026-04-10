@@ -8703,174 +8703,8 @@
       ]
     },
     "interface_body": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "{"
-            },
-            {
-              "type": "STRING",
-              "value": "{|"
-            }
-          ]
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "CHOICE",
-                      "members": [
-                        {
-                          "type": "STRING",
-                          "value": ","
-                        },
-                        {
-                          "type": "STRING",
-                          "value": ";"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "BLANK"
-                    }
-                  ]
-                },
-                {
-                  "type": "SEQ",
-                  "members": [
-                    {
-                      "type": "CHOICE",
-                      "members": [
-                        {
-                          "type": "SYMBOL",
-                          "name": "export_statement"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "property_signature"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "call_signature"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "construct_signature"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "index_signature"
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "method_signature"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "REPEAT",
-                      "content": {
-                        "type": "SEQ",
-                        "members": [
-                          {
-                            "type": "CHOICE",
-                            "members": [
-                              {
-                                "type": "STRING",
-                                "value": ","
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "_semicolon"
-                              }
-                            ]
-                          },
-                          {
-                            "type": "CHOICE",
-                            "members": [
-                              {
-                                "type": "SYMBOL",
-                                "name": "export_statement"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "property_signature"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "call_signature"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "construct_signature"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "index_signature"
-                              },
-                              {
-                                "type": "SYMBOL",
-                                "name": "method_signature"
-                              }
-                            ]
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                },
-                {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "CHOICE",
-                      "members": [
-                        {
-                          "type": "STRING",
-                          "value": ","
-                        },
-                        {
-                          "type": "SYMBOL",
-                          "name": "_semicolon"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "BLANK"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "}"
-            },
-            {
-              "type": "STRING",
-              "value": "|}"
-            }
-          ]
-        }
-      ]
+      "type": "SYMBOL",
+      "name": "_ts_interface_body"
     },
     "call_signature": {
       "type": "SYMBOL",
@@ -10050,16 +9884,6 @@
         "type": "SYMBOL",
         "name": "primary_expression"
       }
-    ],
-    [
-      {
-        "type": "SYMBOL",
-        "name": "construct_signature"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "_property_name"
-      }
     ]
   ],
   "externals": [
@@ -10114,6 +9938,10 @@
     {
       "type": "SYMBOL",
       "name": "_ts_type_parameters"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ts_interface_body"
     }
   ],
   "inline": [

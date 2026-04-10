@@ -11,10 +11,10 @@ module.exports = function defineGrammar(dialect) {
       $._function_signature_automatic_semicolon,
       $.__error_recovery,
       // v2: opaque type tokens — scanned by external scanner, parsed later by C++ type parser
-      $._ts_type,             // full type expression body (e.g. "string | number", "(a: Foo) => Bar")
-      $._ts_type_arguments,   // <Type, ...> in expression context (needs <> disambiguation)
-      $._ts_type_parameters,  // <T extends U, V = W> in declaration context (unambiguous)
-      $._ts_interface_body,   // opaque interface body { ... } (scanned by external scanner)
+      $._ts_type,             // full type expression body
+      $._ts_type_arguments,   // <Type, ...> in expression context
+      $._ts_type_parameters,  // <T extends U, V = W> in declaration context
+      $._ts_interface_body,   // opaque interface body { ... }
     ]),
 
     // No type supertypes needed — types are opaque tokens
@@ -42,7 +42,6 @@ module.exports = function defineGrammar(dialect) {
       [$.decorator_call_expression, $.decorator],
       [$.new_expression, $.primary_expression],
       [$.meta_property, $.primary_expression],
-      // [$.construct_signature, $._property_name], // removed: construct_signature no longer reachable
     ]),
 
     conflicts: ($, previous) => previous.concat([
@@ -58,7 +57,6 @@ module.exports = function defineGrammar(dialect) {
       [$.primary_expression, $._property_name, $.arrow_function],
       [$.arrow_function, $._property_name],
       [$.new_expression, $._property_name],
-      [$.primary_expression, $.mapped_type_clause],
     ]).concat(
       dialect === 'typescript' ? [] : [
         [$.jsx_opening_element, $._ts_type_parameters],
@@ -529,15 +527,9 @@ module.exports = function defineGrammar(dialect) {
             $.method_definition,
             optional($._semicolon),
           ),
-          seq($.method_signature, choice($._function_signature_automatic_semicolon, ',')),
           $.class_static_block,
           seq(
-            choice(
-              $.abstract_method_signature,
-              $.index_signature,
-              $.method_signature,
-              $.public_field_definition,
-            ),
+            $.public_field_definition,
             choice($._semicolon, ','),
           ),
           ';',
@@ -558,27 +550,8 @@ module.exports = function defineGrammar(dialect) {
         field('body', $.statement_block),
       )),
 
-      method_signature: $ => seq(
-        optional($.accessibility_modifier),
-        optional('static'),
-        optional($.override_modifier),
-        optional('readonly'),
-        optional('async'),
-        optional(choice('get', 'set', '*')),
-        field('name', $._property_name),
-        optional('?'),
-        $._call_signature,
-      ),
-
-      abstract_method_signature: $ => seq(
-        optional($.accessibility_modifier),
-        'abstract',
-        optional($.override_modifier),
-        optional(choice('get', 'set', '*')),
-        field('name', $._property_name),
-        optional('?'),
-        $._call_signature,
-      ),
+      // method_signature — removed (externalized to interface body / not needed in class body)
+      // abstract_method_signature — removed (externalized)
 
       // ================================================================
       // DECLARATIONS (TS-specific)
@@ -621,50 +594,10 @@ module.exports = function defineGrammar(dialect) {
         commaSep1(alias($._ts_type, $.type)),
       ),
 
-      // v2: interface body is an opaque external token — parsed by C++ interface body parser
-      interface_body: $ => $._ts_interface_body,
+      interface_body: $ => alias($._ts_interface_body, $.interface_body_content),
 
-      // call_signature, property_signature, construct_signature — removed
-      // (only used in interface_body which is now an opaque external token)
-
-      index_signature: $ => seq(
-        optional(
-          seq(
-            field('sign', optional(choice('-', '+'))),
-            'readonly',
-          ),
-        ),
-        '[',
-        choice(
-          seq(
-            field('name', choice(
-              $.identifier,
-              alias($._reserved_identifier, $.identifier),
-            )),
-            ':',
-            field('index_type', alias($._ts_type, $.type)),
-          ),
-          $.mapped_type_clause,
-        ),
-        ']',
-        field('type', choice(
-          $.type_annotation,
-          $.omitting_type_annotation,
-          $.adding_type_annotation,
-          $.opting_type_annotation,
-        )),
-      ),
-
-      mapped_type_clause: $ => seq(
-        field('name', $._type_identifier),
-        'in',
-        field('type', alias($._ts_type, $.type)),
-        optional(seq('as', field('alias', alias($._ts_type, $.type)))),
-      ),
-
-      omitting_type_annotation: $ => seq('-?:', alias($._ts_type, $.type)),
-      adding_type_annotation: $ => seq('+?:', alias($._ts_type, $.type)),
-      opting_type_annotation: $ => seq('?:', alias($._ts_type, $.type)),
+      // call_signature, property_signature, construct_signature, index_signature,
+      // mapped_type_clause, annotation variants — removed (externalized to interface body parser)
 
       // ================================================================
       // ENUM (full grammar — generates runtime code)
