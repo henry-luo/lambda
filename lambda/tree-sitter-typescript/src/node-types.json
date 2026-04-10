@@ -4623,10 +4623,6 @@
     "named": false
   },
   {
-    "type": "any",
-    "named": false
-  },
-  {
     "type": "as",
     "named": false
   },
@@ -4644,10 +4640,6 @@
   },
   {
     "type": "await",
-    "named": false
-  },
-  {
-    "type": "boolean",
     "named": false
   },
   {
@@ -4815,14 +4807,6 @@
     "named": true
   },
   {
-    "type": "number",
-    "named": false
-  },
-  {
-    "type": "object",
-    "named": false
-  },
-  {
     "type": "of",
     "named": false
   },
@@ -4895,10 +4879,6 @@
     "named": false
   },
   {
-    "type": "string",
-    "named": false
-  },
-  {
     "type": "string_fragment",
     "named": true
   },
@@ -4908,10 +4888,6 @@
   },
   {
     "type": "switch",
-    "named": false
-  },
-  {
-    "type": "symbol",
     "named": false
   },
   {
@@ -4936,11 +4912,11 @@
   },
   {
     "type": "type",
-    "named": true
+    "named": false
   },
   {
     "type": "type",
-    "named": false
+    "named": true
   },
   {
     "type": "type_arguments",

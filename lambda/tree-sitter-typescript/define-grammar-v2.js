@@ -740,6 +740,9 @@ module.exports = function defineGrammar(dialect) {
 
       _type_identifier: $ => alias($.identifier, $.type_identifier),
 
+      // v2: removed type-name keywords (any, number, boolean, string, symbol, object)
+      // — no longer used as keyword tokens after type externalization; they're just identifiers now
+      // Also removed duplicate 'readonly' and redundant 'export' (already in JS _reserved_identifier)
       _reserved_identifier: (_, previous) => choice(
         'declare',
         'namespace',
@@ -750,15 +753,7 @@ module.exports = function defineGrammar(dialect) {
         'override',
         'readonly',
         'module',
-        'any',
-        'number',
-        'boolean',
-        'string',
-        'symbol',
-        'export',
-        'object',
         'new',
-        'readonly',
         previous,
       ),
     },
