@@ -2714,11 +2714,6 @@
     }
   },
   {
-    "type": "identifier",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "if_statement",
     "named": true,
     "fields": {
@@ -4168,11 +4163,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "predefined_type",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "program",
@@ -5760,6 +5750,10 @@
     "named": true
   },
   {
+    "type": "identifier",
+    "named": true
+  },
+  {
     "type": "if",
     "named": false
   },
@@ -5812,10 +5806,6 @@
     "named": false
   },
   {
-    "type": "never",
-    "named": false
-  },
-  {
     "type": "new",
     "named": false
   },
@@ -5842,6 +5832,10 @@
   {
     "type": "override",
     "named": false
+  },
+  {
+    "type": "predefined_type",
+    "named": true
   },
   {
     "type": "private",
@@ -5966,14 +5960,6 @@
   {
     "type": "undefined",
     "named": true
-  },
-  {
-    "type": "unique symbol",
-    "named": false
-  },
-  {
-    "type": "unknown",
-    "named": false
   },
   {
     "type": "using",

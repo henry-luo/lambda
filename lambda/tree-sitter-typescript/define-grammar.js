@@ -42,7 +42,6 @@ module.exports = function defineGrammar(dialect) {
       [$.extends_clause, $.primary_expression],
       ['unary', 'assign'],
       ['declaration', $.expression],
-      [$.predefined_type, $.unary_expression],
       [$.type, $.flow_maybe_type],
       [$.tuple_type, $.array_type, $.pattern, $.type],
       [$.readonly_type, $.pattern],
@@ -62,7 +61,6 @@ module.exports = function defineGrammar(dialect) {
       [$.override_modifier, $.primary_expression],
       [$.decorator_call_expression, $.decorator],
       [$.literal_type, $.pattern],
-      [$.predefined_type, $.pattern],
       [$.call_expression, $._type_query_call_expression],
       [$.call_expression, $._type_query_call_expression_in_type_annotation],
       [$.new_expression, $.primary_expression],
@@ -89,10 +87,8 @@ module.exports = function defineGrammar(dialect) {
       [$.primary_expression, $._parameter_name, $.primary_type],
       [$.primary_expression, $.literal_type],
       [$.primary_expression, $.literal_type, $.rest_pattern],
-      [$.primary_expression, $.predefined_type, $.rest_pattern],
       [$.primary_expression, $.primary_type],
       [$.primary_expression, $.generic_type],
-      [$.primary_expression, $.predefined_type],
       [$.primary_expression, $.pattern, $.primary_type],
       [$._parameter_name, $.primary_type],
       [$.pattern, $.primary_type],
@@ -937,19 +933,18 @@ module.exports = function defineGrammar(dialect) {
 
       parenthesized_type: $ => seq('(', $.type, ')'),
 
-      predefined_type: _ => choice(
+      predefined_type: _ => token(choice(
         'any',
         'number',
         'boolean',
         'string',
         'symbol',
-        alias(seq('unique', 'symbol'), 'unique symbol'),
+        seq('unique', /\s+/, 'symbol'),
         'void',
         'unknown',
-        'string',
         'never',
         'object',
-      ),
+      )),
 
       type_arguments: $ => seq(
         '<',
