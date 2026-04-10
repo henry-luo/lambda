@@ -356,18 +356,56 @@ The LARGE_STATE_COUNT reduction (−15.3%) is the biggest win — the dense pars
 
 3. **Build system caveat.** `make build` does not relink `lambda.exe` when `.a` library files change — Premake doesn't track static library dependencies. Must `touch` a source file to force relinking after regenerating the parser.
 
-### Phase 2: Medium Risk (Estimated: −10–20% additional)
+### Phase 2: Medium Risk — COMPLETED (partial)
 
-5. **Unify `_type_query_*` rules** into 1–2 merged rules
-6. **Flatten `primary_type`/`type` hierarchy** — move recursive types to `type` only
-7. Update AST builder for new node classification
-8. Full test suite pass
+5. ✅ **Unify `_type_query_*` rules** — merged 6 rules into 2 (`_type_query_expression` + `_type_query_import_expression`)
+6. ⏭️ **Flatten `primary_type`/`type` hierarchy** — SKIPPED, too risky (see below)
+7. ✅ No AST builder changes needed — types are stripped during transpilation, AST builder doesn't consume type_query internals
+8. ✅ All 567 baseline tests pass (including 19/19 TypeScript tests)
+
+#### Phase 2 Results
+
+| Metric | Phase 1 | Phase 2 | Change | Cumulative from Original |
+|--------|---------|---------|--------|--------------------------|
+| `STATE_COUNT` | 5,827 | 5,601 | −226 (−3.9%) | −269 (−4.6%) |
+| `LARGE_STATE_COUNT` | 1,011 | 994 | −17 (−1.7%) | −199 (−16.7%) |
+| `SYMBOL_COUNT` | 373 | 369 | −4 | −7 |
+| `TOKEN_COUNT` | 164 | 164 | 0 | −2 |
+| `parser.c` bytes | 8,572,838 | 8,397,205 | −176 KB (−2.0%) | −349 KB (−4.0%) |
+| **`libtree-sitter-typescript.a`** | **1,366,872** | **1,333,912** | **−33 KB (−2.4%)** | **−122 KB (−8.4%)** |
+
+#### What was done
+
+1. **Merged 4 `typeof`-context rules** (`_type_query_member_expression`, `_type_query_subscript_expression`, `_type_query_call_expression`, `_type_query_instantiation_expression`) into 1 unified `_type_query_expression` rule with 4 suffix branches (member, subscript, call, instantiation).
+
+2. **Merged 2 import-type-annotation rules** (`_type_query_member_expression_in_type_annotation`, `_type_query_call_expression_in_type_annotation`) into 1 unified `_type_query_import_expression` rule with 2 branches (member access, call).
+
+3. **Reduced precedence entries** from 10 `_type_query_*` entries to 7 unified entries.
+
+4. **Updated `type_query` rule** to reference the unified `$._type_query_expression` (hidden, inlined into `type_query` node).
+
+5. **Updated `type` rule** — collapsed 2 alternatives into 1: `prec(-1, alias($._type_query_import_expression, $.member_expression))`.
+
+#### Why `primary_type`/`type` flattening was skipped
+
+Moving `union_type`, `intersection_type`, `conditional_type`, `lookup_type` out of `primary_type` would break valid TypeScript patterns:
+- `${string | number}` — template literal types rely on `union_type` being in `primary_type` (via `template_type → primary_type`)
+- `A[B][]` — chained lookups require `lookup_type` in `primary_type` (via `array_type → primary_type`)
+- `A[B][C]` — nested lookups require `lookup_type` to be a valid `primary_type` for the base of another `lookup_type`
+
+The `primary_type` / `type` separation encodes operator precedence (array type binds tighter than union/intersection). Flattening would require alternative precedence mechanisms that risk subtle breakage.
+
+#### Lessons Learned
+
+4. **Recursive alias correctness.** When merging rules that use different aliases for recursive self-references, the unified rule can only have ONE alias per reference point. The alias may be "wrong" for some matches (e.g., a subscript expression aliased as `member_expression`). This is acceptable when the AST builder doesn't consume the aliased nodes.
+
+5. **Type rule is a supertype.** The `type` rule requires each alternative to produce a single visible child node. Hidden rules (`_` prefix) used directly in `type` cause a "Supertype symbols must always have a single visible child" error. Must alias hidden rules to visible names.
 
 ### Phase 3: High Risk, High Reward (Estimated: additional −15–30%)
 
 9. **Simplify `object_type` internal parsing**
 10. **Common prefix extraction** for array/tuple and object/object_type ambiguities
-11. **Reduce conflict sets** from 46 toward ~30
+11. **Reduce conflict sets** from 44 toward ~30
 12. Extensive AST builder rework and testing
 
 ---
