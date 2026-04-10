@@ -8,20 +8,8 @@
 }
 @font-face {
   font-family: 'KaTeX_Caligraphic';
-  src: url('../fonts/KaTeX_Caligraphic-Bold.woff2') format('woff2');
-  font-weight: bold;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'KaTeX_Caligraphic';
   src: url('../fonts/KaTeX_Caligraphic-Regular.woff2') format('woff2');
   font-weight: normal;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'KaTeX_Fraktur';
-  src: url('../fonts/KaTeX_Fraktur-Bold.woff2') format('woff2');
-  font-weight: bold;
   font-style: normal;
 }
 @font-face {
