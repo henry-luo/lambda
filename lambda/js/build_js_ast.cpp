@@ -769,6 +769,20 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
             }
 
             TSNode name_node = ts_node_child_by_field_name(property_node, "name", strlen("name"));
+
+            // v2 fallback: get/set consumed by opaque _ts_class_modifiers — check source prefix
+            if (!is_getter && !is_setter && !ts_node_is_null(name_node)) {
+                uint32_t ms = ts_node_start_byte(property_node);
+                uint32_t ns = ts_node_start_byte(name_node);
+                if (ns > ms) {
+                    const char* pfx = tp->source + ms;
+                    int plen = (int)(ns - ms);
+                    int i = 0;
+                    while (i < plen && (pfx[i] == ' ' || pfx[i] == '\t' || pfx[i] == '\n' || pfx[i] == '\r')) i++;
+                    if (plen - i >= 4 && memcmp(pfx + i, "get", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_getter = true;
+                    else if (plen - i >= 4 && memcmp(pfx + i, "set", 3) == 0 && (pfx[i+3] == ' ' || pfx[i+3] == '\t' || pfx[i+3] == '\n')) is_setter = true;
+                }
+            }
             TSNode body_node = ts_node_child_by_field_name(property_node, "body", strlen("body"));
 
             if ((is_getter || is_setter) && !ts_node_is_null(name_node) && !ts_node_is_null(body_node)) {
@@ -914,6 +928,21 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             // stop once we hit the parameters or body
             if (strcmp(ctype, "formal_parameters") == 0 || strcmp(ctype, "statement_block") == 0) break;
         }
+        // v2 fallback: '*' consumed by opaque _ts_class_modifiers — check source prefix
+        if (!is_generator) {
+            TSNode name_tmp = ts_node_child_by_field_name(func_node, "name", 4);
+            if (!ts_node_is_null(name_tmp)) {
+                uint32_t ms = ts_node_start_byte(func_node);
+                uint32_t ns = ts_node_start_byte(name_tmp);
+                if (ns > ms) {
+                    const char* pfx = tp->source + ms;
+                    int plen = (int)(ns - ms);
+                    for (int pi = 0; pi < plen; pi++) {
+                        if (pfx[pi] == '*') { is_generator = true; break; }
+                    }
+                }
+            }
+        }
     }
 
     bool is_expression = is_arrow || (strcmp(node_type, "function_expression") == 0) ||
@@ -937,6 +966,26 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             const char* ctype = ts_node_type(child);
             if (strcmp(ctype, "async") == 0) { func->is_async = true; break; }
             if (strcmp(ctype, "function") == 0 || strcmp(ctype, "=>") == 0) break;
+        }
+    }
+    // v2 fallback: 'async' consumed by opaque _ts_class_modifiers — check source prefix
+    if (!func->is_async) {
+        TSNode name_tmp = ts_node_child_by_field_name(func_node, "name", 4);
+        if (!ts_node_is_null(name_tmp)) {
+            uint32_t ms = ts_node_start_byte(func_node);
+            uint32_t ns = ts_node_start_byte(name_tmp);
+            if (ns > ms && (ns - ms) >= 5) {
+                const char* pfx = tp->source + ms;
+                int plen = (int)(ns - ms);
+                for (int pi = 0; pi <= plen - 5; pi++) {
+                    if (pfx[pi] == 'a' && memcmp(pfx + pi, "async", 5) == 0) {
+                        // ensure it's a word boundary (not part of a longer identifier)
+                        bool left_ok = (pi == 0) || !isalnum((unsigned char)pfx[pi - 1]);
+                        bool right_ok = (pi + 5 >= plen) || !isalnum((unsigned char)pfx[pi + 5]);
+                        if (left_ok && right_ok) { func->is_async = true; break; }
+                    }
+                }
+            }
         }
     }
 
@@ -2661,6 +2710,26 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node) {
         }
     }
 
+    // v2 fallback: 'static' consumed by opaque _ts_class_modifiers — check source prefix
+    if (!field->is_static) {
+        TSNode prop_tmp = ts_node_child_by_field_name(field_node, "property", 8);
+        if (ts_node_is_null(prop_tmp))
+            prop_tmp = ts_node_child_by_field_name(field_node, "name", 4);
+        if (!ts_node_is_null(prop_tmp)) {
+            uint32_t fs = ts_node_start_byte(field_node);
+            uint32_t ps = ts_node_start_byte(prop_tmp);
+            if (ps > fs) {
+                const char* pfx = tp->source + fs;
+                int plen = (int)(ps - fs);
+                int pi = 0;
+                while (pi < plen && (pfx[pi] == ' ' || pfx[pi] == '\t' || pfx[pi] == '\n' || pfx[pi] == '\r')) pi++;
+                if (plen - pi >= 7 && memcmp(pfx + pi, "static", 6) == 0 && (pfx[pi+6] == ' ' || pfx[pi+6] == '\t' || pfx[pi+6] == '\n' || pfx[pi+6] == '[')) {
+                    field->is_static = true;
+                }
+            }
+        }
+    }
+
     // get property name — tree-sitter uses "property" for field_definition,
     // "name" for public_field_definition
     TSNode prop_node = ts_node_child_by_field_name(field_node, "property", strlen("property"));
@@ -2750,6 +2819,31 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
             method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
         } else if (strcmp(child_type, "set") == 0) {
             method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
+        }
+    }
+
+    // v2 fallback: get/set/static consumed by opaque _ts_class_modifiers — check source prefix
+    if (method->kind == JsMethodDefinitionNode::JS_METHOD_METHOD || !method->static_method) {
+        TSNode name_tmp = ts_node_child_by_field_name(method_node, "name", 4);
+        if (!ts_node_is_null(name_tmp)) {
+            uint32_t ms = ts_node_start_byte(method_node);
+            uint32_t ns = ts_node_start_byte(name_tmp);
+            if (ns > ms) {
+                const char* pfx = tp->source + ms;
+                int plen = (int)(ns - ms);
+                int pi = 0;
+                while (pi < plen) {
+                    while (pi < plen && (pfx[pi] == ' ' || pfx[pi] == '\t' || pfx[pi] == '\n' || pfx[pi] == '\r')) pi++;
+                    if (pi >= plen) break;
+                    if (pfx[pi] == '*') { pi++; continue; }
+                    int ws = pi;
+                    while (pi < plen && pfx[pi] >= 'a' && pfx[pi] <= 'z') pi++;
+                    int wl = pi - ws;
+                    if (wl == 3 && memcmp(pfx + ws, "get", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_GET;
+                    else if (wl == 3 && memcmp(pfx + ws, "set", 3) == 0) method->kind = JsMethodDefinitionNode::JS_METHOD_SET;
+                    else if (wl == 6 && memcmp(pfx + ws, "static", 6) == 0) method->static_method = true;
+                }
+            }
         }
     }
 

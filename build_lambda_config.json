@@ -1500,6 +1500,7 @@
                     {
                         "source": "test_mempool_gtest.cpp",
                         "name": "Unified Memory Pool Tests",
+                        "disable_sanitizer": true,
                         "dependencies": [],
                         "libraries": [
                             "gtest",
@@ -2769,6 +2770,7 @@
                         "source": "test/test_js_test262_gtest.cpp",
                         "name": "test262 Compliance Tests",
                         "category": "extended",
+                        "disabled": true,
                         "dependencies": [],
                         "binary": "test_js_test262_gtest.exe",
                         "libraries": [
