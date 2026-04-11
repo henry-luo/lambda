@@ -67,8 +67,10 @@
 // =============================================================================
 
 static const char* TEST262_ROOT = "ref/test262";
-static const char* HARNESS_DIR = "ref/test262/harness";
+static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
+static std::string g_harness_dir = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
+static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
 // Target: ES2020 compliance. All features ≤ES2020 are in scope.
@@ -645,7 +647,7 @@ static const std::string& get_harness_file(const std::string& name) {
     std::lock_guard<std::mutex> lock(g_harness_mutex);
     auto it = g_harness_cache.find(name);
     if (it != g_harness_cache.end()) return it->second;
-    std::string path = std::string(HARNESS_DIR) + "/" + name;
+    std::string path = g_harness_dir + "/" + name;
     g_harness_cache[name] = read_file_contents(path);
     return g_harness_cache[name];
 }
@@ -676,9 +678,20 @@ static std::string assemble_harness_source() {
     return harness;
 }
 
+// Map original test path to stripped version if available
+static std::string get_source_path(const std::string& test_path) {
+    if (g_use_stripped) {
+        // ref/test262/test/... -> test/js262/test/...
+        std::string stripped = std::string(TEST262_SOURCE_DIR) +
+                               test_path.substr(strlen(TEST262_ROOT));
+        return stripped;
+    }
+    return test_path;
+}
+
 // Assemble test source WITHOUT harness (for two-module split: harness sent separately)
 static std::string assemble_test_source(const Test262Prepared& p) {
-    std::string source = read_file_contents(p.test_path);
+    std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
 
     std::string combined;
@@ -701,7 +714,7 @@ static std::string assemble_test_source(const Test262Prepared& p) {
 
 // Legacy: assemble combined source with harness included (for backward compatibility)
 static std::string assemble_combined_source(const Test262Prepared& p) {
-    std::string source = read_file_contents(p.test_path);
+    std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
 
     std::string combined;
@@ -755,6 +768,7 @@ static bool g_baseline_only = false;
 static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
+static bool g_no_stripped = false;  // --no-stripped: force original test files
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 static int g_total_tests = 0;   // total discovered tests
@@ -833,8 +847,8 @@ static void prepare_all_tests(
     std::vector<size_t>& batch_indices)
 {
     // pre-load common harness files
-    g_harness_sta = read_file_contents(std::string(HARNESS_DIR) + "/sta.js");
-    g_harness_assert = read_file_contents(std::string(HARNESS_DIR) + "/assert.js");
+    g_harness_sta = read_file_contents(g_harness_dir + "/sta.js");
+    g_harness_assert = read_file_contents(g_harness_dir + "/assert.js");
 
     prepared.resize(tests.size());
     std::atomic<int> prep_count{0};
@@ -1861,10 +1875,29 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--mir-interp") == 0) {
             g_mir_interp = true;
         }
+        if (strcmp(argv[i], "--no-stripped") == 0) {
+            g_no_stripped = true;  // explicit disable
+        }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);
             if (g_opt_level < 0 || g_opt_level > 3) g_opt_level = 0;
             snprintf(g_opt_level_arg, sizeof(g_opt_level_arg), "--opt-level=%d", g_opt_level);
+        }
+    }
+
+    // Auto-detect stripped test files directory (test/js262 -> ../lambda-test/js262)
+    if (!g_no_stripped) {
+        struct stat st;
+        std::string stripped_test_dir = std::string(TEST262_SOURCE_DIR) + "/test";
+        if (stat(stripped_test_dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            g_use_stripped = true;
+            // Also use stripped harness files if available
+            std::string stripped_harness = std::string(TEST262_SOURCE_DIR) + "/harness";
+            if (stat(stripped_harness.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+                g_harness_dir = stripped_harness;
+            }
+            fprintf(stderr, "[test262] Using comment-stripped files from %s\n",
+                    TEST262_SOURCE_DIR);
         }
     }
 

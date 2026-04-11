@@ -1,7 +1,7 @@
 # Radiant–ThorVG Deep Integration Design
 
 **Date:** April 2026
-**Status:** Active (Phase 1 in progress)
+**Status:** Stage 1 complete
 
 ---
 
@@ -11,7 +11,7 @@
 
 Extracting ThorVG's `sw_engine` or replacing it with platform-native backends (Core Graphics, Direct2D) is deferred to a future phase. The scope of that change is too large for a single step.
 
-Instead, this phase focuses on **isolation**: introduce `RdtVector` as Radiant's sole vector rendering interface. All ThorVG C API calls are moved out of Radiant rendering code and into a single backend file (`rdt_vector_tvg.cpp`). Radiant rendering files (`render.cpp`, `render_border.cpp`, `render_background.cpp`, `render_form.cpp`, `render_svg_inline.cpp`, `scroller.cpp`) call only `rdt_*` functions — never `tvg_*` directly.
+Stage 1 focuses on **isolation**: introduce `RdtVector` as Radiant's sole vector rendering interface. All ThorVG C API calls are moved out of Radiant rendering code and into a single backend file (`rdt_vector_tvg.cpp`). Radiant rendering files (`render.cpp`, `render_border.cpp`, `render_background.cpp`, `render_form.cpp`, `render_svg_inline.cpp`, `scroller.cpp`) call only `rdt_*` functions — never `tvg_*` directly.
 
 This gives us:
 1. **Clean separation** — ThorVG is an implementation detail behind a stable API.
@@ -32,7 +32,8 @@ This gives us:
 ### What Stays the Same
 
 - ThorVG linked as external static library (`libthorvg.a`) on all platforms
-- SVG rasterization uses ThorVG's SVG parser and Canvas (wrapped in RdtPicture)
+- SVG text rendering uses ThorVG's `tvg_text_*` API (wrapped via `rdt_picture_take_tvg_paint`)
+- SVG `<image>` loading uses ThorVG's `tvg_picture_*` API (wrapped via `rdt_picture_take_tvg_paint`)
 - Build system unchanged (ThorVG in `mac-deps/`, `win-native-deps/`, `/usr/local/lib/`)
 - Text/font pipeline entirely Radiant-owned (unchanged)
 
@@ -215,24 +216,28 @@ radiant/
 ├── render_border.cpp       # calls rdt_* only
 ├── render_background.cpp   # calls rdt_* only
 ├── render_form.cpp         # calls rdt_* only
-├── render_svg_inline.cpp   # calls rdt_* only
+├── render_svg_inline.cpp   # calls rdt_* + tvg_text_*/tvg_picture_* (internal bridge)
 ├── scroller.cpp            # calls rdt_* only
-├── surface.cpp             # fill_surface_rect stays pixel-level
+├── surface.cpp             # calls rdt_picture_load/free for SVG, pixel-level for raster
+├── cmd_layout.cpp          # calls rdt_picture_load/free for standalone SVG loading
+├── ui_context.cpp          # calls rdt_engine_init/term, rdt_font_load
 └── ...
 ```
 
-Future backends (not in this phase):
+Future backends (Stage 2):
 ```
-├── rdt_vector_cg.mm        # Core Graphics (macOS) — future
-├── rdt_vector_d2d.cpp      # Direct2D (Windows) — future
-├── rdt_vector_sw.cpp       # Extracted ThorVG sw_engine — future
+├── rdt_vector_cg.mm        # Core Graphics (macOS) — Stage 2
+├── rdt_vector_d2d.cpp      # Direct2D (Windows) — Stage 2
+├── rdt_vector_sw.cpp       # Extracted ThorVG sw_engine — Stage 2
 ```
 
 ---
 
 ## 6. Migration Plan
 
-### Phase 1: RdtVector API + ThorVG Backend + Migration (current)
+### Stage 1: ThorVG Deep Integration (complete)
+
+#### Phase 1: RdtVector API + ThorVG Backend + Migration ✅
 
 1. ✅ Define `rdt_vector.hpp` — complete API header, no ThorVG types exposed
 2. ✅ Implement `rdt_vector_tvg.cpp` — wraps ThorVG C API behind RdtVector
@@ -241,23 +246,68 @@ Future backends (not in this phase):
 5. ✅ Migrate `render.cpp` — overlays, markers, wavy lines, column rules, debug rect, images
 6. ✅ Migrate `render_border.cpp` — trapezoids, rounded borders, dashes, clipping
 7. ✅ Migrate `render_background.cpp` — gradients, shadows, images, rounded-rect clipping
-8. ☐ Migrate `render_svg_inline.cpp` — SVG shapes, transforms, scenes
-9. ☐ Migrate `surface.cpp` — SVG picture creation
-10. ☐ Remove `Tvg_Canvas` from RenderContext, remove all direct tvg_ includes from render files
-11. ☐ Run `make test-radiant-baseline` — must pass 100%
+8. ✅ Migrate `render_svg_inline.cpp` — SVG shapes, transforms, scenes → rdt_* calls
+9. ✅ Migrate `surface.cpp` — SVG picture creation
+10. ✅ Remove `Tvg_Canvas` from RenderContext, remove all direct tvg_ includes from render files
+11. ✅ `make test-radiant-baseline` — 4005/4005 pass
 
-### Phase 2: Platform-Native Backends (future)
+#### Phase 2: SVG Inline Rendering Rework ✅
+
+Eliminated the ThorVG scene tree (`Tvg_Paint`/`Tvg_Scene`) from inline SVG rendering.
+`build_svg_scene()` is replaced by `render_svg_to_vec()` which draws directly to `RdtVector`.
+
+1. ✅ Added `rdt_matrix_multiply()` and `rdt_matrix_translate()` to `rdt_vector.hpp`
+2. ✅ Updated `SvgRenderContext` — added `RdtVector* vec` and `RdtMatrix transform` for accumulated transforms
+3. ✅ Replaced gradient/fill/stroke/transform helpers: `draw_gradient_fill()`, `draw_svg_fill_stroke()`, `compose_element_transform()`
+4. ✅ Converted all shape renderers (rect, circle, ellipse, line, polyline, polygon, path) — build `RdtPath`, call `rdt_fill_path`/`rdt_stroke_path`/`rdt_fill_*_gradient` directly
+5. ✅ Converted group/children rendering — save/restore `ctx->transform` instead of creating ThorVG scenes
+6. ✅ Converted `render_svg_element()` dispatcher — void return, no scene push
+7. ✅ Converted `<use>` element — compose offset into accumulated transform
+8. ✅ Converted text rendering — `create_text_segment()` still uses `tvg_text_*` API internally, wraps result via `rdt_picture_take_tvg_paint()` + `rdt_picture_draw()`
+9. ✅ Converted image rendering — `tvg_picture_*` loading wrapped via `rdt_picture_take_tvg_paint()`
+10. ✅ Rewrote `build_svg_scene()` → `render_svg_to_vec()` — computes viewBox transform, composes with base transform, renders children directly to vec
+11. ✅ Simplified `render_inline_svg()` — builds base transform (position + scale + document transform), calls `render_svg_to_vec()` directly
+12. ✅ Build: 0 errors, 0 warnings. Tests: 4005/4005 baseline pass
+
+**Remaining ThorVG usage in `render_svg_inline.cpp`** (26 `tvg_` calls, all properly wrapped):
+- `create_text_segment()` — `tvg_text_*`/`tvg_font_load` for SVG `<text>` elements
+- `render_svg_image()` — `tvg_picture_*` for SVG `<image>` elements
+- Both bridge to rdt_ via `rdt_picture_take_tvg_paint()` before drawing
+
+#### Phase 3: Full ThorVG Elimination Outside Isolation Files ✅
+
+Removed all remaining `tvg_*` / `Tvg_*` / `thorvg_capi.h` usage from every file outside the two isolation files (`rdt_vector_tvg.cpp`, `render_svg_inline.cpp`). ThorVG is now fully encapsulated.
+
+1. ✅ Changed `ImageSurface::pic` type from `Tvg_Paint` to `struct RdtPicture*` in `view.hpp`
+2. ✅ Added `rdt_picture_dup()`, `rdt_engine_init()`, `rdt_engine_term()`, `rdt_font_load()` to rdt_ API
+3. ✅ Removed `#include <thorvg_capi.h>` from `view.hpp` — no ThorVG types remain in the header
+4. ✅ Migrated `surface.cpp` — `tvg_picture_new/load/load_data/get_size/paint_unref` → `rdt_picture_load/load_data/get_size/free`
+5. ✅ Deleted dead code `create_tvg_picture_from_surface()` from `surface.cpp` (~40 lines, zero callers)
+6. ✅ Updated `render.cpp` — `surface->pic` is `RdtPicture*`, used directly (no bridge wrapper needed)
+7. ✅ Updated `render_background.cpp` — `rdt_picture_from_tvg_paint()` → `rdt_picture_dup()`
+8. ✅ Migrated `cmd_layout.cpp` — all `tvg_picture_*` calls → `rdt_picture_load/get_size/free`
+9. ✅ Migrated `ui_context.cpp` — `tvg_engine_init/term` → `rdt_engine_init/term`, `tvg_font_load` → `rdt_font_load`
+10. ✅ Removed unused `#include <thorvg_capi.h>` from `pdf/pdf_to_view.cpp`
+11. ✅ Removed bridge functions from `rdt_vector.hpp`: `rdt_vector_get_tvg_canvas`, `rdt_picture_from_tvg_paint`, `Tvg_Matrix` conversion utilities
+12. ✅ Kept `rdt_picture_take_tvg_paint` — only bridge function remaining, used by `render_svg_inline.cpp` for text/image paint
+13. ✅ Build: 0 errors. Tests: Lambda 566/566, Layout 4005/4005 baseline pass
+
+**ThorVG is now isolated to exactly 3 files:**
+- `rdt_vector_tvg.cpp` — backend implementation (all `tvg_*` calls)
+- `render_svg_inline.cpp` — SVG text/image rendering (uses `tvg_text_*`/`tvg_picture_*` internally)
+- `rdt_vector.hpp` — single `#include <thorvg_capi.h>` + one bridge declaration (`rdt_picture_take_tvg_paint`)
+
+Zero `tvg_*` or `Tvg_*` references exist anywhere else in the codebase.
+
+### Stage 2: Platform-Native Backends (future)
 
 1. Implement `rdt_vector_cg.mm` — Core Graphics backend for macOS
 2. Implement `rdt_vector_d2d.cpp` — Direct2D backend for Windows
 3. Compile-time backend selection via platform #ifdef
 4. Pixel-level baseline comparison to validate rendering equivalence
-
-### Phase 3: ThorVG Extraction (future)
-
-1. Extract `sw_engine` from ThorVG for Linux-only use
-2. Remove external ThorVG dependency
-3. Implement `rdt_vector_sw.cpp` wrapping extracted sw_engine directly
+5. Extract `sw_engine` from ThorVG for Linux-only use
+6. Remove external ThorVG dependency
+7. Implement `rdt_vector_sw.cpp` wrapping extracted sw_engine directly
 
 ---
 
@@ -268,17 +318,18 @@ Future backends (not in this phase):
 | ThorVG backend adds indirection overhead | Low — one extra function call per shape, dominated by rasterization time | Profile if needed; the indirection is negligible vs. rasterization |
 | Rendering regressions during migration | Medium | Run `make test-radiant-baseline` after each file migration |
 | RdtVector API gaps discovered during migration | Low | API can be extended as needed; it's Radiant-owned |
-| ThorVG push/draw/remove overhead not eliminated | Accepted for this phase | Future platform-native backends eliminate it entirely |
+| ThorVG push/draw/remove overhead not eliminated | Accepted for Stage 1 | Stage 2 platform-native backends eliminate it entirely |
 
 ---
 
 ## 8. Summary
 
-| Aspect | Before | After (Phase 1) | Future |
+| Aspect | Before | After (Stage 1) | Stage 2 |
 |--------|--------|-----------------|--------|
 | ThorVG dependency | External, C API | External, C API (isolated) | Extracted / replaced |
-| ThorVG calls in render code | 30+ files | Only `rdt_vector_tvg.cpp` | Same |
+| ThorVG calls in render code | 30+ files | Only `rdt_vector_tvg.cpp` + `render_svg_inline.cpp` (3 files total) | Same |
 | Rendering API | `tvg_*` C functions | `rdt_*` free functions | Same API, different backend |
-| Scene management | Push/draw/remove inline | Push/draw/remove in backend | Immediate-mode (native) |
+| Scene management | Push/draw/remove inline, ThorVG scene tree for SVG | Push/draw/remove in backend, direct draw for SVG | Immediate-mode (native) |
+| SVG rendering | `build_svg_scene()` → ThorVG scene tree | `render_svg_to_vec()` → direct `rdt_*` draw calls | Same |
 | Text rendering | Radiant (all) | Radiant (all) | Same |
 | Binary footprint | Full ThorVG | Full ThorVG | sw_engine only (~19k LoC) |

@@ -540,6 +540,17 @@ RdtPicture* rdt_picture_load_data(const char* data, int size, const char* mime_t
     return p;
 }
 
+RdtPicture* rdt_picture_dup(RdtPicture* pic) {
+    if (!pic || !pic->paint) return nullptr;
+    Tvg_Paint dup = tvg_paint_duplicate(pic->paint);
+    if (!dup) return nullptr;
+    RdtPicture* p = (RdtPicture*)calloc(1, sizeof(RdtPicture));
+    p->paint = dup;
+    p->width = pic->width;
+    p->height = pic->height;
+    return p;
+}
+
 void rdt_picture_get_size(RdtPicture* pic, float* w, float* h) {
     if (!pic) { if (w) *w = 0; if (h) *h = 0; return; }
     if (w) *w = pic->width;
@@ -581,24 +592,8 @@ void rdt_picture_free(RdtPicture* pic) {
 }
 
 // ============================================================================
-// Migration helper: raw canvas access for not-yet-migrated code
+// Bridge: wrap ThorVG paint as RdtPicture (used by render_svg_inline.cpp)
 // ============================================================================
-
-Tvg_Canvas rdt_vector_get_tvg_canvas(RdtVector* vec) {
-    if (!vec || !vec->impl) return nullptr;
-    return vec->impl->canvas;
-}
-
-RdtPicture* rdt_picture_from_tvg_paint(Tvg_Paint paint, float w, float h) {
-    if (!paint) return nullptr;
-    Tvg_Paint dup = tvg_paint_duplicate(paint);
-    if (!dup) return nullptr;
-    RdtPicture* pic = (RdtPicture*)calloc(1, sizeof(RdtPicture));
-    pic->paint = dup;
-    pic->width = w;
-    pic->height = h;
-    return pic;
-}
 
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
@@ -626,4 +621,22 @@ void rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m) {
     tm.e21 = m->e21; tm.e22 = m->e22; tm.e23 = m->e23;
     tm.e31 = m->e31; tm.e32 = m->e32; tm.e33 = m->e33;
     tvg_paint_set_transform(pic->paint, &tm);
+}
+
+// ============================================================================
+// Engine lifecycle
+// ============================================================================
+
+void rdt_engine_init(int threads) {
+    tvg_engine_init(threads);
+}
+
+void rdt_engine_term(void) {
+    tvg_engine_term();
+}
+
+void rdt_font_load(const char* font_path) {
+    if (font_path) {
+        tvg_font_load(font_path);
+    }
 }

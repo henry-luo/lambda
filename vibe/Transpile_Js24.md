@@ -265,15 +265,80 @@ Even with a shared preamble, the compiled native functions call back into global
 
 ---
 
+## Stage 9: Comment-Stripped Test Files
+
+**Current**: Test262 `.js` files contain lengthy copyright headers, spec description comments, and inline `//CHECK#N` comments. These add ~13% to file size (81.5 MB → 70.6 MB), increasing I/O volume and parser workload for every test run.
+
+### Implementation
+
+**1. Stripping script** (`utils/strip_test262_comments.py`):
+- Character-level state machine strips `//` and `/* */` comments
+- Preserves `/*--- ... ---*/` YAML frontmatter (required by metadata parser)
+- Handles regex literals with `/` inside character classes (e.g., `/[//]/` not misidentified as comment)
+- Respects U+2028 (LS) and U+2029 (PS) as JS line terminators in `//` comments
+- Preserves newlines from block comments to maintain line numbering
+- Collapses runs of 3+ blank lines to 2
+- Parallel processing: 8 workers, ~16s for all 53,432 files
+- Output: `ref/test262-stripped/` mirroring `ref/test262/` structure
+- Harness files (`ref/test262/harness/`) copied as-is (loaded separately, already cached)
+
+**2. Runner integration** (`test/test_js_test262_gtest.cpp`):
+- Auto-detects `ref/test262-stripped/test/` directory at startup
+- `get_source_path()` remaps `ref/test262/test/...` → `ref/test262-stripped/test/...` for source assembly
+- Metadata still loaded from TSV cache (unchanged — uses original paths as keys)
+- `--no-stripped` CLI flag to explicitly disable stripped files
+- No change to test naming, baseline matching, or result evaluation
+
+**3. Makefile target**: `make test262-strip` runs the stripping script.
+
+### Edge Cases Handled
+
+| Edge case | Solution |
+|-----------|----------|
+| `/[//]/` regex (fwd slash in char class) | Context-aware: track `[...]` state inside regex literals |
+| `//` after `assert(`, `)`, identifiers | Regex-vs-division disambiguation via preceding token analysis |
+| Keywords before regex (`return /x/`) | Check preceding word against keyword list (`return`, `typeof`, `void`, etc.) |
+| U+2028/U+2029 inside `//` comments | Treat as line terminators (per ECMAScript spec) |
+| `/*--- ... ---*/` frontmatter | Detected by `/*---` prefix, preserved verbatim |
+
+### Results (M-series Mac, 12 workers, baseline-only mode)
+
+| Metric | Original | Stripped | Delta |
+|--------|----------|----------|-------|
+| Total file size (test/) | 81.5 MB | 70.6 MB | **−13.4%** |
+| Phase 2 (execute) | 60.3s | 56.6s | **−6.1%** |
+| Wall time | 70.5s | 66.1s | **−6.2%** |
+| CPU time (user) | 234.0s | 226.4s | **−3.2%** |
+| New regressions | 135 | 135 | **0 new** |
+
+### Analysis
+
+The 13% I/O reduction translates to only ~6% wall-time savings because:
+- Test execution is **CPU-bound** (MIR link + gen + execute dominates)
+- File system cache is warm after first batch — subsequent reads hit page cache
+- The parser still processes all non-comment tokens identically
+
+The benefit is more pronounced on:
+- Cold cache runs (first run after reboot)
+- CI machines with slower storage or memory pressure
+- Machines where file reads compete with other I/O
+
+### Status: ✅ Done
+
+`ref/test262-stripped/` generated, runner auto-detects and uses stripped files. Zero regressions. ~6% Phase 2 improvement.
+
+---
+
 ## Implementation Priority
 
 | Stage | Description | Impact | Risk | Effort | Priority |
 |-------|-------------|--------|------|--------|----------|
 | **4** | Profile per-test breakdown | Enables all others | None | Low | **Do first** |
-| **1** | Increase worker count | 8-46% (core-dependent) | Low | Trivial | **Quick win** |
+| **1** | Increase worker count | 8-46% (core-dependent) | Low | Trivial | ✅ Done |
+| **9** | Comment-stripped test files | ~6% wall time | Low | Low | ✅ Done |
 | **5** | Adaptive micro-batches | 3-5s | Low | Low | Quick win |
-| **2** | MIR context reuse | ~5% | Medium | Medium | After profiling |
+| **2** | MIR context reuse | ~5% | Medium | Medium | ❌ Infeasible |
 | **6** | Skip stable tests (dev mode) | ~80% for dev iteration | Low | Medium | Quality-of-life |
-| **3** | Preamble binary cache | <1% | Low | Low | Skip unless persistent workers added |
+| **3** | Preamble binary cache | <1% | Low | Low | ❌ Infeasible |
 | **7** | Parallel parse pipeline | 20-30% | High | High | Only if profiling shows parse is significant |
-| **8** | Multi-thread workers | Shared preamble | High | High | Skipped — 42+ globals not thread-safe |
+| **8** | Multi-thread workers | Shared preamble | High | High | ⏭️ Skipped — 42+ globals not thread-safe |

@@ -30,7 +30,6 @@
 #define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
 #endif
 
-#include <thorvg_capi.h>
 #endif // LAMBDA_HEADLESS
 
 // Use inline functions instead of macros to avoid conflicts with std::max/min
@@ -361,7 +360,7 @@ typedef struct ImageSurface {
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
 #ifndef LAMBDA_HEADLESS
-    Tvg_Paint pic;        // ThorVG picture for SVG image (Tvg_Paint is already a pointer type in v1.0-pre34)
+    struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
 #endif
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
@@ -1395,7 +1394,6 @@ typedef struct {
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
-extern Tvg_Paint create_tvg_picture_from_surface(ImageSurface* surface);
 #endif // LAMBDA_HEADLESS
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document

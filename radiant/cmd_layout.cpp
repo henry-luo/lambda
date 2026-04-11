@@ -57,6 +57,7 @@ extern "C" {
 #include "../lambda/transpiler.hpp"
 #include "../lambda/mark_builder.hpp"
 #include "../radiant/view.hpp"
+#include "../radiant/rdt_vector.hpp"
 #include "../radiant/layout.hpp"
 #include "../radiant/font_face.h"
 #include "../radiant/state_store.hpp"
@@ -2320,19 +2321,17 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    // Load SVG using ThorVG (v1.0-pre34: Tvg_Paint is already a pointer type)
-    Tvg_Paint pic = tvg_picture_new();
-    Tvg_Result ret = tvg_picture_load(pic, svg_filepath);
-    if (ret != TVG_RESULT_SUCCESS) {
-        log_error("Failed to load SVG: %s (error: %d)", svg_filepath, ret);
-        tvg_paint_unref(pic, true);
+    // Load SVG through rdt_ vector API
+    RdtPicture* pic = rdt_picture_load(svg_filepath);
+    if (!pic) {
+        log_error("Failed to load SVG: %s", svg_filepath);
         pool_destroy(view_pool);
         return nullptr;
     }
 
     // Get SVG intrinsic size from viewBox
     float svg_width, svg_height;
-    tvg_picture_get_size(pic, &svg_width, &svg_height);
+    rdt_picture_get_size(pic, &svg_width, &svg_height);
     log_info("SVG intrinsic size: %.1f x %.1f", svg_width, svg_height);
 
     // If SVG has no intrinsic size, use viewport
@@ -2347,7 +2346,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     ViewTree* view_tree = (ViewTree*)pool_calloc(view_pool, sizeof(ViewTree));
     if (!view_tree) {
         log_error("Failed to allocate view tree for SVG");
-        tvg_paint_unref(pic, true);
+        rdt_picture_free(pic);
         pool_destroy(view_pool);
         return nullptr;
     }
@@ -2358,7 +2357,7 @@ DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height,
     ViewBlock* root_view = (ViewBlock*)pool_calloc(view_pool, sizeof(ViewBlock));
     if (!root_view) {
         log_error("Failed to allocate root view for SVG");
-        tvg_paint_unref(pic, true);
+        rdt_picture_free(pic);
         pool_destroy(view_pool);
         return nullptr;
     }
