@@ -66,8 +66,10 @@
 // =============================================================================
 
 static const char* TEST262_ROOT = "ref/test262";
+static const char* TEST262_STRIPPED_ROOT = "ref/test262-stripped";
 static const char* HARNESS_DIR = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
+static bool g_use_stripped = false;  // use comment-stripped test files
 
 // Features above ES2020 — skip tests requiring these.
 // Target: ES2020 compliance. All features ≤ES2020 are in scope.
@@ -664,9 +666,20 @@ static std::string assemble_harness_source() {
     return harness;
 }
 
+// Map original test path to stripped version if available
+static std::string get_source_path(const std::string& test_path) {
+    if (g_use_stripped) {
+        // ref/test262/test/... -> ref/test262-stripped/test/...
+        std::string stripped = std::string(TEST262_STRIPPED_ROOT) +
+                               test_path.substr(strlen(TEST262_ROOT));
+        return stripped;
+    }
+    return test_path;
+}
+
 // Assemble test source WITHOUT harness (for two-module split: harness sent separately)
 static std::string assemble_test_source(const Test262Prepared& p) {
-    std::string source = read_file_contents(p.test_path);
+    std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
 
     std::string combined;
@@ -689,7 +702,7 @@ static std::string assemble_test_source(const Test262Prepared& p) {
 
 // Legacy: assemble combined source with harness included (for backward compatibility)
 static std::string assemble_combined_source(const Test262Prepared& p) {
-    std::string source = read_file_contents(p.test_path);
+    std::string source = read_file_contents(get_source_path(p.test_path));
     if (source.empty()) return "";
 
     std::string combined;
@@ -1834,10 +1847,24 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--mir-interp") == 0) {
             g_mir_interp = true;
         }
+        if (strcmp(argv[i], "--no-stripped") == 0) {
+            g_use_stripped = false;  // explicit disable
+        }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);
             if (g_opt_level < 0 || g_opt_level > 3) g_opt_level = 0;
             snprintf(g_opt_level_arg, sizeof(g_opt_level_arg), "--opt-level=%d", g_opt_level);
+        }
+    }
+
+    // Auto-detect stripped test files directory
+    {
+        struct stat st;
+        std::string stripped_test_dir = std::string(TEST262_STRIPPED_ROOT) + "/test";
+        if (stat(stripped_test_dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            g_use_stripped = true;
+            fprintf(stderr, "[test262] Using comment-stripped test files from %s\n",
+                    TEST262_STRIPPED_ROOT);
         }
     }
 

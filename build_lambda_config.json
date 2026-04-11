@@ -2770,7 +2770,7 @@
                         "source": "test/test_js_test262_gtest.cpp",
                         "name": "test262 Compliance Tests",
                         "category": "extended",
-                        "disabled": true,
+                        "disabled": false,
                         "dependencies": [],
                         "binary": "test_js_test262_gtest.exe",
                         "libraries": [

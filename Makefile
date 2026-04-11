@@ -893,6 +893,11 @@ test262-update-baseline: build-test
 	@echo "Running full test262 suite and updating baseline..."
 	@./test/test_js_test262_gtest.exe --batch-only --update-baseline
 
+# test262 strip comments: create comment-stripped test files for faster I/O
+test262-strip:
+	@echo "Stripping comments from test262 files..."
+	@python3 utils/strip_test262_comments.py
+
 test-input-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
