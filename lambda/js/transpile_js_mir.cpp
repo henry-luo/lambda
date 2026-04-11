@@ -183,6 +183,7 @@ struct JsClassEntry {
     int method_count;
     JsClassMethodEntry* constructor;     // points into methods[] or NULL
     JsClassEntry* superclass;            // resolved parent class entry or NULL
+    bool has_self_extends;               // class x extends x {} — TDZ violation
     JsStaticFieldEntry static_fields[16]; // static field definitions
     int static_field_count;
     JsInstanceFieldEntry instance_fields[32]; // instance field definitions
@@ -11978,6 +11979,15 @@ static MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
                 }
             }
         }
+        // TDZ: class x extends x {} → throw ReferenceError
+        if (ce && ce->has_self_extends) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "Cannot access '%.*s' before initialization",
+                effective_name ? (int)effective_name->len : 1, effective_name ? effective_name->chars : "?");
+            MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
+            jm_call_void_1(mt, "js_throw_reference_error",
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+        }
         if (effective_name) {
             MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
             MIR_reg_t cn_val = jm_box_string_literal(mt, effective_name->chars, (int)effective_name->len);
@@ -14582,6 +14592,15 @@ static void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             if (cls_node->name && cls_node->name->chars) {
                 JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
                 if (ce) {
+                    // TDZ: class x extends x {} → throw ReferenceError
+                    if (ce->has_self_extends) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot access '%.*s' before initialization",
+                            (int)cls_node->name->len, cls_node->name->chars);
+                        MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
+                        jm_call_void_1(mt, "js_throw_reference_error",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                    }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
@@ -18121,6 +18140,17 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             JsIdentifierNode* super_id = (JsIdentifierNode*)ce->node->superclass;
             if (super_id->name) {
                 ce->superclass = jm_find_class(mt, super_id->name->chars, (int)super_id->name->len);
+                // Detect self-referential extends (class x extends x {}):
+                // Per ES spec, the class name is in TDZ during the extends clause.
+                // At compile time, we simply clear the superclass to prevent infinite
+                // loops in inheritance chain walkers. The runtime will throw ReferenceError
+                // because the class binding doesn't exist yet when extends is evaluated.
+                if (ce->superclass == ce) {
+                    ce->superclass = NULL;
+                    ce->has_self_extends = true;
+                    log_debug("js-mir: class '%.*s' has self-referential extends (TDZ)",
+                        (int)ce->name->len, ce->name->chars);
+                }
                 if (ce->superclass) {
                     log_debug("js-mir: class '%.*s' extends '%.*s'",
                         (int)ce->name->len, ce->name->chars,
@@ -18884,6 +18914,15 @@ void transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             if (cls_node->name && cls_node->name->chars) {
                 JsClassEntry* ce = jm_find_class(mt, cls_node->name->chars, (int)cls_node->name->len);
                 if (ce) {
+                    // TDZ: class x extends x {} → throw ReferenceError
+                    if (ce->has_self_extends) {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "Cannot access '%.*s' before initialization",
+                            (int)cls_node->name->len, cls_node->name->chars);
+                        MIR_reg_t msg_reg = jm_box_string_literal(mt, msg, (int)strlen(msg));
+                        jm_call_void_1(mt, "js_throw_reference_error",
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, msg_reg));
+                    }
                     // Create class object with __class_name__ property
                     MIR_reg_t cls_obj = jm_call_0(mt, "js_new_object", MIR_T_I64);
                     MIR_reg_t cn_key = jm_box_string_literal(mt, "__class_name__", 14);
@@ -20087,6 +20126,13 @@ static void jm_load_imports(Runtime* runtime, JsAstNode* ast, const char* filena
     }
 }
 
+// eval() preamble: snapshot of the outer script's module_consts so that
+// dynamically compiled code (eval / new Function) can resolve outer-scope
+// var declarations via the shared static js_module_vars[] array.
+static JsModuleConstEntry* g_eval_preamble_entries = NULL;
+static int g_eval_preamble_entry_count = 0;
+static int g_eval_preamble_var_count = 0;
+
 // ============================================================================
 // new Function(param1, param2, ..., body) — dynamic function compilation
 // Called from JIT code when new Function(...) is encountered.
@@ -20198,6 +20244,14 @@ extern "C" Item js_new_function_from_string(Item* args, int argc) {
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->current_func_index = -1;
+
+    // Inherit outer script's module_consts so eval()/new Function() can
+    // resolve var declarations from the calling scope.
+    if (g_eval_preamble_entries && g_eval_preamble_entry_count > 0) {
+        mt->preamble_entries = g_eval_preamble_entries;
+        mt->preamble_entry_count = g_eval_preamble_entry_count;
+        mt->preamble_var_count = g_eval_preamble_var_count;
+    }
 
     char module_name[48];
     snprintf(module_name, sizeof(module_name), "js_dynfunc_%d", js_dynamic_func_counter++);
@@ -20779,6 +20833,25 @@ static Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, co
         // Normal/preamble mode: reset all module vars before execution
         js_reset_module_vars();
     }
+
+    // Save module_consts as eval preamble BEFORE execution so that
+    // eval()/new Function() called during js_main can resolve outer-scope
+    // var declarations via the shared static js_module_vars[] array.
+    if (mt->module_consts && !g_jm_preamble_mode) {
+        free(g_eval_preamble_entries);
+        int ecount = (int)hashmap_count(mt->module_consts);
+        g_eval_preamble_entries = (JsModuleConstEntry*)malloc(ecount * sizeof(JsModuleConstEntry));
+        g_eval_preamble_entry_count = 0;
+        size_t eiter = 0; void* eitem;
+        while (hashmap_iter(mt->module_consts, &eiter, &eitem)) {
+            g_eval_preamble_entries[g_eval_preamble_entry_count++] =
+                *(JsModuleConstEntry*)eitem;
+        }
+        g_eval_preamble_var_count = mt->module_var_count;
+        log_debug("js-mir: saved eval preamble: %d entries, %d module vars",
+            g_eval_preamble_entry_count, g_eval_preamble_var_count);
+    }
+
     // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
     Item result = js_main((Context*)context);
     log_debug("js-mir: JIT execution returned (type=%d)", get_type_id(result));

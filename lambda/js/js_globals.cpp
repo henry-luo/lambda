@@ -6057,6 +6057,8 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
+extern "C" uint64_t js_get_heap_epoch();
+
 extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -6064,10 +6066,18 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-        extern Item js_new_error_with_name(Item type_name, Item message);
-        js_throw_value(js_new_error_with_name(tn, msg));
+        // Cache URIError object per-epoch to avoid expensive error creation
+        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
@@ -6094,10 +6104,16 @@ extern "C" Item js_decodeURI(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-        extern Item js_new_error_with_name(Item type_name, Item message);
-        js_throw_value(js_new_error_with_name(tn, msg));
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);

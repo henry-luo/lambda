@@ -87,6 +87,10 @@ static int js_pending_call_argc = 0;
 static Item js_module_vars[JS_MAX_MODULE_VARS];
 static int js_module_var_count = 0;
 
+// Epoch counter: incremented on batch reset to invalidate cached heap objects.
+static uint64_t js_heap_epoch = 1;
+extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
+
 // v18m: Original 'this' for Array.prototype.call() on non-array objects.
 // When filter/forEach/every/map/etc. are called on a MAP via .call(),
 // we convert to array-like internally but callbacks should get the original object.
@@ -268,6 +272,8 @@ extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
 static void js_module_cache_reset();
 
 extern "C" void js_batch_reset() {
+    // increment epoch to invalidate cached heap objects
+    js_heap_epoch++;
     // reset module variable table
     js_reset_module_vars();
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
@@ -9560,6 +9566,13 @@ extern "C" Item js_throw_type_error(const char* message) {
 // v20: Helper: throw SyntaxError (for early errors detected during transpilation)
 extern "C" void js_throw_syntax_error(Item message) {
     Item type_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
+    Item error = js_new_error_with_name(type_name, message);
+    js_throw_value(error);
+}
+
+// Helper: throw ReferenceError (for TDZ violations, undefined variables)
+extern "C" void js_throw_reference_error(Item message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("ReferenceError"))};
     Item error = js_new_error_with_name(type_name, message);
     js_throw_value(error);
 }

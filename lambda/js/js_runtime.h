@@ -362,6 +362,7 @@ void js_throw_value(Item value);
 Item js_throw_range_error(const char* message);
 Item js_throw_type_error(const char* message);
 void js_throw_syntax_error(Item message);
+void js_throw_reference_error(Item message);
 
 /** Throw TypeError if value is null or undefined (ES spec RequireObjectCoercible). */
 void js_require_object_coercible(Item value);

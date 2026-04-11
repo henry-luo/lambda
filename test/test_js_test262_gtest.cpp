@@ -14,6 +14,35 @@
 //   - flags: [async, module, raw, noStrict, onlyStrict]
 //   - Tests requiring features we don't support (Proxy, SharedArrayBuffer, etc.)
 //   - Tests using eval() semantics (test262 eval tests)
+//
+// =============================================================================
+// STABILITY PRINCIPLES — ZERO CRASH POLICY
+// =============================================================================
+//
+// The test262 runner MUST produce ZERO crashes and ZERO lost tests in every CI
+// run.  Any crash is a MAJOR regression that must be fixed immediately.
+//
+// Execution model:
+//   - Phase 1:  Parse metadata, partition tests into three groups:
+//       (a) CLEAN    — safe to batch (50 tests per process, 12 parallel workers)
+//       (b) NON-BATCH — tests whose harness includes mutate global built-in state
+//                        (e.g. propertyHelper.js deletes properties to test
+//                        configurability).  These MUST run individually (batch
+//                        size = 1) to prevent poisoning co-batched tests.
+//       (c) CRASHERS — quarantined from a previous run; skipped entirely.
+//   - Phase 2:  Execute CLEAN tests in batched workers.
+//   - Phase 2a: Execute NON-BATCH tests individually.
+//   - Phase 2b: Retry any batch-lost tests individually (crash recovery).
+//   - Phase 3:  Evaluate results against expected outcomes.
+//   - Phase 4:  (--batch-only) Retry regressions individually; if recovered,
+//               the failure was a batch interaction, not a real regression.
+//
+// Key invariant: after Phase 2 + 2a + 2b, every non-skipped test must have
+// a result.  If any test is MISSING, that is a crash and a critical bug.
+//
+// When adding a new test harness that mutates global state, add it to
+// NON_BATCH_INCLUDES so it always runs in isolation.
+//
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -69,7 +98,10 @@
 static const char* TEST262_ROOT = "ref/test262";
 static const char* TEST262_SOURCE_DIR = "test/js262";  // comment-stripped test files (symlink to ../lambda-test/js262)
 static std::string g_harness_dir = "ref/test262/harness";
+// Only tests with runtime < 3s (debug build) belong in the baseline.
+// Slow tests (>= 3s) should be moved to temp/_t262_crashers.txt with SLOW status.
 static const char* BASELINE_FILE = "test/js/test262_baseline.txt";
+static const char* NONBATCH_FILE = "test/js/test262_nonbatch.txt";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
 // Features above ES2020 — skip tests requiring these.
@@ -178,6 +210,18 @@ static const std::map<std::string, std::string> SKIPPED_TESTS = {
     // intermittently fail depending on the PRNG state and does not
     // indicate a real engine regression.
     {"built-ins/Math/random/S15.8.2.14_A1.js", "non-deterministic (Math.random)"},
+};
+
+// Harness files that mutate global built-in state.  Tests including ANY of
+// these MUST run individually, never inside a shared batch process, because
+// the mutations leak into subsequent tests within the same batch.
+// propertyHelper.js is listed here because its isConfigurable() helper
+// calls `delete obj[name]` to verify configurability — this permanently
+// removes built-in prototype methods in a shared batch process.  ~1500
+// baseline tests include it; running them individually (chunk_size=1) adds
+// only ~1.5s wallclock with 12 parallel workers.
+static const std::set<std::string> NON_BATCH_INCLUDES = {
+    "propertyHelper.js",
 };
 
 // =============================================================================
@@ -782,6 +826,7 @@ struct BatchTiming {
 // Forward declarations for globals used in prepare phase
 static std::set<std::string> g_baseline_passing;
 static std::set<std::string> g_known_crashers;
+static std::set<std::string> g_nonbatch_tests;  // tests that must run individually (from test262_nonbatch.txt)
 static std::set<std::string> g_known_slow_tests;  // tests >3s elapsed in previous run
 static const long SLOW_THRESHOLD_US = 3000000L;  // 3 seconds
 static bool g_update_baseline = false;
@@ -790,6 +835,7 @@ static bool g_batch_only = false;
 static bool g_no_hot_reload = false;
 static bool g_mir_interp = false;
 static bool g_no_stripped = false;  // --no-stripped: force original test files
+static std::string g_batch_file;   // --batch-file=<path>: run only tests from this list in a single batch
 static int g_opt_level = 0;  // default -O0 (fastest for short-lived test262 scripts)
 static char g_opt_level_arg[20] = "--opt-level=0";  // "--opt-level=N"
 static int g_total_tests = 0;   // total discovered tests
@@ -798,6 +844,11 @@ static int g_total_batched = 0; // total batched (executed) tests
 static double g_prep_secs = 0;  // Phase 1 (prepare) runtime
 static double g_exec_secs = 0;  // Phase 2 (execute) runtime
 static double g_total_secs = 0; // total runtime
+
+// Batch assignment tracking: which batch each test was in during Phase 2.
+// Used by Phase 4 to diagnose which co-batched tests cause false failures.
+static std::unordered_map<std::string, size_t> g_batch_assignment;  // test_name → batch_index
+static std::vector<std::vector<std::string>> g_batch_contents;      // batch_index → [test_names]
 
 // Get short git commit hash for baseline header
 static std::string get_git_commit_hash() {
@@ -862,6 +913,27 @@ static void load_known_crashers(const char* path) {
         }
     }
     fclose(f);
+}
+
+// Load non-batch test list: tests that must run individually, not in shared batches.
+// These are tests that destructively mutate global built-in state.
+static void load_nonbatch_list(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return;
+    char buf[2048];
+    while (fgets(buf, sizeof(buf), f)) {
+        // skip comments and empty lines
+        if (buf[0] == '#' || buf[0] == '\n' || buf[0] == '\r') continue;
+        // trim trailing whitespace
+        size_t len = strlen(buf);
+        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r' || buf[len-1] == ' '))
+            buf[--len] = '\0';
+        if (len > 0) g_nonbatch_tests.insert(std::string(buf));
+    }
+    fclose(f);
+    if (!g_nonbatch_tests.empty())
+        fprintf(stderr, "[test262] Loaded %zu non-batch tests from %s\n",
+                g_nonbatch_tests.size(), path);
 }
 
 // Phase 1: Prepare all tests — parse metadata, determine skips.
@@ -1017,11 +1089,18 @@ static void prepare_all_tests(
     g_total_batched = (int)batch_indices.size();
 }
 
+// Hard per-worker timeout: 15s per test, minimum 30s.
+// If a worker exceeds this, a watchdog thread sends SIGKILL to prevent infinite hangs
+// (the internal --timeout=10 only catches JS-level loops, not hangs in JIT/parser).
+static constexpr int T262_HARD_TIMEOUT_PER_TEST = 15;
+static constexpr int T262_HARD_TIMEOUT_MIN = 30;
+
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
 static void run_t262_sub_batch(
     const char* manifest_path,
-    std::unordered_map<std::string, BatchResult>& results)
+    std::unordered_map<std::string, BatchResult>& results,
+    size_t num_tests = T262_BATCH_CHUNK_SIZE)
 {
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) return;
@@ -1075,6 +1154,25 @@ static void run_t262_sub_batch(
         return;
     }
 
+    // Watchdog thread: kills the worker if it exceeds the hard timeout.
+    // This catches hangs in JIT compilation, parsing, or native code that the
+    // internal --timeout=10 can't interrupt. Killing the process closes its
+    // stdout pipe, which unblocks the fgets loop below.
+    int hard_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, (int)(num_tests * T262_HARD_TIMEOUT_PER_TEST));
+    std::atomic<bool> worker_done{false};
+    std::thread watchdog([pid, hard_timeout_secs, &worker_done]() {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(hard_timeout_secs);
+        while (!worker_done.load(std::memory_order_relaxed)) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                fprintf(stderr, "\n[test262] WARNING: Worker PID %d exceeded hard timeout (%ds) — sending SIGKILL\n",
+                        pid, hard_timeout_secs);
+                kill(pid, SIGKILL);
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
     FILE* fp = fdopen(stdout_pipe[0], "r");
     if (fp) {
         char buffer[4096];
@@ -1119,12 +1217,16 @@ static void run_t262_sub_batch(
 
     int wstatus;
     waitpid(pid, &wstatus, 0);
+    worker_done.store(true, std::memory_order_relaxed);
+    watchdog.join();
 }
 
 // Phase 2: Execute all prepared tests through js-test-batch (reusable manifest files + stdout pipes)
+// chunk_size: number of tests per sub-batch process (default T262_BATCH_CHUNK_SIZE=50, use 1 for non-batch)
 static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     const std::vector<Test262Prepared>& prepared,
-    const std::vector<size_t>& indices)
+    const std::vector<size_t>& indices,
+    size_t chunk_size = T262_BATCH_CHUNK_SIZE)
 {
     std::unordered_map<std::string, BatchResult> results;
     if (indices.empty()) return results;
@@ -1144,13 +1246,13 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
 
     // Create sub-batches from both groups
     std::vector<SubBatch> batches;
-    for (size_t s = 0; s < native_indices.size(); s += T262_BATCH_CHUNK_SIZE) {
-        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, native_indices.size());
+    for (size_t s = 0; s < native_indices.size(); s += chunk_size) {
+        size_t e = std::min(s + chunk_size, native_indices.size());
         batches.push_back({s, e, true});
     }
     size_t native_batch_count = batches.size();
-    for (size_t s = 0; s < js_indices.size(); s += T262_BATCH_CHUNK_SIZE) {
-        size_t e = std::min(s + T262_BATCH_CHUNK_SIZE, js_indices.size());
+    for (size_t s = 0; s < js_indices.size(); s += chunk_size) {
+        size_t e = std::min(s + chunk_size, js_indices.size());
         batches.push_back({s, e, false});
     }
 
@@ -1256,10 +1358,11 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
 
                 // Execute: fork/exec with stdin from manifest, read stdout via pipe
                 auto t0 = std::chrono::steady_clock::now();
-                run_t262_sub_batch(manifest_path, thread_results[i]);
+                size_t batch_num_tests = batches[i].end - batches[i].start;
+                run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests);
                 auto t1 = std::chrono::steady_clock::now();
                 batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
-                                    batches[i].end - batches[i].start};
+                                    batch_num_tests};
             }
             unlink(manifest_path);
         });
@@ -1383,50 +1486,94 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
     std::vector<size_t> batch_indices;
     prepare_all_tests(tests, prepared, batch_indices);
 
-    // Partition batch_indices: quarantine known crashers into separate small batches
-    // to prevent collateral damage to co-batched tests.
+    // Partition batch_indices into three groups:
+    //   1. clean_indices   — safe to run in shared batches of 50
+    //   2. nonbatch_indices — tests that mutate global state (propertyHelper.js etc.)
+    //                         and MUST run individually to avoid poisoning co-batched tests
+    //   3. crasher_indices  — known crashers quarantined from previous runs
     std::vector<size_t> clean_indices;
+    std::vector<size_t> nonbatch_indices;
     std::vector<size_t> crasher_indices;
-    if (!g_known_crashers.empty()) {
-        for (size_t idx : batch_indices) {
-            if (g_known_crashers.count(prepared[idx].test_name)) {
-                crasher_indices.push_back(idx);
+    for (size_t idx : batch_indices) {
+        if (!g_known_crashers.empty() && g_known_crashers.count(prepared[idx].test_name)) {
+            crasher_indices.push_back(idx);
+        } else {
+            // check if any included harness is in the non-batch list
+            bool is_nonbatch = false;
+            if (g_nonbatch_tests.count(prepared[idx].test_name)) {
+                is_nonbatch = true;
+            } else {
+                for (auto& inc : prepared[idx].includes) {
+                    if (NON_BATCH_INCLUDES.count(inc)) {
+                        is_nonbatch = true;
+                        break;
+                    }
+                }
+            }
+            if (is_nonbatch) {
+                nonbatch_indices.push_back(idx);
             } else {
                 clean_indices.push_back(idx);
             }
         }
-    } else {
-        clean_indices = batch_indices;
     }
 
     auto prep_time = std::chrono::steady_clock::now();
     double prep_secs = std::chrono::duration<double>(prep_time - start_time).count();
-    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu skipped-crashers)\n",
-            prep_secs, batch_indices.size(), clean_indices.size(), crasher_indices.size());
+    fprintf(stderr, "[test262] Phase 1 (prepare): %.1fs — %zu scripts to batch (%zu clean, %zu non-batch, %zu quarantined-crashers)\n",
+            prep_secs, batch_indices.size(), clean_indices.size(), nonbatch_indices.size(), crasher_indices.size());
 
     // Phase 2: execute clean tests through js-test-batch (batch size 50)
     auto batch_results = execute_t262_batch(prepared, clean_indices);
+
+    // Build batch assignment map for Phase 4 diagnostics.
+    // clean_indices are chunked sequentially into batches of T262_BATCH_CHUNK_SIZE.
+    {
+        size_t num_batches = (clean_indices.size() + T262_BATCH_CHUNK_SIZE - 1) / T262_BATCH_CHUNK_SIZE;
+        g_batch_contents.resize(num_batches);
+        for (size_t i = 0; i < clean_indices.size(); i++) {
+            size_t bi = i / T262_BATCH_CHUNK_SIZE;
+            const auto& name = prepared[clean_indices[i]].test_name;
+            g_batch_assignment[name] = bi;
+            g_batch_contents[bi].push_back(name);
+        }
+        fprintf(stderr, "[test262] Batch assignment map: %zu entries across %zu batches\n",
+                g_batch_assignment.size(), num_batches);
+    }
 
     auto exec_time = std::chrono::steady_clock::now();
     double exec_secs = std::chrono::duration<double>(exec_time - prep_time).count();
     fprintf(stderr, "[test262] Phase 2 (execute): %.1fs — %zu results collected\n",
             exec_secs, batch_results.size());
 
-    // Crashers are skipped entirely — mark them as CRASH in results so Phase 3 evaluation
-    // records them properly without spending time executing them.
-    // Slow tests are marked as timeout (exit_code=124) instead of crash (137).
-    for (size_t idx : crasher_indices) {
-        const auto& p = prepared[idx];
-        BatchResult cr;
-        if (g_known_slow_tests.count(p.test_name)) {
-            cr.output = "SKIPPED: slow test (>3s in previous run)";
-            cr.exit_code = 124;  // timeout
-        } else {
-            cr.output = "SKIPPED: known crasher from previous run";
-            cr.exit_code = 137;  // signal-killed
+    // Phase 2a: execute non-batch tests individually (batch size = 1).
+    // These tests include harnesses (e.g. propertyHelper.js) that destructively
+    // mutate global built-in state, so they cannot safely share a process.
+    if (!nonbatch_indices.empty()) {
+        fprintf(stderr, "[test262] Phase 2a (non-batch): %zu tests running individually...\n",
+                nonbatch_indices.size());
+        auto nb_results = execute_t262_batch(prepared, nonbatch_indices, /*chunk_size=*/1);
+        for (auto& kv : nb_results) {
+            batch_results[kv.first] = std::move(kv.second);
         }
-        cr.elapsed_us = 0;
-        batch_results[p.test_name] = cr;
+        fprintf(stderr, "[test262] Phase 2a (non-batch): %zu results collected\n",
+                nb_results.size());
+    }
+
+    // Run crasher-quarantined tests individually (batch size = 1).
+    // These tests previously caused batch crashes (signal kills, OOM). Running them
+    // individually prevents collateral damage and actually tests whether they still crash.
+    // Previously we faked them as CRASH without running, but that caused ~N phantom
+    // regressions every run that Phase 4 would redundantly recover.
+    if (!crasher_indices.empty()) {
+        fprintf(stderr, "[test262] Phase 2a (crashers): %zu quarantined tests running individually...\n",
+                crasher_indices.size());
+        auto cr_results = execute_t262_batch(prepared, crasher_indices, /*chunk_size=*/1);
+        for (auto& kv : cr_results) {
+            batch_results[kv.first] = std::move(kv.second);
+        }
+        fprintf(stderr, "[test262] Phase 2a (crashers): %zu results collected\n",
+                cr_results.size());
     }
 
     // Phase 2b: retry batch-lost tests in small batches (crash recovery)
@@ -1473,7 +1620,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                             fputc('\n', mf);
                         }
                         fclose(mf);
-                        run_t262_sub_batch(manifest_path, thread_results[i]);
+                        size_t retry_num_tests = retry_batches[i].end - retry_batches[i].start;
+                        run_t262_sub_batch(manifest_path, thread_results[i], retry_num_tests);
                     }
                     unlink(manifest_path);
                 });
@@ -1998,6 +2146,9 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--no-stripped") == 0) {
             g_no_stripped = true;  // explicit disable
         }
+        if (strncmp(argv[i], "--batch-file=", 13) == 0) {
+            g_batch_file = argv[i] + 13;
+        }
         if (strncmp(argv[i], "--opt-level=", 12) == 0) {
             g_opt_level = atoi(argv[i] + 12);
             if (g_opt_level < 0 || g_opt_level > 3) g_opt_level = 0;
@@ -2065,9 +2216,107 @@ int main(int argc, char** argv) {
                 g_known_crashers.size());
     }
 
+    // Load non-batch tests: poisoners that mutate global state
+    load_nonbatch_list(NONBATCH_FILE);
+
     // register summary listener
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new Test262ReportListener());
+
+    // --batch-file mode: run only tests from the given list in a single batch, then exit
+    if (!g_batch_file.empty()) {
+        // Load test names from file
+        std::vector<std::string> batch_names;
+        FILE* bf = fopen(g_batch_file.c_str(), "r");
+        if (!bf) {
+            fprintf(stderr, "[test262] Error: cannot open batch file: %s\n", g_batch_file.c_str());
+            return 1;
+        }
+        char line[512];
+        while (fgets(line, sizeof(line), bf)) {
+            if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+            size_t len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+            if (len > 0) batch_names.push_back(std::string(line, len));
+        }
+        fclose(bf);
+        fprintf(stderr, "[test262] Batch file: %zu tests from %s\n", batch_names.size(), g_batch_file.c_str());
+
+        // Pre-load harness files (needed for batch execution)
+        g_harness_sta = read_file_contents(g_harness_dir + "/sta.js");
+        g_harness_assert = read_file_contents(g_harness_dir + "/assert.js");
+
+        // Discover all tests and build name→index lookup
+        auto all_tests = discover_all_tests();
+        std::unordered_map<std::string, size_t> name_to_idx;
+        for (size_t i = 0; i < all_tests.size(); i++) {
+            name_to_idx[all_tests[i].test_name] = i;
+        }
+
+        // Build prepared entries for the batch
+        std::vector<Test262Prepared> prepared;
+        std::vector<size_t> indices;
+        for (auto& name : batch_names) {
+            auto it = name_to_idx.find(name);
+            if (it == name_to_idx.end()) {
+                fprintf(stderr, "[test262]   WARNING: test not found: %s\n", name.c_str());
+                continue;
+            }
+            const auto& param = all_tests[it->second];
+            Test262Prepared p;
+            p.test_name = param.test_name;
+            p.test_path = param.test_path;
+            p.skip_result = T262_PASS;
+            p.is_negative = false;
+            p.is_strict = false;
+            auto cm_it = g_metadata_cache.find(param.test_path);
+            if (cm_it != g_metadata_cache.end()) {
+                const CachedMeta& cm = cm_it->second;
+                p.is_negative = cm.flags & 32;
+                p.negative_type = cm.neg_type;
+                p.is_strict = cm.flags & 8;
+                p.includes = cm.includes;
+            }
+            indices.push_back(prepared.size());
+            prepared.push_back(std::move(p));
+        }
+
+        // Run as a single batch (all tests in one lambda.exe js-test-batch process)
+        fprintf(stderr, "[test262] Running %zu tests in a single batch...\n", indices.size());
+        auto results = execute_t262_batch(prepared, indices);
+
+        // Evaluate and report per-test results
+        int passed = 0, failed = 0;
+        std::vector<std::string> failed_names;
+        for (size_t i = 0; i < prepared.size(); i++) {
+            auto result = evaluate_batch_result(prepared[i], results);
+            const char* status = "?";
+            switch (result.result) {
+                case T262_PASS: status = "PASS"; passed++; break;
+                case T262_FAIL: status = "FAIL"; failed++; failed_names.push_back(prepared[i].test_name); break;
+                case T262_TIMEOUT: status = "TIMEOUT"; failed++; failed_names.push_back(prepared[i].test_name); break;
+                case T262_CRASH: status = "CRASH"; failed++; failed_names.push_back(prepared[i].test_name); break;
+                case T262_SKIP: status = "SKIP"; break;
+            }
+            fprintf(stderr, "  [%s] %s", status, prepared[i].test_name.c_str());
+            if (!result.message.empty() && result.result != T262_PASS) {
+                // Show first line of failure message
+                std::string first_line = result.message.substr(0, result.message.find('\n'));
+                if (first_line.size() > 120) first_line = first_line.substr(0, 120) + "...";
+                fprintf(stderr, " — %s", first_line.c_str());
+            }
+            fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "\n[test262] Batch file result: %d passed, %d failed out of %zu\n",
+                passed, failed, prepared.size());
+        if (!failed_names.empty()) {
+            fprintf(stderr, "[test262] Failed tests:\n");
+            for (auto& name : failed_names) {
+                fprintf(stderr, "  - %s\n", name.c_str());
+            }
+        }
+        return failed > 0 ? 1 : 0;
+    }
 
     // pre-run all tests in batch mode
     auto all_tests = discover_all_tests();
@@ -2138,6 +2387,7 @@ int main(int argc, char** argv) {
             if (!retry_prepared.empty()) {
                 auto retry_results = execute_t262_batch(retry_prepared, retry_indices);
                 std::vector<std::string> real_regressions;
+                std::vector<std::string> recovered_names;
                 size_t recovered = 0;
                 for (auto& reg_name : regressions) {
                     // Find in retry_prepared
@@ -2150,6 +2400,7 @@ int main(int argc, char** argv) {
                     }
                     if (result.result == T262_PASS) {
                         recovered++;
+                        recovered_names.push_back(reg_name);
                         current_passing.push_back(reg_name);
                         passed++;
                         failed--;
@@ -2159,6 +2410,63 @@ int main(int argc, char** argv) {
                 }
                 fprintf(stderr, "[test262] Phase 4: %zu/%zu regressions recovered (were batch kills)\n",
                         recovered, regressions.size());
+
+                // Diagnostic: group recovered tests by their original Phase 2 batch
+                // to identify which batches have state-leak / interaction issues.
+                if (!recovered_names.empty()) {
+                    std::map<size_t, std::vector<std::string>> recovered_by_batch;
+                    std::vector<std::string> untracked_recovered;  // not in any tracked batch
+                    for (auto& name : recovered_names) {
+                        auto it = g_batch_assignment.find(name);
+                        if (it != g_batch_assignment.end()) {
+                            recovered_by_batch[it->second].push_back(name);
+                        } else {
+                            untracked_recovered.push_back(name);
+                        }
+                    }
+                    fprintf(stderr, "[test262] Phase 4 diagnostic: %zu recovered tests came from %zu batches",
+                            recovered_names.size(), recovered_by_batch.size());
+                    if (!untracked_recovered.empty()) {
+                        fprintf(stderr, " (%zu ran individually/non-batch)", untracked_recovered.size());
+                    }
+                    fprintf(stderr, "\n");
+
+                    // Write detailed report to file for analysis
+                    FILE* diag = fopen("temp/_t262_batch_kills.txt", "w");
+                    if (diag) {
+                        fprintf(diag, "# Phase 4 batch-kill diagnostic\n");
+                        fprintf(diag, "# %zu tests recovered from %zu batches (batch size = %zu)\n",
+                                recovered_names.size(), recovered_by_batch.size(), T262_BATCH_CHUNK_SIZE);
+                        fprintf(diag, "# Format: batch[N] — M recovered / K total tests in batch\n");
+                        fprintf(diag, "# Tests marked [RECOVERED] passed individually but failed in batch\n\n");
+                        for (auto& [bi, names] : recovered_by_batch) {
+                            fprintf(diag, "batch[%zu] — %zu recovered / %zu total tests:\n",
+                                    bi, names.size(), bi < g_batch_contents.size() ? g_batch_contents[bi].size() : 0);
+                            // List all tests in this batch, marking recovered ones
+                            if (bi < g_batch_contents.size()) {
+                                std::set<std::string> recovered_set(names.begin(), names.end());
+                                for (auto& tname : g_batch_contents[bi]) {
+                                    fprintf(diag, "  %s  %s\n",
+                                            recovered_set.count(tname) ? "[RECOVERED]" : "[OK]        ",
+                                            tname.c_str());
+                                }
+                            }
+                            fprintf(diag, "\n");
+                        }
+                        // Write untracked recovered tests (from non-batch or unknown batches)
+                        if (!untracked_recovered.empty()) {
+                            fprintf(diag, "# %zu recovered tests NOT in any tracked clean batch:\n",
+                                    untracked_recovered.size());
+                            for (auto& name : untracked_recovered) {
+                                fprintf(diag, "  [RECOVERED-UNTRACKED]  %s\n", name.c_str());
+                            }
+                            fprintf(diag, "\n");
+                        }
+                        fclose(diag);
+                        fprintf(stderr, "[test262] Phase 4 diagnostic → temp/_t262_batch_kills.txt\n");
+                    }
+                }
+
                 regressions = std::move(real_regressions);
             }
         }
