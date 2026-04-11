@@ -1147,6 +1147,7 @@ static bool scan_ts_class_modifiers(TSLexer *lexer) {
                 // * followed by property name — it's a generator marker
                 lexer->mark_end(lexer);
                 has_safe_mark = true;
+                any_consumed = true;
                 keywords_found++;
                 continue;
             }
@@ -1239,6 +1240,7 @@ static bool scan_ts_class_modifiers(TSLexer *lexer) {
 // ================================================================
 
 static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+
     if (valid_symbols[TEMPLATE_CHARS]) {
         if (valid_symbols[AUTOMATIC_SEMICOLON]) {
             return false;
@@ -1261,32 +1263,36 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
     }
 
     // v2: class member modifiers — opaque modifier prefix (declare/public/static/readonly/...)
-    // No AUTOMATIC_SEMICOLON guard: in class body, ASI may be valid in a parallel parse
-    // path (after previous member). Modifier keywords unambiguously start a new member.
-    // Fast reject: only try if lookahead is an ident start char or *.
+    // After class members, both TS_CLASS_MODIFIERS and AUTOMATIC_SEMICOLON may be valid
+    // in parallel parse paths. The modifier scanner handles newlines correctly — it skips
+    // whitespace to find modifier keywords, and `*` handling is needed for generators.
     if (valid_symbols[TS_CLASS_MODIFIERS] &&
         !valid_symbols[TEMPLATE_CHARS]) {
-        if (ts_is_ident_start(lexer->lookahead) || iswspace(lexer->lookahead)) {
+        int32_t ch = lexer->lookahead;
+        if (ts_is_ident_start(ch) || ch == '*' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             if (scan_ts_class_modifiers(lexer)) return true;
         }
         // fall through to try other external tokens
     }
 
     // v2: type parameters — unambiguous in declaration context (starts with '<')
-    // No AUTOMATIC_SEMICOLON guard: after 'interface Name' or 'class Name', ASI may be
-    // valid in a parallel parse path, but '<' unambiguously starts type parameters.
+    // Only enter when lookahead is '<' or horizontal whitespace — NOT newlines,
+    // as scan_ts_type_parameters would advance past newlines needed for ASI detection.
     if (valid_symbols[TS_TYPE_PARAMETERS] &&
         !valid_symbols[TEMPLATE_CHARS]) {
-        // check lookahead without consuming — scan_ts_type_parameters will skip ws internally
-        if (lexer->lookahead == '<' || iswspace(lexer->lookahead)) {
+        int32_t tch = lexer->lookahead;
+        if (tch == '<' || tch == ' ' || tch == '\t') {
             if (scan_ts_type_parameters(lexer)) return true;
         }
     }
 
     // v2: type tokens — check before ASI since type contexts are more specific
     // Check TS_TYPE first — it's the most common type token
+    // Guard: don't match TS_TYPE when TERNARY_QMARK is valid — prevents the type scanner
+    // from consuming ternary expressions (e.g., `? 1 : 0` as conditional type instead of ternary).
     if (valid_symbols[TS_TYPE] &&
         !valid_symbols[AUTOMATIC_SEMICOLON] &&
+        !valid_symbols[TERNARY_QMARK] &&
         !valid_symbols[TEMPLATE_CHARS]) {
         return scan_ts_type(lexer);
     }
@@ -1296,7 +1302,8 @@ static inline bool external_scanner_scan(void *payload, TSLexer *lexer, const bo
         !valid_symbols[AUTOMATIC_SEMICOLON] &&
         !valid_symbols[TEMPLATE_CHARS]) {
         if (lexer->lookahead == '<' || (iswspace(lexer->lookahead))) {
-            return scan_ts_type_arguments(lexer);
+            if (scan_ts_type_arguments(lexer)) return true;
+            // fall through — scan_ts_type_arguments returned false, try other tokens
         }
     }
 

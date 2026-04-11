@@ -50,6 +50,7 @@ module.exports = function defineGrammar(dialect) {
       // parenthesized class expression
       [$.class],
 
+      // Expression vs parameter name ambiguity (critical for ternary-in-parens)
       [$.primary_expression, $._parameter_name],
 
       [$.nested_identifier, $.nested_type_identifier, $.primary_expression],
@@ -335,14 +336,9 @@ module.exports = function defineGrammar(dialect) {
         )),
       ),
 
-      parenthesized_expression: $ => seq(
-        '(',
-        choice(
-          seq($.expression, field('type', optional($.type_annotation))),
-          $.sequence_expression,
-        ),
-        ')',
-      ),
+      // v2: parenthesized_expression uses base JS grammar (no type_annotation needed here;
+      // arrow function typed params are handled by formal_parameters/required_parameter)
+      // NOTE: override removed to fix ternary-in-parens ambiguity with opaque _ts_type token
 
       _formal_parameter: $ => choice(
         $.required_parameter,
