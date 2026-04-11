@@ -2465,18 +2465,26 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                     target_width = item->blk->given_min_width;
                 }
 
-                // CSS box model: content-box size >= 0 (border-box >= padding+border)
-                // When box-sizing: border-box, the declared width can't be less than padding+border
+                // CSS box model: border-box width >= padding+border (content-box size >= 0)
                 if (item->bound) {
                     float pb_w = item->bound->padding.left + item->bound->padding.right;
                     if (item->bound->border) {
                         pb_w += item->bound->border->width.left + item->bound->border->width.right;
                     }
-                    if (target_width < pb_w) {
-                        log_debug("Width %.1f below padding+border %.1f, flooring (content-box >= 0)", target_width, pb_w);
-                        target_width = pb_w;
-                        // Also update the given_width so flex-basis picks up the corrected value
-                        item->blk->given_width = target_width;
+                    if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                        // border-box: declared width can't be less than padding+border
+                        if (target_width < pb_w) {
+                            log_debug("Width %.1f below padding+border %.1f, flooring border-box", target_width, pb_w);
+                            target_width = pb_w;
+                            item->blk->given_width = target_width;
+                        }
+                    } else {
+                        // content-box: given_width is content-only, visual width includes padding+border
+                        // Do NOT modify given_width — calculate_flex_basis adds padding+border
+                        if (target_width + pb_w > target_width) {
+                            target_width = target_width + pb_w;
+                            log_debug("Width: content-box %.1f + padding+border %.1f = %.1f", item->blk->given_width, pb_w, target_width);
+                        }
                     }
                 }
 
@@ -2498,16 +2506,26 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                     target_height = item->blk->given_min_height;
                 }
 
-                // CSS box model: content-box size >= 0 (border-box >= padding+border)
+                // CSS box model: border-box height >= padding+border (content-box size >= 0)
                 if (item->bound) {
                     float pb_h = item->bound->padding.top + item->bound->padding.bottom;
                     if (item->bound->border) {
                         pb_h += item->bound->border->width.top + item->bound->border->width.bottom;
                     }
-                    if (target_height < pb_h) {
-                        log_debug("Height %.1f below padding+border %.1f, flooring (content-box >= 0)", target_height, pb_h);
-                        target_height = pb_h;
-                        item->blk->given_height = target_height;
+                    if (item->blk->box_sizing == CSS_VALUE_BORDER_BOX) {
+                        // border-box: declared height can't be less than padding+border
+                        if (target_height < pb_h) {
+                            log_debug("Height %.1f below padding+border %.1f, flooring border-box", target_height, pb_h);
+                            target_height = pb_h;
+                            item->blk->given_height = target_height;
+                        }
+                    } else {
+                        // content-box: given_height is content-only, visual height includes padding+border
+                        // Do NOT modify given_height — calculate_flex_basis adds padding+border
+                        if (target_height + pb_h > target_height) {
+                            target_height = target_height + pb_h;
+                            log_debug("Height: content-box %.1f + padding+border %.1f = %.1f", item->blk->given_height, pb_h, target_height);
+                        }
                     }
                 }
 

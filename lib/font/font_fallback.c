@@ -22,7 +22,11 @@
 // ============================================================================
 
 static const char* serif_fonts[] = {
+#ifdef __APPLE__
+    "Times", "Times New Roman", "Liberation Serif", "Nimbus Roman",
+#else
     "Times New Roman", "Liberation Serif", "Times", "Nimbus Roman",
+#endif
     "Georgia", "DejaVu Serif", NULL
 };
 static const char* sans_serif_fonts[] = {

@@ -228,6 +228,14 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     }
     if (m->underline_thickness < 1.0f) m->underline_thickness = 1.0f;
 
+    // ---- strikeout metrics from OS/2 table ----
+    if (os2t && head && head->units_per_em > 0) {
+        float uscale = handle->size_px / (float)head->units_per_em * bscale;
+        m->strikeout_position = os2t->y_strikeout_position * uscale;
+        m->strikeout_size     = os2t->y_strikeout_size * uscale;
+    }
+    if (m->strikeout_size < 1.0f) m->strikeout_size = 1.0f;
+
     // ---- typographic measures ----
     m->x_height    = measure_x_height(handle, scale, m->ascender);
     m->cap_height  = measure_cap_height(handle, scale, m->ascender);

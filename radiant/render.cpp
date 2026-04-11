@@ -15,6 +15,7 @@
 #include "../lib/memtrack.h"
 #include "../lib/str.h"
 #include "../lambda/input/css/css_style.hpp"
+#include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include <string.h>
 #include <math.h>
@@ -93,6 +94,335 @@ void scrollpane_render(RdtVector* vec, ScrollPane* sp, Rect* block_bound,
 void render_form_control(RenderContext* rdcon, ViewBlock* block);  // form controls
 void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, RadiantState* state);  // select dropdown popup
 void render_column_rules(RenderContext* rdcon, ViewBlock* block);  // multi-column rules
+
+// ============================================================================
+// Per-corner rounded rect path helper
+// ============================================================================
+
+/**
+ * Build a path for a rectangle with per-corner border radii.
+ * Uses cubic Bézier arcs (kappa ≈ 0.5522847) to approximate quarter-circle arcs.
+ */
+static RdtPath* create_per_corner_rounded_rect_path(
+    float x, float y, float w, float h,
+    float r_tl, float r_tr, float r_br, float r_bl) {
+
+    RdtPath* p = rdt_path_new();
+    // clamp radii to half-dimensions
+    float max_rx = w * 0.5f, max_ry = h * 0.5f;
+    if (r_tl > max_rx) r_tl = max_rx; if (r_tl > max_ry) r_tl = max_ry;
+    if (r_tr > max_rx) r_tr = max_rx; if (r_tr > max_ry) r_tr = max_ry;
+    if (r_br > max_rx) r_br = max_rx; if (r_br > max_ry) r_br = max_ry;
+    if (r_bl > max_rx) r_bl = max_rx; if (r_bl > max_ry) r_bl = max_ry;
+
+    const float k = 0.5522847f; // cubic Bézier kappa for 90° arc
+
+    // start at top-left corner, after the TL arc
+    rdt_path_move_to(p, x + r_tl, y);
+    // top edge → top-right corner
+    rdt_path_line_to(p, x + w - r_tr, y);
+    if (r_tr > 0) {
+        rdt_path_cubic_to(p, x + w - r_tr + r_tr * k, y,
+                             x + w, y + r_tr - r_tr * k,
+                             x + w, y + r_tr);
+    }
+    // right edge → bottom-right corner
+    rdt_path_line_to(p, x + w, y + h - r_br);
+    if (r_br > 0) {
+        rdt_path_cubic_to(p, x + w, y + h - r_br + r_br * k,
+                             x + w - r_br + r_br * k, y + h,
+                             x + w - r_br, y + h);
+    }
+    // bottom edge → bottom-left corner
+    rdt_path_line_to(p, x + r_bl, y + h);
+    if (r_bl > 0) {
+        rdt_path_cubic_to(p, x + r_bl - r_bl * k, y + h,
+                             x, y + h - r_bl + r_bl * k,
+                             x, y + h - r_bl);
+    }
+    // left edge → top-left corner
+    rdt_path_line_to(p, x, y + r_tl);
+    if (r_tl > 0) {
+        rdt_path_cubic_to(p, x, y + r_tl - r_tl * k,
+                             x + r_tl - r_tl * k, y,
+                             x + r_tl, y);
+    }
+    rdt_path_close(p);
+    return p;
+}
+
+// ============================================================================
+// Pixel-level clip masking for CSS clip-path and rounded overflow
+// ============================================================================
+
+// Clip mask: saves pixels before element rendering and restores outside clip region after
+struct ClipMask {
+    int x0, y0, w, h;        // pixel bounding rect
+    uint32_t* saved;          // saved pixel data (w * h)
+};
+
+static ClipMask* save_clip_region(ImageSurface* surface, float fx0, float fy0, float fw, float fh) {
+    if (!surface || !surface->pixels) return nullptr;
+    int x0 = (int)fx0, y0 = (int)fy0;
+    int x1 = (int)(fx0 + fw + 0.5f), y1 = (int)(fy0 + fh + 0.5f);
+    if (x0 < 0) x0 = 0;  if (y0 < 0) y0 = 0;
+    if (x1 > surface->width) x1 = surface->width;
+    if (y1 > surface->height) y1 = surface->height;
+    int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return nullptr;
+
+    ClipMask* mask = (ClipMask*)malloc(sizeof(ClipMask));
+    mask->x0 = x0; mask->y0 = y0; mask->w = w; mask->h = h;
+    mask->saved = (uint32_t*)malloc(w * h * sizeof(uint32_t));
+    for (int row = 0; row < h; row++) {
+        uint32_t* src = (uint32_t*)((uint8_t*)surface->pixels + (y0 + row) * surface->pitch) + x0;
+        memcpy(mask->saved + row * w, src, w * sizeof(uint32_t));
+    }
+    return mask;
+}
+
+// Point-in-polygon test (ray casting algorithm)
+static bool point_in_polygon(float px, float py, const float* vx, const float* vy, int count) {
+    bool inside = false;
+    for (int i = 0, j = count - 1; i < count; j = i++) {
+        if (((vy[i] > py) != (vy[j] > py)) &&
+            (px < (vx[j] - vx[i]) * (py - vy[i]) / (vy[j] - vy[i]) + vx[i])) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// Point-in-rounded-rect test
+static bool point_in_rounded_rect(float px, float py,
+    float rx, float ry, float rw, float rh,
+    float r_tl, float r_tr, float r_br, float r_bl) {
+    // outside bounding rect?
+    if (px < rx || px > rx + rw || py < ry || py > ry + rh) return false;
+    // check each corner
+    // top-left corner
+    if (px < rx + r_tl && py < ry + r_tl) {
+        float dx = px - (rx + r_tl), dy = py - (ry + r_tl);
+        if (dx * dx + dy * dy > r_tl * r_tl) return false;
+    }
+    // top-right corner
+    if (px > rx + rw - r_tr && py < ry + r_tr) {
+        float dx = px - (rx + rw - r_tr), dy = py - (ry + r_tr);
+        if (dx * dx + dy * dy > r_tr * r_tr) return false;
+    }
+    // bottom-right corner
+    if (px > rx + rw - r_br && py > ry + rh - r_br) {
+        float dx = px - (rx + rw - r_br), dy = py - (ry + rh - r_br);
+        if (dx * dx + dy * dy > r_br * r_br) return false;
+    }
+    // bottom-left corner
+    if (px < rx + r_bl && py > ry + rh - r_bl) {
+        float dx = px - (rx + r_bl), dy = py - (ry + rh - r_bl);
+        if (dx * dx + dy * dy > r_bl * r_bl) return false;
+    }
+    return true;
+}
+
+// Clip shape types
+enum ClipShapeType {
+    CLIP_SHAPE_NONE = 0,
+    CLIP_SHAPE_POLYGON,
+    CLIP_SHAPE_CIRCLE,
+    CLIP_SHAPE_ELLIPSE,
+    CLIP_SHAPE_INSET,
+    CLIP_SHAPE_ROUNDED_RECT
+};
+
+struct ClipShape {
+    ClipShapeType type;
+    union {
+        struct { float* vx; float* vy; int count; } polygon;
+        struct { float cx, cy, r; } circle;
+        struct { float cx, cy, rx, ry; } ellipse;
+        struct { float x, y, w, h, rx, ry; } inset;
+        struct { float x, y, w, h, r_tl, r_tr, r_br, r_bl; } rounded_rect;
+    };
+};
+
+// Apply clip mask: restore saved pixels where point is outside clip shape
+static void apply_clip_mask(ImageSurface* surface, ClipMask* mask, ClipShape* shape) {
+    if (!mask || !shape || !surface || !surface->pixels) return;
+    for (int row = 0; row < mask->h; row++) {
+        uint32_t* dst = (uint32_t*)((uint8_t*)surface->pixels + (mask->y0 + row) * surface->pitch) + mask->x0;
+        uint32_t* saved = mask->saved + row * mask->w;
+        float py = (float)(mask->y0 + row) + 0.5f;  // pixel center
+        for (int col = 0; col < mask->w; col++) {
+            float px = (float)(mask->x0 + col) + 0.5f;
+            bool inside = false;
+            switch (shape->type) {
+                case CLIP_SHAPE_POLYGON:
+                    inside = point_in_polygon(px, py, shape->polygon.vx, shape->polygon.vy, shape->polygon.count);
+                    break;
+                case CLIP_SHAPE_CIRCLE: {
+                    float dx = px - shape->circle.cx, dy = py - shape->circle.cy;
+                    inside = (dx * dx + dy * dy <= shape->circle.r * shape->circle.r);
+                    break;
+                }
+                case CLIP_SHAPE_ELLIPSE: {
+                    float dx = (px - shape->ellipse.cx) / shape->ellipse.rx;
+                    float dy = (py - shape->ellipse.cy) / shape->ellipse.ry;
+                    inside = (dx * dx + dy * dy <= 1.0f);
+                    break;
+                }
+                case CLIP_SHAPE_INSET:
+                    inside = (px >= shape->inset.x && px <= shape->inset.x + shape->inset.w &&
+                              py >= shape->inset.y && py <= shape->inset.y + shape->inset.h);
+                    break;
+                case CLIP_SHAPE_ROUNDED_RECT:
+                    inside = point_in_rounded_rect(px, py,
+                        shape->rounded_rect.x, shape->rounded_rect.y,
+                        shape->rounded_rect.w, shape->rounded_rect.h,
+                        shape->rounded_rect.r_tl, shape->rounded_rect.r_tr,
+                        shape->rounded_rect.r_br, shape->rounded_rect.r_bl);
+                    break;
+                default: inside = true; break;
+            }
+            if (!inside) {
+                dst[col] = saved[col];  // restore original pixel
+            }
+        }
+    }
+}
+
+static void free_clip_mask(ClipMask* mask) {
+    if (mask) { free(mask->saved); free(mask); }
+}
+
+static void free_clip_shape(ClipShape* shape) {
+    if (shape) {
+        if (shape->type == CLIP_SHAPE_POLYGON) {
+            free(shape->polygon.vx);
+            free(shape->polygon.vy);
+        }
+        free(shape);
+    }
+}
+
+// Parse CSS clip-path value and return a ClipShape
+static ClipShape* parse_css_clip_shape(const char* value, float elem_w, float elem_h,
+                                        float abs_x, float abs_y) {
+    if (!value || strncmp(value, "none", 4) == 0) return nullptr;
+
+    auto parse_len = [](const char*& s, float ref) -> float {
+        while (*s == ' ' || *s == ',') s++;
+        float val = strtof(s, (char**)&s);
+        while (*s == ' ') s++;
+        if (*s == '%') { s++; return val / 100.0f * ref; }
+        if (s[0] == 'p' && s[1] == 'x') s += 2;
+        return val;
+    };
+
+    if (strncmp(value, "inset(", 6) == 0) {
+        const char* s = value + 6;
+        // Parse 1-4 inset values (CSS shorthand: top [right [bottom [left]]])
+        float vals[4] = {0};
+        int val_count = 0;
+        while (*s && *s != ')' && val_count < 4) {
+            while (*s == ' ') s++;
+            if (*s == ')' || strncmp(s, "round", 5) == 0) break;
+            float ref = (val_count == 0 || val_count == 2) ? elem_h : elem_w;
+            vals[val_count++] = parse_len(s, ref);
+        }
+        float top, right_v, bottom, left_v;
+        if (val_count == 1)      { top = right_v = bottom = left_v = vals[0]; }
+        else if (val_count == 2) { top = bottom = vals[0]; right_v = left_v = vals[1]; }
+        else if (val_count == 3) { top = vals[0]; right_v = left_v = vals[1]; bottom = vals[2]; }
+        else                     { top = vals[0]; right_v = vals[1]; bottom = vals[2]; left_v = vals[3]; }
+        float rx = 0, ry = 0;
+        while (*s == ' ') s++;
+        if (strncmp(s, "round", 5) == 0) {
+            s += 5;
+            rx = parse_len(s, elem_w);
+            ry = rx;
+        }
+        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        if (rx > 0 || ry > 0) {
+            cs->type = CLIP_SHAPE_ROUNDED_RECT;
+            cs->rounded_rect = {abs_x + left_v, abs_y + top,
+                                elem_w - left_v - right_v, elem_h - top - bottom,
+                                rx, rx, rx, rx};
+        } else {
+            cs->type = CLIP_SHAPE_INSET;
+            cs->inset = {abs_x + left_v, abs_y + top,
+                         elem_w - left_v - right_v, elem_h - top - bottom, 0, 0};
+        }
+        return cs;
+    }
+
+    if (strncmp(value, "circle(", 7) == 0) {
+        const char* s = value + 7;
+        float ref = fmin(elem_w, elem_h);
+        float r = parse_len(s, ref);
+        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
+        while (*s == ' ') s++;
+        if (strncmp(s, "at", 2) == 0) {
+            s += 2;
+            cx = abs_x + parse_len(s, elem_w);
+            cy = abs_y + parse_len(s, elem_h);
+        }
+        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        cs->type = CLIP_SHAPE_CIRCLE;
+        cs->circle = {cx, cy, r};
+        return cs;
+    }
+
+    if (strncmp(value, "ellipse(", 8) == 0) {
+        const char* s = value + 8;
+        float rx = parse_len(s, elem_w);
+        float ry = parse_len(s, elem_h);
+        float cx = abs_x + elem_w * 0.5f, cy = abs_y + elem_h * 0.5f;
+        while (*s == ' ') s++;
+        if (strncmp(s, "at", 2) == 0) {
+            s += 2;
+            cx = abs_x + parse_len(s, elem_w);
+            cy = abs_y + parse_len(s, elem_h);
+        }
+        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        cs->type = CLIP_SHAPE_ELLIPSE;
+        cs->ellipse = {cx, cy, rx, ry};
+        return cs;
+    }
+
+    if (strncmp(value, "polygon(", 8) == 0) {
+        const char* s = value + 8;
+        // count points first
+        const char* scan = s;
+        int count = 0;
+        while (*scan && *scan != ')') {
+            while (*scan == ' ' || *scan == ',') scan++;
+            if (*scan == ')') break;
+            strtof(scan, (char**)&scan);
+            while (*scan == ' ') scan++;
+            if (*scan == '%') scan++;
+            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
+            strtof(scan, (char**)&scan);
+            while (*scan == ' ') scan++;
+            if (*scan == '%') scan++;
+            if (scan[0] == 'p' && scan[1] == 'x') scan += 2;
+            count++;
+            while (*scan == ' ' || *scan == ',') scan++;
+        }
+        if (count < 3) return nullptr;
+
+        float* vx = (float*)malloc(count * sizeof(float));
+        float* vy = (float*)malloc(count * sizeof(float));
+        for (int i = 0; i < count; i++) {
+            vx[i] = parse_len(s, elem_w) + abs_x;
+            vy[i] = parse_len(s, elem_h) + abs_y;
+        }
+        ClipShape* cs = (ClipShape*)calloc(1, sizeof(ClipShape));
+        cs->type = CLIP_SHAPE_POLYGON;
+        cs->polygon = {vx, vy, count};
+        return cs;
+    }
+
+    return nullptr;
+}
 
 /**
  * Helper function to apply transform and push paint to canvas
@@ -555,7 +885,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 g_render_load_glyph_time += std::chrono::duration<double, std::milli>(t2 - t1).count();
                 g_render_glyph_count++;
                 if (glyph) {
-                    natural_width += glyph->advance_x;  // already in physical pixels
+                    natural_width += glyph->advance_x + rdcon->font.style->letter_spacing * s;  // already in physical pixels
                 } else {
                     natural_width += scaled_space_width;  // fallback width in physical pixels
                 }
@@ -658,7 +988,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         ts = ts->next;
                     }
                     rdcon->color = saved_color;
-                    sx_pos += s_glyph->advance_x;
+                    sx_pos += s_glyph->advance_x + rdcon->font.style->letter_spacing * s;
                     } // end for s_tt_count
                 }
             }
@@ -818,8 +1148,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     auto t4 = std::chrono::high_resolution_clock::now();
                     g_render_draw_glyph_time += std::chrono::duration<double, std::milli>(t4 - t3).count();
                     g_render_draw_count++;
-                    // advance to the next position
-                    x += glyph->advance_x;
+                    // advance to the next position (include letter-spacing)
+                    x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
                 }
                 } // end for tti (full case mapping expansion)
             }
@@ -852,20 +1182,30 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
             Rect rect = {0, 0, 0, 0};
             bool draw_deco = true;
+            // Use the same ascender as glyph rendering for consistent baseline
+            float deco_ascend = font_get_rendering_ascender(rdcon->font.font_handle) * s;
             if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
                 // Use font underline_position metric for correct placement below baseline
                 float underline_pos = _deco_m ? _deco_m->underline_position : 0;
-                float ascend = _deco_m ? (_deco_m->hhea_ascender * s) : 12.0f;
                 // Apply text-underline-offset if set
                 float offset = rdcon->font.style->text_underline_offset;
                 rect.x = rdcon->block.x + text_rect->x * s;
-                rect.y = rdcon->block.y + text_rect->y * s + ascend - underline_pos * s + offset;
+                // baseline = text_rect_y + ascender; underline_pos is negative (below baseline)
+                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - underline_pos * s + offset;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
-                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s;
+                rect.x = rdcon->block.x + text_rect->x * s;
+                // overline sits at the ascender line (baseline - ascender = top of text)
+                rect.y = rdcon->block.y + text_rect->y * s;
             }
             else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
-                rect.x = rdcon->block.x + text_rect->x * s;  rect.y = rdcon->block.y + text_rect->y * s + (text_rect->height * s) / 2;
+                rect.x = rdcon->block.x + text_rect->x * s;
+                // Use OS/2 strikeout position (above baseline) for accurate placement
+                float strikeout_pos = (_deco_m && _deco_m->strikeout_position > 0)
+                    ? _deco_m->strikeout_position : (deco_ascend * 0.3f);
+                rect.y = rdcon->block.y + text_rect->y * s + deco_ascend - strikeout_pos * s;
+                if (_deco_m && _deco_m->strikeout_size > 0)
+                    thickness = _deco_m->strikeout_size;
             }
             else {
                 draw_deco = false;  // unknown decoration type, skip rendering
@@ -1096,7 +1436,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                     p += bytes;
                     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
                     LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, cp, false);
-                    total_text_width += glyph ? glyph->advance_x : (rdcon->font.style->space_width * s);
+                    total_text_width += glyph ? glyph->advance_x + rdcon->font.style->letter_spacing * s : (rdcon->font.style->space_width * s);
                 }
 
                 // Right-align text within marker box: start at (x + width - total_text_width)
@@ -1119,7 +1459,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                     LoadedGlyph* glyph = font_load_glyph(rdcon->font.font_handle, &sd, cp, true);
                     if (glyph) {
                         draw_glyph(rdcon, &glyph->bitmap, tx + glyph->bitmap.bearing_x, y + ascend - glyph->bitmap.bearing_y);
-                        tx += glyph->advance_x;
+                        tx += glyph->advance_x + rdcon->font.style->letter_spacing * s;
                     } else {
                         tx += rdcon->font.style->space_width * s;
                     }
@@ -1381,6 +1721,11 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
     rect.width = view->width * s;  rect.height = view->height * s;
 
+    // Resolve percentage border-radius values against element's own dimensions (in CSS px)
+    if (view->bound->border) {
+        resolve_border_radius_percentages(&view->bound->border->radius, view->width, view->height);
+    }
+
     // Render box-shadow BEFORE background (shadows go underneath the element)
     if (view->bound->box_shadow) {
         render_box_shadow(rdcon, view, rect);
@@ -1494,6 +1839,8 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
         // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
         if (block->bound && block->bound->border) {
             BorderProp* border = block->bound->border;
+            // resolve percentage border-radius if not yet resolved
+            resolve_border_radius_percentages(&border->radius, block->width, block->height);
             if (border->radius.top_left > 0 || border->radius.top_right > 0 ||
                 border->radius.bottom_left > 0 || border->radius.bottom_right > 0) {
                 rdcon->block.has_clip_radius = true;
@@ -1632,6 +1979,68 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             render_list_bullet(rdcon, block);
         }
     }
+    // Push CSS clip-path if specified on this element (clips backgrounds, borders, content, children)
+    ClipMask* css_clip_mask = nullptr;
+    ClipShape* css_clip_shape = nullptr;
+    {
+        CssDeclaration* clip_decl = dom_element_get_specified_value((DomElement*)block, CSS_PROPERTY_CLIP_PATH);
+        if (clip_decl && clip_decl->value_text && clip_decl->value_text_len > 0) {
+            const char* clip_str = clip_decl->value_text;
+            if (clip_str && strncmp(clip_str, "none", 4) != 0) {
+                float s = rdcon->scale;
+                float elem_w = block->width * s;
+                float elem_h = block->height * s;
+                float abs_x = pa_block.x + block->x * s;
+                float abs_y = pa_block.y + block->y * s;
+                css_clip_shape = parse_css_clip_shape(clip_str, elem_w, elem_h, abs_x, abs_y);
+                if (css_clip_shape) {
+                    css_clip_mask = save_clip_region(rdcon->ui_context->surface, abs_x, abs_y, elem_w, elem_h);
+                    log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
+                }
+            }
+        }
+    }
+
+    // Save backdrop for mix-blend-mode before rendering this element
+    CssEnum mix_blend = (block->in_line && block->in_line->mix_blend_mode &&
+                         block->in_line->mix_blend_mode != CSS_VALUE_NORMAL)
+                        ? block->in_line->mix_blend_mode : (CssEnum)0;
+    uint32_t* mix_blend_backdrop = nullptr;
+    int mbx0 = 0, mby0 = 0, mbw = 0, mbh = 0;
+    if (mix_blend) {
+        float ms = rdcon->scale;
+        ImageSurface* surface = rdcon->ui_context->surface;
+        if (surface && surface->pixels) {
+            mbx0 = (int)(pa_block.x + block->x * ms);
+            mby0 = (int)(pa_block.y + block->y * ms);
+            int mx1 = mbx0 + (int)(block->width * ms);
+            int my1 = mby0 + (int)(block->height * ms);
+            if (mbx0 < 0) mbx0 = 0;
+            if (mby0 < 0) mby0 = 0;
+            if (mx1 > surface->width) mx1 = surface->width;
+            if (my1 > surface->height) my1 = surface->height;
+            mbw = mx1 - mbx0;
+            mbh = my1 - mby0;
+            if (mbw > 0 && mbh > 0) {
+                mix_blend_backdrop = (uint32_t*)mem_alloc((size_t)mbw * mbh * sizeof(uint32_t), MEM_CAT_RENDER);
+                if (mix_blend_backdrop) {
+                    uint32_t* px = (uint32_t*)surface->pixels;
+                    int pitch = surface->pitch / 4;
+                    for (int row = 0; row < mbh; row++) {
+                        memcpy(mix_blend_backdrop + row * mbw,
+                               px + (mby0 + row) * pitch + mbx0,
+                               mbw * sizeof(uint32_t));
+                    }
+                    // Clear region to transparent so element renders on clean background
+                    for (int row = 0; row < mbh; row++) {
+                        memset(px + (mby0 + row) * pitch + mbx0, 0, mbw * sizeof(uint32_t));
+                    }
+                    log_debug("[MIX-BLEND] Saved backdrop %dx%d for <%s>", mbw, mbh, block->node_name());
+                }
+            }
+        }
+    }
+
     if (!self_hidden && block->bound) {
         // CSS 2.1 Section 17.6.1: empty-cells: hide suppresses borders/backgrounds
         bool skip_bound = false;
@@ -1642,6 +2051,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
                 log_debug("Skipping bound for empty cell (empty-cells: hide)");
             }
         }
+
         if (!skip_bound) {
             render_bound(rdcon, block);
         }
@@ -1682,16 +2092,67 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         if (block->scroller) {
             setup_scroller(rdcon, block);
         }
+
+        // Save pixels for rounded overflow clip (pixel masking for border-radius clipping)
+        ClipMask* overflow_clip_mask = nullptr;
+        ClipShape* overflow_clip_shape = nullptr;
+        if (rdcon->block.has_clip_radius) {
+            Bound* clip = &rdcon->block.clip;
+            Corner* cr = &rdcon->block.clip_radius;
+            float cw = clip->right - clip->left;
+            float ch = clip->bottom - clip->top;
+            if (cw > 0 && ch > 0) {
+                overflow_clip_mask = save_clip_region(rdcon->ui_context->surface,
+                    clip->left, clip->top, cw, ch);
+                overflow_clip_shape = (ClipShape*)calloc(1, sizeof(ClipShape));
+                overflow_clip_shape->type = CLIP_SHAPE_ROUNDED_RECT;
+                overflow_clip_shape->rounded_rect = {clip->left, clip->top, cw, ch,
+                    cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
+                log_debug("[CLIP] saved overflow clip region for rounded mask: (%.0f,%.0f) %.0fx%.0f r=[%.0f,%.0f,%.0f,%.0f]",
+                    clip->left, clip->top, cw, ch,
+                    cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left);
+            }
+        }
+
         // render negative z-index children
         render_children(rdcon, view);
-        // render positive z-index children
+        // render positive z-index children (sorted by z-index)
         if (block->position) {
             log_debug("render absolute/fixed positioned children");
+            // collect positioned children into array for z-index sorting
+            ViewBlock* abs_children[256];
+            int abs_count = 0;
             ViewBlock* child_block = block->position->first_abs_child;
-            while (child_block) {
-                render_block_view(rdcon, child_block);
+            while (child_block && abs_count < 256) {
+                abs_children[abs_count++] = child_block;
                 child_block = child_block->position->next_abs_sibling;
             }
+            // sort by z-index (stable: preserve document order for equal z-index)
+            for (int i = 1; i < abs_count; i++) {
+                ViewBlock* key = abs_children[i];
+                int key_z = key->position ? key->position->z_index : 0;
+                int j = i - 1;
+                while (j >= 0) {
+                    int j_z = abs_children[j]->position ? abs_children[j]->position->z_index : 0;
+                    if (j_z > key_z) {
+                        abs_children[j + 1] = abs_children[j];
+                        j--;
+                    } else {
+                        break;
+                    }
+                }
+                abs_children[j + 1] = key;
+            }
+            for (int i = 0; i < abs_count; i++) {
+                render_block_view(rdcon, abs_children[i]);
+            }
+        }
+
+        // Apply rounded overflow clip mask
+        if (overflow_clip_mask && overflow_clip_shape) {
+            apply_clip_mask(rdcon->ui_context->surface, overflow_clip_mask, overflow_clip_shape);
+            free_clip_mask(overflow_clip_mask);
+            free_clip_shape(overflow_clip_shape);
         }
     }
     else {
@@ -1754,6 +2215,30 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
             log_debug("[OPACITY] Applied opacity=%.2f on <%s> region (%d,%d)-(%d,%d)",
                       opacity, block->node_name(), x0, y0, x1, y1);
         }
+    }
+
+    // Apply mix-blend-mode: composite rendered element onto saved backdrop
+    if (mix_blend_backdrop && mbw > 0 && mbh > 0) {
+        ImageSurface* surface = rdcon->ui_context->surface;
+        uint32_t* px = (uint32_t*)surface->pixels;
+        int pitch = surface->pitch / 4;
+        for (int row = 0; row < mbh; row++) {
+            for (int col = 0; col < mbw; col++) {
+                uint32_t backdrop = mix_blend_backdrop[row * mbw + col];
+                uint32_t source = px[(mby0 + row) * pitch + (mbx0 + col)];
+                px[(mby0 + row) * pitch + (mbx0 + col)] =
+                    composite_blend_pixel(backdrop, source, mix_blend);
+            }
+        }
+        mem_free(mix_blend_backdrop);
+        log_debug("[MIX-BLEND] Applied mix-blend-mode on <%s> %dx%d", block->node_name(), mbw, mbh);
+    }
+
+    // Apply CSS clip-path mask (pixel-level masking)
+    if (css_clip_mask && css_clip_shape) {
+        apply_clip_mask(rdcon->ui_context->surface, css_clip_mask, css_clip_shape);
+        free_clip_mask(css_clip_mask);
+        free_clip_shape(css_clip_shape);
     }
 
     // Restore transform state

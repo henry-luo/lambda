@@ -119,6 +119,8 @@ typedef struct FontMetrics {
     float em_size;              // units per em (typically 1000 or 2048)
     float underline_position;   // underline position below baseline (positive = down)
     float underline_thickness;  // underline stroke thickness
+    float strikeout_position;   // strikeout position above baseline (in CSS pixels)
+    float strikeout_size;       // strikeout line thickness (in CSS pixels)
 
     bool has_kerning;           // font contains kerning data
     bool use_typo_metrics;      // OS/2 fsSelection bit 7 (USE_TYPO_METRICS) is set

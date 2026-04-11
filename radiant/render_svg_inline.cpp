@@ -693,6 +693,8 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
                 log_debug("[SVG] gradient fill not resolved: %s", fill);
                 fc = ctx->fill_color;   // fallback
             }
+        } else if (strcmp(fill, "currentColor") == 0) {
+            fc = ctx->current_color;
         } else {
             fc = parse_svg_color(fill);
         }
@@ -713,6 +715,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
             float op = strtof(opacity, nullptr);
             fc.a = (uint8_t)(fc.a * op);
         }
+        // apply inherited group opacity
+        if (ctx->opacity < 1.0f) {
+            fc.a = (uint8_t)(fc.a * ctx->opacity);
+        }
         rdt_fill_path(ctx->vec, path, fc, RDT_FILL_WINDING, transform);
     }
 
@@ -724,7 +730,11 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
     if (stroke) {
         if (strcmp(stroke, "none") != 0) {
             has_stroke = true;
-            sc = parse_svg_color(stroke);
+            if (strcmp(stroke, "currentColor") == 0) {
+                sc = ctx->current_color;
+            } else {
+                sc = parse_svg_color(stroke);
+            }
         }
     } else if (!ctx->stroke_none) {
         has_stroke = true;
@@ -739,6 +749,10 @@ static void draw_svg_fill_stroke(SvgRenderContext* ctx, RdtPath* path, Element* 
         if (stroke_opacity) {
             float opacity = strtof(stroke_opacity, nullptr);
             sc.a = (uint8_t)(sc.a * opacity);
+        }
+        // apply inherited group opacity
+        if (ctx->opacity < 1.0f) {
+            sc.a = (uint8_t)(sc.a * ctx->opacity);
         }
 
         // linecap
@@ -1058,9 +1072,9 @@ static void arc_to_beziers(RdtPath* path, float x1, float y1,
     }
 }
 
-static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
-    const char* d = get_svg_attr(elem, "d");
-    if (!d || !*d) return;
+// Parse SVG path 'd' attribute into an RdtPath. Returns new path (caller must free).
+static RdtPath* parse_svg_path_d(const char* d) {
+    if (!d || !*d) return nullptr;
 
     RdtPath* path = rdt_path_new();
 
@@ -1082,9 +1096,7 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
             p++;
             last_cmd = cmd;
         } else {
-            // implicit command - repeat last command
             cmd = last_cmd;
-            // after M, implicit command is L
             if (cmd == 'M') cmd = 'L';
             if (cmd == 'm') cmd = 'l';
         }
@@ -1255,6 +1267,14 @@ static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
                 break;
         }
     }
+
+    return path;
+}
+
+static void render_svg_path(SvgRenderContext* ctx, Element* elem) {
+    const char* d = get_svg_attr(elem, "d");
+    RdtPath* path = parse_svg_path_d(d);
+    if (!path) return;
 
     RdtMatrix m = compose_element_transform(ctx, elem);
     draw_svg_fill_stroke(ctx, path, elem, &m, 0, 0, 0, 0);
@@ -1776,6 +1796,116 @@ static void render_svg_image(SvgRenderContext* ctx, Element* elem) {
 }
 
 // ============================================================================
+// SVG ClipPath Support
+// ============================================================================
+
+// Build a composite RdtPath from the children of a <clipPath> element.
+// Returns new path (caller must free), or nullptr if no geometry found.
+static RdtPath* build_clip_path_from_def(SvgRenderContext* ctx, Element* clip_elem) {
+    if (!clip_elem || clip_elem->length == 0) return nullptr;
+
+    RdtPath* clip_path = rdt_path_new();
+    bool has_geometry = false;
+
+    for (int64_t i = 0; i < clip_elem->length; i++) {
+        Element* child = get_child_element_at(clip_elem, i);
+        if (!child) continue;
+        const char* tag = get_element_tag_name(child);
+        if (!tag) continue;
+
+        if (strcmp(tag, "rect") == 0) {
+            float x = parse_svg_length(get_svg_attr(child, "x"), 0);
+            float y = parse_svg_length(get_svg_attr(child, "y"), 0);
+            float w = parse_svg_length(get_svg_attr(child, "width"), 0);
+            float h = parse_svg_length(get_svg_attr(child, "height"), 0);
+            float rx = parse_svg_length(get_svg_attr(child, "rx"), 0);
+            float ry = parse_svg_length(get_svg_attr(child, "ry"), rx);
+            if (w > 0 && h > 0) {
+                rdt_path_add_rect(clip_path, x, y, w, h, rx, ry);
+                has_geometry = true;
+            }
+        } else if (strcmp(tag, "circle") == 0) {
+            float cx = parse_svg_length(get_svg_attr(child, "cx"), 0);
+            float cy = parse_svg_length(get_svg_attr(child, "cy"), 0);
+            float r = parse_svg_length(get_svg_attr(child, "r"), 0);
+            if (r > 0) {
+                rdt_path_add_circle(clip_path, cx, cy, r, r);
+                has_geometry = true;
+            }
+        } else if (strcmp(tag, "ellipse") == 0) {
+            float cx = parse_svg_length(get_svg_attr(child, "cx"), 0);
+            float cy = parse_svg_length(get_svg_attr(child, "cy"), 0);
+            float rx = parse_svg_length(get_svg_attr(child, "rx"), 0);
+            float ry = parse_svg_length(get_svg_attr(child, "ry"), 0);
+            if (rx > 0 && ry > 0) {
+                rdt_path_add_circle(clip_path, cx, cy, rx, ry);
+                has_geometry = true;
+            }
+        } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
+            const char* points = get_svg_attr(child, "points");
+            if (points) {
+                has_geometry = parse_points_to_path(points, clip_path, (strcmp(tag, "polygon") == 0)) || has_geometry;
+            }
+        } else if (strcmp(tag, "path") == 0) {
+            const char* d = get_svg_attr(child, "d");
+            if (d) {
+                // parse path 'd' commands directly into clip_path
+                RdtPath* temp = parse_svg_path_d(d);
+                if (temp) {
+                    // we can't copy entries (opaque struct), so free and use temp directly
+                    // for single-child clipPath (common case)
+                    if (clip_elem->length == 1) {
+                        rdt_path_free(clip_path);
+                        return temp;
+                    }
+                    // for multi-child, we need to build separate and push multiple clips
+                    // for now, just use the first path child
+                    rdt_path_free(clip_path);
+                    return temp;
+                }
+            }
+        }
+    }
+
+    if (!has_geometry) {
+        rdt_path_free(clip_path);
+        return nullptr;
+    }
+    return clip_path;
+}
+
+// Parse clip-path="url(#id)" and return the clip RdtPath if found in defs.
+static RdtPath* resolve_svg_clip_path(SvgRenderContext* ctx, Element* elem) {
+    const char* cp = get_svg_attr(elem, "clip-path");
+    if (!cp) return nullptr;
+
+    // parse url(#id) reference
+    if (strncmp(cp, "url(#", 5) != 0) return nullptr;
+    const char* id_start = cp + 5;
+    const char* id_end = strchr(id_start, ')');
+    if (!id_end || id_end == id_start) return nullptr;
+
+    char id_buf[128];
+    int id_len = (int)(id_end - id_start);
+    if (id_len >= (int)sizeof(id_buf)) return nullptr;
+    memcpy(id_buf, id_start, id_len);
+    id_buf[id_len] = '\0';
+
+    if (!ctx->defs) return nullptr;
+    Element* clip_elem = lookup_elem_def((SvgDefTable*)ctx->defs, id_buf);
+    if (!clip_elem) {
+        log_debug("[SVG] clip-path ref '%s' not found in defs", id_buf);
+        return nullptr;
+    }
+
+    RdtPath* path = build_clip_path_from_def(ctx, clip_elem);
+    if (path) {
+        log_debug("[SVG] resolved clip-path='%s'", cp);
+    }
+    return path;
+}
+
+// ============================================================================
 // SVG Group and Children
 // ============================================================================
 
@@ -1785,10 +1915,27 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     // save current inherited state
     Color saved_fill = ctx->fill_color;
     Color saved_stroke = ctx->stroke_color;
+    Color saved_current_color = ctx->current_color;
     float saved_stroke_width = ctx->stroke_width;
+    float saved_opacity = ctx->opacity;
     bool saved_fill_none = ctx->fill_none;
     bool saved_stroke_none = ctx->stroke_none;
     RdtMatrix saved_transform = ctx->transform;
+
+    // apply group opacity (inherited, multiplied down)
+    const char* opacity_attr = get_svg_attr(elem, "opacity");
+    if (opacity_attr) {
+        float op = strtof(opacity_attr, nullptr);
+        if (op < 0.0f) op = 0.0f;
+        if (op > 1.0f) op = 1.0f;
+        ctx->opacity *= op;
+    }
+
+    // update CSS 'color' property (for currentColor keyword)
+    const char* color_attr = get_svg_attr(elem, "color");
+    if (color_attr) {
+        ctx->current_color = parse_svg_color(color_attr);
+    }
 
     // update inherited state from group attributes
     const char* fill = get_svg_attr(elem, "fill");
@@ -1825,7 +1972,9 @@ static void render_svg_group(SvgRenderContext* ctx, Element* elem) {
     // restore inherited state
     ctx->fill_color = saved_fill;
     ctx->stroke_color = saved_stroke;
+    ctx->current_color = saved_current_color;
     ctx->stroke_width = saved_stroke_width;
+    ctx->opacity = saved_opacity;
     ctx->fill_none = saved_fill_none;
     ctx->stroke_none = saved_stroke_none;
     ctx->transform = saved_transform;
@@ -1924,6 +2073,12 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
 
     log_debug("[SVG] rendering element: %s", tag);
 
+    // check for clip-path="url(#id)" attribute and push clip if found
+    RdtPath* clip_path = resolve_svg_clip_path(ctx, elem);
+    if (clip_path) {
+        rdt_push_clip(ctx->vec, clip_path, &ctx->transform);
+    }
+
     if (strcmp(tag, "rect") == 0) {
         render_svg_rect(ctx, elem);
     } else if (strcmp(tag, "circle") == 0) {
@@ -1959,6 +2114,7 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
                 float uy = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
                 // compose <use> offset + element transform with accumulated transform
                 RdtMatrix saved = ctx->transform;
+                Color saved_color = ctx->current_color;
                 RdtMatrix el_m = compose_element_transform(ctx, elem);
                 if (ux != 0.0f || uy != 0.0f) {
                     RdtMatrix translate = rdt_matrix_translate(ux, uy);
@@ -1966,9 +2122,57 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
                 } else {
                     ctx->transform = el_m;
                 }
-                render_svg_element(ctx, ref);
+
+                // update currentColor from <use> element's color attribute
+                const char* use_color = get_svg_attr(elem, "color");
+                if (use_color) {
+                    ctx->current_color = parse_svg_color(use_color);
+                }
+
+                const char* ref_tag = get_element_tag_name(ref);
+                if (ref_tag && strcmp(ref_tag, "symbol") == 0) {
+                    // <symbol> needs viewBox/preserveAspectRatio applied
+                    const char* vb_attr = get_svg_attr(ref, "viewBox");
+                    SvgViewBox vb = parse_svg_viewbox(vb_attr);
+
+                    // <use> width/height override (default: symbol's viewBox or 100%)
+                    float sym_w = parse_svg_length(get_svg_attr(elem, "width"), vb.has_viewbox ? vb.width : 0);
+                    float sym_h = parse_svg_length(get_svg_attr(elem, "height"), vb.has_viewbox ? vb.height : 0);
+
+                    if (vb.has_viewbox && sym_w > 0 && sym_h > 0) {
+                        float sx = sym_w / vb.width;
+                        float sy = sym_h / vb.height;
+                        const char* par = get_svg_attr(ref, "preserveAspectRatio");
+                        bool par_none = par && strcmp(par, "none") == 0;
+                        bool par_slice = par && strstr(par, "slice") != nullptr;
+                        if (!par_none) {
+                            float scale = par_slice ? fmax(sx, sy) : fmin(sx, sy);
+                            float align_x = 0.5f, align_y = 0.5f;
+                            if (par) {
+                                if      (strstr(par, "xMin")) align_x = 0.0f;
+                                else if (strstr(par, "xMax")) align_x = 1.0f;
+                                if      (strstr(par, "YMin")) align_y = 0.0f;
+                                else if (strstr(par, "YMax")) align_y = 1.0f;
+                            }
+                            float tx = -vb.min_x * scale + (sym_w - vb.width * scale) * align_x;
+                            float ty = -vb.min_y * scale + (sym_h - vb.height * scale) * align_y;
+                            RdtMatrix vb_m = {scale, 0, tx, 0, scale, ty, 0, 0, 1};
+                            ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
+                        } else {
+                            float tx = -vb.min_x * sx;
+                            float ty = -vb.min_y * sy;
+                            RdtMatrix vb_m = {sx, 0, tx, 0, sy, ty, 0, 0, 1};
+                            ctx->transform = rdt_matrix_multiply(&ctx->transform, &vb_m);
+                        }
+                    }
+                    // render <symbol> children
+                    render_svg_children(ctx, ref);
+                    log_debug("[SVG] rendered <use> -> <symbol> href='%s' vb=%s", href, vb_attr ? vb_attr : "(none)");
+                } else {
+                    render_svg_element(ctx, ref);
+                }
                 ctx->transform = saved;
-                return;
+                ctx->current_color = saved_color;
             }
         }
         log_debug("[SVG] <use> href='%s' not resolved", href ? href : "(none)");
@@ -1979,6 +2183,11 @@ static void render_svg_element(SvgRenderContext* ctx, Element* elem) {
     } else {
         // unknown element - try rendering children
         render_svg_children(ctx, elem);
+    }
+
+    if (clip_path) {
+        rdt_pop_clip(ctx->vec);
+        rdt_path_free(clip_path);
     }
 }
 
@@ -2001,6 +2210,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
     ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
+    ctx.current_color.r = 0; ctx.current_color.g = 0; ctx.current_color.b = 0; ctx.current_color.a = 255;  // default black
     ctx.stroke_width = 1.0f;
     ctx.opacity = 1.0f;
     ctx.fill_none = false;
@@ -2011,6 +2221,7 @@ void render_svg_to_vec(RdtVector* vec, Element* svg_element, float viewport_widt
 
     // parse viewBox
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
+    if (!viewbox_attr) viewbox_attr = get_svg_attr(svg_element, "viewbox");
     SvgViewBox vb = parse_svg_viewbox(viewbox_attr);
 
     if (vb.has_viewbox && vb.width > 0 && vb.height > 0) {

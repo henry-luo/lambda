@@ -3796,6 +3796,38 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     log_debug("[CSS] Text-decoration: %s -> 0x%04X", info ? info->name : "unknown", deco_value);
                 }
             }
+            else if (value->type == CSS_VALUE_TYPE_LIST) {
+                // text-decoration shorthand: <line> || <style> || <color>
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* val = values[i];
+                    if (val->type == CSS_VALUE_TYPE_KEYWORD) {
+                        CssEnum kw = val->data.keyword;
+                        const CssEnumInfo* info = css_enum_info(kw);
+                        if (info) {
+                            if (info->group == CSS_VALUE_GROUP_TEXT_DECO_LINE) {
+                                span->font->text_deco = kw;
+                                log_debug("[CSS] text-decoration line: %s", info->name);
+                            } else if (info->group == CSS_VALUE_GROUP_TEXT_DECO_STYLE ||
+                                       ((info->group == CSS_VALUE_GROUP_BORDER_STYLE) &&
+                                        (kw == CSS_VALUE_SOLID || kw == CSS_VALUE_DOUBLE ||
+                                         kw == CSS_VALUE_DOTTED || kw == CSS_VALUE_DASHED))) {
+                                span->font->text_deco_style = kw;
+                                log_debug("[CSS] text-decoration style: %s", info->name);
+                            } else if (info->group == CSS_VALUE_GROUP_COLOR ||
+                                       info->group == CSS_VALUE_GROUP_SYSTEM_COLOR) {
+                                span->font->text_deco_color = color_name_to_rgb(kw);
+                                log_debug("[CSS] text-decoration color keyword: %s", info->name);
+                            }
+                        }
+                    }
+                    else if (val->type == CSS_VALUE_TYPE_COLOR || val->type == CSS_VALUE_TYPE_FUNCTION) {
+                        span->font->text_deco_color = resolve_color_value(lycon, val);
+                        log_debug("[CSS] text-decoration color: #%08x", span->font->text_deco_color.c);
+                    }
+                }
+            }
             break;
         }
 
@@ -4613,6 +4645,15 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             }
                         }
                     }
+                } else if (func && func->name &&
+                           (strcmp(func->name, "linear-gradient") == 0 ||
+                            strcmp(func->name, "repeating-linear-gradient") == 0 ||
+                            strcmp(func->name, "radial-gradient") == 0 ||
+                            strcmp(func->name, "repeating-radial-gradient") == 0 ||
+                            strcmp(func->name, "conic-gradient") == 0)) {
+                    // Delegate gradient functions to the background shorthand handler
+                    log_debug("[CSS] background-image: delegating %s to background handler", func->name);
+                    resolve_css_property(CSS_PROPERTY_BACKGROUND, decl, lycon);
                 }
             } else if (value->type == CSS_VALUE_TYPE_URL || value->type == CSS_VALUE_TYPE_STRING) {
                 // Direct URL/string value (non-function form)
@@ -5677,9 +5718,17 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                     filter->params.drop_shadow.color.a = 255;
 
                     // Parse drop-shadow arguments: <offset-x> <offset-y> [<blur-radius>] [<color>]
+                    // drop-shadow() uses space-separated args, so the parser may pack
+                    // them into a single CSS_VALUE_TYPE_LIST — unwrap if needed
+                    int ds_count = func->arg_count;
+                    CssValue** ds_values = func->args;
+                    if (ds_count == 1 && ds_values[0] && ds_values[0]->type == CSS_VALUE_TYPE_LIST) {
+                        ds_count = ds_values[0]->data.list.count;
+                        ds_values = ds_values[0]->data.list.values;
+                    }
                     int len_idx = 0;
-                    for (int i = 0; i < func->arg_count; i++) {
-                        CssValue* a = func->args[i];
+                    for (int i = 0; i < ds_count; i++) {
+                        CssValue* a = ds_values[i];
                         if (!a) continue;
                         if (a->type == CSS_VALUE_TYPE_LENGTH) {
                             float val = resolve_length_value(lycon, prop_id, a);
@@ -5692,6 +5741,10 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                             filter->params.drop_shadow.color.g = a->data.color.data.rgba.g;
                             filter->params.drop_shadow.color.b = a->data.color.data.rgba.b;
                             filter->params.drop_shadow.color.a = a->data.color.data.rgba.a;
+                        } else if (a->type == CSS_VALUE_TYPE_FUNCTION && a->data.function) {
+                            // Nested color function like rgba(0,0,0,0.5) — resolve it
+                            Color c = resolve_color_value(lycon, a);
+                            filter->params.drop_shadow.color = c;
                         }
                     }
                     log_debug("[CSS] filter: drop-shadow(%.2f %.2f %.2f rgba(%d,%d,%d,%.2f))",
@@ -7116,28 +7169,56 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
             // 3 values: top-left, top-right/bottom-left, bottom-right
             // 4 values: top-left, top-right, bottom-right, bottom-left
 
-            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_NUMBER) {
                 // Single value - all corners get same radius
                 float radius = resolve_length_value(lycon, CSS_PROPERTY_BORDER_RADIUS, value);
 
                 // Check specificity before setting each corner
                 if (specificity >= span->bound->border->radius.tl_specificity) {
                     span->bound->border->radius.top_left = radius;
+                    span->bound->border->radius.tl_percent = false;
                     span->bound->border->radius.tl_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.tr_specificity) {
                     span->bound->border->radius.top_right = radius;
+                    span->bound->border->radius.tr_percent = false;
                     span->bound->border->radius.tr_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.br_specificity) {
                     span->bound->border->radius.bottom_right = radius;
+                    span->bound->border->radius.br_percent = false;
                     span->bound->border->radius.br_specificity = specificity;
                 }
                 if (specificity >= span->bound->border->radius.bl_specificity) {
                     span->bound->border->radius.bottom_left = radius;
+                    span->bound->border->radius.bl_percent = false;
                     span->bound->border->radius.bl_specificity = specificity;
                 }
                 log_debug("[CSS] Border-radius (all): %.2f px", radius);
+            } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                // Single percentage value - store raw percentage, resolve at render time
+                float pct = (float)value->data.percentage.value;
+                if (specificity >= span->bound->border->radius.tl_specificity) {
+                    span->bound->border->radius.top_left = pct;
+                    span->bound->border->radius.tl_percent = true;
+                    span->bound->border->radius.tl_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.tr_specificity) {
+                    span->bound->border->radius.top_right = pct;
+                    span->bound->border->radius.tr_percent = true;
+                    span->bound->border->radius.tr_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.br_specificity) {
+                    span->bound->border->radius.bottom_right = pct;
+                    span->bound->border->radius.br_percent = true;
+                    span->bound->border->radius.br_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.bl_specificity) {
+                    span->bound->border->radius.bottom_left = pct;
+                    span->bound->border->radius.bl_percent = true;
+                    span->bound->border->radius.bl_specificity = specificity;
+                }
+                log_debug("[CSS] Border-radius (all): %.2f%%", pct);
             } else if (value->type == CSS_VALUE_TYPE_LIST) {
                 // Multi-value border-radius
                 size_t count = value->data.list.count;
@@ -7233,8 +7314,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.tl_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.top_left = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.top_left = (float)value->data.percentage.value;
+                    span->bound->border->radius.tl_percent = true;
+                } else {
+                    span->bound->border->radius.top_left = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.tl_percent = false;
+                }
                 span->bound->border->radius.tl_specificity = specificity;
             }
             break;
@@ -7248,8 +7334,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.tr_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.top_right = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.top_right = (float)value->data.percentage.value;
+                    span->bound->border->radius.tr_percent = true;
+                } else {
+                    span->bound->border->radius.top_right = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.tr_percent = false;
+                }
                 span->bound->border->radius.tr_specificity = specificity;
             }
             break;
@@ -7263,8 +7354,13 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.br_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.bottom_right = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.bottom_right = (float)value->data.percentage.value;
+                    span->bound->border->radius.br_percent = true;
+                } else {
+                    span->bound->border->radius.bottom_right = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.br_percent = false;
+                }
                 span->bound->border->radius.br_specificity = specificity;
             }
             break;
@@ -7278,8 +7374,14 @@ void resolve_css_property(CssPropertyId prop_id, const CssDeclaration* decl, Lay
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
             if (specificity >= span->bound->border->radius.bl_specificity) {
-                float radius = resolve_length_value(lycon, prop_id, value);
-                span->bound->border->radius.bottom_left = radius;
+                if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+                    span->bound->border->radius.bottom_left = (float)value->data.percentage.value;
+                    span->bound->border->radius.bl_percent = true;
+                } else {
+                    span->bound->border->radius.bottom_left = resolve_length_value(lycon, prop_id, value);
+                    span->bound->border->radius.bl_percent = false;
+                }
+                span->bound->border->radius.bl_specificity = specificity;
                 span->bound->border->radius.bl_specificity = specificity;
             }
             break;
