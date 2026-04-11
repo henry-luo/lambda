@@ -4986,7 +4986,8 @@ void fn_map_set(Item map_item, Item key, Item value) {
     ShapeEntry* entry = map_type->shape;
     while (entry) {
         // A6: pointer comparison first (interned strings share char* pointers)
-        if (entry->name->str == key_cstr || strcmp(entry->name->str, key_cstr) == 0) {
+        if (entry->name && entry->name->str &&
+            (entry->name->str == key_cstr || strcmp(entry->name->str, key_cstr) == 0)) {
             TypeId field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
 

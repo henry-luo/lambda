@@ -586,7 +586,12 @@ Item MarkEditor::map_rebuild_with_new_shape(Map* old_map, ShapeBuilder* builder,
 
     // Free old data (inline mode only), replace with new
     if (is_inline && old_map->data) {
-        pool_free(pool_, old_map->data);
+        // In ui_mode, old data was arena-allocated during JIT execution
+        // (via context->arena = result_arena). The MarkEditor's pool_ is a
+        // different allocator; calling pool_free here would corrupt rpmalloc.
+        if (!ui_mode_) {
+            pool_free(pool_, old_map->data);
+        }
     }
     result_map->data = new_data;
     result_map->data_cap = new_byte_size;
@@ -1104,7 +1109,12 @@ Item MarkEditor::elmt_rebuild_with_new_shape(Element* old_elmt, ShapeBuilder* bu
 
     // Free old data (inline mode only), replace with new
     if (is_inline && old_elmt->data) {
-        pool_free(pool_, old_elmt->data);
+        // In ui_mode, old data was arena-allocated during JIT execution
+        // (via context->arena = result_arena). The MarkEditor's pool_ is a
+        // different allocator; calling pool_free here would corrupt rpmalloc.
+        if (!ui_mode_) {
+            pool_free(pool_, old_elmt->data);
+        }
     }
     result_elmt->data = new_data;
     result_elmt->data_cap = new_byte_size;
@@ -1330,13 +1340,14 @@ Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
             int64_t new_capacity = elmt->capacity ? elmt->capacity * 2 : 8;
             bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
             if (use_arena) {
-                if (elmt->items == nullptr) {
-                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                } else {
-                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
-                                                       elmt->capacity * sizeof(Item),
-                                                       new_capacity * sizeof(Item));
+                // Always fresh alloc — do NOT arena_realloc (frees old buffer
+                // to arena free-list, which can be recycled by new DomElement
+                // allocations, overwriting still-referenced items buffers).
+                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                if (new_items && elmt->items) {
+                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
                 }
+                elmt->items = new_items;
             } else {
                 Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
                 if (!new_items) {
@@ -1435,13 +1446,11 @@ Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* 
             }
             bool use_arena = (arena_ != nullptr && (elmt->items == nullptr || arena_owns(arena_, elmt->items)));
             if (use_arena) {
-                if (elmt->items == nullptr) {
-                    elmt->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                } else {
-                    elmt->items = (Item*)arena_realloc(arena_, elmt->items,
-                                                       elmt->capacity * sizeof(Item),
-                                                       new_capacity * sizeof(Item));
+                Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                if (new_items && elmt->items) {
+                    memcpy(new_items, elmt->items, elmt->capacity * sizeof(Item));
                 }
+                elmt->items = new_items;
             } else {
                 Item* new_items = (Item*)realloc(elmt->items, new_capacity * sizeof(Item));
                 if (!new_items) return ItemError;
@@ -1762,13 +1771,11 @@ Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
                 // Check if items are arena-allocated to avoid realloc on arena pointers
                 bool use_arena = (arena_ != nullptr && (arr->items == nullptr || arena_owns(arena_, arr->items)));
                 if (use_arena) {
-                    if (arr->items == nullptr) {
-                        arr->items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
-                    } else {
-                        arr->items = (Item*)arena_realloc(arena_, arr->items,
-                                                          arr->capacity * sizeof(Item),
-                                                          new_capacity * sizeof(Item));
+                    Item* new_items = (Item*)arena_alloc(arena_, new_capacity * sizeof(Item));
+                    if (new_items && arr->items) {
+                        memcpy(new_items, arr->items, arr->capacity * sizeof(Item));
                     }
+                    arr->items = new_items;
                 } else {
                     Item* new_items = (Item*)realloc(arr->items, new_capacity * sizeof(Item));
                     if (!new_items) return ItemError;

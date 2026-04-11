@@ -229,7 +229,7 @@ bool MapReader::has(const char* key) const {
 
     ShapeEntry* field = map_type_->shape;
     while (field) {
-        if (strcmp(field->name->str, key) == 0) {
+        if (field->name && field->name->str && strcmp(field->name->str, key) == 0) {
             return true;
         }
         field = field->next;
@@ -544,7 +544,7 @@ bool ElementReader::has_attr(const char* key) const {
     size_t key_len = strlen(key);
 
     while (field) {
-        if (field->name && field->name->length == key_len &&
+        if (field->name && field->name->str && field->name->length == key_len &&
             strncmp(field->name->str, key, key_len) == 0) {
             return true;
         }
@@ -569,7 +569,7 @@ const char* ElementReader::get_attr_string(const char* key) const {
     size_t key_len = strlen(key);
 
     while (field) {
-        if (field->name && field->name->length == key_len &&
+        if (field->name && field->name->str && field->name->length == key_len &&
             strncmp(field->name->str, key, key_len) == 0) {
 
             if (field->type && field->type->type_id == LMD_TYPE_STRING) {

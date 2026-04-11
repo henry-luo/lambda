@@ -346,8 +346,16 @@ bool shape_pool_shapes_equal(ShapeEntry* shape1, ShapeEntry* shape2) {
     
     while (e1 && e2) {
         // Compare name
-        if (e1->name->length != e2->name->length) return false;
-        if (memcmp(e1->name->str, e2->name->str, e1->name->length) != 0) return false;
+        if (!e1->name || !e2->name) {
+            if (e1->name != e2->name) return false;
+        } else {
+            if (e1->name->length != e2->name->length) return false;
+            if (e1->name->str && e2->name->str) {
+                if (memcmp(e1->name->str, e2->name->str, e1->name->length) != 0) return false;
+            } else if (e1->name->str != e2->name->str) {
+                return false;
+            }
+        }
         
         // Compare type
         if (e1->type->type_id != e2->type->type_id) return false;
