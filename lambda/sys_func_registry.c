@@ -1248,6 +1248,7 @@ JitImport jit_runtime_imports[] = {
     {"js_clear_exception", FPTR(js_clear_exception)},
     {"js_require_object_coercible", FPTR(js_require_object_coercible)},
     {"js_throw_syntax_error", FPTR(js_throw_syntax_error)},
+    {"js_throw_reference_error", FPTR(js_throw_reference_error)},
     {"js_new_error", FPTR(js_new_error)},
     {"js_new_error_with_name", FPTR(js_new_error_with_name)},
     {"js_new_error_with_stack", FPTR(js_new_error_with_stack)},
