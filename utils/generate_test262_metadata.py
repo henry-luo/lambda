@@ -160,7 +160,13 @@ def main():
         includes = ";".join(meta["includes"])
         features = ";".join(meta["features"])
 
-        results.append((path, flags, meta["neg_phase"], meta["neg_type"], includes, features))
+        # native harness eligibility: no includes, not negative, no Test262Error in source
+        native = 0
+        if not meta["includes"] and not meta["is_negative"]:
+            if "Test262Error" not in source:
+                native = 1
+
+        results.append((path, flags, meta["neg_phase"], meta["neg_type"], includes, features, native))
 
         if (i + 1) % 10000 == 0:
             print(f"[metadata]   parsed {i + 1}/{len(entries)}...", file=sys.stderr)
@@ -168,10 +174,10 @@ def main():
     # write TSV cache
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     with open(OUTPUT_FILE, "w") as f:
-        f.write(f"V1\t{len(results)}\n")
-        for path, flags, neg_phase, neg_type, includes, features in results:
-            # path\tflags\tneg_phase\tneg_type\tincludes\tfeatures
-            f.write(f"{path}\t{flags}\t{neg_phase}\t{neg_type}\t{includes}\t{features}\n")
+        f.write(f"V2\t{len(results)}\n")
+        for path, flags, neg_phase, neg_type, includes, features, native in results:
+            # path\tflags\tneg_phase\tneg_type\tincludes\tfeatures\tnative
+            f.write(f"{path}\t{flags}\t{neg_phase}\t{neg_type}\t{includes}\t{features}\t{native}\n")
 
     file_size = os.path.getsize(OUTPUT_FILE)
     print(

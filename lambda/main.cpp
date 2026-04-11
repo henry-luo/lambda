@@ -817,7 +817,7 @@ int exec_convert(int argc, char* argv[]) {
 
 #ifndef _WIN32
 // per-script timeout support for test-batch mode
-static jmp_buf batch_timeout_jmp;
+static sigjmp_buf batch_timeout_jmp;
 static volatile sig_atomic_t batch_timeout_active = 0;
 
 // MIR error recovery for batch mode: longjmp instead of exit(1)
@@ -857,7 +857,7 @@ static void batch_alarm_handler(int sig) {
     (void)sig;
     if (batch_timeout_active) {
         batch_timeout_active = 0;
-        longjmp(batch_timeout_jmp, 1);
+        siglongjmp(batch_timeout_jmp, 1);
     }
 }
 
@@ -2598,7 +2598,7 @@ int main(int argc, char *argv[]) {
                 sa.sa_flags = 0;
                 sigaction(SIGALRM, &sa, &old_sa);
                 batch_timeout_active = 1;
-                if (setjmp(batch_timeout_jmp) == 0) {
+                if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                     alarm(batch_timeout);
                     result = run_script_file(&runtime, script_path, use_mir, false, run_main);
                     alarm(0);
@@ -2833,7 +2833,7 @@ int main(int argc, char *argv[]) {
                 batch_timeout_active = 1;
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
-                    if (setjmp(batch_timeout_jmp) == 0) {
+                    if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
                         Item res = has_preamble
                             ? transpile_js_to_mir_with_preamble(&runtime, js_source, script_path, &preamble)

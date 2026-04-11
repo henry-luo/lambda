@@ -208,11 +208,19 @@ extern "C" Item js_date_new_from(Item value) {
         String* s = it2s(value);
         if (s) {
             struct tm tm = {};
-            if (strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm) ||
-                strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm) ||
-                strptime(s->chars, "%c", &tm)) {
+            char* rest = strptime(s->chars, "%Y-%m-%dT%H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%a %b %d %Y %H:%M:%S", &tm);
+            if (!rest) rest = strptime(s->chars, "%c", &tm);
+            if (rest) {
                 time_t t = timegm(&tm);
                 double ms = (double)t * 1000.0;
+                // Parse fractional seconds (e.g. ".872" → 872ms)
+                if (rest && *rest == '.') {
+                    char* end_frac;
+                    double frac = strtod(rest, &end_frac);
+                    ms += frac * 1000.0;
+                    rest = end_frac;
+                }
                 store_time(ms);
             } else {
                 // fallback: try mktime (local time)
@@ -236,14 +244,59 @@ extern "C" Item js_date_new_from(Item value) {
         bool has_time = false;
         Item other_time = js_map_get_fast_ext(value.map, "_time", 5, &has_time);
         if (has_time && (get_type_id(other_time) == LMD_TYPE_FLOAT || get_type_id(other_time) == LMD_TYPE_INT || get_type_id(other_time) == LMD_TYPE_INT64)) {
-            store_time(other_time.get_double());
+            double ms = (get_type_id(other_time) == LMD_TYPE_FLOAT) ? it2d(other_time) : (double)it2i(other_time);
+            store_time(ms);
         } else {
-            // Non-Date object: try ToPrimitive then ToNumber
-            Item prim = js_to_number(value);
-            if (get_type_id(prim) == LMD_TYPE_FLOAT || get_type_id(prim) == LMD_TYPE_INT)
-                store_time(prim.get_double());
-            else
-                store_time(NAN);
+            // Non-Date object: ToPrimitive(value) per ES spec §21.4.2
+            // 1. Check Symbol.toPrimitive
+            Item sym_key = (Item){.item = s2it(heap_create_name("__sym_2", 7))};
+            Item to_prim = js_property_get(value, sym_key);
+            Item prim;
+            if (to_prim.item != ItemNull.item && get_type_id(to_prim) == LMD_TYPE_FUNC) {
+                Item hint = (Item){.item = s2it(heap_create_name("default", 7))};
+                Item args[1] = { hint };
+                prim = js_call_function(to_prim, value, args, 1);
+                if (js_check_exception()) return ItemNull;
+                // If result is an object, throw TypeError
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_MAP || pt == LMD_TYPE_ARRAY || pt == LMD_TYPE_ELEMENT) {
+                    js_throw_type_error("Cannot convert object to primitive value");
+                    return ItemNull;
+                }
+                // Symbol results → throw TypeError
+                if ((pt == LMD_TYPE_INT && it2i(prim) <= -(int64_t)JS_SYMBOL_BASE) || pt == LMD_TYPE_SYMBOL) {
+                    js_throw_type_error("Cannot convert a Symbol value to a number");
+                    return ItemNull;
+                }
+            } else {
+                // No Symbol.toPrimitive: try valueOf/toString
+                prim = js_to_number(value);
+                if (js_check_exception()) return ItemNull;
+                TypeId pt = get_type_id(prim);
+                if (pt == LMD_TYPE_FLOAT)
+                    store_time(it2d(prim));
+                else if (pt == LMD_TYPE_INT || pt == LMD_TYPE_INT64)
+                    store_time((double)it2i(prim));
+                else
+                    store_time(NAN);
+                goto date_done;
+            }
+            // Dispatch on ToPrimitive result type
+            TypeId pt = get_type_id(prim);
+            if (pt == LMD_TYPE_STRING) {
+                // Re-enter Date constructor with the string
+                return js_date_new_from(prim);
+            } else {
+                // ToNumber on the primitive
+                Item num = js_to_number(prim);
+                TypeId nt = get_type_id(num);
+                if (nt == LMD_TYPE_FLOAT)
+                    store_time(it2d(num));
+                else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64)
+                    store_time((double)it2i(num));
+                else
+                    store_time(NAN);
+            }
         }
     } else {
         // Per spec: ToNumber(value) then TimeClip
@@ -254,6 +307,7 @@ extern "C" Item js_date_new_from(Item value) {
         else if (nt == LMD_TYPE_INT || nt == LMD_TYPE_INT64) store_time((double)it2i(num));
         else store_time(NAN);
     }
+date_done:
     Item cls_key = (Item){.item = s2it(heap_create_name("__class_name__"))};
     js_property_set(obj, cls_key, (Item){.item = s2it(heap_create_name("Date"))});
     return obj;
@@ -4039,6 +4093,667 @@ extern "C" Item js_object_is(Item left, Item right) {
 }
 
 // =============================================================================
+// Native assert.sameValue / assert.notSameValue for test262 (debug builds only)
+// =============================================================================
+// These bypass the JS-level assert.sameValue/notSameValue, avoiding:
+//   - full JS function dispatch overhead (property lookup, args array, etc.)
+//   - string concatenation for error messages on the hot (passing) path
+// The transpiler intercepts assert.sameValue(a,b,msg) calls and emits direct
+// calls to these C++ functions instead.
+
+#ifndef NDEBUG
+
+// helper: build error message string for assert.sameValue/notSameValue
+static Item assert_build_error_msg(Item actual, Item expected, Item message, bool same) {
+    extern Item js_to_string_val(Item value);
+
+    Item actual_str = js_to_string_val(actual);
+    Item expected_str = js_to_string_val(expected);
+    String* a_s = it2s(actual_str);
+    String* e_s = it2s(expected_str);
+    const char* a_chars = a_s ? a_s->chars : "undefined";
+    int a_len = a_s ? (int)a_s->len : 9;
+    const char* e_chars = e_s ? e_s->chars : "undefined";
+    int e_len = e_s ? (int)e_s->len : 9;
+
+    // format: "[<message> ]Expected SameValue(«<actual>», «<expected>») to be true/false"
+    const char* tail = same ? "\xC2\xBB) to be true" : "\xC2\xBB) to be false";
+    const char* mid = "\xC2\xBB, \xC2\xAB";
+    const char* head = "Expected SameValue(\xC2\xAB";
+
+    // get optional message prefix
+    const char* msg_chars = NULL;
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* m_s = it2s(message);
+        if (m_s && m_s->len > 0) { msg_chars = m_s->chars; msg_len = (int)m_s->len; }
+    }
+
+    int total = msg_len + (msg_len > 0 ? 1 : 0) + (int)strlen(head) + a_len +
+                (int)strlen(mid) + e_len + (int)strlen(tail) + 1;
+    char* buf = (char*)malloc(total);
+    int pos = 0;
+    if (msg_chars) {
+        memcpy(buf + pos, msg_chars, msg_len); pos += msg_len;
+        buf[pos++] = ' ';
+    }
+    int hlen = (int)strlen(head);
+    memcpy(buf + pos, head, hlen); pos += hlen;
+    memcpy(buf + pos, a_chars, a_len); pos += a_len;
+    int mlen = (int)strlen(mid);
+    memcpy(buf + pos, mid, mlen); pos += mlen;
+    memcpy(buf + pos, e_chars, e_len); pos += e_len;
+    int tlen = (int)strlen(tail);
+    memcpy(buf + pos, tail, tlen); pos += tlen;
+    buf[pos] = '\0';
+
+    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    free(buf);
+    return result;
+}
+
+extern "C" void js_assert_same_value(Item actual, Item expected, Item message) {
+    // SameValue semantics: NaN === NaN, +0 !== -0
+    Item result = js_object_is(actual, expected);
+    if (it2b(result)) return;  // fast path: values are the same
+
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    Item msg = assert_build_error_msg(actual, expected, message, true);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    js_throw_value(js_new_error_with_name(err_name, msg));
+}
+
+extern "C" void js_assert_not_same_value(Item actual, Item unexpected, Item message) {
+    Item result = js_object_is(actual, unexpected);
+    if (!it2b(result)) return;  // fast path: values are different
+
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    Item msg = assert_build_error_msg(actual, unexpected, message, false);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    js_throw_value(js_new_error_with_name(err_name, msg));
+}
+
+// =============================================================================
+// Native compareArray / assert.compareArray for test262 (debug builds only)
+// =============================================================================
+
+// compareArray(a, b): element-wise SameValue comparison, returns bool Item
+extern "C" Item js_compare_array(Item a, Item b) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+
+    if (get_type_id(a) != LMD_TYPE_ARRAY || get_type_id(b) != LMD_TYPE_ARRAY)
+        return (Item){.item = b2it(false)};
+
+    int64_t len_a = js_array_length(a);
+    int64_t len_b = js_array_length(b);
+    if (len_a != len_b) return (Item){.item = b2it(false)};
+
+    for (int64_t i = 0; i < len_a; i++) {
+        Item ai = js_array_get_int(a, i);
+        Item bi = js_array_get_int(b, i);
+        if (!it2b(js_object_is(ai, bi))) return (Item){.item = b2it(false)};
+    }
+    return (Item){.item = b2it(true)};
+}
+
+// helper: format array as "[elem1, elem2, ...]" for error messages
+static Item assert_format_array(Item arr) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_to_string_val(Item value);
+
+    if (get_type_id(arr) != LMD_TYPE_ARRAY) {
+        return (Item){.item = s2it(heap_create_name("(not an array)"))};
+    }
+    int64_t len = js_array_length(arr);
+    // pre-pass: compute total length
+    int total = 2; // "[]"
+    char* strs[256];
+    int slens[256];
+    int maxn = len > 256 ? 256 : (int)len;
+    for (int i = 0; i < maxn; i++) {
+        Item elem = js_array_get_int(arr, i);
+        Item s = js_to_string_val(elem);
+        String* ss = it2s(s);
+        strs[i] = ss ? ss->chars : (char*)"undefined";
+        slens[i] = ss ? (int)ss->len : 9;
+        total += slens[i] + (i > 0 ? 2 : 0); // ", " separator
+    }
+    char* buf = (char*)malloc(total + 1);
+    int pos = 0;
+    buf[pos++] = '[';
+    for (int i = 0; i < maxn; i++) {
+        if (i > 0) { buf[pos++] = ','; buf[pos++] = ' '; }
+        memcpy(buf + pos, strs[i], slens[i]); pos += slens[i];
+    }
+    buf[pos++] = ']';
+    buf[pos] = '\0';
+    Item result = (Item){.item = s2it(heap_create_name(buf, pos))};
+    free(buf);
+    return result;
+}
+
+// assert.compareArray(actual, expected, message): throws on mismatch
+extern "C" void js_assert_compare_array(Item actual, Item expected, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+
+    // null checks
+    TypeId at = get_type_id(actual);
+    if (at == LMD_TYPE_NULL || at == LMD_TYPE_UNDEFINED) {
+        const char* msg_prefix = "Actual argument shouldn't be nullish. ";
+        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
+        char* buf = (char*)malloc(total + 1);
+        memcpy(buf, msg_prefix, strlen(msg_prefix));
+        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
+        buf[total] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
+        free(buf);
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    TypeId et = get_type_id(expected);
+    if (et == LMD_TYPE_NULL || et == LMD_TYPE_UNDEFINED) {
+        const char* msg_prefix = "Expected argument shouldn't be nullish. ";
+        String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+        int total = (int)strlen(msg_prefix) + (ms ? (int)ms->len : 0);
+        char* buf = (char*)malloc(total + 1);
+        memcpy(buf, msg_prefix, strlen(msg_prefix));
+        if (ms) memcpy(buf + strlen(msg_prefix), ms->chars, ms->len);
+        buf[total] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg = (Item){.item = s2it(heap_create_name(buf, total))};
+        free(buf);
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    Item result = js_compare_array(actual, expected);
+    if (it2b(result)) return; // pass
+
+    // build error message: "Actual [...] and expected [...] should have the same contents. <message>"
+    Item a_fmt = assert_format_array(actual);
+    Item e_fmt = assert_format_array(expected);
+    String* as = it2s(a_fmt);
+    String* es = it2s(e_fmt);
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+
+    const char* p1 = "Actual ";
+    const char* p2 = " and expected ";
+    const char* p3 = " should have the same contents. ";
+    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
+                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
+    char* buf = (char*)malloc(total + 1);
+    int pos = 0;
+    int l;
+    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
+    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
+    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
+    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
+    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
+    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
+    buf[pos] = '\0';
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
+    free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native verifyProperty for test262 (debug builds only)
+// =============================================================================
+// Simplified native version: checks descriptor fields against
+// Object.getOwnPropertyDescriptor result. Skips destructive isWritable/
+// isConfigurable/isEnumerable checks for performance.
+
+extern "C" void js_verify_property(Item obj, Item name, Item desc, Item options) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_object_get_own_property_descriptor(Item obj, Item name);
+    extern Item js_has_own_property(Item obj, Item key);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_to_string_val(Item value);
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+
+    // verifyProperty requires at least 3 arguments: obj, name, desc
+    // (always true when called from transpiler)
+
+    Item originalDesc = js_object_get_own_property_descriptor(obj, name);
+
+    // desc === undefined → verify property doesn't exist
+    if (get_type_id(desc) == LMD_TYPE_UNDEFINED) {
+        if (get_type_id(originalDesc) != LMD_TYPE_UNDEFINED) {
+            Item name_str = js_to_string_val(name);
+            String* ns = it2s(name_str);
+            char buf[256];
+            int len = snprintf(buf, sizeof(buf), "obj['%.*s'] descriptor should be undefined",
+                              ns ? (int)ns->len : 0, ns ? ns->chars : "");
+            js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(buf, len))}));
+        }
+        return;
+    }
+
+    // assert(hasOwnProperty(obj, name))
+    if (!it2b(js_has_own_property(obj, name))) {
+        Item name_str = js_to_string_val(name);
+        String* ns = it2s(name_str);
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf), "obj should have an own property %.*s",
+                          ns ? (int)ns->len : 0, ns ? ns->chars : "");
+        js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(buf, len))}));
+        return;
+    }
+
+    // desc must be an object
+    if (get_type_id(desc) != LMD_TYPE_MAP) {
+        js_throw_value(js_new_error_with_name(err_name,
+            (Item){.item = s2it(heap_create_name("The desc argument should be an object or undefined"))}));
+        return;
+    }
+
+    if (get_type_id(originalDesc) == LMD_TYPE_UNDEFINED) {
+        // property should exist but getOwnPropertyDescriptor returned undefined
+        js_throw_value(js_new_error_with_name(err_name,
+            (Item){.item = s2it(heap_create_name("property descriptor is undefined but property should exist"))}));
+        return;
+    }
+
+    // check each descriptor field
+    Item value_key = (Item){.item = s2it(heap_create_name("value", 5))};
+    Item writable_key = (Item){.item = s2it(heap_create_name("writable", 8))};
+    Item enumerable_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
+    Item configurable_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
+
+    // collect failure messages
+    char failures[1024];
+    int fpos = 0;
+    failures[0] = '\0';
+
+    auto append_failure = [&](const char* msg) {
+        if (fpos > 0) {
+            memcpy(failures + fpos, "; ", 2);
+            fpos += 2;
+        }
+        int ml = (int)strlen(msg);
+        if (fpos + ml < (int)sizeof(failures) - 1) {
+            memcpy(failures + fpos, msg, ml);
+            fpos += ml;
+        }
+        failures[fpos] = '\0';
+    };
+
+    if (it2b(js_has_own_property(desc, value_key))) {
+        Item desc_value = js_property_get(desc, value_key);
+        Item orig_value = js_property_get(originalDesc, value_key);
+        if (!it2b(js_object_is(desc_value, orig_value))) {
+            append_failure("descriptor value mismatch");
+        }
+        // also check obj[name] matches
+        Item obj_value = js_property_get(obj, name);
+        if (!it2b(js_object_is(desc_value, obj_value))) {
+            append_failure("object value mismatch");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, enumerable_key))) {
+        Item desc_enum = js_property_get(desc, enumerable_key);
+        Item orig_enum = js_property_get(originalDesc, enumerable_key);
+        bool desc_e = it2b(desc_enum);
+        bool orig_e = it2b(orig_enum);
+        if (desc_e != orig_e) {
+            append_failure(desc_e ? "descriptor should be enumerable" : "descriptor should not be enumerable");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, writable_key))) {
+        Item desc_writ = js_property_get(desc, writable_key);
+        Item orig_writ = js_property_get(originalDesc, writable_key);
+        bool desc_w = it2b(desc_writ);
+        bool orig_w = it2b(orig_writ);
+        if (desc_w != orig_w) {
+            append_failure(desc_w ? "descriptor should be writable" : "descriptor should not be writable");
+        }
+    }
+
+    if (it2b(js_has_own_property(desc, configurable_key))) {
+        Item desc_conf = js_property_get(desc, configurable_key);
+        Item orig_conf = js_property_get(originalDesc, configurable_key);
+        bool desc_c = it2b(desc_conf);
+        bool orig_c = it2b(orig_conf);
+        if (desc_c != orig_c) {
+            append_failure(desc_c ? "descriptor should be configurable" : "descriptor should not be configurable");
+        }
+    }
+
+    if (fpos > 0) {
+        js_throw_value(js_new_error_with_name(err_name, (Item){.item = s2it(heap_create_name(failures, fpos))}));
+        return;
+    }
+
+    // options.restore: restore the original descriptor
+    if (get_type_id(options) == LMD_TYPE_MAP) {
+        Item restore_key = (Item){.item = s2it(heap_create_name("restore", 7))};
+        Item restore_val = js_property_get(options, restore_key);
+        if (it2b(restore_val)) {
+            extern Item js_object_define_property(Item obj, Item name, Item desc);
+            js_object_define_property(obj, name, originalDesc);
+        }
+    }
+}
+
+// =============================================================================
+// Native assert.deepEqual for test262 (debug builds only)
+// =============================================================================
+
+// forward declaration for recursive call
+static bool js_deep_equal_compare(Item a, Item b, int depth);
+
+static bool js_deep_equal_compare(Item a, Item b, int depth) {
+    extern int64_t js_array_length(Item array);
+    extern Item js_array_get_int(Item array, int64_t index);
+    extern Item js_property_get(Item obj, Item key);
+    extern Item js_object_keys(Item object);
+    extern Item js_strict_equal(Item left, Item right);
+
+    if (depth > 100) return false; // prevent infinite recursion
+
+    // fast path: strict equality (same reference, same primitives)
+    if (it2b(js_strict_equal(a, b))) return true;
+
+    TypeId ta = get_type_id(a);
+    TypeId tb = get_type_id(b);
+
+    // null/undefined: only equal if both the same
+    if (ta == LMD_TYPE_NULL || ta == LMD_TYPE_UNDEFINED ||
+        tb == LMD_TYPE_NULL || tb == LMD_TYPE_UNDEFINED) {
+        return ta == tb && a.item == b.item;
+    }
+
+    // NaN handling: NaN === NaN for deepEqual
+    if (ta == LMD_TYPE_FLOAT && tb == LMD_TYPE_FLOAT) {
+        double da = it2d(a);
+        double db = it2d(b);
+        if (da != da && db != db) return true; // both NaN
+        return da == db;
+    }
+
+    // different primitive types
+    if ((ta == LMD_TYPE_BOOL || ta == LMD_TYPE_INT || ta == LMD_TYPE_FLOAT ||
+         ta == LMD_TYPE_STRING) &&
+        (tb == LMD_TYPE_BOOL || tb == LMD_TYPE_INT || tb == LMD_TYPE_FLOAT ||
+         tb == LMD_TYPE_STRING)) {
+        // both primitives but not strict equal — not deep equal
+        // (cross-type like int/float: 1 === 1.0 should have passed strict equal)
+        return false;
+    }
+
+    // both arrays: element-wise deep comparison
+    if (ta == LMD_TYPE_ARRAY && tb == LMD_TYPE_ARRAY) {
+        int64_t len_a = js_array_length(a);
+        int64_t len_b = js_array_length(b);
+        if (len_a != len_b) return false;
+        for (int64_t i = 0; i < len_a; i++) {
+            if (!js_deep_equal_compare(js_array_get_int(a, i), js_array_get_int(b, i), depth + 1))
+                return false;
+        }
+        return true;
+    }
+
+    // both objects/maps: structural comparison
+    if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
+        Item keys_a = js_object_keys(a);
+        Item keys_b = js_object_keys(b);
+        int64_t len_a = js_array_length(keys_a);
+        int64_t len_b = js_array_length(keys_b);
+        if (len_a != len_b) return false;
+
+        for (int64_t i = 0; i < len_a; i++) {
+            Item key = js_array_get_int(keys_a, i);
+            // check same key exists in b
+            Item val_a = js_property_get(a, key);
+            Item val_b = js_property_get(b, key);
+            if (!js_deep_equal_compare(val_a, val_b, depth + 1))
+                return false;
+        }
+        return true;
+    }
+
+    // mismatched types (array vs object, etc.)
+    return false;
+}
+
+extern "C" void js_assert_deep_equal(Item actual, Item expected, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_to_string_val(Item value);
+
+    bool equal = js_deep_equal_compare(actual, expected, 0);
+    if (equal) return;
+
+    // build error message
+    Item a_str = js_to_string_val(actual);
+    Item e_str = js_to_string_val(expected);
+    String* as = it2s(a_str);
+    String* es = it2s(e_str);
+    String* ms = (get_type_id(message) == LMD_TYPE_STRING) ? it2s(message) : NULL;
+
+    const char* p1 = "Expected ";
+    const char* p2 = " to be structurally equal to ";
+    const char* p3 = ". ";
+    int total = (int)strlen(p1) + (as ? (int)as->len : 0) + (int)strlen(p2) +
+                (es ? (int)es->len : 0) + (int)strlen(p3) + (ms ? (int)ms->len : 0);
+    char* buf = (char*)malloc(total + 1);
+    int pos = 0;
+    int l;
+    l = (int)strlen(p1); memcpy(buf + pos, p1, l); pos += l;
+    if (as) { memcpy(buf + pos, as->chars, as->len); pos += (int)as->len; }
+    l = (int)strlen(p2); memcpy(buf + pos, p2, l); pos += l;
+    if (es) { memcpy(buf + pos, es->chars, es->len); pos += (int)es->len; }
+    l = (int)strlen(p3); memcpy(buf + pos, p3, l); pos += l;
+    if (ms) { memcpy(buf + pos, ms->chars, ms->len); pos += (int)ms->len; }
+    buf[pos] = '\0';
+
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg = (Item){.item = s2it(heap_create_name(buf, pos))};
+    free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native assert.throws for test262 (debug builds only)
+// assert.throws(expectedErrorConstructor, func [, message])
+// =============================================================================
+
+extern "C" void js_assert_throws(Item expected_ctor, Item func, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_call_function(Item func_item, Item this_val, Item* args, int arg_count);
+    extern int js_check_exception(void);
+    extern Item js_clear_exception(void);
+    extern Item js_to_string_val(Item value);
+    extern Item js_instanceof(Item left, Item right);
+    extern Item js_property_get(Item obj, Item key);
+
+    // validate func argument
+    if (get_type_id(func) != LMD_TYPE_FUNC) {
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name("assert.throws requires two arguments: the error constructor and a function to run"))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+        return;
+    }
+
+    // get message prefix
+    const char* msg_chars = "";
+    int msg_len = 0;
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) { msg_chars = ms->chars; msg_len = (int)ms->len; }
+    }
+
+    // call the function — expect it to throw
+    js_call_function(func, make_js_undefined(), NULL, 0);
+
+    if (js_check_exception()) {
+        // good — an exception was thrown. check its type.
+        Item thrown = js_clear_exception();
+
+        // thrown must be an object
+        TypeId tid = get_type_id(thrown);
+        if (tid != LMD_TYPE_MAP && tid != LMD_TYPE_ELEMENT) {
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 1000 ? msg_len : 1000); pos = msg_len < 1000 ? msg_len : 1000; buf[pos++] = ' '; }
+            const char* t = "Thrown value was not an object!";
+            int tl = (int)strlen(t);
+            memcpy(buf + pos, t, tl); pos += tl;
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+            return;
+        }
+
+        // check: thrown instanceof expectedErrorConstructor
+        Item instanceof_result = js_instanceof(thrown, expected_ctor);
+        bool is_instance = (get_type_id(instanceof_result) == LMD_TYPE_BOOL && it2b(instanceof_result));
+
+        if (!is_instance) {
+            // type mismatch — build error message
+            Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+            Item exp_name = js_property_get(expected_ctor, name_key);
+            // get actual constructor name via prototype chain
+            extern Item js_prototype_lookup(Item obj, Item key);
+            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor"))};
+            Item thrown_ctor = js_prototype_lookup(thrown, ctor_key);
+            Item act_name = (get_type_id(thrown_ctor) != LMD_TYPE_UNDEFINED && get_type_id(thrown_ctor) != LMD_TYPE_NULL)
+                ? js_property_get(thrown_ctor, name_key) : make_js_undefined();
+            String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+            String* ans = (get_type_id(act_name) == LMD_TYPE_STRING) ? it2s(act_name) : NULL;
+            const char* en = ens ? ens->chars : "?";
+            int enl = ens ? (int)ens->len : 1;
+            const char* an = ans ? ans->chars : "?";
+            int anl = ans ? (int)ans->len : 1;
+
+            char buf[1200];
+            int pos = 0;
+            if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+
+            if (enl == anl && strncmp(en, an, enl) == 0) {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a different error constructor with the same name";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+            } else {
+                const char* t = "Expected a ";
+                int tl = (int)strlen(t);
+                memcpy(buf + pos, t, tl); pos += tl;
+                memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+                const char* t2 = " but got a ";
+                int t2l = (int)strlen(t2);
+                memcpy(buf + pos, t2, t2l); pos += t2l;
+                memcpy(buf + pos, an, anl < 100 ? anl : 100); pos += anl < 100 ? anl : 100;
+            }
+            buf[pos] = '\0';
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+            js_throw_value(js_new_error_with_name(err_name, err_msg));
+        }
+        return;
+    }
+
+    // no exception was thrown — that's a failure
+    {
+        Item name_key = (Item){.item = s2it(heap_create_name("name"))};
+        Item exp_name = js_property_get(expected_ctor, name_key);
+        String* ens = (get_type_id(exp_name) == LMD_TYPE_STRING) ? it2s(exp_name) : NULL;
+        const char* en = ens ? ens->chars : "?";
+        int enl = ens ? (int)ens->len : 1;
+
+        char buf[1200];
+        int pos = 0;
+        if (msg_len > 0) { memcpy(buf, msg_chars, msg_len < 900 ? msg_len : 900); pos = msg_len < 900 ? msg_len : 900; buf[pos++] = ' '; }
+        const char* t = "Expected a ";
+        int tl = (int)strlen(t);
+        memcpy(buf + pos, t, tl); pos += tl;
+        memcpy(buf + pos, en, enl < 100 ? enl : 100); pos += enl < 100 ? enl : 100;
+        const char* t2 = " to be thrown but no exception was thrown at all";
+        int t2l = (int)strlen(t2);
+        memcpy(buf + pos, t2, t2l); pos += t2l;
+        buf[pos] = '\0';
+        Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+        Item err_msg  = (Item){.item = s2it(heap_create_name(buf, pos))};
+        js_throw_value(js_new_error_with_name(err_name, err_msg));
+    }
+}
+
+// =============================================================================
+// Native assert() base function for test262 (debug builds only)
+// assert(mustBeTrue [, message])
+// =============================================================================
+
+extern "C" void js_assert_base(Item must_be_true, Item message) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    extern Item js_to_string_val(Item value);
+
+    // check mustBeTrue === true
+    if (get_type_id(must_be_true) == LMD_TYPE_BOOL && it2b(must_be_true)) return;
+
+    // build error message
+    if (get_type_id(message) == LMD_TYPE_STRING) {
+        String* ms = it2s(message);
+        if (ms && ms->len > 0) {
+            Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+            js_throw_value(js_new_error_with_name(err_name, message));
+            return;
+        }
+    }
+
+    // default message: "Expected true but got <value>"
+    Item val_str = js_to_string_val(must_be_true);
+    String* vs = it2s(val_str);
+    const char* prefix = "Expected true but got ";
+    int plen = (int)strlen(prefix);
+    int vlen = vs ? (int)vs->len : 9;
+    const char* vchars = vs ? vs->chars : "undefined";
+    char* buf = (char*)malloc(plen + vlen + 1);
+    memcpy(buf, prefix, plen);
+    memcpy(buf + plen, vchars, vlen);
+    buf[plen + vlen] = '\0';
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name(buf, plen + vlen))};
+    free(buf);
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+// =============================================================================
+// Native $DONOTEVALUATE for test262 (debug builds only)
+// =============================================================================
+
+extern "C" void js_donotevaluate(void) {
+    extern Item js_new_error_with_name(Item type_name, Item message);
+    extern void js_throw_value(Item error);
+    Item err_name = (Item){.item = s2it(heap_create_name("Test262Error"))};
+    Item err_msg  = (Item){.item = s2it(heap_create_name("Test262: This statement should not be evaluated."))};
+    js_throw_value(js_new_error_with_name(err_name, err_msg));
+}
+
+#endif // !NDEBUG
+
+// =============================================================================
 // Object.assign(target, ...sources)
 // =============================================================================
 
@@ -5396,6 +6111,8 @@ extern "C" Item js_encodeURIComponent(Item str_item) {
     return (Item){.item = s2it(result)};
 }
 
+extern "C" uint64_t js_get_heap_epoch();
+
 extern "C" Item js_decodeURIComponent(Item str_item) {
     Item str_val = js_to_string(str_item);
     String* s = it2s(str_val);
@@ -5403,10 +6120,18 @@ extern "C" Item js_decodeURIComponent(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_component(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-        extern Item js_new_error_with_name(Item type_name, Item message);
-        js_throw_value(js_new_error_with_name(tn, msg));
+        // Cache URIError object per-epoch to avoid expensive error creation
+        // in hot loops (e.g., test262 tests that iterate 65000+ code points).
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);
@@ -5433,10 +6158,16 @@ extern "C" Item js_decodeURI(Item str_item) {
     size_t decoded_len = 0;
     char* decoded = url_decode_uri(s->chars, s->len, &decoded_len);
     if (!decoded) {
-        Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
-        Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
-        extern Item js_new_error_with_name(Item type_name, Item message);
-        js_throw_value(js_new_error_with_name(tn, msg));
+        static Item cached_error = {0};
+        static uint64_t cached_epoch = 0;
+        if (!cached_error.item || cached_epoch != js_get_heap_epoch()) {
+            Item tn = (Item){.item = s2it(heap_create_name("URIError", 8))};
+            Item msg = (Item){.item = s2it(heap_create_name("URI malformed", 13))};
+            extern Item js_new_error_with_name(Item type_name, Item message);
+            cached_error = js_new_error_with_name(tn, msg);
+            cached_epoch = js_get_heap_epoch();
+        }
+        js_throw_value(cached_error);
         return ItemNull;
     }
     String* result = heap_create_name(decoded, decoded_len);

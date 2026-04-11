@@ -87,6 +87,10 @@ static int js_pending_call_argc = 0;
 static Item js_module_vars[JS_MAX_MODULE_VARS];
 static int js_module_var_count = 0;
 
+// Epoch counter: incremented on batch reset to invalidate cached heap objects.
+static uint64_t js_heap_epoch = 1;
+extern "C" uint64_t js_get_heap_epoch() { return js_heap_epoch; }
+
 // v18m: Original 'this' for Array.prototype.call() on non-array objects.
 // When filter/forEach/every/map/etc. are called on a MAP via .call(),
 // we convert to array-like internally but callbacks should get the original object.
@@ -268,6 +272,8 @@ extern "C" void js_check_tdz(Item value, const char* name, int name_len) {
 static void js_module_cache_reset();
 
 extern "C" void js_batch_reset() {
+    // increment epoch to invalidate cached heap objects
+    js_heap_epoch++;
     // reset module variable table
     js_reset_module_vars();
     // clear module registry (cached namespace_obj / mir_ctx are invalid after heap reset)
@@ -9564,6 +9570,13 @@ extern "C" void js_throw_syntax_error(Item message) {
     js_throw_value(error);
 }
 
+// Helper: throw ReferenceError (for TDZ violations, undefined variables)
+extern "C" void js_throw_reference_error(Item message) {
+    Item type_name = (Item){.item = s2it(heap_create_name("ReferenceError"))};
+    Item error = js_new_error_with_name(type_name, message);
+    js_throw_value(error);
+}
+
 // helper: read array element, checking for accessor properties (getters via defineProperty)
 static inline Item js_array_element(Item arr_item, int idx) {
     Array* arr = arr_item.array;
@@ -11487,6 +11500,15 @@ extern "C" bool js_is_generator(Item obj) {
 extern "C" Item js_get_iterator(Item iterable) {
     TypeId tid = get_type_id(iterable);
 
+    // null and undefined are never iterable — throw TypeError immediately
+    if (tid == LMD_TYPE_NULL || iterable.item == ITEM_JS_UNDEFINED) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "%s is not iterable",
+                 tid == LMD_TYPE_NULL ? "null" : "undefined");
+        js_throw_type_error(msg);
+        return ItemNull;
+    }
+
     // Arrays: wrap in array iterator
     if (tid == LMD_TYPE_ARRAY) {
         Item iter = js_object_create(ItemNull);
@@ -11555,8 +11577,20 @@ extern "C" Item js_get_iterator(Item iterable) {
         }
     }
 
-    // Fallback: return as-is
-    return iterable;
+    // Non-iterable value — throw TypeError
+    {
+        char msg[128];
+        const char* type_str = "object";
+        if (tid == LMD_TYPE_INT || tid == LMD_TYPE_INT64 || tid == LMD_TYPE_FLOAT)
+            type_str = "number";
+        else if (tid == LMD_TYPE_BOOL)
+            type_str = "boolean";
+        else if (tid == LMD_TYPE_SYMBOL)
+            type_str = "symbol";
+        snprintf(msg, sizeof(msg), "%s is not iterable", type_str);
+        js_throw_type_error(msg);
+        return ItemNull;
+    }
 }
 
 // IteratorStep: call iterator.next(), return result {done, value}
@@ -11564,6 +11598,10 @@ extern "C" Item js_get_iterator(Item iterable) {
 // The sentinel is a unique bit pattern (type tag 0x7F) that cannot collide with
 // any valid JS value including null, undefined, false, 0, or empty string.
 extern "C" Item js_iterator_step(Item iterator) {
+    // Safety: if iterator is null (e.g. from a failed js_get_iterator), return done
+    if (get_type_id(iterator) == LMD_TYPE_NULL || iterator.item == ITEM_JS_UNDEFINED)
+        return (Item){.item = JS_ITER_DONE_SENTINEL};
+
     // Synthetic array iterator
     bool has_arr = false;
     Item arr_val = js_map_get_fast(iterator.map, "__arr__", 7, &has_arr);

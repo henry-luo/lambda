@@ -1,0 +1,53 @@
+# test262 Non-Batch List
+# Tests that MUST run individually (batch size = 1), never in a shared batch.
+#
+# These tests destructively mutate global built-in state (prototype overrides,
+# property deletions, etc.) without restoration. In a shared batch process,
+# such mutations leak into subsequent tests, causing spurious failures.
+#
+# In a spec-compliant test262 runner each test gets a fresh JS realm. Our batch
+# mode shares one process for ~50 tests, so we quarantine known poisoners here.
+#
+# To identify new poisoners: run with --batch-only, check Phase 4 recovered
+# tests in temp/_t262_batch_kills.txt, then binary-search the batch to find
+# which preceding test causes the failure.
+#
+# Format: one test_name per line (same as baseline file).  # comments allowed.
+
+# --- propertyHelper.js tests are auto-detected via NON_BATCH_INCLUDES ---
+# (no need to list them here; they use harness that calls `delete obj[name]`)
+
+# --- Direct prototype/builtin mutations ---
+
+# Overwrites Number.prototype.toString with Object.prototype.toString
+built_ins_Number_prototype_S15_7_3_1_A2_T2_js
+
+# Adds Function.prototype.property = 12
+built_ins_Function_prototype_bind_15_3_4_5_11_1_js
+
+# Defines global properties x, y via Object.defineProperties(this, ...)
+language_expressions_typeof_get_value_js
+
+# Modifies Boolean.prototype[0], Boolean.prototype[2] without cleanup
+built_ins_Array_prototype_toReversed_this_value_boolean_js
+built_ins_Array_prototype_toSorted_this_value_boolean_js
+built_ins_Array_prototype_toSpliced_this_value_boolean_js
+built_ins_Array_prototype_with_this_value_boolean_js
+
+# Deletes RegExp.prototype.exec.length
+built_ins_RegExp_prototype_exec_S15_10_6_2_A9_js
+
+# Deletes decodeURIComponent.length
+built_ins_decodeURIComponent_S15_1_3_2_A5_2_js
+
+# Set global properties (this.writable, this.enumerable, etc.) that leak
+# into subsequent tests via the shared global object
+built_ins_Object_create_15_2_3_5_4_71_js
+built_ins_Object_create_15_2_3_5_4_124_js
+built_ins_Object_create_15_2_3_5_4_177_js
+built_ins_Object_create_15_2_3_5_4_203_js
+built_ins_Object_create_15_2_3_5_4_256_js
+built_ins_Object_create_15_2_3_5_4_291_js
+
+# Replaces WeakSet.prototype.add with wrapper function — crashes subsequent WeakSet tests
+built_ins_WeakSet_empty_iterable_js
