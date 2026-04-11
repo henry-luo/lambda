@@ -216,6 +216,10 @@ typedef struct {
 static PlatformFbEntry s_platform_fb[PLATFORM_FB_CACHE_SIZE];
 static int             s_platform_fb_count = 0;
 
+void font_fallback_reset_platform_cache(void) {
+    s_platform_fb_count = 0;
+}
+
 static FontHandle* platform_fb_lookup(const char* path, int face_index,
                                        float size_px, uint32_t codepoint) {
     for (int i = 0; i < s_platform_fb_count; i++) {

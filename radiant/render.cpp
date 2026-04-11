@@ -822,9 +822,19 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     // Check if parent inline element has a background color to render
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
     Color* bg_color = nullptr;
+    float bg_pad_top = 0, bg_pad_right = 0, bg_pad_bottom = 0, bg_pad_left = 0;
+    float bg_radius = 0;
     if (parent_elem && parent_elem->bound && parent_elem->bound->background &&
         parent_elem->bound->background->color.a > 0) {
         bg_color = &parent_elem->bound->background->color;
+        // include parent inline padding in per-fragment background
+        bg_pad_top    = parent_elem->bound->padding.top * s;
+        bg_pad_right  = parent_elem->bound->padding.right * s;
+        bg_pad_bottom = parent_elem->bound->padding.bottom * s;
+        bg_pad_left   = parent_elem->bound->padding.left * s;
+        // use border-radius for rounded fragment backgrounds
+        if (parent_elem->bound->border)
+            bg_radius = parent_elem->bound->border->radius.top_left * s;
     }
 
     // Get text-shadow from parent element's font property
@@ -837,10 +847,43 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         // Apply scale to convert CSS pixel positions to physical surface pixels
         float x = rdcon->block.x + text_rect->x * s, y = rdcon->block.y + text_rect->y * s;
 
-        // Render background for inline element if present
+        // Render background for inline element if present (per-fragment for correct wrapping)
         if (bg_color) {
-            Rect bg_rect = {x, y, text_rect->width * s, text_rect->height * s};
-            fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+            bool is_first = (text_rect == text_view->rect);
+            bool is_last  = (text_rect->next == nullptr);
+            float pl = is_first ? bg_pad_left  : 0;
+            float pr = is_last  ? bg_pad_right : 0;
+            Rect bg_rect = {
+                x - pl,
+                y - bg_pad_top,
+                text_rect->width * s + pl + pr,
+                text_rect->height * s + bg_pad_top + bg_pad_bottom
+            };
+            if (bg_radius > 0) {
+                // first fragment: left radii; last fragment: right radii
+                float r_left  = is_first ? bg_radius : 0;
+                float r_right = is_last  ? bg_radius : 0;
+                // build per-corner rounded rect path
+                RdtPath* p = rdt_path_new();
+                float fx = bg_rect.x, fy = bg_rect.y, fw = bg_rect.width, fh = bg_rect.height;
+                rdt_path_move_to(p, fx + r_left, fy);
+                rdt_path_line_to(p, fx + fw - r_right, fy);
+                if (r_right > 0) rdt_path_cubic_to(p, fx+fw-r_right*0.45f, fy, fx+fw, fy+r_right*0.45f, fx+fw, fy+r_right);
+                else             rdt_path_line_to(p, fx+fw, fy);
+                rdt_path_line_to(p, fx + fw, fy + fh - r_right);
+                if (r_right > 0) rdt_path_cubic_to(p, fx+fw, fy+fh-r_right*0.45f, fx+fw-r_right*0.45f, fy+fh, fx+fw-r_right, fy+fh);
+                else             rdt_path_line_to(p, fx+fw, fy+fh);
+                rdt_path_line_to(p, fx + r_left, fy + fh);
+                if (r_left > 0) rdt_path_cubic_to(p, fx+r_left*0.45f, fy+fh, fx, fy+fh-r_left*0.45f, fx, fy+fh-r_left);
+                else            rdt_path_line_to(p, fx, fy+fh);
+                rdt_path_line_to(p, fx, fy + r_left);
+                if (r_left > 0) rdt_path_cubic_to(p, fx, fy+r_left*0.45f, fx+r_left*0.45f, fy, fx+r_left, fy);
+                rdt_path_close(p);
+                rdt_fill_path(&rdcon->vec, p, *bg_color, RDT_FILL_WINDING, NULL);
+                rdt_path_free(p);
+            } else {
+                fill_surface_rect(rdcon->ui_context->surface, &bg_rect, bg_color->c, &rdcon->block.clip);
+            }
         }
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
@@ -2469,9 +2512,15 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
     bool self_hidden = view_span->in_line && view_span->in_line->visibility == VIS_HIDDEN;
 
-    // Render border/background for inline elements (e.g. <span> with border)
+    // Render border/outline for inline elements.
+    // Background is rendered per-line-fragment in render_text_view so that
+    // wrapping inline elements (e.g. <code> spanning two lines) don't fill
+    // the entire bounding-box rectangle with background color.
     if (!self_hidden && view_span->bound) {
+        BackgroundProp* saved_bg = view_span->bound->background;
+        view_span->bound->background = nullptr;
         render_bound(rdcon, (ViewBlock*)view_span);
+        view_span->bound->background = saved_bg;
     }
 
     View* view = view_span->first_child;

@@ -2635,28 +2635,49 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text
-                    // CSS Text 3 §5.2: When overflow-wrap: break-word is active and
-                    // the last soft-wrap opportunity (space) is in a previous text node,
-                    // perform an emergency mid-word break at the overflow point rather
-                    // than moving the entire text to a new line.  This creates a
-                    // multi-line inline box (e.g. <code>) matching browser behavior,
-                    // where characters that fit on the current line stay there and the
-                    // remainder continues on the next line.
+                    // CSS Text 3 §5.2: overflow-wrap: break-word with last_space in
+                    // a previous text node. First check if the word would fit on a fresh
+                    // line. If so, rewind to the text start and move it to the next line
+                    // (the space in the previous node serves as the natural wrap point).
+                    // Only do an emergency mid-word break when the word itself is wider
+                    // than the full line (i.e., it would overflow even on a fresh line).
                     if (break_word && !lycon->line.is_line_start) {
-                        log_debug("break-word: mid-word break (last_space outside text)");
-                        rect->width -= wd;  // undo the char that overflowed
-                        int text_len = str - text_start - rect->start_index;
-                        if (text_len > 0) {
-                            output_text(lycon, text_view, rect, text_len, rect->width);
-                        } else {
-                            // first char already overflows: unlink the empty rect
-                            if (text_view->rect == rect) {
-                                text_view->rect = nullptr;
+                        float full_line_width = lycon->line.right - lycon->line.left;
+                        // rect->width includes chars measured so far (including overflow char).
+                        // The total word width is at least rect->width - wd (chars that fit)
+                        // plus the remaining unmeasured chars. Use rect->width - wd as a
+                        // lower bound: if even that exceeds a full line, mid-word break.
+                        // If it fits, the whole word likely fits — move to next line.
+                        if (rect->width - wd > full_line_width) {
+                            // Word is wider than a full line: emergency mid-word break
+                            log_debug("break-word: mid-word break (word wider than line)");
+                            rect->width -= wd;  // undo the char that overflowed
+                            int text_len = str - text_start - rect->start_index;
+                            if (text_len > 0) {
+                                output_text(lycon, text_view, rect, text_len, rect->width);
                             } else {
-                                TextRect* prev = text_view->rect;
-                                while (prev && prev->next != rect) prev = prev->next;
-                                if (prev) prev->next = nullptr;
+                                // first char already overflows: unlink the empty rect
+                                if (text_view->rect == rect) {
+                                    text_view->rect = nullptr;
+                                } else {
+                                    TextRect* prev = text_view->rect;
+                                    while (prev && prev->next != rect) prev = prev->next;
+                                    if (prev) prev->next = nullptr;
+                                }
                             }
+                            line_break(lycon);
+                            goto LAYOUT_TEXT;
+                        }
+                        // Word fits on a fresh line: rewind to text start and wrap
+                        log_debug("break-word: rewinding text to next line (word fits on fresh line)");
+                        str = text_start + rect->start_index;  // rewind to text start
+                        // Unlink the partially-measured rect
+                        if (text_view->rect == rect) {
+                            text_view->rect = nullptr;
+                        } else {
+                            TextRect* prev = text_view->rect;
+                            while (prev && prev->next != rect) prev = prev->next;
+                            if (prev) prev->next = nullptr;
                         }
                         line_break(lycon);
                         goto LAYOUT_TEXT;

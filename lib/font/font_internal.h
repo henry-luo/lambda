@@ -438,6 +438,7 @@ const char**        font_get_aliases(const char* family);
 FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style);
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
                                                   uint32_t codepoint);
+void                font_fallback_reset_platform_cache(void);
 
 // font_face.c
 const FontFaceEntry* font_face_find_internal(FontContext* ctx, const char* family,

@@ -5099,9 +5099,12 @@ int cmd_layout(int argc, char** argv) {
         log_debug("[Layout] Added font directory: %s", opts.font_dirs[i]);
     }
 
-    // Set viewport dimensions
+    // Set viewport dimensions (both window and viewport must be set so layout_init
+    // uses the correct initial containing block width via uicon->viewport_width)
     ui_context.window_width = opts.viewport_width;
     ui_context.window_height = opts.viewport_height;
+    ui_context.viewport_width = opts.viewport_width;
+    ui_context.viewport_height = opts.viewport_height;
 
     // Create surface for layout calculations
     log_debug("[Layout] Creating surface for layout calculations...");
