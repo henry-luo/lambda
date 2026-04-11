@@ -54,76 +54,228 @@ static inline bool has_small_caps(LayoutContext* lycon) {
     return false;
 }
 
+// Unicode full case mapping table (SpecialCasing.txt)
+// Characters whose uppercase form expands to multiple codepoints.
+// CSS Text 3 §2.1: "the full case mappings for Unicode code points are used"
+struct FullCaseMapping { uint32_t from; uint32_t to[3]; uint8_t len; };
+
+static const FullCaseMapping g_uppercase_full[] = {
+    {0x00DF, {0x0053, 0x0053, 0x0000}, 2},  // ß → SS
+    {0x0149, {0x02BC, 0x004E, 0x0000}, 2},  // ŉ → ʼN
+    {0x01F0, {0x004A, 0x030C, 0x0000}, 2},  // ǰ → J̌
+    {0x0390, {0x0399, 0x0308, 0x0301}, 3},  // ΐ → Ϊ́
+    {0x03B0, {0x03A5, 0x0308, 0x0301}, 3},  // ΰ → Ϋ́
+    {0x0587, {0x0535, 0x0552, 0x0000}, 2},  // և → ԵՒ
+    {0x1E96, {0x0048, 0x0331, 0x0000}, 2},  // ẖ → H̱
+    {0x1E97, {0x0054, 0x0308, 0x0000}, 2},  // ẗ → T̈
+    {0x1E98, {0x0057, 0x030A, 0x0000}, 2},  // ẘ → W̊
+    {0x1E99, {0x0059, 0x030A, 0x0000}, 2},  // ẙ → Y̊
+    {0x1E9A, {0x0041, 0x02BE, 0x0000}, 2},  // ẚ → Aʾ
+    {0x1F50, {0x03A5, 0x0313, 0x0000}, 2},
+    {0x1F52, {0x03A5, 0x0313, 0x0300}, 3},
+    {0x1F54, {0x03A5, 0x0313, 0x0301}, 3},
+    {0x1F56, {0x03A5, 0x0313, 0x0342}, 3},
+    {0x1F80, {0x1F08, 0x0399, 0x0000}, 2},
+    {0x1F81, {0x1F09, 0x0399, 0x0000}, 2},
+    {0x1F82, {0x1F0A, 0x0399, 0x0000}, 2},
+    {0x1F83, {0x1F0B, 0x0399, 0x0000}, 2},
+    {0x1F84, {0x1F0C, 0x0399, 0x0000}, 2},
+    {0x1F85, {0x1F0D, 0x0399, 0x0000}, 2},
+    {0x1F86, {0x1F0E, 0x0399, 0x0000}, 2},
+    {0x1F87, {0x1F0F, 0x0399, 0x0000}, 2},
+    {0x1F88, {0x1F08, 0x0399, 0x0000}, 2},
+    {0x1F89, {0x1F09, 0x0399, 0x0000}, 2},
+    {0x1F8A, {0x1F0A, 0x0399, 0x0000}, 2},
+    {0x1F8B, {0x1F0B, 0x0399, 0x0000}, 2},
+    {0x1F8C, {0x1F0C, 0x0399, 0x0000}, 2},
+    {0x1F8D, {0x1F0D, 0x0399, 0x0000}, 2},
+    {0x1F8E, {0x1F0E, 0x0399, 0x0000}, 2},
+    {0x1F8F, {0x1F0F, 0x0399, 0x0000}, 2},
+    {0x1F90, {0x1F28, 0x0399, 0x0000}, 2},
+    {0x1F91, {0x1F29, 0x0399, 0x0000}, 2},
+    {0x1F92, {0x1F2A, 0x0399, 0x0000}, 2},
+    {0x1F93, {0x1F2B, 0x0399, 0x0000}, 2},
+    {0x1F94, {0x1F2C, 0x0399, 0x0000}, 2},
+    {0x1F95, {0x1F2D, 0x0399, 0x0000}, 2},
+    {0x1F96, {0x1F2E, 0x0399, 0x0000}, 2},
+    {0x1F97, {0x1F2F, 0x0399, 0x0000}, 2},
+    {0x1F98, {0x1F28, 0x0399, 0x0000}, 2},
+    {0x1F99, {0x1F29, 0x0399, 0x0000}, 2},
+    {0x1F9A, {0x1F2A, 0x0399, 0x0000}, 2},
+    {0x1F9B, {0x1F2B, 0x0399, 0x0000}, 2},
+    {0x1F9C, {0x1F2C, 0x0399, 0x0000}, 2},
+    {0x1F9D, {0x1F2D, 0x0399, 0x0000}, 2},
+    {0x1F9E, {0x1F2E, 0x0399, 0x0000}, 2},
+    {0x1F9F, {0x1F2F, 0x0399, 0x0000}, 2},
+    {0x1FA0, {0x1F68, 0x0399, 0x0000}, 2},
+    {0x1FA1, {0x1F69, 0x0399, 0x0000}, 2},
+    {0x1FA2, {0x1F6A, 0x0399, 0x0000}, 2},
+    {0x1FA3, {0x1F6B, 0x0399, 0x0000}, 2},
+    {0x1FA4, {0x1F6C, 0x0399, 0x0000}, 2},
+    {0x1FA5, {0x1F6D, 0x0399, 0x0000}, 2},
+    {0x1FA6, {0x1F6E, 0x0399, 0x0000}, 2},
+    {0x1FA7, {0x1F6F, 0x0399, 0x0000}, 2},
+    {0x1FA8, {0x1F68, 0x0399, 0x0000}, 2},
+    {0x1FA9, {0x1F69, 0x0399, 0x0000}, 2},
+    {0x1FAA, {0x1F6A, 0x0399, 0x0000}, 2},
+    {0x1FAB, {0x1F6B, 0x0399, 0x0000}, 2},
+    {0x1FAC, {0x1F6C, 0x0399, 0x0000}, 2},
+    {0x1FAD, {0x1F6D, 0x0399, 0x0000}, 2},
+    {0x1FAE, {0x1F6E, 0x0399, 0x0000}, 2},
+    {0x1FAF, {0x1F6F, 0x0399, 0x0000}, 2},
+    {0x1FB2, {0x1FBA, 0x0399, 0x0000}, 2},
+    {0x1FB3, {0x0391, 0x0399, 0x0000}, 2},
+    {0x1FB4, {0x0386, 0x0399, 0x0000}, 2},
+    {0x1FB6, {0x0391, 0x0342, 0x0000}, 2},
+    {0x1FB7, {0x0391, 0x0342, 0x0399}, 3},
+    {0x1FBC, {0x0391, 0x0399, 0x0000}, 2},
+    {0x1FC2, {0x1FCA, 0x0399, 0x0000}, 2},
+    {0x1FC3, {0x0397, 0x0399, 0x0000}, 2},
+    {0x1FC4, {0x0389, 0x0399, 0x0000}, 2},
+    {0x1FC6, {0x0397, 0x0342, 0x0000}, 2},
+    {0x1FC7, {0x0397, 0x0342, 0x0399}, 3},
+    {0x1FCC, {0x0397, 0x0399, 0x0000}, 2},
+    {0x1FD2, {0x0399, 0x0308, 0x0300}, 3},
+    {0x1FD3, {0x0399, 0x0308, 0x0301}, 3},
+    {0x1FD6, {0x0399, 0x0342, 0x0000}, 2},
+    {0x1FD7, {0x0399, 0x0308, 0x0342}, 3},
+    {0x1FE2, {0x03A5, 0x0308, 0x0300}, 3},
+    {0x1FE3, {0x03A5, 0x0308, 0x0301}, 3},
+    {0x1FE4, {0x03A1, 0x0313, 0x0000}, 2},
+    {0x1FE6, {0x03A5, 0x0342, 0x0000}, 2},
+    {0x1FE7, {0x03A5, 0x0308, 0x0342}, 3},
+    {0x1FF2, {0x1FFA, 0x0399, 0x0000}, 2},
+    {0x1FF3, {0x03A9, 0x0399, 0x0000}, 2},
+    {0x1FF4, {0x038F, 0x0399, 0x0000}, 2},
+    {0x1FF6, {0x03A9, 0x0342, 0x0000}, 2},
+    {0x1FF7, {0x03A9, 0x0342, 0x0399}, 3},
+    {0x1FFC, {0x03A9, 0x0399, 0x0000}, 2},
+    {0xFB00, {0x0046, 0x0046, 0x0000}, 2},  // ﬀ → FF
+    {0xFB01, {0x0046, 0x0049, 0x0000}, 2},  // ﬁ → FI
+    {0xFB02, {0x0046, 0x004C, 0x0000}, 2},  // ﬂ → FL
+    {0xFB03, {0x0046, 0x0046, 0x0049}, 3},  // ﬃ → FFI
+    {0xFB04, {0x0046, 0x0046, 0x004C}, 3},  // ﬄ → FFL
+    {0xFB05, {0x0053, 0x0054, 0x0000}, 2},  // ﬅ → ST
+    {0xFB06, {0x0053, 0x0054, 0x0000}, 2},  // ﬆ → ST
+    {0xFB13, {0x0544, 0x0546, 0x0000}, 2},  // ﬓ → ՄՆ
+    {0xFB14, {0x0544, 0x0535, 0x0000}, 2},  // ﬔ → ՄԵ
+    {0xFB15, {0x0544, 0x053B, 0x0000}, 2},  // ﬕ → ՄԻ
+    {0xFB16, {0x054E, 0x0546, 0x0000}, 2},  // ﬖ → ՎՆ
+    {0xFB17, {0x0544, 0x053D, 0x0000}, 2},  // ﬗ → ՄԽ
+};
+static const int g_uppercase_full_count = 102;
+
+// İ (U+0130) lowercases to i + combining dot above
+static const FullCaseMapping g_lowercase_full[] = {
+    {0x0130, {0x0069, 0x0307, 0x0000}, 2},
+};
+static const int g_lowercase_full_count = 1;
+
+// binary search lookup in full case mapping table (sorted by 'from')
+static const FullCaseMapping* lookup_full_case(const FullCaseMapping* table,
+    int count, uint32_t codepoint) {
+    int lo = 0, hi = count - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (table[mid].from == codepoint) return &table[mid];
+        if (table[mid].from < codepoint) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return nullptr;
+}
+
 /**
- * Apply CSS text-transform to a single Unicode codepoint.
- * Uses utf8proc for proper Unicode case mapping (handles Latin-1 supplement,
- * Latin Extended, and all other Unicode blocks per Unicode standard).
+ * Apply CSS text-transform with full Unicode case mapping support.
+ * CSS Text 3 §2.1: "the full case mappings for Unicode code points are used"
+ * This handles 1-to-many case expansions (e.g., ß → SS).
  * @param codepoint Input Unicode codepoint
- * @param text_transform CSS text-transform value (CSS_VALUE_UPPERCASE, etc.)
- * @param is_word_start True if this is the first character of a word (for capitalize)
- * @return Transformed codepoint
+ * @param text_transform CSS text-transform value
+ * @param is_word_start True if first character of a word (for capitalize)
+ * @param out Output buffer for transformed codepoints (must hold at least 3)
+ * @return Number of codepoints written to out (1-3)
  */
-uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
-    if (text_transform == CSS_VALUE_UPPERCASE) {
-        if (codepoint < 128) {
-            return std::toupper(codepoint);
-        } else {
-            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
+    bool is_word_start, uint32_t* out) {
+    if (text_transform == CSS_VALUE_UPPERCASE || (text_transform == CSS_VALUE_CAPITALIZE && is_word_start)) {
+        // check full case mapping table for 1-to-many expansions
+        const FullCaseMapping* m = lookup_full_case(g_uppercase_full, g_uppercase_full_count, codepoint);
+        if (m) {
+            for (int i = 0; i < m->len; i++) out[i] = m->to[i];
+            return m->len;
         }
+        // simple 1-to-1 mapping
+        if (codepoint < 128) {
+            out[0] = std::toupper(codepoint);
+        } else {
+            out[0] = (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+        }
+        return 1;
     } else if (text_transform == CSS_VALUE_LOWERCASE) {
-        if (codepoint < 128) {
-            return std::tolower(codepoint);
-        } else {
-            return (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
+        // check full case mapping table for 1-to-many expansions
+        const FullCaseMapping* m = lookup_full_case(g_lowercase_full, g_lowercase_full_count, codepoint);
+        if (m) {
+            for (int i = 0; i < m->len; i++) out[i] = m->to[i];
+            return m->len;
         }
-    } else if (text_transform == CSS_VALUE_CAPITALIZE && is_word_start) {
         if (codepoint < 128) {
-            return std::toupper(codepoint);
+            out[0] = std::tolower(codepoint);
         } else {
-            return (uint32_t)utf8proc_toupper((utf8proc_int32_t)codepoint);
+            out[0] = (uint32_t)utf8proc_tolower((utf8proc_int32_t)codepoint);
         }
+        return 1;
     } else if (text_transform == CSS_VALUE_FULL_SIZE_KANA) {
         // CSS Text 3 §2.1: Convert small Kana to their normal (full-size) equivalents
+        // always 1-to-1
         switch (codepoint) {
         // Hiragana small → normal
-        case 0x3041: return 0x3042;  // ぁ→あ
-        case 0x3043: return 0x3044;  // ぃ→い
-        case 0x3045: return 0x3046;  // ぅ→う
-        case 0x3047: return 0x3048;  // ぇ→え
-        case 0x3049: return 0x304A;  // ぉ→お
-        case 0x3063: return 0x3064;  // っ→つ
-        case 0x3083: return 0x3084;  // ゃ→や
-        case 0x3085: return 0x3086;  // ゅ→ゆ
-        case 0x3087: return 0x3088;  // ょ→よ
-        case 0x308E: return 0x308F;  // ゎ→わ
-        case 0x3095: return 0x304B;  // ゕ→か
-        case 0x3096: return 0x3051;  // ゖ→け
+        case 0x3041: out[0] = 0x3042; return 1;
+        case 0x3043: out[0] = 0x3044; return 1;
+        case 0x3045: out[0] = 0x3046; return 1;
+        case 0x3047: out[0] = 0x3048; return 1;
+        case 0x3049: out[0] = 0x304A; return 1;
+        case 0x3063: out[0] = 0x3064; return 1;
+        case 0x3083: out[0] = 0x3084; return 1;
+        case 0x3085: out[0] = 0x3086; return 1;
+        case 0x3087: out[0] = 0x3088; return 1;
+        case 0x308E: out[0] = 0x308F; return 1;
+        case 0x3095: out[0] = 0x304B; return 1;
+        case 0x3096: out[0] = 0x3051; return 1;
         // Katakana small → normal
-        case 0x30A1: return 0x30A2;  // ァ→ア
-        case 0x30A3: return 0x30A4;  // ィ→イ
-        case 0x30A5: return 0x30A6;  // ゥ→ウ
-        case 0x30A7: return 0x30A8;  // ェ→エ
-        case 0x30A9: return 0x30AA;  // ォ→オ
-        case 0x30C3: return 0x30C4;  // ッ→ツ
-        case 0x30E3: return 0x30E4;  // ャ→ヤ
-        case 0x30E5: return 0x30E6;  // ュ→ユ
-        case 0x30E7: return 0x30E8;  // ョ→ヨ
-        case 0x30EE: return 0x30EF;  // ヮ→ワ
-        case 0x30F5: return 0x30AB;  // ヵ→カ
-        case 0x30F6: return 0x30B1;  // ヶ→ケ
+        case 0x30A1: out[0] = 0x30A2; return 1;
+        case 0x30A3: out[0] = 0x30A4; return 1;
+        case 0x30A5: out[0] = 0x30A6; return 1;
+        case 0x30A7: out[0] = 0x30A8; return 1;
+        case 0x30A9: out[0] = 0x30AA; return 1;
+        case 0x30C3: out[0] = 0x30C4; return 1;
+        case 0x30E3: out[0] = 0x30E4; return 1;
+        case 0x30E5: out[0] = 0x30E6; return 1;
+        case 0x30E7: out[0] = 0x30E8; return 1;
+        case 0x30EE: out[0] = 0x30EF; return 1;
+        case 0x30F5: out[0] = 0x30AB; return 1;
+        case 0x30F6: out[0] = 0x30B1; return 1;
         // Half-width Katakana small → normal
-        case 0xFF67: return 0xFF71;  // ｧ→ｱ
-        case 0xFF68: return 0xFF72;  // ｨ→ｲ
-        case 0xFF69: return 0xFF73;  // ｩ→ｳ
-        case 0xFF6A: return 0xFF74;  // ｪ→ｴ
-        case 0xFF6B: return 0xFF75;  // ｫ→ｵ
-        case 0xFF6C: return 0xFF94;  // ｬ→ﾔ
-        case 0xFF6D: return 0xFF95;  // ｭ→ﾕ
-        case 0xFF6E: return 0xFF96;  // ｮ→ﾖ
-        case 0xFF6F: return 0xFF82;  // ｯ→ﾂ
+        case 0xFF67: out[0] = 0xFF71; return 1;
+        case 0xFF68: out[0] = 0xFF72; return 1;
+        case 0xFF69: out[0] = 0xFF73; return 1;
+        case 0xFF6A: out[0] = 0xFF74; return 1;
+        case 0xFF6B: out[0] = 0xFF75; return 1;
+        case 0xFF6C: out[0] = 0xFF94; return 1;
+        case 0xFF6D: out[0] = 0xFF95; return 1;
+        case 0xFF6E: out[0] = 0xFF96; return 1;
+        case 0xFF6F: out[0] = 0xFF82; return 1;
         }
     }
-    return codepoint;
+    out[0] = codepoint;
+    return 1;
+}
+
+/**
+ * Backward-compatible wrapper: returns only the first codepoint of the full mapping.
+ */
+uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start) {
+    uint32_t out[3];
+    apply_text_transform_full(codepoint, text_transform, is_word_start, out);
+    return out[0];
 }
 
 /**
@@ -1491,9 +1643,16 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         if (has_id_line_break_class(codepoint)) {
             if (width == 0.0f) {
                 // The first char is CJK — measure just this one character
-                codepoint = apply_text_transform(codepoint, text_transform, word_start);
+                uint32_t tt_out[3];
+                int tt_count = apply_text_transform_full(codepoint, text_transform, word_start, tt_out);
+                codepoint = tt_out[0];
                 GlyphInfo ginfo = font_get_glyph(lycon->font.font_handle, codepoint);
                 width += (ginfo.id != 0) ? ginfo.advance_x : lycon->font.current_font_size;
+                // Add advance for extra codepoints from full case mapping
+                for (int tti = 1; tti < tt_count; tti++) {
+                    GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+                    if (eg.id != 0) width += eg.advance_x;
+                }
             }
             break;
         }
@@ -1502,7 +1661,16 @@ static float measure_first_word_width(LayoutContext* lycon, const unsigned char*
         // U+00AD soft hyphen is a break opportunity
         if (codepoint == 0x00AD) break;
 
-        codepoint = apply_text_transform(codepoint, text_transform, word_start);
+        {
+        uint32_t tt_out[3];
+        int tt_count = apply_text_transform_full(codepoint, text_transform, word_start, tt_out);
+        codepoint = tt_out[0];
+        // Add advance widths for extra codepoints from full case mapping
+        for (int tti = 1; tti < tt_count; tti++) {
+            GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+            if (eg.id != 0) width += eg.advance_x + lycon->font.style->letter_spacing;
+        }
+        }
         bool is_small_caps_lower = false;
         if (has_small_caps(lycon)) {
             uint32_t original = codepoint;
@@ -1557,7 +1725,16 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode* text_node) {
         // CSS Text 3 §4.1.3: U+3000 IDEOGRAPHIC SPACE is hangable — treat as space
         // for lookahead purposes so it doesn't predict false overflow.
         if (codepoint == 0x3000) return RDT_LINE_NOT_FILLED;
-        codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+        {
+        uint32_t tt_out[3];
+        int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+        codepoint = tt_out[0];
+        // Add advance widths for extra codepoints from full case mapping
+        for (int tti = 1; tti < tt_count; tti++) {
+            GlyphInfo eg = font_get_glyph(lycon->font.font_handle, tt_out[tti]);
+            if (eg.id != 0) text_width += eg.advance_x + lycon->font.style->letter_spacing;
+        }
+        }
         // CSS font-variant: small-caps — convert lowercase to uppercase
         // Track whether we scaled a lowercase char for size reduction
         bool is_small_caps_lower = false;
@@ -2139,7 +2316,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else { next_ch = str + 1; }
 
             // Apply text-transform before loading glyph
-            codepoint = apply_text_transform(codepoint, text_transform, is_word_start);
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
+            codepoint = tt_out[0];
             // CSS font-variant: small-caps — convert lowercase to uppercase
             bool is_small_caps_lower = false;
             if (has_small_caps(lycon)) {
@@ -2254,6 +2433,22 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // CSS 2.1 §16.4: letter-spacing is added after every character
             // Browsers include trailing letter-spacing in text node width
             wd += lycon->font.style->letter_spacing;
+
+            // Full case mapping expansion: add advance widths for extra codepoints
+            // (e.g., ß → S,S — the second S needs its own advance width + letter-spacing)
+            if (tt_count > 1) {
+                FontStyleDesc _sd_extra = font_style_desc_from_prop(lycon->font.style);
+                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                for (int ti = 1; ti < tt_count; ti++) {
+                    uint32_t extra_cp = tt_out[ti];
+                    if (extra_cp == 0) continue;
+                    LoadedGlyph* extra_glyph = font_load_glyph(lycon->font.font_handle, &_sd_extra, extra_cp, false);
+                    float extra_wd = extra_glyph ? (extra_glyph->advance_x / pixel_ratio) : 0;
+                    if (is_small_caps_lower) extra_wd *= 0.7f;
+                    extra_wd += lycon->font.style->letter_spacing;
+                    wd += extra_wd;
+                }
+            }
         }
         // handle kerning
         if (lycon->font.style->has_kerning) {

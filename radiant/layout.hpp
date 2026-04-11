@@ -602,6 +602,13 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line = false, struc
 uint32_t apply_text_transform(uint32_t codepoint, CssEnum text_transform, bool is_word_start);
 
 /**
+ * Apply CSS text-transform with full Unicode case mapping (1-to-many expansion).
+ * Writes up to 3 codepoints to out[] and returns the count.
+ */
+int apply_text_transform_full(uint32_t codepoint, CssEnum text_transform,
+    bool is_word_start, uint32_t* out);
+
+/**
  * Get text-transform property from a BlockProp.
  * @param blk BlockProp structure (can be NULL)
  * @return CSS text-transform value or CSS_VALUE_NONE

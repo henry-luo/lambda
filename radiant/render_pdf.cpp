@@ -172,10 +172,16 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 continue;
             }
 
-            uint32_t transformed = apply_text_transform(codepoint, text_transform, is_word_start);
+            // Apply transformation (full case mapping: 1 codepoint may become 2-3)
+            uint32_t tt_out[3];
+            int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
             is_word_start = false;
 
-            // Encode back to UTF-8
+            // Encode all expanded codepoints back to UTF-8
+            for (int tti = 0; tti < tt_count; tti++) {
+            uint32_t transformed = tt_out[tti];
+            if (transformed == 0) continue;
+
             if (transformed < 0x80) {
                 *dst++ = (char)transformed;
             } else if (transformed < 0x800) {
@@ -191,6 +197,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
                 *dst++ = (char)(0x80 | ((transformed >> 6) & 0x3F));
                 *dst++ = (char)(0x80 | (transformed & 0x3F));
             }
+            } // end for tti
             src += bytes;
         }
         *dst = '\0';
