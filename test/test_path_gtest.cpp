@@ -17,6 +17,7 @@ extern "C" {
 // External path API (defined in path.c)
 extern "C" {
     void path_init(void);
+    void path_reset(void);
     Path* path_get_root(PathScheme scheme);
     Path* path_append(Path* parent, const char* segment);
     Path* path_append_len(Path* parent, const char* segment, size_t len);
@@ -46,7 +47,7 @@ protected:
 
     void SetUp() override {
         log_init(NULL);
-        pool = pool_create();
+        pool = pool_create_mmap();
 
         // Set up a minimal context for path operations
         test_heap.pool = pool;
@@ -64,6 +65,7 @@ protected:
     }
 
     void TearDown() override {
+        path_reset();
         context = nullptr;
         if (pool) {
             pool_destroy(pool);

@@ -227,9 +227,12 @@ bool path_is_absolute(Path* path) {
  */
 int path_depth(Path* path) {
     int depth = 0;
-    while (path && path->parent) {  // stop at ROOT_SENTINEL (parent == NULL)
+    while (path && path->parent && path->parent != &ROOT_SENTINEL) {
         depth++;
         path = path->parent;
+    }
+    if (path && path->parent == &ROOT_SENTINEL) {
+        depth++;  // count the scheme root itself
     }
     return depth;
 }
